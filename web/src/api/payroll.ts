@@ -5132,6 +5132,13 @@ export interface PayrollJmhzTransportHistory {
 
 export interface PayrollJmhzReadySubmission {
   submission_id: number
+  /**
+   * Seznam připravených podání je parametrizovaný agendou. „Stav odeslání" si
+   * o něj říká jen pro JMHZ (je to obrazovka kanálu VREP/APEP a jiná agenda
+   * tudy odeslat nejde), ale kód agendy chodí s každým řádkem, aby se nedalo
+   * splést, co se odesílá.
+   */
+  agenda_code: string
   submission_kind: string
   submission_status: 'ready'
   corrects_submission_id: number | null

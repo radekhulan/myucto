@@ -6,12 +6,16 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDocumentKind;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessException;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessSubmissionService;
+use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -26,6 +30,11 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Endpoint záměrně NEUMÍ nastavit stav `accepted` přímo. Povinnost splní až
  * PŘEDÁNÍ územní správě sociálního zabezpečení, takže přijetí se zapisuje jen
  * přes `receipt` a vždy se dnem doručení z protokolu.
+ *
+ * `dispatch` zařadí připravené podání do fronty datové schránky. Je tady, a ne
+ * na obrazovce „Stav odeslání": ta patří kanálu VREP/APEP, kterým NEMPRI ani
+ * HZUPN odeslat nejde (protokol v1.47 pro ně neuvádí identifikátor třídy
+ * podání). Odesílá se proto tam, kde se podání připravilo.
  */
 final class PayrollSicknessCaseAction
 {
@@ -35,8 +44,19 @@ final class PayrollSicknessCaseAction
         private readonly SicknessCaseService $cases,
         private readonly SicknessSubmissionService $submissions,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollProductionGate $productionGate,
+        private readonly PayrollSubmissionTransportAttemptRepository $attempts,
     ) {}
 
+    /**
+     * Seznam případů plus to, co o nich potřebuje vědět odesílací lišta:
+     * dostupnost datovky pro firmu a stav fronty u už zařazených podání.
+     *
+     * Obojí se posílá ROVNOU se seznamem schválně. Kdyby si to frontend
+     * dotahoval až po kliknutí, musel by do té doby tvrdit něco o kanálu, co
+     * ještě neví — a právě to („odešlete ho ve Stavu odeslání") posílalo účetní
+     * na obrazovku, kde tahle podání nikdy nebyla.
+     */
     public function list(Request $request, Response $response): Response
     {
         $denied = $this->authorize($request, $response, AccessLevel::READ);
@@ -45,11 +65,51 @@ final class PayrollSicknessCaseAction
         }
 
         return $this->run($response, function () use ($request): array {
-            return ['items' => $this->cases->list(
-                $this->currentSupplierId($request),
-                $this->environment($request),
-                self::narrowingId($request->getQueryParams(), 'employment_id'),
-            )];
+            $supplierId = $this->currentSupplierId($request);
+            $environment = $this->environment($request);
+
+            return [
+                'items' => $this->cases->list(
+                    $supplierId,
+                    $environment,
+                    self::narrowingId($request->getQueryParams(), 'employment_id'),
+                ),
+                'transport' => $this->submissions->dataBoxTransport(
+                    $supplierId,
+                    $environment,
+                ),
+                'ready_submissions' => $this->attempts->listReadySubmissions(
+                    $supplierId,
+                    $environment,
+                    SicknessSubmissionService::DISPATCHABLE_AGENDA_CODES,
+                ),
+            ];
+        });
+    }
+
+    /** @param array<string,string> $args */
+    public function dispatch(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, function () use ($request, $args): array {
+            $supplierId = $this->currentSupplierId($request);
+            $environment = $this->environment($request);
+            $this->productionGate->assertEnvironmentActive($supplierId, $environment);
+
+            return $this->submissions->enqueueDataBox(
+                $supplierId,
+                $environment,
+                $this->caseId($args),
+                $this->document($request),
+                $this->userId($request),
+            );
         });
     }
 
@@ -201,6 +261,20 @@ final class PayrollSicknessCaseAction
     ): Response {
         try {
             $result = $work();
+        } catch (PayrollProductionGateException $exception) {
+            return $this->noStore(Json::error(
+                $response,
+                PayrollProductionGateException::ERROR_CODE,
+                $exception->getMessage(),
+                409,
+            ));
+        } catch (SubmissionChannelException $exception) {
+            return $this->noStore(Json::error(
+                $response,
+                $exception->errorCode,
+                $exception->getMessage(),
+                $exception->httpStatus,
+            ));
         } catch (SicknessException $exception) {
             return $this->noStore(Json::error(
                 $response,

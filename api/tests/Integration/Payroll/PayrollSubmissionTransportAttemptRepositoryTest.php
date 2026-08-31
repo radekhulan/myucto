@@ -579,9 +579,10 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         ]);
         $correctiveId = (int) $pdo->lastInsertId();
 
-        $ready = $this->repository->listReadyJmhzSubmissions(
+        $ready = $this->repository->listReadySubmissions(
             $this->supplierId,
             self::ENVIRONMENT,
+            [JmhzSubmissionBridgeService::AGENDA_CODE],
         );
 
         self::assertCount(1, $ready);
@@ -622,9 +623,10 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
             'created_by' => null,
         ], 'ready-corrective-outbox-' . $correctiveId);
 
-        $queuedReady = $this->repository->listReadyJmhzSubmissions(
+        $queuedReady = $this->repository->listReadySubmissions(
             $this->supplierId,
             self::ENVIRONMENT,
+            [JmhzSubmissionBridgeService::AGENDA_CODE],
         );
         self::assertCount(1, $queuedReady);
         self::assertSame((int) $queued['row']['id'], $queuedReady[0]['outbox_id']);
@@ -642,9 +644,10 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         );
         self::assertSame(
             [],
-            $this->repository->listReadyJmhzSubmissions(
+            $this->repository->listReadySubmissions(
                 $this->supplierId,
                 self::ENVIRONMENT,
+                [JmhzSubmissionBridgeService::AGENDA_CODE],
             ),
         );
     }

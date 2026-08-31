@@ -15,8 +15,9 @@ use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Auth\SecretEncryption;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
-use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsMessageBuilder;
+use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsAgendaCatalog;
+use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsMessageBuilder;
+use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsInboxProcessor;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface;
@@ -93,12 +94,12 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             $encryption,
             $clock,
         );
-        $this->isds = new JmhzIsdsSubmissionService(
-            new JmhzFrozenPayloadReader($repository, $this->submissions),
+        $this->isds = new JmhzIsdsSubmissionService(new PayrollIsdsSubmissionService(
             $repository,
+            $this->submissions,
             new SubmissionRecipientRepository($connection),
             $outbox,
-        );
+        ));
         $this->gatewayAction = $container->get(IsdsGatewayAction::class);
     }
 
@@ -189,17 +190,18 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
         ], null);
 
         $repository = new PayrollSubmissionRepository($this->db);
-        $isdsWithResolver = new JmhzIsdsSubmissionService(
-            new JmhzFrozenPayloadReader($repository, $this->submissions),
+        $isdsWithResolver = new JmhzIsdsSubmissionService(new PayrollIsdsSubmissionService(
             $repository,
+            $this->submissions,
             new SubmissionRecipientRepository($this->db),
             $this->outboxService,
-            new JmhzIsdsMessageBuilder(),
+            new PayrollIsdsAgendaCatalog(),
+            new PayrollIsdsMessageBuilder(),
             new IsdsTransportAvailabilityResolver(
                 null,
                 new SubmissionCredentialService($credentials, $this->createStub(SecretEncryption::class)),
             ),
-        );
+        ));
 
         $submissionId = $this->frozenSubmission('mobile-key-g');
         $result = $isdsWithResolver->enqueue($this->supplierId, 'test', $submissionId, null);

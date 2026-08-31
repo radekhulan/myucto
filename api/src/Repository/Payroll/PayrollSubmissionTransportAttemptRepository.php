@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use PDO;
 use PDOException;
 
@@ -253,30 +252,73 @@ final class PayrollSubmissionTransportAttemptRepository
     }
 
     /**
-     * Zmrazená JMHZ podání, která jsou připravená, ale ještě nemají pokus o
-     * odeslání. V historii stojí zvlášť od ledgeru: dokud nevznikl pokus,
-     * nesmí se podání tvářit jako odeslané, zároveň ale nesmí po přípravě
-     * opravného či stornovacího podání zmizet bez cesty k odeslání.
+     * Zmrazená podání, která jsou připravená, ale ještě nemají pokus o odeslání.
+     * V historii stojí zvlášť od ledgeru: dokud nevznikl pokus, nesmí se podání
+     * tvářit jako odeslané, zároveň ale nesmí po přípravě opravného či
+     * stornovacího podání zmizet bez cesty k odeslání.
      *
+     * ═══════════════════════════════════════════════════════════════════════
+     * Proč se agendy PŘEDÁVAJÍ, a ne zadrátují
+     * ═══════════════════════════════════════════════════════════════════════
+     * Dřív se dotaz ptal natvrdo na `JMHZ25`. Tím byla obrazovka „Stav odeslání"
+     * jediným místem, kde se dá zmrazené podání odeslat, a zároveň uměla ukázat
+     * jen jednu agendu — NEMPRI a HZUPN se připravily a neměly kde odejít.
+     *
+     * Rozšířit dotaz na „všechny agendy s doloženým kanálem" ale NELZE: „Stav
+     * odeslání" je obrazovka kanálu VREP/APEP (variabilní symbol, doptání na
+     * protokol, uzavření transakce) a podání, které tudy odeslat nejde, by tam
+     * dostalo tlačítko, které vždycky selže. Volající proto říká, PRO KTERÝ
+     * KANÁL se ptá, a předá jeho rozsah agend:
+     *
+     *   VREP/APEP → jen JMHZ; PREZEC/REGZEC mají vlastní obrazovku
+     *               (`PayrollRegistrationTransportAction`) a OZUSPOJ nemá
+     *               odesílací adaptér vůbec, takže by tu obě jen mátly.
+     *   ISDS      → {@see \MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsAgendaCatalog},
+     *               volané z obrazovky té které agendy.
+     *
+     * Filtrovat podle sloupce `submission.channel` by bylo lákavé a bylo by to
+     * špatně: JMHZ je vedené na `vrep_apep` a přitom se běžně odesílá datovkou,
+     * kdežto OZUSPOJ a registrace jsou na `vrep_apep` taky, ale odeslat je tudy
+     * neumíme. Kanál v evidenci říká, kde podání VZNIKLO, ne kudy může ven.
+     *
+     * @param list<string> $agendaCodes neprázdný seznam `agenda_code` povinnosti
      * @return list<array{
-     *   submission_id:int,submission_kind:string,submission_status:string,
+     *   submission_id:int,agenda_code:string,submission_kind:string,
+     *   submission_status:string,
      *   corrects_submission_id:?int,period_start:string,period_end:string,
      *   created_at:string,outbox_id:?int,outbox_dispatch_state:?string,
      *   outbox_acceptance_state:?string,outbox_external_message_id:?string
      * }>
      */
-    public function listReadyJmhzSubmissions(
+    public function listReadySubmissions(
         int $supplierId,
         string $environment,
+        array $agendaCodes,
         int $limit = 50,
     ): array {
         if (!$this->isAvailable()) {
             return [];
         }
         self::assertEnvironment($environment);
+        $agendaCodes = array_values(array_unique(array_filter(
+            array_map(
+                static fn (string $code): string => strtoupper(trim($code)),
+                $agendaCodes,
+            ),
+            static fn (string $code): bool => $code !== '',
+        )));
+        // Prázdný seznam NENÍ „všechno": byla by to tichá změna rozsahu
+        // obrazovky pokaždé, když volající zapomene rozsah předat.
+        if ($agendaCodes === []) {
+            throw new \InvalidArgumentException(
+                'Seznam připravených podání potřebuje aspoň jednu agendu.',
+            );
+        }
         $limit = max(1, min($limit, 100));
+        $placeholders = implode(', ', array_fill(0, count($agendaCodes), '?'));
         $statement = $this->db->pdo()->prepare(
             'SELECT submission.id AS submission_id,
+                    obligation.agenda_code,
                     submission.submission_kind,
                     submission.status AS submission_status,
                     submission.corrects_submission_id,
@@ -313,16 +355,12 @@ final class PayrollSubmissionTransportAttemptRepository
               WHERE submission.supplier_id = ?
                 AND submission.environment = ?
                 AND submission.status = "ready"
-                AND obligation.agenda_code = ?
+                AND obligation.agenda_code IN (' . $placeholders . ')
                 AND attempt.id IS NULL
               ORDER BY submission.created_at DESC, submission.id DESC
               LIMIT ' . $limit,
         );
-        $statement->execute([
-            $supplierId,
-            $environment,
-            JmhzSubmissionBridgeService::AGENDA_CODE,
-        ]);
+        $statement->execute([$supplierId, $environment, ...$agendaCodes]);
         $rows = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if (!is_array($row)) {
@@ -330,6 +368,7 @@ final class PayrollSubmissionTransportAttemptRepository
             }
             $rows[] = [
                 'submission_id' => (int) $row['submission_id'],
+                'agenda_code' => (string) $row['agenda_code'],
                 'submission_kind' => (string) $row['submission_kind'],
                 'submission_status' => (string) $row['submission_status'],
                 'corrects_submission_id' => $row['corrects_submission_id'] === null

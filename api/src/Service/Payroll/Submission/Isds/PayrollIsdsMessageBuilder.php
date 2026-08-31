@@ -2,10 +2,12 @@
 
 declare(strict_types=1);
 
-namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
+namespace MyInvoice\Service\Payroll\Submission\Isds;
+
+use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 
 /**
- * Z čeho se skládá datová zpráva ISDS s podáním JMHZ.
+ * Z čeho se skládá datová zpráva ISDS s mzdovým podáním.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * Co je obsahem zprávy — a co NENÍ
@@ -34,11 +36,6 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
  * datové schránky odesílatele“. Přidat sem podpis nebo šifru by nebylo „bezpečněji“
  * — byla by to nedoložená odchylka, kterou by automatické zpracování odmítlo.
  *
- * Protokol na straně 47 připouští přes ISDS i formát GovTalk. Nepoužíváme ho:
- * GovTalk přes ISDS podle téže strany vyžaduje VS v `GovTalkDetails/Keys` navíc,
- * odpověď je v obou případech stejná, a druhá varianta obsahu by znamenala druhou
- * cestu k testování bez jediného užitku.
- *
  * ═══════════════════════════════════════════════════════════════════════════
  * Přílohou je TENTÝŽ zmrazený artefakt jako u VREP
  * ═══════════════════════════════════════════════════════════════════════════
@@ -56,12 +53,17 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
  * libovolně.“ ČSSZ tedy podle věci nic neřídí — vyplňuje se pro ČLOVĚKA, který
  * zprávu uvidí ve schránce, a proto nese agendu i období.
  *
+ * Věc i adresát proto přicházejí Z AGENDY ({@see PayrollIsdsAgenda}), ne jako
+ * konstanta v tomhle souboru: builder původně psal do věci „Jednotné měsíční
+ * hlášení zaměstnavatele“ natvrdo, takže by hlášení o nemoci dorazilo pod cizím
+ * názvem a účetní by ho ve schránce hledala podle nesprávného textu.
+ *
  * Co relevantní JE, je `dmSenderIdent` (spisová značka odesílatele): podle strany
  * 24 ho ČSSZ v odpovědi vrátí v `RecipientIdent`. Je to jediný údaj, který si
  * volíme sami a dostaneme zpátky, takže na něm stojí párování odpovědi
  * i dohledání po přerušeném odeslání ({@see \MyInvoice\Service\Submission\Channel\Isds\IsdsChannel::probe()}).
  */
-final readonly class JmhzIsdsMessageBuilder
+final readonly class PayrollIsdsMessageBuilder
 {
     /**
      * ISDS omezuje `dmSenderIdent` na 50 znaků. Delší značka by se uřízla a
@@ -75,35 +77,39 @@ final readonly class JmhzIsdsMessageBuilder
 
     public function build(
         string $frozenArtifactBytes,
-        string $agendaCode,
-        string $variableSymbol,
+        PayrollIsdsAgenda $agenda,
+        PayrollIsdsRecipient $recipient,
+        ?string $variableSymbol,
         string $periodLabel,
         string $correlationReference,
-        string $environment,
-    ): JmhzIsdsMessage {
+    ): PayrollIsdsMessage {
         if (trim($frozenArtifactBytes) === '') {
-            throw new JmhzTransportException(
-                'jmhz_isds_payload_empty',
+            throw new SubmissionChannelException(
+                'payroll_isds_payload_empty',
                 'Do datové schránky nelze odeslat prázdnou datovou větu.',
+                422,
             );
         }
         // Příloha musí být XML, ne cokoliv, co se za ni vydává. Kdyby sem přišel
         // zip nebo podepsaná obálka, ČSSZ by zprávu nezpracovala automaticky a
         // podání by tiše uvázlo — proto raději hlasitě tady.
         if (!str_starts_with(ltrim($frozenArtifactBytes), '<')) {
-            throw new JmhzTransportException(
-                'jmhz_isds_payload_not_xml',
+            throw new SubmissionChannelException(
+                'payroll_isds_payload_not_xml',
                 'Příloha pro datovou schránku musí být holé XML datové věty.',
+                422,
             );
         }
-        $senderIdent = $this->senderIdent($correlationReference);
-        $recipient = JmhzIsdsRecipientCatalog::forEnvironment($environment);
 
-        return new JmhzIsdsMessage(
+        return new PayrollIsdsMessage(
             recipient: $recipient,
-            subject: $this->subject($agendaCode, $periodLabel, $variableSymbol),
-            senderIdent: $senderIdent,
-            attachmentFilename: $this->filename($agendaCode, $variableSymbol, $periodLabel),
+            subject: $this->subject($agenda, $periodLabel, $variableSymbol),
+            senderIdent: $this->senderIdent($correlationReference),
+            attachmentFilename: $this->filename(
+                $agenda->code,
+                $variableSymbol,
+                $periodLabel,
+            ),
             attachmentMimeType: self::ATTACHMENT_MIME,
             attachmentBytes: $frozenArtifactBytes,
         );
@@ -111,31 +117,45 @@ final readonly class JmhzIsdsMessageBuilder
 
     /**
      * Věc zprávy. ČSSZ ji ignoruje, člověk ne — ve schránce je to jediné, podle
-     * čeho pozná, které období odešlo.
+     * čeho pozná, KTERÉ podání a které období odešlo.
      *
      * Veřejná proto, že věc se musí znát DŘÍV než spisová značka: tu přiděluje
      * až fronta podání při zařazení, kdežto věc do zařazení vstupuje.
+     *
+     * Variabilní symbol je volitelný: nese ho hlavička JMHZ i datové věty
+     * NEMPRI/HZUPN, ale kdyby v některé chyběl, je poctivější věc bez něj než
+     * věc s prázdnou hodnotou, která vypadá jako chyba přenosu.
      */
-    public function subject(string $agendaCode, string $periodLabel, string $variableSymbol): string
-    {
-        return sprintf(
-            '%s - Jednotné měsíční hlášení zaměstnavatele za %s, VS %s',
-            $agendaCode,
+    public function subject(
+        PayrollIsdsAgenda $agenda,
+        string $periodLabel,
+        ?string $variableSymbol,
+    ): string {
+        $subject = sprintf(
+            '%s - %s za %s',
+            $agenda->code,
+            $agenda->label,
             $periodLabel,
-            $variableSymbol,
         );
+
+        return $variableSymbol === null || trim($variableSymbol) === ''
+            ? $subject
+            : $subject . ', VS ' . trim($variableSymbol);
     }
 
     /**
      * Název přílohy je deterministický, protože artefakt je zmrazený: totéž
      * podání musí dát tentýž soubor, jinak by se dvě stažení nedala porovnat.
      */
-    private function filename(string $agendaCode, string $variableSymbol, string $periodLabel): string
-    {
+    private function filename(
+        string $agendaCode,
+        ?string $variableSymbol,
+        string $periodLabel,
+    ): string {
         return sprintf(
             '%s_%s_%s.xml',
             $this->slug($agendaCode),
-            $this->slug($variableSymbol),
+            $this->slug($variableSymbol ?? ''),
             $this->slug($periodLabel),
         );
     }
@@ -144,18 +164,20 @@ final readonly class JmhzIsdsMessageBuilder
     {
         $value = trim($correlationReference);
         if ($value === '') {
-            throw new JmhzTransportException(
-                'jmhz_isds_sender_ident_missing',
+            throw new SubmissionChannelException(
+                'payroll_isds_sender_ident_missing',
                 'Podání nemá spisovou značku, takže by odpověď z datové schránky'
                     . ' nešlo přiřadit zpět.',
+                422,
             );
         }
         // Ořezat by znamenalo tiše rozbít párování odpovědi. Radši odmítnout.
         if (strlen($value) > self::MAX_SENDER_IDENT) {
-            throw new JmhzTransportException(
-                'jmhz_isds_sender_ident_too_long',
+            throw new SubmissionChannelException(
+                'payroll_isds_sender_ident_too_long',
                 'Spisová značka podání je delší než 50 znaků, které datová'
                     . ' schránka připouští.',
+                422,
             );
         }
 

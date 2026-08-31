@@ -39,6 +39,15 @@ final class PayrollStatutoryAgendaCatalog
                 // VREP/APEP zůstává zavřený — identifikátor třídy podání pro
                 // tuhle agendu není v připnutém Podávacím a dotazovacím
                 // protokolu v1.47 uvedený.
+                //
+                // `transport_capability => 'isds'` je TVRZENÍ O BĚHU, ne přání:
+                // agenda musí být v {@see \MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsAgendaCatalog},
+                // jinak by katalog sliboval kanál, který nikam nevede. Shodu
+                // obou katalogů hlídá `PayrollIsdsAgendaCatalogConsistencyTest`.
+                // `capability => 'prepared_only'` zůstává správně: appka podání
+                // připraví a zařadí do fronty, ale jestli odejde samo (brána,
+                // Mobilní klíč), nebo ho účetní odešle ze své schránky, závisí
+                // na konkrétní firmě — statická matice to vědět nemůže.
                 'capability' => $legacyNempri
                     ? 'not_supported'
                     : 'prepared_only',

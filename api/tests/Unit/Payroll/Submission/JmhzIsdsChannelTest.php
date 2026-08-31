@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
-use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsMessageBuilder;
+use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsAgendaCatalog;
+use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsMessage;
+use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsMessageBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsRecipientCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsResponseMatcher;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
+use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -106,44 +109,23 @@ final class JmhzIsdsChannelTest extends TestCase
      */
     public function testTooLongSenderIdentIsRefusedNotTruncated(): void
     {
-        $this->expectException(JmhzTransportException::class);
+        $this->expectException(SubmissionChannelException::class);
 
-        (new JmhzIsdsMessageBuilder())->build(
-            self::PAYLOAD,
-            'JMHZ25',
-            '1234567890',
-            '07/2026',
-            str_repeat('A', 51),
-            'test',
-        );
+        $this->buildWith(self::PAYLOAD, str_repeat('A', 51));
     }
 
     public function testNonXmlAttachmentIsRefused(): void
     {
-        $this->expectException(JmhzTransportException::class);
+        $this->expectException(SubmissionChannelException::class);
 
-        (new JmhzIsdsMessageBuilder())->build(
-            "PK\x03\x04zip",
-            'JMHZ25',
-            '1234567890',
-            '07/2026',
-            'JMHZ25-1',
-            'test',
-        );
+        $this->buildWith("PK\x03\x04zip", 'JMHZ25-1');
     }
 
     public function testEmptyPayloadIsRefused(): void
     {
-        $this->expectException(JmhzTransportException::class);
+        $this->expectException(SubmissionChannelException::class);
 
-        (new JmhzIsdsMessageBuilder())->build(
-            '   ',
-            'JMHZ25',
-            '1234567890',
-            '07/2026',
-            'JMHZ25-1',
-            'test',
-        );
+        $this->buildWith('   ', 'JMHZ25-1');
     }
 
     // ───────────────────────── párování odpovědi ─────────────────────────
@@ -214,15 +196,20 @@ final class JmhzIsdsChannelTest extends TestCase
         self::assertNull($matcher->parseSubject('ČSSZ - Odpověď na e-Podání. [jen-dva]'));
     }
 
-    private function build(): \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsMessage
+    private function build(): PayrollIsdsMessage
     {
-        return (new JmhzIsdsMessageBuilder())->build(
-            self::PAYLOAD,
-            'JMHZ25',
+        return $this->buildWith(self::PAYLOAD, 'JMHZ25-000123');
+    }
+
+    private function buildWith(string $payload, string $correlation): PayrollIsdsMessage
+    {
+        return (new PayrollIsdsMessageBuilder())->build(
+            $payload,
+            (new PayrollIsdsAgendaCatalog())->require('JMHZ25'),
+            JmhzIsdsRecipientCatalog::forEnvironment('test'),
             '1234567890',
             '07/2026',
-            'JMHZ25-000123',
-            'test',
+            $correlation,
         );
     }
 }

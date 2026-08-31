@@ -7,8 +7,10 @@ const m = vi.hoisted(() => ({
   update: vi.fn(),
   preview: vi.fn(),
   prepare: vi.fn(),
+  dispatch: vi.fn(),
   recordReceipt: vi.fn(),
   person: vi.fn(),
+  gatewayStartPayroll: vi.fn(),
 }))
 
 vi.mock('@/api/payrollSicknessCases', () => ({
@@ -18,7 +20,21 @@ vi.mock('@/api/payrollSicknessCases', () => ({
     update: m.update,
     preview: m.preview,
     prepare: m.prepare,
+    dispatch: m.dispatch,
     recordReceipt: m.recordReceipt,
+  },
+}))
+
+vi.mock('@/api/dataBox', () => ({
+  dataBoxApi: { gatewayStartPayroll: m.gatewayStartPayroll },
+}))
+
+vi.mock('@/components/submission/MobileKeySendButton.vue', () => ({
+  default: {
+    name: 'MobileKeySendButton',
+    props: ['outboxId', 'environment'],
+    emits: ['sent'],
+    template: '<button data-test="mobile-key-send" />',
   },
 }))
 
@@ -126,6 +142,41 @@ function sicknessCase(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/**
+ * Seznam případů nese od serveru i stav odesílací cesty a frontu — panel se
+ * podle toho rozhoduje, jestli nabídne „Odeslat datovou schránkou". Výchozí
+ * hodnota je nejhorší případ („ručně"), aby test musel dostupnost přiznat
+ * výslovně.
+ */
+function listResponse(
+  items: ReturnType<typeof sicknessCase>[],
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    items,
+    transport: { automatic: false, channel: 'manual_upload', reason: 'isds_transport_unavailable' },
+    ready_submissions: [],
+    ...overrides,
+  }
+}
+
+function readySubmission(overrides: Record<string, unknown> = {}) {
+  return {
+    submission_id: 44,
+    agenda_code: 'NEMPRI',
+    submission_kind: 'regular',
+    submission_status: 'ready',
+    corrects_submission_id: null,
+    period_start: '2026-08-01',
+    period_end: '2026-08-31',
+    created_at: '2026-08-16 10:00:00',
+    outbox_id: null,
+    outbox_dispatch_state: null,
+    outbox_acceptance_state: null,
+    outbox_external_message_id: null,
+    ...overrides,
+  }
+}
 async function mountPanel() {
   const wrapper = mount(PayrollSicknessCasesPanel, {
     global: { stubs: { RouterLink: true } },
@@ -137,7 +188,7 @@ async function mountPanel() {
 describe('PayrollSicknessCasesPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    m.list.mockResolvedValue([sicknessCase()])
+    m.list.mockResolvedValue(listResponse([sicknessCase()]))
     m.person.mockResolvedValue({ employments: [] })
   })
 
@@ -168,7 +219,7 @@ describe('PayrollSicknessCasesPanel', () => {
    * musí zůstat zavřená s vlastní větou proč — žádost o dávku podává pojištěnec.
    */
   it('nedovolí připravit NEMPRI u dávky, kterou zaměstnavatel nedrží', async () => {
-    m.list.mockResolvedValue([sicknessCase({ benefit_kind: 'OSE', id: 9 })])
+    m.list.mockResolvedValue(listResponse([sicknessCase({ benefit_kind: 'OSE', id: 9 })]))
     const wrapper = await mountPanel()
     const prepareNempri = wrapper.findAll('button').find(
       button => button.text().includes('actions.prepareNempri'),
@@ -286,4 +337,110 @@ describe('PayrollSicknessCasesPanel', () => {
     expect(wrapper.find('[data-test="sickness-case-error"]').text())
       .toContain('Firma nemá vyplněný variabilní symbol ČSSZ.')
   })
+  /**
+   * Jádro celé opravy: připravené NEMPRI se DÁ odeslat rovnou tady.
+   *
+   * Panel dřív psal „Odešlete ho ve Stavu odeslání" a odkazoval tak na
+   * obrazovku kanálu VREP/APEP, kde tahle podání nikdy nebyla — účetní neměla
+   * hlášení kde odeslat.
+   */
+  it('nabídne u připraveného NEMPRI odeslání datovou schránkou', async () => {
+    m.list.mockResolvedValue(listResponse(
+      [sicknessCase({ status: 'prepared', nempri_submission_id: 44 })],
+      { ready_submissions: [readySubmission()] },
+    ))
+    const wrapper = await mountPanel()
+
+    const dispatch = actionsOf(wrapper, 'dispatch-nempri')
+    expect(dispatch).toBeDefined()
+    expect(dispatch?.show).toBe(true)
+    expect(dispatch?.disabled).toBe(false)
+  })
+
+  it('nenabídne odeslání u případu, ze kterého se ještě nepřipravilo podání', async () => {
+    const wrapper = await mountPanel()
+
+    expect(actionsOf(wrapper, 'dispatch-nempri')?.show).toBe(false)
+    expect(actionsOf(wrapper, 'dispatch-hzupn')?.show).toBe(false)
+  })
+
+  /** Kliknutí musí opravdu volat API, ne jen překreslit lištu. */
+  it('zařadí podání do fronty voláním serveru', async () => {
+    m.list.mockResolvedValue(listResponse(
+      [sicknessCase({ status: 'prepared', nempri_submission_id: 44 })],
+      { ready_submissions: [readySubmission()] },
+    ))
+    m.dispatch.mockResolvedValue({
+      case_id: 7,
+      document_kind: 'nempri',
+      agenda_code: 'NEMPRI',
+      outbox_id: 91,
+      created: true,
+      recipient: { box_id: '9tsaf6s', name: 'ČSSZ — e-Podání TEST', note: '' },
+      subject: 'NEMPRI - Oznámení zaměstnavatele o žádosti zaměstnance o dávku za 08/2026',
+      sender_ident: 'NEMPRI-000091',
+      attachment: { filename: 'NEMPRI_1234567890_08-2026.xml', mime: 'application/xml', sha256: 'abc', bytes: 120 },
+      transport: { automatic: false, channel: 'manual_upload', reason: 'isds_transport_unavailable' },
+    })
+    const wrapper = await mountPanel()
+
+    // ActionBar drží inline jen první tři akce, zbytek schová do „…" — akce
+    // se proto spouští přes vlastní handler, ne přes hledání `<button>`.
+    // Nabídnutá být ale MUSÍ: skrytá akce, kterou test přesto zavolá, by
+    // prošla i tehdy, kdyby se k ní uživatel nikdy nedostal.
+    const dispatch = actionsOf(wrapper, 'dispatch-nempri')
+    expect(dispatch?.show).toBe(true)
+    await dispatch!.run!()
+    await flushPromises()
+
+    expect(m.dispatch).toHaveBeenCalledWith('production', 7, 'nempri')
+    expect(wrapper.find('[data-test="sickness-case-success"]').text())
+      .toContain('dispatch.queued')
+  })
+
+  /**
+   * Právě jedna ze tří vět o tom, co se s podáním stane. Bez brány a bez
+   * doložené schránky se nesmí tvrdit, že appka odešle sama.
+   */
+  it('řekne u připraveného podání konkrétní cestu ven', async () => {
+    m.list.mockResolvedValue(listResponse(
+      [sicknessCase({ status: 'prepared', nempri_submission_id: 44 })],
+      { ready_submissions: [readySubmission()] },
+    ))
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('[data-test="sickness-case-dispatch-7-nempri"]').text())
+      .toContain('dispatch.transportManual')
+  })
+
+  it('u firmy s Mobilním klíčem slíbí odeslání po potvrzení v mobilu', async () => {
+    m.list.mockResolvedValue(listResponse(
+      [sicknessCase({ status: 'prepared', nempri_submission_id: 44 })],
+      {
+        ready_submissions: [readySubmission()],
+        transport: { automatic: false, channel: 'mobile_key', reason: null },
+      },
+    ))
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('[data-test="sickness-case-dispatch-7-nempri"]').text())
+      .toContain('dispatch.transportMobileKey')
+  })
+
+  /**
+   * Už zařazené podání se nenabízí k zařazení podruhé, ale musí být vidět,
+   * že ve frontě JE — jinak se to čte jako „neodešlo to".
+   */
+  it('u zařazeného podání ukáže frontu místo dalšího tlačítka', async () => {
+    m.list.mockResolvedValue(listResponse(
+      [sicknessCase({ status: 'prepared', nempri_submission_id: 44 })],
+      { ready_submissions: [readySubmission({ outbox_id: 91, outbox_dispatch_state: 'ready' })] },
+    ))
+    const wrapper = await mountPanel()
+
+    expect(actionsOf(wrapper, 'dispatch-nempri')?.show).toBe(false)
+    expect(wrapper.find('[data-test="sickness-case-outbox-7-nempri"]').text())
+      .toContain('dispatch.inOutbox')
+  })
 })
+

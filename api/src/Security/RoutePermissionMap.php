@@ -325,7 +325,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/submissions/sickness-cases$#', 'payroll.submissions', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/submissions/sickness-cases/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/sickness-cases/[0-9]+/preview$#', 'payroll.submissions', AccessLevel::READ],
-        ['POST', '#^/api/payroll/submissions/sickness-cases/[0-9]+/(?:prepare|receipt)$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/sickness-cases/[0-9]+/(?:prepare|receipt|dispatch)$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::READ],
         ['*', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-transport$#', 'payroll.submissions', AccessLevel::READ],

@@ -96,17 +96,60 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
     }
 
     /**
-     * NEMPRI/HZUPN se nesmí objevit DVAKRÁT: bohatší verzi (vázanou na
-     * konkrétní případ dávky) dodává zdroj `sickness_case`.
+     * PŘIPRAVENÉ nemocenské hlášení musí být v přehledu vidět jako „odeslat",
+     * ne jako „vyřiďte ručně".
+     *
+     * Dřív se povinnosti s agendou NEMPRI/HZUPN z pramene `submission`
+     * VYFILTROVÁVALY s odůvodněním, že je bohatěji dodá zdroj `sickness_case`.
+     * Jenže ten připravený případ přeskakuje (má `*_submission_id`), takže
+     * hlášení z přehledu úplně zmizelo — přesně ve chvíli, kdy zbýval jediný
+     * krok: odeslat ho.
      */
-    public function testNempriObligationRowIsExcludedFromSubmissionSource(): void
+    public function testPreparedNempriObligationOffersSendWhenTransportIsAvailable(): void
     {
         $service = $this->service(
             submissionRows: [$this->submissionRow(agendaCode: 'NEMPRI', latestSubmissionStatus: 'ready')],
+            transport: ['automatic' => true, 'channel' => 'gateway', 'reason' => null],
         );
 
+        $item = $this->onlyItem($service, 'submission');
+        self::assertSame('NEMPRI', $item['agenda_code']);
+        self::assertSame('send', $item['action']['kind']);
+        self::assertSame('/payroll/submissions/sickness', $item['action']['path']);
+        self::assertNull($item['action']['reason']);
+        self::assertStringContainsString('datová schránka', $item['channel']['label']);
+    }
+
+    /**
+     * A když firma ani bránu, ani doloženou schránku nemá, je to `manual`
+     * s jednou konkrétní větou — ne prázdné „nepodporováno".
+     */
+    public function testPreparedHzupnWithoutTransportIsManualWithReason(): void
+    {
+        $service = $this->service(
+            submissionRows: [$this->submissionRow(agendaCode: 'HZUPN', latestSubmissionStatus: 'ready')],
+            transport: ['automatic' => false, 'channel' => 'manual_upload', 'reason' => 'isds_transport_unavailable'],
+        );
+
+        $item = $this->onlyItem($service, 'submission');
+        self::assertSame('manual', $item['action']['kind']);
+        self::assertSame('/payroll/submissions/sickness', $item['action']['path']);
+        self::assertStringContainsString('ručně', $item['action']['reason']);
+    }
+
+    /**
+     * Nepřipravený případ zůstává u pramene `sickness_case` — dvakrát se
+     * tatáž povinnost objevit nesmí. Prameny jsou disjunktní konstrukcí:
+     * povinnost v evidenci vzniká až přípravou a `PayrollDeadlineOverviewService`
+     * naopak případ s vyplněným `*_submission_id` přeskočí.
+     */
+    public function testUnpreparedSicknessCaseStaysInTheDeadlineSourceOnly(): void
+    {
+        $service = $this->service(deadlineItems: [$this->sicknessItem('NEMPRI')]);
+
         $result = $service->checklist(11, 'production', self::PERIOD);
-        self::assertSame([], $result['items']);
+        self::assertCount(1, $result['items']);
+        self::assertSame('sickness_case', $result['items'][0]['source']);
     }
 
     public function testAccidentInsuranceLevyIsPaymentOnlyWithNoDocument(): void

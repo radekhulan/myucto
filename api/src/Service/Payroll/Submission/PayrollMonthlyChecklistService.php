@@ -40,15 +40,19 @@ use MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver;
  * je hotové.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * Proč se u JMHZ a zdravotní agendy neodesílá odsud rovnou
+ * Proč se odsud neodesílá rovnou
  * ═══════════════════════════════════════════════════════════════════════════
  * Skutečné odeslání (náhled PVPOJ/pojišťovny, volba účtárny, Mobilní klíč,
- * dávkové potvrzení) žije v {@see \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService}
- * a {@see \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService}
+ * dávkové potvrzení) žije v {@see \MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService},
+ * {@see \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService}
  * a jejich frontendových panelech — hotové, otestované a bohatší, než co by
  * šlo znovu postavit tady. Tenhle přehled proto místo druhé kopie posílací
  * logiky vrací ODKAZ na existující záložku s předvyplněným obdobím; splňuje
  * to „tlačítko rovnou tam" doslova, jen bez zdvojení pěti set řádků logiky.
+ *
+ * Odkaz ale musí vést TAM, KDE TO JDE. U nemocenských hlášení vedl na „Stav
+ * odeslání", což je obrazovka kanálu VREP/APEP — a tudy NEMPRI ani HZUPN
+ * odeslat nejde. Odkaz proto míří na Nemocenské případy.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * Pravidlo pro `action.kind`
@@ -134,13 +138,26 @@ final readonly class PayrollMonthlyChecklistService
 
     /**
      * Agendové povinnosti období: JMHZ, ELDP, OZUSPOJ, REGZEL, registrace
-     * u ČSSZ (kontrolní náhled) a zdravotní agenda — tentýž dotaz jako
-     * záložka „Stav odeslání", jen BEZ filtru na jednu skupinu.
+     * u ČSSZ (kontrolní náhled), zdravotní agenda a PŘIPRAVENÁ nemocenská
+     * hlášení — tentýž dotaz jako záložka „Stav odeslání", jen BEZ filtru na
+     * jednu skupinu.
      *
-     * NEMPRI a HZUPN se sem záměrně nedostanou, i kdyby už existovala
-     * povinnost s tímhle `agenda_code`: bohatší a jistě nezdvojenou verzi
-     * (vázanou na KONKRÉTNÍ případ dávky, ne na obecnou obligaci) přidává
-     * {@see self::deadlineRows()} ze zdroje `sickness_case`.
+     * ═══════════════════════════════════════════════════════════════════════
+     * Proč se NEMPRI a HZUPN nekříží s pramenem `sickness_case`
+     * ═══════════════════════════════════════════════════════════════════════
+     * Prameny jsou disjunktní KONSTRUKCÍ, ne filtrem:
+     *
+     *   * povinnost v `payroll_obligations` u nemocenského hlášení vzniká až
+     *     v {@see \MyInvoice\Service\Payroll\Submission\Sickness\SicknessSubmissionService::prepare()},
+     *     takže sem se dostane jen PŘIPRAVENÉ podání,
+     *   * {@see \MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService}
+     *     naopak případ s vyplněným `*_submission_id` přeskakuje, takže ze
+     *     zdroje `sickness_case` přijdou jen NEPŘIPRAVENÁ.
+     *
+     * Dřív se sem NEMPRI a HZUPN vůbec nepouštěly. Připravené hlášení tím
+     * z přehledu ZMIZELO: z termínů vypadlo (je připravené) a mezi povinnosti
+     * se nedostalo (bylo vyfiltrované) — přesně ve chvíli, kdy zbýval jediný
+     * krok, totiž odeslat ho.
      *
      * @param array{automatic:bool,channel:string,reason:?string} $transport
      * @return list<array<string,mixed>>
@@ -164,9 +181,6 @@ final readonly class PayrollMonthlyChecklistService
 
         $rows = [];
         foreach ($page['items'] as $row) {
-            if (in_array($row['agenda_code'], ['NEMPRI', 'HZUPN'], true)) {
-                continue;
-            }
             $assessment = $this->assessments->assess(
                 $row['earliest_submission_on'],
                 $row['due_on'],
@@ -310,6 +324,19 @@ final readonly class PayrollMonthlyChecklistService
                 'XML (JMHZ — jednotné měsíční hlášení zaměstnavatele)',
                 'ČSSZ',
                 '/payroll/submissions/jmhz',
+                $transport,
+            ),
+            // Nemocenská hlášení: kanál ISDS je doložený až do tvaru zprávy
+            // ({@see \MyInvoice\Service\Payroll\Submission\Sickness\SicknessChannelCatalog})
+            // a odesílá se z karty případu
+            // ({@see \MyInvoice\Service\Payroll\Submission\Sickness\SicknessSubmissionService::enqueueDataBox()}).
+            // Kanál VREP/APEP pro ně otevřený není — protokol v1.47 pro ně
+            // neuvádí identifikátor třídy podání — takže odkaz vede na
+            // Nemocenské případy, ne na „Stav odeslání".
+            'NEMPRI', 'HZUPN' => $this->isdsAgendaDescription(
+                'XML (' . $agendaCode . ' — hlášení zaměstnavatele o dávce nemocenského pojištění)',
+                'ČSSZ (nebo místně příslušná OSSZ)',
+                '/payroll/submissions/sickness',
                 $transport,
             ),
             // {@see EldpStatementService} — „Odesílá člověk, ne tahle
@@ -602,13 +629,21 @@ final readonly class PayrollMonthlyChecklistService
             ];
         }
 
+        // Případ, ze kterého se ještě nepřipravilo podání. Chybí tedy KROK
+        // PŘÍPRAVY, ne odeslání — kanál se popisuje pravdivě už tady, aby se
+        // účetní nedozvěděla až po přípravě, že „odeslání uděláte ručně“,
+        // což od zavedení {@see \MyInvoice\Service\Payroll\Submission\Sickness\SicknessSubmissionService::enqueueDataBox()}
+        // není pravda.
         return [
             'agenda_code' => $agenda,
             'agenda_label' => $agenda,
             'status' => 'not_prepared',
             'document' => ['format' => 'XML (' . $agenda . ')', 'note' => ''],
             'recipient' => ['label' => 'ČSSZ (nebo místně příslušná OSSZ)', 'note' => ''],
-            'channel' => ['label' => null, 'note' => 'Appka XML připraví a zvaliduje, odeslání a evidenci potvrzení uděláte ručně.'],
+            'channel' => [
+                'label' => 'datová schránka',
+                'note' => 'Appka XML připraví, zvaliduje a zařadí k odeslání datovou schránkou.',
+            ],
             'action' => [
                 'kind' => 'generate',
                 'label' => 'Připravit v Nemocenských případech',

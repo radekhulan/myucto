@@ -11,6 +11,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolExplainer;
@@ -132,9 +133,17 @@ final class PayrollJmhzTransportAction
             $limit,
             $offset,
         );
-        $readySubmissions = $this->attempts->listReadyJmhzSubmissions(
+        // Rozsah obrazovky „Stav odeslání" je právě JMHZ. Je to obrazovka
+        // kanálu VREP/APEP (variabilní symbol, doptání na protokol, uzavření
+        // transakce) a jiná agenda tudy odeslat NEJDE: PREZEC/REGZEC mají
+        // vlastní přenosovou obrazovku, OZUSPOJ nemá odesílací adaptér a
+        // NEMPRI/HZUPN nemají v protokolu v1.47 identifikátor třídy podání,
+        // takže se odesílají datovou schránkou ze své vlastní obrazovky.
+        // Nabídnout je tady by znamenalo tlačítko, které vždycky selže.
+        $readySubmissions = $this->attempts->listReadySubmissions(
             $supplierId,
             $environment,
+            [JmhzSubmissionBridgeService::AGENDA_CODE],
         );
 
         return $this->noStore(Json::ok($response, [

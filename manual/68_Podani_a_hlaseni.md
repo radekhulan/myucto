@@ -568,10 +568,27 @@ a následně ověřte doručenku i věcnou odpověď pojišťovny.
 
 Záložka **Další povinnosti** ukazuje pro vybraný měsíc přesnou matici toho,
 co MyÚčto umí a co musí zůstat ruční. NEMPRI je po zavedení JMHZ nahrazené
-jen částečně a HZUPN zůstává samostatným hlášením. MyÚčto pro ně nevytváří
-XML ani je neodesílá. Účetní ověří případ a zdrojová data, podání dokončí
-v oficiálním kanálu ČSSZ a skutečnou doručenku nebo protokol uloží jako
-firemní dokument do DMS.
+jen částečně a HZUPN zůstává samostatným hlášením.
+
+Případ evidujte na záložce **Dávky nemocenského**. Z případu si můžete
+zobrazit náhled datové věty a tlačítkem **Připravit NEMPRI** nebo **Připravit
+HZUPN** ji zmrazit; MyÚčto ji ověří proti připnutému XSD. Odesílá se rovnou
+odsud tlačítkem **Odeslat NEMPRI/HZUPN datovou schránkou** — kanál VREP/APEP
+pro tyhle dvě agendy otevřený není, takže na záložce **Stav odeslání**, která
+patří jemu, tahle podání nenajdete. U připraveného podání je vždy napsané, co
+se s ním stane: buď ho MyÚčto vloží do datové schránky jako koncept a odeslání
+schválíte v ISDS, nebo ho odešle po potvrzení Mobilním klíčem, nebo si přílohu
+stáhnete z fronty podání a odešlete ji ze své schránky. Doručenku nahrajete
+ručně v každém případě — žádný z kanálů datovou schránku číst neumí.
+
+Odeslání není splnění povinnosti: tu splní až doručení územní správě
+sociálního zabezpečení. Skutečnou doručenku nebo protokol proto uložte jako
+firemní dokument do DMS a výsledek zapište u případu.
+
+U dávek, kde datová věta nese i žádost o dávku s údaji, které podává
+pojištěnec (ošetřovné, peněžitá pomoc v mateřství, otcovská, dlouhodobé
+ošetřovné), MyÚčto podání nesestavuje. Případ v evidenci zůstává i s hlídanou
+lhůtou a tiskopis vyřídíte na ePortálu ČSSZ.
 
 Po ručním splnění lze u NEMPRI nebo HZUPN zapsat zaměstnance, referenci
 případu, referenci doručenky, datum a ID firemního DMS dokumentu. Server

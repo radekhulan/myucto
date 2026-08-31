@@ -757,7 +757,7 @@ final class Bootstrap
                 => $c->get(\MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class),
 
             // ── Past PHP-DI: nullable parametr S výchozí hodnotou se NEautowiruje ──
-            // `JmhzIsdsSubmissionService` a `HealthInsuranceIsdsSubmissionService`
+            // `PayrollIsdsSubmissionService` a `HealthInsuranceIsdsSubmissionService`
             // mají poslední konstruktorový parametr `?IsdsTransportAvailabilityResolver
             // $transportAvailability = null` — schválně, aby si je testy mohly stavět
             // ručně bez plné DI grafu (viz docblock u parametru). Jenže PHP-DI
@@ -767,13 +767,18 @@ final class Bootstrap
             // `null` a dostupnost datovky by tiše spadla na `manual_upload`, přestože
             // testy (které si závislost předávají explicitně) by zůstaly zelené.
             // Ověřeno reflexí nad reálným kontejnerem, ne jen testem.
-            \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService::class => fn (ContainerInterface $c)
-                => new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService(
-                    $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader::class),
+            //
+            // Pozor, tatáž past platí i pro `$agendas` a `$builder`: mají výchozí
+            // hodnotu `new …()`, takže je PHP-DI nedosadí — a to je v pořádku,
+            // obojí je bezstavový katalog bez závislostí.
+            \MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService(
                     $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionRepository::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\PayrollSubmissionService::class),
                     $c->get(\MyInvoice\Repository\Submission\SubmissionRecipientRepository::class),
                     $c->get(\MyInvoice\Service\Submission\SubmissionOutboxService::class),
-                    new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsMessageBuilder(),
+                    new \MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsAgendaCatalog(),
+                    new \MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsMessageBuilder(),
                     $c->get(\MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver::class),
                 ),
             // Produkční brána mezd čte odemčení z cfg.php (`payroll.production_released`).

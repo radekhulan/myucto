@@ -14,6 +14,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
+use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsAgendaCatalog;
 use MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayDispatchService;
 use MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
@@ -50,6 +51,8 @@ final class IsdsGatewayAction
         private readonly SubmissionOutboxRepository $outbox,
         private readonly ActivityLogger $logger,
         private readonly PayrollProductionGate $productionGate,
+        private readonly PayrollIsdsAgendaCatalog $payrollIsdsAgendas
+            = new PayrollIsdsAgendaCatalog(),
     ) {}
 
     /**
@@ -347,13 +350,20 @@ final class IsdsGatewayAction
         }
         $agendaCode = strtoupper(trim((string) $row['agenda_code']));
         $artifactKind = trim((string) $row['artifact_kind']);
-        $allowedAgenda = str_starts_with($agendaCode, 'JMHZ')
+        // Rozsah mzdového oprávnění u brány. Agendy s doloženou datovou
+        // schránkou drží {@see PayrollIsdsAgendaCatalog} — kdyby se tenhle
+        // seznam psal znovu, dopadlo by to jako u NEMPRI a HZUPN: katalog
+        // schopností jim kanál sliboval, zařazení do fronty fungovalo a brána
+        // je pak odmítla s 403, tedy až v posledním kroku.
+        $allowedAgenda = $this->payrollIsdsAgendas->has($agendaCode)
             || $agendaCode === 'PPZ'
             || str_starts_with($agendaCode, 'PPZ_');
         if (!$allowedAgenda || $artifactKind !== 'payroll_submission') {
             throw new SubmissionChannelException(
                 'payroll_gateway_outbox_forbidden',
-                'Mzdové oprávnění smí přes ISDS odeslat pouze připravené podání JMHZ nebo PPZ.',
+                'Mzdové oprávnění smí přes ISDS odeslat pouze připravené mzdové'
+                    . ' podání s doloženou datovou schránkou (JMHZ, NEMPRI,'
+                    . ' HZUPN nebo přehled zdravotní pojišťovně).',
                 403,
             );
         }

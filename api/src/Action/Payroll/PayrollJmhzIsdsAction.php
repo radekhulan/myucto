@@ -10,7 +10,6 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsRecipientCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSubmissionPrerequisites;
@@ -147,16 +146,9 @@ final class PayrollJmhzIsdsAction
                 $exception->getMessage(),
                 422,
             ));
-        } catch (JmhzXmlException $exception) {
-            // Chybějící zmrazená datová věta není chyba požadavku ani serveru —
-            // je to nedokončený předchozí krok, který musí udělat uživatel.
-            return $this->noStore(Json::error(
-                $response,
-                $exception->validationCode,
-                $exception->getMessage(),
-                422,
-            ));
         } catch (SubmissionChannelException $exception) {
+            // Sem spadne i chybějící zmrazená datová věta (422) — není to chyba
+            // požadavku ani serveru, ale nedokončený předchozí krok uživatele.
             return $this->noStore(Json::error(
                 $response,
                 $exception->errorCode,

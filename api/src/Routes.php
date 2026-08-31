@@ -1471,6 +1471,15 @@ final class Routes
                 '/submissions/sickness-cases/{caseId:[0-9]+}/receipt',
                 [PayrollSicknessCaseAction::class, 'receipt'],
             );
+            // Odeslání datovou schránkou visí na PŘÍPADU, ne na obrazovce
+            // „Stav odeslání": ta patří kanálu VREP/APEP, kterým NEMPRI ani
+            // HZUPN odeslat nejde. Endpoint jen ZAŘADÍ podání do obecné fronty;
+            // dál se pokračuje `/api/submissions/outbox/{id}/…`, aby doručenka
+            // a rozhodný den doručení měly jedinou evidenci.
+            $g->post(
+                '/submissions/sickness-cases/{caseId:[0-9]+}/dispatch',
+                [PayrollSicknessCaseAction::class, 'dispatch'],
+            );
             // Oznámení záměru uplatňovat slevu na pojistném (OZUSPOJ).
             // Vlastní podání s vlastní lhůtou: sleva podle § 7a bez doručeného
             // záměru nenáleží, i když se v měsíčním hlášení vykáže.

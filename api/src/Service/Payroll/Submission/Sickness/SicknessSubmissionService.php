@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -31,10 +32,25 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentit
  * až do tvaru zprávy — viz {@see SicknessChannelCatalog}. VREP/APEP ČSSZ
  * přijímá, ale identifikátor třídy podání pro NEMPRI a HZUPN nemáme
  * v připnutém protokolu, takže se neotevírá.
+ *
+ * Doložený kanál ale musí být i PRŮCHODNÝ. Dokud {@see enqueueDataBox()}
+ * neexistovalo, končilo podání ve stavu `ready` a účetní ho neměla kde odeslat:
+ * obrazovka „Stav odeslání" patří kanálu VREP/APEP a ptala se natvrdo na JMHZ.
+ * Zařazení do fronty proto visí přímo na případu dávky — tam, kde se podání
+ * připravilo.
  */
 final readonly class SicknessSubmissionService
 {
     public const SOURCE_EVENT_TYPE = 'payroll_sickness_case';
+
+    /**
+     * Agendy, které se z případu dávky odesílají. Je to ROZSAH obrazovky:
+     * odsud se nesmí zařadit podání jiné agendy, i kdyby jeho ID někdo do
+     * požadavku podstrčil.
+     *
+     * @var list<string>
+     */
+    public const DISPATCHABLE_AGENDA_CODES = ['NEMPRI', 'HZUPN'];
 
     private const SUBJECT_TYPE = 'employment';
 
@@ -52,6 +68,7 @@ final readonly class SicknessSubmissionService
         private PayrollSubmissionService $submissions,
         private PayrollSubmissionRepository $submissionRepository,
         private JmhzSoftwareIdentification $software,
+        private PayrollIsdsSubmissionService $dataBox,
     ) {}
 
     /**
@@ -231,6 +248,66 @@ final readonly class SicknessSubmissionService
                 'created' => true,
             ];
         });
+    }
+
+    /**
+     * Zařadí připravené podání případu do fronty podání datovou schránkou.
+     *
+     * Podání se tím NEPOSOUVÁ na „podáno": zařazení do fronty je krok dopravy,
+     * povinnost splní až doručení územní správě sociálního zabezpečení. Stav
+     * případu proto zůstává `prepared` a mění ho teprve `recordReceipt()` proti
+     * protokolu — stejně jako v ručním režimu.
+     *
+     * @return array<string,mixed>
+     */
+    public function enqueueDataBox(
+        int $supplierId,
+        string $environment,
+        int $caseId,
+        SicknessDocumentKind $document,
+        ?int $userId,
+    ): array {
+        $this->channels->assertDispatchable($this->channels->dispatchChannel());
+        $row = $this->caseService->requireCase($supplierId, $environment, $caseId);
+        $column = $document === SicknessDocumentKind::Nempri
+            ? 'nempri_submission_id'
+            : 'hzupn_submission_id';
+        $submissionId = $row[$column] === null ? 0 : (int) $row[$column];
+        if ($submissionId <= 0) {
+            throw new SicknessException(
+                'sickness_submission_not_prepared',
+                'Podání ještě není připravené, takže není co odeslat.'
+                    . ' Nejdřív u případu zvolte Připravit.',
+            );
+        }
+
+        $queued = $this->dataBox->enqueue(
+            $supplierId,
+            $environment,
+            $submissionId,
+            self::DISPATCHABLE_AGENDA_CODES,
+            $userId,
+        );
+
+        return [
+            'case_id' => $caseId,
+            'document_kind' => $document->value,
+            ...$queued,
+        ];
+    }
+
+    /**
+     * Jak je na tom firma s odesíláním datovkou — bez ohledu na konkrétní případ.
+     *
+     * Seznam případů to potřebuje ještě předtím, než uživatel na cokoliv klikne:
+     * podle toho se rozhoduje, jestli se nabídne „Odeslat datovou schránkou",
+     * „Odeslat po potvrzení v mobilu", nebo věta, proč to jde jen ručně.
+     *
+     * @return array{automatic:bool,channel:string,reason:?string}
+     */
+    public function dataBoxTransport(int $supplierId, string $environment): array
+    {
+        return $this->dataBox->transportAvailability($supplierId, $environment);
     }
 
     public static function sourceEventReference(int $caseId): string

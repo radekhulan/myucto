@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 
+use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsRecipient;
+
 /**
  * Do které datové schránky se JMHZ podává.
  *
@@ -64,16 +66,16 @@ final readonly class JmhzIsdsRecipientCatalog
      * a vymyslet ji nelze, takže test jde do obecné testovací schránky. Kdyby se
      * `iie254d` použilo i v testu, mířilo by cvičné podání na ostrou schránku.
      */
-    public static function forEnvironment(string $environment): JmhzIsdsRecipient
+    public static function forEnvironment(string $environment): PayrollIsdsRecipient
     {
         return match (self::normalize($environment)) {
-            'production' => new JmhzIsdsRecipient(
+            'production' => new PayrollIsdsRecipient(
                 self::JMHZ_PRODUCTION_BOX_ID,
                 self::JMHZ_PRODUCTION_BOX_NAME,
                 'production',
                 'Datová schránka zřízená ČSSZ výslovně pro JMHZ.',
             ),
-            'test' => new JmhzIsdsRecipient(
+            'test' => new PayrollIsdsRecipient(
                 self::TEST_BOX_ID,
                 self::TEST_BOX_NAME,
                 'test',
@@ -92,9 +94,9 @@ final readonly class JmhzIsdsRecipientCatalog
      * Nabízí se jen tehdy, kdyby JMHZ schránka odmítala příjem; není to výchozí
      * cesta a sama se nepoužije.
      */
-    public static function generalFallback(): JmhzIsdsRecipient
+    public static function generalFallback(): PayrollIsdsRecipient
     {
-        return new JmhzIsdsRecipient(
+        return new PayrollIsdsRecipient(
             self::GENERAL_PRODUCTION_BOX_ID,
             self::GENERAL_PRODUCTION_BOX_NAME,
             'production',

@@ -115,6 +115,55 @@ export interface PayrollSicknessCasePrepared {
   created: boolean
 }
 
+/**
+ * Kudy podání odejde. `automatic` znamená odesílací bránu ISDS (uživatel
+ * odeslání potvrdí přímo v perimetru datové schránky), `mobile_key` odeslání
+ * z aplikace po potvrzení relace v mobilu, `manual_upload` stažení přílohy
+ * a odeslání z vlastní schránky. Počítá to server, ne frontend — dostupnost
+ * se mění v čase a podle firmy.
+ */
+export interface PayrollSicknessTransport {
+  automatic: boolean
+  channel: 'gateway' | 'mobile_key' | 'manual_upload'
+  reason: string | null
+}
+
+/** Řádek fronty u připraveného podání — je, nebo není už zařazené k odeslání. */
+export interface PayrollSicknessReadySubmission {
+  submission_id: number
+  agenda_code: string
+  submission_kind: string
+  submission_status: string
+  corrects_submission_id: number | null
+  period_start: string
+  period_end: string
+  created_at: string
+  outbox_id: number | null
+  outbox_dispatch_state: string | null
+  outbox_acceptance_state: string | null
+  outbox_external_message_id: string | null
+}
+
+export interface PayrollSicknessCaseList {
+  items: PayrollSicknessCase[]
+  transport: PayrollSicknessTransport
+  ready_submissions: PayrollSicknessReadySubmission[]
+}
+
+/** Výsledek zařazení do fronty podání datovou schránkou. */
+export interface PayrollSicknessDispatched {
+  case_id: number
+  document_kind: PayrollSicknessDocumentKind
+  agenda_code: string
+  outbox_id: number
+  created: boolean
+  recipient: { box_id: string; name: string; note: string }
+  subject: string
+  sender_ident: string
+  attachment: { filename: string; mime: string; sha256: string; bytes: number }
+  transport: PayrollSicknessTransport
+}
+
 export type PayrollSicknessCaseInput = Partial<
   Omit<
     PayrollSicknessCase,
@@ -132,10 +181,10 @@ export type PayrollSicknessCaseInput = Partial<
 
 export const payrollSicknessCasesApi = {
   list: (environment: PayrollRegzelEnvironment, employmentId?: number) =>
-    api.get<{ items: PayrollSicknessCase[] }>(
+    api.get<PayrollSicknessCaseList>(
       '/payroll/submissions/sickness-cases',
       { params: { environment, employment_id: employmentId || undefined } },
-    ).then(response => response.data.items),
+    ).then(response => response.data),
 
   create: (
     environment: PayrollRegzelEnvironment,
@@ -178,6 +227,24 @@ export const payrollSicknessCasesApi = {
   ) =>
     api.post<PayrollSicknessCasePrepared>(
       `/payroll/submissions/sickness-cases/${caseId}/prepare`,
+      { environment, document },
+    ).then(response => response.data),
+
+  /**
+   * Zařadí připravené podání do fronty podání datovou schránkou.
+   *
+   * Neodesílá samo: podle `transport` se pak buď pokračuje branou ISDS,
+   * Mobilním klíčem, nebo si uživatel přílohu stáhne z fronty a odešle ji ze
+   * své schránky. Doručenka se v každém případě nahrává ručně — ani jeden
+   * kanál neumí schránku ČÍST.
+   */
+  dispatch: (
+    environment: PayrollRegzelEnvironment,
+    caseId: number,
+    document: PayrollSicknessDocumentKind,
+  ) =>
+    api.post<PayrollSicknessDispatched>(
+      `/payroll/submissions/sickness-cases/${caseId}/dispatch`,
       { environment, document },
     ).then(response => response.data),
 

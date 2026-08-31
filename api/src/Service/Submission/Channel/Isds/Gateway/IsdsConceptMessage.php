@@ -13,8 +13,8 @@ use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
  * Je to čistá hodnota — postaví se a zkontroluje bez sítě, takže se dá
  * validovat proti `SetConcept.xsd` v testu. Skládá se výhradně z toho, co už
  * fronta o podání ví ({@see OutboundSubmission}); tahle třída žádný obsah
- * nevymýšlí a nesmí. Zprávu pro JMHZ staví
- * {@see \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsMessageBuilder}
+ * nevymýšlí a nesmí. Zprávu pro mzdová podání staví
+ * {@see \MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsMessageBuilder}
  * a jeho výstup se sem dostane přes frontu, ne druhou cestou.
  *
  * ── Limity, které vynucuje ISDS ─────────────────────────────────────────────

@@ -20,8 +20,12 @@
  * znamenalo, že se dá uložit půlka případu — a půlka případu je datová věta,
  * kterou ČSSZ odmítne.
  *
- * Odesílání tady není: podání končí ve stavu „připraveno" a odeslání spouští
- * člověk ve Stavu odeslání, stejně jako u registrace a ELDP.
+ * ODESÍLÁ SE TADY, a to schválně. Obrazovka „Stav odeslání" patří kanálu
+ * VREP/APEP, kterým NEMPRI ani HZUPN odeslat nejde (Podávací a dotazovací
+ * protokol v1.47 pro ně neuvádí identifikátor třídy podání), takže tam tahle
+ * podání nikdy nebyla — a panel přesto účetní psal „Odešlete ho ve Stavu
+ * odeslání". Doložený kanál je datová schránka, takže tlačítko stojí přímo
+ * u připraveného podání.
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
@@ -31,7 +35,10 @@ import {
   type PayrollSicknessBenefitKind,
   type PayrollSicknessCase,
   type PayrollSicknessCaseInput,
+  type PayrollSicknessDispatched,
   type PayrollSicknessDocumentKind,
+  type PayrollSicknessReadySubmission,
+  type PayrollSicknessTransport,
   type PayrollSicknessWorkInterval,
 } from '@/api/payrollSicknessCases'
 import {
@@ -39,10 +46,12 @@ import {
   type PayrollEmployment,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
+import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import { useAuthStore } from '@/stores/auth'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -70,6 +79,20 @@ const receiptDate = ref<Record<number, string>>({})
 const receiptReason = ref<Record<number, string>>({})
 const error = ref('')
 const success = ref('')
+
+/**
+ * Dostupnost datovky POČÍTÁ SERVER a je jedna pro celou firmu. Kdyby si ji
+ * frontend odhadoval, tvrdil by o kanálu něco, co neví — a přesně tak vznikl
+ * text „Odešlete ho ve Stavu odeslání", který ukazoval na obrazovku bez těchhle
+ * podání.
+ */
+const transport = ref<PayrollSicknessTransport | null>(null)
+/** Připravená podání a jejich stav ve frontě, klíčované ID podání. */
+const readyBySubmission = ref<Record<number, PayrollSicknessReadySubmission>>({})
+const dispatched = ref<Record<string, PayrollSicknessDispatched>>({})
+const gateways = ref<Record<string, GatewayStart>>({})
+const mobileKeySent = ref<Record<string, boolean>>({})
+const dispatchingKey = ref<string | null>(null)
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 
@@ -116,8 +139,18 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    items.value = await payrollSicknessCasesApi.list(environment.value)
+    const result = await payrollSicknessCasesApi.list(environment.value)
+    items.value = result.items
+    transport.value = result.transport
+    readyBySubmission.value = Object.fromEntries(
+      result.ready_submissions.map(ready => [ready.submission_id, ready]),
+    )
   } catch (err) {
+    // Stav zůstává NEZNÁMÝ, ne „nejde to": kdyby se `transport` po selhání
+    // načtení tvářil jako `manual_upload`, přečetla by to účetní jako doložený
+    // stav kanálu a odeslala podání ručně podruhé.
+    transport.value = null
+    readyBySubmission.value = {}
     error.value = message(err)
   } finally {
     loading.value = false
@@ -276,6 +309,96 @@ async function prepare(
   }
 }
 
+/** Klíč řádku odesílací lišty: jeden případ nese dvě samostatná podání. */
+function dispatchKey(
+  item: PayrollSicknessCase,
+  document: PayrollSicknessDocumentKind,
+): string {
+  return `${item.id}:${document}`
+}
+
+function submissionId(
+  item: PayrollSicknessCase,
+  document: PayrollSicknessDocumentKind,
+): number | null {
+  return document === 'nempri' ? item.nempri_submission_id : item.hzupn_submission_id
+}
+
+/** Je podání připravené a zároveň ještě nezařazené do fronty? */
+function readyFor(
+  item: PayrollSicknessCase,
+  document: PayrollSicknessDocumentKind,
+): PayrollSicknessReadySubmission | null {
+  const id = submissionId(item, document)
+  return id === null ? null : (readyBySubmission.value[id] ?? null)
+}
+
+/**
+ * Zařadí podání do fronty a hned navíže tou cestou, která je k dispozici:
+ * u brány přesměrováním do perimetru ISDS, u Mobilního klíče tlačítkem
+ * s potvrzením v mobilu, jinak odkazem do fronty ke stažení přílohy.
+ */
+async function dispatch(
+  item: PayrollSicknessCase,
+  document: PayrollSicknessDocumentKind,
+): Promise<void> {
+  const key = dispatchKey(item, document)
+  if (!canWrite.value || dispatchingKey.value !== null) return
+  dispatchingKey.value = key
+  error.value = ''
+  success.value = ''
+  try {
+    const queued = await payrollSicknessCasesApi.dispatch(
+      environment.value,
+      item.id,
+      document,
+    )
+    dispatched.value = { ...dispatched.value, [key]: queued }
+    if (queued.transport.automatic) {
+      try {
+        gateways.value = {
+          ...gateways.value,
+          [key]: await dataBoxApi.gatewayStartPayroll(queued.outbox_id),
+        }
+      } catch (err) {
+        error.value = message(err)
+      }
+    }
+    success.value = queued.created
+      ? t('payroll.sicknessCases.dispatch.queued', { id: queued.outbox_id })
+      : t('payroll.sicknessCases.dispatch.alreadyQueued', { id: queued.outbox_id })
+    await load()
+  } catch (err) {
+    error.value = message(err)
+  } finally {
+    dispatchingKey.value = null
+  }
+}
+
+function continueGateway(key: string): void {
+  const gateway = gateways.value[key]
+  if (gateway) window.location.assign(gateway.redirect_url)
+}
+
+function markMobileKeySent(key: string): void {
+  mobileKeySent.value = { ...mobileKeySent.value, [key]: true }
+}
+
+/**
+ * Jedna věta o tom, co se s připraveným podáním stane — právě jedna ze tří
+ * možností. Zamlčet rozdíl mezi „appka odešle" a „odešlete ho sami" znamená,
+ * že účetní neví, jestli má ještě něco udělat.
+ */
+function transportNote(): string {
+  const state = transport.value
+  if (state === null) return t('payroll.sicknessCases.dispatch.transportUnknown')
+  if (state.automatic) return t('payroll.sicknessCases.dispatch.transportGateway')
+  if (state.channel === 'mobile_key') {
+    return t('payroll.sicknessCases.dispatch.transportMobileKey')
+  }
+  return t('payroll.sicknessCases.dispatch.transportManual')
+}
+
 async function recordReceipt(
   item: PayrollSicknessCase,
   outcome: 'accepted' | 'rejected' | 'cancelled',
@@ -295,6 +418,33 @@ async function recordReceipt(
     error.value = message(err)
   } finally {
     busyId.value = null
+  }
+}
+
+/**
+ * Odesílací akce jednoho tiskopisu.
+ *
+ * Nabízí se teprve tehdy, když podání EXISTUJE a ještě není ve frontě —
+ * druhé zařazení sice nic nezdvojí (fronta je idempotentní), ale tlačítko,
+ * které nic nedělá, se čte jako „neodešlo to".
+ */
+function dispatchAction(
+  item: PayrollSicknessCase,
+  document: PayrollSicknessDocumentKind,
+): ActionItem {
+  const ready = readyFor(item, document)
+  const key = dispatchKey(item, document)
+
+  return {
+    key: `dispatch-${document}`,
+    label: t(`payroll.sicknessCases.actions.dispatch${document === 'nempri' ? 'Nempri' : 'Hzupn'}`),
+    icon: 'send',
+    variant: 'primary',
+    show: ready !== null && ready.outbox_id === null,
+    disabled: !canWrite.value || dispatchingKey.value !== null,
+    disabledReason: t('payroll.sicknessCases.hints.readOnly'),
+    loading: dispatchingKey.value === key,
+    run: () => void dispatch(item, document),
   }
 }
 
@@ -340,6 +490,7 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       loading: busyId.value === item.id,
       run: () => void prepare(item, 'nempri'),
     },
+    dispatchAction(item, 'nempri'),
     {
       key: 'preview-hzupn',
       label: t('payroll.sicknessCases.actions.previewHzupn'),
@@ -362,6 +513,7 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       loading: busyId.value === item.id,
       run: () => void prepare(item, 'hzupn'),
     },
+    dispatchAction(item, 'hzupn'),
     {
       key: 'accept',
       label: t('payroll.sicknessCases.actions.recordAccepted'),
@@ -700,6 +852,78 @@ onMounted(() => void load())
         </div>
 
         <ActionBar class="mt-3" :actions="actionsFor(item)" />
+
+        <!--
+          Odesílací lišta připraveného podání. Právě jedna ze tří vět: appka
+          odešle (brána), odešle po potvrzení v mobilu, nebo si přílohu stáhnete
+          a odešlete ze své schránky. Žádné „odešlete ho jinde" bez adresy.
+        -->
+        <div
+          v-for="document in (['nempri', 'hzupn'] as PayrollSicknessDocumentKind[])"
+          :key="document"
+        >
+          <div
+            v-if="readyFor(item, document)"
+            class="mt-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 text-xs text-neutral-700"
+            :data-test="`sickness-case-dispatch-${item.id}-${document}`"
+          >
+            <p class="font-semibold text-neutral-900">
+              {{ t(`payroll.sicknessCases.dispatch.title.${document}`) }}
+            </p>
+            <p class="mt-1">{{ transportNote() }}</p>
+
+            <p
+              v-if="readyFor(item, document)!.outbox_id !== null"
+              class="mt-2"
+              :data-test="`sickness-case-outbox-${item.id}-${document}`"
+            >
+              {{ t('payroll.sicknessCases.dispatch.inOutbox', {
+                id: readyFor(item, document)!.outbox_id,
+              }) }}
+              <a href="/admin/databox?tab=outbox" class="font-semibold underline">
+                {{ t('payroll.sicknessCases.dispatch.openOutbox') }}
+              </a>
+            </p>
+
+            <div
+              v-if="dispatched[dispatchKey(item, document)]"
+              class="mt-2 space-y-1"
+              :data-test="`sickness-case-dispatched-${item.id}-${document}`"
+            >
+              <p>
+                {{ t('payroll.sicknessCases.dispatch.recipient', {
+                  name: dispatched[dispatchKey(item, document)]!.recipient.name,
+                  id: dispatched[dispatchKey(item, document)]!.recipient.box_id,
+                }) }}
+              </p>
+              <p>
+                {{ t('payroll.sicknessCases.dispatch.senderIdent', {
+                  value: dispatched[dispatchKey(item, document)]!.sender_ident,
+                }) }}
+              </p>
+              <p v-if="mobileKeySent[dispatchKey(item, document)]" class="font-semibold">
+                {{ t('databox.outbox.mobileKey.sent') }}
+              </p>
+              <MobileKeySendButton
+                v-else-if="!dispatched[dispatchKey(item, document)]!.transport.automatic
+                  && dispatched[dispatchKey(item, document)]!.transport.channel === 'mobile_key'"
+                class="mt-1"
+                :outbox-id="dispatched[dispatchKey(item, document)]!.outbox_id"
+                :environment="environment"
+                @sent="markMobileKeySent(dispatchKey(item, document))"
+              />
+              <button
+                v-else-if="gateways[dispatchKey(item, document)]"
+                type="button"
+                class="mt-1 cursor-pointer rounded-lg border border-primary-500/40 px-3 py-2 text-sm font-semibold text-primary-700"
+                :data-test="`sickness-case-gateway-${item.id}-${document}`"
+                @click="continueGateway(dispatchKey(item, document))"
+              >
+                {{ t('payroll.sicknessCases.dispatch.continueGateway') }}
+              </button>
+            </div>
+          </div>
+        </div>
 
         <pre
           v-if="previewXml && previewXml.id === item.id"
