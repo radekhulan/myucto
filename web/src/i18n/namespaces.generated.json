@@ -445,9 +445,11 @@
       "payroll"
     ],
     "payroll-submissions": [
+      "databox",
       "payroll"
     ],
     "payroll-submissions-tab": [
+      "databox",
       "payroll"
     ],
     "payroll-settings": [

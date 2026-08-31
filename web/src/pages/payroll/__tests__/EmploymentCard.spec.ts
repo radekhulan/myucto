@@ -43,6 +43,18 @@ vi.mock('@/api/payroll', () => ({
       ],
       relationship_detail_codes: [{ code: '1', label: 'Žádné' }],
       countries: [{ code: 'CZ', label: 'Česko' }],
+      tax_identifier_types: [{ code: 'D', label: 'DIČ' }],
+      education_levels: [{ code: 'A', label: 'Bez vzdělání' }],
+      work_mode_codes: [{ code: '1', label: 'Jednosměnný pracovní režim' }],
+      workplace_progress_codes: [{ code: '1', label: 'V prostorách zaměstnavatele' }],
+      pension_type_codes: [{ code: '1', label: 'starobní' }],
+      proof_identity_type_codes: [{ code: 'I', label: 'Průkaz totožnosti' }],
+      health_restriction_type_codes: [{ code: '1', label: 'III. stupeň invalidity' }],
+      foreign_worker_free_access_reason_codes: [
+        { code: '1', label: 'Občan EU/EHP a Švýcarska' },
+      ],
+      foreign_worker_permit_type_codes: [{ code: '1', label: 'povolení k zaměstnání' }],
+      labour_office_codes: [{ code: 'HMP', label: 'Krajská pobočka pro hlavní město Prahu' }],
     }),
     searchJmhzMunicipalities: vi.fn().mockResolvedValue([
       { code: '554782', label: 'Hlavní město Praha' },

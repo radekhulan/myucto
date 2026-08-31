@@ -1438,6 +1438,16 @@ export interface PayrollEmploymentJmhzEvidenceOptions {
   relationship_detail_codes: Array<{ code: string; label: string }>
   apz_instruments: Array<{ code: string; label: string }>
   countries: Array<{ code: string; label: string }>
+  tax_identifier_types: Array<{ code: string; label: string }>
+  education_levels: Array<{ code: string; label: string }>
+  work_mode_codes: Array<{ code: string; label: string }>
+  workplace_progress_codes: Array<{ code: string; label: string }>
+  pension_type_codes: Array<{ code: string; label: string }>
+  proof_identity_type_codes: Array<{ code: string; label: string }>
+  health_restriction_type_codes: Array<{ code: string; label: string }>
+  foreign_worker_free_access_reason_codes: Array<{ code: string; label: string }>
+  foreign_worker_permit_type_codes: Array<{ code: string; label: string }>
+  labour_office_codes: Array<{ code: string; label: string }>
 }
 
 export interface PayrollJmhzMunicipalityOption {

@@ -12,6 +12,9 @@ const m = vi.hoisted(() => ({
   approveEvent: vi.fn(),
   a1Profile: vi.fn(),
   saveA1Profile: vi.fn(),
+  jmhzOptions: vi.fn(),
+  searchMunicipalities: vi.fn(),
+  searchCzIsco: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -26,6 +29,9 @@ vi.mock('@/api/payroll', () => ({
     approveEmploymentRegistrationEvent: m.approveEvent,
     employmentRegistrationA1Profile: m.a1Profile,
     saveEmploymentRegistrationA1Profile: m.saveA1Profile,
+    employmentJmhzEvidenceOptions: m.jmhzOptions,
+    searchJmhzMunicipalities: m.searchMunicipalities,
+    searchCzIsco: m.searchCzIsco,
   },
 }))
 
@@ -46,6 +52,48 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 }))
 
 import EmploymentRegistrationPanel from '@/pages/payroll/EmploymentRegistrationPanel.vue'
+import { resetPayrollJmhzOptions } from '@/composables/usePayrollJmhzOptions'
+
+function jmhzOptions() {
+  return {
+    package_key: 'synthetic',
+    manifest_sha256: 'a'.repeat(64),
+    external_codebooks: {
+      overlay_key: 'synthetic-overlay',
+      manifest_sha256: 'b'.repeat(64),
+      snapshot_date: '2026-08-13',
+      effective_from: '2026-01-01',
+      verified_through: '2026-08-13',
+      base_spec_manifest_sha256: 'a'.repeat(64),
+    },
+    activity_codes: [
+      { code: '1', label: 'Pracovní poměr', relationship_detail_mode: 'select' },
+    ],
+    relationship_detail_codes: [{ code: '1', label: 'Žádné' }],
+    apz_instruments: [],
+    countries: [
+      { code: 'CZ', label: 'Česko' },
+      { code: 'SK', label: 'Slovensko' },
+    ],
+    tax_identifier_types: [
+      { code: 'D', label: 'DIČ' },
+      { code: 'R', label: 'Rodné číslo' },
+      { code: 'S', label: 'Sociální pojištění' },
+      { code: 'J', label: 'Jiné' },
+    ],
+    education_levels: [{ code: 'M', label: 'Úplné střední odborné vzdělání s maturitou' }],
+    work_mode_codes: [{ code: '1', label: 'Jednosměnný pracovní režim' }],
+    workplace_progress_codes: [{ code: '1', label: 'V prostorách zaměstnavatele' }],
+    pension_type_codes: [{ code: '1', label: 'starobní' }],
+    proof_identity_type_codes: [{ code: 'I', label: 'Průkaz totožnosti' }],
+    health_restriction_type_codes: [{ code: '1', label: 'III. stupeň invalidity' }],
+    foreign_worker_free_access_reason_codes: [
+      { code: '1', label: 'Občan EU/EHP a Švýcarska' },
+    ],
+    foreign_worker_permit_type_codes: [{ code: '1', label: 'povolení k zaměstnání' }],
+    labour_office_codes: [{ code: 'HMP', label: 'Krajská pobočka pro hlavní město Prahu' }],
+  }
+}
 
 const deadline = {
   earliest_registration_on: '2026-08-14',
@@ -167,6 +215,11 @@ function mountPanel(canWrite = true) {
 
 describe('EmploymentRegistrationPanel', () => {
   beforeEach(() => {
+    // Nabídky JMHZ číselníků se drží v paměti modulu na celý běh aplikace —
+    // mezi případy se musí vyprázdnit, jinak druhý test dostane odpověď
+    // (nebo `null` po chybě) z toho prvního (viz stejný vzorec u karty
+    // pracovního vztahu, EmploymentCard.spec.ts).
+    resetPayrollJmhzOptions()
     vi.clearAllMocks()
     vi.stubGlobal('crypto', {
       randomUUID: vi.fn(() => '00000000-0000-4000-8000-000000000001'),
@@ -179,6 +232,7 @@ describe('EmploymentRegistrationPanel', () => {
     })
     m.events.mockResolvedValue([])
     m.a1Profile.mockResolvedValue(a1View())
+    m.jmhzOptions.mockResolvedValue(jmhzOptions())
   })
 
   it('saves the authoritative A1 profile before preview and prepare', async () => {
@@ -686,5 +740,119 @@ describe('EmploymentRegistrationPanel', () => {
 
     await interaction.setValue('cancellation')
     expect(wrapper.find('[data-test="registration-event-a8"]').exists()).toBe(true)
+  })
+
+  /**
+   * Číselníková pole A1 (druh činnosti, typ daňového identifikátoru, stát)
+   * se vybírají z připnutých JMHZ číselníků, ne píší rukou — a odesílá se
+   * pořád jen zvolený kód jako řetězec (stejná záruka jako u pojišťovny).
+   */
+  it('sends codes picked from the JMHZ codebooks for the A1 profile', async () => {
+    m.saveA1Profile.mockResolvedValue({
+      ...a1Suggested(),
+      row_version: 1,
+      reference_hash: 'a'.repeat(64),
+      created_at: '2026-08-14 10:00:00',
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="a1-employment-activity-code"]').setValue('1')
+    await wrapper.get('[data-test="a1-tax-residency-identifier-type"]').setValue('R')
+
+    const country = wrapper.get('[data-test="a1-permanent-country_code"]').get('input[role="combobox"]')
+    await country.trigger('focus')
+    await country.setValue('Slovensko')
+    await country.trigger('keydown', { key: 'Enter' })
+
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveA1Profile).toHaveBeenCalledWith(5, expect.objectContaining({
+      employment: expect.objectContaining({ activity_code: '1' }),
+      tax_residency: expect.objectContaining({ identifier_type: 'R' }),
+      permanent_address: expect.objectContaining({ country_code: 'SK' }),
+    }))
+  })
+
+  /**
+   * Historický kód státu mimo číselník (starší podklad, změna hranic apod.)
+   * se nesmí tiše ztratit hned při prvním otevření karty.
+   */
+  it('keeps a legacy country code that is not in the codebook', async () => {
+    const legacy = { ...a1Suggested() }
+    legacy.permanent_address = { ...legacy.permanent_address, country_code: 'XX' }
+    m.a1Profile.mockResolvedValue({
+      profile: null,
+      draft: { ...a1View().draft, suggested: legacy },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await flushPromises()
+
+    const country = wrapper.get('[data-test="a1-permanent-country_code"]').get('input[role="combobox"]')
+    expect((country.element as HTMLInputElement).value).toContain('XX')
+  })
+
+  /**
+   * Kód obce pracoviště se hledá stejným našeptávačem jako na kartě vztahu
+   * (searchJmhzMunicipalities) — výběr zároveň doplní i název obce.
+   */
+  it('picks the workplace municipality from the search codebook', async () => {
+    m.searchMunicipalities.mockResolvedValue([
+      { code: '554791', label: 'Neratovice' },
+    ])
+    m.saveA1Profile.mockResolvedValue({
+      ...a1Suggested(),
+      row_version: 1,
+      reference_hash: 'a'.repeat(64),
+      created_at: '2026-08-14 10:00:00',
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await flushPromises()
+
+    const municipality = wrapper
+      .get('[data-test="a1-employment-workplace-municipality-code"]')
+      .get('input[role="combobox"]')
+    await municipality.trigger('focus')
+    await municipality.setValue('Neratovice')
+    // SearchableSelect debounce hledání o 250 ms — reálný čas, ne fake timers.
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushPromises()
+    expect(m.searchMunicipalities).toHaveBeenCalledWith('Neratovice')
+    await municipality.trigger('keydown', { key: 'Enter' })
+
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveA1Profile).toHaveBeenCalledWith(5, expect.objectContaining({
+      employment: expect.objectContaining({
+        workplace_municipality_code: '554791',
+        workplace_city: 'Neratovice',
+      }),
+    }))
+  })
+
+  /**
+   * Postavení zaměstnance zůstává volný text: existující číselník ČSÚ je
+   * hierarchický až na 4 znaky, zatímco pole ukládá nejvýš 2 — nabízet
+   * hodnoty, které aplikace sama odmítne, je horší než volný text. Aspoň
+   * ale musí být vidět, odkud kód vzít.
+   */
+  it('keeps the employment status code as free text with a source hint', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    const field = wrapper.get('[data-test="a1-employment-status-code"]')
+    expect(field.element.tagName).toBe('INPUT')
+    expect(wrapper.text()).toContain('employment_status_code_hint')
   })
 })

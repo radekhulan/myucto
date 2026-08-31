@@ -18,12 +18,16 @@ import {
   type PayrollRegistrationA1ProfilePayload,
   type PayrollRegistrationChangeDetection,
   type PayrollRegistrationChangeProposal,
+  type PayrollEmploymentJmhzEvidenceOptions,
+  type PayrollJmhzMunicipalityOption,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import CzIscoPicker from '@/components/payroll/CzIscoPicker.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate } from '@/composables/useFormat'
+import { loadPayrollJmhzOptions } from '@/composables/usePayrollJmhzOptions'
 import { healthInsurerOptions, isHealthInsurerCode } from '@/utils/healthInsurers'
 
 const props = defineProps<{
@@ -102,6 +106,10 @@ const a1ShowPayload = ref(false)
 const a1Draft = ref<PayrollRegistrationA1Draft | null>(null)
 const a1Stored = ref<PayrollRegistrationA1Profile | null>(null)
 const a1Form = ref<PayrollRegistrationA1ProfilePayload>(emptyA1Profile())
+const jmhzOptions = ref<PayrollEmploymentJmhzEvidenceOptions | null>(null)
+const jmhzOptionsFailed = ref(false)
+const municipalityOptions = ref<PayrollJmhzMunicipalityOption[]>([])
+const municipalitiesLoading = ref(false)
 
 function emptyA1Address(): PayrollRegistrationA1Address {
   return {
@@ -304,6 +312,57 @@ function a1RemoveRestriction(index: number): void {
 
 function a1RemoveAttachment(index: number): void {
   a1Form.value.attachments.splice(index, 1)
+}
+
+/**
+ * Malé uzavřené číselníky REGZEC A1 (typ identifikátoru, vzdělání, důchod…)
+ * doplňují uloženou hodnotu, i když v číselníku není — přesně jako
+ * {@link a1InsurerOptions}. Bez toho by první uložení karty tiše zahodilo
+ * historický kód, který si účetní kdysi napsal do volného textu.
+ */
+function a1CodeOptions(
+  list: Array<{ code: string; label: string }> | undefined,
+  current: string | null | undefined,
+): Array<{ value: string; label: string }> {
+  const options = (list ?? []).map(option => ({
+    value: option.code,
+    label: `${option.code} — ${option.label}`,
+  }))
+  const trimmed = current?.trim() ?? ''
+  if (trimmed !== '' && !options.some(option => option.value === trimmed)) {
+    options.push({
+      value: trimmed,
+      label: t('payroll.people.registration.a1.code_unknown', { code: trimmed }),
+    })
+  }
+  return options
+}
+
+const selectedMunicipality = computed(() => {
+  const code = a1Form.value.employment.workplace_municipality_code
+  const label = a1Form.value.employment.workplace_city
+  return code && label ? { value: code, label, secondary: code } : null
+})
+
+async function searchMunicipalities(query: string): Promise<void> {
+  if (query.trim().length < 2) {
+    municipalityOptions.value = []
+    return
+  }
+  municipalitiesLoading.value = true
+  try {
+    municipalityOptions.value = await payrollApi.searchJmhzMunicipalities(query)
+  } catch {
+    municipalityOptions.value = []
+  } finally {
+    municipalitiesLoading.value = false
+  }
+}
+
+function selectMunicipality(code: string | null): void {
+  const selected = municipalityOptions.value.find(option => option.code === code)
+  a1Form.value.employment.workplace_municipality_code = selected?.code ?? code
+  if (selected) a1Form.value.employment.workplace_city = selected.label
 }
 
 async function a1AddAttachment(event: Event): Promise<void> {
@@ -900,11 +959,17 @@ watch(environment, async () => {
   resetPreparedFiling()
   await Promise.all([loadEvents(), loadChangeDetection()])
 })
-onMounted(() => Promise.all([
-  loadEvents(),
-  loadA1Profile(),
-  loadChangeDetection(),
-]))
+onMounted(() => {
+  void loadPayrollJmhzOptions().then((loaded) => {
+    jmhzOptions.value = loaded
+    jmhzOptionsFailed.value = loaded === null
+  })
+  return Promise.all([
+    loadEvents(),
+    loadA1Profile(),
+    loadChangeDetection(),
+  ])
+})
 
 async function run(action: 'preview' | 'prepare'): Promise<void> {
   busy.value = true
@@ -1184,7 +1249,20 @@ async function copyXml(): Promise<void> {
           <div :class="a1GridClass">
             <label v-for="field in a1AddressFields" :key="field.key" class="block">
               <span :class="a1LabelClass">{{ t(field.label) }}</span>
+              <SearchableSelect
+                v-if="field.key === 'country_code'"
+                class="mt-1"
+                :model-value="a1Form.permanent_address.country_code"
+                :options="a1CodeOptions(jmhzOptions?.countries, a1Form.permanent_address.country_code)"
+                :placeholder="t('payroll.people.registration.a1.country_select')"
+                :no-results-label="t('payroll.people.registration.a1.country_no_results')"
+                :disabled="a1Busy"
+                accent="payroll"
+                data-test="a1-permanent-country_code"
+                @update:model-value="a1Form.permanent_address.country_code = $event"
+              />
               <input
+                v-else
                 v-model="a1Form.permanent_address[field.key]"
                 type="text"
                 :class="a1InputClass"
@@ -1224,7 +1302,20 @@ async function copyXml(): Promise<void> {
           <div v-if="a1Form.czech_residence_address !== null" :class="a1GridClass">
             <label v-for="field in a1AddressFields" :key="field.key" class="block">
               <span :class="a1LabelClass">{{ t(field.label) }}</span>
+              <SearchableSelect
+                v-if="field.key === 'country_code'"
+                class="mt-1"
+                :model-value="a1Form.czech_residence_address.country_code"
+                :options="a1CodeOptions(jmhzOptions?.countries, a1Form.czech_residence_address.country_code)"
+                :placeholder="t('payroll.people.registration.a1.country_select')"
+                :no-results-label="t('payroll.people.registration.a1.country_no_results')"
+                :disabled="a1Busy"
+                accent="payroll"
+                data-test="a1-czech-residence-country_code"
+                @update:model-value="a1Form.czech_residence_address.country_code = $event"
+              />
               <input
+                v-else
                 v-model="a1Form.czech_residence_address[field.key]"
                 type="text"
                 :class="a1InputClass"
@@ -1252,7 +1343,20 @@ async function copyXml(): Promise<void> {
           <div v-if="a1Form.contact_address !== null" :class="a1GridClass">
             <label v-for="field in a1AddressFields" :key="field.key" class="block">
               <span :class="a1LabelClass">{{ t(field.label) }}</span>
+              <SearchableSelect
+                v-if="field.key === 'country_code'"
+                class="mt-1"
+                :model-value="a1Form.contact_address.country_code"
+                :options="a1CodeOptions(jmhzOptions?.countries, a1Form.contact_address.country_code)"
+                :placeholder="t('payroll.people.registration.a1.country_select')"
+                :no-results-label="t('payroll.people.registration.a1.country_no_results')"
+                :disabled="a1Busy"
+                accent="payroll"
+                data-test="a1-contact-country_code"
+                @update:model-value="a1Form.contact_address.country_code = $event"
+              />
               <input
+                v-else
                 v-model="a1Form.contact_address[field.key]"
                 type="text"
                 :class="a1InputClass"
@@ -1278,13 +1382,17 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.tax_residency.country_code') }}
               </span>
-              <input
-                v-model="a1Form.tax_residency.country_code"
-                type="text"
-                :class="a1InputClass"
+              <SearchableSelect
+                class="mt-1"
+                :model-value="a1Form.tax_residency.country_code"
+                :options="a1CodeOptions(jmhzOptions?.countries, a1Form.tax_residency.country_code)"
+                :placeholder="t('payroll.people.registration.a1.country_select')"
+                :no-results-label="t('payroll.people.registration.a1.country_no_results')"
                 :disabled="a1Busy"
+                accent="payroll"
                 data-test="a1-tax-residency-country"
-              >
+                @update:model-value="a1Form.tax_residency.country_code = $event"
+              />
               <span
                 v-if="a1NoteText('tax_residency.country_code')"
                 :class="a1NoteClass('tax_residency.country_code')"
@@ -1296,13 +1404,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.tax_residency.identifier_type') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.tax_residency.identifier_type"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-tax-residency-identifier-type"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.tax_identifier_types ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
               <span
                 v-if="a1NoteText('tax_residency.identifier_type')"
                 :class="a1NoteClass('tax_residency.identifier_type')"
@@ -1350,7 +1464,20 @@ async function copyXml(): Promise<void> {
           <div v-if="a1Form.tax_residency.residence_address !== null" :class="a1GridClass">
             <label v-for="field in a1AddressFields" :key="field.key" class="block">
               <span :class="a1LabelClass">{{ t(field.label) }}</span>
+              <SearchableSelect
+                v-if="field.key === 'country_code'"
+                class="mt-1"
+                :model-value="a1Form.tax_residency.residence_address.country_code"
+                :options="a1CodeOptions(jmhzOptions?.countries, a1Form.tax_residency.residence_address.country_code)"
+                :placeholder="t('payroll.people.registration.a1.country_select')"
+                :no-results-label="t('payroll.people.registration.a1.country_no_results')"
+                :disabled="a1Busy"
+                accent="payroll"
+                data-test="a1-tax-residence-address-country_code"
+                @update:model-value="a1Form.tax_residency.residence_address.country_code = $event"
+              />
               <input
+                v-else
                 v-model="a1Form.tax_residency.residence_address[field.key]"
                 type="text"
                 :class="a1InputClass"
@@ -1370,13 +1497,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.activity_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.employment.activity_code"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-employment-activity-code"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.activity_codes ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
               <span
                 v-if="a1NoteText('employment.activity_code')"
                 :class="a1NoteClass('employment.activity_code')"
@@ -1388,13 +1521,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.relationship_detail_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.employment.relationship_detail_code"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-employment-relationship-detail-code"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.relationship_detail_codes ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
               <span
                 v-if="a1NoteText('employment.relationship_detail_code')"
                 :class="a1NoteClass('employment.relationship_detail_code')"
@@ -1470,6 +1609,17 @@ async function copyXml(): Promise<void> {
                 :disabled="a1Busy"
                 data-test="a1-employment-status-code"
               >
+              <!--
+                Číselník existuje (ČSÚ, Klasifikace postavení v zaměstnání /
+                NKPZ, číselník `klasif_postaveni_v_zamestn` v připnutém
+                datovém slovníku JMHZ), ale je hierarchický až na 4 znaky
+                (např. 1111), zatímco tohle pole ukládá nejvýš 2 — nabídnout
+                by ho šlo jen osekaný na nejvyšší úroveň. Radši volný text
+                s odkazem na zdroj než tichá ztráta hloubky klasifikace.
+              -->
+              <span class="mt-1 block text-xs text-neutral-500">
+                {{ t('payroll.people.registration.a1.employment.employment_status_code_hint') }}
+              </span>
               <span
                 v-if="a1NoteText('employment.employment_status_code')"
                 :class="a1NoteClass('employment.employment_status_code')"
@@ -1481,13 +1631,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.work_mode_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.employment.work_mode_code"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-employment-work-mode-code"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.work_mode_codes ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
               <span
                 v-if="a1NoteText('employment.work_mode_code')"
                 :class="a1NoteClass('employment.work_mode_code')"
@@ -1520,13 +1676,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.prevailing_workplace_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.employment.prevailing_workplace_code"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-employment-prevailing-workplace-code"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.workplace_progress_codes ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
               <span
                 v-if="a1NoteText('employment.prevailing_workplace_code')"
                 :class="a1NoteClass('employment.prevailing_workplace_code')"
@@ -1586,13 +1748,22 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.workplace_municipality_code') }}
               </span>
-              <input
-                v-model="a1Form.employment.workplace_municipality_code"
-                type="text"
-                :class="a1InputClass"
+              <SearchableSelect
+                class="mt-1"
+                :model-value="a1Form.employment.workplace_municipality_code"
+                :options="municipalityOptions.map(option => ({ value: option.code, label: option.label, secondary: option.code }))"
+                :selected-option="selectedMunicipality"
+                remote
                 :disabled="a1Busy"
+                :loading="municipalitiesLoading"
+                :loading-label="t('payroll.people.jmhz_evidence.searching_municipality')"
+                :no-results-label="t('payroll.people.jmhz_evidence.no_municipality')"
+                :placeholder="t('payroll.people.jmhz_evidence.search_municipality')"
+                accent="payroll"
                 data-test="a1-employment-workplace-municipality-code"
-              >
+                @search="searchMunicipalities"
+                @update:model-value="selectMunicipality"
+              />
               <span
                 v-if="a1NoteText('employment.workplace_municipality_code')"
                 :class="a1NoteClass('employment.workplace_municipality_code')"
@@ -1604,13 +1775,11 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.profession_code') }}
               </span>
-              <input
+              <CzIscoPicker
                 v-model="a1Form.employment.profession_code"
-                type="text"
-                :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-employment-profession-code"
-              >
+              />
               <span
                 v-if="a1NoteText('employment.profession_code')"
                 :class="a1NoteClass('employment.profession_code')"
@@ -1622,13 +1791,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.required_education_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.employment.required_education_code"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-employment-required-education-code"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.education_levels ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
             </label>
             <label class="block">
               <span :class="a1LabelClass">
@@ -1703,13 +1878,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.facts.highest_education_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.facts.highest_education_code"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-facts-highest-education-code"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.education_levels ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
               <span
                 v-if="a1NoteText('facts.highest_education_code')"
                 :class="a1NoteClass('facts.highest_education_code')"
@@ -1747,14 +1928,19 @@ async function copyXml(): Promise<void> {
               :key="index"
               class="mt-2 grid gap-2 sm:grid-cols-4"
             >
-              <input
+              <select
                 v-model="restriction.type_code"
-                type="text"
-                :placeholder="t('payroll.people.registration.a1.facts.restriction_type')"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 :data-test="`a1-restriction-type-${index}`"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.facts.restriction_type') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.health_restriction_type_codes ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
               <input
                 v-model="restriction.from"
                 type="date"
@@ -1804,13 +1990,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.pension.type_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.pension.type_code"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-pension-type-code"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.pension_type_codes ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
             </label>
             <label class="block">
               <span :class="a1LabelClass">
@@ -1884,13 +2076,17 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.foreign_legislation.country_code') }}
               </span>
-              <input
-                v-model="a1Form.foreign_legislation.country_code"
-                type="text"
-                :class="a1InputClass"
+              <SearchableSelect
+                class="mt-1"
+                :model-value="a1Form.foreign_legislation.country_code"
+                :options="a1CodeOptions(jmhzOptions?.countries, a1Form.foreign_legislation.country_code)"
+                :placeholder="t('payroll.people.registration.a1.country_select')"
+                :no-results-label="t('payroll.people.registration.a1.country_no_results')"
                 :disabled="a1Busy"
+                accent="payroll"
                 data-test="a1-foreign-legislation-country-code"
-              >
+                @update:model-value="a1Form.foreign_legislation.country_code = $event"
+              />
               <span
                 v-if="a1NoteText('foreign_legislation.country_code')"
                 :class="a1NoteClass('foreign_legislation.country_code')"
@@ -1910,13 +2106,19 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.proof_identity.type_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.proof_identity.type_code"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-proof-identity-type-code"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.proof_identity_type_codes ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
               <span
                 v-if="a1NoteText('proof_identity.type_code')"
                 :class="a1NoteClass('proof_identity.type_code')"
@@ -1958,13 +2160,17 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.proof_identity.country_code') }}
               </span>
-              <input
-                v-model="a1Form.proof_identity.country_code"
-                type="text"
-                :class="a1InputClass"
+              <SearchableSelect
+                class="mt-1"
+                :model-value="a1Form.proof_identity.country_code"
+                :options="a1CodeOptions(jmhzOptions?.countries, a1Form.proof_identity.country_code)"
+                :placeholder="t('payroll.people.registration.a1.country_select')"
+                :no-results-label="t('payroll.people.registration.a1.country_no_results')"
                 :disabled="a1Busy"
+                accent="payroll"
                 data-test="a1-proof-identity-country-code"
-              >
+                @update:model-value="a1Form.proof_identity.country_code = $event"
+              />
               <span
                 v-if="a1NoteText('proof_identity.country_code')"
                 :class="a1NoteClass('proof_identity.country_code')"
@@ -2008,37 +2214,56 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.foreign_worker.free_access_reason_code') }}
               </span>
-              <input
-                v-model="a1Form.foreign_worker.free_access_reason_code"
-                type="text"
-                :class="a1InputClass"
+              <SearchableSelect
+                class="mt-1"
+                :model-value="a1Form.foreign_worker.free_access_reason_code"
+                :options="a1CodeOptions(
+                  jmhzOptions?.foreign_worker_free_access_reason_codes,
+                  a1Form.foreign_worker.free_access_reason_code,
+                )"
+                :placeholder="t('payroll.people.registration.a1.foreign_worker.free_access_reason_select')"
+                :no-results-label="t('payroll.people.registration.a1.no_results')"
                 :disabled="a1Busy"
+                accent="payroll"
                 data-test="a1-foreign-worker-free-access-reason-code"
-              >
+                @update:model-value="a1Form.foreign_worker.free_access_reason_code = $event"
+              />
             </label>
             <label class="block">
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.foreign_worker.permit_type_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.foreign_worker.permit_type_code"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-foreign-worker-permit-type-code"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.foreign_worker_permit_type_codes ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
             </label>
             <label class="block">
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.foreign_worker.issuing_labour_office_code') }}
               </span>
-              <input
+              <select
                 v-model="a1Form.foreign_worker.issuing_labour_office_code"
-                type="text"
                 :class="a1InputClass"
                 :disabled="a1Busy"
                 data-test="a1-foreign-worker-issuing-labour-office-code"
               >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option
+                  v-for="option in jmhzOptions?.labour_office_codes ?? []"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} · {{ option.label }}</option>
+              </select>
             </label>
             <label class="block">
               <span :class="a1LabelClass">

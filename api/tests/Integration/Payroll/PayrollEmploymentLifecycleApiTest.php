@@ -444,6 +444,37 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame(250, count($options['countries']));
         self::assertSame('2026-12-31', $options['external_codebooks']['verified_through']);
 
+        // REGZEC A1 čerpá ze stejného balíku — malé uzavřené číselníky GFŘ/
+        // ČSSZ/ÚP ČR/ČSÚ, vložené přímo v datovém slovníku JMHZ.
+        self::assertSame(
+            ['D', 'R', 'S', 'J'],
+            array_column($options['tax_identifier_types'], 'code'),
+        );
+        self::assertCount(16, $options['education_levels']);
+        self::assertSame(
+            ['1', '2', '3', '4'],
+            array_column($options['work_mode_codes'], 'code'),
+        );
+        self::assertSame(
+            ['1', '2', '3', '4'],
+            array_column($options['workplace_progress_codes'], 'code'),
+        );
+        self::assertSame(
+            ['1', '2', '8', 'A', 'B', 'C'],
+            array_column($options['pension_type_codes'], 'code'),
+        );
+        self::assertSame(
+            ['I', 'P', 'O'],
+            array_column($options['proof_identity_type_codes'], 'code'),
+        );
+        self::assertCount(5, $options['health_restriction_type_codes']);
+        self::assertCount(21, $options['foreign_worker_free_access_reason_codes']);
+        self::assertSame(
+            ['1', '2', '3', '4'],
+            array_column($options['foreign_worker_permit_type_codes'], 'code'),
+        );
+        self::assertCount(14, $options['labour_office_codes']);
+
         $municipalities = $this->action->jmhzMunicipalities(
             $this->request(
                 'GET',

@@ -122,7 +122,7 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         ];
     }
 
-    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string|null>,activity_codes:list<array{code:string,label:string,relationship_detail_mode:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>} */
+    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string|null>,activity_codes:list<array{code:string,label:string,relationship_detail_mode:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>,tax_identifier_types:list<array{code:string,label:string}>,education_levels:list<array{code:string,label:string}>,work_mode_codes:list<array{code:string,label:string}>,workplace_progress_codes:list<array{code:string,label:string}>,pension_type_codes:list<array{code:string,label:string}>,proof_identity_type_codes:list<array{code:string,label:string}>,health_restriction_type_codes:list<array{code:string,label:string}>,foreign_worker_free_access_reason_codes:list<array{code:string,label:string}>,foreign_worker_permit_type_codes:list<array{code:string,label:string}>,labour_office_codes:list<array{code:string,label:string}>} */
     public function options(): array
     {
         $apzOptions = [];
@@ -154,6 +154,23 @@ final class PayrollEmploymentJmhzEvidenceCatalog
             'countries' => $this->externalCodebooks->countries(
                 $this->externalCodebooks->provenance()['effective_from'],
             ),
+            // Zbytek jsou malé, uzavřené číselníky REGZEC A1 (GFŘ/ČSSZ/ÚP ČR/ČSÚ),
+            // vložené přímo v připnutém datovém slovníku JMHZ — stejný zdroj a
+            // stejná pinovaná verze jako druh_cinnosti výše, žádné nové stažení.
+            'tax_identifier_types' => $this->codebookOptions('typ_danove_identifikace'),
+            'education_levels' => $this->codebookOptions('kategorie_dosazeneho_vzdela'),
+            'work_mode_codes' => $this->codebookOptions('pracovni_rezim'),
+            'workplace_progress_codes' => $this->codebookOptions('prubeh_prace'),
+            'pension_type_codes' => $this->codebookOptions('druh_duchodu'),
+            'proof_identity_type_codes' => $this->codebookOptions('typ_dokladu'),
+            'health_restriction_type_codes' => $this->codebookOptions('typ_zdravotniho_omezeni'),
+            'foreign_worker_free_access_reason_codes' => $this->codebookOptions(
+                'duvod_pro_volny_pristup_na',
+            ),
+            'foreign_worker_permit_type_codes' => $this->codebookOptions(
+                'druh_pracovniho_opravneni',
+            ),
+            'labour_office_codes' => $this->codebookOptions('krajske_pobocky_up_cr'),
         ];
     }
 
