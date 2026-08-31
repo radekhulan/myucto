@@ -79,6 +79,15 @@ Options -Indexes -MultiViews
     RewriteCond %{REQUEST_URI} ^/assets/
     RewriteRule ^assets/(.*)$ web/dist/assets/$1 [L]
 
+    # 3a-2) /fonts/* → web/dist/fonts/* (self-hostované woff2 z web/public/fonts,
+    # které `web/index.html` preloaduje absolutní cestou `/fonts/…`). Bez tohoto
+    # pravidla je spolkne SPA fallback (pravidlo 4) a vrátí index.html s Content-Type
+    # text/html — prohlížeč font zahodí (`OTS parsing error: invalid sfntVersion`,
+    # 0x3C21444F = "<!DO") a celá aplikace spadne na systémový fallback.
+    # V IIS to řeší pravidlo „Self-hosted fonts" ve web.config, v nginxu blok 3a-2.
+    RewriteCond %{REQUEST_URI} ^/fonts/
+    RewriteRule ^fonts/(.*)$ web/dist/fonts/$1 [L]
+
     # 3b) PWA soubory generované Vitem → web/dist. Service worker musí být
     # dostupný z rootu, aby mohl ovládat celou aplikaci (scope `/`).
     RewriteRule ^service-worker\.js$ web/dist/service-worker.js [E=NOCACHE:1,L]
