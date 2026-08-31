@@ -114,7 +114,10 @@ onMounted(load)
         </table>
       </div>
 
-      <div v-if="canWrite" class="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:items-end">
+      <!-- `items-start`, ne `items-end`: pod prvním polem visí vysvětlivka, takže
+           zarovnání na spodní hranu posunulo jeho input nahoru a popisky sloupců
+           se rozešly. Zarovnáním na horní hranu sedí popisky i vstupy v řadě. -->
+      <div v-if="canWrite" class="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:items-start">
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.accident_insurance.institution_code') }}</span>
           <input
