@@ -891,10 +891,7 @@ final class InstanceExportService
         if ($stmt === false) {
             throw new InstanceExportException('shared_payroll_read_failed', 'Nelze načíst globální mzdovou tabulku ' . $table . '.');
         }
-        $fh = fopen($filePath, 'wb');
-        if ($fh === false) {
-            throw new InstanceExportException('storage_failed', 'Nelze zapsat ' . $filePath);
-        }
+        $fh = $this->openForWrite($filePath);
         $rows = 0;
         try {
             while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
@@ -1014,13 +1011,53 @@ final class InstanceExportService
         return ['entries' => $entries, 'passwords_restored' => false, 'users_restored_disabled' => true];
     }
 
+    /**
+     * Otevře dočasný soubor exportu pro zápis.
+     *
+     * Pracovní adresář zakládá {@see build()} na začátku běhu, ale export trvá
+     * minuty a mezitím ho může sebrat úklid dočasných souborů (na CI se to
+     * projevilo jako „Nelze zapsat …/tmp-xxxx/accounting_archives.jsonl" v jinak
+     * zeleném běhu). Adresář proto před otevřením obnovíme — je to levnější než
+     * zahodit hotovou půlku exportu.
+     *
+     * Když se otevřít přesto nepodaří, do hlášky patří důvod od systému
+     * (plný disk / došly deskriptory / práva vypadají jinak než chybějící
+     * adresář). Bez něj se z chyby nedá poznat, co dělat dál.
+     *
+     * @return resource
+     */
+    private function openForWrite(string $filePath)
+    {
+        $dir = dirname($filePath);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        $fh = @fopen($filePath, 'wb');
+        if ($fh === false) {
+            $reason = error_get_last()['message'] ?? 'neznámý důvod';
+            throw new InstanceExportException(
+                'storage_failed',
+                'Nelze zapsat ' . $filePath . ' — ' . $reason
+                . ' (adresář ' . (is_dir($dir) ? 'existuje' : 'CHYBÍ')
+                . ', volné místo ' . $this->freeSpaceLabel($dir) . ').',
+            );
+        }
+        return $fh;
+    }
+
+    private function freeSpaceLabel(string $dir): string
+    {
+        $free = @disk_free_space(is_dir($dir) ? $dir : $this->storageBaseDir());
+        if (!is_float($free)) {
+            return 'neznámé';
+        }
+        return round($free / 1024 ** 2) . ' MB';
+    }
+
     /** @param list<array<string,mixed>> $rows */
     private function writeRowsJsonl(array $rows, string $filePath): int
     {
-        $fh = fopen($filePath, 'wb');
-        if ($fh === false) {
-            throw new InstanceExportException('storage_failed', 'Nelze zapsat ' . $filePath);
-        }
+        $fh = $this->openForWrite($filePath);
         try {
             foreach ($rows as $row) {
                 $row = InstanceExportBinaryCodec::encodeRow($row);
@@ -1048,10 +1085,7 @@ final class InstanceExportService
         }
         $pdo = $this->db->pdo();
         $columns = implode(', ', array_map(static fn (string $c): string => '`' . $c . '`', $scope->columns));
-        $fh = fopen($filePath, 'wb');
-        if ($fh === false) {
-            throw new InstanceExportException('storage_failed', 'Nelze zapsat ' . $filePath);
-        }
+        $fh = $this->openForWrite($filePath);
         $rows = 0;
         try {
             $lastKey = null;
