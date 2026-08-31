@@ -40,8 +40,12 @@ final class CronJobsAction
         }
 
         $pdo = $this->db->pdo();
-        $catalog = CronCatalog::all();
         $gate = new CronJobGate($this->config, $pdo);
+        // Spravovaná instalace má licenční obnovu hodinově; self-hosted denně.
+        // Na režim se ptáme brány, ne konfigurace — `app.managed` čte jediné
+        // místo v aplikaci ({@see ManagedModeGuard}), jinak by se podmínka
+        // rozsypala po obrazovkách.
+        $catalog = CronCatalog::forInstallation($gate->isManagedInstallation());
         $mode = CronScheduleMode::current($pdo);
 
         // Poslední stav se od migrace 1183 čte z cron_heartbeat — jeden řádek na

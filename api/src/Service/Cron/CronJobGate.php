@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Cron;
 
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Service\System\ManagedModeGuard;
 use PDO;
 use Throwable;
 
@@ -193,10 +194,10 @@ final class CronJobGate
      * Tiše nespuštěný cron je horší než úloha, která jednou naprázdno změří
      * spotřebu místa.
      */
-    private function isManagedInstallation(): bool
+    public function isManagedInstallation(): bool
     {
         try {
-            return (bool) $this->config->get('app.managed', false);
+            return (new ManagedModeGuard($this->config))->isManaged();
         } catch (Throwable) {
             return true;
         }
@@ -216,7 +217,7 @@ final class CronJobGate
         $dispatcherMode = $mode === CronScheduleMode::DISPATCHER;
 
         return array_values(array_filter(
-            CronCatalog::all(),
+            CronCatalog::forInstallation($this->isManagedInstallation()),
             function (array $job) use ($dispatcherMode): bool {
                 $isDispatcher = ($job['dispatcher_only'] ?? false) === true;
                 if ($isDispatcher !== $dispatcherMode) {

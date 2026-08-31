@@ -52,6 +52,42 @@ final class CronCatalog
      * {@see CronScheduleMode::DISPATCHER}. V režimu INDIVIDUAL se neplánuje
      * (jinak by běžela souběžně s jednotlivými úlohami a spouštěla je dvakrát).
      */
+    /**
+     * Katalog upravený pro konkrétní instalaci.
+     *
+     * Liší se jediná úloha: obnova licence. Ve spravovaném provozu běží hodinově,
+     * aby se změna předplatného (zaplaceno / neuhrazeno) projevila v řádu hodin —
+     * `LicenseService::renewScheduled()` stejně síť volá jen kolem platby a při
+     * past_due, takže častější plán neznamená častější volání serveru.
+     *
+     * Self-hosted instalace zůstává na denním plánu. Nejde o vlastnost licence,
+     * ale o zpětnou kompatibilitu: hodinový plán by u ní znamenal, že `max_age_hours`
+     * najednou hlásí úlohu jako opožděnou, přestože běží přesně tak, jak si ji admin
+     * kdysi nastavil. Z varování by se stal šum — přesně to, čemu se {@see CronHealth}
+     * v docblocku brání.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function forInstallation(bool $managed): array
+    {
+        $jobs = self::all();
+        if (!$managed) {
+            return $jobs;
+        }
+
+        foreach ($jobs as $i => $job) {
+            if (($job['script'] ?? null) !== 'cron-license-renew') {
+                continue;
+            }
+            $jobs[$i]['recommended'] = 'hourly_15';
+            $jobs[$i]['linux_cron'] = '15 * * * *';
+            $jobs[$i]['windows_schtasks'] = '/sc hourly /mo 1 /st 00:15';
+            $jobs[$i]['max_age_hours'] = 4;
+        }
+
+        return $jobs;
+    }
+
     public static function all(): array
     {
         return [
@@ -319,11 +355,16 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Základ je denní obnova — tak to má naplánované každá dosavadní
+                // instalace a self-hosted zákazník si plán sám nepřenastaví.
+                // Hodinový režim si vyžádá jen spravovaný provoz, viz
+                // self::forInstallation(): tam je kolem platby potřeba zachytit
+                // změnu předplatného v řádu hodin, ne dne.
                 'script' => 'cron-license-renew',
-                'recommended' => 'hourly_15',
-                'linux_cron' => '15 * * * *',
-                'windows_schtasks' => '/sc hourly /mo 1 /st 00:15',
-                'max_age_hours' => 4,
+                'recommended' => 'daily_0500',
+                'linux_cron' => '0 5 * * *',
+                'windows_schtasks' => '/sc daily /st 05:00',
+                'max_age_hours' => 36,
                 'weekdays_only' => false,
                 'critical' => false,
             ],
@@ -382,10 +423,10 @@ final class CronCatalog
      *
      * @return list<array<string,mixed>>
      */
-    public static function dispatchable(): array
+    public static function dispatchable(bool $managed = false): array
     {
         return array_values(array_filter(
-            self::all(),
+            self::forInstallation($managed),
             static fn (array $job): bool => ($job['dispatcher_only'] ?? false) !== true,
         ));
     }

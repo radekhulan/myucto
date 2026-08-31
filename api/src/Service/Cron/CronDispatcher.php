@@ -111,7 +111,10 @@ final class CronDispatcher
 
         // Rozvrh smluvně řízených úloh (`cron-backup`) se bere z databáze, ne z katalogu
         // — viz CronCatalog::withContractedSchedules(). Načítá se jednou za tick.
-        foreach (CronCatalog::withContractedSchedules(CronCatalog::dispatchable(), $this->pdo) as $job) {
+        foreach (CronCatalog::withContractedSchedules(
+            CronCatalog::dispatchable($this->gate->isManagedInstallation()),
+            $this->pdo,
+        ) as $job) {
             $script = (string) $job['script'];
 
             try {

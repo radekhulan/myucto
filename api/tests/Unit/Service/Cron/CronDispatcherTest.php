@@ -71,13 +71,35 @@ final class CronDispatcherTest extends TestCase
         self::assertNotContains('cron-backup', $at0201['launched'], 'V 2:01 už zálohu spouštět nesmí.');
     }
 
-    public function testLicenseRenewFiresHourlyAtMinuteFifteen(): void
+    /**
+     * Hodinová obnova licence patří JEN spravovanému provozu. Self-hosted instalace
+     * má úlohu naplánovanou denně už dnes a admin si plán sám nepřenastaví — kdyby
+     * katalog přepnul na hodinový rytmus plošně, začal by `max_age_hours` hlásit
+     * opožděnou úlohu, přestože běží přesně tak, jak byla nastavená.
+     */
+    public function testLicenseRenewFiresHourlyOnlyOnManagedInstallations(): void
     {
-        $at1015 = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 10:15:00'));
+        $managed = new CronDispatcher(
+            $this->pdo,
+            new CronJobGate(new Config(['app' => ['managed' => true]]), null),
+            $this->launcher,
+        );
+
+        $at1015 = $managed->tick(new DateTimeImmutable('2026-08-03 10:15:00'));
         self::assertContains('cron-license-renew', $at1015['launched']);
 
-        $at1016 = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 10:16:00'));
+        $at1016 = $managed->tick(new DateTimeImmutable('2026-08-03 10:16:00'));
         self::assertNotContains('cron-license-renew', $at1016['launched']);
+    }
+
+    public function testLicenseRenewStaysDailyOnSelfHostedInstallations(): void
+    {
+        // `dispatcher()` staví bránu s prázdnou konfigurací = self-hosted.
+        $at1015 = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 10:15:00'));
+        self::assertNotContains('cron-license-renew', $at1015['launched']);
+
+        $at0500 = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 05:00:00'));
+        self::assertContains('cron-license-renew', $at0500['launched']);
     }
 
     /**
