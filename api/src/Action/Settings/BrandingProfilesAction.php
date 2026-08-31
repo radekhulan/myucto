@@ -85,12 +85,13 @@ final class BrandingProfilesAction
         $supplierId = $this->supplierId($request);
         if (($gate = $this->requireEnabled($response, $supplierId)) !== null) return $gate;
         $id = (int) ($args['id'] ?? 0);
-        if ($this->profiles->findForSupplier($id, $supplierId) === null) {
+        $current = $this->profiles->findForSupplier($id, $supplierId);
+        if ($current === null) {
             return Json::error($response, 'not_found', 'Brandingový profil nenalezen.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $errors = BrandingProfileValidation::validate($body, true);
-        $errors = array_merge($errors, $this->emailProfileErrors($supplierId, $body));
+        $errors = array_merge($errors, $this->emailProfileErrors($supplierId, $body, $current));
         if ($errors !== []) return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         try {
             $this->profiles->update($id, $supplierId, $body);
@@ -231,8 +232,16 @@ final class BrandingProfilesAction
         return (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
     }
 
-    /** @param array<string,mixed> $body @return array<string,list<string>> */
-    private function emailProfileErrors(int $supplierId, array $body): array
+    /**
+     * Validuje se jen ZMĚNA vazby. Editor posílá profil zpátky celý, takže
+     * deaktivovaný odesílací profil by jinak zablokoval i úpravu úplně jiného
+     * pole — a v nabídce (filtrované na aktivní) by nebylo čím to spravit.
+     *
+     * @param array<string,mixed> $body
+     * @param array<string,mixed>|null $current
+     * @return array<string,list<string>>
+     */
+    private function emailProfileErrors(int $supplierId, array $body, ?array $current = null): array
     {
         if (!array_key_exists('email_profile_id', $body)
             || $body['email_profile_id'] === null
@@ -241,6 +250,7 @@ final class BrandingProfilesAction
             return [];
         }
         $profileId = (int) $body['email_profile_id'];
+        if ($current !== null && $profileId === (int) ($current['email_profile_id'] ?? 0)) return [];
         if ($profileId > 0 && $this->profiles->hasActiveEmailProfile($supplierId, $profileId)) return [];
 
         return ['email_profile_id' => ['Vybraný e-mailový profil není aktivní v aktuální firmě.']];

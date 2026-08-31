@@ -80,6 +80,9 @@ final class EmailProfilesAction
         if (($restricted = $this->denyClientRestrictedFields($request, $response, $body)) !== null) {
             return $restricted;
         }
+        if (($demoted = $this->denyClientDefaultTakeover($request, $response, $body, null)) !== null) {
+            return $demoted;
+        }
         if (($locked = $this->denyCustomTransport($response, $body)) !== null) {
             return $locked;
         }
@@ -133,6 +136,9 @@ final class EmailProfilesAction
         $body = (array) ($request->getParsedBody() ?? []);
         if (($restricted = $this->denyClientRestrictedFields($request, $response, $body)) !== null) {
             return $restricted;
+        }
+        if (($demoted = $this->denyClientDefaultTakeover($request, $response, $body, $profileId)) !== null) {
+            return $demoted;
         }
         if (($locked = $this->denyCustomTransport($response, $body)) !== null) {
             return $locked;
@@ -467,7 +473,10 @@ final class EmailProfilesAction
     {
         if (!RequestAuthorization::isClientType($request)) return null;
 
-        if (array_key_exists('signing_profile_id', $body)) {
+        // Jen NENULOVÁ hodnota je pokus o delegaci podpisu. Prázdné pole v
+        // round-tripu celého profilu (integrace, budoucí formulář) nesmí
+        // skončit matoucím 403 — klient stejně žádný podpis nastavit nemůže.
+        if (($body['signing_profile_id'] ?? null) !== null && (string) $body['signing_profile_id'] !== '') {
             return Json::error(
                 $response,
                 'field_not_delegable',
@@ -489,6 +498,44 @@ final class EmailProfilesAction
     }
 
     /**
+     * Zákaz editace podepisujícího profilu by nic neznamenal, kdyby ho klient
+     * mohl obejít zvenčí: založí si vlastní profil s `is_default`, staff profil
+     * tím spadne z výchozí pozice a firemní pošta začne odcházet nepodepsaná.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function denyClientDefaultTakeover(
+        Request $request,
+        Response $response,
+        array $body,
+        ?int $profileId,
+    ): ?Response {
+        if (!RequestAuthorization::isClientType($request)) return null;
+        if (!array_key_exists('is_default', $body) || !filter_var($body['is_default'], FILTER_VALIDATE_BOOL)) {
+            return null;
+        }
+
+        $current = $this->profiles->defaultProfile($this->supplierId($request));
+        if ($current === null) return null;
+        if ($profileId !== null && (int) ($current['id'] ?? 0) === $profileId) return null;
+        if ($this->clientManageableProfile($current)) return null;
+
+        return Json::error(
+            $response,
+            'profile_not_delegable',
+            'Výchozí profil spravuje správce instalace — nelze ho nahradit bez jeho součinnosti.',
+            403,
+        );
+    }
+
+    /** @param array<string,mixed> $profile */
+    private function clientManageableProfile(array $profile): bool
+    {
+        return ($profile['signing_profile_id'] ?? null) === null
+            && strtolower((string) ($profile['transport_type'] ?? 'global')) !== 'sendmail';
+    }
+
+    /**
      * Profily napojené na systémový sendmail nebo kryptografické S/MIME identity
      * zůstávají ve správě staff role. Klient je vidí v seznamu, ale nemůže je
      * testovat, měnit ani smazat.
@@ -499,9 +546,7 @@ final class EmailProfilesAction
     {
         if (!RequestAuthorization::isClientType($request)) return null;
 
-        if (($profile['signing_profile_id'] ?? null) !== null
-            || strtolower((string) ($profile['transport_type'] ?? 'global')) === 'sendmail'
-        ) {
+        if (!$this->clientManageableProfile($profile)) {
             return Json::error(
                 $response,
                 'profile_not_delegable',
@@ -520,8 +565,7 @@ final class EmailProfilesAction
     {
         if ($profile === null || !RequestAuthorization::isClientType($request)) return $profile;
 
-        $profile['client_manageable'] = ($profile['signing_profile_id'] ?? null) === null
-            && strtolower((string) ($profile['transport_type'] ?? 'global')) !== 'sendmail';
+        $profile['client_manageable'] = $this->clientManageableProfile($profile);
         unset(
             $profile['signing_profile_id'],
             $profile['signing_profile_name'],

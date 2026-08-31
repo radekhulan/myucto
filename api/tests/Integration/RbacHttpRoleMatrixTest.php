@@ -209,6 +209,137 @@ final class RbacHttpRoleMatrixTest extends TestCase
     }
 
     /**
+     * Deaktivovaný odesílací profil nesmí zablokovat úpravu jiného pole
+     * brandingového profilu. Editor posílá profil zpátky celý a nabídka je
+     * filtrovaná na aktivní, takže by to nešlo spravit ani ručně.
+     */
+    public function testStaleEmailProfileLinkDoesNotBlockUnrelatedBrandingEdits(): void
+    {
+        $userId = $this->createUser('staff_branding_stale', 'staff', 2, true);
+        $session = $this->createSession($userId);
+        $pdo = $this->db->pdo();
+
+        $flag = $pdo->prepare('SELECT branding_profiles_enabled FROM supplier WHERE id = ?');
+        $flag->execute([$this->supplierId]);
+        $previousFlag = (int) $flag->fetchColumn();
+        $pdo->prepare('UPDATE supplier SET branding_profiles_enabled = 1 WHERE id = ?')->execute([$this->supplierId]);
+
+        $brandingId = null;
+        try {
+            $email = $this->request('POST', '/api/settings/email-profiles', $session, [
+                'name' => '__TEST branding link source',
+                'code' => 'branding-link-' . bin2hex(random_bytes(5)),
+                'from_email' => 'branding-link@example.test',
+                'transport_type' => 'global',
+                'is_default' => false,
+                'is_active' => true,
+            ]);
+            self::assertSame(201, $email->getStatusCode(), (string) $email->getBody());
+            $emailProfileId = (int) ($this->json($email)['id'] ?? 0);
+            $this->emailProfileIds[] = $emailProfileId;
+
+            $branding = $this->request('POST', '/api/settings/branding-profiles', $session, [
+                'name' => '__TEST branding stale link',
+                'code' => 'brand-stale-' . bin2hex(random_bytes(5)),
+                'email_profile_id' => $emailProfileId,
+            ]);
+            self::assertSame(201, $branding->getStatusCode(), (string) $branding->getBody());
+            $brandingId = (int) ($this->json($branding)['id'] ?? 0);
+            self::assertGreaterThan(0, $brandingId);
+
+            $pdo->prepare('UPDATE email_profiles SET is_active = 0 WHERE id = ?')->execute([$emailProfileId]);
+
+            $kept = $this->request('PUT', "/api/settings/branding-profiles/{$brandingId}", $session, [
+                'name' => '__TEST branding stale link renamed',
+                'email_profile_id' => $emailProfileId,
+            ]);
+            self::assertSame(200, $kept->getStatusCode(), (string) $kept->getBody());
+            self::assertSame('__TEST branding stale link renamed', $this->json($kept)['name'] ?? null);
+
+            // Přepnout vazbu na JINÝ neaktivní profil se ale dál nesmí.
+            $moved = $this->request('PUT', "/api/settings/branding-profiles/{$brandingId}", $session, [
+                'email_profile_id' => $emailProfileId + 100000,
+            ]);
+            self::assertSame(400, $moved->getStatusCode());
+            self::assertSame('validation_failed', $this->json($moved)['error']['code'] ?? null);
+        } finally {
+            if ($brandingId !== null && $brandingId > 0) {
+                $pdo->prepare('DELETE FROM branding_profiles WHERE id = ?')->execute([$brandingId]);
+            }
+            $pdo->prepare('UPDATE supplier SET branding_profiles_enabled = ? WHERE id = ?')
+                ->execute([$previousFlag, $this->supplierId]);
+        }
+    }
+
+    /**
+     * Zákaz editace staff profilu musí platit i „zvenčí": klient si nesmí
+     * vlastním profilem s `is_default` sesadit profil s S/MIME nebo sendmailem.
+     */
+    public function testClientCannotTakeOverTheDefaultFromASigningProfile(): void
+    {
+        $userId = $this->createUser('client_default_takeover', 'client', 2, true);
+        $session = $this->createSession($userId);
+
+        $this->createStaffOnlyDefaultProfile();
+
+        $takeover = $this->request('POST', '/api/settings/client/email-profiles', $session, [
+            'name' => '__TEST client takeover',
+            'code' => 'client-takeover-' . bin2hex(random_bytes(5)),
+            'from_email' => 'takeover@example.test',
+            'transport_type' => 'global',
+            'is_default' => true,
+            'is_active' => true,
+        ]);
+        self::assertSame(403, $takeover->getStatusCode());
+        self::assertSame('profile_not_delegable', $this->json($takeover)['error']['code'] ?? null);
+
+        // Bez `is_default` je založení profilu v pořádku — omezení míří na
+        // převzetí výchozí pozice, ne na samotné zakládání.
+        $plain = $this->request('POST', '/api/settings/client/email-profiles', $session, [
+            'name' => '__TEST client secondary',
+            'code' => 'client-secondary-' . bin2hex(random_bytes(5)),
+            'from_email' => 'secondary@example.test',
+            'transport_type' => 'global',
+            'is_default' => false,
+            'is_active' => true,
+        ]);
+        self::assertSame(201, $plain->getStatusCode(), (string) $plain->getBody());
+        $this->emailProfileIds[] = (int) ($this->json($plain)['id'] ?? 0);
+    }
+
+    /**
+     * Prázdné `signing_profile_id` je round-trip celého profilu, ne pokus
+     * o delegaci podpisu — API ho nesmí odmítat.
+     */
+    public function testClientMayRoundTripAnEmptySigningProfileField(): void
+    {
+        $userId = $this->createUser('client_signing_roundtrip', 'client', 2, true);
+        $session = $this->createSession($userId);
+
+        $created = $this->request('POST', '/api/settings/client/email-profiles', $session, [
+            'name' => '__TEST client roundtrip',
+            'code' => 'client-roundtrip-' . bin2hex(random_bytes(5)),
+            'from_email' => 'roundtrip@example.test',
+            'transport_type' => 'global',
+            'signing_profile_id' => null,
+            'is_default' => false,
+            'is_active' => true,
+        ]);
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $this->emailProfileIds[] = (int) ($this->json($created)['id'] ?? 0);
+
+        $withValue = $this->request('POST', '/api/settings/client/email-profiles', $session, [
+            'name' => '__TEST client signing attempt',
+            'code' => 'client-signing-' . bin2hex(random_bytes(5)),
+            'from_email' => 'signing@example.test',
+            'transport_type' => 'global',
+            'signing_profile_id' => 1,
+        ]);
+        self::assertSame(403, $withValue->getStatusCode());
+        self::assertSame('field_not_delegable', $this->json($withValue)['error']['code'] ?? null);
+    }
+
+    /**
      * Uložené SMTP heslo API nevrací — a nesmí ho jít ani „vytáhnout" tím, že si
      * klient přepíše host na vlastní server a pole hesla nechá prázdné.
      */
@@ -269,6 +400,38 @@ final class RbacHttpRoleMatrixTest extends TestCase
         self::assertSame('smtp-legit.example.test', $row['smtp_host'] ?? null);
         self::assertArrayNotHasKey('smtp_password', $row);
         self::assertTrue($row['has_smtp_password'] ?? false);
+    }
+
+    /**
+     * Výchozí profil, který klient spravovat nesmí. Přednost má vazba na
+     * S/MIME; bez podpisového profilu v instalaci zastoupí systémový sendmail,
+     * který spadá pod stejnou pojistku ({@see EmailProfilesAction}).
+     */
+    private function createStaffOnlyDefaultProfile(): int
+    {
+        $pdo = $this->db->pdo();
+        $signing = $pdo->prepare('SELECT id FROM signing_profiles WHERE supplier_id = ? LIMIT 1');
+        $signing->execute([$this->supplierId]);
+        $signingId = $signing->fetchColumn();
+
+        $pdo->prepare('UPDATE email_profiles SET is_default = 0 WHERE supplier_id = ?')->execute([$this->supplierId]);
+        $insert = $pdo->prepare(
+            'INSERT INTO email_profiles
+                (supplier_id, name, code, from_email, signing_profile_id, transport_type, sendmail_command, is_default, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1)'
+        );
+        $insert->execute([
+            $this->supplierId,
+            '__TEST staff only default',
+            'staff-only-' . bin2hex(random_bytes(5)),
+            'staff-only@example.test',
+            $signingId === false ? null : (int) $signingId,
+            $signingId === false ? 'sendmail' : 'global',
+            $signingId === false ? '/usr/sbin/sendmail -bs' : null,
+        ]);
+        $id = (int) $pdo->lastInsertId();
+        $this->emailProfileIds[] = $id;
+        return $id;
     }
 
     private function createUser(string $variant, string $roleType, int $level, bool $hasSupplier): int

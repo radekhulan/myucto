@@ -112,7 +112,9 @@ const GROUPS: Group[] = [
       { id: 'series',    to: '/utilities?section=document-series', visible: () => isDoubleEntry.value && auth.canRead('utilities') },
       { id: 'bank_email', to: '/bank?tab=email',               visible: () => auth.canRead('bank') },
       { id: 'databox',   to: '/admin/databox',                 visible: () => isSuperadmin.value && payrollEnabled.value },
-      { id: 'ai_extraction', to: '/admin/integrations?tab=ai', visible: () => auth.canWrite('settings.company') },
+      // Právo zrcadlí skutečnou bránu `/admin/integrations` (viz AppLayout).
+      // `settings.company = WRITE` má nově i klientská role a na integrace nesmí.
+      { id: 'ai_extraction', to: '/admin/integrations?tab=ai', visible: () => auth.canWrite('settings.company.write') },
       { id: 'users',     to: '/admin/users',                   visible: () => isSuperadmin.value },
     ],
   },
