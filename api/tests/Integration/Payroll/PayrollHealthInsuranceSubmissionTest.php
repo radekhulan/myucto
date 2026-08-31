@@ -22,6 +22,7 @@ use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Smalot\PdfParser\Parser;
 
 /**
  * Životní cyklus podání přehledu o platbě zdravotní pojišťovně: povinnost →
@@ -612,25 +613,26 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             $result['pdf_artifact_sha256'],
             hash('sha256', $pdf),
         );
-        self::assertSame([
-            false,
-            'Praha 1',
-            '420111222333',
+        // Hotový tiskopis je PLOCHÝ dokument: hodnoty se kreslí, nezapisují se
+        // do formulářových polí. Vložené písmo tiskopisu je WinAnsi a neumí
+        // č ď ě ň ř ť ů, takže zápis do pole by diakritiku tiše nahradil
+        // otazníky a kontrola přes uloženou hodnotu by to nepoznala. Ověřuje se
+        // proto text VYTĚŽENÝ z výsledku, ne obsah polí.
+        self::assertSame([], PdfEditor::fromBytes($pdf)->formFields());
+
+        $printed = (new Parser())->parseContent($pdf)->getText();
+        foreach ([
             'Syntetický plátce s.r.o.',
-            'Zkušební',
-            '12',
+            'Praha 1',
             '1234567800',
             '11000',
-            date('j.n.Y'),
-            '1',
             '10000',
             '1350',
             '06/2026',
-            true,
-        ], array_map(
-            static fn ($field): string|bool|array|null => $field->value,
-            PdfEditor::fromBytes($pdf)->formFields(),
-        ));
+        ] as $expected) {
+            self::assertStringContainsString($expected, $printed);
+        }
+        self::assertStringNotContainsString('?', $printed);
 
         if (!$bundleAvailable) {
             $issues = $this->db->pdo()->prepare(
