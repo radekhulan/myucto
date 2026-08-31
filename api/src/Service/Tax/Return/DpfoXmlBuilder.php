@@ -13,17 +13,21 @@ use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
  *
  * Struktura dle `api/xsd/dpfdp7_epo2.xsd` (bez namespace, xs:sequence — pořadí vět!):
  *   Pisemnost(nazevSW,verzeSW) > DPFDP7(verzePis) > VetaD, VetaP, VetaO, VetaS, VetaA,
- *   VetaB, VetaT, Vetac, VetaU, VetaV, VetaJ, VetaN
+ *   VetaB, VetaT, Vetac, VetaU, VetaC, VetaE, VetaV, VetaJ, VetaN
  *
  * - VetaD: povinné (fixní k_uladis="DPF", dokument="DP7", rok, dap_typ, c_ufo_cil,
  *   pln_moc, audit) + slevy/zvýhodnění/zálohy/doplatek (kc_op15_1a, da_slevy35ba, kc_danbonus,
- *   kc_zbyvpred…).
+ *   kc_zbyvpred…) + m_deti/m_detiztpp/m_deti2/…/m_deti3/m_detiztpp3 — součet měsíců napříč
+ *   VŠEMI dětmi (Tab. č. 2), musí sedět na to, co se sečte z jednotlivých VetaA níže.
  * - VetaP: identifikace FO (jmeno/prijmeni, rod_c, dic, adresa).
  * - VetaO: dílčí základy §6–§10 + úhrn + základ daně.
  * - VetaS: §15 nezdanitelné části + daň (da_dan16 se 2 desetinnými místy).
  * - VetaB: příznaky vložených příloh (priloha1 — Příloha 1 §7, staví se vždy s VetaT;
  *   priloha2 — Příloha 2 §9/§10, staví se jen s VetaV, {@see buildAppendix2}).
  * - VetaT: Příloha 1 §7 (kc_prij7, kc_vyd7, kc_zd7p, vyd7proc, pr_sazba).
+ * - VetaC/VetaE: Přílohy 1 oddíl E — položkový rozpis částek zvyšujících (VetaC, ř.105)
+ *   a snižujících (VetaE, ř.106) dílčí základ §7 podle § 23 ZDP, {@see appendAdjustmentRows}.
+ *   Staví se JEN když je odpovídající VetaT.kc_uhzvys/kc_uhsniz nenulové.
  * - VetaV/VetaJ: Příloha 2 — §9 nájem (souhrn) a §10 ostatní příjmy (souhrn + položky
  *   podle druhu), {@see buildAppendix2}. Staví se JEN když poplatník má skutečnou
  *   aktivitu §9/§10 (hrubé příjmy nebo výdaje > 0) — prázdná příloha nevzniká.
@@ -41,7 +45,15 @@ final class DpfoXmlBuilder
     // POZOR: `da_slevy` se sem záměrně NEdává (viz DpfoReturnCalculator komentář u
     // klíče `da_slevy35ba` — zkušební EPO 31. 8. 2026 potvrdilo, že jeho přítomnost
     // kazí kontrolu ř.70). `kc_db_po_odpd` (ř.77a) je naopak nutné vždy poslat, i jako
-    // 0 — stejný důvod jako u kc_dan_po_db/kc_dan_celk níže.
+    // 0 — stejný důvod jako u kc_dan_po_db/kc_dan_celk níže. `kc_slevy35c` (ř.73) je v
+    // tomhle rozporný podle KONTEXTU (viz zvláštní ošetření za hlavní smyčkou níže):
+    // BEZE VŠECH dětí musí zůstat vynechané jako ostatní páry „počet měsíců × sazba"
+    // (jinak zkušební EPO hlásí ř.73 stejně jako dřív u nulového ř.65a), ale MÁ-LI
+    // poplatník skutečný nárok na zvýhodnění (kc_dazvyhod > 0, VetaA vyplněné), EPO
+    // naopak explicitní nulu VYŽADUJE — se skutečným dětským bonusem (kdy celou daň
+    // pohltí sleva na poplatníka a na ř.73 nezbyde nic) zkušební EPO 31. 8. 2026
+    // hlásilo „Oddíl 5/ř.73 - hodnota položky neodpovídá výpočtu (0)", dokud se
+    // kc_slevy35c=0 posílalo jako chybějící atribut místo výslovné nuly.
     private const VETA_D_FIELDS = ['kc_op15_1a', 'kc_op15_1c', 'kc_op15_1d', 'kc_op15_1e1', 'kc_op15_1e2', 'uhrn_slevy35ba', 'da_slevy35ba', 'da_slevy35c', 'kc_dazvyhod', 'kc_slevy35c', 'kc_danbonus', 'kc_dan_po_db', 'kc_dan_celk', 'kc_db_po_odpd', 'da_slezap', 'da_celod13', 'kc_zalzavc', 'kc_zalpred', 'kc_zbyvpred', 'm_invduch', 'm_cinvduch', 'm_ztpp', 'm_manz', 'kc_dztrata', 'kc_manztpp'];
 
     /**
@@ -120,6 +132,16 @@ final class DpfoXmlBuilder
             }
             $vetaD->setAttribute($f, $this->int($fields[$f]));
         }
+        // kc_slevy35c (ř.73) — výjimka z pravidla „nulu při chybějícím kontextu vynech"
+        // těsně nad: je-li kc_dazvyhod > 0 (skutečný nárok na zvýhodnění, tedy i výše
+        // opravdu vzniklo VetaD.kc_dazvyhod), EPO na ř.73 = min(ř.71, ř.72) provádí
+        // cross-check a vyžaduje výslovnou nulu, i když ji vlastní hodnota zrovna vyjde
+        // (typicky u skutečného dětského bonusu, kdy celou daň pohltí sleva na
+        // poplatníka a na ř.73 nezbyde nic) — viz komentář u VETA_D_OMIT_WHEN_ZERO výše.
+        // Beze VŠECH dětí (kc_dazvyhod=0) zůstává vynechané jako ostatní páry výše.
+        if (!$vetaD->hasAttribute('kc_slevy35c') && (float) ($fields['kc_dazvyhod'] ?? 0) > 0.0) {
+            $vetaD->setAttribute('kc_slevy35c', $this->int($fields['kc_slevy35c'] ?? 0));
+        }
         $family = (array) ($calc['family'] ?? []);
         $spouse = is_array($family['spouse'] ?? null) ? $family['spouse'] : null;
         if ($spouse !== null) {
@@ -194,6 +216,13 @@ final class DpfoXmlBuilder
         }
         $root->appendChild($vetaS);
 
+        // Souhrn napříč dětmi pro VetaD.m_deti/m_detiztpp/m_deti2/.../m_deti3/m_detiztpp3
+        // (§8 níže) — XSD u nich nemá xs:documentation, ale zkušební EPO 31. 8. 2026
+        // (viz private/DPFO-RADKY-MAPOVANI.md) potvrdilo pokusem, že jde o kritickou
+        // křížovou kontrolu: „Celkem počet měsíců N. dítě (bez/se ZTP/P) z Tab. č. 2 se
+        // nerovná součtu počtu měsíců jednotlivých řádků" — VetaD musí nést součet přesně
+        // toho, co se sečte z jednotlivých VetaA řádků níže, ne odvozenou/odhadnutou hodnotu.
+        $totalMonths = [1 => [0, 0], 2 => [0, 0], 3 => [0, 0]];
         foreach ((array) ($family['children'] ?? []) as $child) {
             if (!is_array($child)) {
                 continue;
@@ -221,6 +250,21 @@ final class DpfoXmlBuilder
             $vetaA->setAttribute('vyzdite_pocmes3', (string) $months[3][0]);
             $vetaA->setAttribute('vyzdite_ztpp3', (string) $months[3][1]);
             $root->appendChild($vetaA);
+            for ($order = 1; $order <= 3; $order++) {
+                $totalMonths[$order][0] += $months[$order][0];
+                $totalMonths[$order][1] += $months[$order][1];
+            }
+        }
+        if ((array) ($family['children'] ?? []) !== []) {
+            // $vetaD je pořád platná reference i po appendChild() výše (DOM uzly zůstávají
+            // upravitelné) — atributy se přidávají teprve teď, protože součet potřebuje
+            // projít celý seznam dětí.
+            $vetaD->setAttribute('m_deti', (string) $totalMonths[1][0]);
+            $vetaD->setAttribute('m_detiztpp', (string) $totalMonths[1][1]);
+            $vetaD->setAttribute('m_deti2', (string) $totalMonths[2][0]);
+            $vetaD->setAttribute('m_detiztpp2', (string) $totalMonths[2][1]);
+            $vetaD->setAttribute('m_deti3', (string) $totalMonths[3][0]);
+            $vetaD->setAttribute('m_detiztpp3', (string) $totalMonths[3][1]);
         }
 
         // ── VetaB — příznaky vložených příloh ────────────────────────────────
@@ -267,8 +311,10 @@ final class DpfoXmlBuilder
         // viz DpfoReturnCalculator::compute komentář u 's7'=>'before_adjustments').
         $vetaT->setAttribute('kc_hosp_rozd', $this->int((float) ($s7['before_adjustments'] ?? ($s7['base'] ?? 0))));
         $vetaT->setAttribute('kc_zd7p', $this->int((float) ($s7['base'] ?? 0)));
-        $vetaT->setAttribute('kc_uhzvys', $this->int((float) ($s7['increase'] ?? 0)));
-        $vetaT->setAttribute('kc_uhsniz', $this->int((float) ($s7['decrease'] ?? 0)));
+        $s7Increase = (float) ($s7['increase'] ?? 0);
+        $s7Decrease = (float) ($s7['decrease'] ?? 0);
+        $vetaT->setAttribute('kc_uhzvys', $this->int($s7Increase));
+        $vetaT->setAttribute('kc_uhsniz', $this->int($s7Decrease));
         if (($s7['expense_mode'] ?? '') === 'pausal') {
             $vetaT->setAttribute('vyd7proc', 'A');
             if ((int) ($s7['expense_rate'] ?? 0) > 0) {
@@ -346,6 +392,15 @@ final class DpfoXmlBuilder
             $root->appendChild($vetaU);
         }
 
+        // ── VetaC/VetaE — Přílohy 1 oddíl E (rozpis úprav ř.105/106 dle § 23) ────
+        // XSD text u VetaT.kc_uhzvys/kc_uhsniz: „Podkladem jsou částky uvedené v odd. E
+        // na str. (2)." Zkušební EPO 31. 8. 2026 potvrdilo pokusem, že jde o kritickou
+        // kontrolu, ne jen doporučení: „Příloha 1/ř.105 - je vyplněn ř.105 a není naplněna
+        // odpovídající část oddílu E. Přílohy č.1" (totéž pro ř.106) — viz
+        // private/DPFO-RADKY-MAPOVANI.md, nález mimo původní zadání, teď doplněno.
+        $this->appendAdjustmentRows($dom, $root, 'VetaC', 'kc_uprzvys_235', 'uprzvys_235', 'kc_uhzvys', '105', $s7Increase, (array) ($s7['increase_items'] ?? []), $warnings);
+        $this->appendAdjustmentRows($dom, $root, 'VetaE', 'kc_uprsniz_235', 'uprsniz_235', 'kc_uhsniz', '106', $s7Decrease, (array) ($s7['decrease_items'] ?? []), $warnings);
+
         // ── VetaV/VetaJ — Příloha 2 (§9 nájem, §10 ostatní příjmy) ──────────────
         if ($appendix2 !== null) {
             $root->appendChild($appendix2['veta_v']);
@@ -422,6 +477,84 @@ final class DpfoXmlBuilder
         $vetaN->setAttribute('kc_preplatek', (string) $overpayment);
 
         return $vetaN;
+    }
+
+    /**
+     * VetaC/VetaE — Přílohy 1 oddíl E: položkový rozpis částek, které tvoří ř.105
+     * (`kc_uhzvys`, zvyšující) nebo ř.106 (`kc_uhsniz`, snižující) dílčí základ §7 podle
+     * § 23 ZDP. XSD u obou atributů VetaT výslovně odkazuje na „odd. E na str. (2)" a
+     * zkušební EPO to vynucuje jako kritickou kontrolu — nenulový ř.105/106 bez aspoň
+     * jednoho odpovídajícího řádku VetaC/VetaE odmítne (viz komentář u volání výše).
+     *
+     * Appka DNES nemá jistý zdroj položkového rozpisu v rozsahu této opravy —
+     * DpfoReturnDataProvider (mimo povolený rozsah, viz private/AUDIT-DPFO-XML.md) čte
+     * z `tax_evidence_non_cash_adjustments`/ručních položek §23 jen SOUČET
+     * (`s7_increase`/`s7_decrease`), položky samotné zatím nepředává. Volající PROTO
+     * MŮŽE (ne musí) dodat `$s7['increase_items']`/`['decrease_items']` (tvar
+     * list<{amount, description|text}>, {@see DpfoReturnCalculator::compute}) — pak se
+     * postaví skutečný řádek na položku. Bez nich builder NEVYMÝŠLÍ rozpis: pošle jeden
+     * souhrnný řádek s celou částkou a obecným popisem a VAROVÁNÍM, že jde o zástupnou
+     * agregaci, ne o doložený rozpis — účetní má před podáním ověřit/rozepsat v EPO.
+     *
+     * @param list<array<string,mixed>> $items
+     * @param list<string>              $warnings
+     */
+    private function appendAdjustmentRows(
+        \DOMDocument $dom,
+        \DOMElement $root,
+        string $element,
+        string $amountAttr,
+        string $textAttr,
+        string $sourceField,
+        string $line,
+        float $total,
+        array $items,
+        array &$warnings,
+    ): void {
+        $total = round($total, 2);
+        if ($total <= 0.0) {
+            return;
+        }
+
+        $rows = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $amount = round((float) ($item['amount'] ?? 0), 2);
+            if ($amount <= 0.0) {
+                continue;
+            }
+            $label = trim((string) ($item['description'] ?? $item['text'] ?? $item['label'] ?? ''));
+            $rows[] = ['amount' => $amount, 'label' => $label];
+        }
+
+        if ($rows === []) {
+            // Bez itemizovaného podkladu — jeden souhrnný řádek s celou částkou, ať se
+            // kritická kontrola oddílu E aspoň formálně naplní; nevymýšlíme rozpad na
+            // víc řádků, který by byl čirá fabulace.
+            $rows[] = ['amount' => $total, 'label' => 'Úprava dílčího základu §7 podle § 23 zákona (souhrn)'];
+            $warnings[] = 'Úprava dílčího základu §7 (ř. ' . $line . ', ' . $sourceField . ' '
+                . number_format($total, 0, ',', ' ') . ' Kč) se do oddílu E Přílohy č. 1 (' . $element
+                . ') promítá jako JEDEN souhrnný řádek — appka nemá k dispozici položkový rozpis '
+                . '(jednotlivé důvody úpravy podle § 23 zákona). Před podáním ověřte v portálu EPO, '
+                . 'zda finanční úřad nevyžaduje rozepsání na víc řádků.';
+        } else {
+            $sum = round(array_sum(array_column($rows, 'amount')), 2);
+            if (abs($sum - $total) > 1.0) {
+                $warnings[] = 'Součet položek oddílu E (' . $element . ', ' . number_format($sum, 0, ',', ' ')
+                    . ' Kč) neodpovídá částce na ř. ' . $line . ' (' . number_format($total, 0, ',', ' ')
+                    . ' Kč) — ověřte podklady před podáním.';
+            }
+        }
+
+        foreach ($rows as $row) {
+            $el = $dom->createElement($element);
+            $el->setAttribute($amountAttr, $this->int($row['amount']));
+            $label = $row['label'] !== '' ? $row['label'] : 'Úprava dílčího základu §7 podle § 23 zákona';
+            $el->setAttribute($textAttr, mb_substr($label, 0, 50)); // XSD maxLength 50
+            $root->appendChild($el);
+        }
     }
 
     /**

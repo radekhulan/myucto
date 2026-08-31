@@ -19,7 +19,13 @@ use MyInvoice\Service\Tax\DpfoCalculator;
  *
  * Vstup:
  *   $data    = podklady §7 (DpfoReturnDataProvider): s7_income, s7_expenses, s7_base,
- *              expense_mode ('actual'|'pausal'), expense_rate
+ *              expense_mode ('actual'|'pausal'), expense_rate, s7_increase, s7_decrease
+ *              (úhrn úprav §23 — ř.105/106 Přílohy 1) a volitelně s7_increase_items/
+ *              s7_decrease_items — položkový rozpis pro oddíl E Přílohy 1 (VetaC/VetaE,
+ *              {@see DpfoXmlBuilder}), tvar list<{amount:float, description?:string,
+ *              text?:string}>. DpfoReturnDataProvider dnes položky nepředává (jen souhrn
+ *              increase/decrease) — bez nich builder sestaví jeden souhrnný řádek a
+ *              upozorní, viz DpfoXmlBuilder::buildAdjustmentRows.
  *   $inputs  = ruční vstupy (income_tax_returns.inputs): s6_employment{income,withholding},
  *              s8_capital{base}, s9_rental{income,expenses}, s10_other{income,expenses},
  *              tax_paid_advances
@@ -58,6 +64,11 @@ final class DpfoReturnCalculator
         $s7Expenses = round((float) ($activityCalc['expenses'] ?? $data['s7_expenses'] ?? 0), 2);
         $s7Increase = round((float) ($data['s7_increase'] ?? 0), 2);
         $s7Decrease = round((float) ($data['s7_decrease'] ?? 0), 2);
+        // Položkový rozpis pro oddíl E Přílohy 1 (VetaC/VetaE) — jen prošedě, ČISTÁ třída
+        // nesumarizuje ani nevaliduje popisy, to dělá DpfoXmlBuilder (má i fallback bez
+        // položek). Sem se dostane jen to, co volající v $data skutečně předal.
+        $s7IncreaseItems = is_array($data['s7_increase_items'] ?? null) ? array_values($data['s7_increase_items']) : [];
+        $s7DecreaseItems = is_array($data['s7_decrease_items'] ?? null) ? array_values($data['s7_decrease_items']) : [];
         $s7BeforeAdjustments = $activityCalc !== null
             ? $s7Income - $s7Expenses
             : (array_key_exists('s7_base', $data)
@@ -414,6 +425,10 @@ final class DpfoReturnCalculator
                 'activities' => $activityCalc['items'] ?? [],
                 'increase' => $s7Increase,
                 'decrease' => $s7Decrease,
+                // Oddíl E Přílohy 1 (VetaC/VetaE) — položkový rozpis, viz komentář u
+                // $s7IncreaseItems výše a DpfoXmlBuilder::buildAdjustmentRows.
+                'increase_items' => $s7IncreaseItems,
+                'decrease_items' => $s7DecreaseItems,
                 'closing' => $data['closing'] ?? null,
             ],
             // Hrubé §9/§10 podklady pro Přílohu č. 2 (VetaV/VetaJ, {@see DpfoXmlBuilder}) —

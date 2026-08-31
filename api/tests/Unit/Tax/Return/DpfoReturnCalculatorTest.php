@@ -613,4 +613,33 @@ final class DpfoReturnCalculatorTest extends TestCase
         self::assertSame(75000.0, (float) $r['s7']['base']);
         self::assertSame($r['s7']['before_adjustments'] + 20000.0 - 5000.0, $r['s7']['base']);
     }
+
+    /**
+     * Příloha 1 oddíl E (VetaC/VetaE) — {@see DpfoXmlBuilder::appendAdjustmentRows}
+     * potřebuje volitelný položkový rozpis vedle souhrnu increase/decrease. Kalkulátor
+     * je ČISTÁ třída bez DB — jen předá, co dostal v $data, nic nesčítá ani nevaliduje
+     * (to dělá až builder). Chybí-li klíč úplně, musí dojít prázdný list, ne null/chyba.
+     */
+    public function testS7AdjustmentItemsPassThroughUnchanged(): void
+    {
+        $withItems = $this->calcRun([
+            's7_base' => 75000,
+            's7_increase' => 20000.0,
+            's7_decrease' => 5000.0,
+            's7_increase_items' => [['amount' => 20000.0, 'description' => 'Neuhrazené pojistné zaměstnavatele']],
+            's7_decrease_items' => [['amount' => 5000.0, 'text' => 'Rozdíl účetních a daňových odpisů']],
+        ]);
+        self::assertSame(
+            [['amount' => 20000.0, 'description' => 'Neuhrazené pojistné zaměstnavatele']],
+            $withItems['s7']['increase_items'],
+        );
+        self::assertSame(
+            [['amount' => 5000.0, 'text' => 'Rozdíl účetních a daňových odpisů']],
+            $withItems['s7']['decrease_items'],
+        );
+
+        $withoutItems = $this->calcRun(['s7_base' => 75000, 's7_increase' => 20000.0, 's7_decrease' => 5000.0]);
+        self::assertSame([], $withoutItems['s7']['increase_items']);
+        self::assertSame([], $withoutItems['s7']['decrease_items']);
+    }
 }

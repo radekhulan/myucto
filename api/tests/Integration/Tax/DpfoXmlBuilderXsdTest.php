@@ -395,5 +395,157 @@ final class DpfoXmlBuilderXsdTest extends TestCase
         $xml = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc)['xml'];
         self::assertStringContainsString('kc_hosp_rozd="60000"', $xml);
         self::assertStringContainsString('kc_zd7p="75000"', $xml);
+        // Nenulové increase/decrease bez itemizovaného rozpisu → jeden souhrnný řádek
+        // VetaC/VetaE (viz níže, testAdjustmentSectionEFallback...), otestováno tady jen
+        // že vůbec vzniknou, ať tahle regrese hlídá i oddíl E.
+        self::assertStringContainsString('<VetaC kc_uprzvys_235="20000"', $xml);
+        self::assertStringContainsString('<VetaE kc_uprsniz_235="5000"', $xml);
+    }
+
+    // ── Příloha 1 oddíl E (VetaC/VetaE) — private/AUDIT-DPFO-XML.md nález č. 2 ──────
+
+    public function testAdjustmentSectionEAbsentWhenIncreaseAndDecreaseAreZero(): void
+    {
+        $calc = [
+            'fields' => [],
+            's7' => ['income' => 100000, 'expenses' => 60000, 'base' => 40000, 'increase' => 0, 'decrease' => 0],
+            'family' => [],
+        ];
+        $xml = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc)['xml'];
+        self::assertStringNotContainsString('<VetaC', $xml);
+        self::assertStringNotContainsString('<VetaE', $xml);
+    }
+
+    /**
+     * Bez itemizovaného rozpisu (`s7.increase_items`/`decrease_items` prázdné nebo
+     * chybí) builder NEVYMÝŠLÍ položky — pošle jeden souhrnný řádek s celou částkou
+     * a musí zároveň varovat, že jde o zástupnou agregaci, ne doložený rozpis.
+     */
+    public function testAdjustmentSectionEFallbackSingleRowWithWarning(): void
+    {
+        $calc = [
+            'fields' => [],
+            's7' => ['income' => 150000, 'expenses' => 90000, 'base' => 75000, 'increase' => 20000, 'decrease' => 5000],
+            'family' => [],
+        ];
+        $result = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc);
+        $xml = $result['xml'];
+
+        self::assertSame(1, substr_count($xml, '<VetaC'));
+        self::assertStringContainsString('<VetaC kc_uprzvys_235="20000" uprzvys_235=', $xml);
+        self::assertSame(1, substr_count($xml, '<VetaE'));
+        self::assertStringContainsString('<VetaE kc_uprsniz_235="5000" uprsniz_235=', $xml);
+
+        $vetaCWarning = array_filter($result['warnings'], static fn (string $w): bool => str_contains($w, 'VetaC') && str_contains($w, 'souhrnný řádek'));
+        self::assertNotEmpty($vetaCWarning, 'chybí varování o zástupném souhrnném řádku VetaC');
+        $vetaEWarning = array_filter($result['warnings'], static fn (string $w): bool => str_contains($w, 'VetaE') && str_contains($w, 'souhrnný řádek'));
+        self::assertNotEmpty($vetaEWarning, 'chybí varování o zástupném souhrnném řádku VetaE');
+    }
+
+    /**
+     * S itemizovaným rozpisem (jak by ho jednou mohl předat DpfoReturnDataProvider,
+     * nebo účetnictví FO s ručními položkami §23) builder postaví JEDEN řádek na
+     * položku — žádný „souhrnný" fallback warning.
+     */
+    public function testAdjustmentSectionEItemizedRowsSkipFallbackWarning(): void
+    {
+        $calc = [
+            'fields' => [],
+            's7' => [
+                'income' => 150000, 'expenses' => 90000, 'base' => 75000,
+                'increase' => 20000, 'decrease' => 5000,
+                'increase_items' => [['amount' => 20000, 'description' => 'Neuhrazené pojistné zaměstnavatele']],
+                'decrease_items' => [['amount' => 5000, 'text' => 'Rozdíl účetních a daňových odpisů']],
+            ],
+            'family' => [],
+        ];
+        $result = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc);
+        $xml = $result['xml'];
+
+        self::assertStringContainsString('<VetaC kc_uprzvys_235="20000" uprzvys_235="Neuhrazené pojistné zaměstnavatele"/>', $xml);
+        self::assertStringContainsString('<VetaE kc_uprsniz_235="5000" uprsniz_235="Rozdíl účetních a daňových odpisů"/>', $xml);
+        self::assertSame([], array_values(array_filter(
+            $result['warnings'],
+            static fn (string $w): bool => str_contains($w, 'souhrnný řádek'),
+        )));
+    }
+
+    public function testAdjustmentSectionEFollowsVetaTAndPrecedesVetaV(): void
+    {
+        $calc = [
+            'fields' => [],
+            's7' => ['income' => 150000, 'expenses' => 90000, 'base' => 75000, 'increase' => 20000, 'decrease' => 5000],
+            's9' => ['income' => 180000, 'expenses' => 60000, 'base' => 120000],
+            'family' => [],
+        ];
+        $xml = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc)['xml'];
+
+        $vetaTPos = strpos($xml, '<VetaT ');
+        $vetaCPos = strpos($xml, '<VetaC ');
+        $vetaEPos = strpos($xml, '<VetaE ');
+        $vetaVPos = strpos($xml, '<VetaV ');
+        self::assertNotFalse($vetaTPos);
+        self::assertNotFalse($vetaCPos);
+        self::assertNotFalse($vetaEPos);
+        self::assertNotFalse($vetaVPos);
+        self::assertLessThan($vetaCPos, $vetaTPos, 'VetaC musí následovat za VetaT v XSD sekvenci.');
+        self::assertLessThan($vetaEPos, $vetaCPos, 'VetaE musí následovat za VetaC v XSD sekvenci.');
+        self::assertLessThan($vetaVPos, $vetaEPos, 'VetaE musí předcházet VetaV v XSD sekvenci.');
+    }
+
+    // ── VetaD.m_deti*/m_detiztpp* — private/AUDIT-DPFO-XML.md nález č. 1 ────────────
+
+    /** @return array<string,mixed> */
+    private function childrenCalc(): array
+    {
+        return [
+            'fields' => [],
+            's7' => ['income' => 0, 'expenses' => 0],
+            'family' => ['children' => [
+                [
+                    'first_name' => 'Jan', 'last_name' => 'Novák', 'birth_date' => '2015-01-01',
+                    'months' => array_map(static fn (int $m): array => ['month' => $m, 'claimed' => true, 'order' => 1, 'ztpp' => false], range(1, 12)),
+                ],
+                [
+                    'first_name' => 'Eva', 'last_name' => 'Nováková', 'birth_date' => '2018-01-01',
+                    // jen 6 měsíců (narození/nástup v půlce roku) — cross-check musí sečíst přesně tohle.
+                    'months' => array_map(static fn (int $m): array => ['month' => $m, 'claimed' => true, 'order' => 2, 'ztpp' => false], range(1, 6)),
+                ],
+                [
+                    'first_name' => 'Petr', 'last_name' => 'Novák', 'birth_date' => '2020-01-01',
+                    'months' => array_map(static fn (int $m): array => ['month' => $m, 'claimed' => true, 'order' => 3, 'ztpp' => true], range(1, 12)),
+                ],
+            ]],
+        ];
+    }
+
+    public function testChildMonthTotalsMatchSumOfIndividualVetaARows(): void
+    {
+        $xml = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $this->childrenCalc())['xml'];
+
+        self::assertSame(3, substr_count($xml, '<VetaA '));
+        self::assertStringContainsString('m_deti="12"', $xml);   // 1. dítě, bez ZTP/P (Jan)
+        self::assertStringContainsString('m_detiztpp="0"', $xml);
+        self::assertStringContainsString('m_deti2="6"', $xml);   // 2. dítě, bez ZTP/P (Eva, 6 měsíců)
+        self::assertStringContainsString('m_detiztpp2="0"', $xml);
+        self::assertStringContainsString('m_deti3="0"', $xml);   // 3.+ dítě bez ZTP/P — Petr má ZTP/P
+        self::assertStringContainsString('m_detiztpp3="12"', $xml);
+
+        $validator = new XmlSchemaValidator();
+        if (!$validator->hasSchema('dpfdp7')) {
+            self::markTestSkipped('XSD dpfdp7_epo2.xsd není k dispozici.');
+        }
+        $validation = $validator->validate($xml, 'dpfdp7');
+        self::assertSame('passed', $validation['status'], 'XSD chyby: ' . implode(' | ', $validation['errors']));
+    }
+
+    public function testChildMonthTotalsAbsentWithoutChildren(): void
+    {
+        $calc = ['fields' => [], 's7' => ['income' => 0, 'expenses' => 0], 'family' => ['children' => []]];
+        $xml = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc)['xml'];
+        self::assertStringNotContainsString('m_deti=', $xml);
+        self::assertStringNotContainsString('m_detiztpp', $xml);
+        self::assertStringNotContainsString('m_deti2', $xml);
+        self::assertStringNotContainsString('m_deti3', $xml);
     }
 }
