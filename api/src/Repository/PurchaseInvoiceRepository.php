@@ -35,6 +35,7 @@ final class PurchaseInvoiceRepository
     public function __construct(
         private readonly Connection $db,
         private readonly TaxConstantsRepository $taxConstants,
+        private readonly AccountingModeRepository $accountingModes,
     ) {}
 
     /** @var array<int,bool> currency_id → je to CZK; viz isCzkCurrency() */
@@ -245,11 +246,33 @@ final class PurchaseInvoiceRepository
         // Transparence ruční/legacy úhrady: status='paid', ale NEEXISTUJE žádná zaúčtovaná
         // úhrada (banka, pokladna ani zápočet) → závazek 321 zůstává v deníku otevřený
         // (viz doklad 163). FE ukáže výrazné upozornění; proklik není kam vést.
+        //
+        // Jen pro rok vedený v podvojném účetnictví. V daňové evidenci / paušálu žádný deník
+        // ani účet 321 neexistuje, ruční „Uhrazeno" je tam jediný způsob, jak úhradu
+        // zaznamenat — varování by hlásilo závadu, která nemůže nastat. Režim bereme k roku
+        // dokladu (ne k dnešku): po přechodu na podvojné účetnictví musí starší doklady
+        // zůstat tiše v evidenci a novější dál hlásit.
         $row['mark_paid_unposted'] = ($row['status'] === 'paid')
             && $row['bank_payments'] === []
             && $row['cash_payments'] === []
-            && $row['settlement_payments'] === [];
+            && $row['settlement_payments'] === []
+            && $this->accountingModes->forYear($supplierId, $this->documentYear($row)) === 'double_entry';
         return $row;
+    }
+
+    /**
+     * Rok, do kterého doklad účetně patří — pod ním se hledá platný režim účetnictví.
+     * Primárně DUZP (podle něj se účtuje), fallback datum vystavení a až nakonec dnešek.
+     */
+    private function documentYear(array $row): int
+    {
+        foreach (['tax_date', 'issue_date'] as $field) {
+            $date = $row[$field] ?? null;
+            if (is_string($date) && preg_match('/^(\d{4})-/', $date, $m) === 1) {
+                return (int) $m[1];
+            }
+        }
+        return (int) date('Y');
     }
 
     /**
