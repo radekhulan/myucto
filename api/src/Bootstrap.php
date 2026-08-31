@@ -776,6 +776,18 @@ final class Bootstrap
                     new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsMessageBuilder(),
                     $c->get(\MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver::class),
                 ),
+            // Produkční brána mezd čte odemčení z cfg.php (`payroll.production_released`).
+            // Parametr `?Config $config = null` je volitelný, aby si ji testy postavily
+            // bez konfigurace — a padá tím do téže pasti jako zápisy níže: PHP-DI parametr
+            // s výchozí hodnotou nikdy nedosadí, takže brána v produkci konfiguraci vůbec
+            // nepřečetla a držela `PRODUCT_RELEASED = false`. Instalace, která si mzdy
+            // odemkla v cfg.php, tedy dál viděla hlášku o testovacím provozu.
+            \MyInvoice\Service\Payroll\PayrollProductionGate::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Payroll\PayrollProductionGate(
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollModuleStateRepository::class),
+                    null,
+                    $c->get(Config::class),
+                ),
             \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService(
                     $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionRepository::class),
