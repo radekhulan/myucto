@@ -54,10 +54,18 @@ final class TaxReturnService
         private readonly EntityCategoryService $categories,
         private readonly AccountingSupplierSettingsRepository $supplierSettings,
         // Příloha v účetní závěrce (§39 vyhl. 500/2002) jako SKUTEČNĚ připojený soubor
-        // (Prilohy/ObecnaPriloha), ne jen strukturovaná data VetaUA/UB/UD/UZ — viz
-        // buildStatementNotesAttachment(). NEŘEŠÍ sama o sobě EPO chybu 2602, viz tam.
+        // (Prilohy/PredepsanaPriloha kod=PP_OPISPUV), ne jen strukturovaná data VetaUA/UB/UD/UZ
+        // — viz buildStatementNotesAttachment(). NEŘEŠÍ sama o sobě EPO chybu 2602, viz tam.
         private readonly \MyInvoice\Service\Accounting\Reports\StatementNotesService $statementNotes,
         private readonly \MyInvoice\Service\Pdf\StatementNotesPdfRenderer $statementNotesPdf,
+        // Přehledy podle § 18 odst. 2 ZoÚ (peněžní toky / změny vlastního kapitálu) do
+        // přílohy DPPO (PredepsanaPriloha kod=PP_PTOK/PP_ZVKAP) — STEJNÉ služby jako
+        // uzávěrkový balíček ({@see \MyInvoice\Service\Export\ClosingPackageService}),
+        // žádný druhý zdroj dat. Viz buildCashFlowAttachment()/buildEquityChangesAttachment().
+        private readonly \MyInvoice\Service\Accounting\Reports\CashFlowStatementService $cashFlowStatement,
+        private readonly \MyInvoice\Service\Pdf\CashFlowPdfRenderer $cashFlowPdf,
+        private readonly \MyInvoice\Service\Accounting\Reports\EquityChangesStatementService $equityChangesStatement,
+        private readonly \MyInvoice\Service\Pdf\EquityChangesPdfRenderer $equityChangesPdf,
         // Zastoupení daňovým poradcem (§29/2 DŘ) do dan_por/pln_moc — viz representationMeta().
         private readonly TaxRepresentationService $representation,
     ) {}
@@ -829,7 +837,7 @@ final class TaxReturnService
                 + $this->periodMeta($computation['podklady']['period'] ?? null, $year)
                 + $amendMeta
                 + $this->representationMeta($supplierId, $finalizedAt);
-            $appendix = $this->buildDppoAppendix($supplierId, (array) ($computation['podklady']['period'] ?? []));
+            $appendix = $this->buildDppoAppendix($supplierId, (array) ($computation['podklady']['period'] ?? []), $year);
             $appendixWarnings = (array) ($appendix['warnings'] ?? []);
             unset($appendix['warnings']);
             $built = $this->dppoXml->build($supplier, $year, $computation['result'], $meta, $appendix);
@@ -997,20 +1005,32 @@ final class TaxReturnService
      * Přílohu v účetní závěrce (§ 39 vyhlášky — souvislý text: účetní metody, události po
      * rozvahovém dni…, kterou účetní vyplňuje v Účetnictví → Uzávěrka → Příloha v účetní
      * závěrce, {@see \MyInvoice\Service\Accounting\Reports\StatementNotesService}) proto
-     * podání nese i jako SKUTEČNĚ PŘILOŽENÝ SOUBOR (`Prilohy/ObecnaPriloha`, dppdp9.xsd:6180)
-     * — jiný obsah než rozpad rozvahy/VZZ po řádcích výše. Samostatný krok, viz
-     * {@see buildStatementNotesAttachment()}.
+     * podání nese i jako SKUTEČNĚ PŘILOŽENÝ SOUBOR (`Prilohy/PredepsanaPriloha` kod=`PP_OPISPUV`,
+     * dppdp9.xsd:6180/6234) — jiný obsah než rozpad rozvahy/VZZ po řádcích výše. Samostatný
+     * krok, viz {@see buildStatementNotesAttachment()}.
+     *
+     * Ručně vyplněný vzor v EPO (ověřený fakt — zadavatel doložil snímkem, viz
+     * AUDIT-DPPO-XML.md) ukázal, že tahle příloha patří do PŘEDEPSANÉ přílohy s kódem
+     * `PP_OPISPUV` (jeden řádek v tabulce příloh EPO), NE do obecné přílohy bez kódu —
+     * dřív se stavěla jako `ObecnaPriloha`, což je špatná přihrádka.
+     *
+     * Stejnou cestou (`Prilohy/PredepsanaPriloha`) nese podání i další dvě přílohy, KDYŽ
+     * je pro danou ÚJ § 18 odst. 2 ZoÚ vyžaduje (viz needsSection18Statements()):
+     * přehled o peněžních tocích (`PP_PTOK`, {@see buildCashFlowAttachment()}) a přehled
+     * o změnách vlastního kapitálu (`PP_ZVKAP`, {@see buildEquityChangesAttachment()}).
+     * `PP_UZMUS` (IFRS závěrka) se NESTAVÍ — aplikace IFRS nepodporuje.
      *
      * POZOR — tohle NEODSTRAŇUJE chybu 2602: ověřeno proti zkušebnímu EPO 31. 8. 2026,
      * výtka „Není vložena příloha účetní závěrky" se s přiloženým souborem i bez něj
      * chová IDENTICKY (AUDIT-DPPO-XML.md dodatek 13, §13.3) — příčinu se nepodařilo zjistit
      * (viz tam), přiložení souboru zůstává správné samo o sobě (§39 vyhláška), jen to není
-     * lék na 2602.
+     * lék na 2602. Přesun z ObecnaPriloha na PredepsanaPriloha/PP_OPISPUV na tohle nemá vliv
+     * — je to strukturální oprava (správná přihrádka v EPO), ne pokus o odstranění 2602.
      *
      * @param array{id?:int,starts_on?:string,ends_on?:string} $period
-     * @return array{balance_sheet?:array<string,mixed>,income_statement?:array<string,mixed>,category?:array<string,mixed>,settings?:array<string,mixed>,statement_notes_attachment?:array{content:string,filename:string,label:string},warnings:list<string>}
+     * @return array{balance_sheet?:array<string,mixed>,income_statement?:array<string,mixed>,category?:array<string,mixed>,settings?:array<string,mixed>,statement_notes_attachment?:array{content:string,filename:string,label:string},cash_flow_attachment?:array{content:string,filename:string,label:string},equity_changes_attachment?:array{content:string,filename:string,label:string},warnings:list<string>}
      */
-    private function buildDppoAppendix(int $supplierId, array $period): array
+    private function buildDppoAppendix(int $supplierId, array $period, int $fiscalYear = 0): array
     {
         $periodId = (int) ($period['id'] ?? 0);
         if ($periodId <= 0) {
@@ -1039,43 +1059,134 @@ final class TaxReturnService
             ]];
         }
 
-        $attachment = $this->buildStatementNotesAttachment($supplierId, $periodId, $period);
-        if ($attachment['file'] !== null) {
-            $appendix['statement_notes_attachment'] = $attachment['file'];
-        }
-        if ($attachment['warning'] !== null) {
-            $appendix['warnings'][] = $attachment['warning'];
+        // Rok pro pojmenování/popis příloh — přednost má explicitně předaný rok podání
+        // (zdaňovací období DPPO nemusí být kalendářní), fallback na rok konce účetního
+        // období, když volající rok nepředal (zpětná kompatibilita se stávajícími testy
+        // přes reflexi, které tenhle parametr nezadávají).
+        $attachmentYear = $fiscalYear > 0 ? $fiscalYear : (int) substr((string) ($period['ends_on'] ?? ''), 0, 4);
+
+        // Součet velikosti e-příloh se hlídá napříč VŠEMI třemi (ne jen u jedné) — proto
+        // sdílený $usedBytes, viz attachIfWithinBudget().
+        $usedBytes = 0;
+        $this->attachIfWithinBudget(
+            $appendix,
+            'statement_notes_attachment',
+            'Příloha v účetní závěrce',
+            $this->buildStatementNotesAttachment($supplierId, $periodId, $period),
+            $usedBytes,
+        );
+
+        // § 18 odst. 2 ZoÚ — jen velká/střední ÚJ a každá s povinným auditem (stejné
+        // kritérium jako Section18StatementsAction/ClosingService, viz
+        // needsSection18Statements()). Mikro/malá ÚJ bez auditu povinnost nemá — tam se
+        // přehledy k DPPO NEPŘIKLÁDAJÍ, i kdyby šly sestavit (appendix by nesl přílohu,
+        // kterou zákon nevyžaduje).
+        if ($this->needsSection18Statements((array) $appendix['category'])) {
+            $this->attachIfWithinBudget(
+                $appendix,
+                'cash_flow_attachment',
+                'Přehled o peněžních tocích',
+                $this->buildCashFlowAttachment($supplierId, $periodId, $attachmentYear),
+                $usedBytes,
+            );
+            $this->attachIfWithinBudget(
+                $appendix,
+                'equity_changes_attachment',
+                'Přehled o změnách vlastního kapitálu',
+                $this->buildEquityChangesAttachment($supplierId, $periodId, $attachmentYear),
+                $usedBytes,
+            );
         }
 
         return $appendix;
     }
 
     /**
-     * Součet velikosti všech e-příloh (`Prilohy/ObecnaPriloha`) v JEDNOM podání smí být
-     * podle dokumentace XSD (dppdp9.xsd:6211) nejvýš 10 240 kB — kontroluje se na velikost
-     * SOUBORU (před base64), protože to je částka, kterou dokumentace jmenuje.
+     * Součet velikosti všech e-příloh (`Prilohy/PredepsanaPriloha`) v JEDNOM podání smí
+     * být podle dokumentace XSD (dppdp9.xsd:6211) nejvýš 10 240 kB — kontroluje se na
+     * velikost SOUBORU (před base64), protože to je částka, kterou dokumentace jmenuje.
      */
     private const STATEMENT_NOTES_MAX_BYTES = 10_240 * 1024;
+
+    /**
+     * § 18 odst. 2 ZoÚ: přehled o peněžních tocích a o změnách vlastního kapitálu jsou
+     * POVINNOU součástí závěrky jen u velké a střední ÚJ a u KAŽDÉ ÚJ s povinným auditem
+     * (auditovaná mikro/malá ÚJ dostane plný `scope`, i když by jinak byla zkrácená —
+     * R18/Epic F4, {@see \MyInvoice\Service\Accounting\Reports\EntityCategoryService::evaluate()}).
+     * Mikro a malá ÚJ bez auditu povinnost NEMAJÍ.
+     *
+     * Stejné kritérium jako {@see \MyInvoice\Action\Accounting\Reports\Section18StatementsAction::get()}
+     * (`required` v odpovědi) a kontrola `section18_statements_required` v
+     * {@see \MyInvoice\Service\Accounting\Closing\ClosingService} — JEDNO místo pravdy;
+     * kdyby se rozešlo, uzávěrka/report/přiznání by o téže povinnosti tvrdily každé něco
+     * jiného.
+     *
+     * @param array<string,mixed> $category výstup EntityCategoryService::evaluate()
+     */
+    private function needsSection18Statements(array $category): bool
+    {
+        return in_array((string) ($category['category'] ?? ''), ['large', 'medium'], true)
+            || (($category['scope_override'] ?? null) === null && (string) ($category['scope'] ?? '') === 'full');
+    }
+
+    /**
+     * Připojí e-přílohu k appendixu, jen když se s dosavadním součtem vejde do limitu
+     * `STATEMENT_NOTES_MAX_BYTES` — limit XSD (dppdp9.xsd:6211) je na SOUČET všech e-příloh
+     * podání, ne na jednu, takže se musí hlídat SPOLEČNÝM `$usedBytes` napříč voláními pro
+     * všechny tři možné přílohy (viz buildDppoAppendix()), ne nezávisle per příloha.
+     * Warning z `$built` (chyba sestavení/renderu, nekompletní obsah) se propíše vždy,
+     * bez ohledu na to, jestli přiložení proběhlo.
+     *
+     * @param array<string,mixed> $appendix
+     * @param array{file:?array{content:string,filename:string,label:string},warning:?string} $built
+     */
+    private function attachIfWithinBudget(array &$appendix, string $key, string $label, array $built, int &$usedBytes): void
+    {
+        if ($built['warning'] !== null) {
+            $appendix['warnings'][] = $built['warning'];
+        }
+        $file = $built['file'];
+        if ($file === null) {
+            return;
+        }
+        $size = strlen((string) $file['content']);
+        if ($usedBytes + $size > self::STATEMENT_NOTES_MAX_BYTES) {
+            $appendix['warnings'][] = sprintf(
+                '%s má %s kB — se součtem dosavadních e-příloh podání (%s kB) by přesáhl '
+                . 'limit 10 240 kB, proto se K PŘIZNÁNÍ NEPŘIPOJIL(A) (raději vůbec než přes '
+                . 'limit). Podejte přiznání a přílohu doručte finančnímu úřadu samostatně '
+                . '(mimo XML podání).',
+                $label,
+                number_format($size / 1024, 0, ',', ' '),
+                number_format($usedBytes / 1024, 0, ',', ' '),
+            );
+            return;
+        }
+        $appendix[$key] = $file;
+        $usedBytes += $size;
+    }
 
     /**
      * Vyrobí PDF „Příloha v účetní závěrce" (§ 18/1/c ZoÚ, § 39/39a/39b vyhl. 500/2002,
      * {@see \MyInvoice\Service\Accounting\Reports\StatementNotesService::build()} +
      * {@see \MyInvoice\Service\Pdf\StatementNotesPdfRenderer}) pro vložení do podání jako
-     * `Prilohy/ObecnaPriloha` — dokument, který zákon k závěrce žádá (viz
-     * {@see buildDppoAppendix()} nad touto metodou).
+     * `Prilohy/PredepsanaPriloha` kod=`PP_OPISPUV` — dokument, který zákon k závěrce žádá
+     * (viz {@see buildDppoAppendix()} nad touto metodou).
      *
      * NEŘEŠÍ EPO chybu 2602 „Není vložena příloha účetní závěrky" — ověřeno proti
      * zkušebnímu EPO 31. 8. 2026, výtka se s přiloženým souborem i bez něj chová
      * IDENTICKY (AUDIT-DPPO-XML.md dodatek 13). Přiložit soubor je přesto správné samo o
      * sobě (dokumentuje splnění § 39), varovné texty níže proto NEslibují, že 2602 zmizí.
      *
-     * Dvě situace soubor VĚDOMĚ nevloží (vrátí `file: null` + `warning`), místo aby ho
-     * tiše ořízly/vynechaly:
+     * Soubor VĚDOMĚ nevloží (vrátí `file: null` + `warning`), místo aby ho tiše
+     * ořízla/vynechala, ve dvou situacích:
      *   1) příloha není kompletní (účetní nevyplnila některou z povinných sekcí) —
      *      vložit prázdný/poloprázdný dokument do ostrého podání by bylo HORŠÍ než ho
      *      nevložit vůbec (vypadalo by to jako splněná povinnost, ačkoli není);
-     *   2) vyrenderované PDF přesahuje limit e-příloh (10 240 kB) — tiché uříznutí by
-     *      poslalo poškozený/nečitelný soubor, raději žádný + jasné varování.
+     *   2) načtení/render selže.
+     * Limit velikosti e-příloh (10 240 kB SOUČTOVĚ, ne per soubor) hlídá až volající
+     * {@see attachIfWithinBudget()} — tahle metoda ho sama neřeší, protože v okamžiku
+     * jejího běhu ještě neví, kolik místa zabraly ostatní přílohy.
      *
      * @param array{starts_on?:string,ends_on?:string} $period
      * @return array{file:?array{content:string,filename:string,label:string},warning:?string}
@@ -1114,22 +1225,83 @@ final class TaxReturnService
                 . 'Vygenerujte přiznání znovu; opakuje-li se to, ověřte obsah v: ' . $path];
         }
 
-        if (strlen($pdf) > self::STATEMENT_NOTES_MAX_BYTES) {
-            return ['file' => null, 'warning' => sprintf(
-                'Příloha v účetní závěrce má %s kB — EPO povoluje nejvýše 10 240 kB součtu všech '
-                . 'e-příloh podání, soubor se proto K PŘIZNÁNÍ NEPŘIPOJIL (raději vůbec než '
-                . 'oříznutý/poškozený). Podejte přiznání a přílohu doručte finančnímu úřadu '
-                . 'samostatně (mimo XML podání).',
-                number_format(strlen($pdf) / 1024, 0, ',', ' '),
-            )];
-        }
-
         $fiscalYear = (int) ($notes['fiscal_year'] ?? 0);
         return ['file' => [
             'content'  => $pdf,
             'filename' => sprintf('priloha-ucetni-zaverky-%d.pdf', $fiscalYear),
             'label'    => sprintf('Příloha v účetní závěrce za rok %d (§ 39 vyhl. 500/2002 Sb.)', $fiscalYear),
         ], 'warning' => null];
+    }
+
+    /**
+     * Přehled o peněžních tocích (§ 18 odst. 2 ZoÚ, § 40–43 vyhl. 500/2002 Sb.) jako
+     * `Prilohy/PredepsanaPriloha` kod=`PP_PTOK`. STEJNÝ zdroj dat jako uzávěrkový balíček
+     * ({@see \MyInvoice\Service\Export\ClosingPackageService}, část `cash_flow`) — žádný
+     * druhý generátor, jen jiný výstupní kontejner (příloha DPPO místo souboru v ZIPu).
+     *
+     * Volá se JEN když {@see needsSection18Statements()} vrátí true (přehled je pro tuhle
+     * ÚJ povinný) — proto je selhání sestavení/renderu vždy warning „je povinný, ale…",
+     * ne tiché vynechání.
+     *
+     * @return array{file:?array{content:string,filename:string,label:string},warning:?string}
+     */
+    private function buildCashFlowAttachment(int $supplierId, int $periodId, int $fiscalYear): array
+    {
+        try {
+            $data = $this->cashFlowStatement->build($supplierId, $periodId);
+            $data['entity'] = $this->statements->entityHeader($supplierId);
+            $pdf = $this->cashFlowPdf->render($data);
+        } catch (\Throwable $e) {
+            return ['file' => null, 'warning' =>
+                'Přehled o peněžních tocích (§ 18 odst. 2 ZoÚ) je pro tuto účetní jednotku '
+                . 'povinnou součástí závěrky, ale nepodařilo se ho sestavit (' . $e->getMessage()
+                . ') — k přiznání se NEPŘIPOJIL. Ověřte v Účetnictví → Uzávěrka → Přehledy podle '
+                . '§ 18/2 a přiznání vygenerujte znovu.'];
+        }
+        // Nesedící přehled (chybný protiúčet apod.) se přesto přiloží — stejné chování
+        // jako uzávěrkový balíček (viz ClosingPackageService::run()): vada v datech se
+        // hlásí warningem, ne tichým vynecháním povinné přílohy.
+        $warning = ($data['reconciles'] ?? true) !== true
+            ? 'Přehled o peněžních tocích v příloze DPPO nesedí (počáteční stav + čistý tok '
+                . '≠ konečný stav) — přiložen je i tak, ale ověřte účtování peněžních prostředků.'
+            : null;
+        return ['file' => [
+            'content'  => $pdf,
+            'filename' => sprintf('prehled-penezni-toky-%d.pdf', $fiscalYear),
+            'label'    => sprintf('Přehled o peněžních tocích za rok %d (§ 18 odst. 2 ZoÚ)', $fiscalYear),
+        ], 'warning' => $warning];
+    }
+
+    /**
+     * Přehled o změnách vlastního kapitálu (§ 18 odst. 2 ZoÚ, § 44 vyhl. 500/2002 Sb.)
+     * jako `Prilohy/PredepsanaPriloha` kod=`PP_ZVKAP`. Stejná logika jako
+     * {@see buildCashFlowAttachment()} (stejný zdroj dat jako uzávěrkový balíček, volá
+     * se jen když je přehled povinný, nesedící přehled se přiloží s warningem).
+     *
+     * @return array{file:?array{content:string,filename:string,label:string},warning:?string}
+     */
+    private function buildEquityChangesAttachment(int $supplierId, int $periodId, int $fiscalYear): array
+    {
+        try {
+            $data = $this->equityChangesStatement->build($supplierId, $periodId);
+            $data['entity'] = $this->statements->entityHeader($supplierId);
+            $pdf = $this->equityChangesPdf->render($data);
+        } catch (\Throwable $e) {
+            return ['file' => null, 'warning' =>
+                'Přehled o změnách vlastního kapitálu (§ 18 odst. 2 ZoÚ) je pro tuto účetní '
+                . 'jednotku povinnou součástí závěrky, ale nepodařilo se ho sestavit ('
+                . $e->getMessage() . ') — k přiznání se NEPŘIPOJIL. Ověřte v Účetnictví → '
+                . 'Uzávěrka → Přehledy podle § 18/2 a přiznání vygenerujte znovu.'];
+        }
+        $warning = ($data['reconciles'] ?? true) !== true
+            ? 'Přehled o změnách vlastního kapitálu v příloze DPPO nesedí u některé složky '
+                . '— přiložen je i tak, ale ověřte účtování vlastního kapitálu.'
+            : null;
+        return ['file' => [
+            'content'  => $pdf,
+            'filename' => sprintf('prehled-zmeny-vlastniho-kapitalu-%d.pdf', $fiscalYear),
+            'label'    => sprintf('Přehled o změnách vlastního kapitálu za rok %d (§ 18 odst. 2 ZoÚ)', $fiscalYear),
+        ], 'warning' => $warning];
     }
 
     /** Přehledy pojistného OSVČ (jen FO). @return array<string,mixed> */

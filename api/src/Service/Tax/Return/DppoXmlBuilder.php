@@ -282,10 +282,12 @@ final class DppoXmlBuilder
      *   income_statement: array (…::incomeStatement výstup), category: array
      *   (EntityCategoryService::evaluate výstup), settings: array
      *   (AccountingSupplierSettingsRepository::get výstup), statement_notes_attachment?:
-     *   array{content:string,filename:string,label:string} — SKUTEČNĚ přiložený soubor
-     *   (viz buildPrilohy()), ne strukturovaná data; volitelné i s appendixem, když příloha
-     *   v účetní závěrce není kompletní}. Prázdné (default) = appendix se nevygeneruje
-     *   (zpětná kompatibilita se stávajícími voláními/testy).
+     *   array{content:string,filename:string,label:string}, cash_flow_attachment?: stejný
+     *   tvar, equity_changes_attachment?: stejný tvar — SKUTEČNĚ přiložené soubory (viz
+     *   buildPrilohy()/PREDEPSANA_PRILOHA_KODY), ne strukturovaná data; každý nezávisle
+     *   volitelný, i s appendixem, když daná příloha není kompletní/povinná}. Prázdné
+     *   (default) = appendix se nevygeneruje (zpětná kompatibilita se stávajícími
+     *   voláními/testy).
      * @return array{xml:string,warnings:list<string>}
      */
     public function build(array $supplier, int $year, array $calc, array $meta = [], array $appendix = []): array
@@ -522,13 +524,14 @@ final class DppoXmlBuilder
             $root->appendChild($vetaNP);
         }
 
-        // ── Prilohy/ObecnaPriloha — SKUTEČNĚ přiložený soubor (dppdp9.xsd:6180), poslední
-        // element sekvence. Viz buildPrilohy(): dokládá přílohu v účetní závěrce (§39 vyhl.
-        // 500/2002) jako dokument, což VetaUA/UB/UD/UZ výše NEDĚLAJÍ (jsou to strukturovaná
-        // data, ne dokument). NEŘEŠÍ ale EPO chybu 2602 „Není vložena příloha účetní
-        // závěrky" — ověřeno proti zkušebnímu EPO 31. 8. 2026, výtka je se souborem i bez
-        // něj identická (AUDIT-DPPO-XML.md dodatek 13, §13.3) — příčina zůstává neznámá
-        // (viz tam), přiložení souboru je i tak samostatně správné.
+        // ── Prilohy/PredepsanaPriloha — SKUTEČNĚ přiložené soubory (dppdp9.xsd:6180),
+        // poslední element sekvence. Viz buildPrilohy(): dokládá přílohy účetní závěrky
+        // (§39 vyhl. 500/2002 pro Přílohu; §18/2 ZoÚ pro peněžní toky/vlastní kapitál) jako
+        // dokumenty, což VetaUA/UB/UD/UZ výše NEDĚLAJÍ (jsou to strukturovaná data, ne
+        // dokument). NEŘEŠÍ ale EPO chybu 2602 „Není vložena příloha účetní závěrky" —
+        // ověřeno proti zkušebnímu EPO 31. 8. 2026, výtka je se souborem i bez něj identická
+        // (AUDIT-DPPO-XML.md dodatek 13, §13.3) — příčina zůstává neznámá (viz tam),
+        // přiložení souborů je i tak samostatně správné.
         $prilohy = $this->buildPrilohy($dom, $appendix);
         if ($prilohy !== null) {
             $root->appendChild($prilohy);
@@ -538,41 +541,73 @@ final class DppoXmlBuilder
     }
 
     /**
-     * `Prilohy/ObecnaPriloha` — skutečně přiložený soubor (base64), NE strukturovaná data.
-     * Jediný zdroj obsahu dnes je „Příloha v účetní závěrce" (§ 39 vyhl. 500/2002,
-     * {@see \MyInvoice\Service\Tax\Return\TaxReturnService::buildStatementNotesAttachment()}),
-     * která už prošla kontrolou kompletnosti a limitu velikosti PŘED tím, než se sem vůbec
-     * dostala — builder tu žádnou z těch kontrol neopakuje, jen mechanicky sestaví větu.
-     * Chybí-li `$appendix['statement_notes_attachment']` (nevyplněná příloha, chyba
-     * renderu, překročený limit — vždy s warningem z volajícího), `Prilohy` se vůbec
-     * nepostaví — prázdná/poloprázdná příloha v ostrém podání je horší než žádná.
+     * Mapa appendix klíč → `kod` `PredepsanaPriloha` (dppdp9.xsd:6234, výčet
+     * `PP_ZVKAP|PP_UZMUS|PP_PTOK|PP_OPISPUV`). Pořadí v poli = pořadí v dokumentu = pořadí
+     * číslování `cislo` (viz buildPrilohy()).
      *
-     * `cislo` (pořadové číslo přílohy) musí být v rámci podání unikátní (XSD) — dnes je
-     * jen jeden možný zdroj e-přílohy, takže je vždy `'1'`; přibude-li druhý zdroj, číslování
-     * bude nutné sjednotit na jedno místo.
+     * Skutečný zadavatelem ručně vyplněný vzor v EPO (ověřený fakt, AUDIT-DPPO-XML.md)
+     * ukázal, že „Příloha v účetní závěrce" patří do PŘEDEPSANÉ přílohy s kódem
+     * `PP_OPISPUV` — každý kód odpovídá jednomu řádku v tabulce příloh EPO — NE do obecné
+     * přílohy, jak dřív stavěl `ObecnaPriloha` bez kódu. `PP_UZMUS` (účetní závěrka dle
+     * mezinárodních účetních standardů) se záměrně NESTAVÍ — IFRS aplikace nepodporuje
+     * (private/DANE-PODPORA-HRANICE.md, kategorie C) a předstírat sestavenou IFRS závěrku
+     * by bylo nepravdivé.
+     */
+    private const PREDEPSANA_PRILOHA_KODY = [
+        'statement_notes_attachment' => 'PP_OPISPUV',
+        'cash_flow_attachment'       => 'PP_PTOK',
+        'equity_changes_attachment'  => 'PP_ZVKAP',
+    ];
+
+    /**
+     * `Prilohy/PredepsanaPriloha` — skutečně přiložené soubory (base64), NE strukturovaná
+     * data. Zdroj obsahu je `$appendix[...]` dle {@see PREDEPSANA_PRILOHA_KODY} — každý klíč
+     * volitelný, sestavuje a kontroluje (kompletnost, limit velikosti — SOUČTOVĚ napříč
+     * všemi přílohami) volající {@see \MyInvoice\Service\Tax\Return\TaxReturnService},
+     * builder tu žádnou z těch kontrol neopakuje, jen mechanicky sestaví věty v pevném
+     * pořadí PREDEPSANA_PRILOHA_KODY. Chybí-li všechny klíče, `Prilohy` se vůbec nepostaví —
+     * prázdná/poloprázdná příloha v ostrém podání je horší než žádná.
      *
-     * @param array<string,mixed> $appendix volitelně nese `statement_notes_attachment`:
-     *   {content:string (syrový binární obsah PDF, NE base64), filename:string, label:string}
+     * `cislo` (pořadové číslo přílohy) musí být v rámci podání unikátní (XSD) a je
+     * PRŮBĚŽNÉ napříč přítomnými přílohami (1, 2, 3, …) bez ohledu na to, které z nich
+     * se pro dané období skutečně vygenerovaly — přeskočená příloha (např. „Příloha v
+     * účetní závěrce" nekompletní, ale peněžní toky ano) nenechává v číslování mezeru,
+     * jen posune číslo těch, co následují.
+     *
+     * @param array<string,mixed> $appendix volitelně nese klíče z PREDEPSANA_PRILOHA_KODY,
+     *   každý {content:string (syrový binární obsah PDF, NE base64), filename:string, label:string}
      */
     private function buildPrilohy(\DOMDocument $dom, array $appendix): ?\DOMElement
     {
-        $attachment = $appendix['statement_notes_attachment'] ?? null;
-        if (!is_array($attachment) || !isset($attachment['content']) || $attachment['content'] === '') {
+        $items = [];
+        foreach (self::PREDEPSANA_PRILOHA_KODY as $key => $kod) {
+            $attachment = $appendix[$key] ?? null;
+            if (!is_array($attachment) || !isset($attachment['content']) || $attachment['content'] === '') {
+                continue;
+            }
+            $items[] = [$kod, $attachment];
+        }
+        if ($items === []) {
             return null;
         }
+
         $prilohy = $dom->createElement('Prilohy');
-        $obecna = $dom->createElement('ObecnaPriloha', base64_encode((string) $attachment['content']));
-        $obecna->setAttribute('cislo', '1');
-        $nazev = mb_substr((string) ($attachment['label'] ?? ''), 0, 255);
-        if ($nazev !== '') {
-            $obecna->setAttribute('nazev', $nazev);
+        $cislo = 1;
+        foreach ($items as [$kod, $attachment]) {
+            $el = $dom->createElement('PredepsanaPriloha', base64_encode((string) $attachment['content']));
+            $el->setAttribute('cislo', (string) $cislo++);
+            $nazev = mb_substr((string) ($attachment['label'] ?? ''), 0, 255);
+            if ($nazev !== '') {
+                $el->setAttribute('nazev', $nazev);
+            }
+            $jmSouboru = mb_substr((string) ($attachment['filename'] ?? ''), 0, 255);
+            if ($jmSouboru !== '') {
+                $el->setAttribute('jm_souboru', $jmSouboru);
+            }
+            $el->setAttribute('kodovani', 'base64');
+            $el->setAttribute('kod', $kod);
+            $prilohy->appendChild($el);
         }
-        $jmSouboru = mb_substr((string) ($attachment['filename'] ?? ''), 0, 255);
-        if ($jmSouboru !== '') {
-            $obecna->setAttribute('jm_souboru', $jmSouboru);
-        }
-        $obecna->setAttribute('kodovani', 'base64');
-        $prilohy->appendChild($obecna);
         return $prilohy;
     }
 
@@ -1144,7 +1179,7 @@ final class DppoXmlBuilder
      * listin) ZŮSTÁVÁ 'N', i teď, když appendix umí přílohu jako soubor skutečně přiložit
      * (viz buildPrilohy() / TaxReturnService::buildStatementNotesAttachment()) — je to JINÁ
      * otázka, ne totéž rozhodnuté podruhé:
-     *   - Připojení souboru (`Prilohy/ObecnaPriloha`) je o tom, aby DPPDP9 neslo přílohu
+     *   - Připojení souboru (`Prilohy/PredepsanaPriloha`) je o tom, aby DPPDP9 neslo přílohu
      *     v účetní závěrce jako dokument (§39 vyhl. 500/2002) — samo o sobě NEŘEŠÍ EPO
      *     chybu 2602 „Není vložena příloha účetní závěrky" (ověřeno proti zkušebnímu EPO
      *     31. 8. 2026: se souborem i bez něj vrací IDENTICKOU výtku — viz AUDIT-DPPO-XML.md

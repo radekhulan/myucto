@@ -10,11 +10,16 @@ use MyInvoice\Service\Tax\TaxConstants;
 use PHPUnit\Framework\TestCase;
 
 /**
- * `Prilohy/ObecnaPriloha` (dppdp9.xsd:6180) — SKUTEČNĚ přiložený soubor, jediná věc,
- * která podle zkušebního EPO (AUDIT-DPPO-XML.md §9.4c) odstraní chybu 2602 „Není
- * vložena příloha účetní závěrky". VetaUA/UB/UD/UZ (strukturovaná data) ji neřeší —
- * ověřeno i tady: appendix bez `statement_notes_attachment` žádnou `Prilohy` nepostaví,
+ * `Prilohy/PredepsanaPriloha` (dppdp9.xsd:6180/6234) — SKUTEČNĚ přiložené soubory.
+ * VetaUA/UB/UD/UZ (strukturovaná data) NEŘEŠÍ EPO chybu 2602 „Není vložena příloha
+ * účetní závěrky" (ověřeno proti zkušebnímu EPO, AUDIT-DPPO-XML.md §9.4c/§13) — ověřeno
+ * i tady: appendix bez žádného z klíčů PREDEPSANA_PRILOHA_KODY žádnou `Prilohy` nepostaví,
  * i když VetaUA/UB/UD/UZ existují (viz testAppendixWithoutAttachmentBuildsNoPrilohy).
+ *
+ * Zadavatel ručně vyplněný vzor v EPO doložil snímkem, že „Příloha v účetní závěrce"
+ * patří do PŘEDEPSANÉ přílohy s kódem `PP_OPISPUV` (jeden řádek v tabulce příloh EPO),
+ * ne do obecné přílohy bez kódu — dřív se stavěla jako `ObecnaPriloha`, což byla špatná
+ * přihrádka; testy tady ověřují novou, opravenou strukturu.
  */
 final class DppoXmlBuilderPrilohyTest extends TestCase
 {
@@ -46,10 +51,11 @@ final class DppoXmlBuilderPrilohyTest extends TestCase
     {
         $xml = $this->build()['xml'];
         self::assertStringNotContainsString('<Prilohy', $xml);
+        self::assertStringNotContainsString('<PredepsanaPriloha', $xml);
         self::assertStringNotContainsString('<ObecnaPriloha', $xml);
     }
 
-    public function testAttachmentBuildsPrilohyWithBase64RoundTrip(): void
+    public function testStatementNotesAttachmentBuildsPredepsanaPrilohaWithOpispuvKod(): void
     {
         // Bajt \xFF vědomě, ať test ověří skutečné base64 kódování, ne jen ASCII text.
         $content = "%PDF-1.4 test obsah p\xC5\x99\xC3\xADlohy \xFF";
@@ -62,17 +68,21 @@ final class DppoXmlBuilderPrilohyTest extends TestCase
         ])['xml'];
 
         self::assertStringContainsString('<Prilohy>', $xml);
+        self::assertStringNotContainsString('<ObecnaPriloha', $xml);
         self::assertStringContainsString('cislo="1"', $xml);
+        self::assertStringContainsString('kod="PP_OPISPUV"', $xml);
         self::assertStringContainsString('jm_souboru="priloha-ucetni-zaverky-2025.pdf"', $xml);
         self::assertStringContainsString('kodovani="base64"', $xml);
         self::assertStringContainsString('nazev="Příloha v účetní závěrce za rok 2025"', $xml);
 
         $dom = new \DOMDocument();
         $dom->loadXML($xml);
-        $nodes = $dom->getElementsByTagName('ObecnaPriloha');
+        self::assertSame(0, $dom->getElementsByTagName('ObecnaPriloha')->length);
+        $nodes = $dom->getElementsByTagName('PredepsanaPriloha');
         self::assertSame(1, $nodes->length);
         $node = $nodes->item(0);
         self::assertNotNull($node);
+        self::assertSame('PP_OPISPUV', $node->getAttribute('kod'));
         self::assertSame($content, base64_decode((string) $node->textContent, true));
     }
 
@@ -103,6 +113,57 @@ final class DppoXmlBuilderPrilohyTest extends TestCase
         }
         self::assertNotNull($lastElement);
         self::assertSame('Prilohy', $lastElement->localName);
+    }
+
+    /**
+     * Tři přílohy (OPISPUV/PTOK/ZVKAP) najednou — číslování `cislo` musí být PRŮBĚŽNÉ
+     * (1, 2, 3) v pevném pořadí PREDEPSANA_PRILOHA_KODY, každá se svým vlastním `kod`,
+     * a nikdy se `PP_UZMUS` (IFRS, nepodporujeme) nesmí objevit.
+     */
+    public function testAllThreeAttachmentsGetContinuousNumberingAndOwnKod(): void
+    {
+        $appendix = [
+            'statement_notes_attachment' => ['content' => 'OPISPUV-DATA', 'filename' => 'priloha.pdf', 'label' => 'Příloha'],
+            'cash_flow_attachment' => ['content' => 'PTOK-DATA', 'filename' => 'penezni-toky.pdf', 'label' => 'Peněžní toky'],
+            'equity_changes_attachment' => ['content' => 'ZVKAP-DATA', 'filename' => 'vlastni-kapital.pdf', 'label' => 'Vlastní kapitál'],
+        ];
+        $xml = $this->build($appendix)['xml'];
+
+        $dom = new \DOMDocument();
+        $dom->loadXML($xml);
+        $nodes = $dom->getElementsByTagName('PredepsanaPriloha');
+        self::assertSame(3, $nodes->length);
+
+        $byKod = [];
+        foreach ($nodes as $node) {
+            $byKod[$node->getAttribute('kod')] = $node->getAttribute('cislo');
+        }
+        self::assertSame(['PP_OPISPUV' => '1', 'PP_PTOK' => '2', 'PP_ZVKAP' => '3'], $byKod);
+        self::assertStringNotContainsString('PP_UZMUS', $xml);
+    }
+
+    /**
+     * Chybí-li prostřední příloha (typicky peněžní toky se nepodařilo sestavit), číslo
+     * se nesmí přeskočit — zbylé dvě dostanou 1 a 2, ne 1 a 3.
+     */
+    public function testMissingMiddleAttachmentLeavesNoGapInNumbering(): void
+    {
+        $appendix = [
+            'statement_notes_attachment' => ['content' => 'OPISPUV-DATA', 'filename' => 'priloha.pdf', 'label' => 'Příloha'],
+            // cash_flow_attachment chybí (nesestavilo se).
+            'equity_changes_attachment' => ['content' => 'ZVKAP-DATA', 'filename' => 'vlastni-kapital.pdf', 'label' => 'Vlastní kapitál'],
+        ];
+        $xml = $this->build($appendix)['xml'];
+
+        $dom = new \DOMDocument();
+        $dom->loadXML($xml);
+        $nodes = $dom->getElementsByTagName('PredepsanaPriloha');
+        self::assertSame(2, $nodes->length);
+        $byKod = [];
+        foreach ($nodes as $node) {
+            $byKod[$node->getAttribute('kod')] = $node->getAttribute('cislo');
+        }
+        self::assertSame(['PP_OPISPUV' => '1', 'PP_ZVKAP' => '2'], $byKod);
     }
 
     /**
