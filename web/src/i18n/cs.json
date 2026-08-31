@@ -4273,6 +4273,7 @@
       "subtitle": "Příprava, kontrola a stažení zákonných hlášení odděleně pro testovací a produkční prostředí.",
       "tabs_label": "Druhy mzdových podání",
       "tabs": {
+        "monthly": "Měsíční přehled",
         "transport": "Stav odeslání",
         "regzel": "Registrace zaměstnavatele",
         "jmhz": "JMHZ",
@@ -4293,6 +4294,43 @@
       "jmhz_fail_closed": "JMHZ připravíte ze schválené neměnné revize, otestujete jeho XML a poté je odešlete přes ISDS nebo VREP. Ostré podání je dostupné až od začátku zákonné lhůty.",
       "health_title": "Hlášení zdravotním pojišťovnám",
       "health_fail_closed": "Přehled o platbě i hromadné oznámení připravíte ze zmrazeného výpočtu a u pojišťovny s doloženým formátem přílohy je odešlete datovkou — bránou, nebo po potvrzení v Mobilním klíči. Bez doloženého formátu nebo ID schránky zůstává stažení a ruční odeslání. Systém nic neoznačí jako odeslané ani přijaté bez ověřeného kanálu a dodejky.",
+      "monthly_checklist": {
+        "title": "Měsíční přehled pro účetní",
+        "description": "Za zvolené období jeden seznam: co přesně vygenerovat a odeslat, kam, jakou cestou a do kdy — a u toho, co MyÚčto neodesílá samo, přesně proč a co s tím.",
+        "load_failed": "Měsíční přehled se nenačetl. Zkuste to prosím znovu.",
+        "empty": "Za zvolené období nemá firma žádnou otevřenou položku.",
+        "unknown": "neznámo",
+        "not_applicable": "netýká se",
+        "done_label": "Hotovo",
+        "col_agenda": "Agenda a předmět",
+        "col_document": "Co se generuje",
+        "col_recipient": "Kam",
+        "col_channel": "Jakou cestou",
+        "col_due": "Do kdy",
+        "col_status": "Stav",
+        "col_action": "Co s tím",
+        "agenda": {
+          "PREZEC26": "Přihláška zaměstnance k sociálnímu pojištění",
+          "REGZEC25": "Změna v registraci zaměstnance u ČSSZ",
+          "REGZEL26": "Registrace zaměstnavatele u ČSSZ",
+          "HOZ_2026": "Hromadné oznámení zdravotní pojišťovně",
+          "PPZ_2026": "Přehled o platbě pojistného zdravotní pojišťovně"
+        },
+        "status": {
+          "open": "Otevřeno",
+          "pending": "Nevyřízeno",
+          "not_prepared": "Nepřipraveno",
+          "not_supported": "Nepodporováno appkou",
+          "unknown": "Neznámý stav"
+        },
+        "summary": {
+          "total": "Celkem",
+          "send": "Jde odeslat",
+          "generate": "Připravit / jinde v appce",
+          "manual": "Jen ručně",
+          "done": "Hotovo"
+        }
+      },
       "statutory": {
         "title": "Nemocenské a další zákonné povinnosti",
         "description": "Pravdivá matice rozsahu pro zvolené období. U každé povinnosti je vidět, co za vás MyÚčto udělá a co musíte dokončit jinde. Nic se odsud neodešle samo — odeslání vždy potvrzujete vy.",

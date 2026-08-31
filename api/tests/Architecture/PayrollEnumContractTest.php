@@ -438,6 +438,11 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollSubmissionDeadlinePhase' =>
             'Fázi lhůty počítá PayrollDeadlineAssessmentService z termínu a dneška; '
             . 'není to uložená hodnota.',
+        'payroll.ts::PayrollMonthlyChecklistActionKind' =>
+            'PayrollMonthlyChecklistService dopočítává, jestli položku jde odeslat, '
+            . 'jen vygenerovat/otevřít jinde v appce, nebo appka odeslání neumí — '
+            . 'není to uložený stav ani sloupec, jen výsledek rozhodovací logiky nad '
+            . 'existujícími prameny.',
         'payroll.ts::PayrollDependantBlocker' =>
             'Kódy překážek nároku skládá PayrollDependantRepository v místě dotazu.',
         'payroll.ts::PayrollDependantClaimReason' =>

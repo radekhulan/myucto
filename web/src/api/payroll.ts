@@ -2263,6 +2263,67 @@ export interface PayrollSubmissionOverviewResponse {
   offset: number
 }
 
+/**
+ * Jeden měsíční přehled pro účetní ({@see PayrollMonthlyChecklistItem.action}):
+ * u KAŽDÉ položky platí právě jedno ze tří — `send` (jde odeslat rovnou),
+ * `generate` (není hotová / jde jen o platbu či úkon — odkaz vede tam, kde se
+ * to udělá), nebo `manual` (appka to poslat neumí, `reason` říká proč).
+ */
+export type PayrollMonthlyChecklistActionKind = 'send' | 'generate' | 'manual'
+
+export interface PayrollMonthlyChecklistAction {
+  kind: PayrollMonthlyChecklistActionKind
+  label: string
+  path: string | null
+  reason: string | null
+}
+
+export interface PayrollMonthlyChecklistItem {
+  key: string
+  /**
+   * Sdílí doménu s {@see PayrollDeadlineSource} (`PayrollDeadlineOverviewService::SOURCES`
+   * na backendu) — ta už `submission` obsahuje, takže přehled agendové
+   * povinnosti ze záložky „Stav odeslání" i zdroje termínů kryje jedním typem.
+   */
+  source: PayrollDeadlineSource
+  agenda_code: string | null
+  /**
+   * U zdrojů `submission` a `checklist` nese jen surový kód/`item_key` —
+   * lidský název dodává frontend (viz `agendaLabel()` v panelu) z
+   * `agenda_code` přes i18n, stejně jako to dělá záložka „Další povinnosti".
+   * U ostatních zdrojů je to už čitelný text z backendu.
+   */
+  agenda_label: string
+  /** `null` = appka pro tenhle řádek nemá ověřený lidský popis (viz backend). */
+  subject: string | null
+  period: string | null
+  due_on: string
+  phase: string
+  days_to_due: number
+  is_overdue: boolean
+  status: string
+  document: { format: string | null; note: string }
+  /**
+   * `applicable=false` = pojem se na tenhle řádek vůbec nevztahuje (např.
+   * příjemce u úkolu v kartě zaměstnance) — zobrazí se „netýká se", NE
+   * „neznámo". `applicable=true` s prázdným `label` a `note` je naopak
+   * poctivé „nevíme, ověřte".
+   */
+  recipient: { label: string | null; note: string; applicable: boolean }
+  channel: { label: string | null; note: string; applicable: boolean }
+  /** Splněno/zrušeno — appka nabídne stav místo tlačítka `action`. */
+  done: boolean
+  action: PayrollMonthlyChecklistAction
+}
+
+export interface PayrollMonthlyChecklistResponse {
+  environment: PayrollRegzelEnvironment
+  period: string
+  window: { from: string; to: string }
+  summary: { total: number; send: number; generate: number; manual: number; done: number }
+  items: PayrollMonthlyChecklistItem[]
+}
+
 /** Fáze zákonného termínu — prahy drží backend, UI je jen barví. */
 export type PayrollDeadlinePhase = 'overdue' | 'due_today' | 'due_soon' | 'open'
   | 'awaiting_result' | 'action_required'
@@ -5466,6 +5527,15 @@ export const payrollApi = {
         ...(options?.agenda_group ? { agenda_group: options.agenda_group } : {}),
         ...pageParams(options),
       },
+    }).then(response => response.data),
+  /**
+   * Jeden měsíční přehled: co se za zvolené období generuje/odesílá, kam,
+   * jakou cestou, do kdy a co s tím — přes VŠECHNY agendy i to, co appka
+   * jen počítá nebo drží jako úkol bez podání (viz {@see PayrollMonthlyChecklistItem}).
+   */
+  monthlyChecklist: (environment: PayrollRegzelEnvironment, period: string) =>
+    api.get<PayrollMonthlyChecklistResponse>('/payroll/submissions/monthly-checklist', {
+      params: { environment, period },
     }).then(response => response.data),
   operationalHealth: () =>
     api.get<PayrollOperationalHealth>('/payroll/operational-health')

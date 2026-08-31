@@ -4273,6 +4273,7 @@
       "subtitle": "Prepare, verify and download statutory reports with clearly separated test and production environments.",
       "tabs_label": "Payroll submission types",
       "tabs": {
+        "monthly": "Monthly overview",
         "transport": "Submission status",
         "regzel": "Employer registration",
         "jmhz": "JMHZ",
@@ -4293,6 +4294,43 @@
       "jmhz_fail_closed": "Prepare JMHZ from an approved immutable revision and, after a validation dry run, submit it through ISDS or VREP. Production filing becomes available when the statutory window opens.",
       "health_title": "Health-insurer reports",
       "health_fail_closed": "Prepare the payment overview or the bulk notification from a frozen calculation and, for an insurer with a documented attachment format, send it by data box — through the gateway, or after confirming a Mobile Key session. Without a documented format or a known data box, it stays download-and-send-yourself. Nothing is marked as sent or accepted without a verified channel and receipt.",
+      "monthly_checklist": {
+        "title": "Monthly overview for the accountant",
+        "description": "One list for the selected period: what to generate and send, where, by which channel, and by when — and for anything MyÚčto does not send itself, exactly why and what to do about it.",
+        "load_failed": "The monthly overview failed to load. Please try again.",
+        "empty": "No open item for the selected period.",
+        "unknown": "unknown",
+        "not_applicable": "not applicable",
+        "done_label": "Done",
+        "col_agenda": "Agenda and subject",
+        "col_document": "What is generated",
+        "col_recipient": "Where it goes",
+        "col_channel": "Which channel",
+        "col_due": "Due by",
+        "col_status": "Status",
+        "col_action": "What to do",
+        "agenda": {
+          "PREZEC26": "Employee registration for social insurance",
+          "REGZEC25": "Change to an employee's social insurance registration",
+          "REGZEL26": "Employer registration with the Social Security Administration",
+          "HOZ_2026": "Bulk notification to the health insurer",
+          "PPZ_2026": "Contribution payment overview for the health insurer"
+        },
+        "status": {
+          "open": "Open",
+          "pending": "Pending",
+          "not_prepared": "Not prepared",
+          "not_supported": "Not supported by the app",
+          "unknown": "Unknown status"
+        },
+        "summary": {
+          "total": "Total",
+          "send": "Can send",
+          "generate": "Prepare / elsewhere in-app",
+          "manual": "Manual only",
+          "done": "Done"
+        }
+      },
       "statutory": {
         "title": "Sickness and other statutory obligations",
         "description": "A truthful capability matrix for the selected period. NEMPRI and HZUPN currently require a manual official-channel workflow; MyÚčto only preserves an immutable link to a real DMS receipt. Nothing is transmitted here.",

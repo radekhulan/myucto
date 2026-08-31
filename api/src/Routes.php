@@ -121,6 +121,7 @@ use MyInvoice\Action\Payroll\PayrollJmhzSubmissionFreezeAction;
 use MyInvoice\Action\Payroll\PayrollJmhzIsdsAction;
 use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
+use MyInvoice\Action\Payroll\PayrollMonthlyChecklistAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
 use MyInvoice\Action\Payroll\PayrollPeriodExportAction;
@@ -1286,6 +1287,10 @@ final class Routes
             $g->get(
                 '/submissions/overview',
                 PayrollSubmissionOverviewAction::class,
+            );
+            $g->get(
+                '/submissions/monthly-checklist',
+                PayrollMonthlyChecklistAction::class,
             );
             $g->get('/deadlines', PayrollDeadlineOverviewAction::class);
             $g->get('/operational-health', PayrollOperationalHealthAction::class);

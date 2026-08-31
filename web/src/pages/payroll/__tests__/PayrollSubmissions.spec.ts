@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   prepare: vi.fn(),
   download: vi.fn(),
   overview: vi.fn(),
+  monthlyChecklist: vi.fn(),
   submissionDetail: vi.fn(),
   downloadSubmissionArtifact: vi.fn(),
   runs: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock('@/api/payroll', () => ({
     prepareRegzel: m.prepare,
     downloadRegzelSnapshot: m.download,
     submissionOverview: m.overview,
+    monthlyChecklist: m.monthlyChecklist,
     submissionDetail: m.submissionDetail,
     downloadSubmissionArtifact: m.downloadSubmissionArtifact,
     runs: m.runs,
@@ -168,7 +170,14 @@ function setup() {
     limit: 25,
     offset: 0,
   })
-  // Stav odeslání je výchozí záložka, takže se ledger načítá při každém mountu.
+  // Měsíční přehled je výchozí záložka, takže se načítá při každém mountu.
+  m.monthlyChecklist.mockResolvedValue({
+    environment: 'production',
+    period: '2026-08',
+    window: { from: '2026-08-01', to: '2026-08-31' },
+    summary: { total: 0, send: 0, generate: 0, manual: 0, done: 0 },
+    items: [],
+  })
   m.jmhzTransportHistory.mockResolvedValue({ environment: 'production', attempts: [] })
   m.submissionInbox.mockResolvedValue({
     environment: 'production',
@@ -491,13 +500,13 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    // Jedenáct: deset dosavadních plus vlastní záložka nemocenských případů.
-    // Vlastní záložku má i záměr uplatňovat slevu (OZUSPOJ) — je to podmínka
-    // nároku, ne součást měsíčního hlášení. „Další povinnosti" vede explicitní
-    // NEMPRI/HZUPN/ELDP/úrazovou matici, zatímco „Ostatní" zůstává záchytná
-    // skupina pro neznámé kódy.
+    // Dvanáct: jedenáct dosavadních plus Měsíční přehled coby nová výchozí
+    // záložka. Vlastní záložku má i záměr uplatňovat slevu (OZUSPOJ) — je to
+    // podmínka nároku, ne součást měsíčního hlášení. „Další povinnosti" vede
+    // explicitní NEMPRI/HZUPN/ELDP/úrazovou matici, zatímco „Ostatní" zůstává
+    // záchytná skupina pro neznámé kódy.
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(11)
+    expect(tabs).toHaveLength(12)
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.statutory'))).toBe(true)
     await clickTab(wrapper, 'regzel')
     await flushPromises()
@@ -523,6 +532,77 @@ describe('PayrollSubmissions', () => {
     )
     expect(wrapper.text()).toContain('JMHZ')
     expect(wrapper.text()).toContain('payroll.submissions.jmhz_fail_closed')
+  })
+
+  /**
+   * Měsíční přehled je teď výchozí záložka — účetní nemá hledat „co mám
+   * tenhle měsíc udělat" po deseti dalších záložkách.
+   */
+  it('otevře se rovnou na měsíčním přehledu a nabídne akci podle druhu', async () => {
+    m.monthlyChecklist.mockResolvedValue({
+      environment: 'production',
+      period: '2026-08',
+      window: { from: '2026-08-01', to: '2026-08-31' },
+      summary: { total: 2, send: 1, generate: 0, manual: 1, done: 0 },
+      items: [
+        {
+          key: 'submission:7',
+          source: 'submission',
+          agenda_code: 'JMHZ25',
+          agenda_label: 'JMHZ25',
+          subject: 'office:synthetic',
+          period: '2026-08',
+          due_on: '2026-09-20',
+          phase: 'open',
+          days_to_due: 30,
+          is_overdue: false,
+          status: 'ready',
+          document: { format: 'XML (JMHZ)', note: '' },
+          recipient: { label: 'ČSSZ', note: '', applicable: true },
+          channel: { label: 'datová schránka — odesílací brána', note: '', applicable: true },
+          done: false,
+          action: { kind: 'send', label: 'Odeslat', path: '/payroll/submissions/jmhz', reason: null },
+        },
+        {
+          key: 'levy:1',
+          source: 'levy',
+          agenda_code: 'statutory_insurance',
+          agenda_label: 'Zákonné pojištění odpovědnosti zaměstnavatele (úrazové)',
+          subject: 'institution:statutory_insurance:123',
+          period: '2026-Q2',
+          due_on: '2026-08-31',
+          phase: 'open',
+          days_to_due: 5,
+          is_overdue: false,
+          status: 'open',
+          document: { format: null, note: 'Bez dokumentu — jde o platbu, ne o podání.' },
+          recipient: { label: 'institution:statutory_insurance:123', note: '', applicable: true },
+          channel: { label: 'bankovní převod', note: 'ABO/SEPA export v modulu Platby.', applicable: true },
+          done: false,
+          action: { kind: 'generate', label: 'Otevřít platby', path: '/payroll/payments', reason: null },
+        },
+      ],
+    })
+
+    const wrapper = mount(PayrollSubmissions, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="to"><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text())
+      .toContain('payroll.submissions.tabs.monthly')
+    expect(m.monthlyChecklist).toHaveBeenCalledWith(
+      'production',
+      expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/),
+    )
+    // JSDOM nevyhodnocuje `md:block`/`md:hidden`, takže by se stejný
+    // `data-test` napočítal dvakrát (desktopová tabulka i mobilní karty) —
+    // dotaz se proto omezí na řádky desktopové tabulky.
+    const rows = wrapper.findAll('tbody tr[data-test="monthly-checklist-row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.text()).toContain('Odeslat')
+    expect(rows[1]!.text()).toContain('Otevřít platby')
+    expect(rows[1]!.text()).toContain('jde o platbu, ne o podání')
   })
 
   /*

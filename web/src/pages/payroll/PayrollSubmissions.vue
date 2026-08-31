@@ -20,6 +20,7 @@ import PayrollSicknessCasesPanel from './PayrollSicknessCasesPanel.vue'
 import PayrollHealthNotificationPanel from './PayrollHealthNotificationPanel.vue'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
+import PayrollMonthlyChecklistPanel from './PayrollMonthlyChecklistPanel.vue'
 import PayrollStatutoryObligationsPanel from './PayrollStatutoryObligationsPanel.vue'
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
@@ -28,17 +29,22 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
-  'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'sickness' | 'eldp' | 'health'
+  'monthly' | 'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'sickness' | 'eldp' | 'health'
   | 'statutory' | 'other' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
-// „Co jsem odeslal a jak to dopadlo" je nejčastější důvod, proč se sem někdo
-// podívá — proto je stav odeslání první záložka a zároveň ta výchozí. Připravit
-// registraci nebo hlášení je jednorázový úkon, sledovat výsledek úkon opakovaný.
-const activeTab = ref<SubmissionTab>('transport')
+/*
+ * „Co mám tenhle měsíc udělat" je ta úplně první otázka, se kterou účetní na
+ * stránku přichází — proto je Měsíční přehled výchozí záložka. Dřív tu byl
+ * „Stav odeslání" (co jsem odeslal a jak to dopadlo), ale to zodpovídá jen
+ * ČÁST otázky (agendy s podáním) a nechává účetní hledat zbytek (odvody,
+ * lhůty u lidí, ruční agendy) po deseti dalších záložkách. Ten panel dál
+ * existuje — jde na něj `transport` — jen už neotvírá stránku jako první.
+ */
+const activeTab = ref<SubmissionTab>('monthly')
 // Certifikát je poslední záložka, ale vlastní: podepisuje se jím REGZEL i JMHZ,
 // takže nepatří pod žádné jednotlivé hlášení.
 // ELDP stojí hned za JMHZ: od roku 2026 ho ČSSZ sestavuje z měsíčního
@@ -54,7 +60,7 @@ const activeTab = ref<SubmissionTab>('transport')
 // zařadit. Bez téhle záložky by taková povinnost nebyla vidět NIKDE — panely
 // filtrují skupinu na serveru, takže by ji ani jeden z nich nenačetl.
 const tabs: SubmissionTab[] = [
-  'transport', 'regzel', 'jmhz', 'discount_intents', 'sickness', 'eldp', 'health',
+  'monthly', 'transport', 'regzel', 'jmhz', 'discount_intents', 'sickness', 'eldp', 'health',
   'statutory', 'other', 'inbox', 'certificate',
 ]
 /*
@@ -342,12 +348,18 @@ onMounted(loadInboxBadge)
     </nav>
 
     <!--
-      Stav odeslání se nečeká na načtení téhle stránky: panel si svá data
-      obstarává sám a schovat ho za skeleton registrace by znamenalo, že se
-      odpověď na „co jsem odeslal" objeví později, než by musela.
+      Měsíční přehled i Stav odeslání se nečekají na načtení téhle stránky:
+      oba si svá data obstarávají sami a schovat je za skeleton registrace by
+      znamenalo, že se odpověď na „co mám tenhle měsíc udělat" objeví později,
+      než by musela.
     -->
+    <PayrollMonthlyChecklistPanel
+      v-if="activeTab === 'monthly'"
+      v-model:environment="environment"
+    />
+
     <PayrollTransportHistoryPanel
-      v-if="activeTab === 'transport'"
+      v-else-if="activeTab === 'transport'"
       v-model:environment="environment"
     />
 

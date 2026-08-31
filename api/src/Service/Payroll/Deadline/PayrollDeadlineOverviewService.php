@@ -156,6 +156,70 @@ final readonly class PayrollDeadlineOverviewService
             ->add(new \DateInterval('P' . $horizonDays . 'D'))
             ->format('Y-m-d');
 
+        $items = $this->buildItems($supplierId, $environment, $from, $to);
+        $summary = ['total' => count($items)]
+            + array_fill_keys(self::PHASES, 0);
+        foreach ($items as $item) {
+            $phase = (string) $item['phase'];
+            if (array_key_exists($phase, $summary) && $phase !== 'total') {
+                ++$summary[$phase];
+            }
+        }
+
+        return [
+            'as_of' => $today->format('Y-m-d'),
+            'horizon_days' => $horizonDays,
+            'window' => ['from' => $from, 'to' => $to],
+            'summary' => $summary,
+            'items' => $items,
+        ];
+    }
+
+    /**
+     * Tytéž prameny jako {@see self::overview()}, ale nad LIBOVOLNÝM oknem
+     * `[$from, $to]` místo dohledu od dneška.
+     *
+     * Vznikla pro měsíční přehled pro účetní ({@see \MyInvoice\Service\Payroll\Submission\PayrollMonthlyChecklistService}):
+     * ten se ptá na konkrétní zvolený měsíc, ne na „co hoří teď", takže okno
+     * musí zadat volající, ne horizont od dnešního dne. Souhrn (`summary`) tu
+     * záměrně není — skládá si ho volající sám nad SLOUČENÝM seznamem položek
+     * z více pramenů, jinak by dva souhrny (tenhle a checklistu) mohly tvrdit
+     * dvě různé pravdy o tomtéž měsíci.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function itemsForWindow(
+        int $supplierId,
+        string $environment,
+        string $from,
+        string $to,
+    ): array {
+        if ($supplierId <= 0) {
+            throw new \InvalidArgumentException(
+                'Firma přehledu mzdových termínů není platná.',
+            );
+        }
+        if (!in_array($environment, ['production', 'test'], true)) {
+            throw new \InvalidArgumentException(
+                'Prostředí přehledu mzdových termínů musí být production nebo test.',
+            );
+        }
+        if ($from > $to) {
+            throw new \InvalidArgumentException(
+                'Počátek okna přehledu mzdových termínů nesmí být po jeho konci.',
+            );
+        }
+
+        return $this->buildItems($supplierId, $environment, $from, $to);
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function buildItems(
+        int $supplierId,
+        string $environment,
+        string $from,
+        string $to,
+    ): array {
         // Detekce se přepočítá dřív, než se přehled poskládá. Katalog lhůt
         // dosud jen PŘIPOMÍNAL a neměl vazbu na službu, která povinnost splní:
         // změnu údaje nikdo nesledoval, takže osmidenní lhůta neměla kde
@@ -183,22 +247,7 @@ final readonly class PayrollDeadlineOverviewService
                 <=> [$b['due_on'], $b['source'], $b['title']],
         );
 
-        $summary = ['total' => count($items)]
-            + array_fill_keys(self::PHASES, 0);
-        foreach ($items as $item) {
-            $phase = (string) $item['phase'];
-            if (array_key_exists($phase, $summary) && $phase !== 'total') {
-                ++$summary[$phase];
-            }
-        }
-
-        return [
-            'as_of' => $today->format('Y-m-d'),
-            'horizon_days' => $horizonDays,
-            'window' => ['from' => $from, 'to' => $to],
-            'summary' => $summary,
-            'items' => $items,
-        ];
+        return $items;
     }
 
     /** @return list<array<string,mixed>> */
