@@ -4949,6 +4949,7 @@
         "channel_label": "Kanál",
         "status_label": "Stav",
         "detail_action": "Detail",
+        "detail_hide": "Skrýt detail",
         "detail_load_failed": "Detail podání se nepodařilo načíst.",
         "detail_title": "{agenda} — podání č. {id}",
         "detail_kind": "Druh podání",

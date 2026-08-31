@@ -12,6 +12,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionInboxService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -69,13 +70,26 @@ final class PayrollSubmissionInboxAction
             $status,
         );
 
+        // `subject_reference` je interní složený klíč — účetní s ním nic
+        // neudělá. `subject_label` dodává jen to, co jde ověřit ze sdíleného
+        // formátovače (viz jeho docblock); zbytek zůstává `null`, ne hádaný.
+        $items = array_map(
+            static fn (array $item): array => $item + [
+                'subject_label' => PayrollObligationSubjectFormatter::humanSubject(
+                    $item['agenda_code'],
+                    $item['subject_reference'],
+                ),
+            ],
+            $page['items'],
+        );
+
         // `summary` se počítá nad celým inboxem, ne nad stránkou — jinak by
         // „kolik toho čeká" záviselo na tom, kde uživatel v seznamu je.
         return Json::ok($response, [
             'environment' => $environment,
             'status' => $status,
             'summary' => $this->items->statusSummary($supplierId, $environment),
-            'items' => $page['items'],
+            'items' => $items,
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,

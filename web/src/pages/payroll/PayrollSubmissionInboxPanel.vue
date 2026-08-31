@@ -5,6 +5,7 @@ import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
   type PayrollRegzelEnvironment,
+  type PayrollSubmissionDetail,
   type PayrollSubmissionInboxItem,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
@@ -17,6 +18,7 @@ import { formatDate, formatDateTime } from '@/composables/useFormat'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { usePayrollLabels } from '@/composables/usePayrollLabels'
 
 const emit = defineEmits<{
   /** `null` = počet se nepodařilo zjistit; rodič pak odznak nevykreslí vůbec. */
@@ -24,6 +26,16 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const {
+  artifactKindLabel,
+  issueSeverityLabel,
+  submissionAgendaLabel,
+  submissionChannelLabel,
+  submissionIssueMessage,
+  submissionIssueRemediation,
+  submissionKindLabel,
+  submissionStatusLabel,
+} = usePayrollLabels()
 const auth = useAuthStore()
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const loading = ref(true)
@@ -39,6 +51,66 @@ const items = ref<PayrollSubmissionInboxItem[]>([])
 const summary = ref({ total: 0, open: 0, acknowledged: 0, snoozed: 0 })
 const acknowledgingId = ref<number | null>(null)
 const actionError = ref('')
+
+/*
+ * Detail podání ROZBALENÝ inline, ne samostatná stránka — účetní se má na
+ * co odkazovat DŘÍV, než položku potvrdí, ne až po odchodu z inboxu a
+ * dohledání toho samého jinde (a se ztrátou místa ve stránkovaném seznamu).
+ * Rozbaluje se jen tam, kde `submission_id` existuje — bez něj appka nemá
+ * co ukázat (problém vznikl dřív, než se cokoliv připravilo), takže se
+ * tlačítko vůbec nenabídne. Najednou smí být rozbalená jen jedna položka.
+ */
+const expandedId = ref<number | null>(null)
+const expandedDetail = ref<PayrollSubmissionDetail | null>(null)
+const expandedLoading = ref(false)
+const expandedError = ref('')
+const downloadingArtifactId = ref<number | null>(null)
+const artifactDownloadError = ref('')
+
+function readableBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function toggleDetail(item: PayrollSubmissionInboxItem) {
+  if (item.submission_id === null) return
+  if (expandedId.value === item.id) {
+    expandedId.value = null
+    return
+  }
+  expandedId.value = item.id
+  expandedDetail.value = null
+  expandedError.value = ''
+  artifactDownloadError.value = ''
+  expandedLoading.value = true
+  try {
+    expandedDetail.value = await payrollApi.submissionDetail(item.submission_id)
+  } catch (exception) {
+    expandedError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.detail_load_failed'),
+    )
+  } finally {
+    expandedLoading.value = false
+  }
+}
+
+async function downloadDetailArtifact(artifact: PayrollSubmissionDetail['artifacts'][number]) {
+  if (!expandedDetail.value || downloadingArtifactId.value !== null) return
+  artifactDownloadError.value = ''
+  downloadingArtifactId.value = artifact.id
+  try {
+    await payrollApi.downloadSubmissionArtifact(expandedDetail.value.submission.id, artifact)
+  } catch (exception) {
+    artifactDownloadError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.artifact_download_failed'),
+    )
+  } finally {
+    downloadingArtifactId.value = null
+  }
+}
 
 const COLUMNS: ColumnDef[] = [
   { key: 'agenda', labelKey: 'payroll.submissions.inbox.agenda', required: true },
@@ -88,6 +160,22 @@ function statusClass(status: string): string {
 
 function statusLabel(status: string): string {
   return t(`payroll.submissions.inbox.status.${status}`)
+}
+
+/**
+ * Barva stavu SAMOTNÉHO PODÁNÍ v rozbaleném detailu — jiný slovník než
+ * `statusClass()` výš (ten barví stav POLOŽKY INBOXU: open/acknowledged/
+ * snoozed/resolved). Podání má vlastní stavy (ready/submitted/accepted/
+ * rejected/…), použít na ně stejnou funkci by dalo nesmyslnou barvu.
+ */
+function submissionStatusClass(status: string): string {
+  if (status === 'accepted') return 'bg-success-50 text-success-700'
+  if (['rejected', 'partially_accepted', 'waiting_for_identity', 'correction_required'].includes(status)) {
+    return 'bg-danger-50 text-danger-700'
+  }
+  if (['submitted', 'processing'].includes(status)) return 'bg-primary-50 text-primary-700'
+  if (status === 'cancelled_in_time') return 'bg-neutral-100 text-neutral-600'
+  return 'bg-payroll-50 text-payroll-700'
 }
 
 async function load() {
@@ -278,58 +366,74 @@ defineExpose({ reload: load })
               </thead>
               <tbody class="divide-y divide-neutral-100">
                 <tr v-for="item in items" :key="item.id" data-test="inbox-row">
-                  <td v-if="tbl.isVisible('agenda')" class="px-4 py-3">
-                    <span class="block font-medium text-neutral-900">{{ item.agenda_code }}</span>
-                    <span class="block text-xs text-neutral-500">{{ item.subject_reference }}</span>
-                  </td>
-                  <td v-if="tbl.isVisible('due_on')" class="px-4 py-3 text-neutral-700">{{ formatDate(item.due_on) }}</td>
-                  <td v-if="tbl.isVisible('problem')" class="px-4 py-3">
-                    <span
-                      class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                      :class="escalationClass(item)"
-                      data-test="inbox-problem"
-                    >
-                      {{ problemLabel(item) }}
-                    </span>
-                  </td>
-                  <td v-if="tbl.isVisible('status')" class="px-4 py-3">
-                    <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
-                      {{ statusLabel(item.status) }}
-                    </span>
-                    <span v-if="item.status === 'snoozed' && item.snoozed_until" class="mt-1 block text-xs text-neutral-500">
-                      {{ t('payroll.submissions.inbox.snoozed_until_label', { at: formatDateTime(item.snoozed_until) }) }}
-                    </span>
-                  </td>
-                  <td v-if="tbl.isVisible('actions')" class="px-4 py-3">
-                    <div v-if="canWrite" class="flex flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        :class="btnOutlineSm('success')"
-                        :disabled="acknowledgingId !== null || item.status === 'acknowledged'"
-                        data-test="inbox-acknowledge"
-                        @click="acknowledge(item)"
+                    <td v-if="tbl.isVisible('agenda')" class="px-4 py-3">
+                      <span class="block font-medium text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</span>
+                      <span v-if="item.subject_label" class="block text-xs text-neutral-500">{{ item.subject_label }}</span>
+                    </td>
+                    <td v-if="tbl.isVisible('due_on')" class="px-4 py-3 text-neutral-700">{{ formatDate(item.due_on) }}</td>
+                    <td v-if="tbl.isVisible('problem')" class="px-4 py-3">
+                      <span
+                        class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                        :class="escalationClass(item)"
+                        data-test="inbox-problem"
                       >
-                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                          <path :d="ICONS.checkCircle" />
-                        </svg>
-                        {{ acknowledgingId === item.id
-                          ? t('payroll.submissions.inbox.acknowledging')
-                          : t('payroll.submissions.inbox.acknowledge') }}
-                      </button>
-                      <button
-                        type="button"
-                        :class="btnOutlineSm('warning')"
-                        data-test="inbox-snooze"
-                        @click="openSnooze(item)"
-                      >
-                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                          <path :d="ICONS.pause" />
-                        </svg>
-                        {{ t('payroll.submissions.inbox.snooze') }}
-                      </button>
-                    </div>
-                    <span v-else class="text-xs text-neutral-400">—</span>
-                  </td>
+                        {{ problemLabel(item) }}
+                      </span>
+                    </td>
+                    <td v-if="tbl.isVisible('status')" class="px-4 py-3">
+                      <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
+                        {{ statusLabel(item.status) }}
+                      </span>
+                      <span v-if="item.status === 'snoozed' && item.snoozed_until" class="mt-1 block text-xs text-neutral-500">
+                        {{ t('payroll.submissions.inbox.snoozed_until_label', { at: formatDateTime(item.snoozed_until) }) }}
+                      </span>
+                    </td>
+                    <td v-if="tbl.isVisible('actions')" class="px-4 py-3">
+                      <div class="flex flex-wrap justify-end gap-2">
+                        <button
+                          v-if="item.submission_id !== null"
+                          type="button"
+                          :class="btnOutlineSm('neutral')"
+                          data-test="inbox-detail-toggle"
+                          @click="toggleDetail(item)"
+                        >
+                          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path :d="ICONS.doc" />
+                          </svg>
+                          {{ expandedId === item.id
+                            ? t('payroll.submissions.overview.detail_hide')
+                            : t('payroll.submissions.overview.detail_action') }}
+                        </button>
+                        <template v-if="canWrite">
+                          <button
+                            type="button"
+                            :class="btnOutlineSm('success')"
+                            :disabled="acknowledgingId !== null || item.status === 'acknowledged'"
+                            data-test="inbox-acknowledge"
+                            @click="acknowledge(item)"
+                          >
+                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                              <path :d="ICONS.checkCircle" />
+                            </svg>
+                            {{ acknowledgingId === item.id
+                              ? t('payroll.submissions.inbox.acknowledging')
+                              : t('payroll.submissions.inbox.acknowledge') }}
+                          </button>
+                          <button
+                            type="button"
+                            :class="btnOutlineSm('warning')"
+                            data-test="inbox-snooze"
+                            @click="openSnooze(item)"
+                          >
+                            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                              <path :d="ICONS.pause" />
+                            </svg>
+                            {{ t('payroll.submissions.inbox.snooze') }}
+                          </button>
+                        </template>
+                        <span v-if="!canWrite && item.submission_id === null" class="text-xs text-neutral-400">—</span>
+                      </div>
+                    </td>
                 </tr>
               </tbody>
             </table>
@@ -340,8 +444,8 @@ defineExpose({ reload: load })
           <article v-for="item in items" :key="item.id" class="rounded-lg border border-neutral-200 p-4" data-test="inbox-card">
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <h3 class="font-semibold text-neutral-900">{{ item.agenda_code }}</h3>
-                <p class="mt-1 text-xs text-neutral-500">{{ item.subject_reference }}</p>
+                <h3 class="font-semibold text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</h3>
+                <p v-if="item.subject_label" class="mt-1 text-xs text-neutral-500">{{ item.subject_label }}</p>
               </div>
               <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
                 {{ statusLabel(item.status) }}
@@ -364,6 +468,20 @@ defineExpose({ reload: load })
             <p v-if="item.status === 'snoozed' && item.snoozed_until" class="mt-2 text-xs text-neutral-500">
               {{ t('payroll.submissions.inbox.snoozed_until_label', { at: formatDateTime(item.snoozed_until) }) }}
             </p>
+            <button
+              v-if="item.submission_id !== null"
+              type="button"
+              class="cursor-pointer mt-4"
+              :class="btnOutline('neutral')"
+              @click="toggleDetail(item)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.doc" />
+              </svg>
+              {{ expandedId === item.id
+                ? t('payroll.submissions.overview.detail_hide')
+                : t('payroll.submissions.overview.detail_action') }}
+            </button>
             <div v-if="canWrite" class="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -397,6 +515,107 @@ defineExpose({ reload: load })
           @update:page="goToPage"
         />
       </section>
+
+      <p
+        v-if="expandedError"
+        class="rounded-xl border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
+        role="alert"
+        data-test="inbox-detail-error"
+      >
+        {{ expandedError }}
+      </p>
+
+      <section
+        v-if="expandedId !== null"
+        class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm"
+        data-test="inbox-detail"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 p-4 sm:p-6">
+          <p v-if="expandedLoading" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
+          <div v-else-if="expandedDetail" class="flex flex-wrap items-center gap-2 text-sm">
+            <span class="font-medium text-neutral-900">{{ submissionKindLabel(expandedDetail.submission.submission_kind) }}</span>
+            <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="submissionStatusClass(expandedDetail.submission.status)">
+              {{ submissionStatusLabel(expandedDetail.submission.status) }}
+            </span>
+            <span class="text-xs text-neutral-500">{{ submissionChannelLabel(expandedDetail.submission.channel) }}</span>
+            <span class="text-xs text-neutral-500">{{ expandedDetail.submission.created_at }}</span>
+          </div>
+          <button type="button" :class="btnOutline('neutral')" @click="expandedId = null">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.x" />
+            </svg>
+            {{ t('common.close') }}
+          </button>
+        </div>
+
+        <div v-if="expandedDetail" class="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2 sm:p-6">
+          <article class="rounded-lg border border-neutral-200 p-4">
+            <h3 class="font-semibold text-neutral-900">
+              {{ t('payroll.submissions.overview.detail_artifacts', { count: expandedDetail.artifacts.length }) }}
+            </h3>
+            <p
+              v-if="artifactDownloadError"
+              class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+              role="alert"
+              data-test="inbox-artifact-download-error"
+            >
+              {{ artifactDownloadError }}
+            </p>
+            <p v-if="expandedDetail.artifacts.length === 0" class="mt-3 text-sm text-neutral-500">
+              {{ t('payroll.submissions.overview.detail_none') }}
+            </p>
+            <ul v-else class="mt-3 divide-y divide-neutral-100">
+              <li v-for="artifact in expandedDetail.artifacts" :key="artifact.id" class="py-3 first:pt-0 last:pb-0">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span class="font-medium text-neutral-900">{{ artifactKindLabel(artifact.artifact_kind) }}</span>
+                    <span class="ml-2 text-xs text-neutral-500">{{ readableBytes(artifact.byte_size) }}</span>
+                  </div>
+                  <button
+                    type="button"
+                    :class="btnOutlineSm('neutral')"
+                    :disabled="downloadingArtifactId !== null"
+                    data-test="inbox-artifact-download"
+                    @click="downloadDetailArtifact(artifact)"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.download" />
+                    </svg>
+                    {{ t('common.download') }}
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </article>
+
+          <article class="rounded-lg border border-neutral-200 p-4">
+            <h3 class="font-semibold text-neutral-900">
+              {{ t('payroll.submissions.overview.detail_issues', { count: expandedDetail.issues.length }) }}
+            </h3>
+            <p v-if="expandedDetail.issues.length === 0" class="mt-3 text-sm text-neutral-500">
+              {{ t('payroll.submissions.overview.detail_none') }}
+            </p>
+            <ul v-else class="mt-3 divide-y divide-neutral-100">
+              <li v-for="issue in expandedDetail.issues" :key="issue.id" class="py-3 first:pt-0 last:pb-0">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <span class="font-medium text-neutral-900" data-test="inbox-issue-message">
+                    {{ submissionIssueMessage(issue.issue_code) }}
+                  </span>
+                  <span
+                    class="rounded-full px-2 py-0.5 text-xs font-medium"
+                    :class="issue.is_resolved ? 'bg-success-50 text-success-700' : 'bg-warning-50 text-warning-700'"
+                  >
+                    {{ issue.is_resolved
+                      ? t('payroll.submissions.overview.detail_resolved')
+                      : issueSeverityLabel(issue.severity) }}
+                  </span>
+                </div>
+                <p class="mt-2 text-xs text-neutral-600">{{ submissionIssueRemediation(issue.validation_stage) }}</p>
+              </li>
+            </ul>
+          </article>
+        </div>
+      </section>
     </template>
 
     <Modal
@@ -407,7 +626,8 @@ defineExpose({ reload: load })
     >
       <div class="space-y-4">
         <p class="text-sm text-neutral-600">
-          {{ snoozeTarget.agenda_code }} · {{ snoozeTarget.subject_reference }}
+          {{ submissionAgendaLabel(snoozeTarget.agenda_code) }}
+          <template v-if="snoozeTarget.subject_label"> · {{ snoozeTarget.subject_label }}</template>
         </p>
         <p v-if="snoozeError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert">
           {{ snoozeError }}

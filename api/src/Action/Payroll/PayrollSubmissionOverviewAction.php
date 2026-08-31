@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
+use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -148,6 +149,13 @@ final class PayrollSubmissionOverviewAction
                 $item['status'],
                 $item['latest_submission']['status'] ?? null,
             )->toArray();
+            // `subject_reference` je interní složený klíč — účetní s ním nic
+            // neudělá. `subject_label` dodává jen to, co jde ověřit ze
+            // sdíleného formátovače; zbytek zůstává `null`, ne hádaný.
+            $item['subject_label'] = PayrollObligationSubjectFormatter::humanSubject(
+                $item['agenda_code'],
+                $item['subject_reference'],
+            );
         }
         unset($item);
 

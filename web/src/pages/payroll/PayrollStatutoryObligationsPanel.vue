@@ -13,6 +13,7 @@ import {
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
+import { usePayrollLabels } from '@/composables/usePayrollLabels'
 
 const props = defineProps<{ environment: PayrollRegzelEnvironment }>()
 const emit = defineEmits<{
@@ -20,6 +21,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { submissionAgendaLabel } = usePayrollLabels()
 const auth = useAuthStore()
 const environmentModel = computed({
   get: () => props.environment,
@@ -389,7 +391,7 @@ watch(period, load)
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p class="font-medium text-neutral-900">
-                {{ item.agenda_code }}<template v-if="item.full_name"> · {{ item.full_name }}</template>
+                {{ submissionAgendaLabel(item.agenda_code) }}<template v-if="item.full_name"> · {{ item.full_name }}</template>
               </p>
               <p class="mt-1 text-sm text-neutral-600">{{ item.case_reference }} · {{ item.receipt_reference }}</p>
               <p v-if="item.payment_amount_minor !== null" class="mt-1 text-sm font-medium text-neutral-800">

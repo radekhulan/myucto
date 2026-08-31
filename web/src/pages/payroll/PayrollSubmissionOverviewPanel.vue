@@ -50,6 +50,7 @@ const { locale, t } = useI18n()
 const {
   artifactKindLabel,
   issueSeverityLabel,
+  submissionAgendaLabel,
   submissionChannelLabel,
   submissionIssueMessage,
   submissionIssueRemediation,
@@ -672,8 +673,8 @@ onMounted(load)
               </thead>
               <tbody class="divide-y divide-neutral-100">
                 <tr v-for="item in items" :key="item.id">
-                  <td v-if="tbl.isVisible('agenda')" class="px-4 py-3 font-medium text-neutral-900">{{ item.agenda_code }}</td>
-                  <td v-if="tbl.isVisible('subject')" class="px-4 py-3 text-neutral-700">{{ item.subject_reference }}</td>
+                  <td v-if="tbl.isVisible('agenda')" class="px-4 py-3 font-medium text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</td>
+                  <td v-if="tbl.isVisible('subject')" class="px-4 py-3 text-neutral-700">{{ item.subject_label ?? '—' }}</td>
                   <td v-if="tbl.isVisible('due_on')" class="px-4 py-3 text-neutral-700">
                     <span class="block">{{ formatDate(item.due_on) }}</span>
                     <span
@@ -716,8 +717,8 @@ onMounted(load)
           <article v-for="item in items" :key="item.id" class="rounded-lg border border-neutral-200 p-4">
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <h3 class="font-semibold text-neutral-900">{{ item.agenda_code }}</h3>
-                <p class="mt-1 text-xs text-neutral-500">{{ item.subject_reference }}</p>
+                <h3 class="font-semibold text-neutral-900">{{ submissionAgendaLabel(item.agenda_code) }}</h3>
+                <p v-if="item.subject_label" class="mt-1 text-xs text-neutral-500">{{ item.subject_label }}</p>
               </div>
               <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
                 {{ submissionStatusLabel(item.status) }}
@@ -785,7 +786,7 @@ onMounted(load)
             <div class="flex flex-wrap items-center gap-2">
               <h2 class="text-lg font-semibold text-neutral-900">
                 {{ t('payroll.submissions.overview.detail_title', {
-                  agenda: detail.submission.agenda_code,
+                  agenda: submissionAgendaLabel(detail.submission.agenda_code),
                   id: detail.submission.id,
                 }) }}
               </h2>
@@ -797,7 +798,7 @@ onMounted(load)
               </span>
             </div>
             <p class="mt-1 text-sm text-neutral-500">
-              {{ detail.submission.subject_reference }} ·
+              <template v-if="detail.submission.subject_label">{{ detail.submission.subject_label }} · </template>
               {{ detail.submission.period_start }}–{{ detail.submission.period_end }}
             </p>
           </div>

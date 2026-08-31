@@ -2216,6 +2216,8 @@ export interface PayrollSubmissionOverviewItem {
   agenda_group: PayrollSubmissionAgendaGroup
   subject_type: string
   subject_reference: string
+  /** Lidsky čitelný `subject_reference`, jen tam, kde jde ověřit — jinak `null`. */
+  subject_label: string | null
   period_start: string
   period_end: string
   obligation_kind: string
@@ -2505,6 +2507,8 @@ export interface PayrollSubmissionDetail {
     agenda_code: string
     subject_type: string
     subject_reference: string
+    /** Lidsky čitelný `subject_reference`, jen tam, kde jde ověřit — jinak `null`. */
+    subject_label: string | null
     period_start: string
     period_end: string
     submission_kind: string
@@ -2590,6 +2594,8 @@ export interface PayrollSubmissionInboxItem {
   agenda_code: string
   subject_type: string
   subject_reference: string
+  /** Lidsky čitelný `subject_reference`, jen tam, kde jde ověřit — jinak `null`. */
+  subject_label: string | null
   period_start: string
   period_end: string
   due_on: string

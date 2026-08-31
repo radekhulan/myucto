@@ -279,7 +279,13 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
      * Zdravotní pojišťovnu už jmenuje sloupec „Kam" — opakovat ji i jako
      * předmět by bylo zbytečné dvojení, ne doplněk.
      */
-    public function testHealthBulkNotificationSubjectIsSuppressedAsDuplicate(): void
+    /**
+     * `PayrollObligationSubjectFormatter` je teď sdílená s inboxem a přehledem
+     * podání — ani jeden z nich nemá sloupec „Kam", takže formátovač musí
+     * kód pojišťovny vrátit vždy, ne ho tady zamlčet kvůli dvojení se sloupcem
+     * „Kam", který mají jen tenhle přehled a checklist.
+     */
+    public function testHealthBulkNotificationSubjectShowsInsurerCode(): void
     {
         $service = $this->service(
             submissionRows: [$this->submissionRow(
@@ -291,7 +297,7 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         );
 
         $item = $this->onlyItem($service, 'submission');
-        self::assertNull($item['subject']);
+        self::assertSame('zdravotní pojišťovna 111', $item['subject']);
     }
 
     /**

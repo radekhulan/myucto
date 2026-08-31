@@ -190,7 +190,10 @@ final readonly class PayrollMonthlyChecklistService
                 // povinností nečte, zůstává tu jen kvůli jednotnému tvaru
                 // řádku napříč prameny.
                 'agenda_label' => $row['agenda_code'],
-                'subject' => self::humanSubmissionSubject((string) $row['subject_reference']),
+                'subject' => PayrollObligationSubjectFormatter::humanSubject(
+                    (string) $row['agenda_code'],
+                    (string) $row['subject_reference'],
+                ),
                 'period' => substr($row['period_start'], 0, 7),
                 'due_on' => $row['due_on'],
                 'phase' => $assessment->phase,
@@ -373,7 +376,7 @@ final readonly class PayrollMonthlyChecklistService
             HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
             HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW => $this->isdsAgendaDescription(
                 'XML nebo PDF podle toho, co pojišťovna přijímá',
-                self::insurerLabel($subjectReference),
+                PayrollObligationSubjectFormatter::humanSubject($agendaCode, $subjectReference),
                 '/payroll/submissions/health',
                 $transport,
             ),
@@ -390,59 +393,6 @@ final readonly class PayrollMonthlyChecklistService
                 'tab_path' => '/payroll/submissions/other',
             ],
         };
-    }
-
-    /**
-     * Poslední segment `subject_reference` je u zdravotních agend kód
-     * pojišťovny (viz `HealthInsuranceSubmissionService::register()`,
-     * `$subjectReference = "...:" . $insurerCode`). Když formát neodpovídá,
-     * radši žádný název pojišťovny než hádaný.
-     */
-    private static function insurerLabel(string $subjectReference): ?string
-    {
-        $parts = explode(':', $subjectReference);
-        $code = end($parts);
-
-        return $code !== '' && $code !== false
-            ? 'zdravotní pojišťovna ' . $code
-            : null;
-    }
-
-    /**
-     * Druhý řádek pod agendou v přehledu — smí ukázat jen to, co je OVĚŘENĚ
-     * čitelné pro člověka. `subject_reference` je u agendových povinností
-     * interní složený klíč (`payroll_run:8:office:4`,
-     * `health_bulk_notification:2026-08:111`, `employment:37`, …) a jeho
-     * syrové zobrazení bylo přesně to, na co si zadavatel stěžoval.
-     *
-     * Rozpoznané tvary:
-     *   `payroll_run:{runId}:office:{officeId}` (JMHZ, REGZEL) — účtárna JE
-     *   užitečný doplněk k předmětu, protože firma s víc účtárnami by jinak
-     *   měla dva řádky bez rozlišení,
-     *   `payroll_run:{runId}` (bez účtárny) a `health_bulk_notification:…`
-     *   (zdravotní agendy — pojišťovnu už nese sloupec „Kam") — druhý řádek by
-     *   byl jen opakování, proto se schová úplně,
-     *   cokoliv jiného (typicky `employment:{id}` u ELDP/OZUSPOJ/PREZEC/REGZEC)
-     *   — appka nezná jméno osoby na tomhle řádku dat a interní ID by nikomu
-     *   nic neřeklo, takže se radši NEUKÁŽE NIC, než syrové ID.
-     */
-    private static function humanSubmissionSubject(string $subjectReference): ?string
-    {
-        if (str_starts_with($subjectReference, 'payroll_run:')) {
-            $parts = explode(':', $subjectReference);
-            if (count($parts) === 4 && $parts[2] === 'office') {
-                return 'mzdová účtárna ' . $parts[3];
-            }
-
-            return null;
-        }
-        if (str_starts_with($subjectReference, 'health_bulk_notification:')) {
-            // Pojišťovnu už jmenuje sloupec „Kam" (viz `insurerLabel()`) —
-            // opakovat ji tady by bylo zbytečné dvojení, ne doplněk.
-            return null;
-        }
-
-        return null;
     }
 
     /**

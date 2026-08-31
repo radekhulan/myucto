@@ -54,6 +54,20 @@ const SUBMISSION_ISSUE_CODES = new Set([
   'registration_xsd_validation_failed',
 ])
 
+/**
+ * Kódy agend, které zná katalog dalších povinností
+ * ({@see \MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog})
+ * a jeho záložka — sdílejí s ním stejné znění (`payroll.submissions.statutory.agenda.*`),
+ * ať se v appce neříká totéž dvakrát jinak.
+ */
+const STATUTORY_CATALOG_AGENDA_CODES = new Set([
+  'NEMPRI', 'HZUPN', 'ELDP', 'JMHZ25', 'OZUSPOJ', 'REGZELDOPL25', 'STATUTORY_ACCIDENT_INSURANCE',
+])
+/** Zbylé agendové kódy, které katalog dalších povinností nezná — vlastní slovník měsíčního přehledu. */
+const MONTHLY_CHECKLIST_AGENDA_CODES = new Set([
+  'PREZEC26', 'REGZEC25', 'REGZEL26', 'HOZ_2026', 'PPZ_2026',
+])
+
 export function usePayrollLabels() {
   const { t, te } = useI18n()
 
@@ -140,6 +154,27 @@ export function usePayrollLabels() {
     )
   }
 
+  /**
+   * Lidský název agendové povinnosti z jejího `agenda_code` — kód sám o sobě
+   * (`JMHZ25`, `HOZ_2026`, `social_jmhz_change`, …) nic účetní neřekne.
+   * Jedna cesta pro měsíční přehled, inbox, přehled podání i záložku Dalších
+   * povinností: kód, který zná katalog dalších povinností, dostane STEJNÉ
+   * znění jako jeho vlastní záložka; zbytek jde přes vlastní slovník
+   * měsíčního přehledu (`payroll.submissions.monthly_checklist.agenda.*`).
+   * Neznámý kód padá na poctivé „neznámo", ne na syrový i18n klíč.
+   */
+  function submissionAgendaLabel(agendaCode: string | null | undefined): string {
+    if (agendaCode && STATUTORY_CATALOG_AGENDA_CODES.has(agendaCode)) {
+      return t(`payroll.submissions.statutory.agenda.${agendaCode}`)
+    }
+    return knownLabel(
+      'payroll.submissions.monthly_checklist.agenda',
+      agendaCode,
+      MONTHLY_CHECKLIST_AGENDA_CODES,
+      'payroll.submissions.monthly_checklist.unknown',
+    )
+  }
+
   function submissionIssueRemediation(stage: string | null | undefined): string {
     return knownLabel(
       'payroll.submissions.overview.issue_remediation',
@@ -164,6 +199,7 @@ export function usePayrollLabels() {
     artifactKindLabel,
     employmentExitReadinessLabel,
     issueSeverityLabel,
+    submissionAgendaLabel,
     submissionChannelLabel,
     submissionKindLabel,
     submissionIssueMessage,

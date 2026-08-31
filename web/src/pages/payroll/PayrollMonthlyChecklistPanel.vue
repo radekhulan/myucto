@@ -29,7 +29,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { submissionStatusLabel } = usePayrollLabels()
+const { submissionAgendaLabel, submissionStatusLabel } = usePayrollLabels()
 const environmentModel = computed({
   get: () => props.environment,
   set: (value: PayrollRegzelEnvironment) => emit('update:environment', value),
@@ -68,33 +68,24 @@ function phaseLabel(item: PayrollMonthlyChecklistItem): string {
 /**
  * Backend posílá u `submission` a `checklist` jen surový kód (`agenda_code`
  * = `JMHZ25`/`HOZ_2026`/…, `item_key` = `social_jmhz_change`/…) — účetní
- * s ním nic neudělá, takže lidský název dodává tenhle panel, přesně jako
- * záložka „Další povinnosti" (`PayrollStatutoryObligationsPanel.vue`)
- * dělá u `payroll.submissions.statutory.agenda.*`.
+ * s ním nic neudělá, takže lidský název dodává tenhle panel.
  *
- * Tři slovníky podle toho, odkud kód je:
+ * Dva slovníky podle toho, odkud kód je:
  *   - checklist item_key → `payroll.people.checklist.*` (karta zaměstnance
  *     tenhle slovník už má a je kompletní pro všech 14 klíčů),
- *   - kód, který zná i katalog „Dalších povinností" → jeho `statutory.agenda.*`
- *     (stejné znění, jedno místo pravdy pro NEMPRI/HZUPN/ELDP/JMHZ25/OZUSPOJ/
- *     REGZELDOPL25/úrazové pojištění),
- *   - zbytek submission agend (PREZEC/REGZEC/REGZEL26, HOZ_2026, PPZ_2026) →
- *     nový `monthly_checklist.agenda.*`, doplněný spolu s tímhle přehledem.
+ *   - submission agenda_code → sdílené `submissionAgendaLabel()`
+ *     z `usePayrollLabels` — TATÁŽ funkce, kterou používá inbox a přehled
+ *     podání, ať se lidský název nerozejde mezi panely.
  *
  * Ostatní zdroje (odvod, registrační změna, vyúčtování, nemocenský případ)
  * posílají už čitelný `agenda_label` z backendu — ten se použije beze změny.
  */
-const STATUTORY_CATALOG_AGENDA_CODES = new Set([
-  'NEMPRI', 'HZUPN', 'ELDP', 'JMHZ25', 'OZUSPOJ', 'REGZELDOPL25', 'STATUTORY_ACCIDENT_INSURANCE',
-])
-
 function agendaLabel(item: PayrollMonthlyChecklistItem): string {
   const code = item.agenda_code
   if (code === null) return item.agenda_label
   if (item.source === 'checklist') return t(`payroll.people.checklist.${code}`)
   if (item.source !== 'submission') return item.agenda_label
-  if (STATUTORY_CATALOG_AGENDA_CODES.has(code)) return t(`payroll.submissions.statutory.agenda.${code}`)
-  return t(`payroll.submissions.monthly_checklist.agenda.${code}`)
+  return submissionAgendaLabel(code)
 }
 
 /*

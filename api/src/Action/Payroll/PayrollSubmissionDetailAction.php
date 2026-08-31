@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSubmissionDetailRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -87,6 +88,14 @@ final class PayrollSubmissionDetailAction
                 404,
             );
         }
+
+        // `subject_reference` je interní složený klíč — účetní s ním nic
+        // neudělá. `subject_label` dodává jen to, co jde ověřit ze sdíleného
+        // formátovače; zbytek zůstává `null`, ne hádaný.
+        $detail['submission']['subject_label'] = PayrollObligationSubjectFormatter::humanSubject(
+            $detail['submission']['agenda_code'],
+            $detail['submission']['subject_reference'],
+        );
 
         return Json::ok($response, $detail)
             ->withHeader('Cache-Control', 'private, no-store')
