@@ -122,10 +122,11 @@ Klíč z e-mailu vlož na stránce **Systém → Zakoupení** do pole v sekci
 **naváže na tuto instalaci** (jedinečný identifikátor vytvořený při prvním
 spuštění). Jeden klíč smí být v jednom okamžiku aktivní na jedné instalaci.
 
-Po aktivaci aplikace platnost licence **jednou denně online ověřuje** vůči
-serveru myucto.cz a získává kryptograficky podepsané potvrzení s platností
-14 dní. Krátkodobý výpadek internetu proto provoz neomezí. Ověřování běží
-samo, na pozadí — **nevyžaduje žádné nastavení uživatele**.
+Po aktivaci aplikace platnost licence běžně **jednou denně online ověřuje**
+vůči serveru myucto.cz a získává kryptograficky podepsané potvrzení s platností
+14 dní. Od dvou hodin před další platbou do 24 hodin po ní a při prodlení se
+stav kontroluje jednou za hodinu. Krátkodobý výpadek internetu proto provoz
+neomezí. Ověřování běží samo na pozadí a **nevyžaduje žádné nastavení uživatele**.
 
 > 🛈 **Co se při ověření přenáší.** Jen technické údaje — identifikátor
 > instalace, licenční klíč, identifikace sestavení a souhrnné počty aktivních

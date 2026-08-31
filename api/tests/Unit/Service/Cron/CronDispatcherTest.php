@@ -71,6 +71,15 @@ final class CronDispatcherTest extends TestCase
         self::assertNotContains('cron-backup', $at0201['launched'], 'V 2:01 už zálohu spouštět nesmí.');
     }
 
+    public function testLicenseRenewFiresHourlyAtMinuteFifteen(): void
+    {
+        $at1015 = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 10:15:00'));
+        self::assertContains('cron-license-renew', $at1015['launched']);
+
+        $at1016 = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 10:16:00'));
+        self::assertNotContains('cron-license-renew', $at1016['launched']);
+    }
+
     /**
      * Nejcitlivější vlastnost dispatcheru. Dvojí spuštění v téže minutě
      * (cron + ruční běh) nesmí pustit úlohu dvakrát — u pravidelné fakturace

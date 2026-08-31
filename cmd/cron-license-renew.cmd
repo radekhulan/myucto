@@ -1,13 +1,12 @@
 @echo off
 REM ============================================================================
-REM  cron-license-renew.cmd — denni obnova licencniho tokenu (E4)
-REM  Frekvence: 1x denne. Doplnek k obnove, kterou spousti i prvni prihlaseny
-REM  request dne (LicenseMiddleware); cron pokryva instalace, ktere pres den
-REM  nikdo neotevre. Mutex uvnitr sluzby zajisti max. 1x denne.
+REM  cron-license-renew.cmd - pravidelna obnova licencniho tokenu (E4)
+REM  Frekvence: 1x za hodinu. Sluzba vola server bezne max. 1x denne,
+REM  kolem dalsi platby a pri past_due max. 1x za hodinu.
 REM
 REM  Task Scheduler:
 REM    schtasks /create /tn "MyUcto License Renew" ^
-REM      /tr "%~f0" /sc daily /st 05:00 /ru SYSTEM
+REM      /tr "%~f0" /sc hourly /mo 1 /st 00:15 /ru SYSTEM
 REM ============================================================================
 setlocal
 set "SCRIPT_DIR=%~dp0"

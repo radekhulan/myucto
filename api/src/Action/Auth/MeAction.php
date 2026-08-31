@@ -201,6 +201,11 @@ final class MeAction
                 : null;
         }
 
+        $licenseSummary = (LicenseMiddleware::state($request) ?? $this->license->current())->toMeSummary();
+        if ($effectiveRole->isClientType()) {
+            $licenseSummary['subscription_state'] = null;
+        }
+
         return Json::ok($response, [
             'user' => [
                 'id'              => $userId,
@@ -233,7 +238,7 @@ final class MeAction
             'server_time'         => self::isoUtc($now),
             'idle_expires_at'     => $idleExpiresAt,
             // Stav licence (E4) pro FE bannery (trial odpočet, overage, degraded).
-            'license'             => (LicenseMiddleware::state($request) ?? $this->license->current())->toMeSummary(),
+            'license'             => $licenseSummary,
         ]);
     }
 

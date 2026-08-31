@@ -109,6 +109,82 @@ final class LicenseRenewTest extends TestCase
         $this->service->renewIfDue(); // 2. den → znovu volá
     }
 
+    public function testScheduledRenewStaysDailyOutsideBillingWindow(): void
+    {
+        $this->prime(date('Y-m-d H:i:s'));
+        $this->subscription([
+            'state'          => 'active',
+            'auto_renew'     => true,
+            'next_charge_at' => time() + 10 * 86400,
+        ]);
+        $this->client->expects($this->never())->method('renew');
+
+        $this->service->renewScheduled();
+    }
+
+    public function testScheduledRenewRepeatsHourlyNearNextCharge(): void
+    {
+        $this->prime(date('Y-m-d H:i:s', time() - 3600));
+        $this->subscription([
+            'state'          => 'active',
+            'auto_renew'     => true,
+            'next_charge_at' => time() + 3600,
+        ]);
+        $this->client->expects($this->once())->method('renew')->willReturn([
+            'ok'    => true,
+            'token' => $this->token(['nonce' => 'billing-watch']),
+        ]);
+
+        $this->service->renewScheduled();
+    }
+
+    public function testScheduledRenewDoesNotRepeatInsideHourlyInterval(): void
+    {
+        $this->prime(date('Y-m-d H:i:s', time() - 600));
+        $this->subscription([
+            'state'          => 'active',
+            'auto_renew'     => true,
+            'next_charge_at' => time() + 3600,
+        ]);
+        $this->client->expects($this->never())->method('renew');
+
+        $this->service->renewScheduled();
+    }
+
+    public function testPastDueSubscriptionUsesHourlyScheduledRenew(): void
+    {
+        $this->prime(date('Y-m-d H:i:s', time() - 3600));
+        $this->subscription(['state' => 'past_due']);
+        $this->client->expects($this->once())->method('renew')->willReturn([
+            'ok'    => true,
+            'token' => $this->token(['nonce' => 'past-due-watch']),
+        ]);
+
+        $this->service->renewScheduled();
+    }
+
+    public function testSuccessfulBillingWatchReturnsToDailyCadence(): void
+    {
+        $this->prime(date('Y-m-d H:i:s', time() - 3600));
+        $this->subscription([
+            'state'          => 'active',
+            'auto_renew'     => true,
+            'next_charge_at' => time() + 3600,
+        ]);
+        $this->client->expects($this->once())->method('renew')->willReturn([
+            'ok'           => true,
+            'token'        => $this->token(['nonce' => 'renewed-period']),
+            'subscription' => [
+                'state'          => 'active',
+                'auto_renew'     => true,
+                'next_charge_at' => time() + 30 * 86400,
+            ],
+        ]);
+
+        $this->service->renewScheduled();
+        $this->service->renewScheduled();
+    }
+
     public function testNetworkErrorMarksCheckFailedButKeepsValidTokenActive(): void
     {
         $this->prime(null);
@@ -277,7 +353,8 @@ final class LicenseRenewTest extends TestCase
         $this->db->pdo()->prepare(
             'UPDATE license
                 SET license_key = ?, token = ?, token_payload = ?, last_nonce = ?,
-                    counter = 0, last_check_at = ?, last_check_ok = 1
+                    counter = 0, last_check_at = ?, last_check_ok = 1,
+                    subscription_info = NULL
               WHERE id = 1'
         )->execute([
             'MYU-TEST-0001-AAAA',
@@ -286,6 +363,13 @@ final class LicenseRenewTest extends TestCase
             'nonce-1',
             $lastCheckAt,
         ]);
+    }
+
+    /** @param array<string,mixed> $subscription */
+    private function subscription(array $subscription): void
+    {
+        $this->db->pdo()->prepare('UPDATE license SET subscription_info = ? WHERE id = 1')
+            ->execute([json_encode($subscription, JSON_UNESCAPED_UNICODE)]);
     }
 
     /** @return array<string,mixed> */

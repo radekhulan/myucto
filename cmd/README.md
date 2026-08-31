@@ -71,7 +71,7 @@ má vždy přednost před oběma.
 | `cron-vat-clearing.{cmd,sh}` | **1× měsíčně** — interní doklad zúčtování DPH: převede daň zdaňovacího období z analytik 343.100 (vstup) a 343.200 (výstup) na zúčtovací 343.900 (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`, `--force`). Jen plátci v podvojném účetnictví; datum zápisu je poslední den období, zaúčtování idempotentní |
 | `cron-vat-status-apply.{cmd,sh}` | Denní propsání historie plátcovství DPH do živé cache firem (`supplier.is_vat_payer`, `is_identified`) — aplikuje změny plánované s budoucí účinností v den, kdy nastanou (`--dry-run`). Jediný set-based UPDATE, idempotentní |
 | `cron-journal-integrity-check.{cmd,sh}` | Noční integrity job nad účetním deníkem (jen podvojné účetnictví) — sirotčí zápisy, Σ MD ≠ Σ D, booked_at bez zápisu a naopak, doklad ≠ zápis částkou. Čistě čtecí, výsledek do dashboardu (`--dry-run`, `--supplier=ID`) |
-| `cron-license-renew.{cmd,sh}` | Denní obnova licenčního tokenu proti licenčnímu serveru (E4); doplněk k obnově z prvního přihlášeného requestu dne — pokryje instalace, které přes den nikdo neotevře. Mutex zajistí max. 1× denně (síťovou chybu jen loguje) |
+| `cron-license-renew.{cmd,sh}` | Hodinový tick obnovy licenčního tokenu (E4). Server se běžně volá nejvýše 1× denně, ale od 2 hodin před další platbou do 24 hodin po ní a během `past_due` nejvýše 1× za hodinu |
 | `license-activate.{cmd,sh}` | **Headless aktivace licenčního klíče** (E4) bez přihlášení do UI — `license-activate.cmd MYU-XXXX-XXXX-XXXX-XXXX [--takeover]`. Zavolá licenční server, uloží klíč+token, vypíše tarif / počty / platnost (u doživotní licence „Neomezeně"). Hodí se pro demo instance, servery a automatizaci. `--takeover` vynutí přenos vazby z jiné instalace (po chybě `already_bound`) |
 | `license-status.{cmd,sh}` | Výpis aktuálního stavu licence (E4) — stav, tarif, počty, platnost, maskovaný klíč |
 | `license-deactivate.{cmd,sh}` | Deaktivace licence (E4) — uvolní vazbu na serveru a smaže klíč/token lokálně |
@@ -175,7 +175,7 @@ chrání sám, na Apache to řeší až přidání do `.htaccess` výše):
 | `cron-journal-integrity-check` | 1× denně (v noci) | 02:30 |
 | `cron-payroll-post` | 1× měsíčně, 1. den | 04:00 (`0 4 1 * *`) |
 | `cron-vat-clearing` | 1× měsíčně, 1. den | 04:30 (`30 4 1 * *`) |
-| `cron-license-renew` | 1× denně | 05:00 |
+| `cron-license-renew` | 1× za hodinu; síť běžně jen 1× denně | 15. minuta (`15 * * * *`) |
 | `cron-cnb-rates` | 1× denně (po vyhlášení kurzu ČNB ~14:30) | 15:00 |
 | `cron-version-check` | 1× denně | 06:00 |
 | `cron-storage-usage` | 1× za hodinu | 15. minuta (`15 * * * *`) |
@@ -247,7 +247,7 @@ schtasks /create /tn "MyUcto VatStatusApply"    /tr "C:\inetpub\wwwroot\myucto.c
 schtasks /create /tn "MyUcto JournalIntegrity"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-journal-integrity-check.cmd"     /sc daily /st 02:30 /ru SYSTEM
 schtasks /create /tn "MyUcto PayrollPost"       /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-post.cmd"             /sc monthly /d 1 /st 04:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VatClearing"       /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-vat-clearing.cmd"            /sc monthly /d 1 /st 04:30 /ru SYSTEM
-schtasks /create /tn "MyUcto LicenseRenew"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-license-renew.cmd"          /sc daily /st 05:00 /ru SYSTEM
+schtasks /create /tn "MyUcto LicenseRenew"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-license-renew.cmd"          /sc hourly /mo 1 /st 00:15 /ru SYSTEM
 schtasks /create /tn "MyUcto CnbRates"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-cnb-rates.cmd"             /sc daily /st 15:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VersionCheck"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-version-check.cmd"           /sc daily /st 06:00 /ru SYSTEM
 schtasks /create /tn "MyUcto StorageUsage"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-storage-usage.cmd"           /sc hourly /mo 1 /ru SYSTEM
@@ -309,7 +309,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
  30  2  *   *   *    /var/www/myucto.cz/cmd/cron-journal-integrity-check.sh
   0  4  1   *   *    /var/www/myucto.cz/cmd/cron-payroll-post.sh
  30  4  1   *   *    /var/www/myucto.cz/cmd/cron-vat-clearing.sh
-  0  5  *   *   *    /var/www/myucto.cz/cmd/cron-license-renew.sh
+ 15  *  *   *   *    /var/www/myucto.cz/cmd/cron-license-renew.sh
   0 15  *   *   *    /var/www/myucto.cz/cmd/cron-cnb-rates.sh
   0  6  *   *   *    /var/www/myucto.cz/cmd/cron-version-check.sh
  15  *  *   *   *    /var/www/myucto.cz/cmd/cron-storage-usage.sh

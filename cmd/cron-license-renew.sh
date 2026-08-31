@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  cron-license-renew.sh — denní obnova licenčního tokenu (E4)
-#  Frekvence: 1× denně. Doplněk k obnově, kterou spouští i první přihlášený
-#  request dne (LicenseMiddleware); cron pokrývá instalace, které přes den
-#  nikdo neotevře. Mutex uvnitř služby (atomický UPDATE dle CURDATE) zajistí,
-#  že obnova proběhne max. 1× denně; síťovou chybu jen zaloguje.
+#  cron-license-renew.sh - pravidelná obnova licenčního tokenu (E4)
+#  Frekvence: 1× za hodinu. Služba volá server běžně max. 1× denně,
+#  kolem další platby a při past_due max. 1× za hodinu.
 #
 #  crontab:
-#    0 5 * * *  /var/www/myucto.cz/cmd/cron-license-renew.sh
+#    15 * * * *  /var/www/myucto.cz/cmd/cron-license-renew.sh
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

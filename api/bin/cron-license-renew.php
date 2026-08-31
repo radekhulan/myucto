@@ -5,17 +5,15 @@ declare(strict_types=1);
 /**
  * MyÚčto.cz — cron-license-renew (E4)
  *
- * Denní obnova licenčního tokenu proti licenčnímu serveru. Doplněk k obnově,
- * kterou spouští i první přihlášený request dne (LicenseMiddleware) — cron
- * pokrývá instalace, které přes den nikdo neotevře. Mutex uvnitř LicenseService
- * (atomický UPDATE dle CURDATE) zajistí, že obnova proběhne max. 1× denně.
+ * Pravidelná obnova licenčního tokenu proti licenčnímu serveru. Běžně se síť
+ * volá nejvýše jednou denně, kolem další platby a při past_due jednou za hodinu.
  *
  * Plánování:
- *   - Linux/cron:        0 5 * * *  cd /path && php api/bin/cron-license-renew.php
+ *   - Linux/cron:        15 * * * *  cd /path && php api/bin/cron-license-renew.php
  *   - Docker:            stejně, přes `docker compose exec app …`
- *   - Windows/Scheduler: denně, akce: php.exe api\bin\cron-license-renew.php
+ *   - Windows/Scheduler: hodinově, akce: php.exe api\bin\cron-license-renew.php
  *
- * Idempotentní — opakované spuštění téhož dne je no-op (síťovou chybu jen loguje).
+ * Idempotentní: interval i souběh hlídá atomický mutex v LicenseService.
  */
 
 require __DIR__ . '/../vendor/autoload.php';
@@ -59,7 +57,7 @@ $service = new LicenseService(
 );
 
 try {
-    $service->renewIfDue();
+    $service->renewScheduled();
     $state = $service->current();
     $telemetryOn = $telemetry !== null && $telemetry->isEnabled();
     echo "[cron-license-renew] OK state={$state->state} last_check_ok=" . ($state->lastCheckOk ? '1' : '0')

@@ -19,6 +19,7 @@ use Psr\Log\NullLogger;
  * - `current()` načte řádek `license`, ověří podpis tokenu a spočítá stav.
  * - `activate()` / `deactivate()` volají licenční server a ukládají klíč+token.
  * - `renewIfDue()` jednou denně obnoví token (chráněno atomickým UPDATE mutexem).
+ * - `renewScheduled()` kolem platby zkrátí interval obnovy na jednu hodinu.
  *
  * Síťové chyby serveru se tolerují — stav se řídí platností posledního tokenu.
  */
@@ -31,6 +32,9 @@ final class LicenseService
     private const PURCHASE_LOCK_PREFIX = 'myucto_license_purchase_';
     private const PURCHASE_LOCK_TIMEOUT = 10;
     private const PURCHASE_PERSIST_SAVEPOINT = 'license_purchase_persist';
+    private const BILLING_WATCH_BEFORE_SECONDS = 2 * 3600;
+    private const BILLING_WATCH_AFTER_SECONDS = 24 * 3600;
+    private const BILLING_WATCH_INTERVAL_SECONDS = 50 * 60;
 
     /** Klíč v požadavku na podporu → sloupec dotazu nad `supplier`. */
     private const SUPPORT_COMPANY_FIELDS = [
@@ -324,6 +328,47 @@ final class LicenseService
     }
 
     /**
+     * Obnova volaná plánovačem. Běžně zachová denní rytmus, ale dvě hodiny před
+     * platbou, den po ní a po dobu past_due dovolí kontrolu jednou za hodinu.
+     */
+    public function renewScheduled(): void
+    {
+        if (!$this->db->hasTable('license')) {
+            return;
+        }
+        $row = $this->loadRow();
+        if ($this->keyOf($row) === null) {
+            return;
+        }
+        if (!$this->billingWatchActive($row)) {
+            $this->renewIfDue();
+            return;
+        }
+
+        $lastCheck = $row['last_check_at'] ?? null;
+        if (!is_string($lastCheck) || $lastCheck === '') {
+            $this->renewIfDue();
+            return;
+        }
+        $lastCheckAt = strtotime($lastCheck);
+        if ($lastCheckAt !== false && $lastCheckAt > time() - self::BILLING_WATCH_INTERVAL_SECONDS) {
+            return;
+        }
+
+        $released = $this->writeLicense(
+            'UPDATE license SET last_check_at = NULL
+              WHERE id = 1 AND last_check_at IS NOT NULL
+                AND TIMESTAMPDIFF(SECOND, last_check_at, NOW()) >= ?',
+            [self::BILLING_WATCH_INTERVAL_SECONDS],
+        );
+        if ($released === 0) {
+            return;
+        }
+
+        $this->renewIfDue();
+    }
+
+    /**
      * Denní obnova tokenu. Atomický UPDATE mutex zajistí, že renew provede jen
      * první request dne; ostatní se vrátí bez akce. Síťovou chybu jen zaloguje.
      */
@@ -438,6 +483,41 @@ final class LicenseService
         // a přepsat rozsah na prázdno by instalaci uvrhlo do read-only.
         $this->storeSubscription($resp);
         $this->logger->warning('license.renew.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
+    }
+
+    /** @param array<string,mixed> $row */
+    private function billingWatchActive(array $row): bool
+    {
+        $subscription = $this->subscriptionOf($row);
+        if ($subscription === null) {
+            return false;
+        }
+
+        $state = (string) ($subscription['state'] ?? '');
+        $phase = (string) ($subscription['phase'] ?? '');
+        if ($state === 'past_due' || $phase === 'past_due') {
+            return true;
+        }
+        if ($state !== 'active' || empty($subscription['auto_renew'])) {
+            return false;
+        }
+
+        $rawNextCharge = $subscription['next_charge_at'] ?? null;
+        if (is_int($rawNextCharge) || (is_string($rawNextCharge) && ctype_digit($rawNextCharge))) {
+            $nextChargeAt = (int) $rawNextCharge;
+        } elseif (is_string($rawNextCharge) && $rawNextCharge !== '') {
+            $parsed = strtotime($rawNextCharge);
+            $nextChargeAt = $parsed === false ? null : $parsed;
+        } else {
+            $nextChargeAt = null;
+        }
+        if ($nextChargeAt === null) {
+            return false;
+        }
+
+        $now = time();
+        return $nextChargeAt >= $now - self::BILLING_WATCH_AFTER_SECONDS
+            && $nextChargeAt <= $now + self::BILLING_WATCH_BEFORE_SECONDS;
     }
 
     /**

@@ -8,6 +8,7 @@ use MyInvoice\Action\Auth\MeAction;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Repository\UserSupplierRepository;
@@ -17,6 +18,7 @@ use MyInvoice\Service\Auth\MfaOfferService;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\License\LicenseService;
+use MyInvoice\Service\License\LicenseState;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\TestCase;
 use Psr\Clock\ClockInterface;
@@ -97,6 +99,25 @@ final class MeActionTest extends TestCase
             ])
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
 
+        $request = $request->withAttribute(LicenseMiddleware::ATTR_STATE, new LicenseState(
+            state: LicenseState::ACTIVE,
+            instanceId: 'synthetic-instance',
+            tier: 'single',
+            maxCompanies: 1,
+            usersLicensed: 3,
+            usersActive: 1,
+            companiesActive: 1,
+            validUntil: 1_800_000_000,
+            trialEndsAt: null,
+            overageDeadline: null,
+            licenseKey: 'MYU-TEST-0001-AAAA',
+            lastCheckAt: '2026-07-24 05:00:00',
+            lastCheckOk: true,
+            subscription: ['state' => 'past_due'],
+            commercial: true,
+            managed: true,
+        ));
+
         $response = $action($request, (new ResponseFactory())->createResponse());
         $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
 
@@ -115,6 +136,7 @@ final class MeActionTest extends TestCase
         self::assertSame('2026-07-24T12:00:00.000000Z', $body['server_time']);
         self::assertSame('2026-07-24T12:03:00.000000Z', $body['idle_expires_at']);
         self::assertSame(str_repeat('b', 64), $body['csrf_token']);
+        self::assertSame('past_due', $body['license']['subscription_state']);
     }
 
     /**
@@ -184,5 +206,67 @@ final class MeActionTest extends TestCase
         // Nabídka NIC neblokuje — `must_setup_mfa` musí zůstat false i pro setup session.
         self::assertFalse($body['user']['must_setup_mfa']);
         self::assertFalse($body['require_mfa']);
+    }
+
+    public function testClientAccountDoesNotReceiveSubscriptionState(): void
+    {
+        $db = $this->createMock(Connection::class);
+        $userSuppliers = $this->createMock(UserSupplierRepository::class);
+        $userSuppliers->method('allowedSupplierIds')->willReturn([]);
+        $permissions = $this->createMock(PermissionResolver::class);
+        $permissions->method('resolve')->willReturn(new EffectiveRole(9, 'Klient', 'client', true));
+        $credentials = $this->createMock(PasskeyCredentialRepository::class);
+        $credentials->method('countActiveForUser')->willReturn(0);
+        $clock = $this->createMock(ClockInterface::class);
+        $clock->method('now')->willReturn(new \DateTimeImmutable('2026-07-24 12:00:00 UTC'));
+        $config = new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+        ]);
+        $action = new MeAction(
+            $db,
+            $config,
+            $userSuppliers,
+            $permissions,
+            $this->createMock(LicenseService::class),
+            $credentials,
+            new MfaPolicyService($config),
+            $this->createMock(MfaOfferService::class),
+            new SessionLockPolicy($config),
+            $clock,
+        );
+        $state = new LicenseState(
+            state: LicenseState::ACTIVE,
+            instanceId: 'synthetic-instance',
+            tier: 'single',
+            maxCompanies: 1,
+            usersLicensed: 3,
+            usersActive: 1,
+            companiesActive: 1,
+            validUntil: 1_800_000_000,
+            trialEndsAt: null,
+            overageDeadline: null,
+            licenseKey: 'MYU-TEST-0001-AAAA',
+            lastCheckAt: '2026-07-24 05:00:00',
+            lastCheckOk: true,
+            subscription: ['state' => 'past_due'],
+            commercial: true,
+            managed: true,
+        );
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/auth/me')
+            ->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => 42,
+                'role_summary' => ['id' => 9, 'name' => 'Klient', 'type' => 'client'],
+                'is_superadmin' => false,
+                'totp_enabled' => false,
+            ])
+            ->withAttribute(AuthMiddleware::ATTR_SESSION, ['csrf_token' => str_repeat('c', 64)])
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0)
+            ->withAttribute(LicenseMiddleware::ATTR_STATE, $state);
+
+        $response = $action($request, (new ResponseFactory())->createResponse());
+        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertNull($body['license']['subscription_state']);
     }
 }

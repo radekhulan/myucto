@@ -305,6 +305,9 @@ final class LicenseState
             'perpetual'        => $this->perpetual,
             'commercial_features' => $this->hasCommercialFeatures(),
             'tier_commercial'  => $this->commercial,
+            'subscription_state' => isset($this->subscription['state'])
+                ? (string) $this->subscription['state']
+                : null,
             // Proč nejde přidat dalšího uživatele na licencované místo:
             // `no_license` / `seat_limit` / null. Obrazovka správy uživatelů
             // podle toho varuje dřív, než admin vyplní celý formulář.

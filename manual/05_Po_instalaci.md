@@ -80,7 +80,7 @@ Oba režimy nekombinuj, jinak by se některé úlohy spouštěly dvakrát.
 | `cron-vat-status-apply` | 1× denně 00:30; aplikuje plánované změny plátcovství DPH v den účinnosti |
 | `cron-journal-integrity-check` | 1× denně 02:30; čtecí kontrola integrity deníku |
 | `cron-cnb-rates` | 1× denně 15:00; stahuje kurzovní lístek ČNB do kurzové historie a dohání mezery za posledních 30 dnů. Bez ní se kurzy plní jen náhodně při prvním dotazu a cizoměnová úhrada ke dni bez kurzu se nemá čím ocenit |
-| `cron-license-renew` | 1× denně 05:00 |
+| `cron-license-renew` | každou hodinu v 15. minutě; server se běžně kontroluje 1× denně, kolem platby a při prodlení 1× za hodinu |
 | `cron-version-check` | 1× denně 06:00; kontrola dostupné aktualizace |
 | `cron-dispatch` | každou minutu, pouze v režimu jednoho dispatcheru |
 
