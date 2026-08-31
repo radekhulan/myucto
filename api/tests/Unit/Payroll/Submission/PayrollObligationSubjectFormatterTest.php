@@ -43,7 +43,7 @@ final class PayrollObligationSubjectFormatterTest extends TestCase
     public function testHealthPaymentOverviewShowsInsurerNotOffice(): void
     {
         self::assertSame(
-            'zdravotní pojišťovna 111',
+            'VZP (111)',
             PayrollObligationSubjectFormatter::humanSubject(
                 HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
                 'payroll_run:8:111',
@@ -51,10 +51,25 @@ final class PayrollObligationSubjectFormatterTest extends TestCase
         );
     }
 
+    /**
+     * Neznámý kód se nesmí ozdobit vymyšlenou zkratkou — zůstane holý,
+     * ať je na první pohled vidět, že ho číselník nezná.
+     */
+    public function testUnknownInsurerCodeStaysPlain(): void
+    {
+        self::assertSame(
+            'zdravotní pojišťovna 999',
+            PayrollObligationSubjectFormatter::humanSubject(
+                HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
+                'health_bulk_notification:2026-08:999',
+            ),
+        );
+    }
+
     public function testHealthBulkNotificationShowsInsurer(): void
     {
         self::assertSame(
-            'zdravotní pojišťovna 111',
+            'VZP (111)',
             PayrollObligationSubjectFormatter::humanSubject(
                 HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
                 'health_bulk_notification:2026-08:111',

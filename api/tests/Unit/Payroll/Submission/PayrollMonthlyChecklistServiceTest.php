@@ -233,7 +233,7 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         );
 
         $item = $this->onlyItem($service, 'submission');
-        self::assertSame('zdravotní pojišťovna 111', $item['recipient']['label']);
+        self::assertSame('VZP (111)', $item['recipient']['label']);
         self::assertSame('send', $item['action']['kind']);
     }
 
@@ -297,7 +297,7 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         );
 
         $item = $this->onlyItem($service, 'submission');
-        self::assertSame('zdravotní pojišťovna 111', $item['subject']);
+        self::assertSame('VZP (111)', $item['subject']);
     }
 
     /**

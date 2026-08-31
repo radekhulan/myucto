@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
+import { HEALTH_INSURERS } from '@/utils/healthInsurers'
 import { dataBoxApi, type MobileKeyBatchItemResult } from '@/api/dataBox'
 import {
   payrollHealthNotificationApi,
@@ -62,6 +63,18 @@ const {
 const loading = ref(true)
 const error = ref('')
 const healthError = ref('')
+
+/**
+ * Nadpis karty je název pojišťovny, ne její kód — „111" účetní s pojišťovnou
+ * nespojí. Kód se nezahazuje, přesouvá se na řádek pod nadpis: pod ním se
+ * pojišťovna eviduje v platebních účtech institucí. Kód, který číselník nezná,
+ * zůstane v nadpisu holý, ať je vidět, že je něco špatně.
+ */
+function healthInsurerTitle(code: string): string {
+  const insurer = HEALTH_INSURERS.find(candidate => candidate.code === code)
+
+  return insurer?.name ?? t('payroll.submissions.overview.health_insurer', { code })
+}
 const period = ref(localPayrollPeriod())
 const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
@@ -1199,9 +1212,10 @@ onMounted(load)
                 >
                 <div>
                   <h3 class="font-semibold text-neutral-900">
-                    {{ t('payroll.submissions.overview.health_insurer', { code: overview.insurer.code }) }}
+                    {{ healthInsurerTitle(overview.insurer.code) }}
                   </h3>
                   <p class="mt-1 text-xs text-neutral-500">
+                    {{ t('payroll.submissions.overview.health_insurer_code', { code: overview.insurer.code }) }} ·
                     {{ overview.period }} ·
                     {{ t('payroll.submissions.overview.health_people', { count: overview.totals.person_count }) }} ·
                     {{ t('payroll.submissions.overview.health_run_revision', {

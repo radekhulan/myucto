@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission;
 
+use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 
 /**
@@ -78,14 +79,24 @@ final class PayrollObligationSubjectFormatter
      * Poslední segment `subject_reference` je u zdravotních agend kód
      * pojišťovny. Když formát neodpovídá, radši žádný název pojišťovny
      * než hádaný.
+     *
+     * Kód se doplňuje zkratkou z číselníku („VZP (111)"), protože samotné
+     * „111" účetní s pojišťovnou nespojí, ale kód potřebuje - pod ním se
+     * pojišťovna eviduje v platebních účtech institucí. Neznámý kód zůstane
+     * holý; vymýšlet si k němu název by bylo horší než ho neukázat.
      */
     private static function insurerLabel(string $subjectReference): ?string
     {
         $parts = explode(':', $subjectReference);
         $code = end($parts);
+        if ($code === '' || $code === false) {
+            return null;
+        }
 
-        return $code !== '' && $code !== false
-            ? 'zdravotní pojišťovna ' . $code
-            : null;
+        $abbreviation = HealthInsurers::abbreviation($code);
+
+        return $abbreviation !== null
+            ? $abbreviation . ' (' . $code . ')'
+            : 'zdravotní pojišťovna ' . $code;
     }
 }

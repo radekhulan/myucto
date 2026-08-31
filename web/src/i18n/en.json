@@ -5070,7 +5070,8 @@
         "jmhz_evidence_scope": "{name} · employment no. {employment}",
         "jmhz_evidence_scope_unnamed": "Employment no. {employment}",
         "jmhz_evidence_pending": "no employment requires attention | 1 employment requires attention | {n} employments require attention",
-        "jmhz_evidence_no_scopes": "The revision contains no employment."
+        "jmhz_evidence_no_scopes": "The revision contains no employment.",
+        "health_insurer_code": "Code {code}"
       }
     },
     "eldp": {

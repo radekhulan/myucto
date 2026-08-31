@@ -5070,7 +5070,8 @@
         "jmhz_evidence_scope": "{name} · vztah č. {employment}",
         "jmhz_evidence_scope_unnamed": "Pracovní vztah č. {employment}",
         "jmhz_evidence_pending": "žádný vztah nevyžaduje pozornost | 1 vztah vyžaduje pozornost | {n} vztahy vyžadují pozornost | {n} vztahů vyžaduje pozornost",
-        "jmhz_evidence_no_scopes": "Revize neobsahuje žádný pracovní vztah."
+        "jmhz_evidence_no_scopes": "Revize neobsahuje žádný pracovní vztah.",
+        "health_insurer_code": "Kód {code}"
       }
     },
     "eldp": {

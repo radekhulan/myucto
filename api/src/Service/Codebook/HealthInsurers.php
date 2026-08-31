@@ -69,6 +69,15 @@ final class HealthInsurers
         return self::CODES[$code] ?? null;
     }
 
+    /**
+     * Zkratka pojišťovny („VZP"). Plný název je do popisku položky v seznamu
+     * moc dlouhý, ale samotný kód účetní s pojišťovnou nespojí.
+     */
+    public static function abbreviation(string $code): ?string
+    {
+        return self::ABBREVIATIONS[$code] ?? null;
+    }
+
     /** @return list<string> */
     public static function codes(): array
     {
