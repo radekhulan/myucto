@@ -104,49 +104,26 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 |---|---|
 | `publish.{sh,ps1}` | `cd web && pnpm install && pnpm build` — produkční build frontendu do `web/dist/` (před commitem nebo nasazením na produkční IIS / Apache) |
 | `test.{sh,ps1}`    | `cd api && vendor/bin/phpunit` — spustí testovou sadu (94 testů, ~1 s). Lze passnout filter / testsuite (`cmd/test.sh --filter=GpcParser`) |
-| `verify-instance-hardening.{sh,ps1}` | **H-19** — akceptační test hardeningu NASAZENÉ instance (ne repa). Přes HTTP zkouší sadu citlivých URL (`cfg.php`, `api/src/`, `db/`, `storage/`, `private/`, VCS metadata, …) a ověřuje, že každá vrátí 403 nebo 404; k tomu testuje tenantový host gate (neznámý `Host` → `421`, i na přímý `/web/dist/index.html`) a že reverzní proxy nepřepisuje hlavičku `Host`. Jen GET/HEAD, nic nezapisuje. `cmd/verify-instance-hardening.sh --host=www.myucto.cz [--ip=IP] [--json]` / `pwsh -File cmd/verify-instance-hardening.ps1 -InstanceHost www.myucto.cz [-Ip IP] [-Json]`. Detaily a chybějící `.htaccess`/`web.config` pravidla, na která skript testuje, viz níže |
+| `verify-instance-hardening.{sh,ps1}` | **H-19** — akceptační test hardeningu NASAZENÉ instance (ne repa). Přes HTTP zkouší sadu citlivých URL (`cfg.php`, `api/src/`, `db/`, `storage/`, `private/`, VCS metadata, …) a ověřuje, že každá vrátí 403 nebo 404; k tomu testuje tenantový host gate (neznámý `Host` → `421`, i na přímý `/web/dist/index.html`) a že reverzní proxy nepřepisuje hlavičku `Host`. Jen GET/HEAD, nic nezapisuje. `cmd/verify-instance-hardening.sh --host=www.myucto.cz [--ip=IP] [--json]` / `pwsh -File cmd/verify-instance-hardening.ps1 -InstanceHost www.myucto.cz [-Ip IP] [-Json]`. Detaily a seznam pravidel, na která skript testuje, viz níže |
 
-### `verify-instance-hardening.{sh,ps1}` — chybějící pravidla v `.htaccess` / `web.config`
+### `verify-instance-hardening.{sh,ps1}` — co sada ověřuje
 
-Skript (H-19) záměrně testuje i na díry, které aktuální konfigurace ještě
-nepokrývá — `cfg.sample.php`, `cfg.docker.php`, skripty s příponou
-`.cmd`/`.ps1`/`.sh` mimo už blokované složky (root: `demo.cmd`,
-`production.cmd`, `docker-entrypoint.sh`), `VERSION`, `web.config` a
-`portainer-template.json`. Dokud pravidla níže nepřibudou, tahle část sady
-bude padat — to je očekávané a správné, ukazuje to skutečný stav instance.
+Skript testuje účinek, ne znění direktivy: pro každou citlivou URL se dívá, jestli
+přijde 403 nebo 404. Pravidla, která na to potřebuje, jsou doplněná ve všech třech
+konfiguracích — `.htaccess`, `web.config` i `docker/nginx.conf`:
 
-**`.htaccess`** — rozšířit alternaci v pravidle „2b) Blokuj cfg.php, tooling
-manifesty a zdrojové soubory" o `cfg\.sample\.php|cfg\.docker\.php|VERSION|
-web\.config|portainer-template\.json` a rozšířit `<FilesMatch>` blok o
-přípony `cmd|ps1|sh` (ty pak pokryjí skripty kdekoli v cestě, nejen v rootu):
+- jména `cfg.sample.php`, `cfg.docker.php`, `VERSION`, `web.config`
+  a `portainer-template.json` (H-19),
+- přípony `.cmd`/`.ps1`/`.sh` — pomocné skripty leží s docrootem v kořeni bundlu
+  ve veřejném prostoru (`demo.cmd`, `production.cmd`, `docker-entrypoint.sh`)
+  a prozrazují cesty i postup nasazení.
 
-```apache
-RewriteRule ^(?:(?:api|web)/)?(cfg\.php|cfg\.local\.php|cfg\.sample\.php|cfg\.docker\.php|composer\.(json|lock)|package\.json|pnpm-lock\.yaml|(?:vite|tsconfig|eslint|tailwind|postcss)\.config\.[^/]+|phpunit\.xml(?:\.dist)?|Dockerfile(?:\..*)?|docker-compose[^/]*|\.gitignore|\.env.*|VERSION|web\.config|portainer-template\.json|[^/]*\.md|[^/]*\.sql)$ - [F,L]
-```
-
-```apache
-<FilesMatch "\.(env|sql|pem|log|lock|md|cmd|ps1|sh)$">
-    Require all denied
-</FilesMatch>
-```
-
-**`web.config`** — rozšířit `fileExtensions` o `.cmd`/`.ps1`/`.sh` a rozšířit
-regex pravidla „Block sensitive files" o `cfg.sample.php`/`cfg.docker.php`/
-`VERSION`/`portainer-template.json` (`web.config` samotný IIS defaultně
-chrání sám, na Apache to řeší až přidání do `.htaccess` výše):
-
-```xml
-<add fileExtension=".cmd" allowed="false" />
-<add fileExtension=".ps1" allowed="false" />
-<add fileExtension=".sh" allowed="false" />
-```
-
-```xml
-<rule name="Block sensitive files" stopProcessing="true">
-  <match url="^(?:(?:api|web)/)?(cfg\.php|cfg\.local\.php|cfg\.sample\.php|cfg\.docker\.php|composer\.(json|lock)|package\.json|pnpm-lock\.yaml|(?:vite|tsconfig|eslint|tailwind|postcss)\.config\.[^/]+|phpunit\.xml(?:\.dist)?|Dockerfile(?:\..*)?|docker-compose[^/]*|\.gitignore|\.env.*|VERSION|portainer-template\.json|.*\.md|.*\.sql)$" />
-  <action type="CustomResponse" statusCode="403" statusReason="Forbidden" statusDescription="Forbidden" />
-</rule>
-```
+⚠️ **Tři konfigurace, jedna smlouva.** H-19 doplnil pravidla jen do `.htaccess`
+a `web.config` — na `docker/nginx.conf` se zapomnělo a Docker instance vydávala
+`/VERSION` i `/production.cmd` s 200 tam, kde hosting vracel 403. Skript to
+neuvidí, pokud ho pustíš jen proti Apache instanci. Statickou paritu všech tří
+konfigurací proto hlídá `SensitivePathBlockParityTest` (testsuite Architecture);
+při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 
 ## Cron — doporučené frekvence
 

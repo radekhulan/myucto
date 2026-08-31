@@ -29,14 +29,14 @@
 #
 # Skript NIC nezapisuje na testovanou instanci — jen GET a HEAD.
 #
-# ⚠️ ZNÁMÉ MEZERY v aktuálním .htaccess/web.config (skript na ně testuje
-# schválně — dokud nejsou pravidla doplněná orchestrátorem, tahle sada
-# URL bude padat, a to je správně, ukazuje to skutečný stav):
-#   - cfg.sample.php, cfg.docker.php
-#   - skripty s příponou .cmd / .ps1 / .sh mimo už blokované složky
-#     (root: demo.cmd, production.cmd, docker-entrypoint.sh)
-#   - VERSION, web.config, portainer-template.json
-# Konkrétní navržené řádky pravidel jsou v cmd/README.md u tohoto skriptu.
+# ⚠️ TŘI KONFIGURACE, JEDNA SMLOUVA. Pravidla, která tahle sada vyžaduje
+# (cfg.sample.php, cfg.docker.php, VERSION, web.config, portainer-template.json
+# a přípony .cmd/.ps1/.sh), musí být v .htaccess, web.config I docker/nginx.conf.
+# H-19 je doplnil jen do prvních dvou a Docker instance pak vydávala /VERSION
+# i /production.cmd s 200 tam, kde hosting vracel 403. Skript testuje jednu
+# instanci, takže tuhle drift sám neuvidí — statickou paritu všech tří
+# konfigurací hlídá SensitivePathBlockParityTest (testsuite Architecture).
+# Při přidání nové citlivé cesty rozšiř seznam tady i v tom testu.
 #
 # Použití:
 #   cmd/verify-instance-hardening.sh --host=www.myucto.cz
@@ -263,8 +263,8 @@ fi
 declare -a SENSITIVE_URLS=(
     "/cfg.php|cfg|1|"
     "/cfg.local.php|cfg|1|"
-    "/cfg.sample.php|GAP|1|Chybějící pravidlo — viz cmd/README.md"
-    "/cfg.docker.php|GAP|1|Chybějící pravidlo — viz cmd/README.md"
+    "/cfg.sample.php|blokovaný soubor|1|"
+    "/cfg.docker.php|blokovaný soubor|1|"
     "/api/src/Bootstrap.php|blokovaná složka|1|"
     "/api/vendor/autoload.php|blokovaná složka|1|"
     "/api/tests/bootstrap.php|blokovaná složka|1|"
@@ -294,14 +294,14 @@ declare -a SENSITIVE_URLS=(
     "/phpunit.xml|blokovaný soubor|0|Reálný soubor je api/phpunit.xml, root varianta je jen ze zadání"
     "/Dockerfile|blokovaný soubor|1|"
     "/docker-compose.yml|blokovaný soubor|1|"
-    "/VERSION|GAP|1|Chybějící pravidlo — viz cmd/README.md"
-    "/web.config|GAP|1|Chybějící pravidlo v .htaccess (IIS soubory .config chrání defaultně samo, Apache ne) — viz cmd/README.md"
-    "/portainer-template.json|GAP|1|Chybějící pravidlo — viz cmd/README.md"
+    "/VERSION|blokovaný soubor|1|"
+    "/web.config|blokovaný soubor|1|IIS chrání .config defaultně samo, Apache a nginx až přidaným pravidlem"
+    "/portainer-template.json|blokovaný soubor|1|"
     "/README.md|blokovaný soubor|1|"
     "/AGENTS.md|blokovaný soubor|1|"
-    "/demo.cmd|GAP|1|Přípony .cmd/.ps1/.sh nejsou blokované mimo už chráněné složky — viz cmd/README.md"
-    "/production.cmd|GAP|1|Viz výše"
-    "/docker-entrypoint.sh|GAP|1|Viz výše"
+    "/demo.cmd|blokovaná přípona|1|Přípony .cmd/.ps1/.sh mimo už chráněné složky"
+    "/production.cmd|blokovaná přípona|1|Viz výše"
+    "/docker-entrypoint.sh|blokovaná přípona|1|Viz výše"
 )
 
 if [ "$ABORTED" = "0" ]; then

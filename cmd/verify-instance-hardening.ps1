@@ -28,14 +28,14 @@
 #
 # Skript NIC nezapisuje na testovanou instanci — jen GET a HEAD.
 #
-# ⚠️ ZNÁMÉ MEZERY v aktuálním .htaccess/web.config (skript na ně testuje
-# schválně — dokud nejsou pravidla doplněná orchestrátorem, tahle sada
-# URL bude padat, a to je správně, ukazuje to skutečný stav):
-#   - cfg.sample.php, cfg.docker.php
-#   - skripty s příponou .cmd / .ps1 / .sh mimo už blokované složky
-#     (root: demo.cmd, production.cmd, docker-entrypoint.sh)
-#   - VERSION, web.config, portainer-template.json
-# Konkrétní navržené řádky pravidel jsou v cmd/README.md u tohoto skriptu.
+# ⚠️ TŘI KONFIGURACE, JEDNA SMLOUVA. Pravidla, která tahle sada vyžaduje
+# (cfg.sample.php, cfg.docker.php, VERSION, web.config, portainer-template.json
+# a přípony .cmd/.ps1/.sh), musí být v .htaccess, web.config I docker/nginx.conf.
+# H-19 je doplnil jen do prvních dvou a Docker instance pak vydávala /VERSION
+# i /production.cmd s 200 tam, kde hosting vracel 403. Skript testuje jednu
+# instanci, takže tuhle drift sám neuvidí — statickou paritu všech tří
+# konfigurací hlídá SensitivePathBlockParityTest (testsuite Architecture).
+# Při přidání nové citlivé cesty rozšiř seznam tady i v tom testu.
 #
 # Použití:
 #   pwsh -File cmd/verify-instance-hardening.ps1 -InstanceHost www.myucto.cz
@@ -227,8 +227,8 @@ if (-not $aborted) {
 $sensitiveUrls = @(
     @{ Path = '/cfg.php'; Category = 'cfg'; ExpectExists = $true; Note = '' }
     @{ Path = '/cfg.local.php'; Category = 'cfg'; ExpectExists = $true; Note = '' }
-    @{ Path = '/cfg.sample.php'; Category = 'GAP'; ExpectExists = $true; Note = 'Chybějící pravidlo — viz cmd/README.md' }
-    @{ Path = '/cfg.docker.php'; Category = 'GAP'; ExpectExists = $true; Note = 'Chybějící pravidlo — viz cmd/README.md' }
+    @{ Path = '/cfg.sample.php'; Category = 'blokovaný soubor'; ExpectExists = $true; Note = '' }
+    @{ Path = '/cfg.docker.php'; Category = 'blokovaný soubor'; ExpectExists = $true; Note = '' }
     @{ Path = '/api/src/Bootstrap.php'; Category = 'blokovaná složka'; ExpectExists = $true; Note = '' }
     @{ Path = '/api/vendor/autoload.php'; Category = 'blokovaná složka'; ExpectExists = $true; Note = '' }
     @{ Path = '/api/tests/bootstrap.php'; Category = 'blokovaná složka'; ExpectExists = $true; Note = '' }
@@ -258,14 +258,14 @@ $sensitiveUrls = @(
     @{ Path = '/phpunit.xml'; Category = 'blokovaný soubor'; ExpectExists = $false; Note = 'Reálný soubor je api/phpunit.xml, root varianta je jen ze zadání' }
     @{ Path = '/Dockerfile'; Category = 'blokovaný soubor'; ExpectExists = $true; Note = '' }
     @{ Path = '/docker-compose.yml'; Category = 'blokovaný soubor'; ExpectExists = $true; Note = '' }
-    @{ Path = '/VERSION'; Category = 'GAP'; ExpectExists = $true; Note = 'Chybějící pravidlo — viz cmd/README.md' }
-    @{ Path = '/web.config'; Category = 'GAP'; ExpectExists = $true; Note = 'Chybějící pravidlo v .htaccess (IIS soubory .config chrání defaultně samo, Apache ne) — viz cmd/README.md' }
-    @{ Path = '/portainer-template.json'; Category = 'GAP'; ExpectExists = $true; Note = 'Chybějící pravidlo — viz cmd/README.md' }
+    @{ Path = '/VERSION'; Category = 'blokovaný soubor'; ExpectExists = $true; Note = '' }
+    @{ Path = '/web.config'; Category = 'blokovaný soubor'; ExpectExists = $true; Note = 'IIS chrání .config defaultně samo, Apache a nginx až přidaným pravidlem' }
+    @{ Path = '/portainer-template.json'; Category = 'blokovaný soubor'; ExpectExists = $true; Note = '' }
     @{ Path = '/README.md'; Category = 'blokovaný soubor'; ExpectExists = $true; Note = '' }
     @{ Path = '/AGENTS.md'; Category = 'blokovaný soubor'; ExpectExists = $true; Note = '' }
-    @{ Path = '/demo.cmd'; Category = 'GAP'; ExpectExists = $true; Note = 'Přípony .cmd/.ps1/.sh nejsou blokované mimo už chráněné složky — viz cmd/README.md' }
-    @{ Path = '/production.cmd'; Category = 'GAP'; ExpectExists = $true; Note = 'Viz výše' }
-    @{ Path = '/docker-entrypoint.sh'; Category = 'GAP'; ExpectExists = $true; Note = 'Viz výše' }
+    @{ Path = '/demo.cmd'; Category = 'blokovaná přípona'; ExpectExists = $true; Note = 'Přípony .cmd/.ps1/.sh mimo už chráněné složky' }
+    @{ Path = '/production.cmd'; Category = 'blokovaná přípona'; ExpectExists = $true; Note = 'Viz výše' }
+    @{ Path = '/docker-entrypoint.sh'; Category = 'blokovaná přípona'; ExpectExists = $true; Note = 'Viz výše' }
 )
 
 if (-not $aborted) {
