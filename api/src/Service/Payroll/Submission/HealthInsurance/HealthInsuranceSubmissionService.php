@@ -2074,6 +2074,25 @@ final readonly class HealthInsuranceSubmissionService
             'CZK',
             $effectiveOn,
         );
+        // Číslo plátce chybí ze dvou různých důvodů a účetní z nich má udělat dvě
+        // různé věci: buď účet pojišťovny vůbec není evidovaný, nebo je, ale bez
+        // symbolu. Hláška proto pojmenuje pojišťovnu, období i konkrétní pole,
+        // jinak by uživatel hledal po celém nastavení zaměstnavatele.
+        $insurer = $this->describeInsurer($supplierId, $insurerCode);
+        $effectiveLabel = self::czechDate($effectiveOn);
+        if ($identifiers === null) {
+            throw new HealthNotificationException(
+                'zp_payer_account_missing',
+                sprintf(
+                    '%s nemá k %s evidovaný platební účet. Založte ho v Mzdy → Nastavení '
+                    . 'zaměstnavatele → Platební účty institucí (typ Zdravotní pojišťovna) '
+                    . 'a do pole VS zaměstnavatele zadejte desetimístné číslo plátce, které '
+                    . 'vám pojišťovna přidělila při registraci.',
+                    $insurer,
+                    $effectiveLabel,
+                ),
+            );
+        }
         $payerNumber = preg_replace(
             '/\D+/',
             '',
@@ -2082,7 +2101,14 @@ final readonly class HealthInsuranceSubmissionService
         if (preg_match('/^[0-9]{10}$/', $payerNumber) !== 1) {
             throw new HealthNotificationException(
                 'zp_payer_number_missing',
-                'U účinného platebního účtu pojišťovny chybí desetimístné identifikační číslo plátce (VS zaměstnavatele).',
+                sprintf(
+                    'U platebního účtu %s účinného k %s není desetimístné číslo plátce. '
+                    . 'Doplňte ho v Mzdy → Nastavení zaměstnavatele → Platební účty institucí '
+                    . 'do pole VS zaměstnavatele — pojišťovna ho přidělila při registraci '
+                    . 'zaměstnavatele a má přesně deset číslic.',
+                    $insurer,
+                    $effectiveLabel,
+                ),
             );
         }
 
@@ -2095,6 +2121,33 @@ final readonly class HealthInsuranceSubmissionService
             city: (string) ($row['city'] ?? ''),
             phone: (string) ($row['phone'] ?? ''),
         );
+    }
+
+    /**
+     * Pojišťovna do hlášky: kód i název, když ho kanál zná. Samotné "111" účetní
+     * nespojí s VZP, samotný název zase nespojí s řádkem v nastavení, kde se
+     * eviduje kód.
+     */
+    private function describeInsurer(int $supplierId, string $insurerCode): string
+    {
+        try {
+            $channel = $this->channelDescription($supplierId, $insurerCode);
+            $name = is_string($channel['insurer_name'] ?? null) ? trim($channel['insurer_name']) : '';
+        } catch (\Throwable) {
+            $name = '';
+        }
+
+        return $name !== ''
+            ? sprintf('zdravotní pojišťovny %s (%s)', $insurerCode, $name)
+            : sprintf('zdravotní pojišťovny %s', $insurerCode);
+    }
+
+    /** `2026-08-31` → `31. 8. 2026`. Datum v hlášce má být čitelné, ne ISO. */
+    private static function czechDate(string $isoDate): string
+    {
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $isoDate);
+
+        return $date === false ? $isoDate : $date->format('j. n. Y');
     }
 
     private function requireFacts(

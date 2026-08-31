@@ -854,6 +854,37 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             self::fail('Bez čísla plátce u konkrétní pojišťovny nesmí podání vzniknout.');
         } catch (HealthNotificationException $e) {
             self::assertSame('zp_payer_number_missing', $e->errorCode);
+            // Hláška musí vést k jednomu konkrétnímu poli. "Chybí číslo plátce"
+            // bez adresy znamená, že účetní prochází celé nastavení naslepo.
+            self::assertStringContainsString('111', $e->getMessage());
+            self::assertStringContainsString('Platební účty institucí', $e->getMessage());
+            self::assertStringContainsString('VS zaměstnavatele', $e->getMessage());
+        }
+    }
+
+    /**
+     * Chybějící účet a účet bez symbolu jsou dvě různé situace a účetní z nich
+     * má udělat dvě různé věci — založit řádek, nebo doplnit pole. Kdyby obě
+     * hlásily totéž, hledala by pořád tam, kde nic není.
+     */
+    public function testMissingInsurerAccountIsReportedAsSomethingToCreate(): void
+    {
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_institution_accounts WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+
+        try {
+            $this->service->preparePaymentOverview(
+                $this->supplierId,
+                'production',
+                $this->revisionId,
+                '111',
+            );
+            self::fail('Bez platebního účtu pojišťovny nesmí podání vzniknout.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_payer_account_missing', $e->errorCode);
+            self::assertStringContainsString('Založte', $e->getMessage());
+            self::assertStringContainsString('Platební účty institucí', $e->getMessage());
         }
     }
 

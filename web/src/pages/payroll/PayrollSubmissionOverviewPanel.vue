@@ -393,6 +393,7 @@ async function officialHealthArtifact(prepared: HealthPreparedOverview) {
 
 async function downloadHealth(overview: PayrollHealthPaymentOverview) {
   healthError.value = ''
+  healthBatchError.value = ''
   downloadingHealthKey.value = healthOverviewKey(overview)
   try {
     const prepared = await prepareHealth(overview)
@@ -409,7 +410,10 @@ async function downloadHealth(overview: PayrollHealthPaymentOverview) {
 }
 
 async function sendHealthViaDataBox(overview: PayrollHealthPaymentOverview) {
+  // Jednotlivé a dávkové odeslání jsou dvě větve téhož; kdyby si každá držela
+  // vlastní hlášku, zůstaly by na stránce viset dvě identické červené lišty.
   healthError.value = ''
+  healthBatchError.value = ''
   const key = healthOverviewKey(overview)
   sendingHealthKey.value = key
   healthMobileKeySentKey.value = null
@@ -467,6 +471,7 @@ async function sendSelectedHealthViaDataBox() {
   )
   if (selected.length === 0) return
   healthBatchError.value = ''
+  healthError.value = ''
   healthBatchQueuedIds.value = []
   healthBatchSentResults.value = null
   healthBatchBusy.value = true
