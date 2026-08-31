@@ -49,6 +49,9 @@ final class DppoReturnDataProvider
     ) {}
 
     /**
+     * @param array<string,mixed> $inputs ruční vstupy (income_tax_returns.inputs), smí nést
+     *   `bank_account_id` — vybraný účet pro vrácení přeplatku (viz {@see pickBankAccount});
+     *   chybí-li/je-li neplatný, použije se výchozí (první v `bank_accounts`)
      * @return array{
      *   period: array{id:int,starts_on:string,ends_on:string}|null,
      *   vh: float, non_deductible_costs: float,
@@ -57,6 +60,7 @@ final class DppoReturnDataProvider
      *   related_party_country_flag: 'N'|'T'|'Z'|'A',
      *   related_party_appendix: list<array{name:string,country_iso2:string,ic:?string,issued_total:float,received_total:float}>,
      *   bank_account: array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null,
+     *   bank_accounts: list<array{id:int,account_number:?string,bank_code:?string,bank_name:?string,iban:?string,is_default:int}>,
      *   disposal_nondeductible_residual: float,
      *   disposal_tax_increase: float, disposal_tax_decrease: float,
      *   disposals: list<array<string,mixed>>,
@@ -65,9 +69,11 @@ final class DppoReturnDataProvider
      *   warnings: list<string>
      * }
      */
-    public function gather(int $supplierId, int $year): array
+    public function gather(int $supplierId, int $year, array $inputs = []): array
     {
         $warnings = [];
+        $bankAccounts = $this->bankAccounts($supplierId);
+        $bankAccount = $this->pickBankAccount($bankAccounts, $inputs['bank_account_id'] ?? null, $warnings);
         $period = $this->periods->findByYear($supplierId, $year);
         if ($period === null) {
             return [
@@ -78,14 +84,17 @@ final class DppoReturnDataProvider
                 'depreciation_by_group' => ['tangible' => [], 'intangible' => 0.0, 'unclassified' => 0.0],
                 'related_party_country_flag' => 'N',
                 'related_party_appendix' => [],
-                'bank_account' => $this->bankAccount($supplierId),
+                'bank_account' => $bankAccount,
+                'bank_accounts' => $bankAccounts,
                 'disposal_nondeductible_residual' => 0.0,
                 'disposal_tax_increase' => 0.0,
                 'disposal_tax_decrease' => 0.0,
                 'disposals' => [],
                 'closing_projection' => (new ClosingProjectionCalculator())->project(0.0, []),
                 'suggestions' => ['addbacks' => [], 'deductions' => []],
-                'warnings' => ['Pro rok ' . $year . ' neexistuje účetní období — podklady z deníku nejsou k dispozici. Zkontrolujte, že je zapnuté podvojné účetnictví a účetní období založené.'],
+                'warnings' => array_merge($warnings, [
+                    'Pro rok ' . $year . ' neexistuje účetní období — podklady z deníku nejsou k dispozici. Zkontrolujte, že je zapnuté podvojné účetnictví a účetní období založené.',
+                ]),
             ];
         }
 
@@ -98,7 +107,6 @@ final class DppoReturnDataProvider
         $depByGroup = $this->depreciationByGroup($supplierId, $year);
         $relatedPartyFlag = $this->relatedPartyCountryFlag($supplierId, $startsOn, $endsOn);
         $relatedPartyAppendix = $this->relatedPartyAppendix($supplierId, $startsOn, $endsOn);
-        $bankAccount = $this->bankAccount($supplierId);
         [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
         $projection = $this->closingProjection($supplierId, (int) $period['id'], $endsOn, $vh);
         $suggestions = [
@@ -126,6 +134,7 @@ final class DppoReturnDataProvider
             'related_party_country_flag' => $relatedPartyFlag,
             'related_party_appendix' => $relatedPartyAppendix,
             'bank_account' => $bankAccount,
+            'bank_accounts' => $bankAccounts,
             'disposal_nondeductible_residual' => 0.0,
             'disposal_tax_increase' => $disposalIncrease,
             'disposal_tax_decrease' => $disposalDecrease,
@@ -544,24 +553,58 @@ final class DppoReturnDataProvider
     }
 
     /**
-     * Výchozí CZK bankovní účet poplatníka (`currencies`, stejný zdroj jako platební
-     * příkazy — {@see \MyInvoice\Repository\PaymentOrderRepository::payerAccounts}) —
-     * jediný podklad, odkud VetaNP (žádost o vrácení přeplatku) může vzít bankovní spojení.
+     * Všechny aktivní CZK bankovní účty poplatníka (`currencies`, stejný zdroj jako
+     * platební příkazy — {@see \MyInvoice\Repository\PaymentOrderRepository::payerAccounts}),
+     * seřazené stejně jako dřívější {@see pickBankAccount} výchozí volba (`is_default DESC,
+     * id`) — FE z nich staví nabídku výběru účtu pro vrácení přeplatku (VetaNP), první
+     * v pořadí je i výchozí volba, když uživatel nevybere jinak.
      *
-     * @return array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null
+     * @return list<array{id:int,account_number:?string,bank_code:?string,bank_name:?string,iban:?string,is_default:int}>
      */
-    private function bankAccount(int $supplierId): ?array
+    private function bankAccounts(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT account_number, bank_code, bank_name, iban
+            "SELECT id, account_number, bank_code, bank_name, iban, is_default
                FROM currencies
               WHERE supplier_id = ? AND code = 'CZK' AND is_active = 1
-           ORDER BY is_default DESC, id
-              LIMIT 1"
+           ORDER BY is_default DESC, id"
         );
         $stmt->execute([$supplierId]);
-        $row = $stmt->fetch();
-        return $row === false ? null : $row;
+        return $stmt->fetchAll() ?: [];
+    }
+
+    /**
+     * Účet pro vrácení přeplatku (VetaNP) — dřív appka vždy tiše vzala první aktivní CZK
+     * účet (`is_default DESC, id`), tj. rozhodovala za poplatníka; s víc účty nemusí být
+     * ta volba správná (přeplatek nemusí mířit na provozní účet). Teď je to volba uložená
+     * v ručních vstupech přiznání (`bank_account_id`, {@see TaxReturnService::sanitizeInputs}),
+     * dřívější automatická volba zůstává VÝCHOZÍ (první v `$accounts`), ne jedinou možností.
+     *
+     * Neplatné/smazané/neaktivní `$requestedId` (starý výběr, účet mezitím zrušen) tiše
+     * NEPADÁ — spadne zpátky na výchozí účet a přidá warning, ať si toho účetní všimne a
+     * volbu v přiznání obnoví, místo aby přiznání potichu neslo jiný účet, než čekala.
+     *
+     * @param list<array{id:int,account_number:?string,bank_code:?string,bank_name:?string,iban:?string,is_default:int}> $accounts
+     * @param list<string> $warnings
+     * @return array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null
+     */
+    private function pickBankAccount(array $accounts, mixed $requestedId, array &$warnings): ?array
+    {
+        if ($accounts === []) {
+            return null;
+        }
+        if ($requestedId !== null && $requestedId !== '') {
+            $id = (int) $requestedId;
+            foreach ($accounts as $row) {
+                if ((int) $row['id'] === $id) {
+                    return $row;
+                }
+            }
+            $warnings[] = 'Vybraný bankovní účet pro vrácení přeplatku daně (id ' . $id . ') už '
+                . 'neexistuje nebo není aktivní CZK účet — použit výchozí účet firmy místo něj. '
+                . 'Zkontrolujte volbu bankovního účtu v přiznání (podklady) a uložte ji znovu.';
+        }
+        return $accounts[0];
     }
 
     /** @return array{tax:float,accounting:float} */

@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { taxReturnApi, type TaxpayerType, type TaxReturnVariant, type TaxReturnState, type InsuranceSummary, type AdvanceSchedule, type AdvanceOverride, type AdvancePeriodicity, type AdvanceKind, type TaxReturnProjection, type TaxReturnAddbackSuggestion, type TaxReturnDeductionSuggestion, type ReconcileResult } from '@/api/taxReturn'
+import { taxReturnApi, type TaxpayerType, type TaxReturnVariant, type TaxReturnState, type InsuranceSummary, type AdvanceSchedule, type AdvanceOverride, type AdvancePeriodicity, type AdvanceKind, type TaxReturnProjection, type TaxReturnAddbackSuggestion, type TaxReturnDeductionSuggestion, type ReconcileResult, type TaxReturnBankAccount } from '@/api/taxReturn'
 import { apiErrorMessage } from '@/api/errors'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useYearOptions } from '@/composables/useYearOptions'
@@ -114,6 +114,18 @@ const deductionSuggestions = computed<TaxReturnDeductionSuggestion[]>(() =>
 const hasSuggestions = computed(() =>
   type.value === 'po' && (addbackSuggestions.value.length > 0 || deductionSuggestions.value.length > 0 || (taxLosses.value.suggested ?? 0) > 0))
 
+// Volba bankovního účtu pro vrácení přeplatku (VetaNP) — appka dřív vybírala za
+// poplatníka (první aktivní CZK účet); `bank_accounts` je nabídka, `bank_account` je
+// efektivně použitý účet (výchozí, nebo dřívější `inputs.bank_account_id`).
+const bankAccountOptions = computed<TaxReturnBankAccount[]>(() =>
+  ((state.value?.podklady as any)?.bank_accounts as TaxReturnBankAccount[]) ?? [])
+const effectiveBankAccount = computed<TaxReturnBankAccount | null>(() =>
+  ((state.value?.podklady as any)?.bank_account as TaxReturnBankAccount | null) ?? null)
+function bankAccountLabel(acc: TaxReturnBankAccount): string {
+  const parts = [acc.account_number, acc.bank_code].filter(Boolean).join('/')
+  return acc.bank_name ? `${parts} — ${acc.bank_name}` : parts
+}
+
 // E10 — předfinalizační kontrolní checklist.
 const prefinalize = computed(() => state.value?.prefinalize_check ?? null)
 function checkTone(c: { ok: boolean; severity: string; na?: boolean }): string {
@@ -144,6 +156,9 @@ function blankInputs(): Record<string, any> {
       rnd_deduction: 0, education_deduction: 0,
       disabled_employees_avg: 0, disabled_employees_severe_avg: 0,
       tax_paid_advances: 0, filing_deadline: '', notes: '',
+      // Volba účtu pro vrácení přeplatku (null = automaticky, viz bankAccountOptions)
+      // a žádost o předání Přílohy do sbírky listin (výchozí ANO, lze vypnout).
+      bank_account_id: null, puz_to_registry: true,
       ...common,
     }
   }
@@ -861,7 +876,20 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                 <label class="text-sm">{{ t('taxReturn.filing_deadline') }}
                   <input type="date" v-model="inputs.filing_deadline" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" />
                   <span class="block text-[11px] text-neutral-400 mt-0.5">{{ t('taxReturn.filing_deadline_hint') }}</span></label>
+                <label class="text-sm">{{ t('taxReturn.bank_account') }}
+                  <select v-model.number="inputs.bank_account_id" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md bg-surface">
+                    <option :value="null">
+                      {{ effectiveBankAccount ? t('taxReturn.bank_account_auto', { account: bankAccountLabel(effectiveBankAccount) }) : t('taxReturn.bank_account_auto_none') }}
+                    </option>
+                    <option v-for="acc in bankAccountOptions" :key="acc.id" :value="acc.id">{{ bankAccountLabel(acc) }}</option>
+                  </select>
+                  <span class="block text-[11px] text-neutral-400 mt-0.5">{{ t('taxReturn.bank_account_hint') }}</span></label>
               </div>
+              <label class="flex items-start gap-2 text-sm mt-3 cursor-pointer">
+                <input type="checkbox" v-model="inputs.puz_to_registry" class="mt-0.5" />
+                <span>{{ t('taxReturn.puz_to_registry') }}
+                  <span class="block text-[11px] text-neutral-400">{{ t('taxReturn.puz_to_registry_hint') }}</span></span>
+              </label>
             </div>
             <div class="bg-surface border border-neutral-200 rounded-lg p-4">
               <div class="flex items-center justify-between mb-2">

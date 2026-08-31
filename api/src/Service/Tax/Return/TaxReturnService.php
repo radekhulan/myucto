@@ -836,7 +836,11 @@ final class TaxReturnService
             $meta = ['verze_sw' => $appVersion ?? '0']
                 + $this->periodMeta($computation['podklady']['period'] ?? null, $year)
                 + $amendMeta
-                + $this->representationMeta($supplierId, $finalizedAt);
+                + $this->representationMeta($supplierId, $finalizedAt)
+                // Žádost o předání Přílohy do sbírky listin (pr11_puz) — výchozí ANO, viz
+                // sanitizeInputs()/DppoXmlBuilder::buildVetaUZ. Nikdy neuložený draft ($inputs
+                // == []) čte klíč jako chybějící → default true stejně jako po sanitizaci.
+                + ['puz_to_registry' => (bool) ($inputs['puz_to_registry'] ?? true)];
             $appendix = $this->buildDppoAppendix($supplierId, (array) ($computation['podklady']['period'] ?? []), $year);
             $appendixWarnings = (array) ($appendix['warnings'] ?? []);
             unset($appendix['warnings']);
@@ -1432,7 +1436,7 @@ final class TaxReturnService
         }
 
         if ($type === 'po') {
-            $data = $this->dppoData->gather($supplierId, $year);
+            $data = $this->dppoData->gather($supplierId, $year, $inputs);
             $result = $this->dppoCalc->compute($data, $inputs, $const);
             $newTax = (float) ($result['summary']['total_tax'] ?? 0);
             $podklady = [
@@ -1445,6 +1449,11 @@ final class TaxReturnService
                 // Feature 1 (projekce VH) + Feature 2 (auto-návrhy §25/§20/§34) pro náhled DPPO.
                 'closing_projection' => $data['closing_projection'] ?? null,
                 'suggestions' => $data['suggestions'] ?? ['addbacks' => [], 'deductions' => []],
+                // Volba bankovního účtu pro vrácení přeplatku (VetaNP) — appka dřív vybírala
+                // za poplatníka (první aktivní CZK účet); FE z `bank_accounts` staví výběr,
+                // `bank_account` je efektivně použitý (výchozí, nebo `inputs.bank_account_id`).
+                'bank_account' => $data['bank_account'] ?? null,
+                'bank_accounts' => $data['bank_accounts'] ?? [],
             ];
             $warnings = array_merge($data['warnings'], $result['warnings']);
         } else {
@@ -1567,6 +1576,16 @@ final class TaxReturnService
             $out['disabled_employees_severe_avg'] = max(0.0, (float) ($inputs['disabled_employees_severe_avg'] ?? 0));
             $out['filing_deadline'] = $this->date($inputs['filing_deadline'] ?? '');
             $out['nace_code'] = $this->text($inputs['nace_code'] ?? '', 10);
+            // Účet pro vrácení přeplatku (VetaNP) — volba poplatníka místo tichého výběru
+            // prvního aktivního CZK účtu; viz DppoReturnDataProvider::pickBankAccount().
+            // null = žádná explicitní volba, ponechá se dosavadní výchozí chování.
+            $rawBankAccountId = $inputs['bank_account_id'] ?? null;
+            $out['bank_account_id'] = ($rawBankAccountId !== null && $rawBankAccountId !== '' && is_numeric($rawBankAccountId))
+                ? (int) $rawBankAccountId : null;
+            // Žádost o předání Přílohy účetní závěrky do sbírky listin (VetaUZ/pr11_puz) —
+            // výchozí ANO (rozhodnutí zadavatele 31. 8. 2026, viz DppoXmlBuilder::buildVetaUZ),
+            // ruční vstup umožňuje vypnout.
+            $out['puz_to_registry'] = filter_var($inputs['puz_to_registry'] ?? true, FILTER_VALIDATE_BOOLEAN);
         } else {
             // DPFO — sekce §6/§8/§9/§10 (typované) + zálohy pojistného (pro přehledy DP4).
             $s6 = (array) ($inputs['s6_employment'] ?? []);

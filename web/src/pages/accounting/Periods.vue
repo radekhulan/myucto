@@ -168,6 +168,10 @@ async function saveSettings() {
   try {
     await closingSettingsApi.update({
       ...settings.value,
+      // Prázdné pole (v-model.number ho drží jako '') → null, ať BE nespadne na
+      // "musí být celé číslo ≥ 0, nebo null" (ReportingSettingsAction::update).
+      avg_employees: settings.value.avg_employees === null || (settings.value.avg_employees as unknown) === ''
+        ? null : Number(settings.value.avg_employees),
       statutory_audit: settings.value.statutory_audit ? 1 : 0,
       manual_doc_series: settings.value.manual_doc_series ? 1 : 0,
       fx_reversal_at_open: settings.value.fx_reversal_at_open ? 1 : 0,
@@ -379,6 +383,12 @@ function statusBadge(status: string): string {
         <div v-if="settingsLoading" class="text-sm text-neutral-500 py-4">{{ t('common.loading') }}</div>
         <template v-else-if="settings">
           <div class="space-y-2 mb-3">
+            <label class="block text-sm">
+              <span class="font-medium">{{ t('accounting.closing.settings.avg_employees') }}</span>
+              <input type="number" min="0" step="1" v-model.number="settings.avg_employees"
+                class="mt-1 w-32 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+              <span class="block text-xs text-neutral-500 mt-0.5">{{ t('accounting.closing.settings.avg_employees_hint') }}</span>
+            </label>
             <label class="flex items-start gap-2 text-sm cursor-pointer">
               <input type="checkbox" v-model="settings.statutory_audit" class="mt-0.5" />
               <span>{{ t('accounting.closing.settings.statutory_audit') }}

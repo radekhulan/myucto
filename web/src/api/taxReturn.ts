@@ -70,6 +70,17 @@ export interface PreFinalizeCheckResult {
   can_finalize: boolean
 }
 
+// Bankovní účet z podkladů DPPO (podklady.bank_accounts) — volba pro VetaNP (vrácení
+// přeplatku), viz DppoReturnDataProvider::bankAccounts / IncomeTaxReport.vue.
+export interface TaxReturnBankAccount {
+  id: number
+  account_number: string | null
+  bank_code: string | null
+  bank_name: string | null
+  iban: string | null
+  is_default: number
+}
+
 export interface AvailableVariant {
   variant: TaxReturnVariant
   variant_seq: number

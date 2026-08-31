@@ -42,9 +42,9 @@ final class DppoXmlBuilderPrilohyTest extends TestCase
         );
     }
 
-    private function build(array $appendix = []): array
+    private function build(array $appendix = [], array $meta = []): array
     {
-        return (new DppoXmlBuilder())->build($this->sampleSupplier(), 2025, $this->calc(), [], $appendix);
+        return (new DppoXmlBuilder())->build($this->sampleSupplier(), 2025, $this->calc(), $meta, $appendix);
     }
 
     public function testNoAttachmentBuildsNoPrilohy(): void
@@ -186,14 +186,15 @@ final class DppoXmlBuilderPrilohyTest extends TestCase
         $xml = $this->build($appendix)['xml'];
         self::assertStringContainsString('<VetaUZ', $xml);
         self::assertStringNotContainsString('<Prilohy', $xml);
+        // Nic se nepřiložilo (statement_notes_attachment chybí) → žádost o sbírku listin
+        // NEJDE odeslat, i když výchozí volba je ANO — nesmí ukazovat na neexistující dokument.
+        self::assertStringContainsString('pr11_puz="N"', $xml);
     }
 
-    public function testPr11PuzStaysNoEvenWithAttachment(): void
+    /** @return array<string,mixed> */
+    private function appendixWithBalanceAndNotes(): array
     {
-        // pr11_puz = žádost o předání DO SBÍRKY LISTIN, jiná otázka než připojení
-        // souboru k podání (viz DppoXmlBuilder::buildVetaUZ docblock) — auto-přiložení
-        // souboru nesmí tiše zapnout tuhle samostatnou žádost.
-        $appendix = [
+        return [
             'balance_sheet' => [
                 'period' => ['id' => 1, 'fiscal_year' => 2025, 'starts_on' => '2025-01-01', 'ends_on' => '2025-12-31'],
                 'assets' => [['row_code' => 'AKTIVA', 'gross' => 1000.0, 'correction' => 0.0, 'net' => 1000.0, 'prev_net' => 0.0]],
@@ -204,8 +205,67 @@ final class DppoXmlBuilderPrilohyTest extends TestCase
             'settings' => ['statutory_audit' => false],
             'statement_notes_attachment' => ['content' => 'PDFDATA', 'filename' => 'x.pdf', 'label' => 'x'],
         ];
-        $xml = $this->build($appendix)['xml'];
+    }
+
+    /**
+     * Rozhodnutí zadavatele 31. 8. 2026: pr11_puz je VÝCHOZÍ 'A', dokud je k dispozici
+     * skutečně přiložená Příloha (statement_notes_attachment) — dřívější natvrdo 'N'
+     * (dodatek 13 AUDIT-DPPO-XML.md) se tímhle obrací.
+     */
+    public function testPr11PuzDefaultsToYesWhenAttachmentPresent(): void
+    {
+        $xml = $this->build($this->appendixWithBalanceAndNotes())['xml'];
+        self::assertStringContainsString('<Prilohy', $xml);
+        self::assertStringContainsString('pr11_puz="A"', $xml);
+    }
+
+    /** Ruční přebití — `$meta['puz_to_registry'] = false` vypne žádost i s přílohou. */
+    public function testPr11PuzCanBeOverriddenToNo(): void
+    {
+        $xml = $this->build($this->appendixWithBalanceAndNotes(), ['puz_to_registry' => false])['xml'];
         self::assertStringContainsString('<Prilohy', $xml);
         self::assertStringContainsString('pr11_puz="N"', $xml);
+    }
+
+    /**
+     * Chce-li uživatel žádost (výchozí ANO), ale příloha se k přiznání nepřipojila
+     * (nekompletní/nesestavená), žádost se NEODEŠLE a appendix o tom varuje — stejné
+     * chování jako v dodatek 13 §13.4 zjištěná EPO výtka o nedostatečném počtu příloh,
+     * teď hlídané appkou dřív, než se k EPO vůbec dostane.
+     */
+    public function testPr11PuzStaysNoAndWarnsWhenAttachmentMissingButWanted(): void
+    {
+        $appendix = $this->appendixWithBalanceAndNotes();
+        unset($appendix['statement_notes_attachment']);
+        $result = $this->build($appendix);
+        self::assertStringNotContainsString('pr11_puz="A"', $result['xml']);
+        self::assertStringContainsString('pr11_puz="N"', $result['xml']);
+        $warningsText = implode(' ', $result['warnings']);
+        self::assertStringContainsString('pr11_puz', $warningsText);
+    }
+
+    /**
+     * pr11_ppt/pr11_pzvk (dodatek 14) NEJSOU uživatelská volba — musí sedět přesně na
+     * to, co appendix SKUTEČNĚ přiložil jako `PP_PTOK`/`PP_ZVKAP`. Jen cash_flow chybí →
+     * jen `pr11_ppt` zůstává 'N', `pr11_pzvk' je 'A' (equity_changes je přítomný).
+     */
+    public function testPr11PptAndPzvkFollowAttachmentPresenceIndependently(): void
+    {
+        $appendix = $this->appendixWithBalanceAndNotes();
+        $appendix['equity_changes_attachment'] = ['content' => 'ZVKAP-DATA', 'filename' => 'vlastni-kapital.pdf', 'label' => 'Vlastní kapitál'];
+        // cash_flow_attachment se vědomě NEPŘIDÁVÁ (nesestavilo se).
+        $xml = $this->build($appendix)['xml'];
+        self::assertStringContainsString('pr11_ppt="N"', $xml);
+        self::assertStringContainsString('pr11_pzvk="A"', $xml);
+    }
+
+    public function testPr11PptAndPzvkBothYesWhenBothAttachmentsPresent(): void
+    {
+        $appendix = $this->appendixWithBalanceAndNotes();
+        $appendix['cash_flow_attachment'] = ['content' => 'PTOK-DATA', 'filename' => 'penezni-toky.pdf', 'label' => 'Peněžní toky'];
+        $appendix['equity_changes_attachment'] = ['content' => 'ZVKAP-DATA', 'filename' => 'vlastni-kapital.pdf', 'label' => 'Vlastní kapitál'];
+        $xml = $this->build($appendix)['xml'];
+        self::assertStringContainsString('pr11_ppt="A"', $xml);
+        self::assertStringContainsString('pr11_pzvk="A"', $xml);
     }
 }

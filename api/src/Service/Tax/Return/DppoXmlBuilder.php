@@ -276,7 +276,9 @@ final class DppoXmlBuilder
      * @param array<string,mixed> $calc     výstup DppoReturnCalculator::compute
      * @param array<string,mixed> $meta     verzeSW, typ_dapdpp, dapdpp_forma, typ_zo, typ_popldpp,
      *   volitelně `poc_zam` (viz {@see buildVetaS} — přebije hodnotu ze $appendix['settings']),
-     *   volitelně `representation` (výstup {@see TaxRepresentationService::at()}, jinak 'N' bez zástupce)
+     *   volitelně `representation` (výstup {@see TaxRepresentationService::at()}, jinak 'N' bez zástupce),
+     *   volitelně `puz_to_registry` (bool, viz {@see buildVetaUZ} — přebíjí výchozí ANO u žádosti
+     *   o předání Přílohy účetní závěrky do sbírky listin, `pr11_puz`)
      * @param array<string,mixed> $appendix Příloha účetní závěrky (Epic DP — VetaUA/UB/UD/UZ,
      *   volitelné): {balance_sheet: array (FinancialStatementService::balanceSheet výstup),
      *   income_statement: array (…::incomeStatement výstup), category: array
@@ -510,6 +512,9 @@ final class DppoXmlBuilder
                 $dom,
                 (array) ($appendix['settings'] ?? []),
                 $supplier,
+                $meta,
+                $appendix,
+                $warnings,
             ));
         } else {
             foreach ($vetaAList as $vetaA) {
@@ -1176,38 +1181,61 @@ final class DppoXmlBuilder
      * k ověření, spec §7.g).
      *
      * `pr11_puz` (má se „Příloha účetní závěrky" zahrnout do ŽÁDOSTI o předání do sbírky
-     * listin) ZŮSTÁVÁ 'N', i teď, když appendix umí přílohu jako soubor skutečně přiložit
-     * (viz buildPrilohy() / TaxReturnService::buildStatementNotesAttachment()) — je to JINÁ
-     * otázka, ne totéž rozhodnuté podruhé:
-     *   - Připojení souboru (`Prilohy/PredepsanaPriloha`) je o tom, aby DPPDP9 neslo přílohu
-     *     v účetní závěrce jako dokument (§39 vyhl. 500/2002) — samo o sobě NEŘEŠÍ EPO
-     *     chybu 2602 „Není vložena příloha účetní závěrky" (ověřeno proti zkušebnímu EPO
-     *     31. 8. 2026: se souborem i bez něj vrací IDENTICKOU výtku — viz AUDIT-DPPO-XML.md
-     *     dodatek 13, §13.3). Přiložit ho je přesto správné (dokumentuje se, o co jde), jen
-     *     to není lék na 2602.
-     *   - `pr11_puz` je VOLITELNÁ žádost, aby FÚ tenhle konkrétní dokument JEŠTĚ NAVÍC
-     *     přeposlal do sbírky listin veřejného rejstříku MÍSTO toho, aby ho poplatník podal
-     *     zvlášť u rejstříkového soudu — samostatný právní úkon s vlastními důsledky
-     *     (dokument se zveřejní), ne mechanický důsledek toho, že teď máme PDF po ruce.
-     *     Experiment (dočasně `pr11_puz='A'`, zkušební EPO, dodatek 13 §13.4) navíc ukázal,
-     *     že zapnutí vyvolá VLASTNÍ novou výtku („Chcete odeslat žádost… není však přiložen
-     *     odpovídající počet příloh") nezávislou na 2602 — další důvod nechat 'N', dokud
-     *     appka nenabídne vědomou volbu (checkbox „požádat o předání do sbírky listin") a
-     *     neumí spočítat, kolik příloh EPO pro tuhle žádost očekává. Stejně jako
-     *     `pr11_pzvk`/`pr11_ppt`/`pr11_uzmus` níže (ty navíc nemají ani obsah, který by šlo
-     *     nabídnout).
+     * listin) — rozhodnutí zadavatele 31. 8. 2026: VÝCHOZÍ je ANO (dřívější rozhodnutí
+     * v dodatku 13 AUDIT-DPPO-XML.md — natvrdo 'N' — se tímhle OBRACÍ; reálné podání
+     * zadavatele nese `pr11_puz="A"`). Jde o SAMOSTATNOU žádost, aby FÚ tenhle dokument
+     * JEŠTĚ NAVÍC přeposlal do sbírky listin veřejného rejstříku MÍSTO toho, aby ho
+     * poplatník podal zvlášť u rejstříkového soudu — proto zůstává PŘEBIJITELNÁ (ruční
+     * vstup přiznání `puz_to_registry`, viz `TaxReturnService::buildXml()`/`sanitizeInputs()`
+     * a FE `IncomeTaxReport.vue`), ne natvrdo zapnutá.
+     *
+     * Žádost se ale píše 'A' JEN když appendix skutečně nese soubor, kterého se týká
+     * (`statement_notes_attachment`, `Prilohy/PredepsanaPriloha` kod=`PP_OPISPUV`) — chtít
+     * přeposlat do sbírky listin dokument, který podání vůbec nepřikládá, by bylo věcně
+     * nesmyslné a přesně to dřívější experiment (dodatek 13 §13.4, `pr11_puz='A'` bez
+     * odpovídajícího počtu příloh) vytklo jako EPO výtku „není přiložen odpovídající počet
+     * příloh". Chce-li uživatel žádost, ale příloha není kompletní/přiložená, žádost se
+     * NEODEŠLE (bezpečnější než poslat neplatnou) a appendix o tom varuje.
+     *
+     * `pr11_ppt`/`pr11_pzvk` (přehled peněžních toků / změn vlastního kapitálu) NEJSOU
+     * uživatelská volba — kopírují, co appendix SKUTEČNĚ přikládá (`cash_flow_attachment`/
+     * `equity_changes_attachment`, řízené `TaxReturnService::needsSection18Statements()`
+     * podle §18/2 ZoÚ), stejným principem jako `pr11_puz` výše: žádost musí sedět na
+     * přiložený obsah, ne být natvrdo 'N' bez ohledu na to, co appka posílá (dodatek 14).
+     *
+     * `pr11_uzmus` (IFRS závěrka) zůstává natvrdo 'N' — appka IFRS nepodporuje
+     * (`private/DANE-PODPORA-HRANICE.md`, kategorie C) a nemá obsah, který by šlo nabídnout.
      *
      * @param array<string,mixed> $settings výstup AccountingSupplierSettingsRepository::get()
      * @param array<string,mixed> $supplier
+     * @param array<string,mixed> $meta     smí nést `puz_to_registry` (bool) — ruční přebití
+     *   výchozí ANO; chybí-li klíč, bere se výchozí ANO
+     * @param array<string,mixed> $appendix smí nést `statement_notes_attachment`/
+     *   `cash_flow_attachment`/`equity_changes_attachment` (viz {@see build()})
+     * @param list<string>        $warnings
      */
-    private function buildVetaUZ(\DOMDocument $dom, array $settings, array $supplier): \DOMElement
+    private function buildVetaUZ(\DOMDocument $dom, array $settings, array $supplier, array $meta, array $appendix, array &$warnings): \DOMElement
     {
         $vetaUZ = $dom->createElement('VetaUZ');
         $vetaUZ->setAttribute('pr11_rozv', 'A');
         $vetaUZ->setAttribute('pr11_vzz', !empty($settings['statutory_audit']) ? 'A' : 'N');
-        $vetaUZ->setAttribute('pr11_puz', 'N');
-        $vetaUZ->setAttribute('pr11_pzvk', 'N');
-        $vetaUZ->setAttribute('pr11_ppt', 'N');
+
+        $hasNotesFile = (string) ($appendix['statement_notes_attachment']['content'] ?? '') !== '';
+        $wantsPuz = array_key_exists('puz_to_registry', $meta) ? (bool) $meta['puz_to_registry'] : true;
+        if ($wantsPuz && $hasNotesFile) {
+            $vetaUZ->setAttribute('pr11_puz', 'A');
+        } else {
+            $vetaUZ->setAttribute('pr11_puz', 'N');
+            if ($wantsPuz && !$hasNotesFile) {
+                $warnings[] = 'Byla požadována žádost o předání Přílohy účetní závěrky do sbírky '
+                    . 'listin (pr11_puz), ale příloha se k přiznání nepřipojila (nekompletní/nesestavená '
+                    . '— viz warning výše) — žádost se do přiznání NEDOSTALA, aby nenesla dokument, který '
+                    . 'nemá k čemu odkazovat. Doplňte přílohu a přiznání vygenerujte znovu.';
+            }
+        }
+
+        $vetaUZ->setAttribute('pr11_ppt', (string) ($appendix['cash_flow_attachment']['content'] ?? '') !== '' ? 'A' : 'N');
+        $vetaUZ->setAttribute('pr11_pzvk', (string) ($appendix['equity_changes_attachment']['content'] ?? '') !== '' ? 'A' : 'N');
         $vetaUZ->setAttribute('pr11_uzmus', 'N');
         $email = trim((string) ($supplier['email'] ?? ''));
         if ($email !== '') {
@@ -1234,9 +1262,9 @@ final class DppoXmlBuilder
         // poc_zam: XSD dokumentace k atributu žádá vyplnění VŽDY, i hodnotou 0 — proto se
         // atribut nikdy nevynechává (na rozdíl od zbytku VetaO/VetaM). Zdroj čísla systém
         // nedopočítává (mzdový modul úvazek nenese, viz StatementNotesService::autoValues) —
-        // bere se buď z $meta, nebo z téhož nastavení, které používá i příloha v účetní
-        // závěrce (Účetnictví → Uzávěrka → Příloha v účetní závěrce, sekce „Průměrný
-        // přepočtený počet zaměstnanců").
+        // bere se buď z $meta, nebo z nastavení výkaznictví firmy (ReportingSettingsAction/
+        // AccountingSupplierSettingsRepository), které se zadává v Uzávěrka → Nastavení
+        // uzávěrky a výkazů, pole „Průměrný přepočtený počet zaměstnanců".
         if (array_key_exists('poc_zam', $meta)) {
             $pocZam = (int) round((float) $meta['poc_zam']);
         } else {
@@ -1247,9 +1275,8 @@ final class DppoXmlBuilder
                 $pocZam = 0;
                 $warnings[] = 'Průměrný přepočtený počet zaměstnanců nebyl nalezen — do přiznání '
                     . 'se dosadila hodnota 0 (chyba EPO 1704 vyžaduje vyplnění vždy, i nulou). '
-                    . 'Účetní má hodnotu doplnit v Účetnictví → Uzávěrka → Příloha v účetní '
-                    . 'závěrce, sekce „Průměrný přepočtený počet zaměstnanců", a přiznání '
-                    . 'vygenerovat znovu.';
+                    . 'Účetní má hodnotu doplnit v Uzávěrka → Nastavení uzávěrky a výkazů, pole '
+                    . '„Průměrný přepočtený počet zaměstnanců", a přiznání vygenerovat znovu.';
             }
         }
         $vetaS->setAttribute('poc_zam', (string) max(0, $pocZam));

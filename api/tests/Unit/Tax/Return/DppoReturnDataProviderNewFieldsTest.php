@@ -212,6 +212,49 @@ final class DppoReturnDataProviderNewFieldsTest extends TestCase
         self::assertNull($result['bank_account']);
     }
 
+    /**
+     * `bank_accounts` (task #2 — volba účtu pro vrácení přeplatku místo tichého výběru
+     * za poplatníka) nese VŠECHNY aktivní CZK účty, ve stejném pořadí jako dřívější
+     * jediná výchozí volba (`is_default DESC, id`) — FE z nich staví nabídku.
+     */
+    public function testBankAccountsListsAllActiveCzkAccountsInDefaultOrder(): void
+    {
+        $this->currency(1, 1, 'CZK', '19-2000145399', '0800', 'Česká spořitelna', null, 0, 1);
+        $this->currency(2, 1, 'CZK', '2000145399', '0100', 'Komerční banka', null, 1, 1);
+        $this->currency(3, 1, 'CZK', '9999999999', '0300', 'ČSOB — neaktivní', null, 0, 0);
+        $this->currency(4, 1, 'EUR', null, null, 'Fio banka', 'CZ0000000000001234567890', 1, 1);
+
+        $result = $this->provider->gather(1, 2025);
+        self::assertCount(2, $result['bank_accounts']);
+        self::assertSame([2, 1], array_column($result['bank_accounts'], 'id'), 'is_default DESC, id — a neaktivní/EUR účet chybí.');
+        self::assertSame($result['bank_accounts'][0], $result['bank_account'], 'Beze volby v $inputs je efektivní účet = první (výchozí) v nabídce.');
+    }
+
+    /** Explicitní `bank_account_id` v $inputs vybere PŘESNĚ tenhle účet, ne výchozí. */
+    public function testBankAccountIdInputSelectsNonDefaultAccount(): void
+    {
+        $this->currency(1, 1, 'CZK', '19-2000145399', '0800', 'Česká spořitelna', null, 0, 1);
+        $this->currency(2, 1, 'CZK', '2000145399', '0100', 'Komerční banka', null, 1, 1);
+
+        $result = $this->provider->gather(1, 2025, ['bank_account_id' => 1]);
+        self::assertSame('19-2000145399', $result['bank_account']['account_number']);
+        self::assertSame([], $result['warnings']);
+    }
+
+    /**
+     * Neplatné/smazané `bank_account_id` (starý výběr, účet mezitím zrušen) NESMÍ spadnout
+     * — spadne zpátky na výchozí účet a přidá warning, ať si toho účetní všimne.
+     */
+    public function testBankAccountIdInputFallsBackToDefaultWithWarningWhenAccountGone(): void
+    {
+        $this->currency(2, 1, 'CZK', '2000145399', '0100', 'Komerční banka', null, 1, 1);
+
+        $result = $this->provider->gather(1, 2025, ['bank_account_id' => 999]);
+        self::assertSame('2000145399', $result['bank_account']['account_number']);
+        self::assertNotEmpty($result['warnings']);
+        self::assertStringContainsString('999', $result['warnings'][0]);
+    }
+
     private function asset(int $id, string $kind, ?int $taxGroup): void
     {
         $this->pdo->prepare('INSERT INTO assets (id, supplier_id, kind, tax_group) VALUES (?,1,?,?)')
