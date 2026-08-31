@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * VetaB (příznaky vložených příloh) a VetaN (žádost o vrácení přeplatku) — obě věty
- * chyběly úplně, viz private/AUDIT-DPFO-XML.md §4/§7 nález 1 a 2.
+ * chyběly úplně, viz private/DANE-PLAN.md §4/§7 nález 1 a 2.
  */
 final class DpfoXmlBuilderVetaBAndNTest extends TestCase
 {

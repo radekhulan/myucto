@@ -15,7 +15,7 @@ use PHPUnit\Framework\TestCase;
  * absorpce součtů (jádro úkolu — viz absorbRoundingDiff v DppoXmlBuilder). Zkušební EPO
  * 31. 8. 2026 vytklo tyhle mezisoučty jako „Hodnota řádku X se nerovná součtu"; lokální
  * XSD to nezachytí (netestuje hodnoty), proto jsou hodnoty ověřeny ručně proti reálnému
- * zkušebnímu EPO — viz private/AUDIT-DPPO-XML.md dodatek 10.
+ * zkušebnímu EPO — viz private/DANE-PLAN.md dodatek 10.
  */
 final class DppoXmlBuilderAppendixDetailTest extends TestCase
 {

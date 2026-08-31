@@ -10,7 +10,7 @@ use MyInvoice\Service\Tax\TaxConstants;
 use PHPUnit\Framework\TestCase;
 
 /**
- * VetaV/VetaJ — Příloha č. 2 (§9 nájem, §10 ostatní příjmy), viz private/AUDIT-DPFO-XML.md
+ * VetaV/VetaJ — Příloha č. 2 (§9 nájem, §10 ostatní příjmy), viz private/DANE-PLAN.md
  * mezera č. 3. Věty dřív chyběly úplně, ačkoli VetaO.kc_zd9/kc_zd10 se posílaly bez podkladu.
  *
  * Hodnoty kc_vyd10/uhrn_vydaje10 a chování při jednořádkovém (nepoložkovém) vstupu jsou

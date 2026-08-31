@@ -1014,7 +1014,7 @@ final class TaxReturnService
      * krok, viz {@see buildStatementNotesAttachment()}.
      *
      * Ručně vyplněný vzor v EPO (ověřený fakt — zadavatel doložil snímkem, viz
-     * AUDIT-DPPO-XML.md) ukázal, že tahle příloha patří do PŘEDEPSANÉ přílohy s kódem
+     * DANE-PLAN.md) ukázal, že tahle příloha patří do PŘEDEPSANÉ přílohy s kódem
      * `PP_OPISPUV` (jeden řádek v tabulce příloh EPO), NE do obecné přílohy bez kódu —
      * dřív se stavěla jako `ObecnaPriloha`, což je špatná přihrádka.
      *
@@ -1026,7 +1026,7 @@ final class TaxReturnService
      *
      * POZOR — tohle NEODSTRAŇUJE chybu 2602: ověřeno proti zkušebnímu EPO 31. 8. 2026,
      * výtka „Není vložena příloha účetní závěrky" se s přiloženým souborem i bez něj
-     * chová IDENTICKY (AUDIT-DPPO-XML.md dodatek 13, §13.3) — příčinu se nepodařilo zjistit
+     * chová IDENTICKY (DANE-PLAN.md dodatek 13, §13.3) — příčinu se nepodařilo zjistit
      * (viz tam), přiložení souboru zůstává správné samo o sobě (§39 vyhláška), jen to není
      * lék na 2602. Přesun z ObecnaPriloha na PredepsanaPriloha/PP_OPISPUV na tohle nemá vliv
      * — je to strukturální oprava (správná přihrádka v EPO), ne pokus o odstranění 2602.
@@ -1179,7 +1179,7 @@ final class TaxReturnService
      *
      * NEŘEŠÍ EPO chybu 2602 „Není vložena příloha účetní závěrky" — ověřeno proti
      * zkušebnímu EPO 31. 8. 2026, výtka se s přiloženým souborem i bez něj chová
-     * IDENTICKY (AUDIT-DPPO-XML.md dodatek 13). Přiložit soubor je přesto správné samo o
+     * IDENTICKY (DANE-PLAN.md dodatek 13). Přiložit soubor je přesto správné samo o
      * sobě (dokumentuje splnění § 39), varovné texty níže proto NEslibují, že 2602 zmizí.
      *
      * Soubor VĚDOMĚ nevloží (vrátí `file: null` + `warning`), místo aby ho tiše

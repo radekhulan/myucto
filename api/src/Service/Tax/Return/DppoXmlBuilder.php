@@ -161,7 +161,7 @@ final class DppoXmlBuilder
     /**
      * Úroveň 2 pod P.B. (Rezervy) — tabulka 24810, platnost=2026. `P.B.1.` (Rezerva na
      * důchody a podobné závazky, ř. 26) v `statement_rows` nemáme (žádná mapa účtů na ni
-     * neukazuje — chybějící DATA, ne chybějící mapování, viz AUDIT-DPPO-XML.md dodatek 11),
+     * neukazuje — chybějící DATA, ne chybějící mapování, viz DANE-PLAN.md dodatek 11),
      * posílají se tedy jen tři ze čtyř oficiálních podřádků; chybějící přispívá součtu
      * nulou, ne chybou (stejný princip jako C.II.3. u aktiv/C.III. u pasiv výše).
      */
@@ -179,7 +179,7 @@ final class DppoXmlBuilder
      * KAŽDÝ řádek, který sama vypíše (stejný princip jako AKTIVA_DETAIL_C_RADKU), takže
      * pokrývá i úroveň 4 (A.II.2./C.II.8.) jedním mechanismem beze změny volajícího kódu.
      * `A.IV.2.` (ř. 21, „Jiný výsledek hospodaření minulých let") a `C.I.4./C.I.5./C.I.7.`/
-     * `C.II.7.`/`P.B.1.` chybí ve `statement_rows` (skupina (b), viz AUDIT-DPPO-XML.md
+     * `C.II.7.`/`P.B.1.` chybí ve `statement_rows` (skupina (b), viz DANE-PLAN.md
      * dodatek 11) — u nich se posílá jen to, co v datech je; chybějící přispívá nulou.
      */
     private const PASIVA_DETAIL_C_RADKU = [
@@ -310,7 +310,7 @@ final class DppoXmlBuilder
         // Typ poplatníka (§ 17): 1 = ostatní, tedy běžná obchodní korporace. Ostatní kódy
         // (veřejně prospěšný poplatník, daňový nerezident, investiční fond, penzijní
         // společnost, nositel investiční pobídky) aplikace neeviduje a nepodporuje — viz
-        // private/DANE-PODPORA-HRANICE.md, kategorie C. Kód je přebitelný z `$meta`, ale
+        // private/DANE-PLAN.md, kategorie C. Kód je přebitelný z `$meta`, ale
         // nikdo ho zatím nepředává, takže se u nestandardního poplatníka musí ověřit ručně.
         $typPoplatnika = (string) ($meta['typ_popldpp'] ?? '1');
         $vetaD->setAttribute('typ_popldpp', $typPoplatnika);
@@ -419,7 +419,7 @@ final class DppoXmlBuilder
         // sam_pr — počet samostatných příloh. VetaA (přehled transakcí se spojenými osobami)
         // NENÍ ani „příloha II. oddílu" (p_pr_2od výše — to jsou tabulky a)-j) VetaE/F/G/…,
         // XSD sekvence je řadí PŘED VetaS), ani „zvláštní příloha" (zvl_pr — VetaR, volný
-        // text). Ověřeno na zkušebním EPO 31. 8. 2026 (private/AUDIT-DPPO-XML.md §11): reálné
+        // text). Ověřeno na zkušebním EPO 31. 8. 2026 (private/DANE-PLAN.md §11): reálné
         // odpovědi VetaA výslovně jmenují „List č. N sam. přílohy k pol. 12" — VetaA PATŘÍ do
         // sam_pr (samostatné přílohy, položka 12 I. oddílu), dřív natvrdo '0' (VetaZ/T/B/C/H,
         // které nestavíme, jsou taky sam_pr, ale jediná sam_pr věta, kterou builder skutečně
@@ -535,7 +535,7 @@ final class DppoXmlBuilder
         // dokumenty, což VetaUA/UB/UD/UZ výše NEDĚLAJÍ (jsou to strukturovaná data, ne
         // dokument). NEŘEŠÍ ale EPO chybu 2602 „Není vložena příloha účetní závěrky" —
         // ověřeno proti zkušebnímu EPO 31. 8. 2026, výtka je se souborem i bez něj identická
-        // (AUDIT-DPPO-XML.md dodatek 13, §13.3) — příčina zůstává neznámá (viz tam),
+        // (DANE-PLAN.md dodatek 13, §13.3) — příčina zůstává neznámá (viz tam),
         // přiložení souborů je i tak samostatně správné.
         $prilohy = $this->buildPrilohy($dom, $appendix);
         if ($prilohy !== null) {
@@ -550,12 +550,12 @@ final class DppoXmlBuilder
      * `PP_ZVKAP|PP_UZMUS|PP_PTOK|PP_OPISPUV`). Pořadí v poli = pořadí v dokumentu = pořadí
      * číslování `cislo` (viz buildPrilohy()).
      *
-     * Skutečný zadavatelem ručně vyplněný vzor v EPO (ověřený fakt, AUDIT-DPPO-XML.md)
+     * Skutečný zadavatelem ručně vyplněný vzor v EPO (ověřený fakt, DANE-PLAN.md)
      * ukázal, že „Příloha v účetní závěrce" patří do PŘEDEPSANÉ přílohy s kódem
      * `PP_OPISPUV` — každý kód odpovídá jednomu řádku v tabulce příloh EPO — NE do obecné
      * přílohy, jak dřív stavěl `ObecnaPriloha` bez kódu. `PP_UZMUS` (účetní závěrka dle
      * mezinárodních účetních standardů) se záměrně NESTAVÍ — IFRS aplikace nepodporuje
-     * (private/DANE-PODPORA-HRANICE.md, kategorie C) a předstírat sestavenou IFRS závěrku
+     * (private/DANE-PLAN.md, kategorie C) a předstírat sestavenou IFRS závěrku
      * by bylo nepravdivé.
      */
     private const PREDEPSANA_PRILOHA_KODY = [
@@ -1182,7 +1182,7 @@ final class DppoXmlBuilder
      *
      * `pr11_puz` (má se „Příloha účetní závěrky" zahrnout do ŽÁDOSTI o předání do sbírky
      * listin) — rozhodnutí zadavatele 31. 8. 2026: VÝCHOZÍ je ANO (dřívější rozhodnutí
-     * v dodatku 13 AUDIT-DPPO-XML.md — natvrdo 'N' — se tímhle OBRACÍ; reálné podání
+     * v dodatku 13 DANE-PLAN.md — natvrdo 'N' — se tímhle OBRACÍ; reálné podání
      * zadavatele nese `pr11_puz="A"`). Jde o SAMOSTATNOU žádost, aby FÚ tenhle dokument
      * JEŠTĚ NAVÍC přeposlal do sbírky listin veřejného rejstříku MÍSTO toho, aby ho
      * poplatník podal zvlášť u rejstříkového soudu — proto zůstává PŘEBIJITELNÁ (ruční
@@ -1204,7 +1204,7 @@ final class DppoXmlBuilder
      * přiložený obsah, ne být natvrdo 'N' bez ohledu na to, co appka posílá (dodatek 14).
      *
      * `pr11_uzmus` (IFRS závěrka) zůstává natvrdo 'N' — appka IFRS nepodporuje
-     * (`private/DANE-PODPORA-HRANICE.md`, kategorie C) a nemá obsah, který by šlo nabídnout.
+     * (`private/DANE-PLAN.md`, kategorie C) a nemá obsah, který by šlo nabídnout.
      *
      * @param array<string,mixed> $settings výstup AccountingSupplierSettingsRepository::get()
      * @param array<string,mixed> $supplier
@@ -1455,7 +1455,7 @@ final class DppoXmlBuilder
      * Jediné pole, které bez odhadu sedí, je katalogové „ostatní transakce" (ost_trans_sl1 =
      * výnos, ost_trans_sl2 = náklad, v tis. Kč jako zbytek VetaA). Bezúplatná plnění (A/N),
      * záruky (A/N), cash-pooling (A/N) a stavy pohledávek/závazků appka neeviduje vůbec —
-     * zůstávají v XML prázdné (nikdy '' ani 'N' naslepo, viz DANE-PODPORA-HRANICE.md zásada
+     * zůstávají v XML prázdné (nikdy '' ani 'N' naslepo, viz DANE-PLAN.md zásada
      * „raději prázdný atribut a varování než odhadnutá hodnota"), varování níže to shrnuje.
      *
      * Dvojice (naz_spojos, stat_spojos) se dedupuje SEM — dva klientské záznamy stejné

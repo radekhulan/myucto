@@ -17,7 +17,7 @@ use ReflectionMethod;
 /**
  * `TaxReturnService::buildStatementNotesAttachment()` (private — volaná z
  * `buildDppoAppendix()`) — konec cesty pro EPO chybu 2602 „Není vložena příloha
- * účetní závěrky" (viz AUDIT-DPPO-XML.md dodatek 9.4c/13): appendix VetaUA/UB/UD/UZ
+ * účetní závěrky" (viz DANE-PLAN.md dodatek 9.4c/13): appendix VetaUA/UB/UD/UZ
  * chybu neřeší, chce se skutečně přiložený soubor (`Prilohy/ObecnaPriloha`).
  *
  * DB integrační test (v transakci, rollback v tearDown — stejný vzor jako

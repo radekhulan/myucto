@@ -13,7 +13,7 @@ use PHPUnit\Framework\TestCase;
  * VetaA (přehled transakcí se spojenými osobami, § 23 odst. 7 ZDP) — schéma ji staví
  * úplně (dppdp9_epo2.xsd:4083), ale `DppoXmlBuilder` ji dosud vůbec negeneroval, přestože
  * podklad (RelatedPartyService/DppoReturnDataProvider::relatedPartyAppendix) existoval jen
- * jako návrh, nikdy se nedostal do XML (viz private/AUDIT-DPPO-XML.md, mezera č. 2).
+ * jako návrh, nikdy se nedostal do XML (viz private/DANE-PLAN.md, mezera č. 2).
  */
 final class DppoXmlBuilderVetaATest extends TestCase
 {
@@ -51,7 +51,7 @@ final class DppoXmlBuilderVetaATest extends TestCase
 
     /**
      * `sam_pr` (počet samostatných příloh) — zkušební EPO 31. 8. 2026 pojmenovalo VetaA
-     * doslova „List č. N sam. přílohy k pol. 12" (private/AUDIT-DPPO-XML.md §11), takže
+     * doslova „List č. N sam. přílohy k pol. 12" (private/DANE-PLAN.md §11), takže
      * VetaA patří do sam_pr, NE do p_pr_2od/zvl_pr (viz testVetaADoesNotAffectPPr2odOrZvlPrCounts).
      */
     public function testSamPrCountsVetaAElements(): void

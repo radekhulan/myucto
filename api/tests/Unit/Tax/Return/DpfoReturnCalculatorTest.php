@@ -249,7 +249,7 @@ final class DpfoReturnCalculatorTest extends TestCase
     /**
      * §9/§10 hrubé podklady pro Přílohu č. 2 (VetaV/VetaJ, {@see DpfoXmlBuilder}) — 'fields'
      * nese jen NET dílčí základ (kc_zd9/kc_zd10), builder ale potřebuje hrubé kc_prij9/
-     * kc_vyd9/kc_prij10/kc_vyd10 zvlášť (viz private/AUDIT-DPFO-XML.md mezera č. 3).
+     * kc_vyd9/kc_prij10/kc_vyd10 zvlášť (viz private/DANE-PLAN.md mezera č. 3).
      */
     public function testGrossSection9And10AreExposedForXmlBuilder(): void
     {

@@ -241,7 +241,7 @@ final class DpfoXmlBuilderXsdTest extends TestCase
         // Kódy tabulky majetku nejsou pořadová čísla řádků tiskopisu: hotovost je 05a,
         // banka 06 a zásoby 03. Dřív tu byla ta trojice prohozená a úřad by to nevytkl,
         // protože kontroluje jen formát. Zdroj: úřední popis struktury DPFDP7,
-        // rozbor v private/RESERSE-DPFO-MAJETEK.md.
+        // rozbor v private/DANE-PLAN.md.
         self::assertStringContainsString('kc_dpfmz05a="5000"', $xml);   // hotovost na začátku
         self::assertStringContainsString('kc_z_dpfmz05a="7000"', $xml); // hotovost na konci
         self::assertStringContainsString('kc_dpfmz06="20000"', $xml);   // banka na začátku
@@ -413,7 +413,7 @@ final class DpfoXmlBuilderXsdTest extends TestCase
         self::assertStringContainsString('<VetaE kc_uprsniz_235="5000"', $xml);
     }
 
-    // ── Příloha 1 oddíl E (VetaC/VetaE) — private/AUDIT-DPFO-XML.md nález č. 2 ──────
+    // ── Příloha 1 oddíl E (VetaC/VetaE) — private/DANE-PLAN.md nález č. 2 ──────
 
     public function testAdjustmentSectionEAbsentWhenIncreaseAndDecreaseAreZero(): void
     {
@@ -504,7 +504,7 @@ final class DpfoXmlBuilderXsdTest extends TestCase
         self::assertLessThan($vetaVPos, $vetaEPos, 'VetaE musí předcházet VetaV v XSD sekvenci.');
     }
 
-    // ── VetaD.m_deti*/m_detiztpp* — private/AUDIT-DPFO-XML.md nález č. 1 ────────────
+    // ── VetaD.m_deti*/m_detiztpp* — private/DANE-PLAN.md nález č. 1 ────────────
 
     /** @return array<string,mixed> */
     private function childrenCalc(): array

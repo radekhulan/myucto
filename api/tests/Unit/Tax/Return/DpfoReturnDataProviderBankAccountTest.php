@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * `DpfoReturnDataProvider::bankAccount()` — jediný podklad, odkud VetaN (žádost o
- * vrácení přeplatku DPFO) může vzít bankovní spojení; chyběl úplně (private/AUDIT-DPFO-XML.md
+ * vrácení přeplatku DPFO) může vzít bankovní spojení; chyběl úplně (private/DANE-PLAN.md
  * §4/§7 nález 2). Stejný zdroj/dotaz jako u DPPO ({@see DppoReturnDataProviderNewFieldsTest}).
  *
  * Instance se staví přes `newInstanceWithoutConstructor()` a testuje se přes reflexi —

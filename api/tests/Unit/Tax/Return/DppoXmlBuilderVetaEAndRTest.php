@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * VetaE (příloha č. 1 II. oddílu, tabulka a) — rozpad ř. 40) a VetaR (zvláštní
  * textová příloha k ř. 62 II. oddílu) — chyběly úplně, zjištěno zkušebním EPO
- * (viz private/AUDIT-DPPO-XML.md §9.4a/b).
+ * (viz private/DANE-PLAN.md §9.4a/b).
  */
 final class DppoXmlBuilderVetaEAndRTest extends TestCase
 {

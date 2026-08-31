@@ -67,7 +67,7 @@ final class TaxReturnServiceDppoAppendixWarningsTest extends TestCase
 
     /**
      * `buildStatementNotesAttachment()` — chyba 2602 se (ověřeno proti zkušebnímu EPO,
-     * AUDIT-DPPO-XML.md §9.4c) neváže na VetaUA/UB/UD/UZ výše, ale na SKUTEČNĚ přiložený
+     * DANE-PLAN.md §9.4c) neváže na VetaUA/UB/UD/UZ výše, ale na SKUTEČNĚ přiložený
      * soubor. Test ověřuje, že selhání `StatementNotesService::build()` (final třída,
      * nejde mockovat — stejný trik jako testStatementErrorWarnsInsteadOfSilentlyDroppingAppendix:
      * neinicializovaná `readonly` vlastnost vyhodí Error při prvním sáhnutí) skončí jako

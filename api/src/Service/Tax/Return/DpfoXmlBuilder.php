@@ -218,7 +218,7 @@ final class DpfoXmlBuilder
 
         // Souhrn napříč dětmi pro VetaD.m_deti/m_detiztpp/m_deti2/.../m_deti3/m_detiztpp3
         // (§8 níže) — XSD u nich nemá xs:documentation, ale zkušební EPO 31. 8. 2026
-        // (viz private/DPFO-RADKY-MAPOVANI.md) potvrdilo pokusem, že jde o kritickou
+        // (viz private/DANE-PLAN.md) potvrdilo pokusem, že jde o kritickou
         // křížovou kontrolu: „Celkem počet měsíců N. dítě (bez/se ZTP/P) z Tab. č. 2 se
         // nerovná součtu počtu měsíců jednotlivých řádků" — VetaD musí nést součet přesně
         // toho, co se sečte z jednotlivých VetaA řádků níže, ne odvozenou/odhadnutou hodnotu.
@@ -380,7 +380,7 @@ final class DpfoXmlBuilder
             // hotovost, banka a zásoby mají čísla, která by podle pořadí na formuláři
             // vycházela jinak, a dřív tu byly kvůli tomu prohozené. Zdrojem je úřední
             // popis struktury DPFDP7 na daňovém portálu, kde má každé pole vlastní
-            // popisek, shodně s anotacemi ve schématu; rozbor v private/RESERSE-DPFO-MAJETEK.md.
+            // popisek, shodně s anotacemi ve schématu; rozbor v private/DANE-PLAN.md.
             // Chybná trojice by prošla bez povšimnutí: úřad kontroluje jen formát,
             // takže zásoby vykázané jako hotovost nic nevytkne.
             $map = [
@@ -410,7 +410,7 @@ final class DpfoXmlBuilder
         // na str. (2)." Zkušební EPO 31. 8. 2026 potvrdilo pokusem, že jde o kritickou
         // kontrolu, ne jen doporučení: „Příloha 1/ř.105 - je vyplněn ř.105 a není naplněna
         // odpovídající část oddílu E. Přílohy č.1" (totéž pro ř.106) — viz
-        // private/DPFO-RADKY-MAPOVANI.md, nález mimo původní zadání, teď doplněno.
+        // private/DANE-PLAN.md, nález mimo původní zadání, teď doplněno.
         $this->appendAdjustmentRows($dom, $root, 'VetaC', 'kc_uprzvys_235', 'uprzvys_235', 'kc_uhzvys', '105', $s7Increase, (array) ($s7['increase_items'] ?? []), $warnings);
         $this->appendAdjustmentRows($dom, $root, 'VetaE', 'kc_uprsniz_235', 'uprsniz_235', 'kc_uhsniz', '106', $s7Decrease, (array) ($s7['decrease_items'] ?? []), $warnings);
 
@@ -500,7 +500,7 @@ final class DpfoXmlBuilder
      * jednoho odpovídajícího řádku VetaC/VetaE odmítne (viz komentář u volání výše).
      *
      * Appka DNES nemá jistý zdroj položkového rozpisu v rozsahu této opravy —
-     * DpfoReturnDataProvider (mimo povolený rozsah, viz private/AUDIT-DPFO-XML.md) čte
+     * DpfoReturnDataProvider (mimo povolený rozsah, viz private/DANE-PLAN.md) čte
      * z `tax_evidence_non_cash_adjustments`/ručních položek §23 jen SOUČET
      * (`s7_increase`/`s7_decrease`), položky samotné zatím nepředává. Volající PROTO
      * MŮŽE (ne musí) dodat `$s7['increase_items']`/`['decrease_items']` (tvar
@@ -584,7 +584,7 @@ final class DpfoXmlBuilder
      * appka nevede číselník druhů ostatních příjmů, jen volný text (`kind`/`kind_code`
      * z formuláře, viz DpfoReturnDataProvider/TaxReturnService::section10Items). Doplnění
      * naslepo by bylo hádání zákonné klasifikace, ne přenos existujícího údaje — proto jen
-     * varujeme (viz private/AUDIT-DPFO-XML.md, mezera č. 3 dodatek).
+     * varujeme (viz private/DANE-PLAN.md, mezera č. 3 dodatek).
      *
      * @param array<string,mixed>       $s9      DpfoReturnCalculator výstup, klíč 's9' (income/expenses/base)
      * @param array<string,mixed>       $s10     klíč 's10' (income/expenses/base)
@@ -689,7 +689,7 @@ final class DpfoXmlBuilder
             // xs:documentation) — stejná třída nejistoty jako VetaD.kc_dan_celk nebo
             // VetaT.celk_pr_prij7/vyd7 jinde v tomto builderu. Zkušební EPO na ně žádnou
             // samostatnou výtku nedalo, jen na kc_vyd10 — proto totožné hodnoty jako
-            // kc_prij10/kc_vyd10/kc_zd10p (riziko zapsáno v private/AUDIT-DPFO-XML.md).
+            // kc_prij10/kc_vyd10/kc_zd10p (riziko zapsáno v private/DANE-PLAN.md).
             $vetaV->setAttribute('uhrn_prijmy10', $this->int($itemsIncome));
             $vetaV->setAttribute('uhrn_vydaje10', $this->int($itemsExpensesClaimed));
             $vetaV->setAttribute('uhrn_rozdil10', $zd10p);

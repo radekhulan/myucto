@@ -10,7 +10,7 @@ use MyInvoice\Service\Tax\TaxConstants;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Dodatek 2026-08-31 (pokračování, viz AUDIT-DPPO-XML.md dodatek 11) — úroveň 3
+ * Dodatek 2026-08-31 (pokračování, viz DANE-PLAN.md dodatek 11) — úroveň 3
  * (a místy 4) zbytku rozvahy: `DppoXmlBuilderAppendixDetailTest` doplnila úroveň 2
  * (B./C./D. aktiv, A./C./D. pasiv), ale jakmile ta úroveň začala nést hodnoty, zkušební
  * EPO u `large` vytklo JEJICH vlastní součty o úroveň hlouběji (B.I./B.II./B.III./C.I./
@@ -199,7 +199,7 @@ final class DppoXmlBuilderAppendixLevel3Test extends TestCase
     /**
      * A.I./A.III. (pasiva, 3/15) — úroveň 3, čistá mapa. A.IV. (18) nese v datech jen
      * A.IV.1. (19) — A.IV.2. (21, „Jiný výsledek hospodaření minulých let") v
-     * `statement_rows` chybí (skupina (b), viz AUDIT-DPPO-XML.md dodatek 11), takže se
+     * `statement_rows` chybí (skupina (b), viz DANE-PLAN.md dodatek 11), takže se
      * neposílá vůbec — chybějící přispívá součtu nulou, ne chybou.
      */
     public function testPasivaAIAndAIIIAndAIVGroupsLevel3Mapped(): void

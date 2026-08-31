@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * `Prilohy/PredepsanaPriloha` (dppdp9.xsd:6180/6234) — SKUTEČNĚ přiložené soubory.
  * VetaUA/UB/UD/UZ (strukturovaná data) NEŘEŠÍ EPO chybu 2602 „Není vložena příloha
- * účetní závěrky" (ověřeno proti zkušebnímu EPO, AUDIT-DPPO-XML.md §9.4c/§13) — ověřeno
+ * účetní závěrky" (ověřeno proti zkušebnímu EPO, DANE-PLAN.md §9.4c/§13) — ověřeno
  * i tady: appendix bez žádného z klíčů PREDEPSANA_PRILOHA_KODY žádnou `Prilohy` nepostaví,
  * i když VetaUA/UB/UD/UZ existují (viz testAppendixWithoutAttachmentBuildsNoPrilohy).
  *
@@ -210,7 +210,7 @@ final class DppoXmlBuilderPrilohyTest extends TestCase
     /**
      * Rozhodnutí zadavatele 31. 8. 2026: pr11_puz je VÝCHOZÍ 'A', dokud je k dispozici
      * skutečně přiložená Příloha (statement_notes_attachment) — dřívější natvrdo 'N'
-     * (dodatek 13 AUDIT-DPPO-XML.md) se tímhle obrací.
+     * (dodatek 13 DANE-PLAN.md) se tímhle obrací.
      */
     public function testPr11PuzDefaultsToYesWhenAttachmentPresent(): void
     {
