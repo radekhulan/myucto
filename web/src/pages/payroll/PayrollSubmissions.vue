@@ -244,14 +244,18 @@ watch(environment, async () => {
   success.value = ''
   // Jiné prostředí = jiný seznam, takže stránka musí zpět na začátek.
   snapshotsOffset.value = 0
+  void loadInboxBadge()
   if (!loading.value) {
     await loadSnapshots()
   }
 })
 
+// Odznak musí ukazovat TÉŽ prostředí, jaké je zvolené nahoře. Natvrdo zadaná
+// produkce znamenala, že si účetní v testu přečte produkční počet a naopak -
+// číslo u záložky pak tvrdí něco jiného než obsah, který se pod ní otevře.
 async function loadInboxBadge() {
   try {
-    const response = await payrollApi.submissionInbox('production')
+    const response = await payrollApi.submissionInbox(environment.value)
     inboxOpenCount.value = response.summary.total
   } catch {
     // Odznak je jen orientační — chybu zobrazí až samotná záložka Inbox.

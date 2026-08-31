@@ -522,6 +522,11 @@ describe('PayrollSubmissions', () => {
     expect(m.snapshots).toHaveBeenLastCalledWith('test', { limit: 25, offset: 0 })
     expect(wrapper.text()).toContain('payroll.regzel.environment.test_warning')
 
+    // Odznak Inboxu musí následovat zvolené prostředí. Dřív se ptal natvrdo
+    // produkce, takže číslo u záložky tvrdilo něco jiného, než co se pod ní
+    // otevřelo.
+    expect(m.submissionInbox).toHaveBeenLastCalledWith('test')
+
     // Skupinu agend filtruje server — panel ji nesmí dofiltrovávat z přijaté
     // stránky, jinak by pager počítal řádky, které tabulka neukazuje.
     await clickTab(wrapper, 'jmhz')

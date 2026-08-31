@@ -5494,8 +5494,8 @@
       },
       "accident_insurance": {
         "title": "Zákonné pojištění odpovědnosti zaměstnavatele",
-        "subtitle": "Vyhláška č. 125/1993 Sb. Sazba se odvíjí od převažující činnosti firmy (příloha č. 2 vyhlášky) — MyÚčto číselník sazeb podle NACE zatím nezná, zadejte ji ručně z výměru pojišťovny. MyÚčto z ní čtvrtletně spočítá pojistné z vyměřovacího základu sociálního pojištění (minimálně 100 Kč) a předepíše ho na seznam plateb.",
-        "rate_source_hint": "Bankovní účet a variabilní symbol pojistitele zadejte v sekci Platební účty institucí výše (typ Zákonné pojištění) — kód instituce tam zadaný použijte i tady.",
+        "subtitle": "Vyhláška č. 125/1993 Sb. Sazba se odvíjí od převažující činnosti firmy (příloha č. 2 vyhlášky). MyÚčto z ní čtvrtletně spočítá pojistné z vyměřovacího základu sociálního pojištění (minimálně 100 Kč) a předepíše ho na seznam plateb.",
+        "rate_source_hint": "Sazbu určuje a pojistné počítá i platí sám zaměstnavatel (§ 12 odst. 2 vyhlášky) — pojišťovna neposílá výměr ani předpis pojistného. Sazebník níže je podklad k výběru, uloží se to, co potvrdíte. Bankovní účet a variabilní symbol pojistitele zadejte v sekci Platební účty institucí výše (typ Zákonné pojištění) — kód instituce tam zadaný použijte i tady.",
         "current": "Aktuální sazba: {rate} ‰ ({institution}), platí od {date}.",
         "not_set": "Sazba zákonného pojištění odpovědnosti není nastavena — dokud ji nezadáte, MyÚčto pojistné nespočítá.",
         "effective_from": "Platí od",
@@ -5505,7 +5505,27 @@
         "add_rate": "Přidat sazbu",
         "load_failed": "Sazbu zákonného pojištění se nepodařilo načíst.",
         "saved": "Sazba zákonného pojištění byla uložena.",
-        "save_failed": "Sazbu zákonného pojištění se nepodařilo uložit."
+        "save_failed": "Sazbu zákonného pojištění se nepodařilo uložit.",
+        "rate_outside_annex": "Tahle sazba není žádná ze sazeb přílohy č. 2 (50,4 / 10,5 / 9,8 / 8,4 / 7 / 5,6 / 4,2 / 2,8 ‰). Uložit ji lze, ale zkontrolujte, jestli nejde o překlep.",
+        "schedule": {
+          "title": "Sazebník přílohy č. 2 vyhlášky",
+          "subtitle": "Osm sazbových skupin a 98 činností tak, jak je vyjmenovává vyhláška. Rozbalte a vyberte řádek podle skutečné převažující činnosti firmy.",
+          "okec_warning": "Příloha č. 2 člení činnosti podle klasifikace OKEČ, kterou Český statistický úřad zrušil k 31. 12. 2007 a nahradil ji CZ-NACE. Vyhláška se od té doby nezměnila, takže závazná je pořád OKEČ — a stejné číslo v ní znamená něco jiného: OKEČ 62 je letecká doprava, CZ-NACE 62 jsou činnosti v oblasti informačních technologií. Čísla kódů proto nepárujte. Závazný převodník OKEČ na CZ-NACE navíc neexistuje v žádném předpise; převodníky pojišťoven jsou metodická pomůcka a některým kódům CZ-NACE v nich vycházejí dvě různé sazby.",
+          "nace_is": "Firma má v CZ-NACE zapsanou činnost {nace}. Návrhy níže jsou hledané podle jejího NÁZVU, ne podle čísla kódu.",
+          "nace_missing": "Firma nemá v nastavení vyplněný kód CZ-NACE, takže MyÚčto nemá podle čeho navrhovat. Vyberte řádek ze sazebníku sami.",
+          "no_suggestion": "Podle názvu této činnosti se v příloze nic nenašlo. Projděte sazebník — pokud tam činnost není a nepracuje se při ní s výbušninami, radioaktivními látkami, radonem, infekčním materiálem, jedy ani ve velkých výškách či hloubkách, patří do skupiny „Ostatní ekonomické činnosti“ (5,6 ‰).",
+          "suggestion_disclaimer": "Návrh je nezávazný. Sazbu určuje převažující základní činnost tvořící předmět podnikání zaměstnavatele — ověřte ji, MyÚčto za ni neručí.",
+          "use": "Použít {rate} ‰",
+          "filter": "Hledat v sazebníku",
+          "filter_placeholder": "Část názvu činnosti nebo kódu OKEČ",
+          "okec_code": "Kód OKEČ",
+          "activity": "Ekonomická činnost",
+          "no_results": "Žádná činnost neodpovídá hledanému výrazu.",
+          "load_failed": "Sazebník přílohy č. 2 se nepodařilo načíst. Sazbu můžete zadat ručně.",
+          "retry": "Zkusit znovu",
+          "provenance": "{annex} vyhlášky č. {decree}; sazby ve znění {rates_source} od {rates_effective_from}. Minimální pojistné za kalendářní čtvrtletí je {minimum} Kč.",
+          "source_link": "Úplné znění vyhlášky"
+        }
       },
       "accounting_title": "Automatické účtování",
       "accounting_hint": "Předkontace rozlišují mzdu zaměstnance, závislý příjem společníka, odměnu za výkon funkce, pojistné, daň a ostatní srážky.",
@@ -6728,7 +6748,7 @@
     },
     "health_notifications": {
       "title": "Oznamovací povinnost vůči zdravotní pojišťovně",
-      "subtitle": "HOZ: aplikace vyhodnotí lhůty, zaeviduje povinnosti do inboxu a umí za období a pojišťovnu sestavit i stáhnout XML ověřené proti připnutému XSD; odeslání zůstává ruční. PPZ: ze schválené revize vytvoří XML i PDF a doložený formát přílohy může připravit do odchozí fronty ISDS. Samotné odeslání vždy potvrzuje uživatel.",
+      "subtitle": "HOZ: aplikace vyhodnotí lhůty, zaeviduje povinnosti do inboxu a za období a pojišťovnu sestaví XML i PDF ověřené proti připnutému XSD. PPZ: totéž ze schválené revize. U pojišťovny s doloženým formátem přílohy jde obojí zařadit do odchozí fronty ISDS a odeslat z aplikace; kde formát doložený není, zůstává stažení a ruční odeslání. Samotné odeslání vždy potvrzuje uživatel.",
       "load_failed": "Přehled oznamovacích povinností se nepodařilo načíst.",
       "stale": "Zobrazená data jsou z posledního úspěšného načtení. {message}",
       "read_only": "K sestavení podání je potřeba právo zápisu do mzdových podání.",

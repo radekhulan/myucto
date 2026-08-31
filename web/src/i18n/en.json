@@ -5494,8 +5494,8 @@
       },
       "accident_insurance": {
         "title": "Statutory employer liability insurance",
-        "subtitle": "Decree No. 125/1993 Coll. The rate depends on the company's prevailing activity (annex 2 of the decree) — MyÚčto does not yet know the NACE rate table, so enter it manually from the insurer's assessment. MyÚčto then calculates the quarterly premium from the social insurance assessment base (at least CZK 100) and assesses it on the payments list.",
-        "rate_source_hint": "Enter the insurer's bank account and variable symbol in the Institution payment accounts section above (type Statutory insurance) — use the same institution code here.",
+        "subtitle": "Decree No. 125/1993 Coll. The rate depends on the company's prevailing activity (annex 2 of the decree). MyÚčto then calculates the quarterly premium from the social insurance assessment base (at least CZK 100) and assesses it on the payments list.",
+        "rate_source_hint": "The employer determines the rate and calculates and pays the premium itself (section 12(2) of the decree) — the insurer issues no assessment. The schedule below is a reference for picking the rate; what gets saved is what you confirm. Enter the insurer's bank account and variable symbol in the Institution payment accounts section above (type Statutory insurance) — use the same institution code here.",
         "current": "Current rate: {rate} ‰ ({institution}), effective from {date}.",
         "not_set": "The statutory accident insurance rate is not set — MyÚčto will not calculate the premium until you enter it.",
         "effective_from": "Effective from",
@@ -5505,7 +5505,27 @@
         "add_rate": "Add rate",
         "load_failed": "The statutory accident insurance rate could not be loaded.",
         "saved": "The statutory accident insurance rate has been saved.",
-        "save_failed": "The statutory accident insurance rate could not be saved."
+        "save_failed": "The statutory accident insurance rate could not be saved.",
+        "rate_outside_annex": "This rate is not one of the annex 2 rates (50.4 / 10.5 / 9.8 / 8.4 / 7 / 5.6 / 4.2 / 2.8 ‰). You can still save it, but check it is not a typo.",
+        "schedule": {
+          "title": "Annex 2 rate schedule",
+          "subtitle": "Eight rate groups and 98 activities exactly as listed by the decree. Expand and pick the row matching the company's actual prevailing activity.",
+          "okec_warning": "Annex 2 classifies activities by OKEČ, which the Czech Statistical Office retired on 31 December 2007 and replaced with CZ-NACE. The decree has not changed since, so OKEČ remains the binding classification — and the same number means something else in each: OKEČ 62 is air transport, CZ-NACE 62 is information technology. Do not match code numbers. No legal act contains a binding OKEČ to CZ-NACE conversion table either; the insurers' tables are guidance only, and some CZ-NACE codes end up with two different rates in them.",
+          "nace_is": "The company's CZ-NACE activity is {nace}. The suggestions below are matched by its NAME, not by the code number.",
+          "nace_missing": "The company has no CZ-NACE code in its settings, so MyÚčto has nothing to suggest from. Pick a row from the schedule yourself.",
+          "no_suggestion": "Nothing in the annex matches the name of this activity. Go through the schedule — if the activity is not listed and does not involve explosives, radioactive substances, radon, infectious material, poisons or work at great heights or depths, it belongs to „Other economic activities“ (5.6 ‰).",
+          "suggestion_disclaimer": "The suggestion is not binding. The rate follows from the prevailing core activity of the employer's business — verify it, MyÚčto does not vouch for it.",
+          "use": "Use {rate} ‰",
+          "filter": "Search the schedule",
+          "filter_placeholder": "Part of an activity name or OKEČ code",
+          "okec_code": "OKEČ code",
+          "activity": "Economic activity",
+          "no_results": "No activity matches the search term.",
+          "load_failed": "The annex 2 schedule could not be loaded. You can enter the rate manually.",
+          "retry": "Try again",
+          "provenance": "{annex} of decree No. {decree}; rates as amended by {rates_source}, effective {rates_effective_from}. The minimum premium per calendar quarter is CZK {minimum}.",
+          "source_link": "Full text of the decree"
+        }
       },
       "accounting_title": "Automatic posting",
       "accounting_hint": "Postings distinguish employee wages, a partner's dependent income, statutory-office remuneration, insurance, tax and other deductions.",
@@ -6728,7 +6748,7 @@
     },
     "health_notifications": {
       "title": "Health insurer notification duty",
-      "subtitle": "HOZ: the application evaluates deadlines, records obligations in the inbox, and can build and download an XML for a period and insurer, validated against the pinned XSD; sending stays manual. PPZ: it creates XML and PDF from an approved revision and can place a documented attachment format into the ISDS outbox. The user always confirms the actual send.",
+      "subtitle": "Bulk notification: the app evaluates deadlines, records obligations in the inbox and builds both XML and PDF for the selected period and insurer, validated against the pinned XSD. Payment overview: the same from an approved revision. Where the insurer's attachment format is documented, both can be queued to the ISDS outbox and sent from the app; where it is not, the file is downloaded and sent manually. Sending is always confirmed by the user.",
       "load_failed": "The notification duty overview could not be loaded.",
       "stale": "The data shown comes from the last successful load. {message}",
       "read_only": "Building a submission requires write access to payroll submissions.",
