@@ -136,6 +136,7 @@ final class LicenseService
                     $takeover,
                     $usersActive,
                     $companiesActive,
+                    $this->instanceDomain(),
                 );
             } catch (LicenseNetworkException $e) {
                 $this->logger->info('license.activate.network_error', ['error' => $e->getMessage()]);
@@ -423,6 +424,7 @@ final class LicenseService
                 $companiesActive,
                 $this->appVersion(),
                 $this->telemetry(),
+                $this->instanceDomain(),
             );
         } catch (LicenseNetworkException $e) {
             $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
@@ -1631,6 +1633,38 @@ final class LicenseService
     public static function keyId(string $publicKeyBase64): string
     {
         return substr(hash('sha256', trim($publicKeyBase64)), 0, 16);
+    }
+
+    /**
+     * Doména, na které instalace běží — hostname z `app.url`.
+     *
+     * Bere se z konfigurace, ne z požadavku: obnova licence běží z cronu, kde
+     * žádný `Host` není, a i v requestu by hlavička byla to, co poslal klient.
+     * `app.url` je zároveň jediná hodnota, kterou instalace sama považuje za
+     * svou kanonickou adresu (odkazy v e-mailech), takže sedí i za reverzní
+     * proxy a u spravované instalace ji drží provozovatel.
+     *
+     * ⚠️ Nepatří do telemetrie ({@see TelemetryPayloadBuilder}) — ta má uzavřený
+     * whitelist, který doménu výslovně zakazuje. Tohle je samostatné pole a
+     * vědomá výjimka: licenční server má u licence ukázat, kde běží.
+     *
+     * Port a cesta se zahazují, hostname se normalizuje na malá písmena a
+     * z IDN se nechá tak, jak je v konfiguraci. Prázdné = `app.url` není
+     * vyplněná nebo z ní hostname nejde vytáhnout; pak se pole neposílá.
+     */
+    private function instanceDomain(): string
+    {
+        $url = trim((string) $this->config->get('app.url', ''));
+        if ($url === '') {
+            return '';
+        }
+        // Bez schématu parse_url() vrátí hostname jako cestu — doplníme ho.
+        if (!preg_match('~^[a-z][a-z0-9+.-]*://~i', $url)) {
+            $url = 'https://' . $url;
+        }
+        $host = parse_url($url, PHP_URL_HOST);
+
+        return is_string($host) ? mb_strtolower(trim($host, '.'), 'UTF-8') : '';
     }
 
     private function appVersion(): string

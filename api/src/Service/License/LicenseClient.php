@@ -65,9 +65,10 @@ final class LicenseClient
         bool $takeover = false,
         int $usersActive = 0,
         int $companiesActive = 0,
+        string $domain = '',
     ): array
     {
-        return $this->post('/api/license/activate', [
+        $body = [
             'license_key'      => $licenseKey,
             'instance_id'      => $instanceId,
             'fingerprint'      => $fingerprint,
@@ -75,7 +76,12 @@ final class LicenseClient
             'takeover'         => $takeover,
             'users_active'     => max(0, $usersActive),
             'companies_active' => max(0, $companiesActive),
-        ]);
+        ];
+        if ($domain !== '') {
+            $body['domain'] = $domain;
+        }
+
+        return $this->post('/api/license/activate', $body);
     }
 
     /**
@@ -85,6 +91,12 @@ final class LicenseClient
      *        a neobsahuje NIC identifikujícího. `null` = telemetrie vypnutá nebo se ji
      *        nepodařilo sestavit; do požadavku se pak vůbec nepřikládá a obnova licence
      *        proběhne přesně jako dřív. Starší licenční server pole prostě ignoruje.
+     * @param string $domain Doména, na které instalace běží (hostname z `app.url`).
+     *        ⚠️ ZÁMĚRNĚ mimo `telemetry` — ta má uzavřený whitelist bez čehokoli
+     *        identifikujícího a doména do něj nepatří. Je to samostatné, výslovné
+     *        pole: provozovatel potřebuje u licence vidět, kde běží (podpora,
+     *        podezření na klon), a tahle vazba má být v kódu vidět, ne schovaná
+     *        v „provozní telemetrii". Prázdné = neposílá se.
      * @return array<string,mixed>
      * @throws LicenseNetworkException
      */
@@ -97,6 +109,7 @@ final class LicenseClient
         int $companiesActive,
         string $appVersion,
         ?array $telemetry = null,
+        string $domain = '',
     ): array {
         $body = [
             'license_key'      => $licenseKey,
@@ -109,6 +122,9 @@ final class LicenseClient
         ];
         if ($telemetry !== null) {
             $body['telemetry'] = $telemetry;
+        }
+        if ($domain !== '') {
+            $body['domain'] = $domain;
         }
 
         return $this->post('/api/license/renew', $body);
