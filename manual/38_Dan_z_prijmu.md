@@ -46,13 +46,39 @@ Automaticky načtená data ze systému:
 Ruční položky, které systém nezná a které **přežijí mezi sezeními**:
 
 - **DPPO:** odečet ztráty minulých let (§ 34), dary (§ 20/8) — buď souhrnně, nebo **položkově**
-  (dary v hodnotě pod **2 000 Kč** se dle § 20/8 neodečtou a systém je vyloučí), přepočtený
-  počet zaměstnanců se zdravotním postižením (sleva § 35), zaplacené zálohy na daň a volné
-  položky § 23 zvyšující/snižující základ.
+  (dary v hodnotě pod **2 000 Kč** se dle § 20/8 neodečtou a systém je vyloučí), **odečet na
+  podporu výzkumu a vývoje** (§ 34/4, ř. 242) a **na podporu odborného vzdělávání** (§ 34/4,
+  ř. 243), přepočtený počet zaměstnanců se zdravotním postižením (sleva § 35), zaplacené zálohy
+  na daň a volné položky § 23 zvyšující/snižující základ.
 - **DPFO:** příjmy a sražené zálohy ze **závislé činnosti (§ 6)**, dílčí základy **§ 8/§ 9**
   a položkové druhy příjmů **§ 10** (výdaj se u každého druhu omezí jeho příjmem),
-  (kapitál, nájem, ostatní), **odečet daňové ztráty minulých let (§ 34)** — uplatní se max do
-  výše úhrnu § 7–§ 10 (ř. 41), zaplacené zálohy na daň i na **pojistné** (sociální/zdravotní).
+  (kapitál, nájem, ostatní), **samostatný základ daně (§ 16a)**, **odečet daňové ztráty minulých
+  let (§ 34)** — uplatní se max do výše úhrnu § 7–§ 10 (ř. 41), zaplacené zálohy na daň i na
+  **pojistné** (sociální/zdravotní).
+
+#### Odečty § 34 odst. 4 (DPPO)
+
+Výši odečtu na **výzkum a vývoj** ani na **odborné vzdělávání** systém z účetnictví spočítat
+nemůže — plyne z projektu výzkumu a vývoje, resp. z evidence odborného vzdělávání. Zadává ji
+poplatník a systém hlídá **pořadí a strop**: odborné vzdělávání se odečítá až od základu
+sníženého o ztrátu a o odečet na výzkum a vývoj, limit darů § 20/8 se počítá až ze základu
+sníženého podle § 34. Nevyužitý zbytek odečtu na výzkum a vývoj lze podle § 34 odst. 5 uplatnit
+v následujících **3 obdobích** — tenhle přenos systém neeviduje a upozorní na něj.
+
+#### Samostatný základ daně (§ 16a, DPFO)
+
+Zahraniční podíly na zisku a obdobné příjmy podle § 8 odst. 1 lze **volitelně** zdanit
+samostatně sazbou **15 %**. Příjmy zahrnuté sem se v § 8 (ř. 38) neuvádějí a slevy § 35ba
+ani § 35c se na tuto daň neuplatňují — přičítá se až k výsledné dani. Do XML se údaj
+**nezapisuje** (atributy nejsou v úředním schématu popsané), příslušné řádky vyplňte ručně v EPO;
+systém na to u nenulové částky upozorní.
+
+#### Paušální výdaj na dopravu (§ 24/2/zt, DPPO)
+
+U volných položek § 23 lze zaškrtnout **Paušál na dopravu**. Označená položka (paušální výdaj
+i odpovídající add-back PHM) se vykáže na **ř. 40**, resp. **112/170** místo obecného ř. 62/162;
+základ daně se tím nemění, jde jen o zařazení na správný řádek. Bez zaškrtnutí se systém pokusí
+paušál rozpoznat z textu položky, a když si není jistý, upozorní na to.
 
 #### Daňové ztráty (§ 34)
 

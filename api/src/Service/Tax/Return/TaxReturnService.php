@@ -1572,6 +1572,12 @@ final class TaxReturnService
             $out['donations'] = $this->money($inputs['donations'] ?? 0);
             // Položkové dary §20/8 (min. 2 000 Kč/dar) — preferováno před agregátem `donations`.
             $out['donation_items'] = $this->items($inputs['donation_items'] ?? []);
+            // Odečty §34 odst. 4 — výzkum a vývoj (ř. 242, §34a–34e) a odborné vzdělávání
+            // (ř. 243, §34f–34h). {@see DppoReturnCalculator::compute()} je čte, whitelist
+            // je ale neměl: účetní odečet zadala, uložení ho tiše zahodilo a přiznání
+            // vyšlo s vyšší daní, aniž by o tom cokoli hlásilo.
+            $out['rnd_deduction'] = $this->money($inputs['rnd_deduction'] ?? 0);
+            $out['education_deduction'] = $this->money($inputs['education_deduction'] ?? 0);
             $out['disabled_employees_avg'] = max(0.0, (float) ($inputs['disabled_employees_avg'] ?? 0));
             $out['disabled_employees_severe_avg'] = max(0.0, (float) ($inputs['disabled_employees_severe_avg'] ?? 0));
             $out['filing_deadline'] = $this->date($inputs['filing_deadline'] ?? '');
@@ -1610,6 +1616,11 @@ final class TaxReturnService
                 'expenses' => $this->money($s10['expenses'] ?? 0),
             ];
             $out['s10_items'] = $this->section10Items($inputs['s10_items'] ?? []);
+            // Samostatný základ daně §16a (zahraniční podíly na zisku, sazba 15 %) —
+            // {@see DpfoReturnCalculator::compute()} ho čte, whitelist ho neměl, takže
+            // volba podle §16a odst. 1 se uložením ztratila. Do XML se nezapisuje
+            // (chybí atributy v XSD), kalkulátor na to upozorňuje varováním.
+            $out['s16a_separate_base'] = $this->money($inputs['s16a_separate_base'] ?? 0);
             $out['social_paid_advances'] = $this->money($inputs['social_paid_advances'] ?? 0);
             $out['health_paid_advances'] = $this->money($inputs['health_paid_advances'] ?? 0);
             // Odečet daňové ztráty minulých let §34 (ř. 44) — ruční vstup, návrh FIFO z evidence.
@@ -1635,7 +1646,19 @@ final class TaxReturnService
         return $out;
     }
 
-    /** @param mixed $items @return list<array{text:string,amount:float}> */
+    /**
+     * Ruční položky §23 (a dary §20/8) — text + částka, u položek §23 navíc explicitní
+     * druh `kind`.
+     *
+     * `kind` se dřív zahazoval, přestože {@see DppoReturnCalculator::isFlatRateTravelItem()}
+     * mu dává PŘEDNOST před rozpoznáváním podle textu. Zůstávala tak funkční jen ta
+     * heuristika, kterou má `kind` nahradit — a kalkulátor uživatele vyzýval, ať položku
+     * označí, což ale nešlo natrvalo udělat. Propouští se jen ZNÁMÝ druh: neznámý řetězec
+     * by heuristiku vypnul, aniž by ji cokoli nahradilo.
+     *
+     * @param mixed $items
+     * @return list<array{text:string,amount:float,kind?:string}>
+     */
     private function items(mixed $items): array
     {
         if (!is_array($items)) {
@@ -1651,7 +1674,11 @@ final class TaxReturnService
             if ($amount === 0.0 && $text === '') {
                 continue;
             }
-            $out[] = ['text' => $text, 'amount' => $amount];
+            $row = ['text' => $text, 'amount' => $amount];
+            if ($this->text($item['kind'] ?? '', 30) === DppoReturnCalculator::KIND_FLAT_RATE_TRAVEL) {
+                $row['kind'] = DppoReturnCalculator::KIND_FLAT_RATE_TRAVEL;
+            }
+            $out[] = $row;
         }
         return array_slice($out, 0, 200);
     }

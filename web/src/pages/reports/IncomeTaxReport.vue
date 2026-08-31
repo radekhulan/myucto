@@ -167,6 +167,8 @@ function blankInputs(): Record<string, any> {
     s8_capital: { base: 0 },
     s9_rental: { income: 0, expenses: 0, expense_mode: 'actual' },
     s10_other: { income: 0, expenses: 0 },
+    // § 16a — samostatný základ daně (zahraniční podíly na zisku, sazba 15 %).
+    s16a_separate_base: 0,
     social_paid_advances: 0, health_paid_advances: 0,
     loss_carryforward: 0,
     tax_paid_advances: 0, notes: '',
@@ -589,7 +591,8 @@ onMounted(async () => {
 type ItemList = 'manual_increase_items' | 'manual_decrease_items' | 'donation_items'
 function addItem(list: ItemList) {
   if (!Array.isArray(inputs[list])) inputs[list] = []
-  inputs[list].push({ text: '', amount: 0 })
+  // `kind` nese explicitní druh položky §23 (paušál na dopravu §24/2/zt); u darů se nepoužívá.
+  inputs[list].push(list === 'donation_items' ? { text: '', amount: 0 } : { text: '', amount: 0, kind: '' })
 }
 function removeItem(list: ItemList, i: number | string) {
   inputs[list].splice(Number(i), 1)
@@ -908,9 +911,13 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                 <span class="text-sm font-semibold">{{ t('taxReturn.manual_increase') }}</span>
                 <button type="button" @click="addItem('manual_increase_items')" class="text-xs text-primary-600">+ {{ t('taxReturn.add_item') }}</button>
               </div>
-              <div v-for="(it, i) in inputs.manual_increase_items" :key="'inc'+i" class="flex gap-2 mb-2">
-                <input v-model="it.text" :placeholder="t('taxReturn.item_text')" class="flex-1 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+              <div v-for="(it, i) in inputs.manual_increase_items" :key="'inc'+i" class="flex flex-wrap items-center gap-2 mb-2">
+                <input v-model="it.text" :placeholder="t('taxReturn.item_text')" class="flex-1 min-w-[12rem] h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 <input type="number" v-model.number="it.amount" class="w-40 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                <label class="flex items-center gap-1 text-[11px] text-neutral-500 whitespace-nowrap" :title="t('taxReturn.item_flat_rate_travel_hint')">
+                  <input type="checkbox" v-model="it.kind" true-value="flat_rate_travel" false-value="" />
+                  {{ t('taxReturn.item_flat_rate_travel') }}
+                </label>
                 <button type="button" @click="removeItem('manual_increase_items', i)" class="text-danger-500 text-sm px-2">×</button>
               </div>
             </div>
@@ -919,9 +926,13 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                 <span class="text-sm font-semibold">{{ t('taxReturn.manual_decrease') }}</span>
                 <button type="button" @click="addItem('manual_decrease_items')" class="text-xs text-primary-600">+ {{ t('taxReturn.add_item') }}</button>
               </div>
-              <div v-for="(it, i) in inputs.manual_decrease_items" :key="'dec'+i" class="flex gap-2 mb-2">
-                <input v-model="it.text" :placeholder="t('taxReturn.item_text')" class="flex-1 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+              <div v-for="(it, i) in inputs.manual_decrease_items" :key="'dec'+i" class="flex flex-wrap items-center gap-2 mb-2">
+                <input v-model="it.text" :placeholder="t('taxReturn.item_text')" class="flex-1 min-w-[12rem] h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 <input type="number" v-model.number="it.amount" class="w-40 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                <label class="flex items-center gap-1 text-[11px] text-neutral-500 whitespace-nowrap" :title="t('taxReturn.item_flat_rate_travel_hint')">
+                  <input type="checkbox" v-model="it.kind" true-value="flat_rate_travel" false-value="" />
+                  {{ t('taxReturn.item_flat_rate_travel') }}
+                </label>
                 <button type="button" @click="removeItem('manual_decrease_items', i)" class="text-danger-500 text-sm px-2">×</button>
               </div>
             </div>
@@ -949,6 +960,10 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                 <input type="number" v-model.number="inputs.s10_other.income" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
               <label class="text-sm">{{ t('taxReturn.s10_expenses') }}
                 <input type="number" v-model.number="inputs.s10_other.expenses" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
+              <label class="text-sm">{{ t('taxReturn.s16a_separate_base') }}
+                <input type="number" v-model.number="inputs.s16a_separate_base" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" />
+                <span class="block text-[11px] text-neutral-400 mt-0.5">{{ t('taxReturn.s16a_separate_base_hint') }}</span></label>
+              <div></div>
               <label class="text-sm">{{ t('taxReturn.loss_carryforward') }}
                 <input type="number" v-model.number="inputs.loss_carryforward" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" />
                 <span class="block text-[11px] text-neutral-400 mt-0.5">{{ t('taxReturn.loss_carryforward_hint_fo') }}</span></label>
