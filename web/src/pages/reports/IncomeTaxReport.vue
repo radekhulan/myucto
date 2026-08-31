@@ -150,7 +150,7 @@ function blankInputs(): Record<string, any> {
   return {
     s6_employment: { income: 0, withholding: 0 },
     s8_capital: { base: 0 },
-    s9_rental: { income: 0, expenses: 0 },
+    s9_rental: { income: 0, expenses: 0, expense_mode: 'actual' },
     s10_other: { income: 0, expenses: 0 },
     social_paid_advances: 0, health_paid_advances: 0,
     loss_carryforward: 0,
@@ -910,7 +910,13 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               <label class="text-sm">{{ t('taxReturn.s9_income') }}
                 <input type="number" v-model.number="inputs.s9_rental.income" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
               <label class="text-sm">{{ t('taxReturn.s9_expenses') }}
-                <input type="number" v-model.number="inputs.s9_rental.expenses" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
+                <input type="number" v-model.number="inputs.s9_rental.expenses" :disabled="inputs.s9_rental.expense_mode === 'pausal'"
+                  class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md disabled:bg-neutral-50 disabled:text-neutral-500" /></label>
+              <label class="text-sm">{{ t('taxReturn.s9_expense_mode') }}
+                <select v-model="inputs.s9_rental.expense_mode" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md">
+                  <option value="actual">{{ t('taxReturn.s9_expense_mode_actual') }}</option>
+                  <option value="pausal">{{ t('taxReturn.s9_expense_mode_pausal') }}</option>
+                </select></label>
               <label class="text-sm">{{ t('taxReturn.s10_income') }}
                 <input type="number" v-model.number="inputs.s10_other.income" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
               <label class="text-sm">{{ t('taxReturn.s10_expenses') }}

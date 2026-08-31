@@ -238,7 +238,18 @@ final class DpfoXmlBuilderXsdTest extends TestCase
         // vstup tak, jak byl — tedy hodnota mimo číselník, kterou EPO odmítne.
         self::assertStringContainsString('c_nace_dal="620200"', $xml);
         self::assertStringContainsString('<VetaU ', $xml);
-        self::assertStringContainsString('kc_z_dpfmz03="7000"', $xml);
+        // Kódy tabulky majetku nejsou pořadová čísla řádků tiskopisu: hotovost je 05a,
+        // banka 06 a zásoby 03. Dřív tu byla ta trojice prohozená a úřad by to nevytkl,
+        // protože kontroluje jen formát. Zdroj: úřední popis struktury DPFDP7,
+        // rozbor v private/RESERSE-DPFO-MAJETEK.md.
+        self::assertStringContainsString('kc_dpfmz05a="5000"', $xml);   // hotovost na začátku
+        self::assertStringContainsString('kc_z_dpfmz05a="7000"', $xml); // hotovost na konci
+        self::assertStringContainsString('kc_dpfmz06="20000"', $xml);   // banka na začátku
+        self::assertStringContainsString('kc_z_dpfmz06="50000"', $xml); // banka na konci
+        self::assertStringContainsString('kc_dpfmz03="30000"', $xml);   // zásoby na začátku
+        self::assertStringContainsString('kc_z_dpfmz03="20000"', $xml); // zásoby na konci
+        self::assertStringContainsString('kc_dpfmz04="40000"', $xml);   // pohledávky
+        self::assertStringContainsString('kc_dpfmz02="100000"', $xml);  // hmotný majetek
 
         $validator = new XmlSchemaValidator();
         if (!$validator->hasSchema('dpfdp7')) {

@@ -1298,6 +1298,10 @@ final class TaxReturnService
             $out['s9_rental'] = [
                 'income' => $this->money($s9['income'] ?? 0),
                 'expenses' => $this->money($s9['expenses'] ?? 0),
+                // Způsob uplatnění výdajů (§ 9 odst. 4) — jde do `vyd9proc` v podání.
+                // Neuloženou hodnotu bere přiznání jako skutečné výdaje, což je stav
+                // před zavedením volby.
+                'expense_mode' => ($s9['expense_mode'] ?? '') === 'pausal' ? 'pausal' : 'actual',
             ];
             $s10 = (array) ($inputs['s10_other'] ?? []);
             $out['s10_other'] = [

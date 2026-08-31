@@ -376,9 +376,22 @@ final class DpfoXmlBuilder
         if ($closing !== null && ($closing['status'] ?? '') === 'final') {
             $opening = (array) ($closing['opening_balances'] ?? []);
             $ending = (array) ($closing['closing_balances'] ?? []);
+            // Tabulka majetku a dluhů (§ 7b). Kódy NEJSOU pořadová čísla řádků tiskopisu —
+            // hotovost, banka a zásoby mají čísla, která by podle pořadí na formuláři
+            // vycházela jinak, a dřív tu byly kvůli tomu prohozené. Zdrojem je úřední
+            // popis struktury DPFDP7 na daňovém portálu, kde má každé pole vlastní
+            // popisek, shodně s anotacemi ve schématu; rozbor v private/RESERSE-DPFO-MAJETEK.md.
+            // Chybná trojice by prošla bez povšimnutí: úřad kontroluje jen formát,
+            // takže zásoby vykázané jako hotovost nic nevytkne.
             $map = [
-                'fixed_assets' => '02', 'cash' => '03', 'receivables' => '04', 'bank' => '05a',
-                'inventory' => '06', 'other_assets' => '08', 'liabilities' => '10', 'reserves' => '11',
+                'fixed_assets' => '02',   // 1. Hmotný majetek
+                'cash' => '05a',          // 2. Peněžní prostředky v hotovosti
+                'bank' => '06',           // 3. Peněžní prostředky na bankovních účtech
+                'inventory' => '03',      // 4. Zásoby
+                'receivables' => '04',    // 5. Pohledávky včetně poskytnutých úvěrů a zápůjček
+                'other_assets' => '08',   // 6. Ostatní majetek
+                'liabilities' => '10',    // 7. Dluhy včetně přijatých úvěrů a zápůjček
+                'reserves' => '11',       // 8. Rezervy
             ];
             $vetaU = $dom->createElement('VetaU');
             foreach ($map as $key => $code) {
@@ -618,10 +631,11 @@ final class DpfoXmlBuilder
             // kde s7_increase/s7_decrease existují) — rozdíl je proto zároveň konečným
             // dílčím základem, shodně s VetaO.kc_zd9 (DpfoReturnCalculator::$s9).
             $vetaV->setAttribute('kc_zd9p', $this->int((float) ($s9['base'] ?? $rozdil9)));
-            // Appka neeviduje, zda poplatník uplatňuje výdaje procentem z příjmů (§9
-            // odst. 4 zákona) — do formuláře se zadává jen absolutní částka výdajů,
-            // proto vždy N (výdaje ve skutečné výši).
-            $vetaV->setAttribute('vyd9proc', 'N');
+            // Způsob uplatnění výdajů podle § 9 odst. 4 (30 % z příjmů). Schéma na to má
+            // kritickou kontrolu jen v tom smyslu, že hodnota musí být A nebo N — obsahově
+            // se neověřuje, takže „N" u poplatníka s paušálem projde a přiznání přesto
+            // uvádí způsob nepravdivě. Volba je proto vstupem, ne odhadem.
+            $vetaV->setAttribute('vyd9proc', !empty($s9['pausal']) ? 'A' : 'N');
         }
 
         // Řádky VetaJ se sestaví PŘED souhrnem VetaV.kc_vyd10, protože ten musí být

@@ -642,4 +642,35 @@ final class DpfoReturnCalculatorTest extends TestCase
         self::assertSame([], $withoutItems['s7']['increase_items']);
         self::assertSame([], $withoutItems['s7']['decrease_items']);
     }
+
+    /**
+     * Výdaje procentem z příjmů u nájmu (§ 9 odst. 4). Bez téhle volby se do přiznání
+     * plnilo „výdaje ve skutečné výši" i poplatníkovi, který uplatňuje paušál — částky
+     * seděly, ale způsob byl uvedený nepravdivě a úřad to nepozná.
+     */
+    public function testRentalPercentageExpensesAreComputedAndFlagged(): void
+    {
+        $r = $this->calcRun([], ['s9_rental' => ['income' => 252000.0, 'expenses' => 999.0, 'expense_mode' => 'pausal']]);
+
+        self::assertSame(75600.0, $r['s9']['expenses']);
+        self::assertTrue($r['s9']['pausal']);
+        self::assertSame(176400.0, $r['s9']['base']);
+    }
+
+    /** Paušál u nájmu je shora omezený (`expense_caps`), ne prosté procento. */
+    public function testRentalPercentageExpensesRespectTheCap(): void
+    {
+        $r = $this->calcRun([], ['s9_rental' => ['income' => 4000000.0, 'expense_mode' => 'pausal']]);
+
+        self::assertSame(600000.0, $r['s9']['expenses']);
+    }
+
+    /** Bez volby zůstává chování jako dřív — skutečné výdaje tak, jak je účetní zadala. */
+    public function testRentalDefaultsToActualExpenses(): void
+    {
+        $r = $this->calcRun([], ['s9_rental' => ['income' => 252000.0, 'expenses' => 40000.0]]);
+
+        self::assertSame(40000.0, $r['s9']['expenses']);
+        self::assertFalse($r['s9']['pausal']);
+    }
 }

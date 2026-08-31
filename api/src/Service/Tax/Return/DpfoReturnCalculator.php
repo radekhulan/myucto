@@ -78,7 +78,15 @@ final class DpfoReturnCalculator
 
         $s8 = max(0.0, $this->num($inputs['s8_capital']['base'] ?? 0));
         $s9Income = max(0.0, $this->num($inputs['s9_rental']['income'] ?? 0));
-        $s9Expenses = max(0.0, $this->num($inputs['s9_rental']['expenses'] ?? 0));
+        // Výdaje procentem z příjmů podle § 9 odst. 4 (30 %, nejvýše dle `expense_caps`).
+        // Bez téhle volby se do přiznání plnilo `vyd9proc="N"` i poplatníkovi, který
+        // paušál uplatňuje — částky by seděly, ale způsob uplatnění výdajů by byl
+        // uvedený nepravdivě a úřad to nepozná (kontroluje jen, že je A nebo N).
+        $s9Pausal = (string) ($inputs['s9_rental']['expense_mode'] ?? 'actual') === 'pausal';
+        $s9Cap = (float) (($c['expense_caps'][30] ?? 600000));
+        $s9Expenses = $s9Pausal
+            ? min(round($s9Income * 0.30, 2), $s9Cap)
+            : max(0.0, $this->num($inputs['s9_rental']['expenses'] ?? 0));
         $s9 = round($s9Income - $s9Expenses, 2); // §9 smí být záporný (ztráta z nájmu, §5/3 → offset §7/§8/§10)
         $s10Items = [];
         $s10Income = 0.0;
@@ -438,6 +446,7 @@ final class DpfoReturnCalculator
                 'income' => $s9Income,
                 'expenses' => $s9Expenses,
                 'base' => $s9,
+                'pausal' => $s9Pausal,
             ],
             's10' => [
                 'income' => $s10Income,
