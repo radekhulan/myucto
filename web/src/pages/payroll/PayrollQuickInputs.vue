@@ -152,6 +152,10 @@ const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employ
  * Lišta se zúžením musí být vidět i tehdy, když zúžení nedalo nic. Bez ní zůstane
  * prázdná tabulka a uživatel nemá jak poznat, že se dívá na zúžený seznam — ani
  * jak se ze zúžení dostat.
+ *
+ * Slepé zúžení jméno neunese: zužuje se na VZTAH a jeho jméno chodí jen se
+ * řádky, které tentokrát nepřišly. Dotáhnout ho zvlášť by stálo dva požadavky
+ * (vztah → osoba), takže lišta radši mluví obecně, než aby ukazovala id.
  */
 const focusName = computed(() => {
   if (focusEmploymentId.value === null) return null
@@ -1000,8 +1004,9 @@ onMounted(() => {
 
     <PayrollFocusNotice
       v-if="focusMissing"
-      :name="String(focusEmploymentId)"
+      :name="focusName ?? t('payroll.agendas.focus.unknown_person')"
       missing
+      named
       @clear="clearFocus"
     />
     <PayrollFocusNotice

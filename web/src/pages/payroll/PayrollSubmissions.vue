@@ -12,6 +12,7 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollEldpPanel from './PayrollEldpPanel.vue'
@@ -98,16 +99,6 @@ const SNAPSHOT_COLUMNS: ColumnDef[] = [
 const snapshotsTbl = useTablePrefs('payroll-submissions', SNAPSHOT_COLUMNS)
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
-const environmentOptions = computed(() => [
-  {
-    value: 'production' as PayrollRegzelEnvironment,
-    label: t('payroll.regzel.environment.production'),
-  },
-  {
-    value: 'test' as PayrollRegzelEnvironment,
-    label: t('payroll.regzel.environment.test'),
-  },
-])
 const officeOptions = computed(() =>
   (settings.value?.offices ?? [])
     .filter(office => office.is_active)
@@ -496,18 +487,16 @@ onMounted(loadInboxBadge)
         </div>
 
         <div class="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <label class="block">
+          <div class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">
               {{ t('payroll.regzel.environment.label') }}
             </span>
-            <SearchableSelect
+            <EnvironmentSwitch
               v-model="environment"
               data-test="regzel-environment"
-              :options="environmentOptions"
-              :clearable="false"
-              accent="payroll"
+              :aria-label="t('payroll.regzel.environment.label')"
             />
-          </label>
+          </div>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">
               {{ t('payroll.regzel.office') }}

@@ -104,9 +104,8 @@ describe('EmploymentJmhzIdentityPanel', () => {
     await wrapper.get('[data-test="jmhz-employment-identifier"]').setValue('200000000000000000002')
     await wrapper.get('[data-test="jmhz-identity-confirmed"]').setValue(true)
 
-    const environment = wrapper.findAllComponents({ name: 'SearchableSelect' })[0]
-    if (environment === undefined) throw new Error('Výběr prostředí nebyl nalezen.')
-    environment.vm.$emit('update:modelValue', 'production')
+    await wrapper.get('[data-test="jmhz-identity-environment"] [data-test="environment-switch-production"]')
+      .trigger('click')
     await flushPromises()
 
     expect((wrapper.get('[data-test="jmhz-person-identifier"]').element as HTMLInputElement).value)

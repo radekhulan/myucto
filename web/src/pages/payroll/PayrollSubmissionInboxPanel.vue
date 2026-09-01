@@ -11,7 +11,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import Modal from '@/components/ui/Modal.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
-import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate, formatDateTime } from '@/composables/useFormat'
@@ -136,11 +136,6 @@ const snoozeUntilInput = ref('')
 const snoozeReason = ref('')
 const snoozeError = ref('')
 const snoozing = ref(false)
-
-const environmentOptions = computed(() => [
-  { value: 'production' as const, label: t('payroll.regzel.environment.production') },
-  { value: 'test' as const, label: t('payroll.regzel.environment.test') },
-])
 
 function escalationClass(item: PayrollSubmissionInboxItem): string {
   if (item.escalation_level === 'overdue') return 'bg-danger-50 text-danger-700'
@@ -293,17 +288,16 @@ defineExpose({ reload: load })
         </button>
       </div>
 
-      <label class="mt-5 block max-w-xs text-sm font-medium text-neutral-700">
+      <div class="mt-5 block max-w-xs text-sm font-medium text-neutral-700">
         {{ t('payroll.submissions.overview.environment') }}
-        <SearchableSelect
-          v-model="environment"
-          class="mt-1"
-          :options="environmentOptions"
-          :clearable="false"
-          accent="payroll"
-          data-test="inbox-environment"
-        />
-      </label>
+        <div class="mt-1">
+          <EnvironmentSwitch
+            v-model="environment"
+            :aria-label="t('payroll.submissions.overview.environment')"
+            data-test="inbox-environment"
+          />
+        </div>
+      </div>
     </div>
 
     <p

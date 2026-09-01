@@ -32,6 +32,7 @@ import { payrollWorkingPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
 import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -65,6 +66,13 @@ const annualItems = ref<PayrollDocument[]>([])
 const focusPersonName = ref<string | null>(null)
 const selectedEmployeeId = ref<number | null>(focusPersonId.value)
 const loading = ref(true)
+/*
+ * Selhalo načtení? Pak o dokumentech nevíme NIC — a to je něco jiného než
+ * „za období žádné vystavené nejsou". Seznam se vyprazdňuje ještě PŘED
+ * požadavkem (kvůli přepnutí období a záložky), takže bez příznaku by po
+ * výpadku sítě zůstal prázdný stav, který tvrdí, že je agenda prázdná.
+ */
+const loadFailed = ref(false)
 const generatingBatchId = ref<number | null>(null)
 const documentBatch = ref<PayrollDocumentBatch | null>(null)
 const documentBatchItems = ref<PayrollDocumentBatchItem[]>([])
@@ -181,6 +189,8 @@ const focusMissing = computed(() =>
   activeTab.value !== 'archive'
   && focusPersonId.value !== null
   && !loading.value
+  // Po selhaném načtení o zúžení nic nevíme — prázdno je chyba, ne odpověď.
+  && !loadFailed.value
   && visibleItems.value.length === 0)
 function clearFocus(): void {
   focusPersonId.value = null
@@ -499,6 +509,7 @@ async function load(): Promise<void> {
   const requestedYear = year.value
   const requestedTab = activeTab.value
   loading.value = true
+  loadFailed.value = false
   if (requestedTab === 'monthly') {
     data.value = null
   } else if (requestedTab === 'annual') {
@@ -533,6 +544,7 @@ async function load(): Promise<void> {
     }
   } catch (error) {
     if (sequence === loadSequence) {
+      loadFailed.value = true
       toast.error(apiErrorMessage(error, t('payroll.documents.load_failed')))
     }
   } finally {
@@ -1096,8 +1108,9 @@ onBeforeUnmount(() => {
 
     <PayrollFocusNotice
       v-if="activeTab !== 'archive' && focusMissing"
-      :name="String(focusPersonId)"
+      :name="focusName ?? t('payroll.agendas.focus.unknown_person')"
       missing
+      named
       @clear="clearFocus"
     />
     <PayrollFocusNotice
@@ -1465,9 +1478,19 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <!-- Pořadí stavů: načítá se → selhalo → prázdno → data. -->
     <div v-if="activeTab !== 'archive' && loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-20 animate-pulse rounded-xl bg-neutral-100" />
     </div>
+
+    <EmptyState
+      v-else-if="activeTab !== 'archive' && loadFailed"
+      variant="failed"
+      boxed
+      data-test="load-failed"
+      :message="t('payroll.documents.load_failed_hint')"
+      @action="load"
+    />
 
     <section
       v-else-if="activeTab !== 'archive' && !visibleItems.length"

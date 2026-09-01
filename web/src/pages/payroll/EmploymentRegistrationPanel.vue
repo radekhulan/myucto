@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
   type PayrollJmhzTransportAttempt,
@@ -26,12 +26,13 @@ import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import CzIscoPicker from '@/components/payroll/CzIscoPicker.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDate } from '@/composables/useFormat'
+import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { loadPayrollJmhzOptions } from '@/composables/usePayrollJmhzOptions'
 import { healthInsurerOptions, isHealthInsurerCode } from '@/utils/healthInsurers'
 
 const props = defineProps<{
   employmentId: number
+  personId?: number
   canWrite: boolean
 }>()
 
@@ -101,11 +102,16 @@ const a1ProfileOpen = ref(false)
 const a1ProfileLoading = ref(false)
 const a1ProfileSaving = ref(false)
 const a1ProfileError = ref('')
+const a1ProfileErrorCode = ref('')
 const a1ProfileMessage = ref('')
 const a1ShowPayload = ref(false)
 const a1Draft = ref<PayrollRegistrationA1Draft | null>(null)
 const a1Stored = ref<PayrollRegistrationA1Profile | null>(null)
 const a1Form = ref<PayrollRegistrationA1ProfilePayload>(emptyA1Profile())
+const a1Baseline = ref('')
+const a1LocalDraft = ref<A1LocalDraft | null>(null)
+const a1LocalDraftArmed = ref(false)
+const a1ErrorPanel = ref<HTMLElement | null>(null)
 const jmhzOptions = ref<PayrollEmploymentJmhzEvidenceOptions | null>(null)
 const jmhzOptionsFailed = ref(false)
 const municipalityOptions = ref<PayrollJmhzMunicipalityOption[]>([])
@@ -200,6 +206,95 @@ function blankToNull<T>(value: T): T {
     ) as T
   }
   return value
+}
+
+interface A1LocalDraft {
+  saved_at: string
+  payload: PayrollRegistrationA1ProfilePayload
+}
+
+/**
+ * Rozepsaný profil A1 v prohlížeči.
+ *
+ * Uložení je všechno nebo nic: server jednu chybějící položku odmítne celou
+ * a formulář má přes stovku polí. Karta vztahu se přitom odmontuje pokaždé,
+ * když účetní sbalí osobu, přepne se jinam nebo obnoví stránku — a právě to
+ * udělá, když jde chybějící údaj doplnit na kartu osoby. Bez téhle zálohy by
+ * se hodinová práce ztratila mezi odmítnutím a opravou.
+ *
+ * Klíč nese i dodavatele: `employmentId` je unikátní jen v rámci firmy, takže
+ * bez něj by se rozpracovaný profil nabídl u cizího vztahu v jiné účtárně.
+ */
+const a1DraftStorageKey = computed(() => {
+  let supplier = '0'
+  try {
+    supplier = localStorage.getItem('myinvoice.current_supplier_id') ?? '0'
+  } catch {
+    supplier = '0'
+  }
+  return `myinvoice.payroll.a1-draft.${supplier}.${props.employmentId}`
+})
+
+function readA1LocalDraft(): A1LocalDraft | null {
+  let raw: string | null = null
+  try {
+    raw = localStorage.getItem(a1DraftStorageKey.value)
+  } catch {
+    return null
+  }
+  if (raw === null) return null
+  try {
+    const parsed = JSON.parse(raw) as Partial<A1LocalDraft>
+    if (typeof parsed?.saved_at !== 'string' || typeof parsed?.payload !== 'object') return null
+    return { saved_at: parsed.saved_at, payload: parsed.payload as PayrollRegistrationA1ProfilePayload }
+  } catch {
+    // Poškozený zápis je totéž jako žádný — nesmí shodit celý panel.
+    return null
+  }
+}
+
+function writeA1LocalDraft(payload: PayrollRegistrationA1ProfilePayload): void {
+  try {
+    localStorage.setItem(a1DraftStorageKey.value, JSON.stringify({
+      saved_at: new Date().toISOString(),
+      payload,
+    } satisfies A1LocalDraft))
+  } catch {
+    /* soukromý režim nebo plná kvóta — záloha je bonus, ne podmínka uložení */
+  }
+}
+
+function clearA1LocalDraft(): void {
+  a1LocalDraft.value = null
+  a1LocalDraftArmed.value = false
+  try {
+    localStorage.removeItem(a1DraftStorageKey.value)
+  } catch {
+    /* viz writeA1LocalDraft */
+  }
+}
+
+function discardA1LocalDraft(): void {
+  clearA1LocalDraft()
+  a1ProfileMessage.value = ''
+}
+
+/**
+ * Verze a datum účinnosti se berou z ČERSTVÉHO návrhu, ne ze zálohy: záloha
+ * může být dny stará a se starým `row_version` by server uložení odmítl na
+ * konflikt — tedy přesně tou chybou, které se tohle snaží předejít.
+ */
+function restoreA1LocalDraft(): void {
+  const draft = a1LocalDraft.value
+  if (draft === null) return
+  a1Form.value = JSON.parse(JSON.stringify(draft.payload)) as PayrollRegistrationA1ProfilePayload
+  if (a1Draft.value !== null) {
+    a1Form.value.effective_on = a1Draft.value.effective_on
+    a1Form.value.row_version = a1Draft.value.row_version
+  }
+  a1LocalDraft.value = null
+  a1LocalDraftArmed.value = true
+  a1ProfileMessage.value = t('payroll.people.registration.a1.draft_restored')
 }
 
 const a1Variant = computed(() => a1Draft.value?.variant ?? null)
@@ -380,18 +475,43 @@ async function a1AddAttachment(event: Event): Promise<void> {
   input.value = ''
 }
 
+/**
+ * Otisk formuláře pro porovnání „změnil se od načtení?".
+ *
+ * `effective_on` a `row_version` jdou stranou — jsou to údaje serveru, ne
+ * uživatelův vstup, a záloha z minulého týdne by jinak vypadala jako změna.
+ * `blankToNull` srovná vypsané a zase smazané pole s nevyplněným.
+ */
+function a1Comparable(payload: PayrollRegistrationA1ProfilePayload): string {
+  const {
+    effective_on: _effectiveOn,
+    row_version: _rowVersion,
+    ...rest
+  } = blankToNull(payload)
+  return JSON.stringify(rest)
+}
+
 async function loadA1Profile(): Promise<void> {
   a1ProfileLoading.value = true
   a1ProfileError.value = ''
+  a1ProfileErrorCode.value = ''
   try {
     const view = await payrollApi.employmentRegistrationA1Profile(props.employmentId)
     a1Draft.value = view.draft
     a1Stored.value = view.profile
-    a1Form.value = view.profile === null
-      ? view.draft.suggested
-      : editableA1Profile(view.profile)
+    // Formulář dostane VLASTNÍ kopii: psaní do sdílené odpovědi přepisovalo
+    // i návrh z kmenových dat, na který se vrací „Vrátit návrh z kmenových dat".
+    a1Form.value = JSON.parse(JSON.stringify(
+      view.profile === null ? view.draft.suggested : editableA1Profile(view.profile),
+    )) as PayrollRegistrationA1ProfilePayload
     a1Form.value.effective_on = view.draft.effective_on
     a1Form.value.row_version = view.draft.row_version
+    a1Baseline.value = a1Comparable(a1Form.value)
+    a1LocalDraftArmed.value = false
+    const local = readA1LocalDraft()
+    a1LocalDraft.value = local !== null && a1Comparable(local.payload) !== a1Baseline.value
+      ? local
+      : null
   } catch (exception) {
     a1ProfileError.value = apiErrorMessage(
       exception,
@@ -415,6 +535,7 @@ async function saveA1Profile(): Promise<void> {
   if (!props.canWrite || a1ProfileSaving.value) return
   a1ProfileSaving.value = true
   a1ProfileError.value = ''
+  a1ProfileErrorCode.value = ''
   a1ProfileMessage.value = ''
   try {
     const profile = await payrollApi.saveEmploymentRegistrationA1Profile(
@@ -423,20 +544,65 @@ async function saveA1Profile(): Promise<void> {
     )
     a1Stored.value = profile
     a1Form.value = editableA1Profile(profile)
+    clearA1LocalDraft()
     a1ProfileMessage.value = t('payroll.people.registration.a1.saved', {
       version: profile.row_version,
     })
     resetPreparedFiling()
     await loadA1Profile()
   } catch (exception) {
+    a1ProfileErrorCode.value = apiErrorCode(exception)
     a1ProfileError.value = apiErrorMessage(
       exception,
       t('payroll.people.registration.a1.save_failed'),
     )
+    // Odmítnuté uložení je přesně ten okamžik, kdy účetní odchází chybějící
+    // údaj doplnit jinam — záloha musí být na disku dřív, než kartu opustí.
+    a1LocalDraftArmed.value = true
+    writeA1LocalDraft(blankToNull(a1Form.value))
+    // Tlačítko Uložit je na konci stovky polí; bez doskočení by hlášení
+    // zůstalo mimo obrazovku a klik by vypadal, že se nestalo nic.
+    await nextTick()
+    a1ErrorPanel.value?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
   } finally {
     a1ProfileSaving.value = false
   }
 }
+
+/**
+ * Zálohu zakládá až rozdíl proti tomu, co přišlo ze serveru — nezměněný profil
+ * by se zapisoval po každém otevření karty a nabídka „pokračovat
+ * v rozpracovaném" by pak svítila pořád.
+ */
+watch(a1Form, () => {
+  if (a1ProfileLoading.value) return
+  if (a1Comparable(a1Form.value) === a1Baseline.value) {
+    if (a1LocalDraftArmed.value) clearA1LocalDraft()
+    return
+  }
+  a1LocalDraftArmed.value = true
+  writeA1LocalDraft(blankToNull(a1Form.value))
+}, { deep: true })
+
+/**
+ * Chybějící osobní údaje na tomhle formuláři nejsou — bere je z osobní
+ * evidence. Odkaz na kartu osoby se proto nabízí jen u chyb, které tam míří;
+ * u konfliktu verzí nebo výpadku sítě by účetní posílal na špatné místo.
+ */
+const A1_PERSON_DATA_ERRORS = [
+  'registration_regzec_a1_required_field_missing',
+  'registration_regzec_a1_foreign_data_missing',
+]
+
+const a1PersonCardTarget = computed(() => {
+  if (!A1_PERSON_DATA_ERRORS.includes(a1ProfileErrorCode.value)) return null
+  const query: Record<string, string> = {
+    employment: String(props.employmentId),
+    panel: 'statutory_evidence',
+  }
+  if (props.personId !== undefined) query.person = String(props.personId)
+  return { name: 'payroll-people', query }
+})
 
 const deltaFieldOptions = computed(() => eventInteraction.value === 'correction'
   ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code']
@@ -1190,6 +1356,72 @@ async function copyXml(): Promise<void> {
         </button>
       </div>
       <div v-if="a1ProfileOpen" class="mt-3 space-y-3">
+        <div
+          v-if="a1ProfileError"
+          ref="a1ErrorPanel"
+          class="rounded-md border border-danger-300 bg-danger-50 p-3"
+          role="alert"
+          data-test="registration-a1-error"
+        >
+          <h6 class="text-sm font-semibold text-danger-800">
+            {{ t('payroll.people.registration.a1.error_title') }}
+          </h6>
+          <p class="mt-1 text-xs text-danger-800" data-test="registration-a1-error-message">
+            {{ a1ProfileError }}
+          </p>
+          <p class="mt-2 text-xs text-danger-800">
+            {{ t('payroll.people.registration.a1.error_kept') }}
+          </p>
+          <template v-if="a1PersonCardTarget !== null">
+            <p class="mt-2 text-xs text-danger-800">
+              {{ t('payroll.people.registration.a1.error_person_hint') }}
+            </p>
+            <RouterLink
+              :to="a1PersonCardTarget"
+              :class="[btnOutline('danger'), 'mt-2']"
+              data-test="registration-a1-person-link"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.eye" />
+              </svg>
+              {{ t('payroll.people.registration.a1.error_person_link') }}
+            </RouterLink>
+          </template>
+        </div>
+
+        <div
+          v-if="canWrite && a1LocalDraft !== null"
+          class="rounded-md border border-primary-300 bg-primary-50 p-3"
+          data-test="registration-a1-local-draft"
+        >
+          <h6 class="text-sm font-semibold text-primary-800">
+            {{ t('payroll.people.registration.a1.draft_title') }}
+          </h6>
+          <p class="mt-1 text-xs text-primary-800">
+            {{ t('payroll.people.registration.a1.draft_hint', {
+              saved: formatDateTime(a1LocalDraft.saved_at),
+            }) }}
+          </p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              :class="btnFilled('primary')"
+              data-test="registration-a1-draft-restore"
+              @click="restoreA1LocalDraft"
+            >
+              {{ t('payroll.people.registration.a1.draft_restore') }}
+            </button>
+            <button
+              type="button"
+              :class="btnOutline('neutral')"
+              data-test="registration-a1-draft-discard"
+              @click="discardA1LocalDraft"
+            >
+              {{ t('payroll.people.registration.a1.draft_discard') }}
+            </button>
+          </div>
+        </div>
+
         <p class="text-xs text-neutral-500">
           {{ t('payroll.people.registration.a1.warning') }}
         </p>
@@ -2373,8 +2605,15 @@ async function copyXml(): Promise<void> {
           >{{ a1PayloadPreview }}</pre>
         </div>
 
-        <p v-if="a1ProfileError" class="text-xs text-danger-700" data-test="registration-a1-error">
-          {{ a1ProfileError }}
+        <!-- Uložení se pouští z lišty dole, ale výsledek hlásí panel nahoře:
+             formulář má přes stovku polí a jednořádková chyba u tlačítka
+             zapadla. Tady zůstává jen ukazatel, ať klik nevyzní naprázdno. -->
+        <p
+          v-if="a1ProfileError"
+          class="rounded-md border border-danger-300 bg-danger-50 px-3 py-2 text-xs font-medium text-danger-800"
+          data-test="registration-a1-error-inline"
+        >
+          {{ t('payroll.people.registration.a1.error_above') }}
         </p>
 
         <!-- Jedno společné Uložit pro celý profil: server bere celý cílový

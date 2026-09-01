@@ -31,6 +31,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
@@ -103,10 +104,6 @@ const employmentOptions = computed(() =>
       ? `${employment.code} (${employment.start_date ?? '?'} – ${employment.end_date})`
       : `${employment.code} (${employment.start_date ?? '?'})`,
   })))
-const environmentOptions = computed(() => [
-  { value: 'production' as PayrollRegzelEnvironment, label: t('payroll.regzel.environment.production') },
-  { value: 'test' as PayrollRegzelEnvironment, label: t('payroll.regzel.environment.test') },
-])
 const yearOptions = computed(() => {
   const current = new Date().getFullYear()
   return Array.from({ length: 6 }, (_, index) => current - index)
@@ -438,12 +435,16 @@ watch(requestedByAuthority, value => {
           </span>
           <SearchableSelect v-model="year" :options="yearOptions" />
         </label>
-        <label class="block text-sm">
+        <div class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.regzel.environment.label') }}
           </span>
-          <SearchableSelect v-model="environment" :options="environmentOptions" />
-        </label>
+          <EnvironmentSwitch
+            v-model="environment"
+            :aria-label="t('payroll.regzel.environment.label')"
+            data-test="eldp-environment"
+          />
+        </div>
       </div>
 
       <div class="space-y-2 border-t border-neutral-200 pt-4">

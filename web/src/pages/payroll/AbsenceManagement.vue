@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatMoneyMinor as money } from '@/composables/useFormat'
+import { formatDate, formatMoneyMinor as money } from '@/composables/useFormat'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -924,7 +924,7 @@ onMounted(async () => {
               </span>
             </div>
             <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <div><dt class="text-neutral-500">{{ t('payroll_absence.period') }}</dt><dd class="font-medium text-neutral-900">{{ item.date_from }} – {{ item.date_to }}</dd></div>
+              <div><dt class="text-neutral-500">{{ t('payroll_absence.period') }}</dt><dd class="font-medium text-neutral-900">{{ formatDate(item.date_from) }} – {{ formatDate(item.date_to) }}</dd></div>
               <div><dt class="text-neutral-500">{{ t('payroll_absence.absences.average') }}</dt><dd class="font-medium text-neutral-900">{{ money(item.average_hourly_minor) }}</dd></div>
             </dl>
             <p v-if="item.note" class="mt-3 text-sm text-neutral-600">{{ item.note }}</p>
@@ -1112,7 +1112,7 @@ onMounted(async () => {
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           <article v-for="entry in leaveEntries" :key="entry.id" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
             <div class="flex justify-between gap-3"><h3 class="font-medium text-neutral-900">{{ t(`payroll_absence.leave.types.${entry.entry_type}`) }}</h3><strong :class="entry.minutes_delta < 0 ? 'text-danger-600' : 'text-success-600'">{{ minutes(entry.minutes_delta) }}</strong></div>
-            <p class="mt-2 text-xs text-neutral-500">{{ entry.effective_date }}</p><p class="mt-2 text-sm text-neutral-600">{{ entry.reason }}</p>
+            <p class="mt-2 text-xs text-neutral-500">{{ formatDate(entry.effective_date) }}</p><p class="mt-2 text-sm text-neutral-600">{{ entry.reason }}</p>
           </article>
         </div>
       </section>

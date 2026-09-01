@@ -31,6 +31,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 
 const emit = defineEmits<{ (e: 'changed'): void }>()
 
@@ -407,13 +408,18 @@ onMounted(load)
         </p>
 
         <div class="grid gap-3 sm:grid-cols-2">
-          <label class="block">
+          <div class="block">
             <span class="text-sm font-medium">{{ t('databox.gateway.registrations.environment') }}</span>
-            <select v-model="form.environment" class="form-select mt-1 w-full" @change="onEnvironmentChange">
-              <option value="production">{{ t('databox.env.production') }}</option>
-              <option value="test">{{ t('databox.env.test') }}</option>
-            </select>
-          </label>
+            <div class="mt-1">
+              <EnvironmentSwitch
+                v-model="form.environment"
+                :aria-label="t('databox.gateway.registrations.environment')"
+                :production-label="t('databox.env.production')"
+                :test-label="t('databox.env.test')"
+                @update:model-value="onEnvironmentChange"
+              />
+            </div>
+          </div>
           <label class="block">
             <span class="text-sm font-medium">{{ t('databox.gateway.registrations.label') }}</span>
             <input v-model="form.label" type="text" maxlength="120" class="form-input mt-1 w-full" data-test="gw-label" />

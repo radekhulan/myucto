@@ -35,10 +35,9 @@ vi.mock('@/api/payroll', () => ({
   },
 }))
 
-vi.mock('@/api/errors', () => ({
-  apiErrorMessage: (exception: unknown, fallback: string) =>
-    (exception as { message?: string }).message ?? fallback,
-}))
+// Formátování chyby se NEmockuje: panel se podle strojového kódu z odpovědi
+// rozhoduje, jestli nabídne odkaz na kartu osoby, a náhrada by tenhle kus
+// chování obešla.
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
 // `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
@@ -209,9 +208,23 @@ function insurerInput(wrapper: ReturnType<typeof mountPanel>): HTMLInputElement 
 
 function mountPanel(canWrite = true) {
   return mount(EmploymentRegistrationPanel, {
-    props: { employmentId: 5, canWrite },
+    props: { employmentId: 5, personId: 9, canWrite },
+    global: {
+      stubs: {
+        RouterLink: {
+          props: ['to'],
+          template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
+        },
+      },
+    },
   })
 }
+
+function rejection(code: string, message: string) {
+  return { response: { status: 422, data: { error: { code, message } } } }
+}
+
+const A1_DRAFT_KEY = 'myinvoice.payroll.a1-draft.0.5'
 
 describe('EmploymentRegistrationPanel', () => {
   beforeEach(() => {
@@ -221,6 +234,7 @@ describe('EmploymentRegistrationPanel', () => {
     // pracovního vztahu, EmploymentCard.spec.ts).
     resetPayrollJmhzOptions()
     vi.clearAllMocks()
+    localStorage.clear()
     vi.stubGlobal('crypto', {
       randomUUID: vi.fn(() => '00000000-0000-4000-8000-000000000001'),
     })
@@ -854,5 +868,169 @@ describe('EmploymentRegistrationPanel', () => {
     const field = wrapper.get('[data-test="a1-employment-status-code"]')
     expect(field.element.tagName).toBe('INPUT')
     expect(wrapper.text()).toContain('employment_status_code_hint')
+  })
+
+  /**
+   * Uložení je všechno nebo nic. Odmítnutí proto nesmí vypadat jako drobnost
+   * u tlačítka na konci stovky polí — a hlavně nesmí spolknout rozdělanou
+   * práci ani zamlčet, kde se chybějící údaj zadává.
+   */
+  it('keeps the filled form and points at the person card when the save is rejected', async () => {
+    m.saveA1Profile.mockRejectedValue(rejection(
+      'registration_regzec_a1_required_field_missing',
+      'Pro REGZEC A1 chybí státní občanství (citizenship_country_code).',
+    ))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="a1-permanent-house_number"]').setValue('12')
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    const panel = wrapper.get('[data-test="registration-a1-error"]')
+    expect(panel.attributes('role')).toBe('alert')
+    expect(panel.text()).toContain('chybí státní občanství')
+    expect(panel.text()).toContain('a1.error_kept')
+    expect(
+      (wrapper.get('[data-test="a1-permanent-house_number"]').element as HTMLInputElement).value,
+    ).toBe('12')
+
+    const link = wrapper.get('[data-test="registration-a1-person-link"]')
+    expect(JSON.parse(link.attributes('data-to') ?? '{}')).toEqual({
+      name: 'payroll-people',
+      query: { employment: '5', panel: 'statutory_evidence', person: '9' },
+    })
+  })
+
+  /**
+   * Konflikt verzí se na kartě osoby doplnit nedá — odkaz by účetní poslal
+   * na špatné místo.
+   */
+  it('omits the person card link for errors that are not about person data', async () => {
+    m.saveA1Profile.mockRejectedValue(rejection(
+      'registration_regzec_a1_profile_conflict',
+      'Profil mezitím uložil někdo jiný.',
+    ))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-a1-error"]').text())
+      .toContain('Profil mezitím uložil někdo jiný.')
+    expect(wrapper.find('[data-test="registration-a1-person-link"]').exists()).toBe(false)
+  })
+
+  /**
+   * Doplnit chybějící údaj znamená odejít z karty vztahu — ta se odmontuje
+   * i s formulářem. Rozdělaná práce proto musí přežít v prohlížeči a po
+   * návratu se sama nabídnout zpátky.
+   */
+  it('offers the unsaved form back after the card is reopened', async () => {
+    m.saveA1Profile.mockRejectedValue(rejection(
+      'registration_regzec_a1_required_field_missing',
+      'Pro REGZEC A1 chybí státní občanství (citizenship_country_code).',
+    ))
+    const first = mountPanel()
+    await flushPromises()
+    await first.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await first.get('[data-test="a1-permanent-house_number"]').setValue('12')
+    await first.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+    first.unmount()
+
+    expect(localStorage.getItem(A1_DRAFT_KEY)).not.toBeNull()
+
+    const second = mountPanel()
+    await flushPromises()
+    await second.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    expect(second.find('[data-test="registration-a1-local-draft"]').exists()).toBe(true)
+    expect(
+      (second.get('[data-test="a1-permanent-house_number"]').element as HTMLInputElement).value,
+    ).toBe('')
+
+    await second.get('[data-test="registration-a1-draft-restore"]').trigger('click')
+    await flushPromises()
+
+    expect(
+      (second.get('[data-test="a1-permanent-house_number"]').element as HTMLInputElement).value,
+    ).toBe('12')
+    expect(second.find('[data-test="registration-a1-local-draft"]').exists()).toBe(false)
+  })
+
+  it('drops the browser copy once the profile is saved', async () => {
+    m.saveA1Profile
+      .mockRejectedValueOnce(rejection(
+        'registration_regzec_a1_required_field_missing',
+        'Pro REGZEC A1 chybí státní občanství (citizenship_country_code).',
+      ))
+      .mockResolvedValue({
+        ...a1Suggested(),
+        row_version: 1,
+        reference_hash: 'a'.repeat(64),
+        created_at: '2026-08-14 10:00:00',
+        created: true,
+      })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="a1-permanent-house_number"]').setValue('12')
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+    expect(localStorage.getItem(A1_DRAFT_KEY)).not.toBeNull()
+
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(localStorage.getItem(A1_DRAFT_KEY)).toBeNull()
+    expect(wrapper.find('[data-test="registration-a1-error"]').exists()).toBe(false)
+  })
+
+  it('discards the browser copy on request', async () => {
+    localStorage.setItem(A1_DRAFT_KEY, JSON.stringify({
+      saved_at: '2026-08-14T10:00:00.000Z',
+      payload: { ...a1Suggested(), permanent_address: { ...a1Suggested().permanent_address, house_number: '12' } },
+    }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-draft-discard"]').trigger('click')
+
+    expect(localStorage.getItem(A1_DRAFT_KEY)).toBeNull()
+    expect(wrapper.find('[data-test="registration-a1-local-draft"]').exists()).toBe(false)
+  })
+
+  /**
+   * V soukromém režimu prohlížeče `localStorage` vyhazuje. Záloha je bonus,
+   * takže z toho nesmí spadnout ani samotné hlášení o odmítnutém uložení.
+   */
+  it('survives localStorage being unavailable', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => { throw new Error('QuotaExceededError') })
+    const getItem = vi.spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(() => { throw new Error('SecurityError') })
+    m.saveA1Profile.mockRejectedValue(rejection(
+      'registration_regzec_a1_required_field_missing',
+      'Pro REGZEC A1 chybí státní občanství (citizenship_country_code).',
+    ))
+    try {
+      const wrapper = mountPanel()
+      await flushPromises()
+      await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+      await wrapper.get('[data-test="a1-permanent-house_number"]').setValue('12')
+      await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.get('[data-test="registration-a1-error"]').text())
+        .toContain('chybí státní občanství')
+      expect(
+        (wrapper.get('[data-test="a1-permanent-house_number"]').element as HTMLInputElement).value,
+      ).toBe('12')
+    } finally {
+      setItem.mockRestore()
+      getItem.mockRestore()
+    }
   })
 })

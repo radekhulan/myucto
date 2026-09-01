@@ -805,6 +805,7 @@
       "focus": {
         "title": "Seznam je zúžený na {name}.",
         "missing": "Zúžení (č. {name}) nedalo v tomto výběru žádný záznam — vztah ani osoba k firmě nepatří, v daném období neexistovali, nebo odkaz zestaral.",
+        "missing_named": "Seznam je zúžený na {name}, ale v tomto výběru nezbyl žádný záznam — vztah ani osoba k firmě nepatří, v daném období neexistovali, nebo odkaz zestaral.",
         "unknown_person": "vybraného zaměstnance",
         "clear": "Zrušit zúžení"
       }
@@ -1068,7 +1069,8 @@
       "materialized": "Bylo vytvořeno {count} nových platebních závazků.",
       "materialized_replay": "Všechny závazky už byly připravené; nevznikla žádná duplicita.",
       "materialize_failed": "Platební závazky se nepodařilo připravit.",
-      "materialize_partial_failed": "{count} mzdových běhů se nepodařilo připravit, ostatní byly zpracovány. {detail}",
+      "materialize_partial_failed": "{count} mzdových běhů se nepodařilo připravit, ostatní byly zpracovány. Důvody jsou vypsané nad seznamem.",
+      "materialize_failures": "Nepodařilo se připravit závazky: {count}. Opravte uvedené důvody a spusťte přípravu znovu.",
       "load_failed": "Platby mezd se nepodařilo načíst.",
       "readonly_hint": "Máte oprávnění pouze pro čtení — příprava závazků, platebních dávek, exportů a párování je vypnutá.",
       "tabs_label": "Části plateb mezd",
@@ -2358,6 +2360,7 @@
       "bundle_created": "Měsíční balíček je připraven ke stažení.",
       "bundle_failed": "Měsíční balíček se nepodařilo vytvořit.",
       "load_failed": "Mzdové dokumenty se nepodařilo načíst.",
+      "load_failed_hint": "Mzdové dokumenty se nenačetly, takže nevíme, jestli za období nějaké vystavené jsou. Zkuste to prosím znovu.",
       "download": "Stáhnout",
       "download_failed": "Dokument se nepodařilo stáhnout.",
       "empty_title": "Pro zvolené období nejsou vytvořené žádné dokumenty",
@@ -2640,14 +2643,14 @@
         "unworked_evidence_hint": "Zdroj obsahuje absenci. Berte ji jako podklad pro kontrolu; hodnoty podmíněných bloků potvrďte výslovně.",
         "unworked_occurred": "Byly v měsíci neodpracované hodiny?",
         "obstacles_occurred": "Byly v měsíci překážky v práci?",
-        "unworked_total": "Neodpracované hodiny celkem (10275)",
-        "unworked_paid": "Placené nebo nekrácené hodiny (10276)",
-        "dpn_without_compensation": "DPN bez náhrady zaměstnavatele (10277)",
-        "dpn_with_compensation": "DPN s náhradou zaměstnavatele (10278)",
-        "vacation": "Čerpaná dovolená (10279)",
-        "care": "Péče s nárokem na ošetřovné (10280)",
-        "employee_obstacle": "Placené překážky na straně zaměstnance (10471)",
-        "employer_obstacle": "Překážky na straně zaměstnavatele (10472)",
+        "unworked_total": "Neodpracované hodiny celkem",
+        "unworked_paid": "Placené nebo nekrácené hodiny",
+        "dpn_without_compensation": "DPN bez náhrady zaměstnavatele",
+        "dpn_with_compensation": "DPN s náhradou zaměstnavatele",
+        "vacation": "Čerpaná dovolená",
+        "care": "Péče s nárokem na ošetřovné",
+        "employee_obstacle": "Placené překážky na straně zaměstnance",
+        "employer_obstacle": "Překážky na straně zaměstnavatele",
         "required_missing": "Vyplňte „{field}“ — bez toho souhrn pracovní doby nevznikne.",
         "conditional_missing": "Odpovězte na obě otázky výše.",
         "as_agreed": "Odpracoval přesně předepsaný fond",
@@ -4042,6 +4045,16 @@
           "saved": "Verze {version} byla uložena a je připravena pro nový náhled A1.",
           "load_failed": "Profil REGZEC A1 se nepodařilo načíst.",
           "save_failed": "Profil REGZEC A1 se nepodařilo uložit.",
+          "error_title": "Uložení neproběhlo, na serveru se nezměnilo nic",
+          "error_kept": "Vyplněné hodnoty zůstávají ve formuláři a máme je zálohované i v tomto prohlížeči, takže o ně nepřijdete ani po zavření karty nebo obnovení stránky.",
+          "error_person_hint": "Chybějící údaj se na tomhle formuláři nezadává, bere se z osobní evidence. Doplňte ho na kartě osoby v sekcích „Údaje pro registraci zaměstnance“ a „Historie adres“ a pak se sem vraťte.",
+          "error_person_link": "Otevřít kartu osoby",
+          "error_above": "Uložení neproběhlo. Co chybí a kde to doplnit, je v červeném rámečku nahoře.",
+          "draft_title": "Máte tu rozpracovaný profil",
+          "draft_hint": "Z {saved} je v tomto prohlížeči uložená neodeslaná verze formuláře. Chcete v ní pokračovat?",
+          "draft_restore": "Pokračovat v rozpracovaném",
+          "draft_discard": "Zahodit rozpracované",
+          "draft_restored": "Rozpracovaný profil je zpátky ve formuláři. Na server se dostane až uložením.",
           "variant": "Varianta A1-{variant} podle business matice ČSSZ.",
           "missing_title": "Co aplikace o osobě nevede",
           "diverged_title": "Snímek se rozešel s kmenovými daty",
@@ -12199,6 +12212,13 @@
     "entry": "zápis"
   },
   "common": {
+    "environmentSwitch": {
+      "legend": "Prostředí",
+      "production": "Ostrý provoz",
+      "test": "Testovací prostředí",
+      "productionHint": "Pracujete s ostrými daty a ostrými přihlašovacími údaji.",
+      "testHint": "Pozor: testovací prostředí. Data ani přihlašovací údaje nejsou ostré."
+    },
     "storage_quota": {
       "warning": "Přidělený prostor instalace se blíží ke konci ({percent} %).",
       "warning_no_percent": "Přidělený prostor instalace se blíží ke konci.",
@@ -19370,6 +19390,23 @@
         "sent": "Podání bylo odesláno datovou schránkou.",
         "notDispatched": "Relace byla potvrzena, ale podání se neodeslalo. Zkontrolujte stav podání.",
         "testEnvironmentWarning": "Jste v testovacím prostředí. Testovací ISDS (datovka-test.gov.cz) má vlastní účty — přihlášení do ostré datové schránky tu neprojde. Pro odeslání ostrého podání přepněte nahoře na Ostré prostředí."
+      },
+      "passwordSend": {
+        "action": "Odeslat jménem a heslem",
+        "intro": "Přihlášení platí jen pro tohle jedno odeslání. Heslo projde do ISDS a nikam se neukládá.",
+        "username": "Uživatelské jméno ISDS",
+        "password": "Heslo k datové schránce",
+        "submit": "Přihlásit a odeslat",
+        "sent": "Zpráva byla odeslána.",
+        "notSent": "Zpráva zůstala ve frontě — zkontrolujte stav v historii pokusů.",
+        "failed": "Zprávu se nepodařilo odeslat."
+      },
+      "certificateSend": {
+        "action": "Odeslat certifikátem",
+        "confirm": "Odeslat „{subject}“ systémovým certifikátem firmy? Za certifikátem nestojí člověk, takže odesláním to potvrzujete vy.",
+        "sent": "Zpráva byla odeslána systémovým certifikátem.",
+        "notSent": "Zpráva zůstala ve frontě — zkontrolujte stav v historii pokusů.",
+        "failed": "Zprávu se nepodařilo odeslat certifikátem."
       }
     },
     "manual": {

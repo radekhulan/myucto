@@ -21,7 +21,7 @@ import {
   type PayrollSubmissionDetail,
   type PayrollSubmissionOverviewItem,
 } from '@/api/payroll'
-import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
 import MobileKeyBatchSendButton from '@/components/submission/MobileKeyBatchSendButton.vue'
@@ -149,16 +149,6 @@ const COLUMNS: ColumnDef[] = [
 ]
 const tbl = useTablePrefs('payroll-submission-overview', COLUMNS)
 
-const environmentOptions = computed(() => [
-  {
-    value: 'production' as const,
-    label: t('payroll.regzel.environment.production'),
-  },
-  {
-    value: 'test' as const,
-    label: t('payroll.regzel.environment.test'),
-  },
-])
 /*
  * Karty stojí na serverovém `deadline_summary`, ne na načtené stránce — souhrn
  * platí za celé období a (díky `agenda_group`) právě za agendu tohohle panelu.
@@ -619,17 +609,16 @@ onMounted(load)
             data-test="submission-overview-period"
           >
         </label>
-        <label class="block text-sm font-medium text-neutral-700">
+        <div class="block text-sm font-medium text-neutral-700">
           {{ t('payroll.submissions.overview.environment') }}
-          <SearchableSelect
-            v-model="environment"
-            class="mt-1"
-            :options="environmentOptions"
-            :clearable="false"
-            accent="payroll"
-            data-test="submission-overview-environment"
-          />
-        </label>
+          <div class="mt-1">
+            <EnvironmentSwitch
+              v-model="environment"
+              :aria-label="t('payroll.submissions.overview.environment')"
+              data-test="submission-overview-environment"
+            />
+          </div>
+        </div>
       </div>
     </div>
 

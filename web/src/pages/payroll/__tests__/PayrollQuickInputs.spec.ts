@@ -64,6 +64,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import PayrollQuickInputs from '@/pages/payroll/PayrollQuickInputs.vue'
+import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
 
 function inputRef(
   status: PayrollQuickInputRef['status'],
@@ -507,6 +508,24 @@ describe('PayrollQuickInputs', () => {
     expect(notice.exists()).toBe(true)
     expect(notice.text()).toContain('payroll.agendas.focus.missing')
     expect(wrapper.find('[data-test="payroll-focus-clear"]').exists()).toBe(true)
+  })
+
+  /*
+   * Id vztahu zná adresní řádek, ne uživatel. Hláška o slepém zúžení proto
+   * mluví o zaměstnanci, ne o čísle z databáze.
+   */
+  it('keeps the raw employment id out of the empty narrowing notice', async () => {
+    m.routeQuery = { employment: '9999' }
+    m.load.mockImplementation(async period => ({ period, items: [], total: 0 }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="payroll-focus-notice"]')
+    expect(notice.text()).toContain('payroll.agendas.focus.missing_named')
+    expect(notice.text()).not.toContain('9999')
+    // `t` v testu zahazuje parametry, takže jméno se ověřuje na propu.
+    expect(wrapper.getComponent(PayrollFocusNotice).props('name'))
+      .toBe('payroll.agendas.focus.unknown_person')
   })
 
   it('invalidates old rows when loading a new payroll period fails', async () => {
