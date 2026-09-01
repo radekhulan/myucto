@@ -6,10 +6,7 @@ namespace MyInvoice\Service\Bank\Match;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
-use MyInvoice\Service\Invoice\FinalFromProformaCreator;
-use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
-use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use PDO;
 
@@ -29,8 +26,6 @@ final class MatchSuggestionService
         private readonly MatchScorer $scorer,
         private readonly CounterpartyMapService $counterpartyMap,
         private readonly InvoicePaymentService $payments,
-        private readonly FinalFromProformaCreator $finalCreator,
-        private readonly PaymentTaxDocumentCreator $taxDocCreator,
         // Návrh mohl vzniknout dřív, než pohyb spotřebovaly mzdy — `match_status`
         // zůstane 'unmatched', takže samotný zámek níž to nezachytí.
         private readonly ?PayrollBankEvidenceGuard $payrollEvidence = null,
@@ -354,22 +349,11 @@ final class MatchSuggestionService
                 'variable_symbol' => $tx['variable_symbol'] ?? null, 'bank_reference' => $tx['bank_ref'] ?? null,
                 'created_by' => $userId ?: null,
             ]);
-            $followUp = ProformaPaymentDocuments::afterPayment(
-                $this->finalCreator,
-                $this->taxDocCreator,
-                $invoiceId,
-                (string) $row['invoice_type'],
-                (bool) $recorded['became_paid'],
-                isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
-                $userId ?: 0,
-                $postedAt,
-                $this->db->pdo(),
-            );
-            if ($followUp['final_draft_id'] !== null) {
-                $finalDraftIds[] = $followUp['final_draft_id'];
+            if ($recorded['final_draft_id'] !== null) {
+                $finalDraftIds[] = $recorded['final_draft_id'];
             }
-            if ($followUp['tax_document_id'] !== null) {
-                $taxDocumentIds[] = $followUp['tax_document_id'];
+            if ($recorded['tax_document_id'] !== null) {
+                $taxDocumentIds[] = $recorded['tax_document_id'];
             }
         }
         $this->markTransaction((int) $tx['id'], $invoiceIds[0], $manual ? 'manual' : 'auto_exact', $userId);

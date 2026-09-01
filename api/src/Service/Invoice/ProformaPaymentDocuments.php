@@ -163,7 +163,7 @@ final class ProformaPaymentDocuments
         }
         try {
             $result['tax_document_id'] = $taxDocCreator->createForPayment($paymentId, $userId);
-        } catch (\RuntimeException) {
+        } catch (PaymentTaxDocumentNotApplicableException) {
             // Neplátce DPH / přenesená daňová povinnost / už existuje finál — doklad
             // se nevystavuje a párování to nesmí shodit.
         }

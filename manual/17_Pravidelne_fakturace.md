@@ -45,6 +45,8 @@ Tady nastavíš metadata, která se zkopírují na každou vygenerovanou fakturu
 - **Typ dokladu** — Faktura nebo Zálohová faktura (proforma)
 - **Měna** — určuje bankovní spojení a CNB kurz (u neCZK měn)
 - **Jazyk** — `cs` nebo `en` (jazyk PDF + e-mailu)
+- **Vizuální identita** - brandingový profil, který se použije na všech fakturách
+  vytvořených ze šablony. Bez výběru se použije výchozí identita dodavatele.
 - **Způsob úhrady** — Bankovní převod / Platební karta / Hotově / Jiný.
   U non-bank-transfer se v PDF i e-mailu nezobrazí QR kód ani bankovní
   spojení.

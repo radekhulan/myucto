@@ -209,6 +209,7 @@ export interface Invoice {
   parent_invoice_id: number | null
   client_id: number
   project_id: number | null
+  branding_profile_id: number | null
   issue_date: string
   tax_date: string | null
   due_date: string
@@ -465,6 +466,7 @@ export interface InvoicePayload {
   invoice_type?: InvoiceType
   client_id: number
   project_id?: number | null
+  branding_profile_id?: number | null
   issue_date?: string
   tax_date?: string | null
   due_date?: string

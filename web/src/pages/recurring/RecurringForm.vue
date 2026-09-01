@@ -10,6 +10,7 @@ import { projectsApi, type Project } from '@/api/projects'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
 import { priceListApi, type CatalogDescriptionSource, type CatalogPolicy, type PriceListItem, type ResolvedPriceListItem } from '@/api/priceList'
+import { settingsApi, type BrandingProfile } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
@@ -92,6 +93,7 @@ const currencies = ref<Currency[]>([])
 const vatRates = ref<VatRate[]>([])
 const units = ref<Unit[]>([])
 const revenueCategories = ref<RevenueCategory[]>([])
+const brandingProfiles = ref<BrandingProfile[]>([])
 const priceListItems = ref<PriceListItem[]>([])
 const catalogResolving = ref<number | null>(null)
 const hasPriceList = computed(() => priceListEnabled.value && priceListItems.value.length > 0)
@@ -152,6 +154,7 @@ type FormItem = {
 const form = ref<{
   client_id: number | null
   project_id: number | null
+  branding_profile_id: number | null
   name: string
   frequency: Frequency
   day_of_month: number | null
@@ -180,6 +183,7 @@ const form = ref<{
 }>({
   client_id: null,
   project_id: null,
+  branding_profile_id: null,
   name: '',
   frequency: 'monthly',
   day_of_month: null,
@@ -624,18 +628,20 @@ onMounted(async () => {
   loading.value = true
   try {
     // Klienti se hledají server-side (onClientSearch); cache se plní výsledky + vybraným.
-    const [cur, vat, un, rcat] = await Promise.all([
+    const [cur, vat, un, rcat, profiles] = await Promise.all([
       codebooksApi.currencies(),
       // Dodavatel v OSS potřebuje i sazby států spotřeby — bez nich by OSS řádek
       // šablony musel nést tuzemskou sazbu a generoval by měsíčně špatnou daň.
       codebooksApi.vatRates(supplierStore.currentSupplier?.oss_enabled ? 'ALL' : 'CZ'),
       codebooksApi.units(),
       revenueCategoriesApi.list(false).catch(() => [] as RevenueCategory[]),  // jen aktivní
+      settingsApi.listAvailableBrandingProfiles().catch(() => [] as BrandingProfile[]),
     ])
     currencies.value = cur
     vatRates.value = vat
     units.value = un
     revenueCategories.value = rcat
+    brandingProfiles.value = profiles
     await loadPriceListItems()
 
     if (form.value.currency_id === 0) {
@@ -671,6 +677,8 @@ onMounted(async () => {
         const inv = await mod.invoicesApi.get(Number(fromInvoice))
         form.value.client_id = inv.client_id
         form.value.project_id = inv.project_id
+        form.value.branding_profile_id = brandingProfiles.value.some(profile => profile.id === inv.branding_profile_id)
+          ? inv.branding_profile_id : null
         form.value.name = inv.client_company_name ?? ''
         form.value.invoice_type = inv.invoice_type === 'proforma' ? 'proforma' : 'invoice'
         form.value.currency_id = inv.currency_id
@@ -717,6 +725,8 @@ onMounted(async () => {
       Object.assign(form.value, {
         client_id: tpl.client_id,
         project_id: tpl.project_id,
+        branding_profile_id: brandingProfiles.value.some(profile => profile.id === tpl.branding_profile_id)
+          ? tpl.branding_profile_id : null,
         name: tpl.name,
         frequency: tpl.frequency,
         day_of_month: tpl.day_of_month,
@@ -823,6 +833,7 @@ async function submit() {
     const payload: RecurringTemplatePayload = {
       client_id: form.value.client_id!,
       project_id: form.value.project_id,
+      branding_profile_id: form.value.branding_profile_id,
       name: form.value.name.trim(),
       frequency: form.value.frequency,
       day_of_month: form.value.end_of_month ? null : form.value.day_of_month,
@@ -1049,6 +1060,14 @@ async function submit() {
               <option value="cash">{{ t('payment_method.cash') }}</option>
               <option value="other">{{ t('payment_method.other') }}</option>
             </select>
+          </div>
+          <div v-if="brandingProfiles.length > 0">
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('recurring.branding_profile') }}</label>
+            <select v-model="form.branding_profile_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface">
+              <option :value="null">{{ t('recurring.branding_profile_default') }}</option>
+              <option v-for="profile in brandingProfiles" :key="profile.id" :value="profile.id">{{ profile.name }}</option>
+            </select>
+            <p class="mt-1 text-xs text-neutral-500">{{ t('recurring.branding_profile_hint') }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('recurring.payment_due_label') }}</label>

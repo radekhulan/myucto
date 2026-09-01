@@ -8,18 +8,14 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\CashDocumentRepository;
 use MyInvoice\Repository\CashRegisterRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
-use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingService;
-use MyInvoice\Service\Invoice\FinalFromProformaCreator;
-use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Invoice\InvoiceMath;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
-use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
@@ -61,10 +57,7 @@ final class CashDocumentService
         private readonly DocumentSeriesService $series,
         private readonly PostingRuleRepository $rules,
         private readonly InvoicePaymentService $invoicePayments,
-        private readonly FinalFromProformaCreator $finalCreator,
-        private readonly PaymentTaxDocumentCreator $taxDocCreator,
         private readonly PurchaseInvoiceRepository $purchaseInvoices,
-        private readonly InvoiceRepository $invoices,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly TaxConstantsRepository $taxConstants,
         private readonly CashRegisterRepository $registers,
@@ -741,19 +734,6 @@ final class CashDocumentService
                 ['source' => 'cash', 'note' => $docNumber, 'created_by' => $userId],
             );
             $this->documents->setInvoicePaymentId($supplierId, $id, (int) $res['payment_id']);
-
-            $invoice = $this->invoices->find((int) $doc['invoice_id']);
-            ProformaPaymentDocuments::afterPayment(
-                $this->finalCreator,
-                $this->taxDocCreator,
-                (int) $doc['invoice_id'],
-                isset($invoice['invoice_type']) ? (string) $invoice['invoice_type'] : null,
-                (bool) $res['became_paid'],
-                isset($res['payment_id']) ? (int) $res['payment_id'] : null,
-                $userId ?? 0,
-                (string) $doc['issue_date'],
-                $this->db->pdo(),
-            );
         } elseif ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
             $pfId = (int) $doc['purchase_invoice_id'];
             if ($doc['doc_type'] === 'in') {

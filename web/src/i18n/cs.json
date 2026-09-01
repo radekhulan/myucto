@@ -11374,6 +11374,9 @@
     "invoice_type": "Typ dokladu",
     "currency": "Měna",
     "language": "Jazyk dokladu",
+    "branding_profile": "Vizuální identita",
+    "branding_profile_default": "Výchozí identita dodavatele",
+    "branding_profile_hint": "Vybraný profil se použije na všech fakturách vytvořených z této šablony.",
     "payment_due_days": "Splatnost (dní od vystavení)",
     "payment_due_label": "Splatnost",
     "payment_due_unit_inherit": "Podle zákazníka",
@@ -14271,6 +14274,10 @@
       "success": "Vyúčtování je kompletně spárované a zaúčtované.",
       "review": "Vyúčtování se zpracovalo, některé položky ale vyžadují kontrolu."
     },
+    "delete": {
+      "confirm": "Opravdu smazat GoPay vyúčtování {id}, importované XML a účetní zápisy, které z něj vznikly? Tuto akci nelze vrátit.",
+      "success": "GoPay vyúčtování, XML a související účetní zápisy byly smazány."
+    },
     "detail": {
       "title": "Vyúčtování {id}",
       "imported": "Soubor {file}, načteno {date}",
@@ -14317,6 +14324,9 @@
       "invalid_payout_bank_code": "Kód banky GoPay musí mít čtyři číslice.",
       "invalid_tolerance": "Tolerance data musí být 0 až 14 dní.",
       "clearing_conflict": "Stejné vyúčtování už existuje s jinými údaji.",
+      "period_not_open": "Vyúčtování obsahuje zápis v uzavřeném účetním období.",
+      "date_locked": "Vyúčtování obsahuje zápis v uzamčené části účetnictví.",
+      "entry_has_reversal": "Vyúčtování obsahuje stornovaný zápis. Nejprve vyřeš jeho storno v deníku.",
       "not_double_entry": "Automatické účtování GoPay vyžaduje podvojné účetnictví.",
       "not_found": "GoPay vyúčtování nebylo nalezeno."
     }

@@ -2070,6 +2070,7 @@ final class Routes
             $g->get   ('/gopay/clearings',                            [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'list']);
             $g->post  ('/gopay/clearings/import',                     [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'import']);
             $g->get   ('/gopay/clearings/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'detail']);
+            $g->delete('/gopay/clearings/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'delete']);
             $g->get   ('/gopay/clearings/{id:[0-9]+}/download',       [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'download']);
             $g->post  ('/gopay/clearings/{id:[0-9]+}/process',        [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'process']);
             $g->post  ('/gopay/clearings/{id:[0-9]+}/payout-match',   [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'associatePayout']);

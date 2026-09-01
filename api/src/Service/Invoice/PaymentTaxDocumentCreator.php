@@ -164,12 +164,12 @@ final class PaymentTaxDocumentCreator
         );
         $finalExists->execute([(int) $proforma['id']]);
         if ($finalExists->fetchColumn() !== false) {
-            throw new \RuntimeException(
+            throw new PaymentTaxDocumentNotApplicableException(
                 'K zálohové faktuře už existuje finální doklad — daňový doklad k platbě by úplatu zdanil podruhé.'
             );
         }
         if (!empty($proforma['reverse_charge'])) {
-            throw new \RuntimeException(
+            throw new PaymentTaxDocumentNotApplicableException(
                 'U přenesené daňové povinnosti se záloha nedaní — daňový doklad k platbě se nevystavuje.'
             );
         }
@@ -178,7 +178,7 @@ final class PaymentTaxDocumentCreator
         // platby (paid_on), ne dnešní cache: platba přijatá v období neplátcovství
         // DDKP nezakládá, i když firma mezitím plátcem (znovu) je.
         if (!$this->vatStatus->isVatPayerAt((int) $proforma['supplier_id'], (string) $payment['paid_on'])) {
-            throw new \RuntimeException(
+            throw new PaymentTaxDocumentNotApplicableException(
                 'Daňový doklad k přijaté platbě vystavuje jen plátce DPH — firma jím k datu přijetí platby nebyla.'
             );
         }

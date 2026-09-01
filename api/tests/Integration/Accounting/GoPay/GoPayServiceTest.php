@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\GoPay\GoPayService;
 use MyInvoice\Service\Accounting\JournalLinkService;
@@ -24,6 +25,7 @@ final class GoPayServiceTest extends TestCase
 
     private Connection $db;
     private GoPayService $service;
+    private BankPostingService $bankPosting;
     private PostingService $posting;
     private JournalEntryRepository $journal;
     private JournalLinkService $links;
@@ -43,6 +45,7 @@ final class GoPayServiceTest extends TestCase
         $container = Bootstrap::buildApp()->getContainer();
         $this->db = $container->get(Connection::class);
         $this->service = $container->get(GoPayService::class);
+        $this->bankPosting = $container->get(BankPostingService::class);
         $this->posting = $container->get(PostingService::class);
         $this->journal = $container->get(JournalEntryRepository::class);
         $this->links = $container->get(JournalLinkService::class);
@@ -181,6 +184,87 @@ final class GoPayServiceTest extends TestCase
         $notice = $this->db->pdo()->prepare('SELECT match_status FROM bank_transactions WHERE id=?');
         $notice->execute([$noticeTransactionId]);
         self::assertSame('unmatched', $notice->fetchColumn());
+    }
+
+    public function testDeleteRemovesImportedXmlAndOwnedEntriesButKeepsMatchedDocuments(): void
+    {
+        $this->configureAccounts();
+        [$invoiceId, $creditNoteId] = $this->documents();
+        [$invoiceEntryId, $creditNoteEntryId] = $this->postDocuments($invoiceId, $creditNoteId);
+        $this->payment($invoiceId);
+        $bankTransactionId = $this->bankPayout();
+
+        $import = $this->service->import($this->supplierId, $this->userId, 'synthetic-delete.xml', $this->xml());
+        $clearingId = (int) $import['clearing']['id'];
+        $bankEntryId = (int) $import['clearing']['bank_journal_entry_id'];
+        $this->service->associatePayoutTransaction($this->supplierId, $clearingId, $bankTransactionId, $this->userId);
+        $ownership = $this->db->pdo()->prepare('SELECT bank_journal_entry_id,bank_journal_entry_owned FROM gopay_clearings WHERE id=?');
+        $ownership->execute([$clearingId]);
+        self::assertSame(
+            ['bank_journal_entry_id' => $bankEntryId, 'bank_journal_entry_owned' => 1],
+            array_map('intval', $ownership->fetch(PDO::FETCH_ASSOC)),
+        );
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE gopay_clearings SET bank_journal_entry_owned=0 WHERE id=?')->execute([$clearingId]);
+        $ownedEntryIds = array_map(
+            static fn (array $movement): int => (int) $movement['journal_entry_id'],
+            $import['clearing']['movements'],
+        );
+        $ownedEntryIds[] = $bankEntryId;
+
+        try {
+            $this->service->delete($this->supplierId + 100000, $clearingId, $this->userId);
+            self::fail('Cizí firma nesmí GoPay vyúčtování smazat.');
+        } catch (\MyInvoice\Service\Accounting\GoPay\GoPayException $e) {
+            self::assertSame('not_found', $e->errorCode);
+        }
+
+        $result = $this->service->delete($this->supplierId, $clearingId, $this->userId);
+        self::assertTrue($result['deleted']);
+        self::assertEqualsCanonicalizing($ownedEntryIds, $result['deleted_entry_ids']);
+        self::assertNull($result['preserved_bank_entry_id']);
+
+        self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM gopay_clearings WHERE id={$clearingId}")->fetchColumn());
+        self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM gopay_movements WHERE clearing_id={$clearingId}")->fetchColumn());
+        foreach ($ownedEntryIds as $entryId) {
+            self::assertNull($this->journal->find($entryId, $this->supplierId));
+        }
+        self::assertNotNull($this->journal->find($invoiceEntryId, $this->supplierId));
+        self::assertNotNull($this->journal->find($creditNoteEntryId, $this->supplierId));
+        self::assertSame(1, (int) $pdo->query("SELECT COUNT(*) FROM invoice_payments WHERE invoice_id={$invoiceId}")->fetchColumn());
+        self::assertSame('unmatched', $pdo->query("SELECT match_status FROM bank_transactions WHERE id={$bankTransactionId}")->fetchColumn());
+
+        $reimport = $this->service->import($this->supplierId, $this->userId, 'synthetic-delete.xml', $this->xml());
+        self::assertFalse($reimport['duplicate']);
+        self::assertSame('processed', $reimport['clearing']['status']);
+    }
+
+    public function testDeletePreservesExistingBankPostingAndItsMatchStatus(): void
+    {
+        $accounts = $this->configureAccounts();
+        [$invoiceId, $creditNoteId] = $this->documents();
+        $this->postDocuments($invoiceId, $creditNoteId);
+        $this->payment($invoiceId);
+        $bankTransactionId = $this->bankPayout();
+        $posting = $this->bankPosting->postManual($this->supplierId, $bankTransactionId, [
+            'debit_account_code' => $accounts['bank'],
+            'credit_account_code' => '261',
+            'description' => 'Test existujícího bankovního zápisu',
+        ], ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+        $bankEntryId = (int) $posting['entry_id'];
+
+        $import = $this->service->import($this->supplierId, $this->userId, 'synthetic-preserve.xml', $this->xml());
+        $clearingId = (int) $import['clearing']['id'];
+        self::assertSame($bankEntryId, $import['clearing']['bank_journal_entry_id']);
+
+        $result = $this->service->delete($this->supplierId, $clearingId, $this->userId);
+
+        self::assertSame($bankEntryId, $result['preserved_bank_entry_id']);
+        self::assertNotContains($bankEntryId, $result['deleted_entry_ids']);
+        self::assertNotNull($this->journal->find($bankEntryId, $this->supplierId));
+        $status = $this->db->pdo()->prepare('SELECT match_status FROM bank_transactions WHERE id=?');
+        $status->execute([$bankTransactionId]);
+        self::assertSame('manual', $status->fetchColumn());
     }
 
     /** @return array{gopay:string,bank:string} */

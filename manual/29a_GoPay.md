@@ -81,3 +81,13 @@ zaúčtované všechny pohyby a je spárovaný i bankovní převod. Stav **Vyža
 kontrolu** obsahuje v detailu konkrétní důvod u problematického pohybu nebo převodu.
 
 Původní XML zůstává uložené u vyúčtování a lze je kdykoli znovu stáhnout.
+
+## Smazání importu
+
+Admin může importované vyúčtování smazat ze seznamu. Smazání odstraní původní XML,
+jednotlivé GoPay pohyby a účetní zápisy, které z nich modul vytvořil. Faktury,
+dobropisy a jejich úhrady zůstanou zachované. Pokud modul pro příchozí převod použil
+účetní zápis, který existoval už před zpracováním XML, tento zápis se nesmaže.
+
+Vyúčtování lze smazat jen tehdy, když všechny jeho účetní zápisy patří do otevřeného
+a nezamčeného období a nebyly stornované. Po smazání lze stejné XML znovu importovat.

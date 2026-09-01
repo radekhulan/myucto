@@ -102,6 +102,12 @@ export interface GoPayImportResult {
   clearing: GoPayClearingDetail
 }
 
+export interface GoPayDeleteResult {
+  deleted: boolean
+  deleted_entry_ids: number[]
+  preserved_bank_entry_id: number | null
+}
+
 export interface GoPayPayoutCandidate extends GoPayClearing {
   transaction_source: 'email_notice' | 'statement'
 }
@@ -124,6 +130,8 @@ export const gopayApi = {
   },
   process: (id: number) =>
     api.post<GoPayClearingDetail>(`/accounting/gopay/clearings/${id}/process`, {}).then(r => r.data),
+  delete: (id: number) =>
+    api.delete<GoPayDeleteResult>(`/accounting/gopay/clearings/${id}`).then(r => r.data),
   payoutCandidate: (transactionId: number) =>
     api.get<{ candidate: GoPayPayoutCandidate | null }>(`/accounting/gopay/payout-candidates/${transactionId}`)
       .then(r => r.data.candidate),
