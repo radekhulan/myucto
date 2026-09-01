@@ -267,7 +267,8 @@ nepřepsali nastavení.
 
 Každý uživatel kromě superadmina má přístup pouze k firmám, které mu
 superadmin výslovně přidá v editaci uživatele. Firma se vyhledá podle názvu,
-IČO nebo ID; aplikace kvůli tomu nenačítá celý seznam firem.
+IČO nebo ID; aplikace kvůli tomu nenačítá celý seznam firem. Nabídka firem se
+otevře po vstupu do vyhledávacího pole a po opuštění pole se zase zavře.
 
 U přiřazené firmy lze ponechat **Výchozí roli**, nebo vybrat jinou aktivní roli
 stejného typu. Přepis se s výchozí rolí nesčítá — pro danou firmu ji úplně

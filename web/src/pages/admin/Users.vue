@@ -33,9 +33,11 @@ const error = ref('')
 const supplierQuery = ref('')
 const supplierResults = ref<AdminSupplierSearchItem[]>([])
 const supplierSearching = ref(false)
+const supplierSearchOpen = ref(false)
 const supplierCursor = ref<string | null>(null)
 const assignments = ref<Array<UserSupplierAssignment & { role_id: number | null }>>([])
 let searchTimer: ReturnType<typeof setTimeout> | undefined
+let supplierSearchGeneration = 0
 
 const form = reactive({ id: null as number | null, email: '', name: '', role_id: 0, locale: 'cs' as 'cs' | 'en', is_active: true, password: '' })
 const selectedRole = computed(() => roles.value.find(r => r.id === form.role_id) ?? null)
@@ -60,34 +62,76 @@ async function load() {
   finally { loading.value = false }
 }
 
+function resetSupplierSearch() {
+  clearTimeout(searchTimer)
+  supplierSearchGeneration++
+  supplierQuery.value = ''
+  supplierResults.value = []
+  supplierSearching.value = false
+  supplierCursor.value = null
+  supplierSearchOpen.value = false
+}
+
 function openCreate() {
+  resetSupplierSearch()
   const initial = roles.value.find(r => r.is_active && r.role_type === 'staff' && r.system_key !== 'superadmin') ?? roles.value.find(r => r.is_active)
   Object.assign(form, { id: null, email: '', name: '', role_id: initial?.id ?? 0, locale: 'cs', is_active: true, password: '' })
   assignments.value = []
   showForm.value = true
-  void searchSuppliers('', false)
 }
 
 async function openEdit(user: AdminUser) {
+  resetSupplierSearch()
   Object.assign(form, { id: user.id, email: user.email, name: user.name, role_id: user.role_id || user.role.id, locale: user.locale, is_active: user.is_active, password: '' })
   assignments.value = user.is_superadmin ? [] : (await adminApi.listUserSuppliers(user.id)).map(a => ({ ...a, role_id: a.role_id }))
   showForm.value = true
-  void searchSuppliers('', false)
 }
 
 async function searchSuppliers(query: string, append: boolean) {
+  const normalizedQuery = query.trim()
+  if (normalizedQuery.length === 1 && !/^\d$/.test(normalizedQuery)) {
+    supplierResults.value = []
+    supplierCursor.value = null
+    supplierSearching.value = false
+    return
+  }
+  const generation = ++supplierSearchGeneration
+  const cursor = append ? supplierCursor.value : null
   supplierSearching.value = true
   try {
-    const response = await adminApi.searchSuppliers({ q: query || undefined, limit: 20, ...(append && supplierCursor.value ? { cursor: supplierCursor.value } : {}) })
+    const response = await adminApi.searchSuppliers({ q: normalizedQuery || undefined, limit: 20, ...(cursor ? { cursor } : {}) })
+    if (generation !== supplierSearchGeneration || !supplierSearchOpen.value || normalizedQuery !== supplierQuery.value.trim()) return
     const available = response.data.filter(s => !assignments.value.some(a => a.supplier_id === s.id))
     supplierResults.value = append ? [...supplierResults.value, ...available] : available
     supplierCursor.value = response.next_cursor
-  } finally { supplierSearching.value = false }
+  } finally {
+    if (generation === supplierSearchGeneration) supplierSearching.value = false
+  }
+}
+
+function openSupplierSearch() {
+  supplierSearchOpen.value = true
+  void searchSuppliers(supplierQuery.value, false)
+}
+
+function closeSupplierSearch() {
+  supplierSearchOpen.value = false
+  clearTimeout(searchTimer)
+  supplierSearchGeneration++
+  supplierSearching.value = false
 }
 
 watch(supplierQuery, query => {
   clearTimeout(searchTimer)
-  if (query.length === 1) { supplierResults.value = []; return }
+  supplierSearchGeneration++
+  supplierSearching.value = false
+  if (!supplierSearchOpen.value) return
+  const normalizedQuery = query.trim()
+  if (normalizedQuery.length === 1 && !/^\d$/.test(normalizedQuery)) {
+    supplierResults.value = []
+    supplierCursor.value = null
+    return
+  }
   searchTimer = setTimeout(() => { void searchSuppliers(query, false) }, 275)
 })
 
@@ -172,7 +216,32 @@ onMounted(load)
             <select v-model.number="item.role_id" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm"><option :value="null">{{ t('users.supplier_role_inherit') }}</option><option v-for="role in compatibleRoles" :key="role.id" :value="role.id">{{ role.name }}</option></select>
             <button type="button" :class="btnOutline('danger')" @click="assignments.splice(index,1)">{{ t('common.remove') }}</button>
           </div>
-          <div class="relative"><input v-model="supplierQuery" :placeholder="t('users.supplier_search')" class="w-full h-10 px-3 border border-neutral-300 rounded-md" /><div v-if="supplierSearching" class="text-xs text-neutral-500 mt-1">{{ t('common.loading') }}</div><div v-if="supplierResults.length" class="absolute z-10 top-full inset-x-0 max-h-64 overflow-y-auto bg-surface border border-neutral-200 rounded-md shadow-lg"><button v-for="item in supplierResults" :key="item.id" type="button" class="block w-full text-left px-3 py-2 hover:bg-neutral-50" @click="addSupplier(item)">{{ item.name }} <span v-if="item.ic" class="text-xs text-neutral-500">({{ item.ic }})</span></button><button v-if="supplierCursor" type="button" class="block w-full px-3 py-2 text-sm text-primary-600 hover:bg-primary-50" @click="searchSuppliers(supplierQuery, true)">{{ t('users.supplier_more') }}</button></div></div>
+          <div class="relative">
+            <input
+              v-model="supplierQuery"
+              type="text"
+              role="combobox"
+              autocomplete="off"
+              aria-autocomplete="list"
+              :aria-expanded="supplierSearchOpen"
+              :aria-controls="supplierSearchOpen ? 'user-supplier-search-results' : undefined"
+              :placeholder="t('users.supplier_search')"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md"
+              @focus="openSupplierSearch"
+              @blur="closeSupplierSearch"
+            />
+            <div v-if="supplierSearchOpen && supplierSearching" class="text-xs text-neutral-500 mt-1">{{ t('common.loading') }}</div>
+            <div
+              v-if="supplierSearchOpen && supplierResults.length"
+              id="user-supplier-search-results"
+              role="listbox"
+              class="absolute z-10 top-full inset-x-0 max-h-64 overflow-y-auto bg-surface border border-neutral-200 rounded-md shadow-lg"
+              @mousedown.prevent
+            >
+              <button v-for="item in supplierResults" :key="item.id" type="button" role="option" class="block w-full text-left px-3 py-2 hover:bg-neutral-50" @click="addSupplier(item)">{{ item.name }} <span v-if="item.ic" class="text-xs text-neutral-500">({{ item.ic }})</span></button>
+              <button v-if="supplierCursor" type="button" class="block w-full px-3 py-2 text-sm text-primary-600 hover:bg-primary-50" @click="searchSuppliers(supplierQuery, true)">{{ t('users.supplier_more') }}</button>
+            </div>
+          </div>
           <p v-if="supplierRequired" class="rounded-md bg-danger-50 px-3 py-2 text-sm text-danger-600">
             {{ t('users.supplier_required') }}
           </p>
