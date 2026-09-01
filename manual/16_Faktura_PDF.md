@@ -147,7 +147,7 @@ Vygenerované PDF obsahuje:
 5. **Bankovní spojení** — číslo účtu / IBAN, BIC, banka, variabilní symbol
 6. **Položky** — tabulka (Popis / Množství / Cena / DPH / Celkem)
 7. **Sumář** — mezisoučet, sleva, DPH rozpis, **CELKEM**
-8. **(EUR / cizí měna) Přepočet do CZK** — kurz ČNB + tabulka základů DPH a DPH v CZK (světle šedé podbarvení)
+8. **(EUR / cizí měna) Přepočet do CZK** - u českého odběratele kurz ČNB a tabulka základů a DPH v CZK; u zahraničního odběratele pouze česká DPH v CZK, pokud na dokladu vzniká
 9. **QR platbu** — vpravo dole (CZK SPAYD nebo EUR SEPA EPC)
 10. **Patičku** — text z Nastavení dodavatele (volitelný)
 11. **(volitelně) 2. strana** — Výkaz víceprací. Pokud faktura výkaz má, položka „Výkaz víceprací" v tabulce položek je **proklikávací odkaz** (podtržená) — kliknutí přeskočí přímo na stránku s výkazem.
@@ -161,11 +161,17 @@ Vygenerované PDF obsahuje:
 
 ### 16.2.1 Přepočet do CZK (faktury v cizí měně)
 
-Pokud je faktura v jiné měně než CZK, PDF obsahuje navíc:
+Pokud je faktura v jiné měně než CZK a odběratel je z ČR, PDF obsahuje navíc:
 
 - **Drobnou řádku v hlavním sumáři**: „Kurz ČNB: 24,360 CZK / 1 EUR (2026-05-03)"
 - **Samostatnou tabulku „Přepočet do CZK"** pod sumářem se světle šedým
   podbarvením, kde je rozpis základů a DPH per sazba v CZK + celkové součty.
+
+U odběratele mimo ČR se informativní kurz ani celkový přepočet do CZK netiskne.
+Pokud takový doklad obsahuje českou DPH, PDF zachová pouze částku české DPH
+v CZK. U reverse charge, osvobozeného plnění, vývozu a OSS se netiskne ani tato
+částka. Interní kurz a kompletní korunová rekapitulace zůstávají uložené pro
+účetnictví, DPH a exporty.
 
 Kurz se ukládá na fakturu v okamžiku **prvního uložení** a nemění se ani po
 vystavení, ani po editaci items (pokud se nezmění `issue_date` nebo měna).

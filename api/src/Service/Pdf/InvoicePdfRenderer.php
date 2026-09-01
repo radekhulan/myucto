@@ -14,6 +14,7 @@ use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Branding\AccentColor;
 use MyInvoice\Service\Export\IsdocExporter;
+use MyInvoice\Service\Invoice\CzkRecap;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Oss\OssInvoiceClause;
 use MyInvoice\Service\Qr\PaymentQrDueDate;
@@ -337,6 +338,28 @@ final class InvoicePdfRenderer
 
         $logoPath = $this->resolveLogoPath($supplierData, (int) ($invoice['supplier_id'] ?? 0));
 
+        $clientCountry = strtoupper(trim((string) ($clientData['country_iso2'] ?? '')));
+        $hidePdfCzkRecap = $clientCountry !== '' && $clientCountry !== 'CZ';
+        $pdfCzkVat = [];
+        if ($hidePdfCzkRecap
+            && ($invoice['invoice_type'] ?? '') !== 'proforma'
+            && is_array($invoice['czk_recap'] ?? null)
+        ) {
+            $exchangeRate = (float) ($invoice['czk_recap']['rate'] ?? 0);
+            $items = (array) ($invoice['items'] ?? []);
+            $pdfCzkVat = CzkRecap::buildCzechVatForDocument($items, $exchangeRate);
+
+            if ($items === []) {
+                foreach ((array) ($invoice['czk_recap']['breakdown'] ?? []) as $row) {
+                    if (abs((float) ($row['vat_czk'] ?? 0)) < 0.000001) continue;
+                    $pdfCzkVat[] = [
+                        'rate'    => (float) ($row['rate'] ?? 0),
+                        'vat_czk' => (float) $row['vat_czk'],
+                    ];
+                }
+            }
+        }
+
         $vars = [
             'invoice'           => $invoice,
             'supplier'          => $supplierData,
@@ -368,6 +391,8 @@ final class InvoicePdfRenderer
             // reálně je — bez loga se název ukazuje vždy (textový brand-name fallback).
             'logo_show_name'    => $logoPath !== null && !empty($supplierData['pdf_logo_show_name']),
             'isdoc_attachment'  => $hasIsdocAttachment, // bool — badge gate
+            'hide_pdf_czk_recap'=> $hidePdfCzkRecap,
+            'pdf_czk_vat'       => $pdfCzkVat,
             // Doložka o odvodu daně v režimu OSS (§ 110a a násl. ZDPH). Doklad s cizí
             // sazbou musí říct, PROČ ta sazba na něm je — jinak ji příjemce i účetní
             // čtou jako českou daň ve špatné sazbě. Protějšek RC doložky výše.

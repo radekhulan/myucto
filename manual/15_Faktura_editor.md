@@ -313,8 +313,10 @@ Zaokrouhlování CZK přepočtu: **HALF_UP, 2 desetinná místa, zvlášť per s
 **Kde je přepočet vidět:**
 
 - **Detail faktury** — sekce „Přepočet do CZK" pod hlavními totály
-- **PDF** — samostatná tabulka „Přepočet do CZK" pod sumářem (světle šedé
-  podbarvení), plus drobná řádka „Kurz ČNB: X CZK / 1 EUR (datum)"
+- **PDF pro českého odběratele** - samostatná tabulka „Přepočet do CZK" pod
+  sumářem a drobná řádka s kurzem ČNB
+- **PDF pro zahraničního odběratele** - informativní přepočet ani kurz netiskne;
+  pokud doklad obsahuje českou DPH, uvede pouze zákonem požadovanou výši DPH v CZK
 - **Editor (re-edit)** — informativní řádka pod totály s použitým kurzem
 
 ## 15.5 Tlačítka

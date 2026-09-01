@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Invoice;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\CzkRecap;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -128,6 +129,47 @@ final class OssInvoiceClauseRenderTest extends TestCase
         self::assertStringNotContainsString('One Stop Shop', $html);
     }
 
+    public function testOssInvoicePdfOmitsCustomerFacingCzkConversion(): void
+    {
+        $invoice = $this->invoice([$this->ossItem('PL')]);
+        $invoice['czk_recap'] = $this->czkRecap(23.0, 23.0);
+
+        $html = $this->renderer->renderHtml($invoice, includeCss: false);
+
+        self::assertStringNotContainsString('Přepočet do CZK', $html);
+        self::assertStringNotContainsString('Kurz ČNB', $html);
+        self::assertStringNotContainsString('CZK', $html);
+    }
+
+    public function testForeignCustomerWithCzechVatKeepsOnlyMandatoryVatAmountInCzk(): void
+    {
+        $invoice = $this->invoice([$this->domesticItem()]);
+        $invoice['czk_recap'] = $this->czkRecap(21.0, 21.0);
+
+        $html = $this->renderer->renderHtml($invoice, includeCss: false);
+
+        self::assertStringNotContainsString('Přepočet do CZK', $html);
+        self::assertStringNotContainsString('Kurz ČNB', $html);
+        self::assertStringContainsString('DPH v CZK', $html);
+        self::assertStringContainsString('511,67 CZK', $html);
+        self::assertSame(2, substr_count($html, 'CZK'));
+    }
+
+    public function testCzechCustomerKeepsFullCzkConversionInPdf(): void
+    {
+        $invoice = $this->invoice([$this->domesticItem()]);
+        $invoice['czk_recap'] = $this->czkRecap(21.0, 21.0);
+        $client = json_decode((string) $invoice['client_snapshot'], true, flags: JSON_THROW_ON_ERROR);
+        $client['country_iso2'] = 'CZ';
+        $invoice['client_snapshot'] = json_encode($client, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        $html = $this->renderer->renderHtml($invoice, includeCss: false);
+
+        self::assertStringContainsString('Přepočet do CZK', $html);
+        self::assertStringContainsString('Kurz ČNB', $html);
+        self::assertStringNotContainsString('DPH v CZK', $html);
+    }
+
     /** @return array<string,mixed> */
     private function ossItem(string $country): array
     {
@@ -157,6 +199,16 @@ final class OssInvoiceClauseRenderTest extends TestCase
             'oss_applicable'         => false,
             'oss_consumer_country'   => null,
         ];
+    }
+
+    /** @return array<string,mixed> */
+    private function czkRecap(float $rate, float $vat): array
+    {
+        return CzkRecap::build(
+            [['rate' => $rate, 'base' => 100.0, 'vat' => $vat]],
+            24.365,
+            '2026-07-01',
+        );
     }
 
     /**

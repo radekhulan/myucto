@@ -420,7 +420,7 @@
           <td class="tot-num nowrap">{{ (invoice.amount_to_pay - invoice.paid_total)|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
         </tr>
         {% endif %}
-        {% if invoice.czk_recap %}
+        {% if invoice.czk_recap and not hide_pdf_czk_recap %}
         <tr class="rate-note">
           <td colspan="2" class="rate-note-cell">
             {{ t('Kurz ČNB', 'CNB rate') }}:
@@ -429,12 +429,21 @@
           </td>
         </tr>
         {% endif %}
+        {% for b in pdf_czk_vat %}
+        <tr class="vat-czk-required">
+          <td class="tot-label">
+            {{ t('DPH v CZK', 'VAT in CZK') }}
+            ({{ b.rate|number_format(b.rate == b.rate|round(0) ? 0 : 2, decimal_sep, thousand_sep) }}&nbsp;%)
+          </td>
+          <td class="tot-num nowrap">{{ b.vat_czk|number_format(2, decimal_sep, thousand_sep) }} CZK</td>
+        </tr>
+        {% endfor %}
       </table>
     </td>
   </tr>
 </table>
 
-{% if invoice.czk_recap %}
+{% if invoice.czk_recap and not hide_pdf_czk_recap %}
 <table class="czk-recap">
   <tr>
     <td colspan="2" class="czk-recap-title">
@@ -459,7 +468,6 @@
   </tr>
   {% endif %}
   {% endfor %}
-  {# Souhrn jen při více sazbách; u jediné sazby by jen zopakoval per-sazbové řádky výše #}
   {% if invoice.czk_recap.breakdown|length > 1 %}
   <tr class="subtotal">
     <td class="tot-label">{{ t('Celkem bez DPH', 'Total without VAT') }}</td>
