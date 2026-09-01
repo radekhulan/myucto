@@ -579,6 +579,26 @@ final class DirectIsdsInboxTransport implements IsdsTransport
                 throw new SubmissionChannelException('isds_response_too_large', 'Datová schránka vrátila příliš velkou odpověď.', 502);
             }
             if ($ok === false || $responseBody === '') {
+                /*
+                 * Selhání TLS handshake NENÍ výpadek sítě.
+                 *
+                 * Endpoint `ws1c.…/cert` je mutual-TLS: bez certifikátu, který
+                 * ISDS pro danou schránku zná, spojení skončí fatálním TLS
+                 * alertem ještě před první odpovědí. Společná hláška „nepodařilo
+                 * se dovolat, zkuste to znovu" pak radila opakovat něco, co
+                 * nemůže projít nikdy — příčina je registrace certifikátu,
+                 * ne dostupnost služby.
+                 */
+                if (self::isTlsHandshakeFailure($error)) {
+                    throw new SubmissionChannelException(
+                        'isds_certificate_rejected',
+                        'Datová schránka odmítla certifikát při navazování spojení. '
+                        . 'Ověřte, že je to systémový certifikát vydaný pro TUHLE schránku '
+                        . 'a v TOMHLE prostředí (testovací a ostré ISDS mají certifikáty '
+                        . 'oddělené) a že je v ISDS zaregistrovaný.',
+                        502,
+                    );
+                }
                 throw new SubmissionChannelException('isds_connection_failed', 'Spojení s datovou schránkou se přerušilo' . ($error !== '' ? ' (' . $error . ')' : '') . '.', 502);
             }
             $this->assertHttpStatus($status, $context);

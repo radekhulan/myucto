@@ -278,13 +278,43 @@ final class PayrollRunSnapshotBuilder
             $timeMonth = isset($timeMonthRows[$employmentId])
                 ? $this->timeMonth($timeMonthRows[$employmentId])
                 : null;
-            if ($timeMonth !== null && $timeMonth['status'] !== 'approved') {
+            /*
+             * CHYBĚJÍCÍ pracovní měsíc blokuje stejně jako neschválený.
+             *
+             * Why: kontrola dřív hlídala jen řádek, který existuje a není
+             * schválený. Vztah, u kterého se docházka vůbec nezaložila, prošel
+             * tiše — a protože `lock_inputs` zmrazí snímek, dostal se do něj
+             * `time_month: null`. Účetní pak měsíc schválila, jenže hlášení
+             * JMHZ čte zmrazený snímek a dál tvrdilo „pracovní doba za měsíc
+             * není schválená". Slepá ulička: údaj byl doplněný, hláška lhala
+             * a cesta ven (znovu otevřít běh a založit novou revizi) nikde
+             * nestála.
+             *
+             * Pracovní souhrn je pro JMHZ povinný — u scénáře 3 (jednatel)
+             * atributy 10259/10260/10261. Je to `warning`, ne `blocker`:
+             * varování se ukáže PŘED zamknutím, takže účetní ví, co si zmrazí,
+             * ale vztah, u kterého se docházka opravdu nevede (dohoda bez
+             * evidence), tím běh nezastaví.
+             */
+            if ($timeMonth === null) {
+                $validations[] = new PayrollRunValidation(
+                    'warning',
+                    'time_month_missing',
+                    'employment',
+                    $employmentId,
+                    'Pracovní vztah nemá za období založenou a schválenou pracovní dobu. '
+                    . 'Zamknutím vstupů se stav zmrazí a měsíční hlášení ČSSZ by ji '
+                    . 'už nevidělo — schvalte ji nejdřív.',
+                    '/payroll/time',
+                );
+            } elseif ($timeMonth['status'] !== 'approved') {
                 $validations[] = new PayrollRunValidation(
                     'blocker',
                     'time_month_not_approved',
                     'employment',
                     $employmentId,
-                    'Docházka pracovního vztahu není schválena.',
+                    'Docházka pracovního vztahu není schválena. Zamknutím vstupů se '
+                    . 'stav zmrazí a měsíční hlášení ČSSZ by ji už nevidělo.',
                     '/payroll/time',
                 );
             }

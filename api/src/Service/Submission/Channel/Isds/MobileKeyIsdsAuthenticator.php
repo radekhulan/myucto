@@ -80,7 +80,24 @@ final class MobileKeyIsdsAuthenticator
 
         $response = $this->loginRequest($environment, $username, $communicationCode, null);
         if ($response['status'] === 401) {
-            throw new SubmissionChannelException('isds_mobile_login_rejected', 'ISDS odmítl uživatelské jméno nebo komunikační kód Mobilního klíče.', 401);
+            /*
+             * Nejčastější příčina není překlep, ale PROSTŘEDÍ: testovací ISDS
+             * (`datovka-test.gov.cz`) má vlastní účty a ostré přihlášení v něm
+             * nikdy neprojde. Hláška „ISDS odmítl jméno nebo kód" pak posílala
+             * účetní přepisovat údaje, které měla správně.
+             */
+            throw new SubmissionChannelException(
+                'isds_mobile_login_rejected',
+                $environment === 'test'
+                    ? 'Testovací ISDS (datovka-test.gov.cz) odmítl přihlášení. '
+                        . 'Testovací prostředí má vlastní účty — přihlášení do ostré '
+                        . 'datové schránky v něm nefunguje. Přepněte nahoře na '
+                        . 'Ostré prostředí, nebo použijte testovací údaje.'
+                    : 'ISDS odmítl uživatelské jméno nebo komunikační kód Mobilního klíče. '
+                        . 'Komunikační kód je samostatný kód pro externí aplikace, '
+                        . 'ne heslo do datové schránky.',
+                401,
+            );
         }
         $sCookieName = isset($response['cookies']['IPCZ-S-COOKIE'])
             ? 'IPCZ-S-COOKIE'
