@@ -190,7 +190,21 @@ final class JmhzEldpEvidenceBuilder
         if ($uncappedBase % 100 !== 0 || intdiv($uncappedBase, 100) > 9_999_999_999) {
             $this->invalid('jmhz_eldp_assessment_base_not_whole_czk', 'Vyměřovací základ ELDP musí být celé Kč v rozsahu XSD.');
         }
-        if (!$participates && ($uncappedBase !== 0 || $cappedBase !== 0)) {
+        /*
+         * Neúčastný vztah se poměřuje ZASTROPOVANÝM základem, ne surovým.
+         *
+         * Why: u dohody pod hranicí účasti kalkulátor legitimně vyplní
+         * `assessment_base` zúčtovaným příjmem (8 000 Kč u DPP) a vynuluje jen
+         * `capped_assessment_base` — surový základ nese informaci „tolik se
+         * posuzovalo", zastropovaný „tolik vstoupilo do pojištění". Kontrola
+         * na obojí proto podlimitní dohodu odmítla a shodila ELDP, potažmo
+         * celé měsíční hlášení: jedna DPP za 8 000 Kč znamenala, že se JMHZ
+         * nesestaví NIKOMU ve firmě.
+         *
+         * U účastného vztahu se obě čísla rovnají (ověřeno na HPP i DPČ), takže
+         * se zúžením kontroly nic neztrácí.
+         */
+        if (!$participates && $cappedBase !== 0) {
             $this->invalid('jmhz_eldp_social_relationship_unsupported', 'Neúčastný vztah nesmí mít vyměřovací základ sociálního pojištění.');
         }
 
