@@ -180,6 +180,42 @@ final class PurchaseSummaryActionCostTest extends TestCase
         self::assertEqualsWithDelta($basePrev + 150.0, $this->rollingVal($after, 'CZK', 'prev_period_total'), 0.01, 'Předchozích 12m (−18 měsíců) += 150.');
     }
 
+    public function testPayableDashboardUsesBalanceAfterAccountSettlement(): void
+    {
+        $vendor = $this->vendor('Golden Dodavatel Settlement');
+        $overdueDate = (new \DateTimeImmutable('today'))->modify('-30 days')->format('Y-m-d');
+        $futureDate = (new \DateTimeImmutable('today'))->modify('+2 days')->format('Y-m-d');
+
+        $kpiBefore = $this->kpi((int) date('Y'), (int) date('Y') - 1);
+        $beforeUnpaid = (int) $kpiBefore['unpaid_count'];
+        $beforeTotal = $this->kpiUnpaidTotal($kpiBefore, 'CZK');
+        $overdueId = $this->purchase($vendor, $overdueDate, $overdueDate, 164.46, 199.0);
+        self::assertSame($beforeUnpaid + 1,
+            (int) $this->kpi((int) date('Y'), (int) date('Y') - 1)['unpaid_count']);
+
+        $this->settle($overdueId, 199.0);
+        $kpiAfter = $this->kpi((int) date('Y'), (int) date('Y') - 1);
+        self::assertSame($beforeUnpaid, (int) $kpiAfter['unpaid_count']);
+        self::assertEqualsWithDelta($beforeTotal, $this->kpiUnpaidTotal($kpiAfter, 'CZK'), 0.01);
+        self::assertNotContains($overdueId, array_column(
+            $this->call('overdue', [$this->pdo, $this->supplierId]),
+            'id',
+        ));
+
+        $futureId = $this->purchase($vendor, $futureDate, $futureDate, 1000.0, 1210.0);
+        $this->settle($futureId, 210.0);
+        $upcoming = $this->call('unpaidUpcoming', [$this->pdo, $this->supplierId]);
+        $row = null;
+        foreach ($upcoming as $candidate) {
+            if ((int) $candidate['id'] === $futureId) {
+                $row = $candidate;
+                break;
+            }
+        }
+        self::assertNotNull($row);
+        self::assertSame(1000.0, (float) $row['amount_to_pay']);
+    }
+
     // ── reflection wrappery ────────────────────────────────────────────────────
 
     private function costsByYear(): array
@@ -230,6 +266,16 @@ final class PurchaseSummaryActionCostTest extends TestCase
         foreach ($kpi['per_currency'] as $r) {
             if ($r['currency'] === $cur) {
                 return (float) $r[$key];
+            }
+        }
+        return 0.0;
+    }
+
+    private function kpiUnpaidTotal(array $kpi, string $cur): float
+    {
+        foreach ($kpi['unpaid_per_currency'] as $row) {
+            if ($row['currency'] === $cur) {
+                return (float) $row['total'];
             }
         }
         return 0.0;
@@ -308,5 +354,20 @@ final class PurchaseSummaryActionCostTest extends TestCase
             $currencyId ?? $this->czkId, $exchangeRate, $net, round($gross - $net, 2), $gross, $status, $this->userId,
         ]);
         return (int) $this->pdo->lastInsertId();
+    }
+
+    private function settle(int $purchaseId, float $amount): void
+    {
+        $accountId = (int) ($this->pdo->query(
+            "SELECT id FROM chart_of_accounts
+              WHERE supplier_id = {$this->supplierId} AND account_code LIKE '365%'
+              ORDER BY id LIMIT 1"
+        )->fetchColumn() ?: 0);
+        self::assertGreaterThan(0, $accountId, 'Test vyžaduje účet 365.');
+        $this->pdo->prepare(
+            "INSERT INTO invoice_settlements
+                (supplier_id, doc_type, doc_id, settled_on, amount, account_id, status, created_by)
+             VALUES (?, 'purchase_invoice', ?, CURDATE(), ?, ?, 'confirmed', ?)"
+        )->execute([$this->supplierId, $purchaseId, $amount, $accountId, $this->userId]);
     }
 }

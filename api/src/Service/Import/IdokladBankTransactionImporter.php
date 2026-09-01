@@ -101,7 +101,8 @@ final class IdokladBankTransactionImporter
                         $this->refreshStatement($pdo, $statementId);
                         $pdo->commit();
                         $committed = true;
-                        $match = $this->matcher->match($txId);
+                        $match = $this->matcher->matchBatch([$txId])[$txId]
+                            ?? ['status' => 'unmatched'];
                         if (in_array($match['status'], ['auto_exact', 'auto_partial'], true)) $result['matched']++;
                     }
                 }

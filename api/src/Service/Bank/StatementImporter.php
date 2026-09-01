@@ -183,6 +183,7 @@ final class StatementImporter
         $matched = 0;
         $inserted = 0;
         $skipped = 0;
+        $matchIds = [];
         foreach ($parsed['transactions'] as $tx) {
             // Měna registrovaného účtu přebíjí i per-tx pole (#109): výpis je
             // jednoměnový a Fio do 075 píše konstantně CZK i u EUR účtu — per-tx
@@ -270,11 +271,14 @@ final class StatementImporter
                 continue;
             }
 
-            $r = $this->matcher->match($txId);
+            $matchIds[] = $txId;
+        }
+
+        foreach ($this->matcher->matchBatch($matchIds) as $txId => $r) {
             if (in_array($r['status'], ['auto_exact', 'auto_partial'], true)) {
                 $matched++;
             }
-            $this->bankPosting?->handleTransaction($txId, $userId, !empty($r['requires_review']));
+            $this->bankPosting?->handleTransaction((int) $txId, $userId, !empty($r['requires_review']));
         }
 
         $pdo->prepare('UPDATE bank_statements SET matched_count = ?, transaction_count = ? WHERE id = ?')

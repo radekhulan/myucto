@@ -3392,7 +3392,7 @@ final class BankStatementAction
      * Přepároj všechny dosud nespárované transakce výpisu — užitečné poté, co
      * uživatel ex-post doplnil přijaté/vystavené faktury, které by se daly napárovat.
      *
-     * Volá StatementMatcher::match() pro každou transakci ve stavu 'unmatched' nebo
+     * Volá StatementMatcher::matchBatch() pro transakce ve stavu 'unmatched' nebo
      * 'auto_partial'. Stávající 'auto_exact', 'manual' a 'ignored' nejsou dotčeny.
      */
     public function rematch(Request $request, Response $response, array $args): Response
@@ -3421,6 +3421,7 @@ final class BankStatementAction
         $newlyPartial = 0;
         $stillUnmatched = 0;
         $takenOver = 0;
+        $matchIds = [];
         foreach ($txIds as $txId) {
             // Nejdřív cross-source dedup: pokud tatáž platba visí spárovaná na
             // e-mailovém avízu, převezmi párování na oficiální výpis místo dvojího
@@ -3435,14 +3436,17 @@ final class BankStatementAction
                 continue;
             }
 
-            $r = $this->matcher->match((int) $txId);
+            $matchIds[] = (int) $txId;
+        }
+
+        foreach ($this->matcher->matchBatch($matchIds) as $txId => $r) {
             $s = (string) ($r['status'] ?? 'unmatched');
             if ($s === 'auto_exact') $newlyMatched++;
             elseif ($s === 'auto_partial') $newlyPartial++;
             else $stillUnmatched++;
             // Automatizace: zaúčtování po (re)match (best-effort, no-op mimo double_entry).
             $this->bankPosting->handleTransaction(
-                (int) $txId,
+                $txId,
                 $userId ?: null,
                 !empty($r['requires_review']),
             );

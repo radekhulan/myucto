@@ -28,6 +28,10 @@ pohled jen na **přijaté faktury**. U **plátce DPH** se náklady počítají *
 - **Aging závazků** — stáří neuhrazených přijatých faktur
 - **Distribuce velikosti přijatých faktur** (12 m)
 
+Závazkové přehledy, aging a odhad budoucích plateb pracují se zbytkem po
+odečtení bankovních úhrad, vzájemných zápočtů a zápočtů proti účtu. Plně
+vyrovnaný doklad se proto mezi nezaplacenými závazky nezobrazuje.
+
 > [!TIP]
 > Kategorie nákladů přiřazuješ v editoru přijaté faktury. Bez nich se rozpad
 > „Náklady podle kategorií" smrskne na jediný řádek „Bez kategorie". Souhrnný

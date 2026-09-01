@@ -754,11 +754,12 @@ final class CrmAggregationService
                 END AS bucket,
                 COALESCE(c.code, 'CZK') AS currency,
                 COUNT(*) AS cnt,
-                SUM(COALESCE(pi.amount_to_pay, pi.total_with_vat, 0)) AS total
+                SUM(GREATEST(" . PayablePredicate::remainingExpression('pi') . ", 0)) AS total
               FROM purchase_invoices pi
          LEFT JOIN currencies c ON c.id = pi.currency_id
              WHERE pi.supplier_id = ?
-               AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument() . "
+               AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
+                . PayablePredicate::excludeFullySettled() . "
           GROUP BY bucket, currency
           ORDER BY currency, FIELD(bucket, 'not_due', 'overdue_30', 'overdue_60', 'overdue_90', 'overdue_90_plus')
         ";
@@ -1173,10 +1174,11 @@ final class CrmAggregationService
 
         // 3. Přijaté faktury po splatnosti — zaplatit dodavateli
         $stmt = $pdo->prepare(
-            "SELECT id FROM purchase_invoices
-              WHERE supplier_id = ?
-                AND status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument('') . "
-                AND due_date < ?"
+            "SELECT pi.id FROM purchase_invoices pi
+              WHERE pi.supplier_id = ?
+                AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
+                . PayablePredicate::excludeFullySettled() . "
+                AND pi.due_date < ?"
         );
         $stmt->execute([$supplierId, $today]);
         $payablesIds = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
@@ -2696,10 +2698,11 @@ final class CrmAggregationService
                 break;
             case 'overdue_payables':
                 $stmt = $pdo->prepare(
-                    "SELECT id FROM purchase_invoices
-                      WHERE supplier_id = ?
-                        AND status IN ('received','booked')" . PayablePredicate::excludeAdvanceVatDocument('') . "
-                        AND due_date < ?"
+                    "SELECT pi.id FROM purchase_invoices pi
+                      WHERE pi.supplier_id = ?
+                        AND pi.status IN ('received','booked')" . PayablePredicate::excludeAdvanceVatDocument()
+                        . PayablePredicate::excludeFullySettled() . "
+                        AND pi.due_date < ?"
                 );
                 $stmt->execute([$supplierId, $today]);
                 break;
@@ -2818,11 +2821,12 @@ final class CrmAggregationService
         // Out: nezaplacené přijaté faktury s due_date v okně.
         $outStmt = $pdo->prepare(
             "SELECT CASE{$buildCase('pi')} END AS bucket,
-                    SUM(pi.total_with_vat) AS amt
+                    SUM(GREATEST(" . PayablePredicate::remainingExpression('pi') . ", 0)) AS amt
                FROM purchase_invoices pi
           LEFT JOIN currencies c ON c.id = pi.currency_id
               WHERE pi.supplier_id = ?
-                AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument() . "
+                AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
+                . PayablePredicate::excludeFullySettled() . "
                 AND pi.due_date BETWEEN ? AND ?
                 AND COALESCE(c.code, 'CZK') = ?
            GROUP BY bucket"

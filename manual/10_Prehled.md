@@ -230,7 +230,7 @@ Widget kombinuje víc typů položek, každá se zobrazí jen když má co hlás
 | Pošli upomínky | Faktury po splatnosti bez odeslané upomínky | `Faktury` (filtr po splatnosti) |
 | Spáruj platby z banky | Nespárované bankovní transakce | [Banka](28_Banka.md) |
 | Vystav pravidelné faktury | Splatné pravidelné faktury čekají na vygenerování | [Pravidelné faktury](17_Pravidelne_fakturace.md) |
-| Zaplať dodavatelům | Přijaté faktury po splatnosti | `Přijaté faktury` (filtr po splatnosti) |
+| Zaplať dodavatelům | Přijaté faktury po splatnosti se skutečným zůstatkem po odečtení banky a zápočtů | `Přijaté faktury` (filtr po splatnosti) |
 | Zkontroluj koncepty přijatých faktur | Rozpracované koncepty PF | [Přijaté faktury](23_Prijate_faktury.md) (filtr koncept) |
 | **Zaúčtuj doklady** | Jen podvojné účetnictví — viz [§ 10.10.1](#10101-zauctuj-doklady) | Filtrovaný seznam FV/PF/banka |
 | **Zkontroluj integritu deníku** | Jen podvojné účetnictví — viz [§ 10.10.2](#10102-zkontroluj-integritu-deniku) | [Účetní deník](45_Ucetni_denik.md) |
@@ -242,6 +242,10 @@ Widget kombinuje víc typů položek, každá se zobrazí jen když má co hlás
 Každá položka má menu se **skrytím** (na den / týden / natrvalo / historicky) —
 pokud si něco odklikneš, dole se objeví odkaz **„Obnovit skrytá (N)"**, kterým
 skryté položky zase vrátíš.
+
+Přijatá faktura plně vyrovnaná bankou, vzájemným zápočtem nebo zápočtem proti
+účtu se v položce **Zaplať dodavatelům** znovu nenabízí. U částečné úhrady se
+do souhrnů a platebních příkazů započítá jen zbývající částka.
 
 ### 10.10.1 Zaúčtuj doklady
 

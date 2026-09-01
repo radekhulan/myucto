@@ -59,9 +59,10 @@ Vyber soubor (drag & drop nebo klik). Po nahrání:
 2. **Validace bankovního účtu** — server zkontroluje, že číslo účtu z hlavičky
    výpisu patří některé z měn aktuálního dodavatele.
 3. **Parsing transakcí** — přečte všechny řádky.
-4. **Auto-matching** — pro příchozí i odchozí pohyby se vyhodnotí VS, zbývající
-   částka, číslo dokladu ve zprávě, známý účet protistrany, název a blízkost
-   splatnosti. Jednoznačná shoda se potvrdí, slabší se jen nabídne.
+4. **Auto-matching** — nejprve se u všech pohybů vyhodnotí silné signály, zejména
+   VS, zbývající částka, číslo dokladu ve zprávě a známý účet protistrany. Ve
+   druhém průchodu se u dosud volných odchozích plateb bez VS zkusí přesná shoda
+   částky, měny a data. Jednoznačná shoda se potvrdí, slabší se jen nabídne.
 5. **Update faktur** — plně uhrazený doklad dostane stav `paid` a datum úhrady
    podle bankovní transakce; nižší platba se zapíše jako částečná a sníží
    zbývající částku.
@@ -197,10 +198,13 @@ faktura vyrovná celým zbytkem v její měně; přesný CZK pohyb zůstane na
 bankovní transakci. Výrazně nižší částka je částečná úhrada.
 Plné pokrytí označí fakturu `paid` (`paid_at` = datum transakce).
 
-Samotná shoda částky a data nebo jen přibližná shoda názvu dodavatele se
-automaticky nepotvrdí ani nezaúčtuje. Doklad zůstane nezměněný, dokud kandidáta
-neověříš ručním párováním. Stejně se postupuje, když platba míří na přijatou
-fakturu, která už je označená jako uhrazená.
+U odchozí platby bez VS může druhý průchod automaticky potvrdit jednu běžnou
+přijatou fakturu, pokud přesně sedí částka i měna, datum vystavení nebo splatnosti
+je nejvýše 14 dní od platby a na výpisu není jiný volný pohyb stejné částky.
+Doklad nesmí být uhrazen bankou, hotovostí ani zápočtem. U faktury už označené
+jako uhrazená musí navíc přesně sedět datum úhrady a název obchodníka musí mít
+společný významný token s názvem dodavatele. Jakákoli nejednoznačnost zůstane
+k ruční kontrole.
 Activity log: `bank.matched_manual`.
 
 #### Sloučená úhrada (jedna platba na více faktur)
@@ -553,10 +557,11 @@ hromadně.
 - **VS je nejsilnější signál**, ale není jediný. Bez něj MyÚčto vyhodnotí částku,
   zprávu, datum, název a dříve ověřený účet protistrany; nejednoznačnou shodu
   nechá vždy k potvrzení. Klienty přesto veď k vyplňování VS.
-- **Platby kartou** (bez VS) se zkusí spárovat na přijatou fakturu i podle
-  **částky + podobnosti názvu** dodavatele (název protistrany na výpisu nemusí
-  přesně sedět s názvem dodavatele). Spáruje se jen při jednoznačné shodě;
-  jinak nech na ručním párování / založení dokladu (viz § 28.4.4).
+- **Platby kartou** (bez VS) se po dokončení párování podle silných signálů zkusí
+  spárovat na přijatou fakturu podle přesné částky, měny a data. Musí jít o jediný
+  volný doklad i jediný volný pohyb této částky; u dokladu už označeného jako
+  uhrazený se kontroluje také datum úhrady a podobnost názvu dodavatele. Jinak
+  platba zůstane k ručnímu párování / založení dokladu (viz § 28.4.4).
 - **Částečné platby** (klient pošle míň, ale VS sedí) se u **vydaných** faktur
   evidují automaticky jako částečná úhrada (viz § 28.4.1). U **přijatých**
   faktur se podplatba jen označí k ruční kontrole. Toleranci přesné shody lze
