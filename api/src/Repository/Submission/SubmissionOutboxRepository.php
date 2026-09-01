@@ -193,13 +193,19 @@ final class SubmissionOutboxRepository
     }
 
     /**
-     * Přechod `ready` → `sending`, který smí uspět jen jednou.
+     * Zabere podání k odeslání. Uspěje právě jednou — na tom stojí ochrana
+     * před dvojím podáním u úřadu.
      *
-     * Tohle je celý zámek idempotence potvrzení: druhé kliknutí (nebo druhý
-     * běžící požadavek) narazí na `dispatch_state = 'ready'` v WHERE a
-     * nezmění nic, takže druhé podání prostě nevznikne.
+     * Bere i stav `failed`: neúspěšný pokus není konec cesty. Chyby, na kterých
+     * odesílání padá nejčastěji — špatná metoda přihlášení, vypršelá relace,
+     * odmítnutý certifikát — nastávají PŘED tím, než se zpráva dostane
+     * ke zpracování, takže u úřadu nic neleží a zpráva sama je pořád platná.
+     * Dokud se z `failed` zabrat nedalo, zůstala připravená zpráva viset bez
+     * jediného tlačítka a účetní ji musela zahodit a připravit znovu.
      *
-     * @return array<string,mixed>
+     * Stav `send_uncertain` se tu VĚDOMĚ nebere: tam nevíme, jestli zpráva
+     * odešla, a druhý pokus by mohl založit druhé podání. Ten se řeší
+     * rekonciliací (`resolveUncertain`), ne opakováním.
      */
     public function claimForSending(int $supplierId, int $id, int $confirmedBy): ?array
     {
@@ -208,7 +214,7 @@ final class SubmissionOutboxRepository
             'UPDATE ' . self::TABLE . '
                 SET dispatch_state = \'sending\', confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
                     row_version = row_version + 1
-              WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\''
+              WHERE supplier_id = ? AND id = ? AND dispatch_state IN (\'ready\', \'failed\')'
         );
         $stmt->execute([$confirmedBy, $supplierId, $id]);
         if ($stmt->rowCount() !== 1) {

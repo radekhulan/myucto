@@ -270,14 +270,21 @@ function acceptanceTone(state: AcceptanceState): string {
 function primaryAction(row: OutboxSubmission): 'gateway' | 'confirm' | 'resolve' | 'markSent' | 'uploadReceipt' | null {
   if (row.dispatch_state === 'send_uncertain' || row.dispatch_state === 'sending') return 'resolve'
   if (canUseGateway(row)) return 'gateway'
-  if (row.dispatch_state === 'ready') return row.channel === 'isds' ? 'markSent' : 'confirm'
+  // `failed` nabízí totéž co `ready`: neúspěšný pokus není konec cesty. Chyby,
+  // na kterých odesílání padá, nastávají před zpracováním u úřadu, takže tam nic
+  // neleží a zpráva je pořád platná. Bez toho zůstala připravená zpráva viset
+  // bez jediného tlačítka.
+  if (row.dispatch_state === 'ready' || row.dispatch_state === 'failed') {
+    return row.channel === 'isds' ? 'markSent' : 'confirm'
+  }
   if (row.dispatch_state === 'sent' && row.channel === 'isds' && !row.receipt_document_id) return 'uploadReceipt'
   return null
 }
 
 /** Ukazuje se u připraveného ISDS podání: konkrétní postup, ne obecná nápověda. */
 function needsManualSteps(row: OutboxSubmission): boolean {
-  return row.channel === 'isds' && row.dispatch_state === 'ready'
+  return row.channel === 'isds'
+    && (row.dispatch_state === 'ready' || row.dispatch_state === 'failed')
 }
 
 async function loadAll() {
