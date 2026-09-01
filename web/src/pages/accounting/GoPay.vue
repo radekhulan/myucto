@@ -182,7 +182,7 @@ onMounted(load)
         <form class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" @submit.prevent="saveSettings">
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('gopay.settings.gopay_account') }}
-            <select v-model="form.gopay_account_id" class="input mt-1 w-full" :disabled="!canConfigure" required>
+            <select v-model="form.gopay_account_id" class="form-select mt-1 w-full" :disabled="!canConfigure" required>
               <option :value="null">{{ t('gopay.settings.select') }}</option>
               <option v-for="account in account221" :key="account.id" :value="account.id">{{ accountLabel(account) }}</option>
             </select>
@@ -191,7 +191,7 @@ onMounted(load)
 
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('gopay.settings.destination_account') }}
-            <select v-model="form.destination_bank_account_id" class="input mt-1 w-full" :disabled="!canConfigure" required>
+            <select v-model="form.destination_bank_account_id" class="form-select mt-1 w-full" :disabled="!canConfigure" required>
               <option :value="null">{{ t('gopay.settings.select') }}</option>
               <option v-for="account in account221" :key="account.id" :value="account.id">{{ accountLabel(account) }}</option>
             </select>
@@ -199,7 +199,7 @@ onMounted(load)
 
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('gopay.settings.receivable_account') }}
-            <select v-model="form.receivable_account_id" class="input mt-1 w-full" :disabled="!canConfigure" required>
+            <select v-model="form.receivable_account_id" class="form-select mt-1 w-full" :disabled="!canConfigure" required>
               <option :value="null">{{ t('gopay.settings.select') }}</option>
               <option v-for="account in account311" :key="account.id" :value="account.id">{{ accountLabel(account) }}</option>
             </select>
@@ -207,7 +207,7 @@ onMounted(load)
 
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('gopay.settings.fee_account') }}
-            <select v-model="form.fee_account_id" class="input mt-1 w-full" :disabled="!canConfigure" required>
+            <select v-model="form.fee_account_id" class="form-select mt-1 w-full" :disabled="!canConfigure" required>
               <option :value="null">{{ t('gopay.settings.select') }}</option>
               <option v-for="account in expenseAccounts" :key="account.id" :value="account.id">{{ accountLabel(account) }}</option>
             </select>
@@ -215,7 +215,7 @@ onMounted(load)
 
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('gopay.settings.clearing_account') }}
-            <select v-model="form.clearing_account_id" class="input mt-1 w-full" :disabled="!canConfigure" required>
+            <select v-model="form.clearing_account_id" class="form-select mt-1 w-full" :disabled="!canConfigure" required>
               <option :value="null">{{ t('gopay.settings.select') }}</option>
               <option v-for="account in account261" :key="account.id" :value="account.id">{{ accountLabel(account) }}</option>
             </select>
@@ -224,17 +224,17 @@ onMounted(load)
           <div class="grid grid-cols-[minmax(0,1fr)_5rem] gap-3">
             <label class="block text-sm font-medium text-neutral-700">
               {{ t('gopay.settings.payout_account') }}
-              <input v-model.trim="form.payout_account_number" class="input mt-1 w-full" :disabled="!canConfigure" required>
+              <input v-model.trim="form.payout_account_number" class="form-input mt-1 w-full" :disabled="!canConfigure" required>
             </label>
             <label class="block text-sm font-medium text-neutral-700">
               {{ t('gopay.settings.bank_code') }}
-              <input v-model.trim="form.payout_bank_code" class="input mt-1 w-full" inputmode="numeric" maxlength="4" :disabled="!canConfigure" required>
+              <input v-model.trim="form.payout_bank_code" class="form-input mt-1 w-full" inputmode="numeric" maxlength="4" :disabled="!canConfigure" required>
             </label>
           </div>
 
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('gopay.settings.date_tolerance') }}
-            <input v-model.number="form.payout_date_tolerance_days" class="input mt-1 w-full" type="number" min="0" max="14" :disabled="!canConfigure" required>
+            <input v-model.number="form.payout_date_tolerance_days" class="form-input mt-1 w-full" type="number" min="0" max="14" :disabled="!canConfigure" required>
           </label>
 
           <div v-if="canConfigure" class="flex items-end md:col-span-2 xl:col-span-3">
@@ -252,7 +252,7 @@ onMounted(load)
         <div class="mt-4 flex flex-wrap items-end gap-3">
           <label class="min-w-[16rem] flex-1 text-sm font-medium text-neutral-700">
             {{ t('gopay.import.file') }}
-            <input ref="fileInput" class="input mt-1 block w-full" type="file" accept=".xml,application/xml,text/xml" :disabled="importing || !canImport" @change="chooseFile">
+            <input ref="fileInput" class="form-input mt-1 block w-full" type="file" accept=".xml,application/xml,text/xml" :disabled="importing || !canImport" @change="chooseFile">
           </label>
           <button type="button" :class="btnFilled('primary')" :disabled="importing || !!importDisabledReason" :title="importDisabledReason || undefined" @click="importXml">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.upload" /></svg>
