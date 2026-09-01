@@ -101,13 +101,20 @@ final class Connection
             $timezone = 'Europe/Prague';
         }
 
-        // Zda server pojmenované zóny zná, se zjišťuje JEDNOU za proces. Bez toho by
-        // instalace bez tzinfo tabulek platila neúspěšný pokus u každého spojení —
-        // v testech, které jich otevírají stovky, je to znát.
-        if (self::$namedTimeZoneSupported !== false) {
+        // Zda server pojmenované zóny zná, se zjišťuje JEDNOU za proces přes
+        // CONVERT_TZ. Při chybějících tzinfo tabulkách vrátí NULL, ale nevyhodí
+        // očekávanou chybu 1298, která by jinak zanesla aplikační log.
+        if (self::$namedTimeZoneSupported === null) {
+            $probe = $pdo->prepare(
+                "SELECT CONVERT_TZ('2000-01-01 00:00:00', '+00:00', ?) IS NOT NULL"
+            );
+            $probe->execute([$timezone]);
+            self::$namedTimeZoneSupported = (bool) $probe->fetchColumn();
+        }
+
+        if (self::$namedTimeZoneSupported) {
             try {
                 $pdo->prepare('SET time_zone = ?')->execute([$timezone]);
-                self::$namedTimeZoneSupported = true;
 
                 return;
             } catch (\PDOException $e) {
