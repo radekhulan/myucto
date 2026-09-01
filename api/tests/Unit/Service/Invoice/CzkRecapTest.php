@@ -85,6 +85,26 @@ final class CzkRecapTest extends TestCase
         self::assertSame(0.0, $r['total_with_vat_czk']);
     }
 
+    public function testDocumentVatIncludesOnlyNonOssItemsAndGroupsRates(): void
+    {
+        $r = CzkRecap::buildCzechVatForDocument([
+            ['vat_rate_snapshot' => 21.0, 'total_vat' => 20.0, 'oss_applicable' => false],
+            ['vat_rate_snapshot' => 21.0, 'total_vat' => 1.0, 'oss_applicable' => false],
+            ['vat_rate_snapshot' => 23.0, 'total_vat' => 23.0, 'oss_applicable' => true],
+        ], 24.365);
+
+        self::assertSame([['rate' => 21.0, 'vat_czk' => 511.67]], $r);
+    }
+
+    public function testDocumentVatKeepsNegativeCzechVatOnCreditNote(): void
+    {
+        $r = CzkRecap::buildCzechVatForDocument([
+            ['vat_rate_snapshot' => 21.0, 'total_vat' => -21.0, 'oss_applicable' => false],
+        ], 24.365);
+
+        self::assertSame([['rate' => 21.0, 'vat_czk' => -511.67]], $r);
+    }
+
     /**
      * `multiplyHalfUp()` je SSOT přepočtu měny a musí dát MATEMATICKY správný HALF_UP,
      * i když přesný součin padne na půlhaléřovou hranici.

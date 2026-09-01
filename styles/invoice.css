@@ -261,6 +261,12 @@ table.totals-table tr.to-pay td {
     color: #3B2D83;
     padding: 2.5mm 3mm;
 }
+table.totals-table tr.vat-czk-required td {
+    border-top: 0.5pt solid #D2CCDF;
+    font-size: 8.5pt;
+    color: #5A5470;
+    padding-top: 1.5mm;
+}
 table.totals-table tr.rate-note td.rate-note-cell {
     text-align: right;
     font-size: 8.5pt;

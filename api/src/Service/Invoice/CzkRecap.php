@@ -67,6 +67,42 @@ final class CzkRecap
     }
 
     /**
+     * @param list<array<string,mixed>> $items
+     * @return list<array{rate:float,vat_czk:float}>
+     */
+    public static function buildCzechVatForDocument(array $items, float $exchangeRate): array
+    {
+        if ($exchangeRate <= 0) return [];
+
+        $groups = [];
+        foreach ($items as $item) {
+            if (!empty($item['oss_applicable'])) continue;
+
+            $vat = (float) ($item['total_vat'] ?? 0);
+            if (abs($vat) < 0.000001) continue;
+
+            $rate = (float) ($item['vat_rate_snapshot'] ?? 0);
+            $key = number_format($rate, 2, '.', '');
+            if (!isset($groups[$key])) {
+                $groups[$key] = ['rate' => $rate, 'vat' => 0.0];
+            }
+            $groups[$key]['vat'] += $vat;
+        }
+
+        $rows = [];
+        foreach ($groups as $group) {
+            $vat = round((float) $group['vat'], 2);
+            if (abs($vat) < 0.000001) continue;
+            $rows[] = [
+                'rate'    => (float) $group['rate'],
+                'vat_czk' => self::multiplyHalfUp($vat, $exchangeRate),
+            ];
+        }
+        usort($rows, static fn (array $a, array $b) => $b['rate'] <=> $a['rate']);
+        return $rows;
+    }
+
+    /**
      * Násobení dvou floatů s HALF_UP zaokrouhlením na 2 dp. Používá bcmath kvůli
      * binární nepřesnosti — např. 21,00 × 24,365 = 511,665, ale ve floatu
      * 511,66499999..., takže `round(...HALF_UP)` vrací 511,66 místo 511,67.
