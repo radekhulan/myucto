@@ -34,6 +34,7 @@ const saving = ref(false)
 const showCreate = ref(false)
 const showValidation = ref(false)
 const editingId = ref<number | null>(null)
+const deletingId = ref<number | null>(null)
 const conflictId = ref<number | null>(null)
 const accounts = ref<PayrollInstitutionAccount[]>([])
 
@@ -226,6 +227,14 @@ function errorCode(error: unknown): string | null {
     : null
 }
 
+/** Hláška ze serveru má přednost: u blokovaného mazání říká, co účet drží. */
+function errorMessage(error: unknown): string | null {
+  const message = isAxiosError<{ error?: { message?: string } }>(error)
+    ? error.response?.data?.error?.message ?? null
+    : null
+  return message === null || message.trim() === '' ? null : message
+}
+
 function showSaveError(error: unknown, fallbackKey: string) {
   const code = errorCode(error)
   if (code === 'institution_account_interval_overlap') {
@@ -250,6 +259,49 @@ async function loadAccounts() {
     toast.error(t('payroll.employer.health_accounts.load_failed'))
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * Smazání účtu, ze kterého se nikdy neplatilo.
+ *
+ * PROČ VŮBEC: účet zadaný pod špatným kódem instituce se při přípravě plateb
+ * nikdy nenajde, takže je to mrtvý řádek — jenže vedle správného stojí se
+ * stejným číslem a účetní z dvojice nepozná, který platí. Ukončit platnost
+ * nestačí, ukončený řádek zůstává v přehledu stát dál.
+ *
+ * Rozhoduje server (`can_delete`): vazbu na závazky a položky příkazu nedrží
+ * cizí klíč, ale text v `recipient_reference`, takže odsud ji spolehlivě
+ * dovodit nejde. Když smazat nejde, akce se neschovává ani nezešedne — důvod
+ * se řekne až při pokusu, stejně jako u osoby a pracovního vztahu.
+ */
+async function removeAccount(account: PayrollInstitutionAccount) {
+  if (deletingId.value !== null) return
+  if (!account.can_delete) {
+    toast.error(
+      account.delete_blocker?.message
+      ?? t('payroll.employer.health_accounts.delete_blocked'),
+    )
+    return
+  }
+  const question = t('payroll.employer.health_accounts.delete_confirm', {
+    institution: account.institution_name,
+    account: accountNumber(account),
+  })
+  if (!window.confirm(question)) return
+
+  deletingId.value = account.id
+  try {
+    await payrollApi.deleteInstitutionAccount(account.id, account.row_version)
+    accounts.value = accounts.value.filter(item => item.id !== account.id)
+    if (editingId.value === account.id) editingId.value = null
+    toast.success(t('payroll.employer.health_accounts.deleted'))
+  } catch (error) {
+    toast.error(
+      errorMessage(error) ?? t('payroll.employer.health_accounts.delete_failed'),
+    )
+  } finally {
+    deletingId.value = null
   }
 }
 
@@ -485,10 +537,23 @@ onMounted(async () => {
                   <p class="text-xs text-neutral-500">{{ account.verified_on }}<template v-if="account.source_reference"> · {{ account.source_reference }}</template></p>
                 </td>
                 <td v-if="tbl.isVisible('actions')" class="px-3 py-3">
-                  <button v-if="canWrite" type="button" :class="btnOutlineSm('neutral')" @click="startEdit(account)">
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
-                    {{ t('common.edit') }}
-                  </button>
+                  <div v-if="canWrite" class="flex items-center gap-2">
+                    <button type="button" :class="btnOutlineSm('neutral')" @click="startEdit(account)">
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                      {{ t('common.edit') }}
+                    </button>
+                    <button
+                      type="button"
+                      :class="btnOutlineSm('danger')"
+                      :disabled="deletingId === account.id"
+                      :title="t('payroll.employer.health_accounts.delete')"
+                      :aria-label="t('payroll.employer.health_accounts.delete')"
+                      data-test="delete-institution-account"
+                      @click="removeAccount(account)"
+                    >
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -504,10 +569,22 @@ onMounted(async () => {
               <h3 class="font-medium text-neutral-900">{{ account.institution_name }}</h3>
               <p class="font-mono text-xs text-neutral-500">{{ account.institution_code }}</p>
             </div>
-            <button v-if="canWrite" type="button" :class="btnOutlineSm('neutral')" @click="startEdit(account)">
-              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
-              {{ t('common.edit') }}
-            </button>
+            <div v-if="canWrite" class="flex items-center gap-2">
+              <button type="button" :class="btnOutlineSm('neutral')" @click="startEdit(account)">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                {{ t('common.edit') }}
+              </button>
+              <button
+                type="button"
+                :class="btnOutlineSm('danger')"
+                :disabled="deletingId === account.id"
+                :title="t('payroll.employer.health_accounts.delete')"
+                :aria-label="t('payroll.employer.health_accounts.delete')"
+                @click="removeAccount(account)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+              </button>
+            </div>
           </div>
           <dl class="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
             <div>

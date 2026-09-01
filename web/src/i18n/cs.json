@@ -1152,7 +1152,7 @@
         "create_failed": "Platební dávku se nepodařilo vytvořit.",
         "select_all": "Vybrat nebo zrušit kompatibilní závazky",
         "select_blocked_all": "Všechny závazky tohoto období už jsou zařazené do platebních dávek, není z čeho vybírat.",
-          "select_blocked_batched": "Závazek už je v platební dávce, do další ho zařadit nelze.",
+        "select_blocked_batched": "Závazek už je v platební dávce, do další ho zařadit nelze.",
         "select_blocked_not_ready": "Závazek zatím není připravený k zařazení do dávky.",
         "select_blocked_group": "Do jedné dávky patří jen platby se stejným dnem splatnosti, měnou a plátcem.",
         "select_employee": "Vybrat závazek: {name}",
@@ -5524,7 +5524,12 @@
           "institution_notice": "Sdělení instituce",
           "user_verified": "Ověřeno uživatelem",
           "imported": "Importovaný údaj"
-        }
+        },
+        "delete": "Smazat účet",
+        "delete_confirm": "Opravdu smazat účet {institution} ({account})? Smazat jde jen účet, ze kterého se nikdy neplatilo — pokud jde o duplicitu pod špatným kódem instituce, o nic nepřijdete.",
+        "deleted": "Platební účet instituce byl smazán.",
+        "delete_failed": "Platební účet instituce se nepodařilo smazat.",
+        "delete_blocked": "Z tohoto účtu už se platilo, takže smazat nejde. Nastavte mu konec platnosti."
       },
       "accident_insurance": {
         "title": "Zákonné pojištění odpovědnosti zaměstnavatele",
@@ -17822,9 +17827,9 @@
     "s8_base": "Dílčí základ §8 (kapitálový majetek)",
     "s9_income": "Příjmy z nájmu (§9)",
     "s9_expenses": "Výdaje k nájmu (§9)",
-      "s9_expense_mode": "Výdaje k nájmu",
-      "s9_expense_mode_actual": "Ve skutečné výši",
-      "s9_expense_mode_pausal": "Procentem z příjmů (30 %, § 9 odst. 4)",
+    "s9_expense_mode": "Výdaje k nájmu",
+    "s9_expense_mode_actual": "Ve skutečné výši",
+    "s9_expense_mode_pausal": "Procentem z příjmů (30 %, § 9 odst. 4)",
     "s10_income": "Ostatní příjmy (§10)",
     "s10_expenses": "Výdaje k §10",
     "social_paid_advances": "Zaplacené zálohy — sociální",

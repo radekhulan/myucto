@@ -3730,6 +3730,13 @@ export interface PayrollInstitutionAccount {
   row_version: number
   created_at: string
   updated_at: string
+  /**
+   * Smazat jde jen účet, ze kterého se nikdy neplatilo. Vazbu nedrží cizí klíč
+   * (příjemce si závazky nesou jako text), takže o ni rozhoduje server a
+   * frontend se jeho verdiktem řídí — sám si ji dovodit neumí.
+   */
+  can_delete: boolean
+  delete_blocker: PayrollDeleteBlocker | null
 }
 
 export interface PayrollInstitutionAccountCreatePayload {
@@ -6213,6 +6220,11 @@ export const payrollApi = {
   updateInstitutionAccount: (id: number, payload: PayrollInstitutionAccountUpdatePayload) =>
     api.put<{ account: PayrollInstitutionAccount }>(`/payroll/settings/institution-accounts/${id}`, payload)
       .then(response => response.data.account),
+  deleteInstitutionAccount: (id: number, rowVersion: number) =>
+    api.delete<{ deleted: boolean; cascade: PayrollDeleteCascade }>(
+      `/payroll/settings/institution-accounts/${id}`,
+      { data: { row_version: rowVersion } },
+    ).then(response => response.data.cascade),
   payrollDimensions: (dimensionType?: PayrollDimensionType) =>
     api.get<{ dimensions: PayrollDimension[] }>('/payroll/settings/dimensions', {
       params: dimensionType ? { type: dimensionType } : undefined,
