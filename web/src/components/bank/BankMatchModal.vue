@@ -20,11 +20,12 @@ const auth = useAuthStore()
 // (a správně zúží v v-if větvích), stejně jako běžné top-level refy v <script setup>.
 const {
   matchingTx, matchCtx, matchVarsymbol, matchCandidates, loadingCandidates, candidatesFallback,
+  gopayCandidate, loadingGoPayCandidate, matchingGoPay,
   splitSuggestions, loadingSplit, splitWindow,
   anchorInvoiceId, anchorOptions, anchorSelected, anchorLoading,
   currentSuggestion, matchError, reviewingSuggestion,
   widenSplitWindow, onAnchorSearch, onAnchorSelect,
-  confirmSuggestion, confirmCandidate, confirmMatch, closeMatch,
+  confirmSuggestion, confirmCandidate, confirmMatch, confirmGoPayCandidate, closeMatch,
   acceptTxSuggestion, rejectTxSuggestion,
 } = props.actions
 </script>
@@ -44,6 +45,37 @@ const {
         :can-review="auth.canWrite('bank.match')"
         @accept="(i) => acceptTxSuggestion(currentSuggestion!.bank_transaction_id, i)"
         @reject="rejectTxSuggestion(currentSuggestion!.bank_transaction_id)" />
+
+      <div v-if="loadingGoPayCandidate || gopayCandidate" class="mb-4">
+        <div class="mb-1.5 text-sm font-medium text-neutral-700">{{ t('bank.gopay_match.title') }}</div>
+        <div v-if="loadingGoPayCandidate" class="py-2 text-xs text-neutral-500">{{ t('common.loading') }}</div>
+        <div v-else-if="gopayCandidate" class="rounded-md border border-success-200 bg-success-50 p-3">
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div class="font-medium text-success-800">
+                {{ t('bank.gopay_match.clearing', { id: gopayCandidate.clearing_id }) }}
+              </div>
+              <div class="mt-0.5 text-xs text-success-700">
+                {{ formatDate(gopayCandidate.performed_on) }} ·
+                {{ formatMoney(gopayCandidate.amount_sent, gopayCandidate.currency) }}
+              </div>
+            </div>
+            <button type="button" @click="confirmGoPayCandidate"
+              :disabled="matchingGoPay || !auth.canWrite('bank.match') || !auth.canWrite('bank.post')"
+              class="inline-flex h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md bg-success-600 px-3 text-sm font-medium text-white hover:bg-success-700 disabled:cursor-not-allowed disabled:bg-neutral-300">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 0 1 0 5.656l-2 2a4 4 0 0 1-5.656-5.656l1.1-1.1m3.9 2.756a4 4 0 0 1 0-5.656l2-2a4 4 0 0 1 5.656 5.656l-1.1 1.1" />
+              </svg>
+              {{ matchingGoPay ? t('bank.gopay_match.matching') : t('bank.gopay_match.match') }}
+            </button>
+          </div>
+          <p class="mt-2 text-xs text-success-700">
+            {{ gopayCandidate.transaction_source === 'email_notice'
+              ? t('bank.gopay_match.notice_hint')
+              : t('bank.gopay_match.statement_hint') }}
+          </p>
+        </div>
+      </div>
 
       <!-- Návrhy ke spárování dle částky (±14 dní, fallback ±90 dní) -->
       <div class="mb-4">

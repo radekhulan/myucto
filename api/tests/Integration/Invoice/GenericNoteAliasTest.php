@@ -155,6 +155,23 @@ final class GenericNoteAliasTest extends TestCase
         self::assertSame('TEST NOTE', $res['body']['note_below_items'] ?? null);
     }
 
+    public function testSupplierOrderNumberWorksWithoutProjectOnCreateAndUpdate(): void
+    {
+        $body = $this->payload();
+        $body['project_id'] = null;
+        $body['supplier_order_number'] = 'MYU000023';
+        $created = self::decode(($this->create)($this->request('POST', $body), new Psr7Response()));
+        self::assertSame(201, $created['status'], json_encode($created['body'], JSON_UNESCAPED_UNICODE));
+
+        $id = (int) $created['body']['id'];
+        self::assertSame('MYU000023', $created['body']['supplier_order_number'] ?? null);
+
+        $body['supplier_order_number'] = 'OBJ-2026-24';
+        $updated = $this->put($id, $body);
+        self::assertSame(200, $updated['status'], json_encode($updated['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('OBJ-2026-24', $updated['body']['supplier_order_number'] ?? null);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private function createInvoice(): int

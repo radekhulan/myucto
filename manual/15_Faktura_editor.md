@@ -41,6 +41,7 @@ Editor je rozdělený na tři bloky:
 | Vystaveno | Datum vystavení (dnes default) |
 | DUZP | Datum uskutečnění zdanitelného plnění (= vystaveno default) |
 | Splatnost | Datum splatnosti — automaticky vypočítáno z `vystaveno + splatnost zakázky` (nebo klienta nebo systému) |
+| Číslo objednávky dodavatele | Volitelná obchodní reference, například `MYU000023`. Je uložená přímo na faktuře i bez zakázky a lze podle ní párovat platby. |
 | Datum úhrady | Vyplní se automaticky při zaplacení (přes banku nebo manuálně) |
 
 ### 15.2.4 Měna a DPH

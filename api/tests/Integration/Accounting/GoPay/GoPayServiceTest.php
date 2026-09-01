@@ -7,9 +7,12 @@ namespace MyInvoice\Tests\Integration\Accounting\GoPay;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\GoPay\GoPayService;
+use MyInvoice\Service\Accounting\JournalLinkService;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Bank\EmailNoticeReconciler;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -22,6 +25,9 @@ final class GoPayServiceTest extends TestCase
     private Connection $db;
     private GoPayService $service;
     private PostingService $posting;
+    private JournalEntryRepository $journal;
+    private JournalLinkService $links;
+    private EmailNoticeReconciler $reconciler;
     private AccountingPeriodRepository $periods;
     private int $supplierId;
     private int $userId;
@@ -38,6 +44,9 @@ final class GoPayServiceTest extends TestCase
         $this->db = $container->get(Connection::class);
         $this->service = $container->get(GoPayService::class);
         $this->posting = $container->get(PostingService::class);
+        $this->journal = $container->get(JournalEntryRepository::class);
+        $this->links = $container->get(JournalLinkService::class);
+        $this->reconciler = $container->get(EmailNoticeReconciler::class);
         $this->periods = $container->get(AccountingPeriodRepository::class);
         $pdo = $this->db->pdo();
         $this->supplierId = (int) ($pdo->query("SELECT id FROM supplier WHERE accounting_mode='double_entry' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
@@ -78,7 +87,7 @@ final class GoPayServiceTest extends TestCase
     {
         $ids = $this->configureAccounts();
         [$invoiceId, $creditNoteId] = $this->documents();
-        $this->postDocuments($invoiceId, $creditNoteId);
+        [$invoiceEntryId] = $this->postDocuments($invoiceId, $creditNoteId);
         $this->payment($invoiceId);
         $bankTransactionId = $this->bankPayout();
 
@@ -105,10 +114,73 @@ final class GoPayServiceTest extends TestCase
         $this->assertPair((int) $movements[3]['journal_entry_id'], '568', $ids['gopay'], 20.00);
         $this->assertPair((int) $movements[4]['journal_entry_id'], '261', $ids['gopay'], 875.00);
 
+        $invoiceEntry = $this->journal->find($invoiceEntryId, $this->supplierId);
+        self::assertIsArray($invoiceEntry);
+        $fromInvoice = $this->links->related($this->supplierId, $invoiceEntry);
+        self::assertCount(1, $fromInvoice['items']);
+        self::assertSame('gopay', $fromInvoice['items'][0]['source_type']);
+        self::assertSame('payment', $fromInvoice['items'][0]['relation']);
+        self::assertSame((int) $movements[0]['journal_entry_id'], $fromInvoice['items'][0]['entry_id']);
+
+        $gopayEntry = $this->journal->find((int) $movements[0]['journal_entry_id'], $this->supplierId);
+        self::assertIsArray($gopayEntry);
+        $fromGoPay = $this->links->related($this->supplierId, $gopayEntry);
+        self::assertCount(1, $fromGoPay['items']);
+        self::assertSame('invoice', $fromGoPay['items'][0]['source_type']);
+        self::assertSame('document', $fromGoPay['items'][0]['relation']);
+        self::assertSame($invoiceEntryId, $fromGoPay['items'][0]['entry_id']);
+
+        $relatedMap = $this->links->hasRelatedMap($this->supplierId, [$invoiceEntry, $gopayEntry]);
+        self::assertArrayHasKey($invoiceEntryId, $relatedMap);
+        self::assertArrayHasKey((int) $movements[0]['journal_entry_id'], $relatedMap);
+
         $duplicate = $this->service->import($this->supplierId, $this->userId, 'synthetic.xml', $this->xml());
         self::assertTrue($duplicate['duplicate']);
         $entryCount->execute([$this->supplierId]);
         self::assertSame(5, (int) $entryCount->fetchColumn());
+    }
+
+    public function testEmailNoticeAssociationIsTransferredAndPostedByOfficialStatement(): void
+    {
+        $this->configureAccounts();
+        [$invoiceId, $creditNoteId] = $this->documents();
+        $this->postDocuments($invoiceId, $creditNoteId);
+        $this->payment($invoiceId);
+        $noticeTransactionId = $this->bankPayout('email_notice');
+
+        $import = $this->service->import($this->supplierId, $this->userId, 'synthetic-notice.xml', $this->xml());
+        $clearingId = (int) $import['clearing']['id'];
+        self::assertSame('needs_review', $import['clearing']['status']);
+        self::assertNull($import['clearing']['bank_journal_entry_id']);
+
+        $candidate = $this->service->payoutCandidateForTransaction($this->supplierId, $noticeTransactionId);
+        self::assertNotNull($candidate);
+        self::assertSame($clearingId, $candidate['id']);
+
+        $associated = $this->service->associatePayoutTransaction(
+            $this->supplierId,
+            $clearingId,
+            $noticeTransactionId,
+            $this->userId,
+        );
+        self::assertSame($noticeTransactionId, $associated['payout_match_transaction_id']);
+        self::assertSame('email_notice_provisional', $associated['payout_issue_code']);
+        self::assertNull($associated['bank_journal_entry_id']);
+
+        $officialTransactionId = $this->bankPayout('statement');
+        $takeover = $this->reconciler->takeOverFromEmailNotice($officialTransactionId);
+        self::assertNotNull($takeover);
+
+        $completed = $this->service->detail($this->supplierId, $clearingId);
+        self::assertSame('processed', $completed['status']);
+        self::assertSame($officialTransactionId, $completed['payout_match_transaction_id']);
+        self::assertSame($officialTransactionId, $completed['bank_transaction_id']);
+        self::assertNotNull($completed['bank_journal_entry_id']);
+        self::assertNull($completed['payout_issue_code']);
+
+        $notice = $this->db->pdo()->prepare('SELECT match_status FROM bank_transactions WHERE id=?');
+        $notice->execute([$noticeTransactionId]);
+        self::assertSame('unmatched', $notice->fetchColumn());
     }
 
     /** @return array{gopay:string,bank:string} */
@@ -156,27 +228,29 @@ final class GoPayServiceTest extends TestCase
             'INSERT INTO invoices
                 (supplier_id,varsymbol,invoice_type,parent_invoice_id,client_id,issue_date,tax_date,due_date,
                  currency_id,reverse_charge,total_without_vat,total_vat,total_with_vat,paid_total,status,
-                 note_below_items,vat_classification_code,created_by)
-             VALUES (?,?,?,?,?,?,?,?,?,0,?,0,?,0,?,?,"1",?)'
+                 supplier_order_number,note_below_items,vat_classification_code,created_by)
+             VALUES (?,?,?,?,?,?,?,?,?,0,?,0,?,0,?,?,?,"1",?)'
         );
         $insert->execute([$this->supplierId, '20980001', 'invoice', null, $clientId, self::YEAR . '-01-10', self::YEAR . '-01-10', self::YEAR . '-01-20',
-            $this->currencyId, 1000, 1000, 'paid', "Objednávka: TEST000001", $this->userId]);
+            $this->currencyId, 1000, 1000, 'paid', 'TEST000001', null, $this->userId]);
         $invoiceId = (int) $pdo->lastInsertId();
         $insert->execute([$this->supplierId, '20980002', 'credit_note', $invoiceId, $clientId, self::YEAR . '-01-20', self::YEAR . '-01-20', self::YEAR . '-01-20',
-            $this->currencyId, -100, -100, 'sent', "Objednávka: TEST000001", $this->userId]);
+            $this->currencyId, -100, -100, 'sent', 'TEST000001', null, $this->userId]);
         return [$invoiceId, (int) $pdo->lastInsertId()];
     }
 
-    private function postDocuments(int $invoiceId, int $creditNoteId): void
+    /** @return array{int,int} */
+    private function postDocuments(int $invoiceId, int $creditNoteId): array
     {
-        $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
+        $invoiceEntryId = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
             ['account_code' => '311', 'side' => 'debit', 'amount' => 1000],
             ['account_code' => '602', 'side' => 'credit', 'amount' => 1000],
         ], ['entry_date' => self::YEAR . '-01-10', 'document_no' => 'FV-TEST', 'description' => 'Test faktura', 'posted_by' => $this->userId]);
-        $this->posting->postDocument($this->supplierId, 'invoice', $creditNoteId, [
+        $creditNoteEntryId = $this->posting->postDocument($this->supplierId, 'invoice', $creditNoteId, [
             ['account_code' => '602', 'side' => 'debit', 'amount' => 100],
             ['account_code' => '311', 'side' => 'credit', 'amount' => 100],
         ], ['entry_date' => self::YEAR . '-01-20', 'document_no' => 'DB-TEST', 'description' => 'Test dobropis', 'posted_by' => $this->userId]);
+        return [$invoiceEntryId, $creditNoteEntryId];
     }
 
     private function payment(int $invoiceId): void
@@ -187,20 +261,27 @@ final class GoPayServiceTest extends TestCase
         )->execute([$this->supplierId, $invoiceId, self::YEAR . '-01-15', 1000, $this->userId]);
     }
 
-    private function bankPayout(): int
+    private function bankPayout(string $source = 'statement'): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
-            'INSERT INTO bank_statements (supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by)
-             VALUES (?,"synthetic.gpc",?,"1000000005","0100","CZK",?,?)'
-        )->execute([$this->supplierId, hash('sha256', uniqid('gopay', true)), self::YEAR . '-02-01', $this->userId]);
+            'INSERT INTO bank_statements (supplier_id,source,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by)
+             VALUES (?,?,?, ?,"1000000005","0100","CZK",?,?)'
+        )->execute([
+            $this->supplierId,
+            $source === 'email_notice' ? 'email_notice' : 'gpc',
+            'synthetic-' . $source . '-' . uniqid('', true) . '.gpc',
+            hash('sha256', uniqid('gopay', true)),
+            self::YEAR . '-02-01',
+            $this->userId,
+        ]);
         $statementId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO bank_transactions
                 (statement_id,source,posted_at,amount,currency,variable_symbol,counterparty_account,
                  counterparty_bank,counterparty_name,description,match_status)
-             VALUES (?,"statement",?,875,"CZK","20980001","1000000005","0100","GoPay","Clearing","unmatched")'
-        )->execute([$statementId, self::YEAR . '-02-01']);
+             VALUES (?,?,?,875,"CZK","20980001","1000000005","0100","GoPay","Clearing","unmatched")'
+        )->execute([$statementId, $source, self::YEAR . '-02-01']);
         return (int) $pdo->lastInsertId();
     }
 

@@ -1965,6 +1965,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.issue_date') }}</dt><dd>{{ formatDate(invoice.issue_date) }}</dd></div>
           <div v-if="invoice.tax_date && !isProforma" class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.tax_date') }}</dt><dd>{{ formatDate(invoice.tax_date) }}</dd></div>
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.due_date') }}</dt><dd>{{ formatDate(invoice.due_date) }}</dd></div>
+          <div v-if="invoice.supplier_order_number" class="flex justify-between gap-3">
+            <dt class="text-neutral-500">{{ t('invoice.supplier_order_number') }}</dt>
+            <dd class="font-mono text-right">{{ invoice.supplier_order_number }}</dd>
+          </div>
           <div v-if="invoice.paid_at" class="flex justify-between"><dt class="text-neutral-500">{{ t('status.paid') }}</dt><dd>{{ formatDate(invoice.paid_at) }}</dd></div>
         </dl>
       </div>

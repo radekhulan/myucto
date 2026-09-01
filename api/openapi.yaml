@@ -11381,6 +11381,53 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/accounting/gopay/payout-candidates/{transactionId}:
+    get:
+      tags: [Accounting]
+      summary: Dohledá GoPay vyúčtování odpovídající bankovnímu pohybu nebo avízu
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: transactionId, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Jednoznačný kandidát nebo null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [candidate]
+                properties:
+                  candidate:
+                    oneOf:
+                      - $ref: '#/components/schemas/GoPayPayoutCandidate'
+                      - type: 'null'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/gopay/clearings/{id}/payout-match:
+    post:
+      tags: [Accounting]
+      summary: Spáruje GoPay vyúčtování s avízem nebo skutečným bankovním pohybem
+      description: Avízo se nezaúčtuje. Jeho vazbu při importu převezme skutečný výpis a ten vytvoří bankovní zápis.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transaction_id]
+              properties:
+                transaction_id: { type: integer, format: int64 }
+      responses:
+        '200': { description: Aktualizované vyúčtování, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayClearingDetail' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/ValidationFailed' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/cash-registers:
     get:
       tags: [Accounting]
@@ -18064,6 +18111,7 @@ components:
         movement_count: { type: integer }
         posted_count: { type: integer }
         issue_count: { type: integer }
+        payout_match_transaction_id: { type: [integer, "null"], format: int64 }
         bank_transaction_id: { type: [integer, "null"], format: int64 }
         imported_at: { type: string, format: date-time }
         processed_at: { type: [string, "null"], format: date-time }
@@ -18111,6 +18159,14 @@ components:
       properties:
         duplicate: { type: boolean }
         clearing: { $ref: '#/components/schemas/GoPayClearingDetail' }
+
+    GoPayPayoutCandidate:
+      allOf:
+        - $ref: '#/components/schemas/GoPayClearing'
+        - type: object
+          required: [transaction_source]
+          properties:
+            transaction_source: { type: string, enum: [email_notice, statement] }
 
     ChartAccount:
       type: object
@@ -19223,6 +19279,7 @@ components:
         czk_recap:
           description: "CZK rekapitulace u cizoměnových faktur (null pokud měna == CZK nebo není zafixován kurz)"
           type: [object, "null"]
+        supplier_order_number: { type: [string, "null"], maxLength: 80, description: "Číslo objednávky dodavatele; samostatná reference dokladu nezávislá na zakázce." }
         note_above_items: { type: [string, "null"] }
         note_below_items: { type: [string, "null"] }
         bank_account_number: { type: [string, "null"], description: "Z currencies (per-měna bank účet supplier-a)" }
@@ -19425,6 +19482,7 @@ components:
             Přednost má vždy konkrétní klíč: když je v těle i `note_below_items`
             (třeba `null` jako vyprázdnění), `note` se ignoruje.
             Jen vstupní alias — odpověď ho nevrací, čti `note_above_items` / `note_below_items`.
+        supplier_order_number: { type: [string, "null"], maxLength: 80, description: "Číslo objednávky dodavatele; používá se také pro automatické párování plateb." }
         note_above_items: { type: [string, "null"] }
         note_below_items: { type: [string, "null"] }
         items:

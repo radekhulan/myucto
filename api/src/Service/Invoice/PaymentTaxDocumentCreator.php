@@ -237,9 +237,9 @@ final class PaymentTaxDocumentCreator
                    (invoice_type, parent_invoice_id, client_id, project_id, supplier_id, branding_profile_id,
                     issue_date, tax_date, due_date, currency_id, exchange_rate, exchange_rate_date,
                     reverse_charge, prices_include_vat, language,
-                    note_above_items, note_below_items, advance_paid_amount, discount_percent, payment_method,
+                     supplier_order_number, note_above_items, note_below_items, advance_paid_amount, discount_percent, payment_method,
                     revenue_category_id, status, created_by)
-                 VALUES ("tax_document", ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, 0, 1, ?, ?, NULL, ?, 0, ?, ?, "draft", ?)'
+                 VALUES ("tax_document", ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, NULL, ?, 0, ?, ?, "draft", ?)'
             );
             $stmt->execute([
                 (int) $proforma['id'],
@@ -256,6 +256,7 @@ final class PaymentTaxDocumentCreator
                 $proforma['exchange_rate'] ?? null,
                 $proforma['exchange_rate_date'] ?? null,
                 $proforma['language'],
+                $proforma['supplier_order_number'] ?? null,
                 $noteAbove,
                 // Přijatá platba kryje doklad celý → amount_to_pay = 0 (auto-paid při vystavení).
                 (float) $payment['amount'],

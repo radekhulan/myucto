@@ -181,11 +181,11 @@ final class BulkReissueAction
                 'INSERT INTO invoices
                    (invoice_type, client_id, project_id, supplier_id, branding_profile_id,
                     issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
-                    note_above_items, note_below_items, discount_percent, payment_method,
+                     supplier_order_number, note_above_items, note_below_items, discount_percent, payment_method,
                     revenue_category_id,'
                 . ($hasReminders ? ' auto_send_reminders,' : '')
                 . ' status, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,'
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,'
                 . ($hasReminders ? ' ?,' : '')
                 . ' "draft", ?)'
             );
@@ -204,6 +204,7 @@ final class BulkReissueAction
                 // zkopírované brutto jednotkové ceny přepočítaly jako netto (nafouknuté totály).
                 !empty($source['prices_include_vat']) ? 1 : 0,
                 $source['language'],
+                $source['supplier_order_number'] ?? null,
                 $source['note_above_items'],
                 $source['note_below_items'],
                 (float) ($source['discount_percent'] ?? 0),

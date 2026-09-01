@@ -277,9 +277,11 @@ final class PohodaXmlExporter
                 $this->el($dom, $hdr, self::NS_INV, 'inv:text', mb_substr('Faktura ' . ($invoice['varsymbol'] ?? ''), 0, 240));
             }
 
-            // Per-faktura číslo zakázky (z projektu) — přepíše se po reimportu zpět na project_number
-            if (!empty($invoice['project_number'])) {
-                $this->el($dom, $hdr, self::NS_INV, 'inv:numberOrder', mb_substr((string) $invoice['project_number'], 0, self::DOCUMENT_NUMBER_LIMIT));
+            // Samostatné číslo objednávky dokladu; číslo zakázky zůstává fallbackem
+            // pro starší data, která vlastní pole ještě neměla.
+            $orderNumber = trim((string) ($invoice['supplier_order_number'] ?? $invoice['project_number'] ?? ''));
+            if ($orderNumber !== '') {
+                $this->el($dom, $hdr, self::NS_INV, 'inv:numberOrder', mb_substr($orderNumber, 0, self::DOCUMENT_NUMBER_LIMIT));
             }
 
             // Účet / středisko / činnost / zakázka (per-supplier)

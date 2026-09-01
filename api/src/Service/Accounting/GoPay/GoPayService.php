@@ -150,7 +150,7 @@ final class GoPayService
             'SELECT id,clearing_id,account_name,currency,variable_symbol,cleared_from,cleared_to,
                     performed_on,amount_gross,amount_fee,amount_storno,amount_storno_fee,
                     amount_transfer,amount_sent,file_name,status,movement_count,posted_count,
-                    issue_count,bank_transaction_id,imported_at,processed_at
+                    issue_count,payout_match_transaction_id,bank_transaction_id,imported_at,processed_at
                FROM gopay_clearings WHERE supplier_id=? ORDER BY performed_on DESC,id DESC'
         );
         $stmt->execute([$supplierId]);
@@ -300,6 +300,107 @@ final class GoPayService
         return $this->detail($supplierId, $clearingId);
     }
 
+    /** @return array<string,mixed>|null */
+    public function payoutCandidateForTransaction(int $supplierId, int $transactionId): ?array
+    {
+        $transaction = $this->payoutTransaction($supplierId, $transactionId);
+        $candidates = $this->payoutCandidates($supplierId, $transaction);
+        if (count($candidates) > 1) {
+            throw new GoPayException('payout_ambiguous', 'Bankovnímu pohybu odpovídá více GoPay vyúčtování.', 409);
+        }
+        if ($candidates === []) {
+            return null;
+        }
+
+        $candidate = $this->normalizeClearing($candidates[0]);
+        $candidate['transaction_source'] = (string) $transaction['source'];
+        return $candidate;
+    }
+
+    /** @return array<string,mixed> */
+    public function associatePayoutTransaction(
+        int $supplierId,
+        int $clearingId,
+        int $transactionId,
+        ?int $userId,
+    ): array {
+        $this->assertDoubleEntry($supplierId);
+        $transaction = $this->payoutTransaction($supplierId, $transactionId);
+        $candidates = $this->payoutCandidates($supplierId, $transaction);
+        $candidateIds = array_map(static fn (array $row): int => (int) $row['id'], $candidates);
+        if (!in_array($clearingId, $candidateIds, true)) {
+            throw new GoPayException('payout_candidate_mismatch', 'Bankovní pohyb neodpovídá zvolenému GoPay vyúčtování.', 409);
+        }
+        if (count($candidateIds) !== 1) {
+            throw new GoPayException('payout_ambiguous', 'Bankovnímu pohybu odpovídá více GoPay vyúčtování.', 409);
+        }
+
+        $pdo = $this->db->pdo();
+        $ownTx = $this->beginUnit($pdo, 'gopay_payout_associate');
+        try {
+            $locked = $pdo->prepare('SELECT payout_match_transaction_id,bank_transaction_id FROM gopay_clearings WHERE id=? AND supplier_id=? FOR UPDATE');
+            $locked->execute([$clearingId, $supplierId]);
+            $clearing = $locked->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($clearing)) {
+                throw new GoPayException('not_found', 'GoPay vyúčtování nebylo nalezeno.', 404);
+            }
+            if ($clearing['bank_transaction_id'] !== null && (int) $clearing['bank_transaction_id'] !== $transactionId) {
+                throw new GoPayException('payout_already_posted', 'GoPay vyúčtování už je zaúčtované proti jinému bankovnímu pohybu.', 409);
+            }
+            if ((string) $transaction['source'] === 'email_notice'
+                && $clearing['payout_match_transaction_id'] !== null
+                && (int) $clearing['payout_match_transaction_id'] !== $transactionId) {
+                throw new GoPayException('payout_already_matched', 'GoPay vyúčtování už je spárované s jiným avízem.', 409);
+            }
+
+            $pdo->prepare('UPDATE gopay_clearings SET payout_match_transaction_id=? WHERE id=? AND supplier_id=?')
+                ->execute([$transactionId, $clearingId, $supplierId]);
+
+            if ((string) $transaction['source'] === 'email_notice') {
+                $pdo->prepare(
+                    'UPDATE bank_transactions
+                        SET match_status="manual",matched_at=NOW(),matched_by=?
+                      WHERE id=?'
+                )->execute([$userId, $transactionId]);
+                $pdo->prepare(
+                    'UPDATE gopay_clearings
+                        SET payout_issue_code="email_notice_provisional",
+                            payout_issue_message="Avízo je spárované. Zaúčtování převodu počká na bankovní výpis."
+                      WHERE id=? AND supplier_id=?'
+                )->execute([$clearingId, $supplierId]);
+            } else {
+                $this->matchPayout($supplierId, $clearingId, $userId);
+            }
+            $this->refreshClearingStatus($supplierId, $clearingId);
+            $this->commitUnit($pdo, $ownTx, 'gopay_payout_associate');
+        } catch (\Throwable $e) {
+            $this->rollbackUnit($pdo, $ownTx, 'gopay_payout_associate');
+            throw $e;
+        }
+
+        return $this->detail($supplierId, $clearingId);
+    }
+
+    public function completeTransferredPayout(int $supplierId, int $transactionId, ?int $userId = null): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM gopay_clearings
+              WHERE supplier_id=? AND payout_match_transaction_id=? LIMIT 2'
+        );
+        $stmt->execute([$supplierId, $transactionId]);
+        $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        if (count($ids) !== 1) {
+            return false;
+        }
+
+        $clearingId = (int) $ids[0];
+        $this->matchPayout($supplierId, $clearingId, $userId);
+        $this->refreshClearingStatus($supplierId, $clearingId);
+        $row = $this->clearingRow($supplierId, $clearingId);
+        return (int) ($row['bank_transaction_id'] ?? 0) === $transactionId
+            && $row['bank_journal_entry_id'] !== null;
+    }
+
     private function processMovement(int $supplierId, int $movementId, ?int $userId): void
     {
         $pdo = $this->db->pdo();
@@ -408,7 +509,8 @@ final class GoPayService
         $currency = (string) $movement['currency'];
         if ($paymentSessionId !== '') {
             $stmt = $this->db->pdo()->prepare(
-                'SELECT p.id payment_id,p.invoice_id,p.amount,p.currency,i.varsymbol,i.note_below_items
+                'SELECT p.id payment_id,p.invoice_id,p.amount,p.currency,i.varsymbol,
+                        i.supplier_order_number,i.note_below_items
                    FROM invoice_payments p JOIN invoices i ON i.id=p.invoice_id AND i.supplier_id=p.supplier_id
                   WHERE p.supplier_id=? AND p.bank_reference=?
                     AND i.invoice_type IN ("invoice","proforma")'
@@ -432,14 +534,17 @@ final class GoPayService
             throw new GoPayException('invoice_reference_missing', 'Platba nemá GoPay ID ani číslo objednávky.');
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT p.id payment_id,p.invoice_id,p.amount,p.currency,i.varsymbol,i.note_below_items
+            'SELECT p.id payment_id,p.invoice_id,p.amount,p.currency,i.varsymbol,
+                    i.supplier_order_number,i.note_below_items
                FROM invoice_payments p JOIN invoices i ON i.id=p.invoice_id AND i.supplier_id=p.supplier_id
               WHERE p.supplier_id=? AND p.amount=? AND p.currency=?
-                AND i.invoice_type IN ("invoice","proforma") AND i.note_below_items LIKE ?'
+                AND i.invoice_type IN ("invoice","proforma")
+                AND (i.supplier_order_number=?
+                     OR (i.supplier_order_number IS NULL AND i.note_below_items LIKE ?))'
         );
-        $stmt->execute([$supplierId, $amount, $currency, '%' . $orderId . '%']);
+        $stmt->execute([$supplierId, $amount, $currency, $orderId, '%' . $orderId . '%']);
         $rows = array_values(array_filter($stmt->fetchAll(PDO::FETCH_ASSOC),
-            fn (array $row): bool => $this->noteHasOrder((string) ($row['note_below_items'] ?? ''), $orderId)));
+            fn (array $row): bool => $this->documentHasOrder($row, $orderId)));
         if (count($rows) !== 1) {
             throw new GoPayException(count($rows) === 0 ? 'invoice_not_found' : 'invoice_ambiguous',
                 count($rows) === 0 ? 'K GoPay platbě nebyla nalezena faktura a její úhrada.' : 'K GoPay platbě bylo nalezeno více faktur.');
@@ -457,14 +562,16 @@ final class GoPayService
         }
         $amount = number_format(abs((float) $movement['amount']), 2, '.', '');
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.id,i.varsymbol,i.note_below_items,i.parent_invoice_id
+            'SELECT i.id,i.varsymbol,i.supplier_order_number,i.note_below_items,i.parent_invoice_id
                FROM invoices i JOIN currencies c ON c.id=i.currency_id
               WHERE i.supplier_id=? AND i.invoice_type="credit_note" AND ABS(i.amount_to_pay)=?
-                AND c.code=? AND i.note_below_items LIKE ?'
+                AND c.code=?
+                AND (i.supplier_order_number=?
+                     OR (i.supplier_order_number IS NULL AND i.note_below_items LIKE ?))'
         );
-        $stmt->execute([$supplierId, $amount, (string) $movement['currency'], '%' . $orderId . '%']);
+        $stmt->execute([$supplierId, $amount, (string) $movement['currency'], $orderId, '%' . $orderId . '%']);
         $rows = array_values(array_filter($stmt->fetchAll(PDO::FETCH_ASSOC),
-            fn (array $row): bool => $this->noteHasOrder((string) ($row['note_below_items'] ?? ''), $orderId)));
+            fn (array $row): bool => $this->documentHasOrder($row, $orderId)));
         if (count($rows) !== 1) {
             throw new GoPayException(count($rows) === 0 ? 'credit_note_not_found' : 'credit_note_ambiguous',
                 count($rows) === 0 ? 'K GoPay vratce nebyl nalezen dobropis.' : 'K GoPay vratce bylo nalezeno více dobropisů.');
@@ -517,7 +624,8 @@ final class GoPayService
                 'SELECT bt.id,bt.amount,bt.currency,bt.posted_at,bt.variable_symbol,
                         bt.counterparty_account,bt.counterparty_bank
                    FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id
-                  WHERE bs.supplier_id=? AND bt.amount=? AND COALESCE(bt.currency,bs.currency)=?
+                  WHERE bs.supplier_id=? AND bt.source="statement" AND bs.source IN ("gpc","pdf")
+                    AND bt.amount=? AND COALESCE(bt.currency,bs.currency)=?
                     AND bt.variable_symbol=?
                     AND bt.posted_at BETWEEN DATE_SUB(?,INTERVAL ? DAY) AND DATE_ADD(?,INTERVAL ? DAY)'
             );
@@ -529,11 +637,32 @@ final class GoPayService
                 return $this->accountKey((string) ($row['counterparty_account'] ?? '')) === $this->accountKey((string) $clearing['payout_account_number'])
                     && trim((string) ($row['counterparty_bank'] ?? '')) === (string) $clearing['payout_bank_code'];
             }));
+            $matchedTransactionId = $clearing['payout_match_transaction_id'] !== null
+                ? (int) $clearing['payout_match_transaction_id'] : null;
+            if ($matchedTransactionId !== null) {
+                $matchedSource = $pdo->prepare('SELECT source FROM bank_transactions WHERE id=?');
+                $matchedSource->execute([$matchedTransactionId]);
+                if ($matchedSource->fetchColumn() === 'statement') {
+                    $rows = array_values(array_filter(
+                        $rows,
+                        static fn (array $row): bool => (int) $row['id'] === $matchedTransactionId,
+                    ));
+                }
+            }
             if (count($rows) !== 1) {
-                $code = count($rows) === 0 ? 'payout_not_found' : 'payout_ambiguous';
-                $message = count($rows) === 0
-                    ? 'Příchozí bankovní převod odpovídající clearingu zatím nebyl nalezen.'
-                    : 'Clearingu odpovídá více bankovních převodů.';
+                $matchedNotice = false;
+                if ($matchedTransactionId !== null) {
+                    $notice = $pdo->prepare('SELECT 1 FROM bank_transactions WHERE id=? AND source="email_notice"');
+                    $notice->execute([$matchedTransactionId]);
+                    $matchedNotice = $notice->fetchColumn() !== false;
+                }
+                $code = $matchedNotice ? 'email_notice_provisional'
+                    : (count($rows) === 0 ? 'payout_not_found' : 'payout_ambiguous');
+                $message = $matchedNotice
+                    ? 'Avízo je spárované. Zaúčtování převodu počká na bankovní výpis.'
+                    : (count($rows) === 0
+                        ? 'Příchozí bankovní převod odpovídající clearingu zatím nebyl nalezen.'
+                        : 'Clearingu odpovídá více bankovních převodů.');
                 $pdo->prepare('UPDATE gopay_clearings SET bank_transaction_id=NULL,bank_journal_entry_id=NULL,payout_issue_code=?,payout_issue_message=? WHERE id=? AND supplier_id=?')
                     ->execute([$code, $message, $clearingId, $supplierId]);
                 $this->commitUnit($pdo, $ownTx, 'gopay_payout');
@@ -557,9 +686,16 @@ final class GoPayService
             }
             $pdo->prepare(
                 'UPDATE gopay_clearings
-                    SET bank_transaction_id=?,bank_journal_entry_id=?,payout_issue_code=NULL,payout_issue_message=NULL
+                    SET payout_match_transaction_id=?,bank_transaction_id=?,bank_journal_entry_id=?,
+                        payout_issue_code=NULL,payout_issue_message=NULL
                   WHERE id=? AND supplier_id=?'
-            )->execute([$txId, $entryId, $clearingId, $supplierId]);
+            )->execute([$txId, $txId, $entryId, $clearingId, $supplierId]);
+            $pdo->prepare(
+                'UPDATE bank_transactions
+                    SET match_status=IF(match_status="unmatched","manual",match_status),
+                        matched_at=COALESCE(matched_at,NOW()),matched_by=COALESCE(matched_by,?)
+                  WHERE id=?'
+            )->execute([$userId, $txId]);
             $this->commitUnit($pdo, $ownTx, 'gopay_payout');
         } catch (\Throwable $e) {
             $this->rollbackUnit($pdo, $ownTx, 'gopay_payout');
@@ -592,6 +728,81 @@ final class GoPayService
             (int) ($counts['movement_count'] ?? 0), (int) ($counts['posted_count'] ?? 0),
             $issues, $clearingId, $supplierId,
         ]);
+    }
+
+    /** @return array<string,mixed> */
+    private function payoutTransaction(int $supplierId, int $transactionId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT bt.*,bs.source statement_source,bs.currency statement_currency
+               FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id=bt.statement_id
+              WHERE bt.id=? AND bs.supplier_id=?'
+        );
+        $stmt->execute([$transactionId, $supplierId]);
+        $transaction = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($transaction)) {
+            throw new GoPayException('bank_transaction_not_found', 'Bankovní pohyb nebyl nalezen.', 404);
+        }
+        $source = (string) ($transaction['source'] ?? '');
+        $statementSource = (string) ($transaction['statement_source'] ?? '');
+        $valid = ($source === 'email_notice' && $statementSource === 'email_notice')
+            || ($source === 'statement' && in_array($statementSource, ['gpc', 'pdf'], true));
+        if (!$valid) {
+            throw new GoPayException('unsupported_bank_source', 'Pohyb není avízo ani položka bankovního výpisu.', 409);
+        }
+        return $transaction;
+    }
+
+    /** @param array<string,mixed> $transaction @return list<array<string,mixed>> */
+    private function payoutCandidates(int $supplierId, array $transaction): array
+    {
+        if ((float) $transaction['amount'] <= 0.0) {
+            return [];
+        }
+        $currency = strtoupper((string) ($transaction['currency'] ?: $transaction['statement_currency'] ?: ''));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT gc.*,gs.payout_account_number,gs.payout_bank_code,gs.payout_date_tolerance_days
+               FROM gopay_clearings gc
+               JOIN gopay_settings gs ON gs.supplier_id=gc.supplier_id AND gs.currency=gc.currency
+              WHERE gc.supplier_id=? AND gc.amount_sent>0
+                AND ABS(gc.amount_sent-?)<=0.005 AND gc.currency=?
+                AND gc.performed_on BETWEEN DATE_SUB(?,INTERVAL 14 DAY) AND DATE_ADD(?,INTERVAL 14 DAY)
+                AND (gc.bank_transaction_id IS NULL OR gc.bank_transaction_id=?)
+              ORDER BY gc.id'
+        );
+        $stmt->execute([
+            $supplierId,
+            number_format((float) $transaction['amount'], 2, '.', ''),
+            $currency,
+            $transaction['posted_at'],
+            $transaction['posted_at'],
+            (int) $transaction['id'],
+        ]);
+
+        $transactionSymbol = $this->symbolKey((string) ($transaction['variable_symbol'] ?? ''));
+        $transactionAccount = $this->accountKey((string) ($transaction['counterparty_account'] ?? ''));
+        $transactionBank = trim((string) ($transaction['counterparty_bank'] ?? ''));
+        $transactionDate = new \DateTimeImmutable((string) $transaction['posted_at']);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ($transactionSymbol === '' || $transactionSymbol !== $this->symbolKey((string) $row['variable_symbol'])) {
+                continue;
+            }
+            if ($transactionAccount === '' || $transactionAccount !== $this->accountKey((string) $row['payout_account_number'])) {
+                continue;
+            }
+            if ($transactionBank === '' || $transactionBank !== trim((string) $row['payout_bank_code'])) {
+                continue;
+            }
+            $performedOn = new \DateTimeImmutable((string) $row['performed_on']);
+            $days = abs((int) $performedOn->diff($transactionDate)->format('%r%a'));
+            if ($days > (int) $row['payout_date_tolerance_days']) {
+                continue;
+            }
+            $out[] = $row;
+        }
+        return $out;
     }
 
     /** @return array<string,mixed> */
@@ -683,7 +894,7 @@ final class GoPayService
     /** @return array<string,mixed> */
     private function normalizeClearing(array $row): array
     {
-        foreach (['id', 'movement_count', 'posted_count', 'issue_count', 'bank_transaction_id', 'bank_journal_entry_id', 'imported_by'] as $field) {
+        foreach (['id', 'movement_count', 'posted_count', 'issue_count', 'payout_match_transaction_id', 'bank_transaction_id', 'bank_journal_entry_id', 'imported_by'] as $field) {
             if (array_key_exists($field, $row)) {
                 $row[$field] = $row[$field] !== null ? (int) $row[$field] : null;
             }
@@ -721,9 +932,24 @@ final class GoPayService
         return preg_match('/(?:^|\R)\s*Objednávka:\s*' . preg_quote($orderId, '/') . '\s*(?:\R|$)/iu', $note) === 1;
     }
 
+    /** @param array<string,mixed> $document */
+    private function documentHasOrder(array $document, string $orderId): bool
+    {
+        $stored = trim((string) ($document['supplier_order_number'] ?? ''));
+        if ($stored !== '') {
+            return mb_strtoupper($stored) === mb_strtoupper(trim($orderId));
+        }
+        return $this->noteHasOrder((string) ($document['note_below_items'] ?? ''), $orderId);
+    }
+
     private function accountKey(string $account): string
     {
         return ltrim((string) preg_replace('/[^0-9]/', '', $account), '0');
+    }
+
+    private function symbolKey(string $symbol): string
+    {
+        return ltrim((string) preg_replace('/[^0-9]/', '', $symbol), '0');
     }
 
     private function entryHasPair(int $supplierId, int $entryId, string $debitCode, string $creditCode, float $amount): bool

@@ -72,6 +72,49 @@ final class GoPayAction
         }
     }
 
+    public function payoutCandidate(Request $request, Response $response, array $args): Response
+    {
+        try {
+            return Json::ok($response, [
+                'candidate' => $this->service->payoutCandidateForTransaction(
+                    $this->currentSupplierId($request),
+                    (int) ($args['transactionId'] ?? 0),
+                ),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->error($response, $e);
+        }
+    }
+
+    public function associatePayout(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'bank.match', AccessLevel::WRITE, $err)
+            || !$this->requirePermission($request, $response, 'bank.post', AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $transactionId = (int) ($body['transaction_id'] ?? 0);
+        if ($transactionId <= 0) {
+            return Json::error($response, 'gopay.invalid_transaction', 'Chybí bankovní pohyb.', 422);
+        }
+        try {
+            $result = $this->service->associatePayoutTransaction(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                $transactionId,
+                $this->userId($request),
+            );
+            $this->log($request, 'gopay.payout_matched', (int) ($result['id'] ?? 0), [
+                'clearing_id' => $result['clearing_id'] ?? null,
+                'bank_transaction_id' => $transactionId,
+                'provisional' => ($result['payout_issue_code'] ?? null) === 'email_notice_provisional',
+            ]);
+            return Json::ok($response, $result);
+        } catch (\Throwable $e) {
+            return $this->error($response, $e);
+        }
+    }
+
     public function import(Request $request, Response $response): Response
     {
         if (!$this->requirePermission($request, $response, 'bank.import', AccessLevel::WRITE, $err)

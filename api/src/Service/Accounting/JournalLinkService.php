@@ -24,6 +24,7 @@ use PDO;
  *   purchase_invoice ↔ bank   přes payment_matches (N:N, migrace 0034)
  *   invoice / purchase_invoice ↔ cash       přes cash_documents.invoice_id / .purchase_invoice_id
  *   invoice / purchase_invoice ↔ settlement přes invoice_settlements.doc_type + .doc_id
+ *   invoice          ↔ gopay  přes gopay_movements.invoice_id / credit_note_id
  *   JAKÝKOLI zápis          ↔ doklad přes journal_entry_document_links (RUČNÍ měkká
  *                             vazba, migrace 1514) — jediná hrana, kterou zakládá
  *                             uživatel, a jediná, kterou má i ruční zápis se
@@ -48,7 +49,7 @@ final class JournalLinkService
      * Typy zápisu, které v grafu vazeb vůbec mají hranu. Cokoli mimo (manual,
      * uzávěrkové typy, odpisy, majetek…) se do DB nedostane.
      */
-    private const LINKABLE = ['invoice', 'purchase_invoice', 'bank', 'cash', 'settlement'];
+    private const LINKABLE = ['invoice', 'purchase_invoice', 'bank', 'cash', 'settlement', 'gopay'];
 
     /** Reálné id dokladu nikdy nedosáhne 1e12, syntetická uzávěrková pásma ano. */
     private const SYNTHETIC_ID_FLOOR = ClosingSourceId::STOCK_SLOT_BASE;
@@ -60,6 +61,7 @@ final class JournalLinkService
         'bank'             => 'bank',
         'cash'             => 'cash',
         'settlement'       => 'accounting',
+        'gopay'            => 'bank',
         'journal_entry'    => 'accounting',
     ];
 
@@ -144,6 +146,7 @@ final class JournalLinkService
         $banks     = $ids($byRef, 'bank');
         $cash      = $ids($byRef, 'cash');
         $settles   = $ids($byRef, 'settlement');
+        $gopay     = $ids($byRef, 'gopay');
 
         $hits = [];
         /** Označí obě strany hrany — na kterékoli z nich může řádek deníku stát. */
@@ -213,7 +216,19 @@ final class JournalLinkService
             $mark((int) $r['doc_id'], (string) $r['doc_type']);
         }
 
-        // 6) Měkká vazba z druhé strany: doklad na stránce, na který ukazuje ruční
+        // 6) GoPay pohyb a faktura nebo dobropis, který tento pohyb hradí.
+        foreach ($this->pairsQuery(
+            'SELECT id, invoice_id, credit_note_id FROM gopay_movements
+              WHERE supplier_id = ? AND (invoice_id IS NOT NULL OR credit_note_id IS NOT NULL)',
+            [$supplierId],
+            [['id', $gopay], ['invoice_id', $invoices], ['credit_note_id', $invoices]]
+        ) as $r) {
+            $mark((int) $r['id'], 'gopay');
+            $mark($r['invoice_id'] !== null ? (int) $r['invoice_id'] : null, 'invoice');
+            $mark($r['credit_note_id'] !== null ? (int) $r['credit_note_id'] : null, 'invoice');
+        }
+
+        // 7) Měkká vazba z druhé strany: doklad na stránce, na který ukazuje ruční
         //    zápis. Bez tohohle by odznak u faktury chyběl, ačkoli panel doúčtování
         //    ukáže — a seznam by lhal (odznak a panel musí říkat totéž).
         foreach ($this->pairsQuery(
@@ -273,6 +288,7 @@ final class JournalLinkService
             'bank'                        => $this->documentsOfBankTransaction($supplierId, $sourceId),
             'cash'                        => $this->documentsOfCashDocument($supplierId, $sourceId),
             'settlement'                  => $this->documentsOfSettlement($supplierId, $sourceId),
+            'gopay'                       => $this->documentsOfGoPayMovement($supplierId, $sourceId),
             default                       => [],
         };
         foreach ($derived as $r) {
@@ -387,6 +403,13 @@ final class JournalLinkService
 
         if ($docType === 'invoice') {
             foreach ($this->rows(
+                'SELECT id, amount FROM gopay_movements
+                  WHERE supplier_id = ? AND (invoice_id = ? OR credit_note_id = ?) ORDER BY id',
+                [$supplierId, $docId, $docId]
+            ) as $r) {
+                $this->addRef($refs, 'gopay', (int) $r['id'], 'payment', abs((float) $r['amount']));
+            }
+            foreach ($this->rows(
                 'SELECT bank_transaction_id AS id, amount FROM invoice_payments
                   WHERE supplier_id = ? AND invoice_id = ? AND bank_transaction_id IS NOT NULL
                   ORDER BY id',
@@ -421,6 +444,29 @@ final class JournalLinkService
             $this->addRef($refs, 'settlement', (int) $r['id'], 'payment', (float) $r['amount']);
         }
 
+        return array_values($refs);
+    }
+
+    /**
+     * GoPay pohyb -> faktura nebo dobropis, který hradí.
+     *
+     * @return list<array{kind:string, id:int, relation:string, allocated:?float}>
+     */
+    private function documentsOfGoPayMovement(int $supplierId, int $movementId): array
+    {
+        $refs = [];
+        foreach ($this->rows(
+            'SELECT invoice_id,credit_note_id,amount FROM gopay_movements
+              WHERE id=? AND supplier_id=?',
+            [$movementId, $supplierId]
+        ) as $r) {
+            if ($r['invoice_id'] !== null) {
+                $this->addRef($refs, 'invoice', (int) $r['invoice_id'], 'document', abs((float) $r['amount']));
+            }
+            if ($r['credit_note_id'] !== null) {
+                $this->addRef($refs, 'invoice', (int) $r['credit_note_id'], 'document', abs((float) $r['amount']));
+            }
+        }
         return array_values($refs);
     }
 
@@ -715,6 +761,29 @@ final class JournalLinkService
                     'currency' => 'CZK',
                     // Zápočet nemá vlastní stránku — proklik vede jen na jeho zaúčtování.
                     'route'    => null,
+                ];
+            }
+            return $out;
+        }
+
+        if ($kind === 'gopay') {
+            foreach ($this->rows(
+                "SELECT m.id,m.performed_on,m.amount,m.order_id,m.payment_session_id,
+                        m.movement_type,c.id clearing_pk,c.clearing_id,c.currency
+                   FROM gopay_movements m
+                   JOIN gopay_clearings c ON c.id=m.clearing_id AND c.supplier_id=m.supplier_id
+                  WHERE m.supplier_id=? AND m.id IN ({$in})",
+                array_merge([$supplierId], $ids)
+            ) as $r) {
+                $id = (int) $r['id'];
+                $reference = (string) ($r['order_id'] ?: $r['payment_session_id'] ?: ('#' . $id));
+                $out[$id] = [
+                    'title' => 'GoPay ' . $reference,
+                    'subtitle' => 'Vyúčtování ' . (string) $r['clearing_id'],
+                    'date' => (string) $r['performed_on'],
+                    'amount' => (float) $r['amount'],
+                    'currency' => strtoupper((string) $r['currency']),
+                    'route' => ['name' => 'gopay', 'query' => ['clearing' => (int) $r['clearing_pk']]],
                 ];
             }
             return $out;

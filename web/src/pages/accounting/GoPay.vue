@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   gopayApi,
@@ -18,6 +18,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
 
 const loading = ref(true)
 const saving = ref(false)
@@ -76,6 +77,10 @@ async function load() {
     accountOptions.value = settings.account_options
     applySettings(settings.settings)
     clearings.value = items
+    const requestedClearing = Number(route.query.clearing ?? 0)
+    if (requestedClearing > 0 && items.some(item => item.id === requestedClearing)) {
+      selected.value = await gopayApi.detail(requestedClearing)
+    }
   } catch (error) {
     toast.error(errorMessage(error))
   } finally {
