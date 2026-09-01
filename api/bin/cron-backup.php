@@ -22,6 +22,7 @@ require __DIR__ . '/../vendor/autoload.php';
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\DumpDefinerSanitizer;
 use MyInvoice\Service\Backup\BackupRetentionPolicy;
 use MyInvoice\Service\Backup\BackupSchedule;
 use MyInvoice\Service\Cron\BackupEncryption;
@@ -200,6 +201,16 @@ if ($rc !== 0 && $privIssue) {
 
 if ($rc !== 0 || !is_file($sqlTmp) || filesize($sqlTmp) < 100) {
     $msg = "Backup selhal (rc=$rc)" . ($err !== '' ? ": $err" : '');
+    fwrite(STDERR, "$msg\n");
+    @unlink($sqlTmp);
+    $run->finish('error', null, $msg, 1);
+    exit(1);
+}
+
+try {
+    DumpDefinerSanitizer::sanitizeFile($sqlTmp);
+} catch (Throwable $e) {
+    $msg = 'Backup selhal při odstranění databázových DEFINERů: ' . $e->getMessage();
     fwrite(STDERR, "$msg\n");
     @unlink($sqlTmp);
     $run->finish('error', null, $msg, 1);
