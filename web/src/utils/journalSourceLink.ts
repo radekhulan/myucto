@@ -36,6 +36,9 @@ export function journalSourceLink(entry: JournalSourceRef): RouteLocationRaw | n
   if (entry.source_type === 'bank' && entry.source_statement_id) {
     return { name: 'bank-detail', params: { id: entry.source_statement_id } }
   }
+  if (entry.source_type === 'gopay') {
+    return { name: 'gopay' }
+  }
   if (entry.source_type === 'cash' && entry.source_doc_number) {
     return {
       name: 'accounting-cash',

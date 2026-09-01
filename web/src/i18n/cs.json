@@ -515,6 +515,7 @@
     "electronic_signatures": "Elektronické podpisy",
     "signing_profiles": "Podpisové profily",
     "bank_accounts": "Bankovní účty",
+    "gopay": "GoPay",
     "bank_email_notices": "Bankovní avíza",
     "recurring": "Pravidelné fakturace",
     "price_list": "Ceník",
@@ -8864,6 +8865,7 @@
         "invoice": "Vydaná faktura",
         "purchase_invoice": "Přijatá faktura",
         "bank": "Banka",
+        "gopay": "GoPay",
         "cash": "Pokladna",
         "depreciation": "Odpis majetku",
         "asset": "Zařazení majetku",
@@ -14194,6 +14196,115 @@
     "overdue_none": "✓ Žádné faktury po splatnosti",
     "unpaid_upcoming": "Nezaplacené (před splatností)",
     "unpaid_none": "Žádné neuhrazené faktury"
+  },
+  "gopay": {
+    "title": "GoPay",
+    "subtitle": "Import měsíčních XML vyúčtování, automatické párování plateb a zaúčtování převodu i poplatků.",
+    "close": "Zavřít",
+    "settings": {
+      "title": "Nastavení účtování",
+      "description": "Zvol analytické účty pro peníze u GoPay, pohledávky, poplatky, peníze na cestě a cílový bankovní účet.",
+      "select": "Vyber účet",
+      "gopay_account": "GoPay účet (221)",
+      "gopay_account_help": "Samostatná analytika představující zůstatek peněz u GoPay.",
+      "destination_account": "Cílový bankovní účet (221)",
+      "receivable_account": "Pohledávky (311)",
+      "fee_account": "Nákladový účet poplatků",
+      "clearing_account": "Peníze na cestě (261)",
+      "payout_account": "Účet odesílatele GoPay",
+      "bank_code": "Kód banky",
+      "date_tolerance": "Tolerance data bankovní platby ve dnech",
+      "save": "Uložit nastavení",
+      "saving": "Ukládám...",
+      "saved": "Nastavení GoPay bylo uloženo."
+    },
+    "import": {
+      "title": "Načíst XML vyúčtování",
+      "description": "Nahraj XML Clearing exportovaný z GoPay. Každý pohyb se spáruje s dokladem a zaúčtuje, převod se dohledá v bankovních výpisech.",
+      "file": "GoPay XML",
+      "button": "Načíst a zaúčtovat",
+      "importing": "Načítám a účtuji...",
+      "configure_first": "Nejdřív ulož nastavení účtů.",
+      "permission_missing": "Pro import potřebuješ oprávnění k importu a účtování banky.",
+      "choose_file": "Vyber XML soubor.",
+      "success": "GoPay vyúčtování bylo načteno a zpracováno.",
+      "duplicate": "Vyúčtování už bylo načtené, proto se pouze znovu zpracovalo."
+    },
+    "clearings": {
+      "title": "Importovaná vyúčtování",
+      "empty": "Zatím nebylo načteno žádné GoPay XML",
+      "empty_description": "Po uložení nastavení nahraj první měsíční Clearing XML."
+    },
+    "col": {
+      "date": "Datum převodu",
+      "clearing_id": "Clearing ID",
+      "period": "Období",
+      "gross": "Platby",
+      "fees": "Poplatky",
+      "sent": "Odesláno na účet",
+      "posted": "Zaúčtováno",
+      "status": "Stav"
+    },
+    "status": {
+      "imported": "Načteno",
+      "processing": "Zpracovává se",
+      "processed": "Hotovo",
+      "needs_review": "Vyžaduje kontrolu"
+    },
+    "process": {
+      "button": "Zpracovat znovu",
+      "success": "Vyúčtování je kompletně spárované a zaúčtované.",
+      "review": "Vyúčtování se zpracovalo, některé položky ale vyžadují kontrolu."
+    },
+    "detail": {
+      "title": "Vyúčtování {id}",
+      "imported": "Soubor {file}, načteno {date}",
+      "bank_matched": "Převod na bankovní účet byl spárován k {date}. Účetní doklad: {document}."
+    },
+    "movement": {
+      "date": "Datum",
+      "type": "Typ",
+      "order": "Objednávka",
+      "payment_id": "GoPay ID platby",
+      "amount": "Částka",
+      "document": "Doklad",
+      "posting": "Účetní zápis",
+      "status": "Stav"
+    },
+    "movement_type": {
+      "credit": "Platba",
+      "storno": "Vratka",
+      "storno_fee": "Poplatek za vratku",
+      "clearing_fee": "Poplatek GoPay",
+      "fee_credit": "Dobropis poplatku",
+      "payout": "Převod na účet"
+    },
+    "movement_status": {
+      "pending": "Čeká",
+      "posted": "Zaúčtováno",
+      "unmatched": "Nespárováno",
+      "error": "Chyba"
+    },
+    "errors": {
+      "invalid_xml": "Soubor není platné GoPay XML.",
+      "unsafe_xml": "XML obsahuje nepovolenou deklaraci.",
+      "invalid_file_size": "XML soubor překračuje limit 2 MB.",
+      "invalid_root": "XML nemá očekávaný formát GoPay Clearing.",
+      "currency_unknown": "Z XML nelze bezpečně určit měnu.",
+      "summary_mismatch": "Souhrnné částky XML nesouhlasí s jednotlivými pohyby.",
+      "movement_summary_mismatch": "Kontrolní součet pohybů v XML nesouhlasí.",
+      "duplicate_movement_id": "XML obsahuje duplicitní identifikátor pohybu.",
+      "settings_missing": "Před importem nastav účty modulu GoPay.",
+      "settings_incomplete": "Vyber všechny účty pro automatické účtování.",
+      "accounts_not_distinct": "GoPay účet a cílový bankovní účet musí být různé analytiky.",
+      "invalid_account": "Zvolený účet neodpovídá požadované účetní skupině.",
+      "invalid_payout_account": "Číslo výplatního účtu GoPay nemá platný český formát.",
+      "invalid_payout_bank_code": "Kód banky GoPay musí mít čtyři číslice.",
+      "invalid_tolerance": "Tolerance data musí být 0 až 14 dní.",
+      "clearing_conflict": "Stejné vyúčtování už existuje s jinými údaji.",
+      "not_double_entry": "Automatické účtování GoPay vyžaduje podvojné účetnictví.",
+      "not_found": "GoPay vyúčtování nebylo nalezeno."
+    }
   },
   "bank_accounts": {
     "title": "Bankovní účty",

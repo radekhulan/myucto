@@ -515,6 +515,7 @@
     "electronic_signatures": "Electronic signatures",
     "signing_profiles": "Signing profiles",
     "bank_accounts": "Bank accounts",
+    "gopay": "GoPay",
     "bank_email_notices": "Bank notices",
     "recurring": "Recurring invoices",
     "price_list": "Price list",
@@ -8864,6 +8865,7 @@
         "invoice": "Issued invoice",
         "purchase_invoice": "Received invoice",
         "bank": "Bank",
+        "gopay": "GoPay",
         "cash": "Cash register",
         "depreciation": "Depreciation",
         "asset": "Asset put into use",
@@ -14194,6 +14196,115 @@
     "overdue_none": "✓ No overdue invoices",
     "unpaid_upcoming": "Unpaid (before due)",
     "unpaid_none": "No unpaid invoices"
+  },
+  "gopay": {
+    "title": "GoPay",
+    "subtitle": "Import monthly XML clearings, automatically match payments, and post payouts and fees.",
+    "close": "Close",
+    "settings": {
+      "title": "Posting settings",
+      "description": "Select analytical accounts for funds held by GoPay, receivables, fees, funds in transit, and the destination bank account.",
+      "select": "Select an account",
+      "gopay_account": "GoPay account (221)",
+      "gopay_account_help": "A separate analytical account representing funds held by GoPay.",
+      "destination_account": "Destination bank account (221)",
+      "receivable_account": "Receivables (311)",
+      "fee_account": "Fee expense account",
+      "clearing_account": "Funds in transit (261)",
+      "payout_account": "GoPay sender account",
+      "bank_code": "Bank code",
+      "date_tolerance": "Bank payment date tolerance in days",
+      "save": "Save settings",
+      "saving": "Saving...",
+      "saved": "GoPay settings were saved."
+    },
+    "import": {
+      "title": "Import XML clearing",
+      "description": "Upload the Clearing XML exported from GoPay. Each movement is matched to a document and posted, while the payout is found in bank statements.",
+      "file": "GoPay XML",
+      "button": "Import and post",
+      "importing": "Importing and posting...",
+      "configure_first": "Save the account settings first.",
+      "permission_missing": "You need bank import and posting permissions to import a clearing.",
+      "choose_file": "Select an XML file.",
+      "success": "The GoPay clearing was imported and processed.",
+      "duplicate": "The clearing had already been imported, so it was only processed again."
+    },
+    "clearings": {
+      "title": "Imported clearings",
+      "empty": "No GoPay XML has been imported yet",
+      "empty_description": "Save the settings, then upload your first monthly Clearing XML."
+    },
+    "col": {
+      "date": "Payout date",
+      "clearing_id": "Clearing ID",
+      "period": "Period",
+      "gross": "Payments",
+      "fees": "Fees",
+      "sent": "Paid out",
+      "posted": "Posted",
+      "status": "Status"
+    },
+    "status": {
+      "imported": "Imported",
+      "processing": "Processing",
+      "processed": "Complete",
+      "needs_review": "Needs review"
+    },
+    "process": {
+      "button": "Process again",
+      "success": "The clearing is fully matched and posted.",
+      "review": "The clearing was processed, but some items need review."
+    },
+    "detail": {
+      "title": "Clearing {id}",
+      "imported": "File {file}, imported {date}",
+      "bank_matched": "The bank payout was matched on {date}. Journal document: {document}."
+    },
+    "movement": {
+      "date": "Date",
+      "type": "Type",
+      "order": "Order",
+      "payment_id": "GoPay payment ID",
+      "amount": "Amount",
+      "document": "Document",
+      "posting": "Journal entry",
+      "status": "Status"
+    },
+    "movement_type": {
+      "credit": "Payment",
+      "storno": "Refund",
+      "storno_fee": "Refund fee",
+      "clearing_fee": "GoPay fee",
+      "fee_credit": "Fee credit",
+      "payout": "Bank payout"
+    },
+    "movement_status": {
+      "pending": "Pending",
+      "posted": "Posted",
+      "unmatched": "Unmatched",
+      "error": "Error"
+    },
+    "errors": {
+      "invalid_xml": "The file is not valid GoPay XML.",
+      "unsafe_xml": "The XML contains a forbidden declaration.",
+      "invalid_file_size": "The XML file exceeds the 2 MB limit.",
+      "invalid_root": "The XML is not in the expected GoPay Clearing format.",
+      "currency_unknown": "The currency cannot be determined safely from the XML.",
+      "summary_mismatch": "XML summary amounts do not match the individual movements.",
+      "movement_summary_mismatch": "The XML movement checksum does not match.",
+      "duplicate_movement_id": "The XML contains a duplicate movement identifier.",
+      "settings_missing": "Configure the GoPay module accounts before importing.",
+      "settings_incomplete": "Select all accounts used for automatic posting.",
+      "accounts_not_distinct": "The GoPay account and destination bank account must use different analytics.",
+      "invalid_account": "The selected account is not in the required accounting group.",
+      "invalid_payout_account": "The GoPay payout account is not in a valid Czech account format.",
+      "invalid_payout_bank_code": "The GoPay bank code must contain four digits.",
+      "invalid_tolerance": "Date tolerance must be between 0 and 14 days.",
+      "clearing_conflict": "The same clearing already exists with different data.",
+      "not_double_entry": "Automatic GoPay posting requires double-entry accounting.",
+      "not_found": "The GoPay clearing was not found."
+    }
   },
   "bank_accounts": {
     "title": "Bank accounts",

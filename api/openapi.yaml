@@ -11279,6 +11279,108 @@ paths:
         '415': { $ref: '#/components/responses/ValidationFailed' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/gopay/settings:
+    get:
+      tags: [Accounting]
+      summary: Nastavení účtování GoPay a dostupné analytické účty
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: currency, schema: { type: string, pattern: '^[A-Z]{3}$', default: CZK } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/GoPaySettingsResponse' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Accounting]
+      summary: Uloží analytické účty pro automatické účtování GoPay
+      description: Dostupné pouze z přihlášeného webového rozhraní s právem účtovat banku.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GoPaySettings' }
+      responses:
+        '200': { description: Uložené nastavení, content: { application/json: { schema: { $ref: '#/components/schemas/GoPaySettingsResponse' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/gopay/clearings:
+    get:
+      tags: [Accounting]
+      summary: Seznam importovaných GoPay XML vyúčtování
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/GoPayClearing' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/gopay/clearings/import:
+    post:
+      tags: [Accounting]
+      summary: Importuje a automaticky zaúčtuje GoPay Clearing XML
+      description: Idempotentní podle clearing ID a SHA-256 obsahu. Dostupné pouze z přihlášeného webového rozhraní.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: GoPay Clearing XML, nejvýše 2 MB }
+      responses:
+        '200': { description: Vyúčtování už existovalo a bylo znovu zpracováno, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayImportResult' } } } }
+        '201': { description: Vyúčtování bylo importováno, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayImportResult' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Vyúčtování koliduje s dříve importovanými údaji nebo chybí nastavení }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/gopay/clearings/{id}:
+    get:
+      tags: [Accounting]
+      summary: Detail GoPay vyúčtování včetně jednotlivých pohybů
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayClearingDetail' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/gopay/clearings/{id}/download:
+    get:
+      tags: [Accounting]
+      summary: Stáhne původní GoPay Clearing XML
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200': { description: XML, content: { application/xml: { schema: { type: string } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/gopay/clearings/{id}/process:
+    post:
+      tags: [Accounting]
+      summary: Znovu spáruje a zaúčtuje nevyřešené pohyby GoPay vyúčtování
+      description: Dostupné pouze z přihlášeného webového rozhraní s právem účtovat banku.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200': { description: Zpracovaný detail, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayClearingDetail' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/accounting/cash-registers:
     get:
       tags: [Accounting]
@@ -17906,6 +18008,110 @@ components:
               status: { type: string, enum: [create, update, skip, error] }
               changes: { type: object, additionalProperties: { type: object, properties: { from: {}, to: {} } } }
               message: { type: string }
+    GoPayAccountOption:
+      type: object
+      required: [id, account_code, name, account_type, is_synthetic]
+      properties:
+        id: { type: integer, format: int64 }
+        account_code: { type: string }
+        name: { type: string }
+        account_type: { type: string, enum: [asset, liability, equity, revenue, expense, offbalance] }
+        is_synthetic: { type: boolean }
+        parent_id: { type: [integer, "null"], format: int64 }
+
+    GoPaySettings:
+      type: object
+      required: [currency, gopay_account_id, receivable_account_id, fee_account_id, clearing_account_id, destination_bank_account_id, payout_account_number, payout_bank_code, payout_date_tolerance_days]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$', example: CZK }
+        gopay_account_id: { type: [integer, "null"], format: int64, description: Analytika 221 pro peníze u GoPay }
+        receivable_account_id: { type: [integer, "null"], format: int64, description: Analytika 311 }
+        fee_account_id: { type: [integer, "null"], format: int64, description: Nákladová analytika poplatků }
+        clearing_account_id: { type: [integer, "null"], format: int64, description: Analytika 261 pro peníze na cestě }
+        destination_bank_account_id: { type: [integer, "null"], format: int64, description: Analytika 221 cílového bankovního účtu }
+        payout_account_number: { type: string, pattern: '^(?:[0-9]{1,6}-)?[0-9]{1,10}$' }
+        payout_bank_code: { type: string, pattern: '^[0-9]{4}$' }
+        payout_date_tolerance_days: { type: integer, minimum: 0, maximum: 14 }
+
+    GoPaySettingsResponse:
+      type: object
+      required: [configured, settings, account_options]
+      properties:
+        configured: { type: boolean }
+        settings: { $ref: '#/components/schemas/GoPaySettings' }
+        account_options: { type: array, items: { $ref: '#/components/schemas/GoPayAccountOption' } }
+
+    GoPayClearing:
+      type: object
+      required: [id, clearing_id, currency, variable_symbol, cleared_from, cleared_to, performed_on, amount_gross, amount_fee, amount_storno, amount_storno_fee, amount_transfer, amount_sent, file_name, status, movement_count, posted_count, issue_count, imported_at]
+      properties:
+        id: { type: integer, format: int64 }
+        clearing_id: { type: string }
+        account_name: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        variable_symbol: { type: string }
+        cleared_from: { type: string, format: date }
+        cleared_to: { type: string, format: date }
+        performed_on: { type: string, format: date }
+        amount_gross: { type: number, format: double }
+        amount_fee: { type: number, format: double }
+        amount_storno: { type: number, format: double }
+        amount_storno_fee: { type: number, format: double }
+        amount_transfer: { type: number, format: double }
+        amount_sent: { type: number, format: double }
+        file_name: { type: string }
+        status: { type: string, enum: [imported, processing, processed, needs_review] }
+        movement_count: { type: integer }
+        posted_count: { type: integer }
+        issue_count: { type: integer }
+        bank_transaction_id: { type: [integer, "null"], format: int64 }
+        imported_at: { type: string, format: date-time }
+        processed_at: { type: [string, "null"], format: date-time }
+
+    GoPayMovement:
+      type: object
+      required: [id, movement_type, performed_on, amount, status]
+      properties:
+        id: { type: integer, format: int64 }
+        movement_type: { type: string, enum: [credit, storno, storno_fee, clearing_fee, fee_credit, payout] }
+        performed_on: { type: string, format: date }
+        amount: { type: number, format: double }
+        order_id: { type: [string, "null"] }
+        payment_session_id: { type: [string, "null"] }
+        account_movement_id: { type: [string, "null"] }
+        payment_channel: { type: [string, "null"] }
+        counterparty_name: { type: [string, "null"] }
+        status: { type: string, enum: [pending, posted, unmatched, error] }
+        issue_code: { type: [string, "null"] }
+        issue_message: { type: [string, "null"] }
+        invoice_id: { type: [integer, "null"], format: int64 }
+        invoice_number: { type: [string, "null"] }
+        credit_note_id: { type: [integer, "null"], format: int64 }
+        credit_note_number: { type: [string, "null"] }
+        journal_entry_id: { type: [integer, "null"], format: int64 }
+        journal_document_no: { type: [string, "null"] }
+
+    GoPayClearingDetail:
+      allOf:
+        - $ref: '#/components/schemas/GoPayClearing'
+        - type: object
+          required: [has_file, movements]
+          properties:
+            has_file: { type: boolean }
+            payout_issue_code: { type: [string, "null"] }
+            payout_issue_message: { type: [string, "null"] }
+            bank_posted_on: { type: [string, "null"], format: date }
+            bank_amount: { type: [number, "null"], format: double }
+            bank_journal_document_no: { type: [string, "null"] }
+            movements: { type: array, items: { $ref: '#/components/schemas/GoPayMovement' } }
+
+    GoPayImportResult:
+      type: object
+      required: [duplicate, clearing]
+      properties:
+        duplicate: { type: boolean }
+        clearing: { $ref: '#/components/schemas/GoPayClearingDetail' }
+
     ChartAccount:
       type: object
       properties:
