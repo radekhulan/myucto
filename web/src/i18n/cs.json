@@ -2647,7 +2647,11 @@
         "vacation": "Čerpaná dovolená (10279)",
         "care": "Péče s nárokem na ošetřovné (10280)",
         "employee_obstacle": "Placené překážky na straně zaměstnance (10471)",
-        "employer_obstacle": "Překážky na straně zaměstnavatele (10472)"
+        "employer_obstacle": "Překážky na straně zaměstnavatele (10472)",
+        "required_missing": "Vyplňte „{field}“ — bez toho souhrn pracovní doby nevznikne.",
+        "conditional_missing": "Odpovězte na otázky o neodpracovaných hodinách a překážkách v práci.",
+        "as_agreed": "Odpracoval přesně předepsaný fond",
+        "as_agreed_hint": "Nesledujete u tohoto vztahu docházku? Tlačítko doplní odpracované hodiny ve výši sjednaného fondu a odpoví „ne“ na neodpracované hodiny i překážky v práci. Zákonný fond doplňte sami — je to stanovená doba pro profesi, ne údaj ze smlouvy."
       },
       "bulk": {
         "approve": "Schválit vybrané ({count})",
@@ -19617,7 +19621,8 @@
     "capabilities": {
       "projects": "zakázky",
       "documents": "dokumenty",
-      "logbook": "knihu jízd"
+      "logbook": "knihu jízd",
+      "payroll": "mzdy a personální vstupy"
     },
     "install": {
       "prepare_title": "Připravte server.",
@@ -19640,17 +19645,32 @@
         "link_document": "Připoj tu smlouvu k zakázce Web 2026.",
         "add_trip": "Přidej dnešní služební jízdu Praha–Kolín, 120 km.",
         "add_fueling": "Zapiš tankování 40 litrů za 1 520 Kč."
+      },
+      "payroll": {
+        "title": "Mzdy a zaměstnanci",
+        "agreed_salary": "Jakou má Jana Nováková sjednanou hrubou mzdu?",
+        "net_salary": "Kolik vyšla Janě Novákové čistá mzda za srpen?",
+        "change_salary": "Zvyš Janě mzdu od září na 55 000 Kč.",
+        "sickness": "Zadej Janě neschopenku od 3. do 12. září.",
+        "overtime": "Zapiš Janě dvě hodiny přesčasu dnes od 17 do 19 hodin.",
+        "bonus": "Přidej Janě mimořádnou odměnu 5 000 Kč za září."
       }
     },
     "tool_groups": {
       "projects": "Zakázky",
       "documents": "Dokumenty",
-      "logbook": "Kniha jízd"
+      "logbook": "Kniha jízd",
+      "payroll": "Mzdy a zaměstnanci"
+    },
+    "payroll_boundary": {
+      "title": "U mezd lze číst personální údaje a výsledky a zapisovat jen připravované vstupy.",
+      "description": "Asistent může změnit sjednanou mzdu, zadat přesčas, absenci nebo odměnu, ale nemůže schválit docházku, absenci ani mzdový běh, mzdy vypočítat, zaúčtovat, připravit platby, uzavřít ani odesílat podání a dokumenty."
     },
     "troubleshooting": {
       "restart_prefix": "Restartujte aplikaci asistenta. U doporučené varianty zkontrolujte cestu k",
       "npm_prefix": "Příkaz",
-      "npm_suffix": "je potřeba jen při spouštění vývojové varianty z"
+      "npm_suffix": "je potřeba jen při spouštění vývojové varianty z",
+      "write_forbidden": "Zápis je v dané části API zakázaný, například v účetnictví, daních nebo řízení mzdového běhu."
     }
   },
   "instance_export": {

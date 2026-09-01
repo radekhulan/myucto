@@ -270,6 +270,42 @@ const approvalConditionalComplete = computed(() =>
     )),
 )
 
+/**
+ * Čtyři pole fondu pracovní doby, bez kterých souhrn nevznikne.
+ *
+ * Why: `required` na `<input>` v tomhle dialogu nic nevynutí — potvrzuje se
+ * kliknutím, ne odesláním formuláře, takže prázdné pole odešlo na server
+ * a vrátilo se jako „standard_fund_hours musí být nezáporné desetinné číslo".
+ * Účetní z takové hlášky nepozná ani které pole to je, ani co tam patří.
+ *
+ * `standard_fund_hours` server NENAVRHUJE nikdy (vždy `null`, viz
+ * `PayrollJmhzWorkMonthSummaryBuilder`), takže prázdné je při každém otevření
+ * dialogu — bez téhle brány je to past, do které se spadne pokaždé.
+ */
+const APPROVAL_REQUIRED_FIELDS = [
+  ['standard_fund', () => approvalStandardFund.value],
+  ['agreed_fund', () => approvalAgreedFund.value],
+  ['weekly_work', () => approvalWeeklyWork.value],
+  ['worked', () => approvalWorked.value],
+] as const
+
+const approvalMissingField = computed(
+  () => APPROVAL_REQUIRED_FIELDS.find(([, read]) => read().trim() === '')?.[0] ?? null,
+)
+
+const approvalBlockedReason = computed<string | null>(() => {
+  const missing = approvalMissingField.value
+  if (missing !== null) {
+    return t('payroll.time.jmhz.required_missing', {
+      field: t(`payroll.time.jmhz.${missing}`),
+    })
+  }
+  if (!approvalConditionalComplete.value) {
+    return t('payroll.time.jmhz.conditional_missing')
+  }
+  return null
+})
+
 const categories: PayrollTimeCategory[] = [
   'regular',
   'overtime',
@@ -362,6 +398,40 @@ function nextEditorDay(date: string): string {
   const next = new Date(parsed.getTime() + 86_400_000)
   const iso = next.toISOString().slice(0, 10)
   return iso.startsWith(`${period.value}-`) ? iso : date
+}
+
+/**
+ * Změna dne u začátku přesune i konec.
+ *
+ * Why: směna přes půlnoc je výjimka, jeden den je pravidlo — jenže datum se
+ * zadává dvakrát a druhé zůstávalo na původním dni. Vznikl tak zápis od 5. 8.
+ * do 1. 8., tedy záporná délka, kterou musel odchytit až server. Kdo směnu
+ * přes půlnoc opravdu píše, přepíše si datum konce po svém; tohle jen srovná
+ * výchozí stav.
+ *
+ * Posouvá se o TOLIK DNÍ, o kolik se posunul začátek, ne na tentýž den —
+ * u noční směny se tím zachová, že konec je den po začátku.
+ */
+watch(startsAt, (nove, stare) => {
+  const novyDen = nove.slice(0, 10)
+  const staryDen = stare?.slice(0, 10) ?? ''
+  if (novyDen === '' || novyDen === staryDen || endsAt.value === '') return
+  const posun = dayDifference(staryDen, novyDen)
+  if (posun === null) return
+  endsAt.value = `${shiftDay(endsAt.value.slice(0, 10), posun)}T${endsAt.value.slice(11)}`
+})
+
+function dayDifference(from: string, to: string): number | null {
+  const left = Date.parse(`${from}T00:00:00Z`)
+  const right = Date.parse(`${to}T00:00:00Z`)
+  if (Number.isNaN(left) || Number.isNaN(right)) return null
+  return Math.round((right - left) / 86_400_000)
+}
+
+function shiftDay(day: string, days: number): string {
+  const base = Date.parse(`${day}T00:00:00Z`)
+  if (Number.isNaN(base)) return day
+  return new Date(base + days * 86_400_000).toISOString().slice(0, 10)
 }
 
 /**
@@ -460,6 +530,26 @@ function openApproval(item: PayrollTimeOverviewItem) {
   approvalObstaclesOccurred.value = null
   clearConditionalValues()
   approvalNote.value = ''
+}
+
+/**
+ * „Odpracoval přesně předepsaný fond."
+ *
+ * Why: u vztahu, kde se docházka nesleduje — typicky jednatel-společník —
+ * účetní nemá co opisovat. Odpracované hodiny se rovnají sjednanému fondu,
+ * neodpracované hodiny žádné nejsou a překážky v práci taky ne. Vyplňovat to
+ * ručně po jednom poli znamená přepisovat číslo, které aplikace už zná,
+ * a u čtyř polí plus dvou otázek se to plete.
+ *
+ * Zákonný fond (10259) tlačítko NEDOPLŇUJE: je to stanovená doba pro danou
+ * profesi, ne údaj odvoditelný ze smlouvy ani z kalendáře. Domyslet ho by
+ * znamenalo vyplnit za účetní hlášení pro ČSSZ.
+ */
+function fillWorkedAsAgreed() {
+  approvalWorked.value = approvalAgreedFund.value
+  approvalUnworkedOccurred.value = false
+  approvalObstaclesOccurred.value = false
+  clearConditionalValues()
 }
 
 function clearConditionalValues() {
@@ -884,7 +974,7 @@ async function approve() {
   const item = approvalItem.value
   const preview = item?.jmhz_work_summary.preview
   if (!item || !preview) return
-  if (!approvalConditionalComplete.value
+  if (approvalBlockedReason.value !== null
     || approvalUnworkedOccurred.value === null
     || approvalObstaclesOccurred.value === null
   ) return
@@ -2351,6 +2441,20 @@ onMounted(() => {
         >
           {{ t('payroll.time.jmhz.unworked_evidence_hint') }}
         </p>
+        <div v-if="approvalAgreedFund.trim() !== ''" class="rounded-lg border border-payroll-500/30 bg-payroll-50 p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-sm text-neutral-700">{{ t('payroll.time.jmhz.as_agreed_hint') }}</p>
+            <button
+              type="button"
+              :class="btnOutline('primary')"
+              data-test="jmhz-as-agreed"
+              @click="fillWorkedAsAgreed"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+              {{ t('payroll.time.jmhz.as_agreed') }}
+            </button>
+          </div>
+        </div>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.standard_fund') }}</span>
@@ -2447,14 +2551,21 @@ onMounted(() => {
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
           </button>
-          <button
-            type="submit"
-            :class="btnFilled('success')"
-            :disabled="saving || !approvalConditionalComplete || Boolean(approvalItem.jmhz_work_summary.preview?.issues.length)"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
-            {{ t('payroll.time.jmhz.confirm') }}
-          </button>
+          <div class="flex flex-col items-end gap-1.5">
+            <button
+              type="submit"
+              :class="btnFilled('success')"
+              :disabled="saving || approvalBlockedReason !== null || Boolean(approvalItem.jmhz_work_summary.preview?.issues.length)"
+              :title="disabledTitle(approvalBlockedReason !== null, approvalBlockedReason)"
+              data-test="jmhz-confirm"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll.time.jmhz.confirm') }}
+            </button>
+            <p v-if="approvalBlockedReason" :class="BTN_DISABLED_NOTE" data-test="jmhz-confirm-blocked">
+              {{ approvalBlockedReason }}
+            </p>
+          </div>
         </div>
       </form>
     </Modal>

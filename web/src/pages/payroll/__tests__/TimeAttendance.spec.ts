@@ -1083,4 +1083,171 @@ describe('TimeAttendance — měsíční mřížka', () => {
     expect(wrapper.find('[data-test="grid-mobile-note"]').classes()).toContain('md:hidden')
     wrapper.unmount()
   })
+  /*
+   * `required` na <input> v dialogu nic nevynutí — potvrzuje se kliknutím, ne
+   * odesláním formuláře. Prázdný zákonný fond (server ho nenavrhuje NIKDY)
+   * proto odešel na server a vrátil se jako „standard_fund_hours musí být
+   * nezáporné desetinné číslo", což účetní nenavede na nic.
+   */
+  it('neodešle schválení s prázdným zákonným fondem a řekne, které pole chybí', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 12, full_name: 'Syntetická osoba', code: 'SYN-HPP' },
+        month: { status: 'open', row_version: 3 },
+        calendar: null,
+        summary: {
+          fund_minutes: 10_080,
+          planned_minutes: 10_080,
+          actual_minutes: 450,
+          difference_minutes: -9_630,
+          category_minutes: {},
+          incomplete: false,
+        },
+        jmhz_work_summary: {
+          preview: {
+            derivation_version: 'jmhz-work-month.v2',
+            source_snapshot_sha256: 'a'.repeat(64),
+            suggestions: {
+              standard_fund_hours: null,
+              agreed_fund_hours: '168',
+              weekly_work_hours: '40',
+              evidence_days: 31,
+              worked_hours: '7.5',
+            },
+            issues: [],
+            requires_unworked_hours_followup: false,
+          },
+          current_revision: null,
+        },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, {
+      global: { stubs: { teleport: true } },
+    })
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+    await wrapper.get('[data-test="jmhz-unworked-no"]').setValue(true)
+    await wrapper.get('[data-test="jmhz-obstacles-no"]').setValue(true)
+
+    expect(wrapper.get('[data-test="jmhz-confirm"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="jmhz-confirm-blocked"]').text())
+      .toBe('payroll.time.jmhz.required_missing')
+
+    await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.approveTimeMonth).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="jmhz-standard-fund"]').setValue('168')
+    expect(wrapper.get('[data-test="jmhz-confirm"]').attributes('disabled')).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  /*
+   * U vztahu, kde se docházka nesleduje (jednatel-společník), nemá účetní co
+   * opisovat: odpracováno = sjednaný fond, žádné neodpracované hodiny ani
+   * překážky. Zákonný fond tlačítko schválně nedoplňuje — to je stanovená
+   * doba pro profesi, ne údaj ze smlouvy.
+   */
+  it('doplní odpracované hodiny ve výši sjednaného fondu jedním tlačítkem', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 12, full_name: 'Syntetická osoba', code: 'SYN-HPP' },
+        month: { status: 'open', row_version: 3 },
+        calendar: null,
+        summary: {
+          fund_minutes: 10_080,
+          planned_minutes: 10_080,
+          actual_minutes: 450,
+          difference_minutes: -9_630,
+          category_minutes: {},
+          incomplete: false,
+        },
+        jmhz_work_summary: {
+          preview: {
+            derivation_version: 'jmhz-work-month.v2',
+            source_snapshot_sha256: 'a'.repeat(64),
+            suggestions: {
+              standard_fund_hours: null,
+              agreed_fund_hours: '168',
+              weekly_work_hours: '40',
+              evidence_days: 31,
+              worked_hours: '7.5',
+            },
+            issues: [],
+            requires_unworked_hours_followup: false,
+          },
+          current_revision: null,
+        },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, {
+      global: { stubs: { teleport: true } },
+    })
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+    await wrapper.get('[data-test="jmhz-as-agreed"]').trigger('click')
+
+    expect((wrapper.get('[data-test="jmhz-worked"]').element as HTMLInputElement).value)
+      .toBe('168')
+    expect((wrapper.get('[data-test="jmhz-standard-fund"]').element as HTMLInputElement).value)
+      .toBe('')
+    expect(wrapper.get('[data-test="jmhz-confirm-blocked"]').text())
+      .toBe('payroll.time.jmhz.required_missing')
+
+    wrapper.unmount()
+  })
+  /*
+   * Datum se v editoru zadává dvakrát a druhé zůstávalo na původním dni:
+   * vznikl zápis od 5. 8. do 1. 8., tedy záporná délka, kterou odchytil až
+   * server. Směna přes půlnoc je výjimka, jeden den je pravidlo.
+   */
+  it('posune konec zápisu spolu se změnou dne u začátku', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 12, full_name: 'Syntetická osoba', code: 'SYN-HPP' },
+        month: { status: 'open', row_version: 3 },
+        calendar: null,
+        summary: {
+          fund_minutes: 0, planned_minutes: 0, actual_minutes: 0,
+          difference_minutes: 0, category_minutes: {}, incomplete: false,
+        },
+        jmhz_work_summary: { preview: null, current_revision: null },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, {
+      global: { stubs: { teleport: true } },
+    })
+    await flushPromises()
+
+    const add = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.add')
+    await add!.trigger('click')
+
+    const inputs = wrapper.findAll('input[type="datetime-local"]')
+    const start = inputs[0]!
+    const end = inputs[1]!
+    const puvodniKonec = (end.element as HTMLInputElement).value
+
+    await start.setValue(`2026-08-05T${(start.element as HTMLInputElement).value.slice(11)}`)
+
+    expect((end.element as HTMLInputElement).value.slice(0, 10)).toBe('2026-08-05')
+    // Čas konce zůstává, mění se jen den.
+    expect((end.element as HTMLInputElement).value.slice(11))
+      .toBe(puvodniKonec.slice(11))
+
+    wrapper.unmount()
+  })
 })

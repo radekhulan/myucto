@@ -520,11 +520,39 @@ final class PayrollRegistrationA1SnapshotBuilder
         return $value;
     }
 
+    /**
+     * Lidský název a MÍSTO, kde se údaj doplňuje.
+     *
+     * Why: hláška uměla jen technický název sloupce („nemá platné povinné pole
+     * citizenship_country_code"). Účetní z něj nepozná ani co to je, ani kam
+     * jít — a formulář, na kterém hláška vyskočí, to pole nemá: bere se
+     * z osobní evidence, ne z podání. Klíč bez překladu se vypíše tak, jak je;
+     * neúplný slovník nesmí zamlčet, že něco chybí.
+     */
+    private const FIELD_LABELS = [
+        'citizenship_country_code' => ['státní občanství', 'karta osoby → Zákonná evidence'],
+        'birth_country_code' => ['stát narození', 'karta osoby → Zákonná evidence'],
+        'birth_place' => ['místo narození', 'karta osoby → Zákonná evidence'],
+        'birth_date' => ['datum narození', 'karta osoby → Zákonná evidence'],
+        'sex' => ['pohlaví', 'karta osoby → Zákonná evidence'],
+        'family_name' => ['příjmení', 'karta osoby → Zákonná evidence'],
+        'given_name' => ['jméno', 'karta osoby → Zákonná evidence'],
+        'street' => ['ulice', 'karta osoby → Adresy'],
+        'house_number' => ['číslo popisné', 'karta osoby → Adresy'],
+        'city' => ['obec', 'karta osoby → Adresy'],
+        'postal_code' => ['PSČ', 'karta osoby → Adresy'],
+        'country_code' => ['stát adresy', 'karta osoby → Adresy'],
+    ];
+
     private function missing(string $field): never
     {
+        [$label, $where] = self::FIELD_LABELS[$field] ?? [null, null];
         $this->invalid(
             'registration_regzec_a1_required_field_missing',
-            "Autoritativní zdroj REGZEC A1 nemá platné povinné pole {$field}.",
+            $label === null
+                ? "Autoritativní zdroj REGZEC A1 nemá platné povinné pole {$field}."
+                : "Pro REGZEC A1 chybí {$label} ({$field}). Doplňte ho v {$where}"
+                    . ' — na tomhle formuláři se nezadává, bere se z osobní evidence.',
         );
     }
 
