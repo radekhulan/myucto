@@ -82,7 +82,7 @@ function accountName(code: string): string {
 }
 
 const SOURCE_TYPES = [
-  'manual', 'invoice', 'purchase_invoice', 'bank', 'cash',
+  'manual', 'invoice', 'purchase_invoice', 'bank', 'gopay', 'cash',
   'depreciation', 'asset', 'asset_disposal',
   'closing', 'opening', 'fx_revaluation', 'stock',
   'offset', 'settlement', 'vat_clearing',

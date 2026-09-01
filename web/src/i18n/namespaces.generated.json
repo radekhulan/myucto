@@ -57,6 +57,7 @@
     "expense_categories",
     "export",
     "foreign_income",
+    "gopay",
     "imports",
     "instance_export",
     "integrations",
@@ -135,6 +136,7 @@
       "expense_categories",
       "export",
       "foreign_income",
+      "gopay",
       "imports",
       "instance_export",
       "integrations",
@@ -623,6 +625,9 @@
       "payment_method",
       "purchase_invoice",
       "vendor"
+    ],
+    "gopay": [
+      "gopay"
     ],
     "bank-detail": [
       "automation",

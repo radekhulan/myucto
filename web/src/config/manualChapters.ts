@@ -19,6 +19,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/clients(?:\/|$)/, '18_Klienti'],
   [/^\/projects(?:\/|$)/, '19_Zakazky'],
   [/^\/bank(?:\/|$)/, '28_Banka'],
+  [/^\/gopay(?:\/|$)/, '29a_GoPay'],
   [/^\/accounting\/cash(?:\/|$)/, '30_Pokladna'],
   [/^\/documents(?:\/|$)|^\/document-requests(?:\/|$)/, '31_Dokumenty'],
   [/^\/logbook(?:\/|$)/, '32_Kniha_jizd'],

@@ -56,6 +56,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 
 28. [Banka — výpisy a párování](28_Banka.md)
 29. [Bankovní účty a avíza](29_Bankovni_ucty.md)
+29a. [GoPay](29a_GoPay.md)
 30. [Pokladna](30_Pokladna.md)
 
 ### Dokumenty

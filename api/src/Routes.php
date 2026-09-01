@@ -2065,6 +2065,13 @@ final class Routes
             // Automatizace (mini-epic) — pravidla účtování + fronta návrhů.
             $g->get   ('/bank-accounts',                              [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'list']);
             $g->patch ('/bank-accounts/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'update']);
+            $g->get   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'settings']);
+            $g->put   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'saveSettings']);
+            $g->get   ('/gopay/clearings',                            [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'list']);
+            $g->post  ('/gopay/clearings/import',                     [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'import']);
+            $g->get   ('/gopay/clearings/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'detail']);
+            $g->get   ('/gopay/clearings/{id:[0-9]+}/download',       [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'download']);
+            $g->post  ('/gopay/clearings/{id:[0-9]+}/process',        [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'process']);
             $g->get   ('/bank-posting-rules',                        [\MyInvoice\Action\Accounting\Bank\BankPostingRuleAction::class, 'list']);
             $g->post  ('/bank-posting-rules',                        [\MyInvoice\Action\Accounting\Bank\BankPostingRuleAction::class, 'create']);
             $g->post  ('/bank-posting-rules/dry-run',                [\MyInvoice\Action\Accounting\Bank\BankPostingRuleAction::class, 'dryRun']);

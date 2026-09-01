@@ -1,0 +1,242 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Accounting\GoPay;
+
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\GoPay\GoPayService;
+use MyInvoice\Service\Accounting\PostingService;
+use PDO;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+#[Group('integration')]
+final class GoPayServiceTest extends TestCase
+{
+    private const YEAR = 2098;
+
+    private Connection $db;
+    private GoPayService $service;
+    private PostingService $posting;
+    private AccountingPeriodRepository $periods;
+    private int $supplierId;
+    private int $userId;
+    private int $currencyId;
+    private bool $inTx = false;
+
+    protected function setUp(): void
+    {
+        $root = dirname(__DIR__, 5);
+        if (!is_file($root . '/cfg.php')) {
+            $this->markTestSkipped('Test vyžaduje lokální databázi.');
+        }
+        $container = Bootstrap::buildApp()->getContainer();
+        $this->db = $container->get(Connection::class);
+        $this->service = $container->get(GoPayService::class);
+        $this->posting = $container->get(PostingService::class);
+        $this->periods = $container->get(AccountingPeriodRepository::class);
+        $pdo = $this->db->pdo();
+        $this->supplierId = (int) ($pdo->query("SELECT id FROM supplier WHERE accounting_mode='double_entry' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
+        $this->userId = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        if ($this->supplierId === 0 || $this->userId === 0) {
+            $this->markTestSkipped('Chybí firma s podvojným účetnictvím nebo uživatel.');
+        }
+        $currency = $pdo->prepare("SELECT id FROM currencies WHERE supplier_id=? AND code='CZK' ORDER BY id LIMIT 1");
+        $currency->execute([$this->supplierId]);
+        $this->currencyId = (int) ($currency->fetchColumn() ?: 0);
+        if ($this->currencyId === 0) {
+            $this->markTestSkipped('Firma nemá CZK měnu.');
+        }
+
+        $pdo->beginTransaction();
+        $this->inTx = true;
+        $container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $period = $this->periods->findForDate($this->supplierId, self::YEAR . '-01-15');
+        if ($period === null) {
+            $this->periods->create($this->supplierId, self::YEAR, self::YEAR . '-01-01', self::YEAR . '-12-31');
+        } elseif ($period['status'] !== 'open') {
+            $pdo->prepare('UPDATE accounting_periods SET status="open" WHERE id=?')->execute([(int) $period['id']]);
+        }
+    }
+
+    protected function tearDown(): void
+    {
+        if (isset($this->db) && $this->inTx) {
+            $pdo = $this->db->pdo();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $this->db->close();
+        }
+    }
+
+    public function testXmlImportMatchesPostsAndDeduplicatesWholeClearing(): void
+    {
+        $ids = $this->configureAccounts();
+        [$invoiceId, $creditNoteId] = $this->documents();
+        $this->postDocuments($invoiceId, $creditNoteId);
+        $this->payment($invoiceId);
+        $bankTransactionId = $this->bankPayout();
+
+        $result = $this->service->import($this->supplierId, $this->userId, 'synthetic.xml', $this->xml());
+        self::assertFalse($result['duplicate']);
+        self::assertSame('processed', $result['clearing']['status']);
+        self::assertSame(5, $result['clearing']['posted_count']);
+        self::assertSame(0, $result['clearing']['issue_count']);
+        self::assertSame($bankTransactionId, $result['clearing']['bank_transaction_id']);
+
+        $movements = $result['clearing']['movements'];
+        self::assertSame($invoiceId, $movements[0]['invoice_id']);
+        self::assertSame($creditNoteId, $movements[1]['credit_note_id']);
+        foreach ($movements as $movement) {
+            self::assertSame('posted', $movement['status']);
+            self::assertNotNull($movement['journal_entry_id']);
+        }
+
+        $entryCount = $this->db->pdo()->prepare("SELECT COUNT(*) FROM journal_entries WHERE supplier_id=? AND source_type='gopay'");
+        $entryCount->execute([$this->supplierId]);
+        self::assertSame(5, (int) $entryCount->fetchColumn());
+        $this->assertPair((int) $movements[0]['journal_entry_id'], $ids['gopay'], '311', 1000.00);
+        $this->assertPair((int) $movements[1]['journal_entry_id'], '311', $ids['gopay'], 100.00);
+        $this->assertPair((int) $movements[3]['journal_entry_id'], '568', $ids['gopay'], 20.00);
+        $this->assertPair((int) $movements[4]['journal_entry_id'], '261', $ids['gopay'], 875.00);
+
+        $duplicate = $this->service->import($this->supplierId, $this->userId, 'synthetic.xml', $this->xml());
+        self::assertTrue($duplicate['duplicate']);
+        $entryCount->execute([$this->supplierId]);
+        self::assertSame(5, (int) $entryCount->fetchColumn());
+    }
+
+    /** @return array{gopay:string,bank:string} */
+    private function configureAccounts(): array
+    {
+        $pdo = $this->db->pdo();
+        $parent = (int) $pdo->query("SELECT id FROM chart_of_accounts WHERE supplier_id={$this->supplierId} AND account_code='221'")->fetchColumn();
+        $insert = $pdo->prepare(
+            'INSERT INTO chart_of_accounts (supplier_id,account_code,name,account_type,normal_side,is_synthetic,parent_id)
+             VALUES (?,?,?,"asset","debit",0,?)'
+        );
+        $insert->execute([$this->supplierId, '221.GP98', 'GoPay test', $parent]);
+        $gopayId = (int) $pdo->lastInsertId();
+        $insert->execute([$this->supplierId, '221.BK98', 'Banka test', $parent]);
+        $bankId = (int) $pdo->lastInsertId();
+        $id = fn (string $code): int => (int) $pdo->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id={$this->supplierId} AND account_code=" . $pdo->quote($code)
+        )->fetchColumn();
+
+        $this->service->saveSettings($this->supplierId, [
+            'currency' => 'CZK',
+            'gopay_account_id' => $gopayId,
+            'receivable_account_id' => $id('311'),
+            'fee_account_id' => $id('568'),
+            'clearing_account_id' => $id('261'),
+            'destination_bank_account_id' => $bankId,
+            'payout_account_number' => '1000000005',
+            'payout_bank_code' => '0100',
+            'payout_date_tolerance_days' => 3,
+        ], $this->userId);
+        return ['gopay' => '221.GP98', 'bank' => '221.BK98'];
+    }
+
+    /** @return array{int,int} */
+    private function documents(): array
+    {
+        $pdo = $this->db->pdo();
+        $countryId = (int) $pdo->query("SELECT id FROM countries WHERE iso2='CZ' LIMIT 1")->fetchColumn();
+        $pdo->prepare(
+            'INSERT INTO clients (supplier_id,company_name,street,city,zip,country_id,main_email,language,currency_default_id,is_customer,is_vendor)
+             VALUES (?,"Test GoPay","Test 1","Praha","11000",?,"test@example.test","cs",?,1,0)'
+        )->execute([$this->supplierId, $countryId, $this->currencyId]);
+        $clientId = (int) $pdo->lastInsertId();
+        $insert = $pdo->prepare(
+            'INSERT INTO invoices
+                (supplier_id,varsymbol,invoice_type,parent_invoice_id,client_id,issue_date,tax_date,due_date,
+                 currency_id,reverse_charge,total_without_vat,total_vat,total_with_vat,paid_total,status,
+                 note_below_items,vat_classification_code,created_by)
+             VALUES (?,?,?,?,?,?,?,?,?,0,?,0,?,0,?,?,"1",?)'
+        );
+        $insert->execute([$this->supplierId, '20980001', 'invoice', null, $clientId, self::YEAR . '-01-10', self::YEAR . '-01-10', self::YEAR . '-01-20',
+            $this->currencyId, 1000, 1000, 'paid', "Objednávka: TEST000001", $this->userId]);
+        $invoiceId = (int) $pdo->lastInsertId();
+        $insert->execute([$this->supplierId, '20980002', 'credit_note', $invoiceId, $clientId, self::YEAR . '-01-20', self::YEAR . '-01-20', self::YEAR . '-01-20',
+            $this->currencyId, -100, -100, 'sent', "Objednávka: TEST000001", $this->userId]);
+        return [$invoiceId, (int) $pdo->lastInsertId()];
+    }
+
+    private function postDocuments(int $invoiceId, int $creditNoteId): void
+    {
+        $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 1000],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 1000],
+        ], ['entry_date' => self::YEAR . '-01-10', 'document_no' => 'FV-TEST', 'description' => 'Test faktura', 'posted_by' => $this->userId]);
+        $this->posting->postDocument($this->supplierId, 'invoice', $creditNoteId, [
+            ['account_code' => '602', 'side' => 'debit', 'amount' => 100],
+            ['account_code' => '311', 'side' => 'credit', 'amount' => 100],
+        ], ['entry_date' => self::YEAR . '-01-20', 'document_no' => 'DB-TEST', 'description' => 'Test dobropis', 'posted_by' => $this->userId]);
+    }
+
+    private function payment(int $invoiceId): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoice_payments (supplier_id,invoice_id,paid_on,amount,currency,bank_reference,source,created_by)
+             VALUES (?,?,?,?,"CZK","GOPAY:1000000001","mark_paid",?)'
+        )->execute([$this->supplierId, $invoiceId, self::YEAR . '-01-15', 1000, $this->userId]);
+    }
+
+    private function bankPayout(): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO bank_statements (supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by)
+             VALUES (?,"synthetic.gpc",?,"1000000005","0100","CZK",?,?)'
+        )->execute([$this->supplierId, hash('sha256', uniqid('gopay', true)), self::YEAR . '-02-01', $this->userId]);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id,source,posted_at,amount,currency,variable_symbol,counterparty_account,
+                 counterparty_bank,counterparty_name,description,match_status)
+             VALUES (?,"statement",?,875,"CZK","20980001","1000000005","0100","GoPay","Clearing","unmatched")'
+        )->execute([$statementId, self::YEAR . '-02-01']);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function assertPair(int $entryId, string $debit, string $credit, float $amount): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT coa.account_code,jel.side,jel.amount FROM journal_entry_lines jel
+             JOIN chart_of_accounts coa ON coa.id=jel.account_id WHERE jel.entry_id=? AND jel.supplier_id=?'
+        );
+        $stmt->execute([$entryId, $this->supplierId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(2, $rows);
+        self::assertContains(['account_code' => $debit, 'side' => 'debit', 'amount' => number_format($amount, 2, '.', '')], $rows);
+        self::assertContains(['account_code' => $credit, 'side' => 'credit', 'amount' => number_format($amount, 2, '.', '')], $rows);
+    }
+
+    private function xml(): string
+    {
+        return <<<'XML'
+<?xml version="1.0"?>
+<clearing xmlns="https://www.gopay.cz/clearing" accountName="Test CZK" amount="1000.00"
+ amountCreditNote="0.00" amountFee="20.00" amountFeeExternal="10.00" amountSent="875.00"
+ amountStorno="100.00" amountStornoFee="5.00" amountTransfer="875.00"
+ clearingId="TEST-CLEARING-2098" dateClearedFrom="01.01.2098" dateClearedTo="31.01.2098"
+ datePerformed="01.02.2098" variableSymbol="20980001">
+ <paymentChannel fee="10.00" transactionFee="10.00" type="test" volumeFee="0.00"><movements>
+  <movement accountMovementId="TEST-MOVE-2098-1" amount="1000.00" counterpartyName="test"
+   datePerformed="15.01.2098" orderId="TEST000001" paymentSessionId="1000000001" type="credit"/>
+ </movements></paymentChannel>
+ <storno>
+  <stornoMovement accountMovementId="TEST-MOVE-2098-2" amount="-100.00" counterpartyName="GOPAY"
+   datePerformed="20.01.2098" orderId="TEST000001" paymentSessionId="1000000001" type="storno"/>
+  <stornoMovement accountMovementId="TEST-MOVE-2098-3" amount="-5.00" counterpartyName="GOPAY"
+   datePerformed="20.01.2098" orderId="TEST000001" paymentSessionId="1000000001" type="stornoFee"/>
+ </storno>
+</clearing>
+XML;
+    }
+}
