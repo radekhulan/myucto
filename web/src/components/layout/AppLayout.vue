@@ -434,8 +434,8 @@ const navSections = computed<NavSection[]>(() => {
       accent: 'success',
       items: [
         { to: '/bank',           label: t('nav.bank_accounts'),  icon: ICONS.bank },
-        ...(isDoubleEntry && auth.hasCommercialFeatures ? [{ to: '/gopay', label: t('nav.gopay'), icon: ICONS.payment_orders }] : []),
         ...((isDoubleEntry || isTaxEvidence) ? [{ to: '/accounting/cash', label: t('nav.accounting_cash'), icon: ICONS.cash, newTo: '/accounting/cash/new' }] : []),
+        ...(isDoubleEntry && auth.hasCommercialFeatures ? [{ to: '/gopay', label: t('nav.gopay'), icon: ICONS.payment_orders }] : []),
       ],
     },
     {
