@@ -14272,6 +14272,7 @@
       "title": "Import XML clearing",
       "description": "Upload the Clearing XML exported from GoPay. Each movement is matched to a document and posted, while the payout is found in bank statements.",
       "file": "GoPay XML",
+      "pdf_file": "GoPay PDF (optional)",
       "button": "Import and post",
       "importing": "Importing and posting...",
       "configure_first": "Save the account settings first.",
@@ -14279,6 +14280,18 @@
       "choose_file": "Select an XML file.",
       "success": "The GoPay clearing was imported and processed.",
       "duplicate": "The clearing had already been imported, so it was only processed again."
+    },
+    "pdf": {
+      "attached": "Attached clearing PDF",
+      "attach": "Attach PDF",
+      "replace": "Replace PDF",
+      "upload": "Upload PDF",
+      "uploading": "Uploading PDF...",
+      "download": "Download PDF",
+      "delete": "Delete PDF",
+      "delete_confirm": "Delete the attached GoPay PDF? The XML, clearing, and journal entries will remain unchanged.",
+      "uploaded": "The PDF was attached to the GoPay clearing.",
+      "deleted": "The PDF was deleted from the GoPay clearing."
     },
     "clearings": {
       "title": "Imported clearings",
@@ -14360,6 +14373,11 @@
       "date_locked": "The clearing contains an entry in a locked part of the accounting records.",
       "entry_has_reversal": "The clearing contains a reversed entry. Resolve its reversal in the journal first.",
       "not_double_entry": "Automatic GoPay posting requires double-entry accounting.",
+      "pdf_no_file": "Select a PDF file.",
+      "pdf_too_large": "The PDF exceeds the 10 MiB limit.",
+      "pdf_invalid_extension": "Only PDF files are allowed.",
+      "pdf_invalid": "The file is not a valid PDF.",
+      "pdf_not_found": "The clearing PDF was not found.",
       "not_found": "The GoPay clearing was not found."
     }
   },
@@ -15910,6 +15928,7 @@
     "freq_daily_0200": "daily at 02:00",
     "freq_daily_0230": "daily at 02:30",
     "freq_daily_0235": "daily at 02:35",
+    "freq_daily_0240": "daily at 02:40",
     "freq_daily_0300": "daily at 03:00",
     "freq_daily_0400": "daily at 04:00",
     "freq_daily_0500": "daily at 05:00",
@@ -16689,7 +16708,7 @@
       "period_label": "Period",
       "period_month": "Month",
       "period_quarter": "Quarter",
-      "period_rule_note": "Documents are assigned to the period in a tax-correct way, consistent with the VAT ledger and VAT return: issued by tax date (DUZP), received by the later of tax date / issue date (input VAT cannot be deducted before you hold the document), statements by statement date.",
+      "period_rule_note": "Documents are assigned to the period in a tax-correct way, consistent with the VAT ledger and VAT return: issued by tax date (DUZP), received by the later of tax date / issue date, statements by statement date, and GoPay by clearing period.",
       "parts_label": "What to include",
       "download": "Download ZIP",
       "downloading": "Preparing ZIP…",
@@ -16726,6 +16745,8 @@
         "purchase_isdoc": "Received invoices — ISDOC",
         "bank_pdf": "Bank statements — PDF",
         "bank_gpc": "Bank statements — GPC",
+        "gopay_pdf": "GoPay clearings - PDF",
+        "gopay_xml": "GoPay clearings - XML",
         "dph_book": "VAT ledger — PDF",
         "vat_control_statement": "VAT control statement — XML"
       }

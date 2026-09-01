@@ -14272,6 +14272,7 @@
       "title": "Načíst XML vyúčtování",
       "description": "Nahraj XML Clearing exportovaný z GoPay. Každý pohyb se spáruje s dokladem a zaúčtuje, převod se dohledá v bankovních výpisech.",
       "file": "GoPay XML",
+      "pdf_file": "GoPay PDF (volitelné)",
       "button": "Načíst a zaúčtovat",
       "importing": "Načítám a účtuji...",
       "configure_first": "Nejdřív ulož nastavení účtů.",
@@ -14279,6 +14280,18 @@
       "choose_file": "Vyber XML soubor.",
       "success": "GoPay vyúčtování bylo načteno a zpracováno.",
       "duplicate": "Vyúčtování už bylo načtené, proto se pouze znovu zpracovalo."
+    },
+    "pdf": {
+      "attached": "Přiložené PDF vyúčtování",
+      "attach": "Přiložit PDF",
+      "replace": "Nahradit PDF",
+      "upload": "Nahrát PDF",
+      "uploading": "Nahrávám PDF...",
+      "download": "Stáhnout PDF",
+      "delete": "Smazat PDF",
+      "delete_confirm": "Opravdu smazat přiložené GoPay PDF? XML, vyúčtování a účetní zápisy zůstanou zachované.",
+      "uploaded": "PDF bylo přiloženo k GoPay vyúčtování.",
+      "deleted": "PDF bylo z GoPay vyúčtování smazáno."
     },
     "clearings": {
       "title": "Importovaná vyúčtování",
@@ -14360,6 +14373,11 @@
       "date_locked": "Vyúčtování obsahuje zápis v uzamčené části účetnictví.",
       "entry_has_reversal": "Vyúčtování obsahuje stornovaný zápis. Nejprve vyřeš jeho storno v deníku.",
       "not_double_entry": "Automatické účtování GoPay vyžaduje podvojné účetnictví.",
+      "pdf_no_file": "Vyber PDF soubor.",
+      "pdf_too_large": "PDF překračuje limit 10 MiB.",
+      "pdf_invalid_extension": "Povolené je pouze PDF.",
+      "pdf_invalid": "Soubor není platné PDF.",
+      "pdf_not_found": "PDF vyúčtování nebylo nalezeno.",
       "not_found": "GoPay vyúčtování nebylo nalezeno."
     }
   },
@@ -15910,6 +15928,7 @@
     "freq_daily_0200": "denně v 02:00",
     "freq_daily_0230": "denně v 02:30",
     "freq_daily_0235": "denně v 02:35",
+    "freq_daily_0240": "denně v 02:40",
     "freq_daily_0300": "denně v 03:00",
     "freq_daily_0400": "denně v 04:00",
     "freq_daily_0500": "denně v 05:00",
@@ -16689,7 +16708,7 @@
       "period_label": "Období",
       "period_month": "Měsíc",
       "period_quarter": "Čtvrtletí",
-      "period_rule_note": "Doklady se do období zařazují daňově korektně, shodně s Knihou DPH a přiznáním DPH: vystavené podle DUZP, přijaté podle pozdějšího z dat DUZP / vystavení (odpočet nelze uplatnit dříve, než máte daňový doklad), výpisy podle data výpisu.",
+      "period_rule_note": "Doklady se do období zařazují daňově korektně, shodně s Knihou DPH a přiznáním DPH: vystavené podle DUZP, přijaté podle pozdějšího z dat DUZP / vystavení (odpočet nelze uplatnit dříve, než máte daňový doklad), výpisy podle data výpisu a GoPay podle období vyúčtování.",
       "parts_label": "Co zahrnout do exportu",
       "download": "Stáhnout ZIP",
       "downloading": "Připravuji ZIP…",
@@ -16726,6 +16745,8 @@
         "purchase_isdoc": "Přijaté faktury — ISDOC",
         "bank_pdf": "Výpisy z účtu — PDF",
         "bank_gpc": "Výpisy z účtu — GPC",
+        "gopay_pdf": "GoPay vyúčtování - PDF",
+        "gopay_xml": "GoPay vyúčtování - XML",
         "dph_book": "Kniha DPH — PDF",
         "vat_control_statement": "Kontrolní hlášení DPH — XML"
       }
