@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   institutionAccounts: vi.fn(),
   createInstitutionAccount: vi.fn(),
   updateInstitutionAccount: vi.fn(),
+  deleteInstitutionAccount: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   routeHash: '',
@@ -21,6 +22,7 @@ vi.mock('@/api/payroll', () => ({
     institutionAccounts: m.institutionAccounts,
     createInstitutionAccount: m.createInstitutionAccount,
     updateInstitutionAccount: m.updateInstitutionAccount,
+    deleteInstitutionAccount: m.deleteInstitutionAccount,
   },
 }))
 
@@ -72,6 +74,8 @@ function account(overrides: Partial<PayrollInstitutionAccount> = {}): PayrollIns
     row_version: 3,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
+    can_delete: true,
+    delete_blocker: null,
     ...overrides,
   }
 }
@@ -439,6 +443,52 @@ describe('HealthInsurerAccounts', () => {
     expect(wrapper.text()).toContain('payroll.employer.health_accounts.conflict')
     expect(m.updateInstitutionAccount).toHaveBeenCalledTimes(1)
 
+    wrapper.unmount()
+  })
+  /**
+   * Duplicitní účet pod špatným kódem instituce se při přípravě plateb nikdy
+   * nenajde, takže je to mrtvý řádek — jenže stojí vedle správného se stejným
+   * číslem a účetní z dvojice nepozná, který platí. Ukončení platnosti ho
+   * z přehledu neodstraní, ten ukazuje i historii.
+   */
+  it('smaže účet, ze kterého se nikdy neplatilo, a pošle jeho verzi', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    m.deleteInstitutionAccount.mockResolvedValue({})
+    const wrapper = await mountComponent([account({ id: 7, row_version: 3 })])
+
+    await wrapper.get('[data-test="delete-institution-account"]').trigger('click')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalled()
+    expect(m.deleteInstitutionAccount).toHaveBeenCalledWith(7, 3)
+    expect(wrapper.text()).not.toContain('Syntetická zdravotní pojišťovna')
+    expect(m.toastSuccess).toHaveBeenCalledWith('payroll.employer.health_accounts.deleted')
+
+    confirm.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('u účtu, ze kterého se platilo, neptá na potvrzení a řekne důvod ze serveru', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = await mountComponent([account({
+      can_delete: false,
+      delete_blocker: {
+        code: 'payroll_institution_account_in_liability',
+        message: 'Na tento účet už míří mzdový platební závazek.',
+        employment_id: null,
+        employment_code: null,
+      },
+    })])
+
+    await wrapper.get('[data-test="delete-institution-account"]').trigger('click')
+    await flushPromises()
+
+    expect(m.deleteInstitutionAccount).not.toHaveBeenCalled()
+    expect(confirm).not.toHaveBeenCalled()
+    expect(m.toastError).toHaveBeenCalledWith('Na tento účet už míří mzdový platební závazek.')
+    expect(wrapper.text()).toContain('Syntetická zdravotní pojišťovna')
+
+    confirm.mockRestore()
     wrapper.unmount()
   })
 })

@@ -1152,7 +1152,7 @@
         "create_failed": "The payment batch could not be created.",
         "select_all": "Select or clear compatible liabilities",
         "select_blocked_all": "Every liability in this period is already in a payment batch, so there is nothing to select.",
-          "select_blocked_batched": "The liability is already in a payment batch and cannot join another one.",
+        "select_blocked_batched": "The liability is already in a payment batch and cannot join another one.",
         "select_blocked_not_ready": "The liability is not ready to be added to a batch yet.",
         "select_blocked_group": "One batch holds only payments with the same due date, currency and payer.",
         "select_employee": "Select liability: {name}",
@@ -5524,7 +5524,12 @@
           "institution_notice": "Institution notice",
           "user_verified": "User verified",
           "imported": "Imported value"
-        }
+        },
+        "delete": "Delete account",
+        "delete_confirm": "Really delete the account {institution} ({account})? Only an account that has never been paid from can be deleted, so if this is a duplicate under a wrong institution code, nothing is lost.",
+        "deleted": "The institution payment account was deleted.",
+        "delete_failed": "The institution payment account could not be deleted.",
+        "delete_blocked": "This account has already been paid from, so it cannot be deleted. Set an end of validity instead."
       },
       "accident_insurance": {
         "title": "Statutory employer liability insurance",
@@ -17822,9 +17827,9 @@
     "s8_base": "§8 partial base (capital)",
     "s9_income": "Rental income (§9)",
     "s9_expenses": "§9 rental expenses",
-      "s9_expense_mode": "Rental expenses",
-      "s9_expense_mode_actual": "Actual amount",
-      "s9_expense_mode_pausal": "Percentage of income (30 %, § 9(4))",
+    "s9_expense_mode": "Rental expenses",
+    "s9_expense_mode_actual": "Actual amount",
+    "s9_expense_mode_pausal": "Percentage of income (30 %, § 9(4))",
     "s10_income": "Other income (§10)",
     "s10_expenses": "§10 expenses",
     "social_paid_advances": "Advances paid — social",
