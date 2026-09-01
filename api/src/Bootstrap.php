@@ -516,8 +516,6 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Bank\Match\MatchScorer::class),
                 $c->get(\MyInvoice\Service\Bank\Match\CounterpartyMapService::class),
                 $c->get(\MyInvoice\Service\Invoice\InvoicePaymentService::class),
-                $c->get(\MyInvoice\Service\Invoice\FinalFromProformaCreator::class),
-                $c->get(\MyInvoice\Service\Invoice\PaymentTaxDocumentCreator::class),
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
             ),
 

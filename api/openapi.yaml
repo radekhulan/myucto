@@ -11356,6 +11356,28 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayClearingDetail' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Accounting]
+      summary: Smaže importované GoPay XML a účetní zápisy vytvořené tímto importem
+      description: Zachová faktury, dobropisy, jejich úhrady a dříve existující bankovní zápisy. Dostupné pouze superadminovi a jen pro otevřené, nezamčené období.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Vyúčtování a jeho vlastní účetní zápisy byly smazány
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, deleted_entry_ids]
+                properties:
+                  deleted: { type: boolean, const: true }
+                  deleted_entry_ids: { type: array, items: { type: integer, format: int64 } }
+                  preserved_bank_entry_id: { type: [integer, "null"], format: int64 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/gopay/clearings/{id}/download:
     get:
@@ -20699,6 +20721,7 @@ components:
         client_id: { type: integer }
         client_company_name: { type: string }
         project_id: { type: [integer, "null"] }
+        branding_profile_id: { type: [integer, "null"], description: "Volitelný aktivní brandingový profil stejného dodavatele. NULL použije výchozí identitu dodavatele." }
         project_name: { type: [string, "null"] }
         name: { type: string, description: "Display name pro admin (např. \"Hosting Acme s.r.o.\")" }
         frequency:

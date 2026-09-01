@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Invoice;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use PDO;
@@ -35,6 +36,7 @@ final class ProformaPaymentDocumentModeTest extends TestCase
 
     private Connection $db;
     private FinalFromProformaCreator $finalCreator;
+    private InvoicePaymentService $payments;
     private PaymentTaxDocumentCreator $taxDocCreator;
 
     private int $supplierId = 0;
@@ -52,6 +54,7 @@ final class ProformaPaymentDocumentModeTest extends TestCase
             $c = Bootstrap::buildApp()->getContainer();
             $this->db            = $c->get(Connection::class);
             $this->finalCreator  = $c->get(FinalFromProformaCreator::class);
+            $this->payments      = $c->get(InvoicePaymentService::class);
             $this->taxDocCreator = $c->get(PaymentTaxDocumentCreator::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
@@ -122,25 +125,50 @@ final class ProformaPaymentDocumentModeTest extends TestCase
      * BEZ OPRAVY PADÁ: zakázková výroba dostávala vyúčtovací fakturu na nepředané
      * dílo, kterou účetní odběratele odmítne převzít (issue #39).
      */
-    public function testFullPaymentCreatesNoFinalInvoiceInTaxDocumentMode(): void
+    public function testFullPaymentCreatesTaxDocumentInTaxDocumentMode(): void
     {
         $this->setMode(ProformaPaymentDocuments::MODE_ALWAYS_TAX_DOCUMENT);
-        $proformaId = $this->proforma();
-
-        $result = ProformaPaymentDocuments::afterPayment(
-            $this->finalCreator,
-            $this->taxDocCreator,
-            $proformaId,
-            'proforma',
-            true,
-            null,
-            0,
-            '2098-03-10',
-            $this->db->pdo(),
+        $proformaId = $this->proformaWithItem(70000.0);
+        $pdo = $this->db->pdo();
+        $existingVatStatus = $pdo->prepare(
+            'SELECT is_vat_payer, is_identified FROM supplier_vat_status_history
+              WHERE supplier_id = ? AND effective_from = ?'
         );
+        $existingVatStatus->execute([$this->supplierId, '2098-03-10']);
+        $originalVatStatus = $existingVatStatus->fetch(PDO::FETCH_ASSOC) ?: null;
+        $pdo->prepare(
+            'INSERT INTO supplier_vat_status_history
+                (supplier_id, effective_from, is_vat_payer, is_identified)
+             VALUES (?, ?, 1, 0)
+             ON DUPLICATE KEY UPDATE is_vat_payer = 1, is_identified = 0'
+        )->execute([$this->supplierId, '2098-03-10']);
 
-        self::assertNull($result['final_draft_id'], 'Zakázka se nesmí uzavřít zálohou.');
-        self::assertSame(0, $this->countChildren($proformaId, 'invoice'));
+        try {
+            $result = $this->payments->recordPayment($proformaId, 84700.0, '2098-03-10');
+
+            self::assertNotNull($result['tax_document_id'], 'Režim vždy musí vytvořit DDKP i při doplacení proformy.');
+            self::assertSame(1, $this->countChildren($proformaId, 'tax_document'));
+            self::assertSame(0, $this->countChildren($proformaId, 'invoice'));
+
+            $payment = $this->payments->findPayment((int) $result['payment_id']);
+            self::assertSame($result['tax_document_id'], $payment['tax_document_invoice_id'] ?? null);
+        } finally {
+            if ($originalVatStatus === null) {
+                $pdo->prepare(
+                    'DELETE FROM supplier_vat_status_history WHERE supplier_id = ? AND effective_from = ?'
+                )->execute([$this->supplierId, '2098-03-10']);
+            } else {
+                $pdo->prepare(
+                    'UPDATE supplier_vat_status_history SET is_vat_payer = ?, is_identified = ?
+                      WHERE supplier_id = ? AND effective_from = ?'
+                )->execute([
+                    $originalVatStatus['is_vat_payer'],
+                    $originalVatStatus['is_identified'],
+                    $this->supplierId,
+                    '2098-03-10',
+                ]);
+            }
+        }
     }
 
     /**

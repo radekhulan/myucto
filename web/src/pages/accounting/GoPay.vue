@@ -24,6 +24,7 @@ const loading = ref(true)
 const saving = ref(false)
 const importing = ref(false)
 const processingId = ref<number | null>(null)
+const deletingId = ref<number | null>(null)
 const configured = ref(false)
 const accountOptions = ref<GoPayAccountOption[]>([])
 const clearings = ref<GoPayClearing[]>([])
@@ -46,6 +47,7 @@ const form = reactive<GoPaySettings>({
 
 const canConfigure = computed(() => auth.canWrite('bank.post'))
 const canImport = computed(() => auth.canWrite('bank.import') && auth.canWrite('bank.post'))
+const canDelete = computed(() => auth.isSuperadmin)
 const account221 = computed(() => accountOptions.value.filter(a => a.account_code.startsWith('221')))
 const account311 = computed(() => accountOptions.value.filter(a => a.account_code.startsWith('311')))
 const account261 = computed(() => accountOptions.value.filter(a => a.account_code.startsWith('261')))
@@ -150,6 +152,21 @@ async function process(clearing: GoPayClearing | GoPayClearingDetail) {
     toast.error(errorMessage(error))
   } finally {
     processingId.value = null
+  }
+}
+
+async function remove(clearing: GoPayClearing | GoPayClearingDetail) {
+  if (!confirm(t('gopay.delete.confirm', { id: clearing.clearing_id }))) return
+  deletingId.value = clearing.id
+  try {
+    await gopayApi.delete(clearing.id)
+    if (selected.value?.id === clearing.id) selected.value = null
+    clearings.value = await gopayApi.list()
+    toast.success(t('gopay.delete.success'))
+  } catch (error) {
+    toast.error(errorMessage(error))
+  } finally {
+    deletingId.value = null
   }
 }
 
@@ -312,6 +329,10 @@ onMounted(load)
                     <button v-if="canConfigure" type="button" :class="btnOutlineSm('warning')" :disabled="processingId === clearing.id" @click="process(clearing)">
                       <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.cycle" /></svg>
                       {{ t('gopay.process.button') }}
+                    </button>
+                    <button v-if="canDelete" type="button" :class="btnOutlineSm('danger')" :disabled="deletingId === clearing.id" @click="remove(clearing)">
+                      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.trash" /></svg>
+                      {{ t('common.delete') }}
                     </button>
                   </div>
                 </td>

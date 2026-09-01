@@ -210,6 +210,147 @@ final class GoPayService
         return ['content' => (string) $row['file_content'], 'file_name' => (string) $row['file_name']];
     }
 
+    /** @return array{deleted:bool,deleted_entry_ids:list<int>,preserved_bank_entry_id:int|null} */
+    public function delete(int $supplierId, int $clearingId, ?int $userId): array
+    {
+        $pdo = $this->db->pdo();
+        $ownTx = $this->beginUnit($pdo, 'gopay_delete');
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT id,clearing_id,payout_match_transaction_id,bank_transaction_id,bank_journal_entry_id,
+                        bank_journal_entry_owned
+                   FROM gopay_clearings
+                  WHERE id=? AND supplier_id=? FOR UPDATE'
+            );
+            $stmt->execute([$clearingId, $supplierId]);
+            $clearing = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($clearing)) {
+                throw new GoPayException('not_found', 'GoPay vyúčtování nebylo nalezeno.', 404);
+            }
+
+            $entries = $pdo->prepare(
+                'SELECT DISTINCT je.id,je.entry_date,je.source_type,je.source_id,je.reversed_by,
+                        ap.status period_status,
+                        EXISTS(SELECT 1 FROM journal_entries original
+                                WHERE original.supplier_id=je.supplier_id
+                                  AND original.reversed_by=je.id) is_reversal
+                   FROM journal_entries je
+                   JOIN accounting_periods ap ON ap.id=je.period_id AND ap.supplier_id=je.supplier_id
+                  WHERE je.supplier_id=?
+                    AND ((je.source_type="gopay" AND je.source_id IN
+                          (SELECT id FROM gopay_movements WHERE clearing_id=? AND supplier_id=?))
+                         OR je.id=?)
+                  FOR UPDATE'
+            );
+            $bankEntryOwned = (bool) $clearing['bank_journal_entry_owned'];
+            if (!$bankEntryOwned
+                && $clearing['bank_journal_entry_id'] !== null
+                && $clearing['bank_transaction_id'] !== null) {
+                $legacyOwned = $pdo->prepare(
+                    'SELECT 1 FROM journal_entries
+                      WHERE id=? AND supplier_id=? AND source_type="bank" AND source_id=? AND description=?
+                      FOR UPDATE'
+                );
+                $legacyOwned->execute([
+                    (int) $clearing['bank_journal_entry_id'],
+                    $supplierId,
+                    (int) $clearing['bank_transaction_id'],
+                    'Přijetí vyúčtování GoPay ' . (string) $clearing['clearing_id'],
+                ]);
+                $bankEntryOwned = $legacyOwned->fetchColumn() !== false;
+            }
+            $bankEntryId = $clearing['bank_journal_entry_id'] !== null
+                && $bankEntryOwned
+                    ? (int) $clearing['bank_journal_entry_id'] : 0;
+            $entries->execute([$supplierId, $clearingId, $supplierId, $bankEntryId]);
+            $entryRows = $entries->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            $locked = $pdo->prepare(
+                'SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id=? FOR UPDATE'
+            );
+            $locked->execute([$supplierId]);
+            $lockedUntil = $locked->fetchColumn();
+            foreach ($entryRows as $entry) {
+                if ((string) $entry['period_status'] !== 'open') {
+                    throw new GoPayException(
+                        'period_not_open',
+                        'Vyúčtování obsahuje účetní zápis v uzavřeném období.',
+                        409,
+                    );
+                }
+                if ($lockedUntil !== false && $lockedUntil !== null
+                    && (string) $entry['entry_date'] <= (string) $lockedUntil) {
+                    throw new GoPayException(
+                        'date_locked',
+                        'Vyúčtování obsahuje účetní zápis v uzamčené části účetnictví.',
+                        409,
+                    );
+                }
+                if ($entry['reversed_by'] !== null || (bool) $entry['is_reversal']) {
+                    throw new GoPayException(
+                        'entry_has_reversal',
+                        'Vyúčtování obsahuje stornovaný účetní zápis. Nejprve vyřeš jeho storno v deníku.',
+                        409,
+                    );
+                }
+            }
+
+            $deletedEntryIds = [];
+            foreach ($entryRows as $entry) {
+                $entryId = (int) $entry['id'];
+                if ((string) $entry['source_type'] === 'bank') {
+                    $this->bankPosting->prepareEntryDeletion(
+                        $supplierId,
+                        (int) $entry['source_id'],
+                        $entryId,
+                        ['user_id' => $userId, 'reason' => 'gopay_clearing_delete'],
+                    );
+                }
+                $deleteEntry = $pdo->prepare('DELETE FROM journal_entries WHERE id=? AND supplier_id=?');
+                $deleteEntry->execute([$entryId, $supplierId]);
+                if ($deleteEntry->rowCount() !== 1) {
+                    throw new \RuntimeException('Účetní zápis GoPay se nepodařilo smazat.');
+                }
+                $deletedEntryIds[] = $entryId;
+            }
+
+            $transactionIds = array_values(array_unique(array_filter([
+                $clearing['payout_match_transaction_id'] !== null ? (int) $clearing['payout_match_transaction_id'] : 0,
+                $clearing['bank_transaction_id'] !== null ? (int) $clearing['bank_transaction_id'] : 0,
+            ])));
+            foreach ($transactionIds as $transactionId) {
+                $pdo->prepare(
+                    'UPDATE bank_transactions bt
+                        SET bt.match_status="unmatched",bt.matched_at=NULL,bt.matched_by=NULL
+                      WHERE bt.id=? AND bt.matched_invoice_id IS NULL
+                        AND NOT EXISTS(SELECT 1 FROM invoice_payments ip WHERE ip.bank_transaction_id=bt.id)
+                        AND NOT EXISTS(SELECT 1 FROM payment_matches pm WHERE pm.bank_transaction_id=bt.id)
+                        AND NOT EXISTS(SELECT 1 FROM journal_entries je
+                                        WHERE je.supplier_id=? AND je.source_type="bank"
+                                          AND je.source_id=bt.id AND je.reversed_by IS NULL)'
+                )->execute([$transactionId, $supplierId]);
+            }
+
+            $deleteClearing = $pdo->prepare('DELETE FROM gopay_clearings WHERE id=? AND supplier_id=?');
+            $deleteClearing->execute([$clearingId, $supplierId]);
+            if ($deleteClearing->rowCount() !== 1) {
+                throw new \RuntimeException('GoPay vyúčtování se nepodařilo smazat.');
+            }
+
+            $this->commitUnit($pdo, $ownTx, 'gopay_delete');
+            return [
+                'deleted' => true,
+                'deleted_entry_ids' => $deletedEntryIds,
+                'preserved_bank_entry_id' => $clearing['bank_journal_entry_id'] !== null
+                    && !$bankEntryOwned
+                        ? (int) $clearing['bank_journal_entry_id'] : null,
+            ];
+        } catch (\Throwable $e) {
+            $this->rollbackUnit($pdo, $ownTx, 'gopay_delete');
+            throw $e;
+        }
+    }
+
     /** @return array{duplicate:bool,clearing:array<string,mixed>} */
     public function import(int $supplierId, ?int $userId, string $fileName, string $xml): array
     {
@@ -663,7 +804,7 @@ final class GoPayService
                     : (count($rows) === 0
                         ? 'Příchozí bankovní převod odpovídající clearingu zatím nebyl nalezen.'
                         : 'Clearingu odpovídá více bankovních převodů.');
-                $pdo->prepare('UPDATE gopay_clearings SET bank_transaction_id=NULL,bank_journal_entry_id=NULL,payout_issue_code=?,payout_issue_message=? WHERE id=? AND supplier_id=?')
+                $pdo->prepare('UPDATE gopay_clearings SET bank_transaction_id=NULL,bank_journal_entry_id=NULL,bank_journal_entry_owned=0,payout_issue_code=?,payout_issue_message=? WHERE id=? AND supplier_id=?')
                     ->execute([$code, $message, $clearingId, $supplierId]);
                 $this->commitUnit($pdo, $ownTx, 'gopay_payout');
                 return;
@@ -673,6 +814,8 @@ final class GoPayService
             $existing = $this->journal->findBySource($supplierId, 'bank', $txId);
             if ($existing !== null && ($existing['reversed_by'] ?? null) === null) {
                 $entryId = (int) $existing['id'];
+                $entryOwned = (int) ($clearing['bank_journal_entry_id'] ?? 0) === $entryId
+                    && (bool) ($clearing['bank_journal_entry_owned'] ?? false);
                 if (!$this->entryHasPair($supplierId, $entryId, (string) $clearing['destination_bank_account_code'], (string) $clearing['clearing_account_code'], (float) $clearing['amount_sent'])) {
                     throw new GoPayException('payout_posting_conflict', 'Bankovní převod je už zaúčtovaný na jiné účty.', 409);
                 }
@@ -683,13 +826,14 @@ final class GoPayService
                     'description' => 'Přijetí vyúčtování GoPay ' . (string) $clearing['clearing_id'],
                 ], ['user_id' => $userId, 'posted_by' => $userId]);
                 $entryId = (int) $result['entry_id'];
+                $entryOwned = true;
             }
             $pdo->prepare(
                 'UPDATE gopay_clearings
-                    SET payout_match_transaction_id=?,bank_transaction_id=?,bank_journal_entry_id=?,
+                    SET payout_match_transaction_id=?,bank_transaction_id=?,bank_journal_entry_id=?,bank_journal_entry_owned=?,
                         payout_issue_code=NULL,payout_issue_message=NULL
                   WHERE id=? AND supplier_id=?'
-            )->execute([$txId, $txId, $entryId, $clearingId, $supplierId]);
+            )->execute([$txId, $txId, $entryId, $entryOwned ? 1 : 0, $clearingId, $supplierId]);
             $pdo->prepare(
                 'UPDATE bank_transactions
                     SET match_status=IF(match_status="unmatched","manual",match_status),
@@ -899,6 +1043,7 @@ final class GoPayService
                 $row[$field] = $row[$field] !== null ? (int) $row[$field] : null;
             }
         }
+        unset($row['bank_journal_entry_owned']);
         foreach (['amount_gross', 'amount_credit_note', 'amount_fee', 'amount_fee_external', 'amount_storno', 'amount_storno_fee', 'amount_transfer', 'amount_sent', 'bank_amount'] as $field) {
             if (array_key_exists($field, $row)) {
                 $row[$field] = $row[$field] !== null ? (float) $row[$field] : null;

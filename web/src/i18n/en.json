@@ -11374,6 +11374,9 @@
     "invoice_type": "Document type",
     "currency": "Currency",
     "language": "Document language",
+    "branding_profile": "Visual identity",
+    "branding_profile_default": "Default supplier identity",
+    "branding_profile_hint": "The selected profile is used for every invoice generated from this template.",
     "payment_due_days": "Due (days from issue)",
     "payment_due_label": "Payment due",
     "payment_due_unit_inherit": "Follow customer",
@@ -14271,6 +14274,10 @@
       "success": "The clearing is fully matched and posted.",
       "review": "The clearing was processed, but some items need review."
     },
+    "delete": {
+      "confirm": "Delete GoPay clearing {id}, the imported XML, and the journal entries created from it? This action cannot be undone.",
+      "success": "The GoPay clearing, XML, and related journal entries were deleted."
+    },
     "detail": {
       "title": "Clearing {id}",
       "imported": "File {file}, imported {date}",
@@ -14317,6 +14324,9 @@
       "invalid_payout_bank_code": "The GoPay bank code must contain four digits.",
       "invalid_tolerance": "Date tolerance must be between 0 and 14 days.",
       "clearing_conflict": "The same clearing already exists with different data.",
+      "period_not_open": "The clearing contains an entry in a closed accounting period.",
+      "date_locked": "The clearing contains an entry in a locked part of the accounting records.",
+      "entry_has_reversal": "The clearing contains a reversed entry. Resolve its reversal in the journal first.",
       "not_double_entry": "Automatic GoPay posting requires double-entry accounting.",
       "not_found": "The GoPay clearing was not found."
     }

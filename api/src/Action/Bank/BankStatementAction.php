@@ -24,8 +24,6 @@ use MyInvoice\Service\Bank\Match\MatchSuggestionException;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
 use MyInvoice\Service\Bank\Match\SubsetSumSolver;
 use MyInvoice\Service\Bank\StatementScanner;
-use MyInvoice\Service\Invoice\FinalFromProformaCreator;
-use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
@@ -84,12 +82,10 @@ final class BankStatementAction
         private readonly IpMatcher $ipMatcher,
         private readonly InvoiceRepository $invoices,
         private readonly GpcParser $parser,
-        private readonly FinalFromProformaCreator $finalCreator,
         private readonly \MyInvoice\Repository\PurchaseInvoiceRepository $purchaseRepo,
         private readonly \MyInvoice\Service\Invoice\PurchaseInvoiceCalculator $purCalc,
         private readonly \MyInvoice\Service\Mail\PaymentThanksMailer $paymentThanks,
         private readonly \MyInvoice\Service\Invoice\InvoicePaymentService $payments,
-        private readonly \MyInvoice\Service\Invoice\PaymentTaxDocumentCreator $taxDocCreator,
         // Vyžádání chybějících dokladů (Fáze F) — jedním klikem z nespárované transakce.
         private readonly \MyInvoice\Repository\DocumentRequestRepository $documentRequests,
         private readonly \MyInvoice\Service\Bank\Pdf\BankStatementPdfParserRegistry $pdfParsers,
@@ -2622,19 +2618,8 @@ final class BankStatementAction
                     $markedPaid = $recorded['became_paid'];
                     $partialPayment = !$recorded['became_paid'];
 
-                    $followUp = ProformaPaymentDocuments::afterPayment(
-                        $this->finalCreator,
-                        $this->taxDocCreator,
-                        $invoiceId,
-                        isset($invoice['invoice_type']) ? (string) $invoice['invoice_type'] : null,
-                        $markedPaid,
-                        isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
-                        $userId ?: 0,
-                        $postedAt,
-                        $pdo,
-                    );
-                    $finalDraftId = $followUp['final_draft_id'] ?? $finalDraftId;
-                    $taxDocId = $followUp['tax_document_id'] ?? $taxDocId;
+                    $finalDraftId = $recorded['final_draft_id'] ?? $finalDraftId;
+                    $taxDocId = $recorded['tax_document_id'] ?? $taxDocId;
                 }
             }
 
@@ -2991,26 +2976,11 @@ final class BankStatementAction
                 if ($recorded['became_paid']) {
                     $paidInvoiceIds[] = $iid;
                 }
-                // Dřív se tu zakládala jen finální faktura. Částečná úhrada tu zatím
-                // nastat nemůže (každá faktura dostává celý zbytek a součet musí sedět
-                // na částku platby), takže to nebyla aktivní chyba — ale rozhodnutí
-                // patří na jedno místo se zbytkem cest párování (issue #39).
-                $followUp = ProformaPaymentDocuments::afterPayment(
-                    $this->finalCreator,
-                    $this->taxDocCreator,
-                    $iid,
-                    isset($byId[$iid]['invoice_type']) ? (string) $byId[$iid]['invoice_type'] : null,
-                    (bool) $recorded['became_paid'],
-                    isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
-                    $userId ?: 0,
-                    $postedAt,
-                    $pdo,
-                );
-                if ($followUp['final_draft_id'] !== null) {
-                    $finalDraftIds[$iid] = $followUp['final_draft_id'];
+                if ($recorded['final_draft_id'] !== null) {
+                    $finalDraftIds[$iid] = $recorded['final_draft_id'];
                 }
-                if ($followUp['tax_document_id'] !== null) {
-                    $taxDocumentIds[$iid] = $followUp['tax_document_id'];
+                if ($recorded['tax_document_id'] !== null) {
+                    $taxDocumentIds[$iid] = $recorded['tax_document_id'];
                 }
             }
 

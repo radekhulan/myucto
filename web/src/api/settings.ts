@@ -988,6 +988,8 @@ export const settingsApi = {
 
   listBrandingProfiles: (clientScoped = false) =>
     api.get<BrandingProfile[]>(clientScoped ? '/settings/client/branding/profiles' : '/settings/branding-profiles').then(r => r.data),
+  listAvailableBrandingProfiles: () =>
+    api.get<BrandingProfile[]>('/branding-profiles').then(r => r.data),
   createBrandingProfile: (payload: Partial<BrandingProfile>, clientScoped = false) =>
     api.post<BrandingProfile>(clientScoped ? '/settings/client/branding/profiles' : '/settings/branding-profiles', payload).then(r => r.data),
   updateBrandingProfile: (id: number, payload: Partial<BrandingProfile>, clientScoped = false) =>

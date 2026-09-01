@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Accounting\GoPay;
 use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\Json;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\GoPay\GoPayException;
 use MyInvoice\Service\Accounting\GoPay\GoPayService;
 use MyInvoice\Service\ActivityLogger;
@@ -167,6 +168,28 @@ final class GoPayAction
                 'clearing_id' => $result['clearing_id'] ?? null,
                 'status' => $result['status'] ?? null,
                 'issue_count' => $result['issue_count'] ?? null,
+            ]);
+            return Json::ok($response, $result);
+        } catch (\Throwable $e) {
+            return $this->error($response, $e);
+        }
+    }
+
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (!RequestAuthorization::isSuperadmin($request)) {
+            return Json::error($response, 'forbidden', 'Pouze admin smí mazat GoPay vyúčtování.', 403);
+        }
+        try {
+            $clearingId = (int) ($args['id'] ?? 0);
+            $result = $this->service->delete(
+                $this->currentSupplierId($request),
+                $clearingId,
+                $this->userId($request),
+            );
+            $this->log($request, 'gopay.clearing_deleted', $clearingId, [
+                'deleted_entry_ids' => $result['deleted_entry_ids'],
+                'preserved_bank_entry_id' => $result['preserved_bank_entry_id'],
             ]);
             return Json::ok($response, $result);
         } catch (\Throwable $e) {

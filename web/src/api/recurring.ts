@@ -58,6 +58,7 @@ export interface RecurringTemplate {
   client_company_name?: string
   project_id: number | null
   project_name?: string | null
+  branding_profile_id: number | null
   name: string
 
   frequency: Frequency
@@ -114,6 +115,7 @@ export interface RecurringTemplate {
 export interface RecurringTemplatePayload {
   client_id: number
   project_id?: number | null
+  branding_profile_id?: number | null
   name: string
   frequency: Frequency
   day_of_month?: number | null

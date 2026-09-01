@@ -39,6 +39,8 @@ final class InvoicePaymentService
         private readonly InvoicePdfRenderer $pdf,
         private readonly StatsRecomputer $stats,
         private readonly ClientBankAccountRepository $clientBankAccounts,
+        private readonly FinalFromProformaCreator $finalCreator,
+        private readonly PaymentTaxDocumentCreator $taxDocCreator,
     ) {}
 
     /**
@@ -134,7 +136,8 @@ final class InvoicePaymentService
      *
      * @param array{variable_symbol?: ?string, bank_reference?: ?string, note?: ?string,
      *              source?: string, bank_transaction_id?: ?int, created_by?: ?int} $opts
-     * @return array{payment_id: int, became_paid: bool, remaining: float}
+     * @return array{payment_id: int, became_paid: bool, remaining: float,
+     *               final_draft_id: int|null, tax_document_id: int|null}
      * @throws \RuntimeException při validační chybě (zpráva pro UI)
      */
     public function recordPayment(int $invoiceId, float $amount, string $paidOn, array $opts = []): array
@@ -207,6 +210,17 @@ final class InvoicePaymentService
             }
 
             $transition = $this->recomputeLocked($pdo, $invoiceId);
+            $documents = ProformaPaymentDocuments::afterPayment(
+                $this->finalCreator,
+                $this->taxDocCreator,
+                $invoiceId,
+                (string) $invoice['invoice_type'],
+                $transition['became_paid'],
+                $paymentId,
+                isset($opts['created_by']) ? (int) $opts['created_by'] : 0,
+                $paidOn,
+                $pdo,
+            );
 
             if ($ownsTransaction) {
                 $pdo->commit();
@@ -224,6 +238,8 @@ final class InvoicePaymentService
             'payment_id'  => $paymentId,
             'became_paid' => $transition['became_paid'],
             'remaining'   => $transition['remaining'],
+            'final_draft_id' => $documents['final_draft_id'],
+            'tax_document_id' => $documents['tax_document_id'],
         ];
     }
 

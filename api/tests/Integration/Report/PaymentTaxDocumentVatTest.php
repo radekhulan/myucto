@@ -15,6 +15,7 @@ use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\AdvanceCycleLock;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
+use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Report\DphBookBuilder;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
@@ -67,6 +68,7 @@ final class PaymentTaxDocumentVatTest extends TestCase
     /** @var int[] vytvořené faktury — mažou se v opačném pořadí (děti dřív) */
     private array $invoiceIds = [];
     private ?array $origVatFlags = null;
+    private ?string $originalPaymentDocumentMode = null;
 
     protected function setUp(): void
     {
@@ -106,6 +108,11 @@ final class PaymentTaxDocumentVatTest extends TestCase
         )->fetch(PDO::FETCH_ASSOC) ?: [];
         $pdo->prepare('UPDATE supplier SET is_vat_payer = 1, is_identified = 0 WHERE id = ?')
             ->execute([$this->supplierId]);
+        $mode = $pdo->prepare('SELECT proforma_payment_document FROM supplier WHERE id = ?');
+        $mode->execute([$this->supplierId]);
+        $this->originalPaymentDocumentMode = (string) $mode->fetchColumn();
+        $pdo->prepare('UPDATE supplier SET proforma_payment_document = ? WHERE id = ?')
+            ->execute([ProformaPaymentDocuments::MODE_MANUAL, $this->supplierId]);
 
         $czId = (int) ($pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn() ?: 0);
         $stmt = $pdo->prepare(
@@ -126,10 +133,11 @@ final class PaymentTaxDocumentVatTest extends TestCase
         }
         $pdo = $this->db->pdo();
         if ($this->origVatFlags !== null && $this->supplierId > 0) {
-            $pdo->prepare('UPDATE supplier SET is_vat_payer = ?, is_identified = ? WHERE id = ?')
+            $pdo->prepare('UPDATE supplier SET is_vat_payer = ?, is_identified = ?, proforma_payment_document = ? WHERE id = ?')
                 ->execute([
                     (int) ($this->origVatFlags['is_vat_payer'] ?? 1),
                     (int) ($this->origVatFlags['is_identified'] ?? 0),
+                    $this->originalPaymentDocumentMode ?? ProformaPaymentDocuments::MODE_ALWAYS_TAX_DOCUMENT,
                     $this->supplierId,
                 ]);
         }

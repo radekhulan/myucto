@@ -489,6 +489,7 @@ final class StatementMatcher
             // Pro již ručně paid fakturu jen navážeme transakci (status/paid_at netknuté).
             $pdo->beginTransaction();
             try {
+                $recorded = null;
                 if (!$alreadyPaid) {
                     if ($this->payments !== null) {
                         $paymentAmount = $this->txAmountInInvoiceCurrency(
@@ -501,7 +502,7 @@ final class StatementMatcher
                         if ($paymentAmount > $remaining && $remaining > 0.0) {
                             $paymentAmount = $remaining;
                         }
-                        $this->payments->recordPayment(
+                        $recorded = $this->payments->recordPayment(
                             (int) $inv['id'],
                             $paymentAmount,
                             (string) $row['posted_at'],
@@ -525,9 +526,10 @@ final class StatementMatcher
                       WHERE id = ?"
                 )->execute([$inv['id'], $transactionId]);
 
-                $finalDraftId = null;
-                if (!$alreadyPaid) {
-                    $finalDraftId = ProformaPaymentDocuments::afterPayment(
+                $finalDraftId = $recorded['final_draft_id'] ?? null;
+                $taxDocId = $recorded['tax_document_id'] ?? null;
+                if (!$alreadyPaid && $this->payments === null) {
+                    $followUp = ProformaPaymentDocuments::afterPayment(
                         $this->finalCreator,
                         $this->taxDocCreator,
                         (int) $inv['id'],
@@ -537,7 +539,9 @@ final class StatementMatcher
                         0,
                         (string) $row['posted_at'],
                         $pdo,
-                    )['final_draft_id'];
+                    );
+                    $finalDraftId = $followUp['final_draft_id'];
+                    $taxDocId = $followUp['tax_document_id'];
                 }
                 $pdo->commit();
             } catch (\Throwable $e) {
@@ -560,6 +564,9 @@ final class StatementMatcher
             $result = ['status' => 'auto_exact', 'invoice_id' => (int) $inv['id'], 'varsymbol' => $vs];
             if ($finalDraftId !== null) {
                 $result['final_draft_id'] = $finalDraftId;
+            }
+            if ($taxDocId !== null) {
+                $result['tax_document_id'] = $taxDocId;
             }
             if ($alreadyPaid) {
                 $result['already_paid'] = true;
@@ -590,17 +597,7 @@ final class StatementMatcher
                       WHERE id = ?"
                 )->execute([$inv['id'], $transactionId]);
 
-                $taxDocId = ProformaPaymentDocuments::afterPayment(
-                    $this->finalCreator,
-                    $this->taxDocCreator,
-                    (int) $inv['id'],
-                    isset($inv['invoice_type']) ? (string) $inv['invoice_type'] : null,
-                    false,
-                    isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
-                    0,
-                    (string) $row['posted_at'],
-                    $pdo,
-                )['tax_document_id'];
+                $taxDocId = $recorded['tax_document_id'];
                 $pdo->commit();
             } catch (\Throwable $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
