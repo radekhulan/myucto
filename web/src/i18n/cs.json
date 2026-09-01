@@ -4914,17 +4914,17 @@
         "jmhz_dispatch_description": "Vyberte dopravní kanál. V obou případech se nejprve neměnně zmrazí přesně ta XML data, která se odešlou. ISDS připraví datovou zprávu pro ČSSZ a vyžádá Vaše přihlášení a schválení přímo v datové schránce.",
         "jmhz_dispatch_empty": "Nejprve dokončete schválenou mzdovou revizi, kontrolní náhled a povinné právní evidence.",
         "jmhz_dispatch_reference": "Období {period} · variabilní symbol {symbol}",
-        "jmhz_dispatch_isds": "Odeslat přes ISDS",
+        "jmhz_dispatch_isds": "Připravit datovou zprávu",
         "jmhz_dispatch_vrep": "Odeslat přes VREP",
         "jmhz_dispatch_obligation_missing": "Pro tuto registraci chybí evidovaná povinnost JMHZ. Obnovte přehled nebo zkontrolujte založení povinností běhu.",
         "jmhz_dispatch_not_open": "Ostré podání lze odeslat nejdříve {date}. Testovací prostředí zůstává dostupné pro ověření celého toku.",
         "jmhz_dispatch_already_started": "Podání už pokračuje ve stavu {status}. Další kopii nelze vytvořit; průběh sledujte v přehledu podání.",
         "jmhz_dispatch_failed": "JMHZ se nepodařilo zmrazit nebo předat zvolenému kanálu.",
         "jmhz_dispatch_vrep_started": "VREP převzal pokus č. {id} ve stavu {status}. Výsledek a protokol se zobrazí na záložce Stav odeslání.",
-        "jmhz_dispatch_isds_queued": "Datová zpráva je připravená pro {name}, ID schránky {box}.",
-        "jmhz_dispatch_manual": "Odesílací brána ani Mobilní klíč pro tuto firmu nejsou k dispozici. Otevřete odchozí frontu, odešlete připravený soubor ze své datové schránky a poté doplňte ID zprávy a doručenku.",
+        "jmhz_dispatch_isds_queued": "Zpráva je připravená pro {name}, ID schránky {box}. Zatím NEODEŠLA — odeslat ji musíte v odchozí frontě.",
+        "jmhz_dispatch_manual": "Odesílací brána ani Mobilní klíč pro tuto firmu nejsou k dispozici. Zprávu odešlete v odchozí frontě ze své datové schránky a pak doplňte ID zprávy a doručenku.",
         "jmhz_dispatch_mobile_key": "Odesílací brána není aktivní, ale podání jde odeslat přímo z aplikace po potvrzení relace v Mobilním klíči.",
-        "jmhz_dispatch_open_outbox": "Otevřít odchozí frontu ISDS",
+        "jmhz_dispatch_open_outbox": "Otevřít frontu a odeslat",
         "jmhz_gateway_title": "Před odchodem do ISDS",
         "jmhz_gateway_credentials": "Přihlašovací údaje zadáváte pouze na stránce ISDS. MyÚčto je nevidí ani neukládá a zpráva odejde až po Vašem schválení konceptu.",
         "jmhz_gateway_methods": "Dostupné metody — například jméno a heslo, heslo aplikace s bezpečnostním klíčem eGovernmentu nebo Mobilní klíč eGovernmentu — určuje ISDS podle Vašeho účtu.",
@@ -19277,7 +19277,11 @@
       "boxId": "ID naší datové schránky",
       "validTo": "Certifikát platí do",
       "certificate": "Soubor certifikátu (PFX nebo P12)",
-      "certificatePassword": "Heslo k certifikátu"
+      "certificatePassword": "Heslo k certifikátu",
+      "deleteCredential": "Smazat přístup",
+      "deleteCredentialConfirm": "Opravdu smazat uložený přístup k datové schránce {box}? Nahraný certifikát se odstraní a budete ho muset nastavit znovu.",
+      "credentialDeleted": "Přístup k datové schránce byl smazán.",
+      "credentialDeleteFailed": "Přístup k datové schránce se nepodařilo smazat."
     },
     "polling": {
       "title": "Vybírání pouze na vyžádání",
@@ -19364,7 +19368,8 @@
         "credentialsRequired": "Vyplňte uživatelské jméno a komunikační kód.",
         "request": "Požádat o potvrzení v klíči",
         "sent": "Podání bylo odesláno datovou schránkou.",
-        "notDispatched": "Relace byla potvrzena, ale podání se neodeslalo. Zkontrolujte stav podání."
+        "notDispatched": "Relace byla potvrzena, ale podání se neodeslalo. Zkontrolujte stav podání.",
+        "testEnvironmentWarning": "Jste v testovacím prostředí. Testovací ISDS (datovka-test.gov.cz) má vlastní účty — přihlášení do ostré datové schránky tu neprojde. Pro odeslání ostrého podání přepněte nahoře na Ostré prostředí."
       }
     },
     "manual": {

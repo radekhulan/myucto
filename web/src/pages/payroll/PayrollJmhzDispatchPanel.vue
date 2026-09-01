@@ -299,9 +299,11 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
                 {{ t('payroll.submissions.overview.jmhz_dispatch_manual') }}
               </p>
               <a
-                href="/admin/databox?tab=outbox"
-                :class="[btnOutline('neutral'), 'mt-3 inline-flex']"
+                :href="`/admin/databox?tab=outbox&outbox=${state(preview).isds!.outbox_id}`"
+                :class="[btnFilled('primary'), 'mt-3 inline-flex']"
+                data-test="jmhz-dispatch-open-outbox"
               >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.send" /></svg>
                 {{ t('payroll.submissions.overview.jmhz_dispatch_open_outbox') }}
               </a>
             </template>

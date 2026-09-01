@@ -4914,17 +4914,17 @@
         "jmhz_dispatch_description": "Choose the transport channel. Both paths first freeze the exact XML data that will be sent. ISDS prepares a data message for CSSA and asks you to sign in and approve it directly in the data box.",
         "jmhz_dispatch_empty": "Complete an approved payroll revision, the validation preview and the mandatory legal evidence first.",
         "jmhz_dispatch_reference": "Period {period} · variable symbol {symbol}",
-        "jmhz_dispatch_isds": "Submit through ISDS",
+        "jmhz_dispatch_isds": "Prepare the data message",
         "jmhz_dispatch_vrep": "Submit through VREP",
         "jmhz_dispatch_obligation_missing": "No JMHZ obligation is recorded for this registration. Refresh the overview or check obligation creation for the payroll run.",
         "jmhz_dispatch_not_open": "Production filing opens on {date}. The test environment remains available for rehearsal.",
         "jmhz_dispatch_already_started": "The filing is already in status {status}. Another copy cannot be created; follow it in the submissions overview.",
         "jmhz_dispatch_failed": "JMHZ could not be frozen or handed to the selected channel.",
         "jmhz_dispatch_vrep_started": "VREP accepted attempt #{id} in status {status}. Follow its result and protocol on the Submission status tab.",
-        "jmhz_dispatch_isds_queued": "The data message is ready for {name}, data box ID {box}.",
-        "jmhz_dispatch_manual": "Neither the sending gateway nor Mobile Key is available for this company. Open the ISDS outbox, send the prepared file from your data box, then record the message ID and upload its delivery receipt.",
+        "jmhz_dispatch_isds_queued": "The message is ready for {name}, box ID {box}. It has NOT been sent yet — send it from the outbox.",
+        "jmhz_dispatch_manual": "Neither the sending gateway nor the Mobile Key is available for this company. Send the message from the outbox using your own data box, then fill in the message ID and the delivery receipt.",
         "jmhz_dispatch_mobile_key": "The sending gateway is not active, but the filing can be sent directly from the app once you confirm the session in Mobile Key.",
-        "jmhz_dispatch_open_outbox": "Open ISDS outbox",
+        "jmhz_dispatch_open_outbox": "Open the outbox and send",
         "jmhz_gateway_title": "Before leaving for ISDS",
         "jmhz_gateway_credentials": "You enter credentials only on the ISDS page. MyÚčto neither sees nor stores them, and the message is sent only after you approve the draft.",
         "jmhz_gateway_methods": "ISDS determines the methods available for your account — for example username and password, an application password with the eGovernment security key, or the Mobile eGovernment Key.",
@@ -19277,7 +19277,11 @@
       "boxId": "Our data box ID",
       "validTo": "Certificate valid until",
       "certificate": "Certificate file (PFX or P12)",
-      "certificatePassword": "Certificate password"
+      "certificatePassword": "Certificate password",
+      "deleteCredential": "Delete access",
+      "deleteCredentialConfirm": "Really delete the stored access to data box {box}? The uploaded certificate will be removed and you will have to set it up again.",
+      "credentialDeleted": "The data box access was deleted.",
+      "credentialDeleteFailed": "The data box access could not be deleted."
     },
     "polling": {
       "title": "On-demand collection only",
@@ -19364,7 +19368,8 @@
         "credentialsRequired": "Fill in the user name and the communication code.",
         "request": "Ask for confirmation in the key",
         "sent": "The submission was sent through the data box.",
-        "notDispatched": "The session was confirmed but the submission was not sent. Check its state."
+        "notDispatched": "The session was confirmed but the submission was not sent. Check its state.",
+        "testEnvironmentWarning": "You are in the test environment. The test ISDS (datovka-test.gov.cz) has its own accounts — credentials for the live data box will not work here. Switch to the live environment above to send a real filing."
       }
     },
     "manual": {

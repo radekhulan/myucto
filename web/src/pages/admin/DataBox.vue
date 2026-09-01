@@ -53,6 +53,35 @@ const supplierStore = useSupplierStore()
 
 type Tab = 'access' | 'outbox' | 'inbox' | 'notices' | 'recipients'
 const tab = ref<Tab>('access')
+/*
+ * Zvýrazněná zpráva z odkazu (`?tab=outbox&outbox=42`).
+ *
+ * Why: mzdové podání sem posílá účetní z úplně jiné obrazovky se zprávou, která
+ * teprve čeká na odeslání. Bez zvýraznění přistála v seznamu, kde jsou všechny
+ * zprávy stejné, a musela svou hledat podle názvu souboru.
+ */
+const focusOutboxId = ref<number | null>(null)
+const deletingCredential = ref(false)
+
+async function removeCredential() {
+  const current = currentCredential.value
+  if (!current || deletingCredential.value) return
+  if (!window.confirm(t('databox.access.deleteCredentialConfirm', { box: current.box_id }))) return
+  deletingCredential.value = true
+  try {
+    await dataBoxApi.deleteCredential(environment.value)
+    toast.success(t('databox.access.credentialDeleted'))
+    certLabel.value = ''
+    certBoxId.value = ''
+    certPassword.value = ''
+    certFile.value = null
+    await loadAll()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('databox.access.credentialDeleteFailed')))
+  } finally {
+    deletingCredential.value = false
+  }
+}
 const environment = ref<'production' | 'test'>('production')
 const loading = ref(true)
 const saving = ref(false)
@@ -1101,9 +1130,14 @@ async function handleGatewayReturn(): Promise<boolean> {
 }
 
 onMounted(async () => {
-  const requestedTab = new URLSearchParams(window.location.search).get('tab')
+  const params = new URLSearchParams(window.location.search)
+  const requestedTab = params.get('tab')
   if (requestedTab && ['access', 'outbox', 'inbox', 'notices', 'recipients'].includes(requestedTab)) {
     tab.value = requestedTab as Tab
+  }
+  const requestedOutbox = Number(params.get('outbox'))
+  if (Number.isInteger(requestedOutbox) && requestedOutbox > 0) {
+    focusOutboxId.value = requestedOutbox
   }
   await loadGatewayRegistrations()
   const returning = await handleGatewayReturn()
@@ -1215,14 +1249,31 @@ onUnmounted(clearMobileStatusTimer)
         <h2 class="mb-1 font-medium text-neutral-900">{{ t('databox.access.certificateSettings') }}</h2>
         <p class="mb-4 text-sm text-neutral-500">{{ t('databox.access.certificateOnly') }}</p>
 
-        <div v-if="currentCredential" class="mb-4 rounded-md bg-neutral-50 p-3 text-sm">
-          <div class="font-medium">{{ currentCredential.label }}</div>
-          <div class="text-neutral-500">
-            {{ t('databox.access.boxId') }}: <code>{{ currentCredential.box_id }}</code>
+        <div v-if="currentCredential" class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-md bg-neutral-50 p-3 text-sm">
+          <div class="min-w-0">
+            <div class="font-medium">{{ currentCredential.label }}</div>
+            <div class="text-neutral-500">
+              {{ t('databox.access.boxId') }}: <code>{{ currentCredential.box_id }}</code>
+            </div>
+            <div v-if="currentCredential.certificate_valid_to" class="text-neutral-500">
+              {{ t('databox.access.validTo') }}: {{ currentCredential.certificate_valid_to }}
+            </div>
           </div>
-          <div v-if="currentCredential.certificate_valid_to" class="text-neutral-500">
-            {{ t('databox.access.validTo') }}: {{ currentCredential.certificate_valid_to }}
-          </div>
+          <!--
+            Smazání uloženého přístupu. Endpoint existoval od začátku, jen na něj
+            nevedlo tlačítko — špatně nahraný certifikát nebo cizí ID schránky
+            se pak nedaly odstranit, jen přepsat, a nikdo to nepoznal.
+          -->
+          <button
+            type="button"
+            :class="btnOutline('danger')"
+            :disabled="deletingCredential"
+            data-test="databox-delete-credential"
+            @click="removeCredential"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+            {{ t('databox.access.deleteCredential') }}
+          </button>
         </div>
 
         <div class="grid gap-3 sm:grid-cols-2">
@@ -1437,7 +1488,11 @@ onUnmounted(clearMobileStatusTimer)
       <div
         v-for="row in outbox"
         :key="row.id"
-        class="rounded-lg border border-neutral-200 bg-surface p-4"
+        class="rounded-lg border bg-surface p-4"
+        :class="row.id === focusOutboxId
+          ? 'border-primary-500 ring-2 ring-primary-500/20'
+          : 'border-neutral-200'"
+        :data-test="row.id === focusOutboxId ? 'outbox-focused' : undefined"
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
@@ -1551,6 +1606,18 @@ onUnmounted(clearMobileStatusTimer)
           data-test="outbox-mobile-key-form"
         >
           <p class="text-sm text-neutral-700">{{ t('databox.outbox.mobileKey.intro') }}</p>
+          <!--
+            Testovací ISDS má vlastní účty. Bez tohohle upozornění vypadalo
+            odmítnutí ostrého přihlášení jako překlep v kódu a účetní ho
+            přepisovala dokola.
+          -->
+          <p
+            v-if="environment === 'test'"
+            class="mt-2 rounded-md border border-warning-200 bg-warning-50 p-2 text-xs text-warning-800"
+            data-test="outbox-mobile-key-test-warning"
+          >
+            {{ t('databox.outbox.mobileKey.testEnvironmentWarning') }}
+          </p>
           <div v-if="mobileOutboxFlow === ''" class="mt-3 grid gap-3 sm:grid-cols-2">
             <label class="block">
               <span class="text-sm font-medium">{{ t('databox.outbox.mobileKey.username') }}</span>
