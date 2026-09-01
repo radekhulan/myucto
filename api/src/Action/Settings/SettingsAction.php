@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
@@ -64,6 +65,7 @@ final class SettingsAction
         // Zastoupení daňovým poradcem (§29/2 DŘ) — jen ke čtení historie do respondSupplier();
         // zápis jde přes TaxRepresentationAction (samostatná historizovaná evidence, vzor VH-01).
         private readonly \MyInvoice\Service\Tax\Return\TaxRepresentationService $taxRepresentation,
+        private readonly SupplierPaymentQrSettingsRepository $paymentQrSettings,
     ) {}
 
     /**
@@ -506,6 +508,7 @@ final class SettingsAction
             // SupplierLogoConverter do storage/branding/sup-N/). Mass-assign by umožnil
             // admin-planted LFI (security report @andrejtomci #2).
             'default_hourly_rate', 'auto_send_reminders', 'reminder_days_after_due', 'auto_generate_recurring', 'embed_isdoc',
+            'invoice_qr_include_due_date', 'purchase_invoice_qr_include_due_date',
             'default_prices_include_vat',
             // Pohoda kódy; `pohoda_accounting_code` = předkontace (migrace 1376) — bez ní
             // si Pohoda po importu dosadí vlastní default a doklad se zaúčtuje jinam.
@@ -871,12 +874,25 @@ final class SettingsAction
                 $body['self_copy'] = $clean === [] ? null : json_encode($clean, JSON_UNESCAPED_UNICODE);
             }
         }
+        $paymentQrBody = [];
+        foreach (SupplierPaymentQrSettingsRepository::FIELDS as $field) {
+            if (!array_key_exists($field, $body)) continue;
+            if (!is_bool($body[$field]) && !in_array($body[$field], [0, 1], true)) {
+                return Json::error($response, 'validation_failed', "$field musí mít logickou hodnotu.", 400);
+            }
+            $paymentQrBody[$field] = (bool) $body[$field];
+        }
         $sets = [];
         $params = [];
         foreach ($allowed as $f) {
             // Plátcovství/IO jde přes historii + přepočet cache (níže) — přímý zápis
             // by u budoucí účinnosti přepnul cache hned a cron ji druhý den vracel.
             if ($vatStatusEffectiveFrom !== null && in_array($f, ['is_vat_payer', 'is_identified'], true)) {
+                continue;
+            }
+            // QR přepínače ukládá společný repository níže, aby interní a klientská
+            // cesta sdílely detekci skutečné změny a invalidaci PDF cache.
+            if (in_array($f, SupplierPaymentQrSettingsRepository::FIELDS, true)) {
                 continue;
             }
             if (array_key_exists($f, $body)) {
@@ -891,6 +907,26 @@ final class SettingsAction
             $params[] = $id;
             $sql = 'UPDATE supplier SET ' . implode(', ', $sets) . ' WHERE id = ?';
             $this->db->pdo()->prepare($sql)->execute($params);
+        }
+        if ($paymentQrBody !== []) {
+            $qrResult = $this->paymentQrSettings->update($id, $paymentQrBody);
+            $invalidated = 0;
+            if (SupplierPaymentQrSettingsRepository::invalidatesInvoicePdfs($qrResult['changed'])) {
+                $invalidated = $this->pdf->invalidatePaymentQrBySupplier($id);
+            }
+            if ($qrResult['changed'] !== []) {
+                $changes = [];
+                foreach ($qrResult['changed'] as $field) {
+                    $changes[$field] = [
+                        'before' => $qrResult['before'][$field],
+                        'after' => $qrResult['settings'][$field],
+                    ];
+                }
+                $this->log($request, 'supplier.payment_qr_settings_updated', $id, [
+                    'changes' => $changes,
+                    'invalidated_invoice_pdfs' => $invalidated,
+                ]);
+            }
         }
         if ($vatStatusEffectiveFrom !== null) {
             // Stejná kódová cesta jako správa historie (VatStatusHistoryAction):
@@ -1127,6 +1163,8 @@ final class SettingsAction
         $row['auto_generate_recurring']  = (bool) ($row['auto_generate_recurring'] ?? true);
         $row['default_prices_include_vat'] = (bool) ($row['default_prices_include_vat'] ?? false);
         $row['embed_isdoc']              = (bool) ($row['embed_isdoc'] ?? true);
+        $row['invoice_qr_include_due_date'] = (bool) ($row['invoice_qr_include_due_date'] ?? false);
+        $row['purchase_invoice_qr_include_due_date'] = (bool) ($row['purchase_invoice_qr_include_due_date'] ?? false);
         // Režim účetnictví (Epic F0, migrace 1001)
         $row['accounting_mode']          = (string) ($row['accounting_mode'] ?? 'tax_evidence');
         // „Vést účetnictví" (migrace 1179) — vypnuté schová účetní sekce z menu. Na licenci
@@ -1786,4 +1824,3 @@ final class SettingsAction
         $this->logger->log($action, (int) ($user['id'] ?? 0), 'supplier', $entityId, $payload, $ip, $request->getHeaderLine('User-Agent'));
     }
 }
-

@@ -5153,6 +5153,8 @@ paths:
         Vrátí QR platbu (SPAYD pro CZK, SEPA EPC jinak) a bankovní účet zjištěný
         v pořadí ISDOC → AI → ruční edit. `needs_account=true` signalizuje, že
         klient může spustit doplnění účtu přes `/payment-qr/extract-account`.
+        Volitelné pole SPAYD `DT` se řídí firemním nastavením
+        `purchase_invoice_qr_include_due_date`; EPC QR datum splatnosti nepřenáší.
       responses:
         '200':
           description: OK
@@ -20146,6 +20148,8 @@ components:
         default_payment_due_days: { type: integer }
         default_payment_due_unit: { type: string, enum: [days, month] }
         default_prices_include_vat: { type: boolean }
+        invoice_qr_include_due_date: { type: boolean, default: false, description: "Zahrnout skutečné datum splatnosti do pole DT nově generovaných CZK QR Plateb (SPAYD) na vystavených dokladech. EPC QR pro jiné měny datum nepodporuje." }
+        purchase_invoice_qr_include_due_date: { type: boolean, default: false, description: "Zahrnout skutečné datum splatnosti do pole DT nově generovaných CZK QR Plateb (SPAYD) na přijatých dokladech. Nemění QR obrázek převzatý z PDF dodavatele." }
         invoice_number_format:
           type: [string, "null"]
           maxLength: 60
@@ -20231,6 +20235,8 @@ components:
         default_payment_due_unit: { type: string, enum: [days, month] }
         default_hourly_rate: { type: number, format: float }
         default_prices_include_vat: { type: boolean, description: "Default pro nové doklady (migrace 0083)" }
+        invoice_qr_include_due_date: { type: boolean, default: false, description: "Zahrnout invoices.due_date do volitelného pole DT CZK QR Platby (SPAYD) vystavených dokladů." }
+        purchase_invoice_qr_include_due_date: { type: boolean, default: false, description: "Zahrnout purchase_invoices.due_date do volitelného pole DT nově generované CZK QR Platby (SPAYD)." }
         stock_enabled: { type: boolean, description: "Feature-flag Epic SKLAD — zapíná skladovou evidenci pro tohoto dodavatele." }
         stock_method:
           type: string

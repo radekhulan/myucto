@@ -72,6 +72,8 @@ final class RoutePermissionMapTest extends TestCase
             ['GET', '/api/settings/client/branding', 'settings.company', AccessLevel::WRITE],
             ['PUT', '/api/settings/client/branding', 'settings.company', AccessLevel::WRITE],
             ['POST', '/api/settings/client/branding/profiles/7/logo', 'settings.company', AccessLevel::WRITE],
+            ['GET', '/api/settings/client/payment-qr', 'settings.company', AccessLevel::WRITE],
+            ['PUT', '/api/settings/client/payment-qr', 'settings.company', AccessLevel::WRITE],
             ['PUT', '/api/settings/supplier', 'settings.company.write', AccessLevel::WRITE],
             ['GET', '/api/settings/accounting-activation/status', 'settings.company', AccessLevel::READ],
             ['POST', '/api/settings/accounting-activation/start', 'accounting.periods.manage', AccessLevel::WRITE],

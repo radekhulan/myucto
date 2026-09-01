@@ -211,6 +211,18 @@ QR obsahuje:
 - Variabilní symbol (jen CZK SPAYD; SEPA EPC ho používá jen v poznámce)
 - Měnu
 - Zprávu pro příjemce (varsymbol + jméno odběratele)
+- Datum splatnosti (volitelné pole `DT`, jen CZK SPAYD)
+
+Volba **Firma → Nastavení → Fakturace → Datum splatnosti v QR platbě →
+Vystavené doklady** určuje, zda se do nově generovaného SPAYD kódu vloží skutečné
+datum splatnosti dokladu. Ve výchozím stavu je vypnutá; po zapnutí se pole `DT`
+do QR doplní. Nastavení platí stejně pro QR v PDF, e-mailu, upomínce a veřejném
+náhledu. Formát SEPA EPC datum splatnosti nepodporuje, takže u jiných měn nemá
+přepínač vliv.
+
+Změna volby zneplatní uložené PDF nezaplacených CZK dokladů s QR, aby se při
+příštím otevření vygenerovalo podle nové volby. Předchozí vystavená verze zůstává
+dohledatelná v **Historii PDF**.
 
 > ⚠️ QR se vygeneruje jen pokud bankovní účet projde **mod-11 kontrolou**
 > (CZ účty) nebo **IBAN checksum** (EUR). Neplatný účet → QR se v PDF

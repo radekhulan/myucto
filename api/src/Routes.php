@@ -63,6 +63,7 @@ use MyInvoice\Action\Admin\SupplierSearchAction;
 use MyInvoice\Action\Settings\EmailBrandingAction;
 use MyInvoice\Action\Settings\BrandingProfilesAction;
 use MyInvoice\Action\Settings\ClientBrandingSettingsAction;
+use MyInvoice\Action\Settings\ClientPaymentQrSettingsAction;
 use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
@@ -2423,6 +2424,8 @@ final class Routes
         $app->delete ('/api/settings/client/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'delete']);
         $app->get    ('/api/settings/client/branding', [ClientBrandingSettingsAction::class, 'get']);
         $app->put    ('/api/settings/client/branding', [ClientBrandingSettingsAction::class, 'update']);
+        $app->get    ('/api/settings/client/payment-qr', [ClientPaymentQrSettingsAction::class, 'get']);
+        $app->put    ('/api/settings/client/payment-qr', [ClientPaymentQrSettingsAction::class, 'update']);
         $app->get    ('/api/settings/client/branding/preview', [EmailBrandingAction::class, 'preview']);
         $app->post   ('/api/settings/client/branding/logo', [EmailBrandingAction::class, 'uploadLogo']);
         $app->delete ('/api/settings/client/branding/logo', [EmailBrandingAction::class, 'deleteLogo']);

@@ -428,6 +428,8 @@ async function saveSupplier() {
       self_copy: supplier.value.self_copy ?? null,
       auto_generate_recurring: supplier.value.auto_generate_recurring,
       embed_isdoc: supplier.value.embed_isdoc,
+      invoice_qr_include_due_date: supplier.value.invoice_qr_include_due_date,
+      purchase_invoice_qr_include_due_date: supplier.value.purchase_invoice_qr_include_due_date,
       proforma_payment_document: supplier.value.proforma_payment_document,
       pohoda_account_code: supplier.value.pohoda_account_code,
       pohoda_centre_code: supplier.value.pohoda_centre_code,
@@ -920,6 +922,26 @@ async function confirmTaxRepDelete() {
               <span class="font-medium">{{ t('settings.default_prices_include_vat') }}</span>
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.default_prices_include_vat_hint') }}</p>
+          </div>
+          <div class="md:col-span-2 border-t border-neutral-200 pt-4 space-y-3">
+            <div>
+              <h3 class="text-sm font-semibold text-neutral-700">{{ t('settings.payment_qr_due_date_title') }}</h3>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.payment_qr_due_date_hint') }}</p>
+            </div>
+            <label class="flex items-start gap-2 text-sm">
+              <input v-model="supplier.invoice_qr_include_due_date" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+              <span>
+                <span class="font-medium text-neutral-700">{{ t('settings.invoice_qr_include_due_date') }}</span>
+                <span class="block text-xs text-neutral-500 mt-0.5">{{ t('settings.invoice_qr_include_due_date_hint') }}</span>
+              </span>
+            </label>
+            <label class="flex items-start gap-2 text-sm">
+              <input v-model="supplier.purchase_invoice_qr_include_due_date" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+              <span>
+                <span class="font-medium text-neutral-700">{{ t('settings.purchase_invoice_qr_include_due_date') }}</span>
+                <span class="block text-xs text-neutral-500 mt-0.5">{{ t('settings.purchase_invoice_qr_include_due_date_hint') }}</span>
+              </span>
+            </label>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.default_hourly_rate') }} ({{ supplier.default_currency }})</label>

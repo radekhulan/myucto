@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Mail;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
 use MyInvoice\Service\Invoice\InvoicePublicLinkService;
+use MyInvoice\Service\Qr\PaymentQrDueDate;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
 
 /**
@@ -18,6 +20,7 @@ final class InvoiceEmailVarsBuilder
         private readonly Connection $db,
         private readonly QrPaymentGenerator $qr,
         private readonly InvoicePublicLinkService $publicLinks,
+        private readonly SupplierPaymentQrSettingsRepository $paymentQrSettings,
     ) {}
 
     /**
@@ -153,6 +156,7 @@ final class InvoiceEmailVarsBuilder
         if ($bank === null) return null;
 
         $supplierName = $this->resolveSupplierName($invoice, true);
+        $qrSettings = $this->paymentQrSettings->find((int) ($invoice['supplier_id'] ?? 0));
 
         return $this->qr->generate(
             (string) $invoice['currency'],
@@ -160,6 +164,8 @@ final class InvoiceEmailVarsBuilder
             (string) $invoice['varsymbol'],
             $bank,
             (string) ($supplierName ?: 'MyÚčto.cz'),
+            PaymentQrDueDate::parse($invoice['due_date'] ?? null),
+            includeDueDate: (bool) ($qrSettings[SupplierPaymentQrSettingsRepository::INVOICE_FIELD] ?? false),
         );
     }
 

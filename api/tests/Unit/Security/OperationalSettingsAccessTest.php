@@ -12,19 +12,21 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 
 final class OperationalSettingsAccessTest extends TestCase
 {
-    public function testClientNeedsCompanyWriteForBothDelegatedAreas(): void
+    public function testClientNeedsCompanyWriteForDelegatedAreas(): void
     {
         $reader = $this->request(new EffectiveRole(4, 'Klient', 'client', true, [
             'settings.company' => AccessLevel::READ->value,
         ]));
         self::assertFalse(OperationalSettingsAccess::emailProfiles($reader));
         self::assertFalse(OperationalSettingsAccess::branding($reader));
+        self::assertFalse(OperationalSettingsAccess::paymentQr($reader));
 
         $writer = $this->request(new EffectiveRole(4, 'Klient', 'client', true, [
             'settings.company' => AccessLevel::WRITE->value,
         ]));
         self::assertTrue(OperationalSettingsAccess::emailProfiles($writer));
         self::assertTrue(OperationalSettingsAccess::branding($writer));
+        self::assertTrue(OperationalSettingsAccess::paymentQr($writer));
     }
 
     public function testClientCannotSubstituteStaffOnlyPermissions(): void
@@ -37,6 +39,7 @@ final class OperationalSettingsAccessTest extends TestCase
 
         self::assertFalse(OperationalSettingsAccess::emailProfiles($request));
         self::assertFalse(OperationalSettingsAccess::branding($request));
+        self::assertFalse(OperationalSettingsAccess::paymentQr($request));
     }
 
     public function testStaffAndSuperadminKeepTheirExistingPermissions(): void
@@ -47,10 +50,12 @@ final class OperationalSettingsAccessTest extends TestCase
         ]));
         self::assertTrue(OperationalSettingsAccess::emailProfiles($staff));
         self::assertTrue(OperationalSettingsAccess::branding($staff));
+        self::assertTrue(OperationalSettingsAccess::paymentQr($staff));
 
         $superadmin = $this->request(new EffectiveRole(1, 'Superadmin', 'superadmin', true, [], 'superadmin'));
         self::assertTrue(OperationalSettingsAccess::emailProfiles($superadmin));
         self::assertTrue(OperationalSettingsAccess::branding($superadmin));
+        self::assertTrue(OperationalSettingsAccess::paymentQr($superadmin));
     }
 
     private function request(EffectiveRole $role): \Psr\Http\Message\ServerRequestInterface

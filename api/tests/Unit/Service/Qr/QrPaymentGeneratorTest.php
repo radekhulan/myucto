@@ -61,6 +61,7 @@ final class QrPaymentGeneratorTest extends TestCase
             'Dodavatel',
             new \DateTimeImmutable('2026-06-30'),
             'Faktura 2026-0042',
+            includeDueDate: true,
         );
         self::assertNotNull($uri);
     }

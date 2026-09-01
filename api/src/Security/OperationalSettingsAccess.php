@@ -31,6 +31,14 @@ final class OperationalSettingsAccess
         return RequestAuthorization::allows($request, 'settings.branding', AccessLevel::WRITE);
     }
 
+    public static function paymentQr(Request $request): bool
+    {
+        if (RequestAuthorization::isClientType($request)) {
+            return self::clientCompanyWrite($request);
+        }
+        return RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE);
+    }
+
     public static function clientCompanyWrite(Request $request): bool
     {
         return RequestAuthorization::isClientType($request)

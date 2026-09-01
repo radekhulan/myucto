@@ -591,7 +591,10 @@ s **QR platbou**, kterou naskenuješ v mobilní bankovní aplikaci — pro CZK d
 ve formátu **QR Platba (SPAYD)**, pro doklady v cizí měně jako **SEPA (EPC)**.
 
 QR sestavujeme z **platebního účtu dodavatele**, částky k úhradě a variabilního
-symbolu. Účet se získává v tomto pořadí:
+symbolu. U CZK může obsahovat také skutečné datum splatnosti. Řídí ho samostatná
+volba **Firma → Nastavení → Fakturace → Datum splatnosti v QR platbě → Přijaté
+doklady**, která je ve výchozím stavu vypnutá. Po zapnutí se pole `DT` do nově
+generovaného SPAYD kódu doplní. SEPA EPC datum splatnosti nepodporuje. Účet se získává v tomto pořadí:
 
 1. **Z ISDOC** — pokud má PDF embedded ISDOC přílohu, vezme se z ní účet/IBAN i VS (zdroj „z ISDOC").
 2. **AI rozpoznání** — když uložený účet není a doklad má PDF, lze ho jednorázově
@@ -604,7 +607,8 @@ symbolu. Účet se získává v tomto pořadí:
    kód banky**, nebo **IBAN** (u zahraničních dodavatelů).
 4. **Obrázek QR z PDF** — když účet nelze získat, ale v PDF je obrázek, který vypadá
    jako QR kód (čtvercový, černobílý), zobrazí se jako **náhradní řešení** rovnou
-   (kód nerozpoznáváme, jen ho ukážeme k naskenování).
+   (kód nerozpoznáváme, jen ho ukážeme k naskenování). Nastavení data splatnosti
+   takový převzatý obrázek změnit nemůže.
 
 Známý účet se zobrazí i v **detailu** faktury (box *Platební účet dodavatele* vedle
 měny) a předvyplní se v editoru i v okně QR.

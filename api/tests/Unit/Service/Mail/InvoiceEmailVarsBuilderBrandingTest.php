@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Service\Mail;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
 use MyInvoice\Service\Invoice\InvoicePublicLinkService;
 use MyInvoice\Service\Mail\InvoiceEmailVarsBuilder;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
@@ -41,6 +42,7 @@ final class InvoiceEmailVarsBuilderBrandingTest extends TestCase
             $connection,
             (new \ReflectionClass(QrPaymentGenerator::class))->newInstanceWithoutConstructor(),
             (new \ReflectionClass(InvoicePublicLinkService::class))->newInstanceWithoutConstructor(),
+            (new \ReflectionClass(SupplierPaymentQrSettingsRepository::class))->newInstanceWithoutConstructor(),
         );
 
         $vars = $builder->buildReminder([
@@ -218,6 +220,7 @@ final class InvoiceEmailVarsBuilderBrandingTest extends TestCase
             $connection,
             (new \ReflectionClass(QrPaymentGenerator::class))->newInstanceWithoutConstructor(),
             (new \ReflectionClass(InvoicePublicLinkService::class))->newInstanceWithoutConstructor(),
+            (new \ReflectionClass(SupplierPaymentQrSettingsRepository::class))->newInstanceWithoutConstructor(),
         );
     }
 

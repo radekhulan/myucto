@@ -9,12 +9,14 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
 use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Branding\AccentColor;
 use MyInvoice\Service\Export\IsdocExporter;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Oss\OssInvoiceClause;
+use MyInvoice\Service\Qr\PaymentQrDueDate;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
 use MyInvoice\Service\Signing\Pdf\PdfSigningService;
 use MyInvoice\Service\Vat\VatStatusService;
@@ -51,6 +53,7 @@ final class InvoicePdfRenderer
         private readonly PdfSigningService $pdfSigning,
         private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
         private readonly VatStatusService $vatStatus,
+        private readonly SupplierPaymentQrSettingsRepository $paymentQrSettings,
     ) {}
 
     /**
@@ -307,12 +310,15 @@ final class InvoicePdfRenderer
         // celého roku najednou, přesně proti tomu, co doklad sjednává.
         $isPaymentCalendar = ($invoice['invoice_type'] ?? '') === 'payment_calendar';
         if ($hasAmount && $bankData !== null && (!$isCzk || $hasVs) && !$isPaid && $isBankTransfer && !$isPaymentCalendar) {
+            $qrSettings = $this->paymentQrSettings->find((int) ($invoice['supplier_id'] ?? 0));
             $qrUri = $this->qr->generate(
                 (string) $invoice['currency'],
                 $remaining,
                 (string) ($invoice['varsymbol'] ?? ''),
                 $bankData,
                 (string) ($supplierData['display_name'] ?? $supplierData['company_name'] ?? 'MyÚčto.cz'),
+                PaymentQrDueDate::parse($invoice['due_date'] ?? null),
+                includeDueDate: (bool) ($qrSettings[SupplierPaymentQrSettingsRepository::INVOICE_FIELD] ?? false),
             );
         }
 
@@ -465,6 +471,37 @@ final class InvoicePdfRenderer
         $ids = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
         foreach ($ids as $id) $this->invalidate($id, 'invalidate_branding', archive: false);
         return count($ids);
+    }
+
+    /**
+     * Invaliduje cached CZK PDF, jejichž QR může obsahovat SPAYD datum splatnosti.
+     * Vystavené verze archivuje, draft preview pouze smaže. Volá se jen při
+     * skutečné změně invoice_qr_include_due_date.
+     */
+    public function invalidatePaymentQrBySupplier(int $supplierId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.id, i.status
+               FROM invoices i
+               JOIN currencies c ON c.id = i.currency_id
+              WHERE i.supplier_id = ?
+                AND c.code = "CZK"
+                AND i.status <> "paid"
+                AND i.payment_method = "bank_transfer"
+                AND i.invoice_type <> "payment_calendar"
+                AND i.varsymbol IS NOT NULL AND i.varsymbol <> ""
+                AND (i.pdf_path IS NOT NULL OR i.pdf_generated_at IS NOT NULL)'
+        );
+        $stmt->execute([$supplierId]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        foreach ($rows as $row) {
+            $this->invalidate(
+                (int) $row['id'],
+                'invalidate_payment_qr_settings',
+                archive: (string) $row['status'] !== 'draft',
+            );
+        }
+        return count($rows);
     }
 
     private function twig(): Environment

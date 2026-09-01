@@ -10,12 +10,14 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Import\LlmGatewayInterface;
 use MyInvoice\Service\Import\IsdocParser;
 use MyInvoice\Service\Import\PdfIsdocExtractor;
 use MyInvoice\Service\Payment\BankAccountParser;
 use MyInvoice\Service\Pdf\PdfImageExtractor;
+use MyInvoice\Service\Qr\PaymentQrDueDate;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
@@ -52,6 +54,7 @@ final class PaymentQrAction
         private readonly DocumentLockService $locks,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly SupplierPaymentQrSettingsRepository $paymentQrSettings,
     ) {}
 
     /** GET — QR z uloženého účtu, jinak needs_account / fallback obrázek. */
@@ -232,8 +235,9 @@ final class PaymentQrAction
             $invoice['payment_iban'] ?? null,
             $invoice['payment_bic'] ?? null,
         );
-        $dueDate = $this->dueDate($invoice);
+        $dueDate = PaymentQrDueDate::parse($invoice['due_date'] ?? null);
         $message = 'Faktura ' . (string) ($invoice['vendor_invoice_number'] ?? $vs);
+        $settings = $this->paymentQrSettings->find((int) ($invoice['supplier_id'] ?? 0));
 
         $dataUri = $this->qr->generate(
             $currency,
@@ -243,6 +247,7 @@ final class PaymentQrAction
             (string) ($invoice['vendor_company_name'] ?? ''),
             $dueDate,
             $message,
+            (bool) ($settings[SupplierPaymentQrSettingsRepository::PURCHASE_INVOICE_FIELD] ?? false),
         );
 
         return [
@@ -330,19 +335,6 @@ final class PaymentQrAction
             }
         }
         return '';
-    }
-
-    private function dueDate(array $invoice): ?\DateTimeImmutable
-    {
-        $raw = (string) ($invoice['due_date'] ?? '');
-        if ($raw === '') {
-            return null;
-        }
-        try {
-            return new \DateTimeImmutable($raw);
-        } catch (\Throwable) {
-            return null;
-        }
     }
 
     /**

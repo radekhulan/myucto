@@ -76,7 +76,8 @@ Každý dodavatel má vlastní:
   `JD{YYYY}-{CC}`, …) + reset cyklu (rok / měsíc / nikdy) — viz § 91.5.3
 - **Výchozí nastavení** — splatnost, hodinová sazba, DPH, **výchozí režim cen
   s DPH / bez DPH** (*Ceny s DPH* — předvyplní přepínač u nové
-  faktury, viz [§ 15.2.6](15_Faktura_editor.md#1526-ceny-s-dph-vs-bez-dph-brutto-netto-rezim))
+  faktury, viz [§ 15.2.6](15_Faktura_editor.md#1526-ceny-s-dph-vs-bez-dph-brutto-netto-rezim)),
+  a oddělené zahrnutí data splatnosti do QR vystavených a přijatých dokladů
 - **E-mailové šablony** (faktura nová / upomínka / reset hesla)
 - **Pohoda kódy** pro export
 - **From: jméno + Reply-To** v odchozích e-mailech

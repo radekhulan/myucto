@@ -196,6 +196,10 @@ export interface Supplier {
   reminder_days_after_due: number
   auto_generate_recurring: boolean
   embed_isdoc: boolean
+  /** Přidat SPAYD DT se splatností do QR vystavených dokladů. */
+  invoice_qr_include_due_date: boolean
+  /** Přidat SPAYD DT se splatností do QR přijatých dokladů. */
+  purchase_invoice_qr_include_due_date: boolean
   proforma_payment_document: 'final_on_full_payment' | 'always_tax_document' | 'manual'
   logo_path: string | null
   signature_path: string | null
@@ -298,6 +302,11 @@ export interface Supplier {
   // šablony (supplier-wide + per-client přepsání) numericky kolidují po normalizaci
   // VS na číslice (StatementMatcher) — read-only, přepočítá se při každém načtení/uložení.
   number_series_collisions?: NumberSeriesCollision[]
+}
+
+export interface PaymentQrSettings {
+  invoice_qr_include_due_date: boolean
+  purchase_invoice_qr_include_due_date: boolean
 }
 
 export interface NumberSeriesSide {
@@ -848,6 +857,10 @@ export const settingsApi = {
   getClientBranding: () => api.get<OperationalBrandingSettings>('/settings/client/branding').then(r => r.data),
   updateClientBranding: (payload: Partial<OperationalBrandingSettings>) =>
     api.put<OperationalBrandingSettings>('/settings/client/branding', payload).then(r => r.data),
+  getClientPaymentQrSettings: () =>
+    api.get<PaymentQrSettings>('/settings/client/payment-qr').then(r => r.data),
+  updateClientPaymentQrSettings: (payload: PaymentQrSettings) =>
+    api.put<PaymentQrSettings>('/settings/client/payment-qr', payload).then(r => r.data),
   // E2: při total > 0 přesměruje FE do průvodce; přímé uložení jistí BE 409 backfill_required.
   getModeSwitchPreview: () => api.get<ModeSwitchPreview>('/settings/mode-switch-preview').then(r => r.data),
 

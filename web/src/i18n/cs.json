@@ -14398,8 +14398,15 @@
   },
   "settings": {
     "client_company_settings_title": "Nastavení firmy",
-    "client_company_settings_hint": "Správa odesílacích profilů a vzhledu komunikace aktuální firmy. Účetní, daňové, právní a systémové nastavení zůstává ve správě účetní.",
+    "client_company_settings_hint": "Správa odesílacích profilů, vzhledu komunikace a platebních QR kódů aktuální firmy. Účetní, daňové, právní a systémové nastavení zůstává ve správě účetní.",
     "client_company_settings_tabs": "Sekce nastavení firmy",
+    "payment_qr_tab": "QR platby",
+    "payment_qr_due_date_title": "Datum splatnosti v QR platbě",
+    "payment_qr_due_date_hint": "Nastavení ovlivňuje pole DT v českém formátu QR Platba (SPAYD). Evropský formát EPC datum splatnosti nepřenáší a převzatý obrázek QR kódu z PDF dodavatele nelze změnit.",
+    "invoice_qr_include_due_date": "Vystavené doklady: zahrnout datum splatnosti",
+    "invoice_qr_include_due_date_hint": "Do nově generovaných QR kódů v PDF, e-mailu, upomínce a veřejném náhledu se vloží skutečná splatnost dokladu.",
+    "purchase_invoice_qr_include_due_date": "Přijaté doklady: zahrnout datum splatnosti",
+    "purchase_invoice_qr_include_due_date_hint": "Do nově generovaného QR kódu v detailu přijatého dokladu se vloží jeho skutečná splatnost.",
     "email_profile_managed_by_staff": "Spravuje účetní",
     "email_profile_managed_by_staff_hint": "Profil používá systémový sendmail nebo kryptografický podpis a může jej změnit pouze správce instalace.",
     "branding_profiles": {

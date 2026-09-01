@@ -205,6 +205,8 @@ final class ClientRoutePolicyTest extends TestCase
             ['POST', '/api/settings/client/email-profiles'],
             ['PUT', '/api/settings/client/branding'],
             ['POST', '/api/settings/client/branding/profiles/7/logo'],
+            ['GET', '/api/settings/client/payment-qr'],
+            ['PUT', '/api/settings/client/payment-qr'],
             ['PUT', '/api/user/preferences/navigation'],
         ] as [$method, $path]) {
             self::assertTrue($this->policy->allowsApiRequest($method, $path), "$method $path");

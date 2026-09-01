@@ -44,15 +44,29 @@ final class QrPaymentGenerator
         string $supplierName = '',
         ?\DateTimeImmutable $dueDate = null,
         ?string $message = null,
+        bool $includeDueDate = false,
     ): ?string {
         if ($amount <= 0) {
             return null;
         }
+        if ($currency === 'CZK' && $includeDueDate && $dueDate === null) {
+            $this->logger->warning('QR due date omitted because it is missing or invalid.', [
+                'currency' => $currency,
+                'varsymbol' => $varsymbol,
+            ]);
+        }
 
         try {
-            $payload = $currency === 'CZK'
-                ? $this->buildCzk($amount, $varsymbol, $bank, $dueDate, $message)
-                : $this->buildSepa($amount, $varsymbol, $bank, $supplierName, $message);
+            $payload = $this->buildPayload(
+                $currency,
+                $amount,
+                $varsymbol,
+                $bank,
+                $supplierName,
+                $dueDate,
+                $message,
+                $includeDueDate,
+            );
         } catch (\Throwable $e) {
             $this->logger->warning('QR generation failed: ' . $e->getMessage(), [
                 'currency' => $currency,
@@ -76,12 +90,36 @@ final class QrPaymentGenerator
         return (new QRCode($options))->render($payload);
     }
 
+    /**
+     * Sestaví testovatelný platební descriptor před převodem na PNG.
+     * Datum je opt-in a bez platné hodnoty se nikdy nenahrazuje dneškem.
+     *
+     * @param array<string,mixed> $bank
+     */
+    public function buildPayload(
+        string $currency,
+        float $amount,
+        string $varsymbol,
+        array $bank,
+        string $supplierName = '',
+        ?\DateTimeImmutable $dueDate = null,
+        ?string $message = null,
+        bool $includeDueDate = false,
+    ): ?string {
+        if ($amount <= 0) return null;
+
+        return $currency === 'CZK'
+            ? $this->buildCzk($amount, $varsymbol, $bank, $dueDate, $message, $includeDueDate)
+            : $this->buildSepa($amount, $varsymbol, $bank, $supplierName, $message);
+    }
+
     private function buildCzk(
         float $amount,
         string $varsymbol,
         array $bank,
         ?\DateTimeImmutable $dueDate = null,
         ?string $message = null,
+        bool $includeDueDate = false,
     ): ?string {
         $accountNumber = (string) ($bank['account_number'] ?? '');
         $bankCode      = (string) ($bank['bank_code'] ?? '');
@@ -105,8 +143,10 @@ final class QrPaymentGenerator
         $payment->setAmount($amount)
             ->setCurrency('CZK')
             ->setConstantSymbol((string) $this->config->get('qr.czk_constant_symbol', '0308'))
-            ->setDueDate($dueDate ?? new \DateTimeImmutable())
             ->setComment($message ?? ('Faktura ' . $varsymbol));
+        if ($includeDueDate && $dueDate !== null) {
+            $payment->setDueDate($dueDate);
+        }
         if ($vs !== '') {
             $payment->setVariableSymbol($vs);
         }

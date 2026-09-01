@@ -79,7 +79,9 @@ duplikovat běžnou roli typu **client** a u položky **Nastavení firmy** zvoli
 výslovně povolené provozní oblasti aktuální firmy:
 
 - odesílací profily, odesílatele, Reply-To, DKIM a supplier-scoped SMTP/IMAP,
-- branding komunikace, logo, barvy, patičky a brandingové profily.
+- branding komunikace, logo, barvy, patičky a brandingové profily,
+- dvě samostatné volby, zda do nově generovaných platebních QR kódů vystavených
+  a přijatých dokladů zahrnout datum splatnosti.
 
 Úroveň **Pouze čtení** tuto sekci nezobrazí. Zápis zároveň neotevře původní
 administrátorskou stránku nastavení ani obecný endpoint dodavatele. Klient proto

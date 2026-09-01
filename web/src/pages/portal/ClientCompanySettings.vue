@@ -4,13 +4,14 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import EmailProfiles from '@/pages/admin/EmailProfiles.vue'
 import Branding from '@/pages/admin/Branding.vue'
+import ClientPaymentQrSettings from '@/components/settings/ClientPaymentQrSettings.vue'
 
-type SettingsTab = 'email-profiles' | 'branding'
+type SettingsTab = 'email-profiles' | 'branding' | 'payment-qr'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const tabs: SettingsTab[] = ['email-profiles', 'branding']
+const tabs: SettingsTab[] = ['email-profiles', 'branding', 'payment-qr']
 
 function tabFromQuery(value: unknown): SettingsTab {
   const candidate = String(value ?? '') as SettingsTab
@@ -56,9 +57,18 @@ function switchTab(tab: SettingsTab) {
       >
         {{ t('nav.branding') }}
       </button>
+      <button
+        type="button"
+        class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+        :class="activeTab === 'payment-qr' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
+        @click="switchTab('payment-qr')"
+      >
+        {{ t('settings.payment_qr_tab') }}
+      </button>
     </nav>
 
     <EmailProfiles v-if="activeTab === 'email-profiles'" client-scoped />
-    <Branding v-else client-scoped />
+    <Branding v-else-if="activeTab === 'branding'" client-scoped />
+    <ClientPaymentQrSettings v-else />
   </div>
 </template>

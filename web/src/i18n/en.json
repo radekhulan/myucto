@@ -14398,8 +14398,15 @@
   },
   "settings": {
     "client_company_settings_title": "Company settings",
-    "client_company_settings_hint": "Manage sending profiles and communication branding for the current company. Accounting, tax, legal and system settings remain with your accountant.",
+    "client_company_settings_hint": "Manage sending profiles, communication branding and payment QR codes for the current company. Accounting, tax, legal and system settings remain with your accountant.",
     "client_company_settings_tabs": "Company settings sections",
+    "payment_qr_tab": "QR payments",
+    "payment_qr_due_date_title": "Due date in payment QR codes",
+    "payment_qr_due_date_hint": "This setting controls the DT field in the Czech QR Payment (SPAYD) format. The European EPC format does not carry a due date, and an embedded QR image imported from a supplier PDF cannot be changed.",
+    "invoice_qr_include_due_date": "Issued documents: include the due date",
+    "invoice_qr_include_due_date_hint": "Newly generated QR codes in PDFs, emails, reminders and public previews will contain the document's actual due date.",
+    "purchase_invoice_qr_include_due_date": "Received documents: include the due date",
+    "purchase_invoice_qr_include_due_date_hint": "A newly generated QR code on the received-document detail will contain the document's actual due date.",
     "email_profile_managed_by_staff": "Managed by accountant",
     "email_profile_managed_by_staff_hint": "This profile uses system sendmail or a cryptographic signature and can only be changed by the installation administrator.",
     "branding_profiles": {
