@@ -2647,7 +2647,11 @@
         "vacation": "Vacation taken (10279)",
         "care": "Care with nursing-benefit entitlement (10280)",
         "employee_obstacle": "Paid employee-side obstacles (10471)",
-        "employer_obstacle": "Employer-side obstacles (10472)"
+        "employer_obstacle": "Employer-side obstacles (10472)",
+        "required_missing": "Fill in “{field}” — without it the working-time summary cannot be created.",
+        "conditional_missing": "Answer the questions about unworked hours and obstacles to work.",
+        "as_agreed": "Worked exactly the prescribed fund",
+        "as_agreed_hint": "Not tracking attendance for this relationship? The button fills worked hours as the agreed fund and answers “no” to unworked hours and obstacles to work. Fill in the statutory fund yourself — it is the time prescribed for the profession, not a figure from the contract."
       },
       "bulk": {
         "approve": "Approve selected ({count})",
@@ -19617,7 +19621,8 @@
     "capabilities": {
       "projects": "projects",
       "documents": "documents",
-      "logbook": "logbook"
+      "logbook": "logbook",
+      "payroll": "payroll and personnel inputs"
     },
     "install": {
       "prepare_title": "Prepare the server.",
@@ -19640,17 +19645,32 @@
         "link_document": "Link that contract to the Web 2026 project.",
         "add_trip": "Add today's business trip from Prague to Kolín, 120 km.",
         "add_fueling": "Record a 40-litre fueling for CZK 1,520."
+      },
+      "payroll": {
+        "title": "Payroll and employees",
+        "agreed_salary": "What is Jana Nováková's agreed gross salary?",
+        "net_salary": "What was Jana Nováková's net salary for August?",
+        "change_salary": "Increase Jana's salary to CZK 55,000 from September.",
+        "sickness": "Record sick leave for Jana from 3 to 12 September.",
+        "overtime": "Record two hours of overtime for Jana today from 17:00 to 19:00.",
+        "bonus": "Add a CZK 5,000 extraordinary bonus for Jana in September."
       }
     },
     "tool_groups": {
       "projects": "Projects",
       "documents": "Documents",
-      "logbook": "Logbook"
+      "logbook": "Logbook",
+      "payroll": "Payroll and employees"
+    },
+    "payroll_boundary": {
+      "title": "Payroll allows personnel data and results to be read, while only preparatory inputs can be written.",
+      "description": "The assistant can change an agreed salary or enter overtime, an absence or a bonus. It cannot approve attendance, an absence or a payroll run, calculate or post payroll, prepare payments, close a run, or send submissions and documents."
     },
     "troubleshooting": {
       "restart_prefix": "Restart the assistant application. For the recommended variant, check the path to",
       "npm_prefix": "The command",
-      "npm_suffix": "is only needed when running the development variant from"
+      "npm_suffix": "is only needed when running the development variant from",
+      "write_forbidden": "Writing is blocked in this part of the API, for example in accounting, taxes or payroll run control."
     }
   },
   "instance_export": {

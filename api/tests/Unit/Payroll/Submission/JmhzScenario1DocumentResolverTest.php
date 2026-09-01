@@ -662,7 +662,9 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
             $resolution->blockers,
         );
 
-        self::assertContains('jmhz_preparation_not_ready', $codes);
+        // Souhrn „zdroje nejsou úplné" se vedle konkrétních nálezů nepřidává:
+        // je to hlavička, ne úkol, a účetní na něm nemá co udělat.
+        self::assertNotContains('jmhz_preparation_not_ready', $codes);
         self::assertContains('office_five_employment', $codes);
         self::assertContains('office_five_person', $codes);
         self::assertContains('office_five_registration', $codes);

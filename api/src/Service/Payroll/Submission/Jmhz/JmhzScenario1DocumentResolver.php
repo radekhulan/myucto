@@ -132,11 +132,24 @@ final class JmhzScenario1DocumentResolver
         if (($preparation->readiness['status'] ?? null) !== 'source_ready'
             && ($scopedReadinessIssues !== [] || $readinessIssues === [])
         ) {
-            $blockers[] = $this->blocker(
-                'jmhz_preparation_not_ready',
-                'preparation',
-                $preparation->id,
-            );
+            /*
+             * „Zdroje hlášení nejsou úplné" je SOUHRN nad konkrétními nálezy,
+             * ne úkol. Dokud se přidával i vedle nich, stál v seznamu kroků
+             * jako čtvrtý řádek, na kterém účetní nemá co udělat — a tlačítko
+             * u něj vedlo do mzdového běhu, kde příčina není. Počítal se přitom
+             * do „N kroků k doplnění", takže seznam sliboval o práci navíc.
+             *
+             * Zůstává jen tehdy, když konkrétní nález chybí: to je jediný stav,
+             * kdy je souhrn to nejpřesnější, co umíme říct, a zamlčet ho by
+             * znamenalo tvrdit, že hlášení jde sestavit.
+             */
+            if ($scopedReadinessIssues === []) {
+                $blockers[] = $this->blocker(
+                    'jmhz_preparation_not_ready',
+                    'preparation',
+                    $preparation->id,
+                );
+            }
             foreach ($scopedReadinessIssues as $issue) {
                 $attributeIds = $issue['attribute_ids'] ?? [];
                 $blockers[] = $this->blocker(
