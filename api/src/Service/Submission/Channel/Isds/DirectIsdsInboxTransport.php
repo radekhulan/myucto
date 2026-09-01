@@ -73,16 +73,34 @@ final class DirectIsdsInboxTransport implements IsdsTransport
     public function __construct(private $httpDouble = null) {}
 
     /**
-     * Nese kontext živou relaci, kterou právě potvrdil člověk?
+     * Unese kontext přímé volání ISDS?
      *
-     * Jediné pravidlo, podle kterého se rozhoduje, jestli se smí odeslat —
-     * používá ho i {@see SessionAwareIsdsTransport} při volbě transportu, aby
-     * odpověď byla na obou místech stejná.
+     * Jediné pravidlo, podle kterého se volí transport — používá ho
+     * i {@see SessionAwareIsdsTransport}, aby odpověď byla na obou místech
+     * stejná.
+     *
+     * Dřív tu stálo jen „relace potvrzená v Mobilním klíči nebo SMS". Čtení
+     * přitom umělo čtyři způsoby přihlášení a odesílat šlo jen dvěma — a to
+     * ne kvůli ISDS, ale kvůli téhle konstantě: jméno a heslo relaci naváže
+     * úplně stejně, jen bez cookie, protože se autentizuje každý požadavek
+     * zvlášť. Účetní tak u připravené zprávy viděla jediné tlačítko a zbylé
+     * přihlašovací metody, které si nastavila, byly k ničemu.
+     *
+     * Pravidlo proto zní: kontext musí nést DOST na to, aby se dalo mluvit
+     * přímo — podle způsobu přihlášení buď živou relaci, nebo přihlašovací
+     * údaje. Co k tomu chybí, odchytí až konkrétní větev v {@see request()}
+     * s vlastní pojmenovanou chybou; fail-closed zůstává.
      */
     public static function hasConfirmedSession(ChannelContext $context): bool
     {
-        return in_array($context->credentials->authMode, self::CONFIRMED_SESSION_MODES, true)
-            && $context->credentials->sessionCookie !== null;
+        $credentials = $context->credentials;
+
+        return match ($credentials->authMode) {
+            'mobile_key', 'sms' => $credentials->sessionCookie !== null,
+            'password' => $credentials->username !== null && $credentials->password !== null,
+            'certificate' => $credentials->certificate !== null,
+            default => false,
+        };
     }
 
     public function checkRecipientBox(ChannelContext $context, string $boxId): IsdsBoxCheck
@@ -832,5 +850,24 @@ final class DirectIsdsInboxTransport implements IsdsTransport
             '10' => 'IN_SAFE',         // přesunuta do datového trezoru
             default => 'UNKNOWN',
         };
+    }
+
+    /**
+     * Rozpozná fatální TLS alert napříč backendy cURL (schannel na Windows,
+     * OpenSSL jinde).
+     *
+     * Text chyby je jediné, co je tady k dispozici — `curl_errno()` se
+     * ke chvíli vyhodnocení už nedostane. Falešně pozitivní shoda nevadí:
+     * obě větve končí chybou, jen jedna z nich radí přesněji.
+     */
+    private static function isTlsHandshakeFailure(string $error): bool
+    {
+        foreach (['SEC_E_', 'schannel', 'SSL', 'TLS', 'handshake', 'alert', 'certificate'] as $needle) {
+            if (stripos($error, $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
