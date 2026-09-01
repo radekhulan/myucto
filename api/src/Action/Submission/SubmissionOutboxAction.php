@@ -10,7 +10,10 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Submission\Channel\ChannelContext;
+use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator;
+use MyInvoice\Service\Submission\Channel\SensitiveValue;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\IsdsMobileCredentialService;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
@@ -194,6 +197,124 @@ final class SubmissionOutboxAction
      *
      * @param array<string,string> $args
      */
+    /**
+     * Odeslání jménem a heslem k datové schránce.
+     *
+     * Why: čtení nabízelo čtyři způsoby přihlášení, odesílání jediný. Nebylo
+     * to omezení ISDS — jméno a heslo relaci naváže stejně jako Mobilní klíč,
+     * jen se autentizuje každý požadavek zvlášť, takže nevzniká cookie, na
+     * kterou se dřív ptala DirectIsdsInboxTransport::hasConfirmedSession().
+     * Účetní, která má u schránky jen heslo, tak zprávu připravila a odeslat
+     * ji nemohla.
+     *
+     * Heslo se NEUKLÁDÁ: projde requestem do ISDS a zahodí se s ním.
+     *
+     * @param array{id:string} $args
+     */
+    public function passwordSend(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $id = (int) ($args['id'] ?? 0);
+        if ($id <= 0) {
+            return Json::error($response, 'submission_not_found', 'Podání neexistuje.', 404);
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $environment = (string) ($body['environment'] ?? 'production');
+        $username = trim((string) ($body['username'] ?? ''));
+        $password = (string) ($body['password'] ?? '');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+        if ($username === '' || strlen($username) > 128 || preg_match('/[\x00-\x20:\x7f]/', $username) === 1) {
+            return Json::error($response, 'isds_username_invalid', 'Vyplňte platné uživatelské jméno k datové schránce.', 400);
+        }
+        if ($password === '' || strlen($password) > 512 || preg_match('/[\x00-\x1f\x7f]/', $password) === 1) {
+            return Json::error($response, 'isds_password_invalid', 'Vyplňte heslo k datové schránce.', 400);
+        }
+
+        $supplierId = SupplierGuard::currentId($request);
+        $userId = $this->userId($request);
+        $context = new ChannelContext(
+            $supplierId,
+            $environment,
+            new ChannelCredentials(
+                boxId: '',
+                authMode: 'password',
+                username: SensitiveValue::fromProducer(static fn (): string => $username),
+                password: SensitiveValue::fromProducer(static fn (): string => $password),
+            ),
+        );
+
+        return $this->sendWithContext($response, $supplierId, $id, $userId, $context);
+    }
+
+    /**
+     * Odeslání systémovým certifikátem firmy.
+     *
+     * Za certifikátem nestojí člověk, proto se odeslání potvrzuje v aplikaci —
+     * stejně jako u EPO. Bez toho potvrzení by zprávu odeslal kdokoli, kdo se
+     * dostane k relaci; s ním je to vědomý krok, který jde doložit.
+     *
+     * @param array{id:string} $args
+     */
+    public function certificateSend(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $id = (int) ($args['id'] ?? 0);
+        if ($id <= 0) {
+            return Json::error($response, 'submission_not_found', 'Podání neexistuje.', 404);
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        if (($body['authorized'] ?? null) !== true) {
+            return Json::error(
+                $response,
+                'isds_certificate_send_unauthorized',
+                'Odeslání systémovým certifikátem potvrďte — za certifikátem nestojí člověk.',
+                400,
+            );
+        }
+        $environment = (string) ($body['environment'] ?? 'production');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+
+        $supplierId = SupplierGuard::currentId($request);
+        $userId = $this->userId($request);
+        try {
+            $context = $this->credentials->unlock($supplierId, $environment);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        return $this->sendWithContext($response, $supplierId, $id, $userId, $context);
+    }
+
+    /** Společný závěr obou cest: odeslat, zalogovat, vrátit stav. */
+    private function sendWithContext(
+        Response $response,
+        int $supplierId,
+        int $id,
+        int $userId,
+        ChannelContext $context,
+    ): Response {
+        try {
+            $result = $this->outbox->confirmAndSend($supplierId, $id, $userId, $context);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'submission_conflict', $e->getMessage(), 409);
+        }
+        if ($result['dispatched']) {
+            $this->logger->log('submission_outbox_sent', $userId, 'submission_outbox', $id, null, null, null, $supplierId);
+        }
+
+        return Json::ok($response, ['result' => $result]);
+    }
+
     public function mobileKeyStart(Request $request, Response $response, array $args): Response
     {
         if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {

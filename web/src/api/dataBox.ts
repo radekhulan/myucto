@@ -591,6 +591,23 @@ export const dataBoxApi = {
       { environment },
     ).then(r => r.data),
 
+  /**
+   * Odeslání jménem a heslem. Heslo jde jen tímhle requestem do ISDS a nikam
+   * se neukládá — proto se pokaždé zadává znovu.
+   */
+  passwordSend: (id: number, environment: string, username: string, password: string) =>
+    api.post<{ result: { row: OutboxSubmission; dispatched: boolean } }>(
+      `/submissions/outbox/${id}/password-send`,
+      { environment, username, password },
+    ).then(r => r.data.result),
+
+  /** Odeslání systémovým certifikátem; `authorized` je vědomé potvrzení uživatele. */
+  certificateSend: (id: number, environment: string) =>
+    api.post<{ result: { row: OutboxSubmission; dispatched: boolean } }>(
+      `/submissions/outbox/${id}/certificate-send`,
+      { environment, authorized: true },
+    ).then(r => r.data.result),
+
   resolve: (id: number, environment: string) =>
     api.post<OutboxSubmission>(`/submissions/outbox/${id}/resolve`, { environment }).then(r => r.data),
 
