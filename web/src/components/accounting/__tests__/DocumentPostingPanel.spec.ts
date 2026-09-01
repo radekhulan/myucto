@@ -77,6 +77,22 @@ describe('DocumentPostingPanel', () => {
     expect(wrapper.text()).toBe('')
   })
 
+  it('volitelný účetní obsah zpřístupní sbalenou sekci i bez zápisu', async () => {
+    journalForDocumentMock.mockResolvedValueOnce([])
+    const wrapper = mount(DocumentPostingPanel, {
+      props: { source: 'purchase-invoices', docId: 271, alwaysVisible: true },
+      slots: { default: '<div class="classification">Účetní klasifikace</div>' },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('accounting.journal.document_posting.title')
+    expect((wrapper.get('.classification').element.parentElement as HTMLElement).style.display).toBe('none')
+
+    await wrapper.get('button').trigger('click')
+    expect((wrapper.get('.classification').element.parentElement as HTMLElement).style.display).toBe('')
+  })
+
   it('zaúčtovaný doklad ukáže sbalenou sekci a rozbalí se až na klik', async () => {
     journalForDocumentMock.mockResolvedValueOnce([entry(64157)])
     const wrapper = mountPanel()

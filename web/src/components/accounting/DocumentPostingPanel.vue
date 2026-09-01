@@ -19,7 +19,13 @@ import { journalEntryLink } from '@/utils/journalSourceLink'
  * o prázdnou lištu nezakopne. Default je sbalený stav: hlavní obsah detailu
  * jsou pořád položky.
  */
-const props = defineProps<{ source: JournalDocumentSource; docId: number }>()
+const props = withDefaults(defineProps<{
+  source: JournalDocumentSource
+  docId: number
+  alwaysVisible?: boolean
+}>(), {
+  alwaysVisible: false,
+})
 
 const { t } = useI18n()
 
@@ -27,8 +33,9 @@ const entries = ref<JournalEntryWithLines[]>([])
 const open = ref(false)
 const failed = ref(false)
 
-/** Sekce se ukazuje jen když je co ukázat — chyba načtení ji taky schová. */
-const visible = computed(() => entries.value.length > 0)
+/** Sekce se běžně ukazuje jen když je co zaúčtovaného ukázat. Volitelný obsah
+ * ji může zpřístupnit i bez zápisu, například pro klasifikaci přijaté faktury. */
+const visible = computed(() => props.alwaysVisible || entries.value.length > 0)
 
 async function load(docId: number): Promise<void> {
   entries.value = []
@@ -64,6 +71,7 @@ function isReversal(entry: JournalEntryWithLines): boolean {
       </svg>
     </button>
     <div v-show="open" class="px-5 py-4 space-y-5">
+      <slot />
       <div v-for="entry in entries" :key="entry.id">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <span class="flex items-center gap-2 text-xs text-neutral-500">
