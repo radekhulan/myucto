@@ -14,6 +14,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Http\Message\UploadedFileInterface;
 
 final class GoPayAction
 {
@@ -134,11 +135,16 @@ final class GoPayAction
             if (strlen($content) > 2_097_152) {
                 return Json::error($response, 'gopay.invalid_file_size', 'GoPay XML překračuje limit 2 MB.', 413);
             }
+            $uploadedPdf = $request->getUploadedFiles()['pdf'] ?? null;
+            $pdf = $uploadedPdf instanceof UploadedFileInterface
+                ? $this->readPdf($uploadedPdf)
+                : null;
             $result = $this->service->import(
                 $this->currentSupplierId($request),
                 $this->userId($request),
                 $file->getClientFilename() ?: 'GoPay-clearing.xml',
                 $content,
+                $pdf,
             );
             $clearing = $result['clearing'];
             $this->log($request, $result['duplicate'] ? 'gopay.clearing_reprocessed' : 'gopay.clearing_imported',
@@ -146,6 +152,7 @@ final class GoPayAction
                     'clearing_id' => $clearing['clearing_id'] ?? null,
                     'status' => $clearing['status'] ?? null,
                     'issue_count' => $clearing['issue_count'] ?? null,
+                    'pdf_name' => $clearing['pdf_name'] ?? null,
                 ]);
             return Json::ok($response, $result, $result['duplicate'] ? 200 : 201);
         } catch (\Throwable $e) {
@@ -214,6 +221,69 @@ final class GoPayAction
         }
     }
 
+    public function uploadPdf(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'bank.import', AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        try {
+            $file = $request->getUploadedFiles()['file'] ?? null;
+            if (!$file instanceof UploadedFileInterface) {
+                throw new GoPayException('pdf_no_file', 'Vyber PDF soubor.', 400);
+            }
+            $pdf = $this->readPdf($file);
+            $clearingId = (int) ($args['id'] ?? 0);
+            $result = $this->service->uploadPdf(
+                $this->currentSupplierId($request),
+                $clearingId,
+                $pdf['file_name'],
+                $pdf['content'],
+            );
+            $this->log($request, 'gopay.pdf_uploaded', $clearingId, [
+                'pdf_name' => $result['pdf_name'] ?? null,
+                'size' => $result['pdf_size_bytes'] ?? null,
+            ]);
+            return Json::ok($response, $result);
+        } catch (\Throwable $e) {
+            return $this->error($response, $e);
+        }
+    }
+
+    public function downloadPdf(Request $request, Response $response, array $args): Response
+    {
+        try {
+            $file = $this->service->downloadPdf(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+            );
+            $safeName = preg_replace('/[\x00-\x1f"\\\\]/', '_', $file['file_name']) ?: 'GoPay-clearing.pdf';
+            $response->getBody()->write($file['content']);
+            return $response
+                ->withHeader('Content-Type', 'application/pdf')
+                ->withHeader('Content-Disposition', 'attachment; filename="' . $safeName . '"')
+                ->withHeader('Content-Length', (string) strlen($file['content']))
+                ->withHeader('X-Content-Type-Options', 'nosniff')
+                ->withHeader('Cache-Control', 'private, no-store');
+        } catch (\Throwable $e) {
+            return $this->error($response, $e);
+        }
+    }
+
+    public function deletePdf(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'bank.import', AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        try {
+            $clearingId = (int) ($args['id'] ?? 0);
+            $result = $this->service->deletePdf($this->currentSupplierId($request), $clearingId);
+            $this->log($request, 'gopay.pdf_deleted', $clearingId, []);
+            return Json::ok($response, $result);
+        } catch (\Throwable $e) {
+            return $this->error($response, $e);
+        }
+    }
+
     private function error(Response $response, \Throwable $e): Response
     {
         if ($e instanceof GoPayException) {
@@ -221,6 +291,40 @@ final class GoPayAction
                 $e->extra === [] ? [] : ['params' => $e->extra]);
         }
         return $this->mapPostingError($response, $e);
+    }
+
+    /** @return array{file_name:string,content:string} */
+    private function readPdf(UploadedFileInterface $file): array
+    {
+        if ($file->getError() !== UPLOAD_ERR_OK) {
+            throw new GoPayException('pdf_no_file', 'PDF soubor se nepodařilo nahrát.', 400);
+        }
+        $maxSize = 10 * 1024 * 1024;
+        $declaredSize = $file->getSize() ?? $file->getStream()->getSize();
+        if ($declaredSize !== null && $declaredSize > $maxSize) {
+            throw new GoPayException('pdf_too_large', 'PDF překračuje limit 10 MiB.', 413);
+        }
+        $name = (string) $file->getClientFilename();
+        if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'pdf') {
+            throw new GoPayException('pdf_invalid_extension', 'Povolené je pouze PDF.', 400);
+        }
+        $content = (string) $file->getStream()->getContents();
+        if (strlen($content) > $maxSize) {
+            throw new GoPayException('pdf_too_large', 'PDF překračuje limit 10 MiB.', 413);
+        }
+        if (!str_starts_with(ltrim($content, "\x00\x09\x0a\x0d\x20\xef\xbb\xbf"), '%PDF-')) {
+            throw new GoPayException('pdf_invalid', 'Soubor není platné PDF.', 400);
+        }
+        if (function_exists('finfo_buffer')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo !== false) {
+                $mime = (string) finfo_buffer($finfo, $content);
+                if ($mime !== '' && $mime !== 'application/pdf') {
+                    throw new GoPayException('pdf_invalid', 'Soubor není platné PDF.', 400);
+                }
+            }
+        }
+        return ['file_name' => $name ?: 'GoPay-clearing.pdf', 'content' => $content];
     }
 
     /** @param array<string,mixed> $payload */

@@ -314,7 +314,7 @@ export interface OssThresholdProgress {
 
 export type MonthlyExportPart =
   | 'sales_pdf' | 'sales_isdoc' | 'purchase_pdf' | 'purchase_isdoc'
-  | 'bank_pdf' | 'bank_gpc' | 'dph_book'
+  | 'bank_pdf' | 'bank_gpc' | 'gopay_pdf' | 'gopay_xml' | 'dph_book'
 
 /** Období hromadného exportu — měsíc nebo celé čtvrtletí. */
 export type ExportPeriodArg =

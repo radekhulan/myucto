@@ -30,8 +30,14 @@ const accountOptions = ref<GoPayAccountOption[]>([])
 const clearings = ref<GoPayClearing[]>([])
 const selected = ref<GoPayClearingDetail | null>(null)
 const detailLoading = ref(false)
-const file = ref<File | null>(null)
-const fileInput = ref<HTMLInputElement | null>(null)
+const xmlFile = ref<File | null>(null)
+const importPdfFile = ref<File | null>(null)
+const xmlFileInput = ref<HTMLInputElement | null>(null)
+const importPdfInput = ref<HTMLInputElement | null>(null)
+const detailPdfFile = ref<File | null>(null)
+const detailPdfInput = ref<HTMLInputElement | null>(null)
+const pdfUploadingId = ref<number | null>(null)
+const pdfDeletingId = ref<number | null>(null)
 
 const form = reactive<GoPaySettings>({
   currency: 'CZK',
@@ -47,6 +53,7 @@ const form = reactive<GoPaySettings>({
 
 const canConfigure = computed(() => auth.canWrite('bank.post'))
 const canImport = computed(() => auth.canWrite('bank.import') && auth.canWrite('bank.post'))
+const canManagePdf = computed(() => auth.canWrite('bank.import'))
 const canDelete = computed(() => auth.isSuperadmin)
 const account221 = computed(() => accountOptions.value.filter(a => a.account_code.startsWith('221')))
 const account311 = computed(() => accountOptions.value.filter(a => a.account_code.startsWith('311')))
@@ -55,7 +62,7 @@ const expenseAccounts = computed(() => accountOptions.value.filter(a => a.accoun
 const importDisabledReason = computed(() => {
   if (!configured.value) return t('gopay.import.configure_first')
   if (!canImport.value) return t('gopay.import.permission_missing')
-  if (!file.value) return t('gopay.import.choose_file')
+  if (!xmlFile.value) return t('gopay.import.choose_file')
   return ''
 })
 
@@ -105,24 +112,67 @@ async function saveSettings() {
   }
 }
 
-function chooseFile(event: Event) {
-  file.value = (event.target as HTMLInputElement).files?.[0] ?? null
+function chooseXmlFile(event: Event) {
+  xmlFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
+}
+
+function chooseImportPdf(event: Event) {
+  importPdfFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
+}
+
+function chooseDetailPdf(event: Event) {
+  detailPdfFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
 }
 
 async function importXml() {
-  if (!file.value || importDisabledReason.value) return
+  if (!xmlFile.value || importDisabledReason.value) return
   importing.value = true
   try {
-    const result = await gopayApi.importXml(file.value)
+    const result = await gopayApi.importXml(xmlFile.value, importPdfFile.value)
     selected.value = result.clearing
-    file.value = null
-    if (fileInput.value) fileInput.value.value = ''
+    xmlFile.value = null
+    importPdfFile.value = null
+    if (xmlFileInput.value) xmlFileInput.value.value = ''
+    if (importPdfInput.value) importPdfInput.value.value = ''
     clearings.value = await gopayApi.list()
     toast.success(result.duplicate ? t('gopay.import.duplicate') : t('gopay.import.success'))
   } catch (error) {
     toast.error(errorMessage(error))
   } finally {
     importing.value = false
+  }
+}
+
+async function uploadPdf() {
+  if (!selected.value || !detailPdfFile.value || !canManagePdf.value) return
+  const id = selected.value.id
+  pdfUploadingId.value = id
+  try {
+    selected.value = await gopayApi.uploadPdf(id, detailPdfFile.value)
+    detailPdfFile.value = null
+    if (detailPdfInput.value) detailPdfInput.value.value = ''
+    clearings.value = await gopayApi.list()
+    toast.success(t('gopay.pdf.uploaded'))
+  } catch (error) {
+    toast.error(errorMessage(error))
+  } finally {
+    pdfUploadingId.value = null
+  }
+}
+
+async function deletePdf() {
+  if (!selected.value || !selected.value.has_pdf || !canManagePdf.value) return
+  if (!confirm(t('gopay.pdf.delete_confirm'))) return
+  const id = selected.value.id
+  pdfDeletingId.value = id
+  try {
+    selected.value = await gopayApi.deletePdf(id)
+    clearings.value = await gopayApi.list()
+    toast.success(t('gopay.pdf.deleted'))
+  } catch (error) {
+    toast.error(errorMessage(error))
+  } finally {
+    pdfDeletingId.value = null
   }
 }
 
@@ -274,7 +324,11 @@ onMounted(load)
         <div class="mt-4 flex flex-wrap items-end gap-3">
           <label class="min-w-[16rem] flex-1 text-sm font-medium text-neutral-700">
             {{ t('gopay.import.file') }}
-            <input ref="fileInput" class="form-input mt-1 block w-full" type="file" accept=".xml,application/xml,text/xml" :disabled="importing || !canImport" @change="chooseFile">
+            <input ref="xmlFileInput" class="form-input mt-1 block w-full" type="file" accept=".xml,application/xml,text/xml" :disabled="importing || !canImport" @change="chooseXmlFile">
+          </label>
+          <label class="min-w-[16rem] flex-1 text-sm font-medium text-neutral-700">
+            {{ t('gopay.import.pdf_file') }}
+            <input ref="importPdfInput" class="form-input mt-1 block w-full" type="file" accept=".pdf,application/pdf" :disabled="importing || !canImport" @change="chooseImportPdf">
           </label>
           <button type="button" :class="btnFilled('primary')" :disabled="importing || !!importDisabledReason" :title="importDisabledReason || undefined" @click="importXml">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.upload" /></svg>
@@ -326,6 +380,10 @@ onMounted(load)
                       <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.download" /></svg>
                       XML
                     </a>
+                    <a v-if="clearing.has_pdf" :href="gopayApi.pdfDownloadUrl(clearing.id)" :class="btnOutlineSm('neutral')">
+                      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.download" /></svg>
+                      PDF
+                    </a>
                     <button v-if="canConfigure" type="button" :class="btnOutlineSm('warning')" :disabled="processingId === clearing.id" @click="process(clearing)">
                       <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.cycle" /></svg>
                       {{ t('gopay.process.button') }}
@@ -356,6 +414,31 @@ onMounted(load)
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.x" /></svg>
             {{ t('gopay.close') }}
           </button>
+        </div>
+
+        <div class="flex flex-wrap items-end gap-3 border-b border-neutral-200 px-5 py-4">
+          <div v-if="selected.has_pdf" class="min-w-[14rem] flex-1">
+            <p class="text-sm font-medium text-neutral-800">{{ t('gopay.pdf.attached') }}</p>
+            <p class="mt-1 text-xs text-neutral-500">{{ selected.pdf_name }}</p>
+          </div>
+          <label v-if="canManagePdf" class="min-w-[16rem] flex-1 text-sm font-medium text-neutral-700">
+            {{ selected.has_pdf ? t('gopay.pdf.replace') : t('gopay.pdf.attach') }}
+            <input ref="detailPdfInput" class="form-input mt-1 block w-full" type="file" accept=".pdf,application/pdf" :disabled="pdfUploadingId === selected.id" @change="chooseDetailPdf">
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <a v-if="selected.has_pdf" :href="gopayApi.pdfDownloadUrl(selected.id)" :class="btnOutline('neutral')">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.download" /></svg>
+              {{ t('gopay.pdf.download') }}
+            </a>
+            <button v-if="canManagePdf" type="button" :class="btnFilled('primary')" :disabled="!detailPdfFile || pdfUploadingId === selected.id" @click="uploadPdf">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.upload" /></svg>
+              {{ pdfUploadingId === selected.id ? t('gopay.pdf.uploading') : t('gopay.pdf.upload') }}
+            </button>
+            <button v-if="canManagePdf && selected.has_pdf" type="button" :class="btnOutline('danger')" :disabled="pdfDeletingId === selected.id" @click="deletePdf">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.trash" /></svg>
+              {{ t('gopay.pdf.delete') }}
+            </button>
+          </div>
         </div>
 
         <div v-if="selected.payout_issue_message" class="m-5 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800">

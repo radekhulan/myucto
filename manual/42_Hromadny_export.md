@@ -11,6 +11,7 @@ vyberete, co se zabalí:
 - **Přijaté faktury** — PDF a/nebo ISDOC (u PDF má přednost originál od dodavatele;
   pokud chybí, vloží se naše rekonstrukce s příponou `-rekonstrukce`)
 - **Výpisy z účtu** — PDF a/nebo GPC (originální soubory)
+- **GoPay vyúčtování** - XML a/nebo přiložené PDF
 - **Kniha DPH** — měsíční PDF žurnál (u čtvrtletí se přiloží **tři** PDF, jeden za
   každý měsíc kvartálu)
 
@@ -22,7 +23,8 @@ které se mají vložit do následujícího ZIP.
 **Zařazení do období je daňově korektní a shodné s výkazy DPH** (přiznání, kontrolní
 hlášení, kniha DPH): vystavené dle DUZP, přijaté tuzemské dle pozdějšího z dat
 DUZP / vystavení, přijaté zahraniční reverse charge dle DUZP,
-výpisy dle data výpisu.
+výpisy dle data výpisu a GoPay podle období uvedeného ve vyúčtování. Pokud GoPay
+vyúčtování zasahuje do zvoleného období, exportuje se jeho XML i dostupné PDF.
 
 #### Běh na pozadí
 

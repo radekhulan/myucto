@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Accounting\GoPay;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
@@ -14,9 +15,12 @@ use MyInvoice\Service\Accounting\GoPay\GoPayService;
 use MyInvoice\Service\Accounting\JournalLinkService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Bank\EmailNoticeReconciler;
+use MyInvoice\Service\Export\ExportPeriod;
+use MyInvoice\Service\Export\MonthlyExportService;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use ZipArchive;
 
 #[Group('integration')]
 final class GoPayServiceTest extends TestCase
@@ -31,6 +35,8 @@ final class GoPayServiceTest extends TestCase
     private JournalLinkService $links;
     private EmailNoticeReconciler $reconciler;
     private AccountingPeriodRepository $periods;
+    private ImportJobRepository $jobs;
+    private MonthlyExportService $monthlyExport;
     private int $supplierId;
     private int $userId;
     private int $currencyId;
@@ -51,6 +57,8 @@ final class GoPayServiceTest extends TestCase
         $this->links = $container->get(JournalLinkService::class);
         $this->reconciler = $container->get(EmailNoticeReconciler::class);
         $this->periods = $container->get(AccountingPeriodRepository::class);
+        $this->jobs = $container->get(ImportJobRepository::class);
+        $this->monthlyExport = $container->get(MonthlyExportService::class);
         $pdo = $this->db->pdo();
         $this->supplierId = (int) ($pdo->query("SELECT id FROM supplier WHERE accounting_mode='double_entry' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
         $this->userId = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
@@ -184,6 +192,107 @@ final class GoPayServiceTest extends TestCase
         $notice = $this->db->pdo()->prepare('SELECT match_status FROM bank_transactions WHERE id=?');
         $notice->execute([$noticeTransactionId]);
         self::assertSame('unmatched', $notice->fetchColumn());
+    }
+
+    public function testPdfLifecycleAndMonthlyExportPreserveXmlAndAccounting(): void
+    {
+        $this->configureAccounts();
+        [$invoiceId, $creditNoteId] = $this->documents();
+        $this->postDocuments($invoiceId, $creditNoteId);
+        $this->payment($invoiceId);
+        $this->bankPayout();
+        $pdf = "%PDF-1.4\nsynthetic GoPay clearing\n%%EOF";
+
+        $import = $this->service->import(
+            $this->supplierId,
+            $this->userId,
+            'synthetic-with-pdf.xml',
+            $this->xml(),
+            ['file_name' => 'synthetic.pdf', 'content' => $pdf],
+        );
+        $clearingId = (int) $import['clearing']['id'];
+        self::assertTrue($import['clearing']['has_pdf']);
+        self::assertSame('synthetic.pdf', $import['clearing']['pdf_name']);
+        self::assertSame(strlen($pdf), $import['clearing']['pdf_size_bytes']);
+        self::assertArrayNotHasKey('pdf_content', $import['clearing']);
+        self::assertArrayNotHasKey('pdf_hash', $import['clearing']);
+        $listed = array_values(array_filter(
+            $this->service->listClearings($this->supplierId),
+            static fn (array $row): bool => (int) $row['id'] === $clearingId,
+        ));
+        self::assertCount(1, $listed);
+        self::assertTrue($listed[0]['has_pdf']);
+        self::assertSame(
+            ['content' => $pdf, 'file_name' => 'synthetic.pdf'],
+            $this->service->downloadPdf($this->supplierId, $clearingId),
+        );
+
+        try {
+            $this->service->downloadPdf($this->supplierId + 100000, $clearingId);
+            self::fail('Cizí firma nesmí stáhnout GoPay PDF.');
+        } catch (\MyInvoice\Service\Accounting\GoPay\GoPayException $e) {
+            self::assertSame('pdf_not_found', $e->errorCode);
+        }
+
+        $replacement = "%PDF-1.7\nreplacement\n%%EOF";
+        $updated = $this->service->uploadPdf(
+            $this->supplierId,
+            $clearingId,
+            '../replacement.pdf',
+            $replacement,
+        );
+        self::assertSame('replacement.pdf', $updated['pdf_name']);
+        self::assertSame($replacement, $this->service->downloadPdf($this->supplierId, $clearingId)['content']);
+
+        $entryCount = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM journal_entries WHERE supplier_id=? AND source_type="gopay"'
+        );
+        $entryCount->execute([$this->supplierId]);
+        $entriesBeforeDelete = (int) $entryCount->fetchColumn();
+        $withoutPdf = $this->service->deletePdf($this->supplierId, $clearingId);
+        self::assertFalse($withoutPdf['has_pdf']);
+        self::assertNull($withoutPdf['pdf_name']);
+        self::assertSame($this->xml(), $this->service->download($this->supplierId, $clearingId)['content']);
+        $entryCount->execute([$this->supplierId]);
+        self::assertSame($entriesBeforeDelete, (int) $entryCount->fetchColumn());
+
+        $this->service->uploadPdf($this->supplierId, $clearingId, 'export.pdf', $pdf);
+        $january = new ExportPeriod('monthly', self::YEAR, 1, null, self::YEAR . '-01-01', self::YEAR . '-02-01', self::YEAR . '-01');
+        $february = new ExportPeriod('monthly', self::YEAR, 2, null, self::YEAR . '-02-01', self::YEAR . '-03-01', self::YEAR . '-02');
+        self::assertSame(1, $this->monthlyExport->previewCounts($this->supplierId, $january)['gopay_pdf']);
+        self::assertSame(1, $this->monthlyExport->previewCounts($this->supplierId, $january)['gopay_xml']);
+        self::assertSame(0, $this->monthlyExport->previewCounts($this->supplierId, $february)['gopay_pdf']);
+        self::assertSame(0, $this->monthlyExport->previewCounts($this->supplierId, $february)['gopay_xml']);
+
+        $jobId = $this->jobs->create($this->supplierId, 'monthly_export', [
+            'period' => 'monthly',
+            'year' => self::YEAR,
+            'month' => 1,
+            'parts' => ['gopay_pdf', 'gopay_xml'],
+        ], $this->userId);
+        $this->monthlyExport->run($jobId);
+        $job = $this->jobs->find($jobId, $this->supplierId);
+        self::assertIsArray($job);
+        self::assertSame('completed', $job['status']);
+        $zipPath = $this->monthlyExport->resolveResultPath((string) $job['result_path']);
+        $zip = new ZipArchive();
+        self::assertTrue($zip->open($zipPath));
+        try {
+            $entries = [];
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $name = $zip->getNameIndex($i);
+                if ($name !== false) $entries[] = $name;
+            }
+            $pdfEntry = array_values(array_filter($entries, static fn (string $name): bool => str_starts_with($name, 'GoPay/PDF/')));
+            $xmlEntry = array_values(array_filter($entries, static fn (string $name): bool => str_starts_with($name, 'GoPay/XML/')));
+            self::assertCount(1, $pdfEntry);
+            self::assertCount(1, $xmlEntry);
+            self::assertSame($pdf, $zip->getFromName($pdfEntry[0]));
+            self::assertSame($this->xml(), $zip->getFromName($xmlEntry[0]));
+        } finally {
+            $zip->close();
+            if (is_file($zipPath)) unlink($zipPath);
+        }
     }
 
     public function testDeleteRemovesImportedXmlAndOwnedEntriesButKeepsMatchedDocuments(): void

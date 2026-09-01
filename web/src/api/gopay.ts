@@ -56,6 +56,10 @@ export interface GoPayClearing {
   amount_transfer: number
   amount_sent: number
   file_name: string
+  has_pdf: boolean
+  pdf_name: string | null
+  pdf_size_bytes: number | null
+  pdf_uploaded_at: string | null
   status: GoPayClearingStatus
   movement_count: number
   posted_count: number
@@ -121,9 +125,10 @@ export const gopayApi = {
     api.get<{ items: GoPayClearing[] }>('/accounting/gopay/clearings').then(r => r.data.items),
   detail: (id: number) =>
     api.get<GoPayClearingDetail>(`/accounting/gopay/clearings/${id}`).then(r => r.data),
-  importXml: (file: File) => {
+  importXml: (file: File, pdf?: File | null) => {
     const body = new FormData()
     body.append('file', file)
+    if (pdf) body.append('pdf', pdf)
     return api.post<GoPayImportResult>('/accounting/gopay/clearings/import', body, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
@@ -132,6 +137,15 @@ export const gopayApi = {
     api.post<GoPayClearingDetail>(`/accounting/gopay/clearings/${id}/process`, {}).then(r => r.data),
   delete: (id: number) =>
     api.delete<GoPayDeleteResult>(`/accounting/gopay/clearings/${id}`).then(r => r.data),
+  uploadPdf: (id: number, file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return api.post<GoPayClearingDetail>(`/accounting/gopay/clearings/${id}/pdf`, body, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+  deletePdf: (id: number) =>
+    api.delete<GoPayClearingDetail>(`/accounting/gopay/clearings/${id}/pdf`).then(r => r.data),
   payoutCandidate: (transactionId: number) =>
     api.get<{ candidate: GoPayPayoutCandidate | null }>(`/accounting/gopay/payout-candidates/${transactionId}`)
       .then(r => r.data.candidate),
@@ -142,5 +156,9 @@ export const gopayApi = {
   downloadUrl: (id: number): string => {
     const base = api.defaults.baseURL ?? ''
     return `${base.replace(/\/$/, '')}/accounting/gopay/clearings/${id}/download`
+  },
+  pdfDownloadUrl: (id: number): string => {
+    const base = api.defaults.baseURL ?? ''
+    return `${base.replace(/\/$/, '')}/accounting/gopay/clearings/${id}/pdf`
   },
 }

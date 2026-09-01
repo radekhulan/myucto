@@ -11339,6 +11339,7 @@ paths:
               required: [file]
               properties:
                 file: { type: string, format: binary, description: GoPay Clearing XML, nejvýše 2 MB }
+                pdf: { type: string, format: binary, description: Volitelné původní PDF vyúčtování, nejvýše 10 MiB }
       responses:
         '200': { description: Vyúčtování už existovalo a bylo znovu zpracováno, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayImportResult' } } } }
         '201': { description: Vyúčtování bylo importováno, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayImportResult' } } } }
@@ -11358,7 +11359,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     delete:
       tags: [Accounting]
-      summary: Smaže importované GoPay XML a účetní zápisy vytvořené tímto importem
+      summary: Smaže importované GoPay XML, případné PDF a účetní zápisy vytvořené tímto importem
       description: Zachová faktury, dobropisy, jejich úhrady a dříve existující bankovní zápisy. Dostupné pouze superadminovi a jen pro otevřené, nezamčené období.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
@@ -11388,6 +11389,50 @@ paths:
         - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
       responses:
         '200': { description: XML, content: { application/xml: { schema: { type: string } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/gopay/clearings/{id}/pdf:
+    post:
+      tags: [Accounting]
+      summary: Přiloží nebo nahradí PDF u GoPay vyúčtování
+      description: Dostupné pouze z přihlášeného webového rozhraní s právem importovat banku.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: PDF, nejvýše 10 MiB }
+      responses:
+        '200': { description: Aktualizované vyúčtování, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayClearingDetail' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { description: PDF překračuje limit 10 MiB }
+    get:
+      tags: [Accounting]
+      summary: Stáhne přiložené PDF GoPay vyúčtování
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200': { description: PDF, content: { application/pdf: { schema: { type: string, format: binary } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Accounting]
+      summary: Smaže pouze PDF přílohu GoPay vyúčtování
+      description: XML, pohyby a účetní zápisy zůstanou zachované.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200': { description: Vyúčtování bez PDF, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayClearingDetail' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/accounting/gopay/clearings/{id}/process:
@@ -16105,7 +16150,7 @@ paths:
         Bez validního `period` se `month` bere jako legacy zápis YYYY-MM.
         Přístup jen role admin/accountant/readonly.
       responses:
-        '200': { description: 'Počty per část (sales_pdf, sales_isdoc, purchase_pdf, purchase_isdoc, bank_pdf, bank_gpc, dph_book)' }
+        '200': { description: 'Počty per část (sales_pdf, sales_isdoc, purchase_pdf, purchase_isdoc, bank_pdf, bank_gpc, gopay_pdf, gopay_xml, dph_book)' }
         '400': { description: 'Neplatné parametry období' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/reports/monthly-export/start:
@@ -16116,8 +16161,8 @@ paths:
       summary: Spustí měsíční/kvartální export (background job)
       description: |
         Vytvoří job (import_jobs, source=monthly_export) a spustí worker na
-        pozadí (ZIP se sales/purchase PDF+ISDOC, bankovními výpisy PDF+GPC a
-        Knihou DPH). Vrátí 409, pokud už export běží. Období se čte z těla,
+        pozadí (ZIP se sales/purchase PDF+ISDOC, bankovními výpisy PDF+GPC,
+        GoPay XML+PDF a Knihou DPH). Vrátí 409, pokud už export běží. Období se čte z těla,
         přebíjí query (`period`/`year`/`month`/`quarter`).
       requestBody:
         content:
@@ -16133,7 +16178,7 @@ paths:
                   type: array
                   items:
                     type: string
-                    enum: [sales_pdf, sales_isdoc, purchase_pdf, purchase_isdoc, bank_pdf, bank_gpc, dph_book]
+                    enum: [sales_pdf, sales_isdoc, purchase_pdf, purchase_isdoc, bank_pdf, bank_gpc, gopay_pdf, gopay_xml, dph_book]
                   description: 'Prázdné/chybí = všechny části'
       responses:
         '201': { description: 'job_id, status=queued, params' }
@@ -18112,7 +18157,7 @@ components:
 
     GoPayClearing:
       type: object
-      required: [id, clearing_id, currency, variable_symbol, cleared_from, cleared_to, performed_on, amount_gross, amount_fee, amount_storno, amount_storno_fee, amount_transfer, amount_sent, file_name, status, movement_count, posted_count, issue_count, imported_at]
+      required: [id, clearing_id, currency, variable_symbol, cleared_from, cleared_to, performed_on, amount_gross, amount_fee, amount_storno, amount_storno_fee, amount_transfer, amount_sent, file_name, has_pdf, status, movement_count, posted_count, issue_count, imported_at]
       properties:
         id: { type: integer, format: int64 }
         clearing_id: { type: string }
@@ -18129,6 +18174,10 @@ components:
         amount_transfer: { type: number, format: double }
         amount_sent: { type: number, format: double }
         file_name: { type: string }
+        has_pdf: { type: boolean }
+        pdf_name: { type: [string, "null"] }
+        pdf_size_bytes: { type: [integer, "null"], minimum: 0 }
+        pdf_uploaded_at: { type: [string, "null"], format: date-time }
         status: { type: string, enum: [imported, processing, processed, needs_review] }
         movement_count: { type: integer }
         posted_count: { type: integer }
