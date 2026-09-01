@@ -338,7 +338,9 @@ final class PayrollQuickInputRepository
                  )
              SELECT employment.id AS employment_id, employment.employee_id,
                     employment.code AS employment_code, employment.relation_type,
-                    employment.monthly_gross_minor, employment.start_date,
+                    ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
+                      AS monthly_gross_minor,
+                    employment.start_date,
                     employment.actual_start_date, employment.end_date,
                     employment.row_version AS employment_row_version,
                     employment.effective_status, employment.suspended_in_month,
@@ -406,6 +408,8 @@ final class PayrollQuickInputRepository
             $periodStart,
             $periodEnd,
             $supplierId,
+            $periodEnd,
+            $periodEnd,
             $periodEnd,
             $periodStart,
             $year,
@@ -490,7 +494,9 @@ final class PayrollQuickInputRepository
                  )
              SELECT recurring.*, component.code AS component_code,
                     component.component_kind, component.value_kind,
-                    component.tax_treatment, employment.monthly_gross_minor,
+                    component.tax_treatment,
+                    ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
+                      AS monthly_gross_minor,
                     COALESCE(
                       employment.actual_start_date,
                       employment.start_date,
@@ -523,6 +529,8 @@ final class PayrollQuickInputRepository
             $periodStart,
             $periodEnd,
             $supplierId,
+            $periodEnd,
+            $periodEnd,
             $supplierId,
             $periodEnd,
             $periodStart,

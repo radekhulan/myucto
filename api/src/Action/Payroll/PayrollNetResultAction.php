@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
-use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\Net\PayrollNetResultQueryService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -24,14 +23,6 @@ final class PayrollNetResultAction
     /** @param array{revisionId:string,employeeId:string} $args */
     public function detail(Request $request, Response $response, array $args): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
-        }
         $error = null;
         if (!$this->requirePermission($request, $response, 'payroll', AccessLevel::READ, $error)) {
             return $error ?? Json::error(

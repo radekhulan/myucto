@@ -38,7 +38,13 @@ final class PayrollTimeAction
 
     public function month(Request $request, Response $response): Response
     {
-        if (($error = $this->authorize($request, $response, 'payroll', AccessLevel::READ)) !== null) {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll',
+            AccessLevel::READ,
+            true,
+        )) !== null) {
             return $error;
         }
         $query = $request->getQueryParams();
@@ -181,6 +187,7 @@ final class PayrollTimeAction
             $response,
             'payroll.time.write',
             AccessLevel::WRITE,
+            true,
         )) !== null) {
             return $error;
         }
@@ -680,8 +687,9 @@ final class PayrollTimeAction
         Response $response,
         string $permission,
         AccessLevel $level,
+        bool $allowBearer = false,
     ): ?Response {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+        if (!$allowBearer && $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error(
                 $response,
                 'session_required',

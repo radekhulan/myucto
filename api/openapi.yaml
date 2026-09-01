@@ -35,8 +35,8 @@ info:
     Cesty `/api/v1/accounting/**`, `/api/v1/reports/**`, `/api/v1/tax/**`,
     `/api/v1/tax-evidence/**`, `/api/v1/tax-return/**` a `/api/v1/automation/**`
     odpovídají na `GET`, ale jakýkoli zápis odmítnou chybou
-    `403 token_write_forbidden` — i tokenu se scope `read_write`. Výjimkou jsou
-    mzdové podcesty popsané níže, které bearer token nezavolá vůbec.
+    `403 token_write_forbidden` — i tokenu se scope `read_write`. Mzdová část má
+    vlastní omezený kontrakt popsaný níže.
 
     Zaúčtování dokladu, storno zápisu, uzavření období, zaevidování opravy podle
     § 46 / § 74b, podání přiznání i odeslání podání na EPO jsou úkony s daňovou
@@ -56,14 +56,19 @@ info:
     - `/api/v1/ai/suggestions/{id}/accept` a `/reject` — přijetí návrhu je
       zaúčtování, viz předchozí odstavec.
 
-    Mzdový modul je kvůli zvláštní citlivosti personálních, daňových a platebních
-    údajů dostupný jen z přihlášeného webového rozhraní pod `/api/payroll/**`.
-    Stejná hranice platí pro legacy `/api/accounting/payroll/**` a
-    `/api/accounting/reports/payroll-sheet`.
-    Veřejná bearer varianta pro mzdy neexistuje a proto v tomto OpenAPI kontraktu
-    není. Její případné budoucí zpřístupnění vyžaduje samostatný
-    omezený kontrakt oprávnění, rozsahů dat a auditování; interní session endpointy
-    se do veřejného API automaticky nepromítají.
+    Mzdový modul má úzký veřejný kontrakt pro personální práci a mzdové vstupy:
+    zaměstnance a jejich sjednanou mzdu, její změnu od zadaného data i opravu,
+    docházku
+    a přesčasy, absence včetně DPN,
+    mzdové složky, měsíční vstupy a čtení výsledku vypočtené mzdy. Přístup stále
+    vyžaduje odpovídající mzdová oprávnění uživatele, kterému PAT patří.
+
+    Řízení mzdového běhu (`calculate`, `review`, `approve`, `post`, platby,
+    `close`), schválení docházky a absencí, dokumenty a všechna podání zůstávají dostupné
+    pouze z webového rozhraní. Legacy `/api/accounting/payroll/**` a
+    `/api/accounting/reports/payroll-sheet` zůstávají pro bearer token zcela
+    nedostupné. Interní session endpointy, které nejsou výslovně popsané pod
+    tagem Payroll, se do veřejného API automaticky nepromítají.
 
     ## Logování volání
 
@@ -156,6 +161,11 @@ tags:
       Podvojné účetnictví (Epic F1) — účtová osnova, účetní období, deník
       (journal) a kontační pravidla. Vše tenant-scoped. Zápisy vyžadují roli
       účetní nebo admin, čtení stačí readonly; změna stavu období je admin-only.
+  - name: Payroll
+    description: |
+      Omezené mzdové API pro zaměstnance, změnu a opravu sjednané mzdy, docházku, absence a
+      měsíční vstupy. Neobsahuje schvalování docházky, absencí ani mzdových běhů,
+      platby, dokumenty nebo podání.
   - name: Stock
     description: |
       Sklad (Epic Stock) — sklady, skladové karty, pohyby a stavy, skladové
@@ -16947,6 +16957,370 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Záloha není ve stavu confirmed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /api/v1/payroll/people:
+    get:
+      tags: [Payroll]
+      summary: Seznam zaměstnanců
+      description: Vrací stránkovaný seznam osob včetně pracovních vztahů a sjednané hrubé mzdy v detailu vztahu.
+      parameters:
+        - { name: filter, in: query, schema: { type: string, enum: [all, active, needs_setup], default: active } }
+        - { name: q, in: query, description: Hledání podle jména, schema: { type: string, maxLength: 100 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Seznam zaměstnanců
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PayrollPeoplePage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/people/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Payroll]
+      summary: Detail zaměstnance
+      description: Vrací osobu a její pracovní vztahy. `monthly_gross_minor` je aktuálně sjednaná měsíční hrubá mzda v haléřích.
+      responses:
+        '200':
+          description: Detail zaměstnance
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [person]
+                properties:
+                  person: { $ref: '#/components/schemas/PayrollPerson' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/payroll/employments/{id}/terms/current:
+    parameters:
+      - { name: id, in: path, required: true, description: ID pracovního vztahu, schema: { type: integer, format: int64 } }
+    patch:
+      tags: [Payroll]
+      summary: Opravit aktuální sjednanou mzdu
+      description: |
+        Opraví chybnou částku aktuální sjednané mzdy bez změny její účinnosti.
+        Bearer token na této cestě nesmí změnit žádnou jinou pracovní, daňovou
+        ani pojistnou podmínku.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayrollEmploymentTermsCorrectionRequest' }
+      responses:
+        '200':
+          description: Aktualizovaný pracovní vztah
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [employment]
+                properties:
+                  employment: { $ref: '#/components/schemas/PayrollEmployment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Konflikt verze nebo již zúčtovaná verze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/employments/{id}/terms:
+    parameters:
+      - { name: id, in: path, required: true, description: ID pracovního vztahu, schema: { type: integer, format: int64 } }
+    put:
+      tags: [Payroll]
+      summary: Změnit sjednanou mzdu od data
+      description: |
+        Založí novou verzi sjednané měsíční hrubé mzdy s účinností od zadaného
+        data. Starší mzdová období dál používají částku ze své tehdy účinné
+        verze. Bearer token na této cestě nesmí změnit žádnou jinou pracovní,
+        daňovou ani pojistnou podmínku.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayrollEmploymentTermsChangeRequest' }
+      responses:
+        '200':
+          description: Aktualizovaný pracovní vztah
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [employment]
+                properties:
+                  employment: { $ref: '#/components/schemas/PayrollEmployment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Konflikt verze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/components:
+    get:
+      tags: [Payroll]
+      summary: Mzdové složky
+      description: Vrací aktivní mzdové složky použitelné při zadávání měsíčních vstupů.
+      parameters:
+        - { name: effective_on, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Seznam složek
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [components]
+                properties:
+                  components:
+                    type: array
+                    items: { $ref: '#/components/schemas/PayrollComponent' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/inputs:
+    get:
+      tags: [Payroll]
+      summary: Měsíční mzdové vstupy
+      parameters:
+        - { name: period, in: query, required: true, description: Měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+        - { name: employment_id, in: query, schema: { type: integer, format: int64 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Seznam vstupů
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PayrollInputsPage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    post:
+      tags: [Payroll]
+      summary: Zadat mzdový vstup
+      description: Vytvoří vstup ve stavu `draft`. Neschvaluje ho ani nespouští výpočet mzdy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayrollInputWrite' }
+      responses:
+        '201':
+          description: Vytvořený vstup
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [input]
+                properties:
+                  input: { $ref: '#/components/schemas/PayrollInput' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/inputs/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+    put:
+      tags: [Payroll]
+      summary: Upravit rozpracovaný mzdový vstup
+      description: Upravit lze pouze vstup ve stavu `draft`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/PayrollInputWrite' }
+                - type: object
+                  required: [row_version]
+                  properties:
+                    row_version: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Upravený vstup
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [input]
+                properties:
+                  input: { $ref: '#/components/schemas/PayrollInput' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Konflikt verze nebo stavu, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/runs:
+    get:
+      tags: [Payroll]
+      summary: Seznam mzdových běhů
+      description: Pouze čtení. Přes bearer token nelze běh vytvořit ani řídit jeho stav.
+      parameters:
+        - { name: period, in: query, description: Měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Seznam běhů
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PayrollRunsPage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/runs/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Payroll]
+      summary: Detail mzdového běhu
+      description: Vrací aktuální revizi a výsledkový snapshot, ale nenabízí žádný stavový příkaz.
+      responses:
+        '200':
+          description: Detail běhu
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run]
+                properties:
+                  run: { $ref: '#/components/schemas/PayrollRun' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/payroll/revisions/{revisionId}/net-results/{employeeId}:
+    parameters:
+      - { name: revisionId, in: path, required: true, schema: { type: integer, format: int64 } }
+      - { name: employeeId, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Payroll]
+      summary: Výsledek mzdy zaměstnance
+      description: Vrací detail vypočtené hrubé a čisté mzdy konkrétní osoby v konkrétní revizi.
+      responses:
+        '200':
+          description: Rozpad výsledku mzdy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [net_result]
+                properties:
+                  net_result: { type: object, additionalProperties: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Výsledek pro revizi není dostupný, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/time/month:
+    get:
+      tags: [Payroll]
+      summary: Docházka za měsíc
+      parameters:
+        - { name: period, in: query, required: true, description: Měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+        - { name: employment_id, in: query, schema: { type: integer, format: int64 } }
+        - { name: incomplete, in: query, schema: { type: boolean, default: false } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Přehled docházky
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PayrollTimeOverview' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/time/entries:
+    post:
+      tags: [Payroll]
+      summary: Zadat nebo opravit docházku
+      description: |
+        Uloží versionovaný záznam docházky. Pro přesčas použij `category: overtime`.
+        Záznam zůstává rozpracovaný a tento endpoint neschvaluje měsíc.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayrollTimeEntryWrite' }
+      responses:
+        '201':
+          description: Uložený záznam a stav měsíce
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entry, month]
+                properties:
+                  entry: { $ref: '#/components/schemas/PayrollTimeEntry' }
+                  month: { type: object, additionalProperties: true }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '409': { description: Docházka je uzamčená nebo došlo ke konfliktu verze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/time/absences:
+    get:
+      tags: [Payroll]
+      summary: Seznam absencí
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: employment_id, in: query, schema: { type: integer, format: int64 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Seznam absencí
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PayrollAbsencesPage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    post:
+      tags: [Payroll]
+      summary: Zadat absenci nebo neschopenku
+      description: "Pro dočasnou pracovní neschopnost použij `absence_type: dpn`. Nový záznam vzniká ve stavu `requested`."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayrollAbsenceWrite' }
+      responses:
+        '201':
+          description: Vytvořená absence
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [absence]
+                properties:
+                  absence: { $ref: '#/components/schemas/PayrollAbsence' }
+        '403': { $ref: '#/components/responses/InsufficientScope' }
+        '409': { description: Překryv absence nebo uzavřený rok, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/time/averages:
+    get:
+      tags: [Payroll]
+      summary: Schválené průměrné výdělky pracovního vztahu
+      description: Vrací snapshoty průměrného hodinového výdělku použitelné pro dovolenou, DPN a překážky.
+      parameters:
+        - { name: employment_id, in: query, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Snapshoty průměrného výdělku
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [snapshots]
+                properties:
+                  snapshots:
+                    type: array
+                    items: { $ref: '#/components/schemas/PayrollAverageSnapshot' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -17010,6 +17384,307 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    PayrollPersonEmploymentRef:
+      type: object
+      required: [id, code, relation_type, status, is_primary]
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string }
+        relation_type: { type: string, enum: [employment, small_scale_employment, dpp, dpc, partner_dependent, statutory_body] }
+        status: { type: string, enum: [planned, preregistered, active, suspended, ended, archived, no_show] }
+        is_primary: { type: boolean }
+
+    PayrollPersonSummary:
+      type: object
+      required: [id, full_name, is_active, employment_count, employment_refs, needs_setup]
+      properties:
+        id: { type: integer, format: int64 }
+        full_name: { type: string }
+        is_active: { type: boolean }
+        profile_status: { type: string }
+        employment_count: { type: integer, minimum: 0 }
+        employment_refs:
+          type: array
+          items: { $ref: '#/components/schemas/PayrollPersonEmploymentRef' }
+        relation_types:
+          type: array
+          items: { type: string }
+        setup_gaps:
+          type: array
+          items: { type: string }
+        needs_setup: { type: boolean }
+
+    PayrollPeoplePage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PayrollPersonSummary' }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1 }
+        offset: { type: integer, minimum: 0 }
+
+    PayrollEmploymentTerm:
+      type: object
+      required: [id, effective_from, planned_start_on, workload_basis_points, row_version]
+      additionalProperties: true
+      properties:
+        id: { type: integer, format: int64 }
+        effective_from: { type: string, format: date }
+        effective_to: { type: [string, "null"], format: date }
+        planned_start_on: { type: string, format: date }
+        actual_start_on: { type: [string, "null"], format: date }
+        monthly_gross_minor:
+          type: [integer, "null"]
+          minimum: 0
+          description: Sjednaná měsíční hrubá mzda v haléřích platná pro tuto verzi.
+        weekly_hours: { type: [string, "null"] }
+        workload_basis_points: { type: integer, minimum: 1, maximum: 10000 }
+        work_place: { type: [string, "null"] }
+        social_insurance_participation: { type: string }
+        health_insurance_participation: { type: string }
+        tax_regime: { type: string }
+        is_primary: { type: boolean }
+        change_reason: { type: [string, "null"] }
+        row_version: { type: integer, minimum: 1 }
+
+    PayrollEmployment:
+      type: object
+      required: [id, employee_id, code, relation_type, status, monthly_gross_minor, row_version, terms]
+      additionalProperties: true
+      properties:
+        id: { type: integer, format: int64 }
+        employee_id: { type: integer, format: int64 }
+        code: { type: string }
+        relation_type: { type: string }
+        status: { type: string }
+        is_primary: { type: boolean }
+        start_date: { type: [string, "null"], format: date }
+        end_date: { type: [string, "null"], format: date }
+        monthly_gross_minor:
+          type: [integer, "null"]
+          description: Sjednaná měsíční hrubá mzda v haléřích.
+        row_version: { type: integer, minimum: 1 }
+        terms:
+          type: array
+          items: { $ref: '#/components/schemas/PayrollEmploymentTerm' }
+
+    PayrollPerson:
+      allOf:
+        - { $ref: '#/components/schemas/PayrollPersonSummary' }
+        - type: object
+          required: [employments]
+          properties:
+            employments:
+              type: array
+              items: { $ref: '#/components/schemas/PayrollEmployment' }
+
+    PayrollEmploymentTermsCorrectionRequest:
+      type: object
+      additionalProperties: false
+      required: [row_version, monthly_gross_minor, change_reason]
+      properties:
+        row_version: { type: integer, minimum: 1 }
+        monthly_gross_minor: { type: [integer, "null"], minimum: 0 }
+        change_reason: { type: string, minLength: 3, maxLength: 500 }
+
+    PayrollEmploymentTermsChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [row_version, effective_from, monthly_gross_minor, change_reason]
+      properties:
+        row_version: { type: integer, minimum: 1 }
+        effective_from: { type: string, format: date }
+        monthly_gross_minor: { type: [integer, "null"], minimum: 0 }
+        change_reason: { type: string, minLength: 3, maxLength: 500 }
+
+    PayrollComponent:
+      type: object
+      required: [id, code, name, component_kind, value_kind]
+      additionalProperties: true
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string }
+        name: { type: string }
+        component_kind: { type: string }
+        value_kind: { type: string }
+        is_active: { type: boolean }
+        row_version: { type: integer }
+
+    PayrollInputWrite:
+      type: object
+      required: [employee_id, employment_id, component_id, period, amount_minor, source_kind]
+      properties:
+        employee_id: { type: integer, format: int64 }
+        employment_id: { type: integer, format: int64 }
+        component_id: { type: integer, format: int64 }
+        period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        source_period: { type: [string, "null"], pattern: '^[0-9]{4}-[0-9]{2}$' }
+        amount_minor: { type: integer }
+        quantity_milliunits: { type: [integer, "null"] }
+        source_kind: { type: string, enum: [manual, recurring, time, absence, import, correction, travel] }
+        external_id: { type: [string, "null"] }
+
+    PayrollInput:
+      allOf:
+        - { $ref: '#/components/schemas/PayrollInputWrite' }
+        - type: object
+          required: [id, status, row_version]
+          properties:
+            id: { type: integer, format: int64 }
+            employee_name: { type: string }
+            employment_code: { type: string }
+            component_code: { type: string }
+            component_name: { type: string }
+            status: { type: string, enum: [draft, approved, locked, cancelled] }
+            row_version: { type: integer, minimum: 1 }
+
+    PayrollInputsPage:
+      type: object
+      required: [inputs, total, limit, offset]
+      properties:
+        inputs:
+          type: array
+          items: { $ref: '#/components/schemas/PayrollInput' }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1 }
+        offset: { type: integer, minimum: 0 }
+        employment_id: { type: [integer, "null"], format: int64 }
+
+    PayrollRun:
+      type: object
+      required: [id, period_start, payment_date, status, row_version]
+      additionalProperties: true
+      properties:
+        id: { type: integer, format: int64 }
+        period_start: { type: string, format: date }
+        payment_date: { type: string, format: date }
+        status: { type: string }
+        current_revision_no: { type: integer }
+        revision_id: { type: [integer, "null"], format: int64 }
+        revision_no: { type: [integer, "null"] }
+        revision_status: { type: [string, "null"] }
+        row_version: { type: integer, minimum: 1 }
+        result_snapshot: { type: [object, "null"], additionalProperties: true }
+        validations:
+          type: array
+          items: { type: object, additionalProperties: true }
+
+    PayrollRunsPage:
+      type: object
+      required: [runs, total, limit, offset]
+      properties:
+        runs:
+          type: array
+          items: { $ref: '#/components/schemas/PayrollRun' }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1 }
+        offset: { type: integer, minimum: 0 }
+
+    PayrollTimeEntryWrite:
+      type: object
+      required: [employment_id, category, starts_at, ends_at, timezone, break_minutes, supersedes_id, row_version, month_row_version]
+      properties:
+        employment_id: { type: integer, format: int64 }
+        category:
+          type: string
+          description: Pro přesčas použij `overtime`.
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        timezone: { type: string, example: Europe/Prague }
+        break_minutes: { type: integer, minimum: 0 }
+        supersedes_id: { type: [integer, "null"], format: int64 }
+        row_version: { type: integer, minimum: 0 }
+        month_row_version: { type: integer, minimum: 0 }
+        difficulty_factor_count: { type: [integer, "null"], minimum: 1, maximum: 255 }
+
+    PayrollTimeEntry:
+      type: object
+      required: [id, employment_id, category, starts_at, ends_at, net_minutes, status, row_version]
+      additionalProperties: true
+      properties:
+        id: { type: integer, format: int64 }
+        employment_id: { type: integer, format: int64 }
+        category: { type: string }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        timezone_name: { type: string }
+        break_minutes: { type: integer }
+        net_minutes: { type: integer }
+        status: { type: string, enum: [draft, approved] }
+        row_version: { type: integer }
+
+    PayrollTimeOverview:
+      type: object
+      required: [period, items, total, limit, offset]
+      additionalProperties: true
+      properties:
+        period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        employment_id: { type: [integer, "null"], format: int64 }
+        items:
+          type: array
+          items: { type: object, additionalProperties: true }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1 }
+        offset: { type: integer, minimum: 0 }
+
+    PayrollAbsenceWrite:
+      type: object
+      required: [employment_id, absence_type, date_from, date_to]
+      properties:
+        employment_id: { type: integer, format: int64 }
+        absence_type:
+          type: string
+          enum: [vacation, dpn, quarantine, ocr, long_term_care, ppm, paternity, parental, unpaid_leave, employee_obstacle, employer_obstacle, compensatory_time_off, unexcused, other]
+        date_from: { type: string, format: date }
+        date_to: { type: string, format: date }
+        timezone_name: { type: string, default: Europe/Prague }
+        partial_first_minutes: { type: [integer, "null"], minimum: 0 }
+        partial_last_minutes: { type: [integer, "null"], minimum: 0 }
+        average_snapshot_id: { type: [integer, "null"], format: int64 }
+        note: { type: [string, "null"] }
+
+    PayrollAverageSnapshot:
+      type: object
+      required: [id, employment_id, applicable_year, applicable_quarter, average_hourly_minor, status, row_version]
+      additionalProperties: true
+      properties:
+        id: { type: integer, format: int64 }
+        employment_id: { type: integer, format: int64 }
+        applicable_year: { type: integer }
+        applicable_quarter: { type: integer, minimum: 1, maximum: 4 }
+        source_kind: { type: string, enum: [actual, probable] }
+        average_hourly_minor: { type: integer, minimum: 0 }
+        rationale: { type: [string, "null"] }
+        status: { type: string, enum: [manual_review, approved, superseded] }
+        row_version: { type: integer, minimum: 1 }
+
+    PayrollAbsence:
+      allOf:
+        - { $ref: '#/components/schemas/PayrollAbsenceWrite' }
+        - type: object
+          required: [id, full_name, employment_code, status, row_version]
+          properties:
+            id: { type: integer, format: int64 }
+            full_name: { type: string }
+            employment_code: { type: string }
+            average_hourly_minor: { type: [integer, "null"] }
+            status: { type: string, enum: [requested, approved, rejected, cancelled] }
+            correction_pending: { type: boolean }
+            row_version: { type: integer, minimum: 0 }
+
+    PayrollAbsencesPage:
+      type: object
+      required: [absences, total, limit, offset]
+      properties:
+        absences:
+          type: array
+          items: { $ref: '#/components/schemas/PayrollAbsence' }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1 }
+        offset: { type: integer, minimum: 0 }
+
     AppUrlConfigurationDiagnostic:
       type: object
       additionalProperties: false

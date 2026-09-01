@@ -364,6 +364,17 @@ const EXAMPLE_GROUPS = computed(() => [
       { q: 'Kolik máme uloženo ve skladu k dnešnímu dni?', tool: 'stock_valuation' },
     ],
   },
+  {
+    title: t('mcp_server_page.examples.payroll.title'),
+    items: [
+      { q: t('mcp_server_page.examples.payroll.agreed_salary'), tool: 'list_payroll_people + get_payroll_person' },
+      { q: t('mcp_server_page.examples.payroll.net_salary'), tool: 'get_payroll_salary_result' },
+      { q: t('mcp_server_page.examples.payroll.change_salary'), tool: 'get_payroll_person + change_payroll_salary' },
+      { q: t('mcp_server_page.examples.payroll.sickness'), tool: 'list_payroll_average_earnings + create_payroll_absence' },
+      { q: t('mcp_server_page.examples.payroll.overtime'), tool: 'get_payroll_time_month + save_payroll_time_entry' },
+      { q: t('mcp_server_page.examples.payroll.bonus'), tool: 'list_payroll_components + create_payroll_input' },
+    ],
+  },
 ])
 
 const TOOL_GROUPS = computed(() => [
@@ -418,6 +429,13 @@ const TOOL_GROUPS = computed(() => [
       + 'list_categories, list_manufacturers, stock_levels, stock_availability, stock_valuation, list_warehouses',
   },
   {
+    title: t('mcp_server_page.tool_groups.payroll'),
+    tools: 'list_payroll_people, get_payroll_person, change_payroll_salary, list_payroll_components, '
+      + 'list_payroll_inputs, create_payroll_input, update_payroll_input, list_payroll_runs, '
+      + 'get_payroll_salary_result, get_payroll_time_month, save_payroll_time_entry, '
+      + 'list_payroll_absences, list_payroll_average_earnings, create_payroll_absence',
+  },
+  {
     title: 'Odběratelé a ARES',
     tools: 'search_clients, get_client, create_client, update_client, lookup_company_in_ares',
   },
@@ -457,7 +475,8 @@ onMounted(() => {
         <strong>{{ t('mcp_server_page.capabilities.projects') }}</strong>,
         <strong>{{ t('mcp_server_page.capabilities.documents') }}</strong>,
         <strong>{{ t('mcp_server_page.capabilities.logbook') }}</strong>,
-        <strong>účetnictví</strong>, <strong>statistiku</strong> a <strong>e-shop se skladem</strong>.
+        <strong>účetnictví</strong>, <strong>statistiku</strong>, <strong>e-shop se skladem</strong>
+        a <strong>{{ t('mcp_server_page.capabilities.payroll') }}</strong>.
       </p>
       <p class="mb-2">
         Řekneš třeba <em>„přidej mi do výkazu práce pro AVYX 3 hodiny práce na MCP serveru“</em> —
@@ -471,6 +490,8 @@ onMounted(() => {
         § 46 / § 74b ani odeslat podání na EPO nemůže — je to agenda s daňovou odpovědností, kde
         chyba znamená opravné podání. Zápis do účetnictví dělá člověk v aplikaci. Zákaz vynucuje
         server, ne jen tenhle nástroj: i token s právem zápisu dostane na takovou operaci odmítnutí.
+        <br><strong>{{ t('mcp_server_page.payroll_boundary.title') }}</strong>
+        {{ t('mcp_server_page.payroll_boundary.description') }}
       </p>
     </div>
 
@@ -747,7 +768,7 @@ npm install</pre>
             </tr>
             <tr class="border-t border-neutral-200">
               <td class="px-3 py-2"><code>403 token_write_forbidden</code></td>
-              <td class="px-3 py-2">Zápis do účetnictví nebo daní — přes API nikdy, viz výše.</td>
+              <td class="px-3 py-2">{{ t('mcp_server_page.troubleshooting.write_forbidden') }}</td>
             </tr>
             <tr class="border-t border-neutral-200">
               <td class="px-3 py-2"><code>403 stock_disabled</code></td>

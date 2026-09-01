@@ -422,6 +422,93 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame('forbidden', $this->json($client)['error']['code']);
     }
 
+    public function testBearerCanVersionSalaryButCannotChangeOtherEmploymentTerms(): void
+    {
+        $employment = $this->create($this->employeeId, 'BEARER-SALARY', 'employment', true);
+        $newTerms = $this->action->addTerms(
+            $this->request(
+                'PUT',
+                "/api/payroll/employments/{$employment['id']}/terms",
+                [
+                    'row_version' => $employment['row_version'],
+                    'effective_from' => '2026-02-01',
+                    'monthly_gross_minor' => 4_500_000,
+                    'change_reason' => 'Navýšení sjednané mzdy',
+                ],
+                authMethod: 'bearer',
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(200, $newTerms->getStatusCode(), (string) $newTerms->getBody());
+        $employment = $this->json($newTerms)['employment'];
+        self::assertSame(4_500_000, $employment['terms'][0]['monthly_gross_minor']);
+        self::assertSame(4_000_000, $employment['terms'][1]['monthly_gross_minor']);
+        self::assertSame(
+            4_000_000,
+            $this->effectiveSalary((int) $employment['id'], '2026-01-31'),
+            'Budoucí navýšení nesmí přepsat mzdu staršího období.',
+        );
+        self::assertSame(
+            4_500_000,
+            $this->effectiveSalary((int) $employment['id'], '2026-02-28'),
+        );
+
+        $newTermsAttack = $this->action->addTerms(
+            $this->request(
+                'PUT',
+                "/api/payroll/employments/{$employment['id']}/terms",
+                [
+                    'row_version' => $employment['row_version'],
+                    'effective_from' => '2026-03-01',
+                    'monthly_gross_minor' => 4_600_000,
+                    'weekly_hours' => '30',
+                    'change_reason' => 'Pokus změnit úvazek přes token',
+                ],
+                authMethod: 'bearer',
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(422, $newTermsAttack->getStatusCode());
+
+        $correctionAttack = $this->action->correctTerms(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$employment['id']}/terms/current",
+                [
+                    'row_version' => $employment['row_version'],
+                    'tax_regime' => 'withholding',
+                    'monthly_gross_minor' => 4_500_000,
+                    'change_reason' => 'Pokus změnit daňový režim přes token',
+                ],
+                authMethod: 'bearer',
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(422, $correctionAttack->getStatusCode());
+
+        $corrected = $this->action->correctTerms(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$employment['id']}/terms/current",
+                [
+                    'row_version' => $employment['row_version'],
+                    'monthly_gross_minor' => 4_600_000,
+                    'change_reason' => 'Oprava sjednané mzdy',
+                ],
+                authMethod: 'bearer',
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(200, $corrected->getStatusCode(), (string) $corrected->getBody());
+        self::assertSame(4_600_000, $this->json($corrected)['employment']['monthly_gross_minor']);
+        self::assertSame(4_000_000, $this->effectiveSalary((int) $employment['id'], '2026-01-31'));
+        self::assertSame(4_600_000, $this->effectiveSalary((int) $employment['id'], '2026-02-28'));
+    }
+
     public function testJmhzEvidenceOptionsComeFromPinnedPackageAndRequireSession(): void
     {
         $response = $this->action->jmhzEvidenceOptions(
@@ -500,6 +587,20 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         );
         self::assertSame(403, $bearer->getStatusCode());
         self::assertSame('session_required', $this->json($bearer)['error']['code']);
+    }
+
+    private function effectiveSalary(int $employmentId, string $effectiveOn): ?int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
+                    AS monthly_gross_minor
+               FROM payroll_employments employment
+              WHERE employment.supplier_id = ? AND employment.id = ?'
+        );
+        $stmt->execute([$effectiveOn, $effectiveOn, $this->supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return $value === null || $value === false ? null : (int) $value;
     }
 
     /** @return array<string,mixed> */

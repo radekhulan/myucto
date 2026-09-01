@@ -837,7 +837,8 @@ final class PayrollRunSnapshotBuilder
                     employment.start_date,
                     employment.actual_start_date,
                     employment.end_date,
-                    employment.monthly_gross_minor,
+                    COALESCE(term.monthly_gross_minor, employment.monthly_gross_minor)
+                      AS monthly_gross_minor,
                     employee.full_name,
                     employee.is_active AS employee_active,
                     profile.profile_status,

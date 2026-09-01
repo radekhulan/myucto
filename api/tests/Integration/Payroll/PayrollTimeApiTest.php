@@ -1209,7 +1209,7 @@ final class PayrollTimeApiTest extends TestCase
         self::assertSame(0, $this->countRows('payroll_time_entries'));
     }
 
-    public function testTenantIsolationAndBearerAreFailClosed(): void
+    public function testTenantIsolationAndLimitedBearerContract(): void
     {
         $foreign = $this->action->month(
             $this->request(
@@ -1226,8 +1226,20 @@ final class PayrollTimeApiTest extends TestCase
                 ->withQueryParams(['period' => '2026-05']),
             new Response(),
         );
-        self::assertSame(403, $bearer->getStatusCode());
-        self::assertSame('session_required', $this->json($bearer)['error']['code']);
+        self::assertSame(200, $bearer->getStatusCode());
+        self::assertArrayHasKey('items', $this->json($bearer));
+
+        $calendar = $this->action->calendar(
+            $this->request(
+                'POST',
+                "/api/payroll/time/employments/{$this->employmentId}/calendars",
+                authMethod: 'bearer',
+            ),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(403, $calendar->getStatusCode());
+        self::assertSame('session_required', $this->json($calendar)['error']['code']);
     }
 
     private function saveEntry(

@@ -72,7 +72,7 @@ final class PayrollAbsenceAction
 
     public function list(Request $request, Response $response): Response
     {
-        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ, true)) !== null) {
             return $error;
         }
         $query = $request->getQueryParams();
@@ -117,7 +117,7 @@ final class PayrollAbsenceAction
 
     public function create(Request $request, Response $response): Response
     {
-        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE, true)) !== null) {
             return $error;
         }
         try {
@@ -309,7 +309,7 @@ final class PayrollAbsenceAction
 
     public function averages(Request $request, Response $response): Response
     {
-        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ, true)) !== null) {
             return $error;
         }
         try {
@@ -654,9 +654,14 @@ final class PayrollAbsenceAction
         return Json::ok($response, ['deleted' => true, 'cascade' => $cascade]);
     }
 
-    private function authorize(Request $request, Response $response, AccessLevel $level): ?Response
+    private function authorize(
+        Request $request,
+        Response $response,
+        AccessLevel $level,
+        bool $allowBearer = false,
+    ): ?Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+        if (!$allowBearer && $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error(
                 $response,
                 'session_required',

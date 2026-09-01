@@ -41,10 +41,11 @@ Podstatné vlastnosti:
 | Statistika | tržby, zisk, trendy, top odběratelé a dodavatelé, cash flow, platební morálka, koncentrace, riziko odchodu |
 | E-shop a sklad | **kompletní správa včetně zápisu** — zboží, obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky a výdejky, inventury (viz [§ 101.9](#1019-e-shop-a-sklad)) |
 | Objednávky u dodavatele | **čtení i zápis** — založení, odeslání, potvrzení, uzavření, storno, příjemka z objednávky a hromadné objednání podle návrhu doplnění zásob ([§ 101.9](#1019-e-shop-a-sklad)) |
+| Mzdy | čtení zaměstnanců, pracovních podmínek a výsledků; změna sjednané mzdy, mzdové vstupy, přesčasy a absence; řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
-Nástrojů je aktuálně **181**; v režimu jen pro čtení (`MYUCTO_READ_ONLY=1`,
-[§ 101.4](#1014-nastaveni)) se jich asistentovi nabídne **105** — zbylých 76 mění
+Nástrojů je aktuálně **195**; v režimu jen pro čtení (`MYUCTO_READ_ONLY=1`,
+[§ 101.4](#1014-nastaveni)) se jich asistentovi nabídne **114** — zbylých 81 mění
 data a server je vůbec nezveřejní. Přesný počet vypíše server při startu do
 `stderr` ([§ 101.3](#1013-zprovozneni), krok 4).
 
@@ -54,6 +55,13 @@ data a server je vůbec nezveřejní. Přesný počet vypíše server při start
 > agenda s daňovou odpovědností, kde chyba znamená opravné podání — dělá ji člověk
 > v aplikaci. Zákaz vynucuje server, ne jen MCP: i token s právem zápisu dostane
 > na takovou operaci `403 token_write_forbidden` (viz [kapitola 78.6](99_API.md#997-scopes)).
+>
+> **U mezd asistent pracuje jen s personálními údaji a připravovanými vstupy.**
+> Může změnit sjednanou mzdu od zadaného data, zadat přesčas, absenci nebo odměnu.
+> Starší mzdová období přitom zachovají původní sjednanou částku. Nemůže spustit
+> výpočet, schválení docházky, absence nebo mzdového běhu, zaúčtování, přípravu
+> plateb, uzavření, podání ani mzdové dokumenty. Nová absence zůstane ve stavu
+> k posouzení a schválí ji člověk v aplikaci.
 
 ## 101.3 Zprovoznění
 
@@ -225,6 +233,18 @@ Podrobnosti v [§ 101.8](#1018-zakazky-dokumenty-a-kniha-jizd).
 - „Nasklaď 20 kusů kabelu na hlavní sklad za 89 Kč a příjemku zaúčtuj.“ *(token čtení a zápis)*
 
 Celá kapitola: [§ 101.9](#1019-e-shop-a-sklad).
+
+**Mzdy a zaměstnanci**
+
+- „Jakou má Jana Nováková sjednanou hrubou mzdu?“
+- „Kolik vyšla Janě Novákové čistá mzda za srpen?“
+- „Zvyš Janě mzdu od září na 55 000 Kč.“ *(token čtení a zápis)*
+- „Zadej Janě neschopenku od 3. do 12. září.“ *(token čtení a zápis)*
+- „Zapiš Janě dvě hodiny přesčasu dnes od 17 do 19 hodin.“ *(token čtení a zápis)*
+- „Přidej Janě mimořádnou odměnu 5 000 Kč za září.“ *(token čtení a zápis)*
+
+Mzdový běh tím nevznikne ani se neposune do dalšího stavu. Výpočet, kontrola,
+schválení, zaúčtování, platby, uzavření a odeslání zůstávají na člověku v aplikaci.
 
 ## 101.6 Odběratelé a ARES
 

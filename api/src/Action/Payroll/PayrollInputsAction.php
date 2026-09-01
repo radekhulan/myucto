@@ -35,7 +35,7 @@ final class PayrollInputsAction
 
     public function list(Request $request, Response $response): Response
     {
-        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ, null, true)) !== null) {
             return $error;
         }
         $query = $request->getQueryParams();
@@ -88,7 +88,7 @@ final class PayrollInputsAction
 
     public function create(Request $request, Response $response): Response
     {
-        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE, null, true)) !== null) {
             return $error;
         }
         // ── Proč se TADY neschvaluje automaticky ───────────────────────────────
@@ -203,7 +203,7 @@ final class PayrollInputsAction
     /** @param array<string,string> $args */
     public function update(Request $request, Response $response, array $args): Response
     {
-        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE, null, true)) !== null) {
             return $error;
         }
         $body = $this->input($request);
@@ -396,8 +396,9 @@ final class PayrollInputsAction
         Response $response,
         AccessLevel $level,
         ?string $permissionOverride = null,
+        bool $allowBearer = false,
     ): ?Response {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+        if (!$allowBearer && $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error(
                 $response,
                 'session_required',

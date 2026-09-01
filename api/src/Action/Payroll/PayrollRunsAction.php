@@ -158,6 +158,7 @@ final class PayrollRunsAction
             $response,
             'payroll',
             AccessLevel::READ,
+            true,
         )) !== null) {
             return $error;
         }
@@ -239,6 +240,7 @@ final class PayrollRunsAction
             $response,
             'payroll',
             AccessLevel::READ,
+            true,
         )) !== null) {
             return $error;
         }
@@ -584,8 +586,9 @@ final class PayrollRunsAction
         Response $response,
         string $permission,
         AccessLevel $level,
+        bool $allowBearer = false,
     ): ?Response {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+        if (!$allowBearer && $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error(
                 $response,
                 'session_required',

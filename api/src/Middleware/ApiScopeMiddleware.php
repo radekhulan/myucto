@@ -78,6 +78,22 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/stock(/|$)#',
         '#^/api/eshop(/|$)#',
         '#^/api/price-list-items(/|$)#',
+        // Mzdy - pouze úzký personální a vstupní kontrakt. Uzávěrky, schválení
+        // běhů, platby, dokumenty a podání nemají v allowlistu žádnou cestu.
+        '#^/api/payroll/people$#',
+        '#^/api/payroll/people/[0-9]+$#',
+        '#^/api/payroll/employments/[0-9]+/terms$#',
+        '#^/api/payroll/employments/[0-9]+/terms/current$#',
+        '#^/api/payroll/components$#',
+        '#^/api/payroll/inputs$#',
+        '#^/api/payroll/inputs/[0-9]+$#',
+        '#^/api/payroll/runs$#',
+        '#^/api/payroll/runs/[0-9]+$#',
+        '#^/api/payroll/revisions/[0-9]+/net-results/[0-9]+$#',
+        '#^/api/payroll/time/month$#',
+        '#^/api/payroll/time/entries$#',
+        '#^/api/payroll/time/absences$#',
+        '#^/api/payroll/time/averages$#',
         // Dashboard / CRM / reporty (čtení + exporty)
         '#^/api/dashboard(/|$)#',
         '#^/api/crm(/|$)#',
@@ -161,6 +177,14 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // Průvodce automatizací zapisuje pravidla zaúčtování — čtení přehledů ano,
         // změnu pravidel dělá člověk.
         '#^/api/automation(/|$)#',
+        // Seznam zaměstnanců a běhů se sdílí s interními POST/DELETE routami.
+        // Token je smí číst, ale nesmí zakládat či mazat osoby ani mzdové běhy.
+        '#^/api/payroll/people$#',
+        '#^/api/payroll/people/[0-9]+$#',
+        '#^/api/payroll/components$#',
+        '#^/api/payroll/runs$#',
+        '#^/api/payroll/runs/[0-9]+$#',
+        '#^/api/payroll/time/averages$#',
     ];
 
     public function __construct(
@@ -204,8 +228,8 @@ final class ApiScopeMiddleware implements MiddlewareInterface
             return Json::error(
                 $response,
                 'token_write_forbidden',
-                'Účetní a daňová vrstva je přes API token dostupná pouze ke čtení. '
-                . 'Zaúčtování, uzávěrku a daňová podání lze provést jen z webového rozhraní.',
+                'Tato část API je přes token dostupná pouze ke čtení. '
+                . 'Zaúčtování, mzdové běhy, uzávěrky a podání lze řídit jen z webového rozhraní.',
                 403,
             );
         }

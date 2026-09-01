@@ -246,7 +246,7 @@ final class PayrollPeopleApiTest extends TestCase
         self::assertTrue($byId[$employeeWithoutProfileId]['needs_setup']);
     }
 
-    public function testEndpointRejectsClientBearerAndDisabledPayroll(): void
+    public function testEndpointAllowsAuthorizedBearerAndRejectsClientAndDisabledPayroll(): void
     {
         $clientResponse = $this->action->list(
             $this->request('GET', '/api/payroll/people', 'client'),
@@ -259,8 +259,8 @@ final class PayrollPeopleApiTest extends TestCase
             $this->request('GET', '/api/payroll/people', 'accountant', 'bearer'),
             new Response(),
         );
-        self::assertSame(403, $bearerResponse->getStatusCode());
-        self::assertSame('session_required', $this->json($bearerResponse)['error']['code']);
+        self::assertSame(200, $bearerResponse->getStatusCode());
+        self::assertArrayHasKey('items', $this->json($bearerResponse));
 
         $this->db->pdo()->prepare(
             'UPDATE supplier SET payroll_enabled = 0 WHERE id = ?'

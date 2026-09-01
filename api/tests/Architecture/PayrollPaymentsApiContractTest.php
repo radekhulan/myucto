@@ -91,9 +91,15 @@ final class PayrollPaymentsApiContractTest extends TestCase
     public function testSessionOnlyPaymentEndpointsStayOutsideBearerOpenApi(): void
     {
         $openApi = $this->read('api/openapi.yaml');
-        self::assertStringNotContainsString('/api/v1/payroll/', $openApi);
-        self::assertStringNotContainsString('/api/v1/accounting/payroll/', $openApi);
-        self::assertStringNotContainsString('/api/v1/accounting/reports/payroll-sheet', $openApi);
+        foreach ([
+            '/api/v1/payroll/payments',
+            '/api/v1/payroll/revisions/{revisionId}/payments',
+            '/api/v1/payroll/people/{employeeId}/accounts',
+            '/api/v1/accounting/payroll/',
+            '/api/v1/accounting/reports/payroll-sheet',
+        ] as $path) {
+            self::assertStringNotContainsString($path, $openApi);
+        }
     }
 
     private function read(string $relativePath): string

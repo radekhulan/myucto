@@ -34,7 +34,7 @@ final class PayrollComponentsAction
 
     public function list(Request $request, Response $response): Response
     {
-        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ, true)) !== null) {
             return $error;
         }
         try {
@@ -147,8 +147,9 @@ final class PayrollComponentsAction
         Request $request,
         Response $response,
         AccessLevel $level,
+        bool $allowBearer = false,
     ): ?Response {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+        if (!$allowBearer && $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error(
                 $response,
                 'session_required',

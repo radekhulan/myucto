@@ -520,14 +520,26 @@ async function createCalendar(item: PayrollTimeOverviewItem) {
 }
 
 function openApproval(item: PayrollTimeOverviewItem) {
-  const suggestions = item.jmhz_work_summary.preview?.suggestions
+  const preview = item.jmhz_work_summary.preview
+  const suggestions = preview?.suggestions
   approvalItem.value = item
   approvalStandardFund.value = suggestions?.standard_fund_hours ?? ''
   approvalAgreedFund.value = suggestions?.agreed_fund_hours ?? ''
   approvalWeeklyWork.value = suggestions?.weekly_work_hours ?? ''
   approvalWorked.value = suggestions?.worked_hours ?? ''
-  approvalUnworkedOccurred.value = null
-  approvalObstaclesOccurred.value = null
+  /*
+   * Měsíc bez absencí se otevře rovnou připravený k potvrzení: obě otázky
+   * mají odpověď „ne" a všechna čtyři čísla jsou z návrhu serveru, takže
+   * schválení je jeden klik.
+   *
+   * Odpověď se předvyplňuje jen tam, kde ji SERVER umí doložit z evidence
+   * (`requires_unworked_hours_followup`). Měsíc s absencí zůstává nezodpovězený
+   * — tam je odpověď lidské rozhodnutí a předvyplnit ji by znamenalo vyplnit
+   * hlášení pro ČSSZ za účetní.
+   */
+  const bezAbsenci = preview !== null && !preview.requires_unworked_hours_followup
+  approvalUnworkedOccurred.value = bezAbsenci ? false : null
+  approvalObstaclesOccurred.value = bezAbsenci ? false : null
   clearConditionalValues()
   approvalNote.value = ''
 }
@@ -541,9 +553,8 @@ function openApproval(item: PayrollTimeOverviewItem) {
  * ručně po jednom poli znamená přepisovat číslo, které aplikace už zná,
  * a u čtyř polí plus dvou otázek se to plete.
  *
- * Zákonný fond (10259) tlačítko NEDOPLŇUJE: je to stanovená doba pro danou
- * profesi, ne údaj odvoditelný ze smlouvy ani z kalendáře. Domyslet ho by
- * znamenalo vyplnit za účetní hlášení pro ČSSZ.
+ * Zákonný fond (10259) tlačítko neřeší — ten předvyplňuje server ze zákonné
+ * týdenní doby a svátků, takže v poli už stojí.
  */
 function fillWorkedAsAgreed() {
   approvalWorked.value = approvalAgreedFund.value
@@ -1063,8 +1074,10 @@ function toggleAllVisible() {
  *     Řádek s absencí se do dávky NEVEZME: tam je odpověď lidské rozhodnutí,
  *     ne údaj z evidence, a odhadnout ji by znamenalo vyplnit hlášení ČSSZ za
  *     uživatele.
- *   · `standard_fund_hours` server nenavrhuje NIKDY (vždy `null`), takže je to
- *     jediné pole, které dávka chce — jednou pro celou dávku, ne 500×.
+ *   · `standard_fund_hours` — zákonný měsíční fond. Server ho navrhuje
+ *     (počítá se ze zákonné týdenní doby a svátků, takže je pro všechny
+ *     v dávce stejný); dávka ho předvyplní a nechá přepsat jednou pro celou
+ *     dávku, ne 500×.
  *
  * Nezpůsobilé řádky se nezahazují ani nezamlčí: vypíšou se jménem i důvodem,
  * aby bylo jasné, koho zbývá odbavit ručně.
@@ -1120,7 +1133,10 @@ const bulkBlockedReason = computed<string | null>(() => {
 
 function openBulkApproval() {
   if (bulkSelectedItems.value.length === 0) return
-  bulkStandardFund.value = ''
+  // Návrh serveru je pro celý měsíc stejný, takže stačí vzít ho z prvního
+  // způsobilého řádku. Prázdné pole tu dřív znamenalo opsat totéž číslo ručně.
+  bulkStandardFund.value = bulkCandidates.value[0]
+    ?.jmhz_work_summary?.preview?.suggestions.standard_fund_hours ?? ''
   bulkNote.value = ''
   approveFailures.value = []
   bulkApprovalOpen.value = true

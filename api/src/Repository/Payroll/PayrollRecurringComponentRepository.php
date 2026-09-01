@@ -294,7 +294,8 @@ final class PayrollRecurringComponentRepository
                      WHERE employment.supplier_id = ?
                  )
              SELECT recurring.*, employment.employee_id,
-                    employment.monthly_gross_minor,
+                    ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
+                      AS monthly_gross_minor,
                     employment.code AS employment_code,
                     employment.effective_status AS employment_effective_status,
                     COALESCE(
@@ -341,6 +342,8 @@ final class PayrollRecurringComponentRepository
             $periodStart,
             $periodEnd,
             $supplierId,
+            $periodEnd,
+            $periodEnd,
             $supplierId,
             $periodEnd,
             $periodStart,
