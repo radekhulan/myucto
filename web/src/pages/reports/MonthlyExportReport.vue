@@ -37,6 +37,7 @@ const ALL_PARTS: MonthlyExportPart[] = [
   'sales_pdf', 'sales_isdoc',
   'purchase_pdf', 'purchase_isdoc',
   'bank_pdf', 'bank_gpc',
+  'gopay_pdf', 'gopay_xml',
   'dph_book',
 ]
 const selected = ref<Set<MonthlyExportPart>>(new Set(ALL_PARTS))
@@ -178,6 +179,7 @@ const yearOptions = useYearOptions('combined', year)
 const groups = computed(() => [
   { key: 'invoices', parts: ['sales_pdf', 'sales_isdoc', 'purchase_pdf', 'purchase_isdoc'] as MonthlyExportPart[] },
   { key: 'bank',     parts: ['bank_pdf', 'bank_gpc'] as MonthlyExportPart[] },
+  { key: 'gopay',    parts: ['gopay_pdf', 'gopay_xml'] as MonthlyExportPart[] },
   { key: 'dph',      parts: ['dph_book'] as MonthlyExportPart[] },
 ])
 

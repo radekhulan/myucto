@@ -29,12 +29,14 @@ use ZipArchive;
  *   - vystavené: dle DUZP (daň na výstupu),
  *   - přijaté: dle pozdějšího z (DUZP, vystavení) — odpočet nelze uplatnit dřív, než
  *     plátce drží daňový doklad (§ 73 ZDPH),
- *   - výpisy: dle data výpisu.
+ *   - výpisy: dle data výpisu,
+ *   - GoPay: dle období vyúčtování.
  *
  * Struktura ZIPu:
  *   Vystavene-faktury/PDF|ISDOC/…   Prijate-faktury/PDF|ISDOC/…
  *   Vypisy-z-uctu/PDF|GPC/…         Kniha-DPH/kniha-dph-YYYY-MM.pdf
- *   Kontrolni-hlaseni/dphkh1-…xml   README.txt
+ *   GoPay/PDF|XML/…                  Kontrolni-hlaseni/dphkh1-…xml
+ *   README.txt
  *   (kvartálně je Kniha DPH per měsíc — tři PDF.)
  */
 final class MonthlyExportService
@@ -42,7 +44,8 @@ final class MonthlyExportService
     /** Všechny podporované části (a zároveň default, když uživatel nic nezvolí). */
     public const ALL_PARTS = [
         'sales_pdf', 'sales_isdoc', 'purchase_pdf', 'purchase_isdoc',
-        'bank_pdf', 'bank_gpc', 'dph_book', 'vat_control_statement',
+        'bank_pdf', 'bank_gpc', 'gopay_pdf', 'gopay_xml',
+        'dph_book', 'vat_control_statement',
     ];
 
     public function __construct(
@@ -86,6 +89,7 @@ final class MonthlyExportService
         $sales    = count($this->findSalesInvoiceIds($supplierId, $period));
         $purchase = count($this->findPurchaseInvoices($supplierId, $period));
         [$bankPdf, $bankGpc] = $this->countStatementFiles($supplierId, $period);
+        [$gopayPdf, $gopayXml] = $this->countGoPayFiles($supplierId, $period);
         return [
             'sales_pdf'      => $sales,
             'sales_isdoc'    => $sales,
@@ -93,6 +97,8 @@ final class MonthlyExportService
             'purchase_isdoc' => $purchase,
             'bank_pdf'       => $bankPdf,
             'bank_gpc'       => $bankGpc,
+            'gopay_pdf'      => $gopayPdf,
+            'gopay_xml'      => $gopayXml,
             'dph_book'       => ($sales + $purchase) > 0 ? 1 : 0,
             // KH může mít i jiné řádky než běžné faktury (např. pokladní doklady),
             // proto jej nenulujeme podle zjednodušeného počtu dokladů. Přesný obsah
@@ -164,6 +170,7 @@ final class MonthlyExportService
             $salesIds   = array_intersect(['sales_pdf', 'sales_isdoc'], $parts) ? $this->findSalesInvoiceIds($supplierId, $period) : [];
             $purchRows  = array_intersect(['purchase_pdf', 'purchase_isdoc'], $parts) ? $this->findPurchaseInvoices($supplierId, $period) : [];
             $statements = array_intersect(['bank_pdf', 'bank_gpc'], $parts) ? $this->findStatements($supplierId, $period) : [];
+            $gopayClearings = array_intersect(['gopay_pdf', 'gopay_xml'], $parts) ? $this->findGoPayClearings($supplierId, $period) : [];
 
             $salesParts = count(array_intersect(['sales_pdf', 'sales_isdoc'], $parts));
             $purchParts = count(array_intersect(['purchase_pdf', 'purchase_isdoc'], $parts));
@@ -172,8 +179,13 @@ final class MonthlyExportService
                 if (in_array('bank_pdf', $parts, true) && $this->hasContent($s['pdf_content'] ?? null)) $bankFiles++;
                 if (in_array('bank_gpc', $parts, true) && $this->hasContent($s['file_content'] ?? null)) $bankFiles++;
             }
+            $gopayFiles = 0;
+            foreach ($gopayClearings as $clearing) {
+                if (in_array('gopay_pdf', $parts, true) && $this->hasContent($clearing['pdf_content'] ?? null)) $gopayFiles++;
+                if (in_array('gopay_xml', $parts, true) && $this->hasContent($clearing['file_content'] ?? null)) $gopayFiles++;
+            }
             $dphMonths = $this->monthsInPeriod($period);
-            $total = count($salesIds) * $salesParts + count($purchRows) * $purchParts + $bankFiles
+            $total = count($salesIds) * $salesParts + count($purchRows) * $purchParts + $bankFiles + $gopayFiles
                 + (in_array('dph_book', $parts, true) ? count($dphMonths) : 0)
                 + (in_array('vat_control_statement', $parts, true) ? 1 : 0);
             $this->jobs->updateProgress($jobId, ['total_items' => $total, 'current_step' => 'Příprava…']);
@@ -289,7 +301,29 @@ final class MonthlyExportService
                 }
             }
 
-            // 4) Kniha DPH — měsíční žurnál; kvartálně tři PDF (per měsíc kvartálu).
+            // 4) GoPay vyúčtování
+            if ($gopayClearings !== []) {
+                $this->ensureNotCancelled($jobId, $zip, $absPath);
+                $this->jobs->appendLog($jobId, 'GoPay vyúčtování: ' . count($gopayClearings) . ' ks');
+                foreach ($gopayClearings as $clearing) {
+                    $id = (int) $clearing['id'];
+                    $clearingNumber = (string) ($clearing['clearing_id'] ?? $id);
+                    if (in_array('gopay_pdf', $parts, true) && $this->hasContent($clearing['pdf_content'] ?? null)) {
+                        $name = $this->gopayFilename((string) ($clearing['pdf_name'] ?? ''), $clearingNumber, $id, 'pdf');
+                        $zip->addFromString("GoPay/PDF/{$name}", (string) $clearing['pdf_content']);
+                        $added++; $summary['gopay_pdf'] = ($summary['gopay_pdf'] ?? 0) + 1;
+                        $bump('GoPay vyúčtování - PDF');
+                    }
+                    if (in_array('gopay_xml', $parts, true) && $this->hasContent($clearing['file_content'] ?? null)) {
+                        $name = $this->gopayFilename((string) ($clearing['file_name'] ?? ''), $clearingNumber, $id, 'xml');
+                        $zip->addFromString("GoPay/XML/{$name}", (string) $clearing['file_content']);
+                        $added++; $summary['gopay_xml'] = ($summary['gopay_xml'] ?? 0) + 1;
+                        $bump('GoPay vyúčtování - XML');
+                    }
+                }
+            }
+
+            // 5) Kniha DPH, měsíční žurnál; kvartálně tři PDF (per měsíc kvartálu).
             if (in_array('dph_book', $parts, true)) {
                 foreach ($dphMonths as [$bookYear, $bookMon]) {
                     $this->ensureNotCancelled($jobId, $zip, $absPath);
@@ -304,7 +338,7 @@ final class MonthlyExportService
                 }
             }
 
-            // 5) Kontrolní hlášení — měsíční nebo čtvrtletní XML podle zvoleného
+            // 6) Kontrolní hlášení, měsíční nebo čtvrtletní XML podle zvoleného
             // ExportPeriod. Nearchivuje se jako podání (to je vedlejší efekt ručního
             // downloadu); tady jde o reprodukovatelný podklad uvnitř hromadného ZIPu.
             if (in_array('vat_control_statement', $parts, true)) {
@@ -510,6 +544,33 @@ final class MonthlyExportService
         return [(int) ($row['pdf_count'] ?? 0), (int) ($row['gpc_count'] ?? 0)];
     }
 
+    /** @return list<array<string,mixed>> GoPay vyúčtování, jejichž období zasahuje do exportovaného období */
+    private function findGoPayClearings(int $sid, ExportPeriod $period): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id,clearing_id,file_name,file_content,pdf_name,pdf_content
+               FROM gopay_clearings
+              WHERE supplier_id=? AND cleared_to>=? AND cleared_from<?
+              ORDER BY cleared_from,id'
+        );
+        $stmt->execute([$sid, $period->dateFrom, $period->dateToExclusive]);
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    /** @return array{0:int,1:int} [gopayPdfCount, gopayXmlCount] bez načítání blobů */
+    private function countGoPayFiles(int $sid, ExportPeriod $period): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT SUM(pdf_content IS NOT NULL AND OCTET_LENGTH(pdf_content)>0) pdf_count,
+                    SUM(file_content IS NOT NULL AND OCTET_LENGTH(file_content)>0) xml_count
+               FROM gopay_clearings
+              WHERE supplier_id=? AND cleared_to>=? AND cleared_from<?'
+        );
+        $stmt->execute([$sid, $period->dateFrom, $period->dateToExclusive]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        return [(int) ($row['pdf_count'] ?? 0), (int) ($row['xml_count'] ?? 0)];
+    }
+
     private function resolveArchiveRoot(): string
     {
         $dir = (string) $this->config->get('purchase_invoice.archive_storage', '');
@@ -556,6 +617,13 @@ final class MonthlyExportService
         return $this->sanitize($name);
     }
 
+    private function gopayFilename(string $name, string $clearingId, int $id, string $ext): string
+    {
+        $original = $name !== '' ? $name : ('vyuctovani.' . $ext);
+        $prefix = $this->sanitize('GoPay-' . $clearingId . '-' . $id);
+        return $prefix . '-' . $this->sanitize($original);
+    }
+
     private function humanSize(int $bytes): string
     {
         if ($bytes >= 1048576) return round($bytes / 1048576, 1) . ' MB';
@@ -573,6 +641,7 @@ final class MonthlyExportService
             'sales_pdf' => 'Vystavené faktury (PDF)', 'sales_isdoc' => 'Vystavené faktury (ISDOC)',
             'purchase_pdf' => 'Přijaté faktury (PDF)', 'purchase_isdoc' => 'Přijaté faktury (ISDOC)',
             'bank_pdf' => 'Výpisy z účtu (PDF)', 'bank_gpc' => 'Výpisy z účtu (GPC)',
+            'gopay_pdf' => 'GoPay vyúčtování (PDF)', 'gopay_xml' => 'GoPay vyúčtování (XML)',
             'dph_book' => 'Kniha DPH (PDF)',
             'vat_control_statement' => 'Kontrolní hlášení DPH (XML)',
         ];
@@ -588,7 +657,8 @@ final class MonthlyExportService
             '  - Vystavené faktury: podle data zdanitelného plnění (DUZP).',
             '  - Přijaté faktury: podle pozdějšího z dat DUZP / vystavení',
             '    (nárok na odpočet nelze uplatnit dříve než podle daňového dokladu).',
-            '  - Výpisy z účtu: podle data výpisu.', '', 'Obsah:',
+            '  - Výpisy z účtu: podle data výpisu.',
+            '  - GoPay vyúčtování: podle období vyúčtování.', '', 'Obsah:',
         ]);
         foreach ($labels as $key => $label) {
             if (isset($summary[$key])) $lines[] = sprintf('  - %s: %d', $label, $summary[$key]);

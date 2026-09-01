@@ -150,7 +150,9 @@ final class GoPayService
             'SELECT id,clearing_id,account_name,currency,variable_symbol,cleared_from,cleared_to,
                     performed_on,amount_gross,amount_fee,amount_storno,amount_storno_fee,
                     amount_transfer,amount_sent,file_name,status,movement_count,posted_count,
-                    issue_count,payout_match_transaction_id,bank_transaction_id,imported_at,processed_at
+                    issue_count,payout_match_transaction_id,bank_transaction_id,imported_at,processed_at,
+                    pdf_name,pdf_size_bytes,pdf_uploaded_at,
+                    (pdf_content IS NOT NULL AND OCTET_LENGTH(pdf_content)>0) has_pdf
                FROM gopay_clearings WHERE supplier_id=? ORDER BY performed_on DESC,id DESC'
         );
         $stmt->execute([$supplierId]);
@@ -208,6 +210,60 @@ final class GoPayService
             throw new GoPayException('not_found', 'GoPay vyúčtování nebylo nalezeno.', 404);
         }
         return ['content' => (string) $row['file_content'], 'file_name' => (string) $row['file_name']];
+    }
+
+    /** @return array{content:string,file_name:string} */
+    public function downloadPdf(int $supplierId, int $clearingId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT pdf_content,pdf_name FROM gopay_clearings WHERE id=? AND supplier_id=?'
+        );
+        $stmt->execute([$clearingId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row) || !$this->hasContent($row['pdf_content'] ?? null)) {
+            throw new GoPayException('pdf_not_found', 'PDF vyúčtování nebylo nalezeno.', 404);
+        }
+        return [
+            'content' => (string) $row['pdf_content'],
+            'file_name' => (string) ($row['pdf_name'] ?: 'GoPay-clearing.pdf'),
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    public function uploadPdf(int $supplierId, int $clearingId, string $fileName, string $content): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE gopay_clearings
+                SET pdf_content=?,pdf_name=?,pdf_hash=?,pdf_size_bytes=?,pdf_uploaded_at=NOW()
+              WHERE id=? AND supplier_id=?'
+        );
+        $stmt->execute([
+            $content,
+            $this->safePdfFileName($fileName),
+            hash('sha256', $content),
+            strlen($content),
+            $clearingId,
+            $supplierId,
+        ]);
+        if ($stmt->rowCount() === 0) {
+            $this->clearingRow($supplierId, $clearingId);
+        }
+        return $this->detail($supplierId, $clearingId);
+    }
+
+    /** @return array<string,mixed> */
+    public function deletePdf(int $supplierId, int $clearingId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE gopay_clearings
+                SET pdf_content=NULL,pdf_name=NULL,pdf_hash=NULL,pdf_size_bytes=NULL,pdf_uploaded_at=NULL
+              WHERE id=? AND supplier_id=?'
+        );
+        $stmt->execute([$clearingId, $supplierId]);
+        if ($stmt->rowCount() === 0) {
+            $this->clearingRow($supplierId, $clearingId);
+        }
+        return $this->detail($supplierId, $clearingId);
     }
 
     /** @return array{deleted:bool,deleted_entry_ids:list<int>,preserved_bank_entry_id:int|null} */
@@ -351,8 +407,11 @@ final class GoPayService
         }
     }
 
-    /** @return array{duplicate:bool,clearing:array<string,mixed>} */
-    public function import(int $supplierId, ?int $userId, string $fileName, string $xml): array
+    /**
+     * @param array{file_name:string,content:string}|null $pdf
+     * @return array{duplicate:bool,clearing:array<string,mixed>}
+     */
+    public function import(int $supplierId, ?int $userId, string $fileName, string $xml, ?array $pdf = null): array
     {
         $this->assertDoubleEntry($supplierId);
         $parsed = $this->parser->parse($xml);
@@ -367,6 +426,9 @@ final class GoPayService
                 throw new GoPayException('clearing_conflict', 'Stejný clearing ID nebo obsah už existuje s jinými údaji.', 409);
             }
             $id = (int) $existing['id'];
+            if ($pdf !== null) {
+                $this->uploadPdf($supplierId, $id, $pdf['file_name'], $pdf['content']);
+            }
             $this->process($supplierId, $id, $userId);
             return ['duplicate' => true, 'clearing' => $this->detail($supplierId, $id)];
         }
@@ -379,14 +441,20 @@ final class GoPayService
                     (supplier_id,clearing_id,account_name,currency,variable_symbol,cleared_from,cleared_to,
                      performed_on,amount_gross,amount_credit_note,amount_fee,amount_fee_external,
                      amount_storno,amount_storno_fee,amount_transfer,amount_sent,file_name,file_hash,
-                     file_content,movement_count,imported_by)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                     file_content,pdf_content,pdf_name,pdf_hash,pdf_size_bytes,pdf_uploaded_at,
+                     movement_count,imported_by)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,IF(? IS NULL,NULL,NOW()),?,?)'
             )->execute([
                 $supplierId, $parsed['clearing_id'], $parsed['account_name'], $parsed['currency'],
                 $parsed['variable_symbol'], $parsed['cleared_from'], $parsed['cleared_to'], $parsed['performed_on'],
                 $parsed['amount_gross'], $parsed['amount_credit_note'], $parsed['amount_fee'],
                 $parsed['amount_fee_external'], $parsed['amount_storno'], $parsed['amount_storno_fee'],
                 $parsed['amount_transfer'], $parsed['amount_sent'], $fileName, $hash, $xml,
+                $pdf['content'] ?? null,
+                $pdf !== null ? $this->safePdfFileName($pdf['file_name']) : null,
+                $pdf !== null ? hash('sha256', $pdf['content']) : null,
+                $pdf !== null ? strlen($pdf['content']) : null,
+                $pdf['content'] ?? null,
                 count($parsed['movements']), $userId,
             ]);
             $clearingPk = (int) $pdo->lastInsertId();
@@ -411,6 +479,9 @@ final class GoPayService
                 $existing = $this->findExistingClearing($supplierId, $parsed['clearing_id'], $hash);
                 if ($existing !== null && hash_equals((string) $existing['file_hash'], $hash)) {
                     $clearingPk = (int) $existing['id'];
+                    if ($pdf !== null) {
+                        $this->uploadPdf($supplierId, $clearingPk, $pdf['file_name'], $pdf['content']);
+                    }
                     $this->process($supplierId, $clearingPk, $userId);
                     return ['duplicate' => true, 'clearing' => $this->detail($supplierId, $clearingPk)];
                 }
@@ -1038,7 +1109,7 @@ final class GoPayService
     /** @return array<string,mixed> */
     private function normalizeClearing(array $row): array
     {
-        foreach (['id', 'movement_count', 'posted_count', 'issue_count', 'payout_match_transaction_id', 'bank_transaction_id', 'bank_journal_entry_id', 'imported_by'] as $field) {
+        foreach (['id', 'movement_count', 'posted_count', 'issue_count', 'payout_match_transaction_id', 'bank_transaction_id', 'bank_journal_entry_id', 'imported_by', 'pdf_size_bytes'] as $field) {
             if (array_key_exists($field, $row)) {
                 $row[$field] = $row[$field] !== null ? (int) $row[$field] : null;
             }
@@ -1049,7 +1120,10 @@ final class GoPayService
                 $row[$field] = $row[$field] !== null ? (float) $row[$field] : null;
             }
         }
-        unset($row['file_content']);
+        $row['has_pdf'] = array_key_exists('has_pdf', $row)
+            ? (bool) $row['has_pdf']
+            : $this->hasContent($row['pdf_content'] ?? null);
+        unset($row['file_content'], $row['pdf_content'], $row['pdf_hash']);
         return $row;
     }
 
@@ -1070,6 +1144,21 @@ final class GoPayService
             $name = 'GoPay-clearing.xml';
         }
         return mb_substr($name, 0, 255);
+    }
+
+    private function safePdfFileName(string $fileName): string
+    {
+        $parts = preg_split('~[\\\\/]~', $fileName) ?: [];
+        $name = trim((string) end($parts));
+        if ($name === '' || !str_ends_with(strtolower($name), '.pdf')) {
+            $name = 'GoPay-clearing.pdf';
+        }
+        return mb_substr($name, 0, 255);
+    }
+
+    private function hasContent(mixed $content): bool
+    {
+        return is_string($content) && $content !== '';
     }
 
     private function noteHasOrder(string $note, string $orderId): bool

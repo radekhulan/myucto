@@ -1,8 +1,8 @@
 # GoPay
 
-Stránka **Peníze > GoPay** zpracovává měsíční XML vyúčtování GoPay. Samostatný
-GPC výpis GoPay ani PDF vyúčtování se nenačítají. XML obsahuje jednotlivé platby,
-vratky, poplatky i souhrnnou částku odeslanou na bankovní účet.
+Stránka **Peníze > GoPay** zpracovává měsíční XML vyúčtování GoPay. K XML lze
+současně nebo později přiložit původní PDF vyúčtování. XML obsahuje jednotlivé
+platby, vratky, poplatky i souhrnnou částku odeslanou na bankovní účet.
 
 Funkce je dostupná firmám s podvojným účetnictvím.
 
@@ -26,7 +26,8 @@ odesílatele GoPay, kód banky a povolený rozdíl data mezi XML a bankovním po
 ## Import vyúčtování
 
 1. V administraci GoPay stáhněte Clearing XML za uzavřené období.
-2. Na stránce **Peníze > GoPay** vyberte soubor a zvolte **Načíst a zaúčtovat**.
+2. Na stránce **Peníze > GoPay** vyberte XML, volitelně přidejte odpovídající PDF
+   a zvolte **Načíst a zaúčtovat**.
 3. Aplikace ověří strukturu XML i všechny kontrolní součty.
 4. Jednotlivé pohyby spáruje s doklady a vytvoří účetní zápisy.
 5. Souhrnnou výplatu se pokusí spárovat s již naimportovaným bankovním výpisem.
@@ -80,12 +81,14 @@ Seznam ukazuje počet všech a zaúčtovaných pohybů. Stav **Hotovo** znamená
 zaúčtované všechny pohyby a je spárovaný i bankovní převod. Stav **Vyžaduje
 kontrolu** obsahuje v detailu konkrétní důvod u problematického pohybu nebo převodu.
 
-Původní XML zůstává uložené u vyúčtování a lze je kdykoli znovu stáhnout.
+Původní XML zůstává uložené u vyúčtování a lze je kdykoli znovu stáhnout. PDF lze
+v detailu vyúčtování dodatečně nahrát, nahradit, stáhnout nebo samostatně smazat.
+Samostatné smazání PDF nemění XML, pohyby ani účetní zápisy.
 
 ## Smazání importu
 
 Admin může importované vyúčtování smazat ze seznamu. Smazání odstraní původní XML,
-jednotlivé GoPay pohyby a účetní zápisy, které z nich modul vytvořil. Faktury,
+přiložené PDF, jednotlivé GoPay pohyby a účetní zápisy, které z nich modul vytvořil. Faktury,
 dobropisy a jejich úhrady zůstanou zachované. Pokud modul pro příchozí převod použil
 účetní zápis, který existoval už před zpracováním XML, tento zápis se nesmaže.
 
