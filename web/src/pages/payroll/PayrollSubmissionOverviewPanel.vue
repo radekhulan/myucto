@@ -31,7 +31,7 @@ import PayrollJmhzDispatchPanel from './PayrollJmhzDispatchPanel.vue'
 import { btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate } from '@/composables/useFormat'
-import { localPayrollPeriod } from './payrollComponentsUi'
+import { payrollWorkingPeriod } from './payrollComponentsUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -75,7 +75,7 @@ function healthInsurerTitle(code: string): string {
 
   return insurer?.name ?? t('payroll.submissions.overview.health_insurer', { code })
 }
-const period = ref(localPayrollPeriod())
+const period = ref(payrollWorkingPeriod())
 const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
 })

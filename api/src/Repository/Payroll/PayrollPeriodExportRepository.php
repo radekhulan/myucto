@@ -311,6 +311,40 @@ final class PayrollPeriodExportRepository
             ],
         );
 
+        /*
+         * Platebni prikazy patri do balicku stejne jako pasky a podani: ucetni
+         * u kontroly potrebuje videt nejen kolik se predepsalo, ale i cim se to
+         * platilo. Vazba na obdobi jde pres davku a jeji zavazky, ne pres datum
+         * vytvoreni souboru - prikaz se casto tvori az v nasledujicim mesici.
+         */
+        $paymentExports = $this->rows(
+            'SELECT DISTINCT export.id, export.batch_id, export.export_format,
+                    export.export_revision_no, export.exporter_version,
+                    export.file_sha256, export.size_bytes, export.mime_type,
+                    export.storage_key, export.suggested_filename,
+                    export.created_at
+               FROM payroll_payment_exports export
+               JOIN payroll_payment_items item
+                 ON item.supplier_id = export.supplier_id
+                AND item.batch_id = export.batch_id
+               JOIN payroll_payment_allocations allocation
+                 ON allocation.supplier_id = item.supplier_id
+                AND allocation.item_id = item.id
+               JOIN payroll_payment_liabilities liability
+                 ON liability.supplier_id = allocation.supplier_id
+                AND liability.id = allocation.liability_id
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE export.supplier_id = ?
+                AND run.period_start BETWEEN ? AND ?
+              ORDER BY export.id',
+            [$supplierId, $periodStart, $periodEnd],
+        );
+
         return [
             'data' => [
                 'scope' => $scope,
@@ -354,6 +388,7 @@ final class PayrollPeriodExportRepository
             'documents' => $documents,
             'artifacts' => $artifacts,
             'protocols' => $protocols,
+            'payment_exports' => $paymentExports,
         ];
     }
 
@@ -683,7 +718,16 @@ final class PayrollPeriodExportRepository
                     document.template_version, document.renderer_version,
                     document.file_sha256, document.size_bytes,
                     document.mime_type, document.storage_key,
-                    document.created_at
+                    document.created_at,
+                    -- Nahrazenou pasku archiv nezahazuje (je to doklad o tom,
+                    -- co se drive vydalo), ale musi se poznat - jinak ucetni
+                    -- v balicku najde dve pasky jednoho cloveka za tyz mesic
+                    -- a nema jak zjistit, ktera plati.
+                    EXISTS (
+                        SELECT 1 FROM payroll_generated_documents newer
+                         WHERE newer.supplier_id = document.supplier_id
+                           AND newer.supersedes_document_id = document.id
+                    ) AS superseded
                FROM payroll_generated_documents document
               WHERE document.supplier_id = ?
                 AND document.document_kind <> "monthly_bundle"

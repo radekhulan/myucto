@@ -36,14 +36,24 @@
         border-top: 0.6pt solid #333;
     }
     .num { text-align: right; font-family: geistmono, montserrat, monospace; white-space: nowrap; }
-    .mono { font-family: geistmono, montserrat, monospace; }
+    .mono { font-family: geistmono, montserrat, monospace; white-space: nowrap; }
+    .payee-note { font-size: 7.5pt; color: #555; }
     .badge { display: inline-block; padding: 0 1mm; font-size: 7pt; font-weight: bold; border-radius: 2pt; }
     .badge-ok   { background: #dcfce7; color: #166534; }
     .badge-warn { background: #fef3c7; color: #92400e; }
     .badge-bad  { background: #fee2e2; color: #991b1b; }
+    /* Pořadové číslo je jednomístné i u velké dávky, na širší sloupec
+       není důvod - místo patří jménu příjemce. */
+    .col-idx  { width: 7mm; }
     .col-acct { width: 38mm; }
-    .col-sym  { width: 22mm; }
-    .col-amt  { width: 34mm; }
+    /* Symboly mají vlastní sloupec každý. Slepené do jednoho se delší VS
+       zalomil na druhý řádek a nešlo poznat, kde končí VS a začíná KS —
+       přesně ten údaj, podle kterého úřad platbu páruje. `nowrap` v .mono
+       to drží na jednom řádku i u desetimístného variabilního symbolu. */
+    .col-vs   { width: 24mm; }
+    .col-ks   { width: 12mm; }
+    .col-ss   { width: 20mm; }
+    .col-amt  { width: 30mm; }
     .disclaimer { text-align: center; font-size: 7.5pt; color: #888; margin-top: 8mm; font-style: italic; }
 </style>
 </head>
@@ -51,7 +61,7 @@
     <table class="header-table">
         <tr>
             <td>
-                <div class="header-title">Platební příkaz</div>
+                <div class="header-title">{{ title|default('Platební příkaz') }}{% if period_label %} za období {{ period_label }}{% endif %}</div>
                 <div class="header-meta">Datum splatnosti: <strong>{{ payment_date|cz_date }}</strong></div>
                 {% if note %}<div class="header-meta">{{ note }}</div>{% endif %}
             </td>
@@ -69,10 +79,12 @@
     <table class="orders">
         <thead>
             <tr>
-                <th>#</th>
+                <th class="col-idx">#</th>
                 <th>Příjemce</th>
                 <th class="col-acct">Účet</th>
-                <th class="col-sym">VS / KS / SS</th>
+                <th class="col-vs">VS</th>
+                <th class="col-ks">KS</th>
+                <th class="col-ss">SS</th>
                 <th>Ověření</th>
                 <th class="col-amt num">Částka</th>
             </tr>
@@ -81,9 +93,15 @@
             {% for it in items %}
             <tr>
                 <td>{{ loop.index }}</td>
-                <td>{{ it.payee_name }}</td>
+                <td>
+                    {{ it.payee_name }}
+                    {# Popis platby vidí jen doklady, které ho pošlou (mzdové odvody) — příkazy z přijatých faktur zůstávají beze změny. #}
+                    {% if it.description %}<div class="payee-note">{{ it.description }}</div>{% endif %}
+                </td>
                 <td class="mono">{% if it.iban %}{{ it.iban }}{% else %}{{ it.account_number }}{% if it.bank_code %}/{{ it.bank_code }}{% endif %}{% endif %}</td>
-                <td class="mono">{{ it.variable_symbol }}{% if it.constant_symbol %} / {{ it.constant_symbol }}{% endif %}{% if it.specific_symbol %} / {{ it.specific_symbol }}{% endif %}</td>
+                <td class="mono">{{ it.variable_symbol }}</td>
+                <td class="mono">{{ it.constant_symbol }}</td>
+                <td class="mono">{{ it.specific_symbol }}</td>
                 <td>
                     {% if it.account_verified == 'verified' %}<span class="badge badge-ok">zveřejněný</span>
                     {% elseif it.account_verified == 'unreliable' %}<span class="badge badge-bad">nespolehlivý</span>
@@ -96,7 +114,7 @@
         </tbody>
         <tfoot>
             <tr>
-                <td colspan="5">Celkem ({{ items|length }} plateb)</td>
+                <td colspan="7">Celkem ({{ items|length }} plateb)</td>
                 <td class="num">{{ total_amount|cz_money }} {{ currency }}</td>
             </tr>
         </tfoot>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollRun,
@@ -26,10 +26,11 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
+import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(false)
@@ -40,7 +41,13 @@ const loading = ref(false)
  */
 const loadFailed = ref(false)
 const saving = ref(false)
-const period = ref(localPayrollPeriod())
+/*
+ * Období drží URL, ne jen stav komponenty. Účetní zpracovává mzdy zpětně — v září
+ * dělá srpen — a bez toho ji každé obnovení stránky, návrat z detailu i sdílený
+ * odkaz vrátily do dnešního měsíce, kde žádný běh není. Vypadá to, jako by běh
+ * zmizel, a měsíc se musí pokaždé přepínat ručně.
+ */
+const period = ref(payrollQueryPeriod(route.query))
 const paymentDate = ref(defaultPaymentDate(period.value))
 const runs = ref<PayrollRun[]>([])
 const personNames = ref<Record<number, string>>({})
@@ -669,6 +676,7 @@ async function deleteRun() {
 
 function changePeriod() {
   paymentDate.value = defaultPaymentDate(period.value)
+  void router.replace({ query: { ...route.query, period: period.value } })
   // Jiné období = jiná množina běhů; zůstat na třetí stránce by ukázalo prázdno.
   offset.value = 0
   void load()
@@ -703,7 +711,7 @@ onMounted(load)
           >
         </label>
         <RouterLink
-          :to="{ name: 'payroll-quick-inputs' }"
+          :to="{ name: 'payroll-quick-inputs', query: { period } }"
           :class="btnOutline('primary')"
         >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -751,7 +759,7 @@ onMounted(load)
       <h2 class="font-semibold text-neutral-900">{{ t('payroll.runs.empty') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.runs.empty_hint') }}</p>
       <RouterLink
-        :to="{ name: 'payroll-quick-inputs' }"
+        :to="{ name: 'payroll-quick-inputs', query: { period } }"
         :class="[btnOutline('primary'), 'mt-4']"
       >
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">

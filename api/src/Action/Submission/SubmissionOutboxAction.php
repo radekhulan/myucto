@@ -64,6 +64,59 @@ final class SubmissionOutboxAction
         ]);
     }
 
+    /**
+     * Stažení souboru, který se tímhle podáním odesílá.
+     *
+     * Existuje kvůli ručnímu odeslání datovou schránkou: návod říká „přiložte
+     * soubor", takže ho aplikace musí umět vydat. Bez toho by ho účetní
+     * hledala v dokumentech a mohla přiložit jiný.
+     *
+     * Kontrolní suma se porovnává se zmrazenou hodnotou z fronty. Když se
+     * artefakt mezitím přegeneroval, stažení se ODMÍTNE — nabídnout soubor,
+     * který neodpovídá spisové značce, je horší než nenabídnout nic.
+     *
+     * @param array<string,string> $args
+     */
+    public function artifact(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::READ)) !== null) {
+            return $denied;
+        }
+
+        try {
+            $artifact = $this->outbox->artifactFor(
+                SupplierGuard::currentId($request),
+                (int) ($args['id'] ?? 0),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        if (!hash_equals($artifact['claimed_sha256'], $artifact['sha256'])) {
+            return Json::error(
+                $response,
+                'artifact_changed',
+                'Soubor se od zařazení do fronty změnil, proto ho nenabízíme ke stažení. '
+                . 'Zrušte podání a zařaďte ho znovu z aktuálního podkladu.',
+                409,
+            );
+        }
+
+        $response->getBody()->write($artifact['bytes']);
+
+        return $response
+            ->withHeader('Content-Type', $artifact['mime'])
+            ->withHeader(
+                'Content-Disposition',
+                'attachment; filename="' . $artifact['filename'] . '"',
+            )
+            ->withHeader('Content-Length', (string) strlen($artifact['bytes']))
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache')
+            ->withHeader('X-Content-Type-Options', 'nosniff')
+            ->withHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    }
+
     public function enqueue(Request $request, Response $response): Response
     {
         if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {

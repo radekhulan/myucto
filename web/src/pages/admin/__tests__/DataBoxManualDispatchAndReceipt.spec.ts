@@ -152,8 +152,13 @@ describe('DataBox — ruční odeslání a doručenka', () => {
 
     const text = wrapper.text()
     expect(text).toContain('databox.manual.title')
-    expect(text).toContain('databox.manual.step1')
     expect(text).toContain('databox.manual.step4')
+    // První krok říká „stáhněte si podklad" a ten podklad musí jít stáhnout
+    // rovnou odsud — jinak by ho účetní hledala v dokumentech a mohla
+    // přiložit jiný soubor, než na který zní spisová značka.
+    const podklad = wrapper.find('[data-test="outbox-artifact-download-step"]')
+    expect(podklad.exists()).toBe(true)
+    expect(podklad.text()).toContain('dphdp3.xml')
     // Bez značky se doručenka nespáruje sama — musí být vidět, ne schovaná.
     expect(text).toContain('DPHDP3-20260815-ABCDEF')
   })

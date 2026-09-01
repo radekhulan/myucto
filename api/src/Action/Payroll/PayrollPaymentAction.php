@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollPaymentExportRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -59,6 +60,7 @@ final class PayrollPaymentAction
         private readonly PayrollPaymentBatchBuilder $batchBuilder,
         private readonly PayrollPaymentExportService $exportService,
         private readonly PayrollPaymentDownloadGrantService $downloadGrants,
+        private readonly PayrollPaymentExportRepository $exportRepository,
         private readonly PayrollModuleAccess $moduleAccess,
         private readonly PayrollProductionGate $productionGate,
         private readonly ActivityLogger $activity,
@@ -936,12 +938,17 @@ final class PayrollPaymentAction
             return $this->errorResponse($error);
         }
         $body = $request->getParsedBody();
-        $idempotencyKey = is_array($body) && !array_is_list($body)
+        $isObjectBody = is_array($body) && !array_is_list($body);
+        $idempotencyKey = $isObjectBody
             ? ($body['idempotency_key'] ?? null)
             : null;
+        // Formát se volí při generování: k jedné dávce patří soubor pro banku
+        // i doklad příkazu. Bez volby zůstává formát dávky.
+        $format = $isObjectBody ? ($body['export_format'] ?? null) : null;
         $batchId = (int) $args['batchId'];
         $userId = $this->userId($request);
         if (!is_string($idempotencyKey)
+            || ($format !== null && !is_string($format))
             || $batchId <= 0
             || $userId === null
         ) {
@@ -984,6 +991,7 @@ final class PayrollPaymentAction
                         $userId,
                     );
                 },
+                $format === null ? null : trim($format),
             );
         } catch (\InvalidArgumentException $exception) {
             return Json::error(
@@ -1101,6 +1109,72 @@ final class PayrollPaymentAction
         return Json::ok($response, $result, 201)
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * Skryje starou revizi exportu ze seznamu u dávky.
+     *
+     * Není to smazání souboru: řádek exportu zůstává, protože je to doklad
+     * o tom, co se poslalo do banky, a ta tabulka je záměrně neměnná.
+     * Účetní ale u dávky vidí jen platnou revizi místo dvou stejně
+     * pojmenovaných dokladů, u kterých se nedá poznat, který vzít.
+     *
+     * @param array<string,string> $args
+     */
+    public function hideExport(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize(
+            $request,
+            $response,
+            'payroll.payments',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $this->errorResponse($error);
+        }
+        $exportId = (int) ($args['exportId'] ?? 0);
+        if ($exportId <= 0) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Skrytí vyžaduje platný export.',
+                422,
+            );
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $userId = $this->userId($request);
+        try {
+            $hidden = $this->exportRepository->hide(
+                $supplierId,
+                $exportId,
+                $userId,
+            );
+        } catch (\DomainException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        }
+        $this->logPaymentActivity(
+            $request,
+            'payroll.payment_export_hidden',
+            'payroll_payment_export',
+            $hidden['export_id'],
+            [
+                'batch_id' => $hidden['batch_id'],
+                'export_format' => $hidden['export_format'],
+                'export_revision_no' => $hidden['export_revision_no'],
+            ],
+            $supplierId,
+            $userId,
+        );
+
+        return Json::ok($response, $hidden);
     }
 
     /** @param array<string,string> $args */

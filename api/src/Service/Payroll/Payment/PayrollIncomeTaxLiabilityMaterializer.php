@@ -522,6 +522,12 @@ final class PayrollIncomeTaxLiabilityMaterializer
         ];
     }
 
+    /** Lidský popis druhu daně do hlášek; kód sám o sobě účetní nic neřekne. */
+    private const KIND_LABELS = [
+        'advance_tax' => 'zálohovou daň ze závislé činnosti',
+        'withholding_tax' => 'daň vybíranou srážkou',
+    ];
+
     /**
      * @return array{
      *   recipient_reference:string,
@@ -544,11 +550,18 @@ final class PayrollIncomeTaxLiabilityMaterializer
             $dueOn,
         );
         if (count($accounts) !== 1) {
-            throw new \DomainException(
-                count($accounts) === 0
-                    ? "Finanční úřad pro {$kind} nemá k datu splatnosti ověřený účet."
-                    : "Finanční úřad pro {$kind} má k datu splatnosti nejednoznačný účet.",
-            );
+            // Účet finančního úřadu se hledá pod kódem instituce, který je
+            // shodný s druhem daně — ne pod názvem či zkratkou úřadu. Bez toho
+            // hláška posílala účetní hledat „ověřený účet" u řádku, který
+            // ověřený byl, jen zadaný pod jiným kódem. Do věty se navíc dostával
+            // holý strojový kód (advance_tax), který uživateli nic neříká.
+            $label = self::KIND_LABELS[$kind] ?? $kind;
+            throw new \DomainException(count($accounts) === 0
+                ? "Finanční úřad nemá k {$dueOn} ověřený účet pro {$label}."
+                    . " Účet musí být v Nastavení mezd → Účty institucí zadaný"
+                    . " s typem Finanční úřad a kódem instituce „{$kind}“."
+                : "Finanční úřad má k {$dueOn} víc než jeden účinný účet pro"
+                    . " {$label} (kód instituce „{$kind}“).");
         }
         $account = $accounts[0];
         $this->assertVerifiedAccount($supplierId, $dueOn, $account);

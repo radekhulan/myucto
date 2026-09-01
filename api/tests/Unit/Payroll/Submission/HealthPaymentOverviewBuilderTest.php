@@ -69,6 +69,36 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
         );
     }
 
+    public function testReportsMinimumAssessmentBaseWhenTopUpApplies(): void
+    {
+        // Jednatel s odměnou 4 500 Kč: pojistné 3 024 Kč se odvádí z minimálního
+        // vyměřovacího základu 22 400 Kč, takže přehled musí vykázat minimum.
+        // Kdyby hlásil skutečných 4 500 Kč, nesedělo by 13,5 % z vykázaného základu.
+        $overviews = $this->builder->build(41, $this->minimumTopUpSource());
+
+        self::assertCount(1, $overviews);
+        self::assertSame(2_240_000, $overviews[0]->totals[
+            'assessment_base_minor_units'
+        ]);
+        self::assertSame(302_400, $overviews[0]->totals[
+            'total_contribution_minor_units'
+        ]);
+        self::assertSame(2_240_000, $overviews[0]->people[0][
+            'assessment_base_minor_units'
+        ]);
+    }
+
+    public function testFallsBackToPlainBaseOnSnapshotsWithoutPpzBase(): void
+    {
+        // Revize spočtené dřív, než se PPZ základ začal ukládat, klíč nemají.
+        // Sestavit přehled musí jít dál — jen z toho, co ve snapshotu skutečně je.
+        $overviews = $this->builder->build(41, $this->source());
+
+        self::assertSame(1_700_000, $overviews[0]->totals[
+            'assessment_base_minor_units'
+        ]);
+    }
+
     public function testRejectsRevisionThatIsNotCurrentAndApproved(): void
     {
         $source = $this->source();
@@ -232,6 +262,67 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
                     CanonicalJson::encode($root),
                 ),
                 'people' => $people,
+            ],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function minimumTopUpSource(): array
+    {
+        $person = $this->person(3, 'Jednatel-společník', '111', 450_000, 261_900, 40_500);
+        $person['result_snapshot']['ppz_assessment_base_minor_units'] = 2_240_000;
+        $person['result_snapshot_hash'] = hash(
+            'sha256',
+            CanonicalJson::encode($person['result_snapshot']),
+        );
+        $root = [
+            'calculation_date' => '2026-06-30',
+            'status' => 'calculated',
+            'assessment_base_minor_units' => 450_000,
+            'ppz_assessment_base_minor_units' => 2_240_000,
+            'employee_contribution_minor_units' => 261_900,
+            'employer_contribution_minor_units' => 40_500,
+            'total_contribution_minor_units' => 302_400,
+            'insurer_liabilities' => [
+                [
+                    'insurer_code' => '111',
+                    'person_count' => 1,
+                    'assessment_base_minor_units' => 450_000,
+                    'ppz_assessment_base_minor_units' => 2_240_000,
+                    'employee_contribution_minor_units' => 261_900,
+                    'employer_contribution_minor_units' => 40_500,
+                    'total_contribution_minor_units' => 302_400,
+                ],
+            ],
+            'issues' => [],
+            'ruleset_id' => 'cz-health-2026',
+            'ruleset_hash' => str_repeat('b', 64),
+        ];
+
+        return [
+            'revision' => [
+                'id' => 53,
+                'run_id' => 19,
+                'revision_no' => 2,
+                'revision_kind' => 'regular',
+                'revision_status' => 'approved',
+                'period_start' => '2026-06-01',
+                'current_revision_no' => 2,
+            ],
+            'statutory_result' => [
+                'id' => 71,
+                'supplier_id' => 41,
+                'revision_id' => 53,
+                'schema_version' => 'payroll-health-result.v1',
+                'result_status' => 'calculated',
+                'ruleset_id' => 'cz-health-2026',
+                'ruleset_hash' => str_repeat('b', 64),
+                'result_snapshot' => $root,
+                'result_snapshot_hash' => hash(
+                    'sha256',
+                    CanonicalJson::encode($root),
+                ),
+                'people' => [$person],
             ],
         ];
     }

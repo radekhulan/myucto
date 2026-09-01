@@ -233,6 +233,46 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
      * zaměstnavatel vyplatil bonus i doplatek zaměstnanci a TÝŽ peníze poslal
      * ještě jednou finančnímu úřadu.
      */
+    public function testBatchAcceptsInstitutionCodeStoredInDifferentCase(): void
+    {
+        /*
+         * Formulář účtu instituce ukládá kód velkými písmeny, závazek se ale
+         * zmrazí pod strojovým druhem daně malými. Databáze mezi nimi nedělá
+         * rozdíl a účet najde, kontrola při sestavení příkazu ale porovnávala
+         * řetězce přesně — mzdy se zaúčtovaly a teprve platební příkaz spadl
+         * na „účet neodpovídá zmrazenému cíli".
+         */
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_institutions
+                SET institution_code = "ADVANCE_TAX"
+              WHERE supplier_id = ? AND institution_type = "tax_office"
+                AND institution_code = "advance_tax"',
+        )->execute([$this->supplierId]);
+
+        $revisionId = $this->createRevision(1, 'regular', null, 12_500, 3_000);
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+
+        $batch = $this->batches->build(
+            $this->supplierId,
+            'abo',
+            "currency:{$this->payerCurrencyId}",
+            [[
+                'liability_id' => $result['liability_ids'][0],
+                'amount_minor' => 12_500,
+            ]],
+            $this->actorId,
+        );
+
+        self::assertSame(
+            '1234567890',
+            $this->batchInstruction($batch['batch_id'])['variable_symbol'],
+        );
+    }
+
     public function testAdvanceLevyIsReducedByBonusAndAnnualSettlement(): void
     {
         $revisionId = $this->createRevision(

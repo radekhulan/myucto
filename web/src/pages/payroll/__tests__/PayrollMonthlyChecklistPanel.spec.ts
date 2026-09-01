@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const m = vi.hoisted(() => ({
@@ -41,8 +41,17 @@ function mountPanel() {
 }
 
 describe('PayrollMonthlyChecklistPanel', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
+    // Panel startuje na aktuálním měsíci. Test přepnutí období musí sáhnout na
+    // JINÝ měsíc, než je dnešek — bez zafixovaných hodin se jednou za čas trefí
+    // do téhož a přepnutí se pak vůbec nespustí.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date(2026, 7, 12, 9, 0, 0))
   })
 
   it('načte přehled za aktuální měsíc a produkci hned po připojení', async () => {

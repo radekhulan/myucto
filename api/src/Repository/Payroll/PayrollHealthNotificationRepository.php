@@ -27,9 +27,13 @@ final readonly class PayrollHealthNotificationRepository
     public function findEmployerIdentification(int $supplierId): ?array
     {
         $statement = $this->db->pdo()->prepare(
-            'SELECT ic, company_name, street, street_number_pop, zip, city, phone
-               FROM supplier
-              WHERE id = ?'
+            'SELECT s.ic, s.company_name, s.street, s.street_number_pop,
+                    s.street_number_orient, s.zip, s.city, s.phone,
+                    settings.payroll_contact_phone
+               FROM supplier s
+          LEFT JOIN payroll_employer_settings settings
+                 ON settings.supplier_id = s.id
+              WHERE s.id = ?'
         );
         $statement->execute([$supplierId]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
@@ -37,17 +41,81 @@ final readonly class PayrollHealthNotificationRepository
             return null;
         }
 
+        $houseNumber = self::houseNumber(
+            $this->nullableString($row['street_number_pop']),
+            $this->nullableString($row['street_number_orient']),
+        );
+
         return [
             'business_id' => $this->nullableString($row['ic']),
             'name' => (string) $row['company_name'],
-            'street' => $this->nullableString($row['street']),
-            'house_number' => $this->nullableString($row['street_number_pop']),
+            'street' => self::streetWithoutHouseNumber(
+                $this->nullableString($row['street']),
+                $houseNumber,
+                $this->nullableString($row['street_number_pop']),
+            ),
+            'house_number' => $houseNumber,
             'postal_code' => $this->normalizePostalCode(
                 $this->nullableString($row['zip']),
             ),
             'city' => $this->nullableString($row['city']),
-            'phone' => $this->nullableString($row['phone']),
+            // Formulář pojišťovny se ptá na kontakt, kam zavolat kvůli pojistnému,
+            // ne na spojovatelku firmy. Mzdový kontakt je proto přednější; bez
+            // něj zbývá firemní telefon, aby pole nezůstalo prázdné.
+            'phone' => $this->nullableString($row['payroll_contact_phone'])
+                ?? $this->nullableString($row['phone']),
         ];
+    }
+
+    /**
+     * Číslo popisné a orientační v úředním tvaru „1104/36".
+     *
+     * Formulář pojišťovny má jediné pole „číslo popisné / číslo orientační".
+     * Dokud se plnilo jen popisným, orientační číslo z adresy zmizelo — a to
+     * je u adres, kde obě čísla existují, jiná adresa.
+     */
+    private static function houseNumber(?string $popisne, ?string $orientacni): ?string
+    {
+        if ($popisne === null) {
+            return $orientacni;
+        }
+
+        return $orientacni === null ? $popisne : $popisne . '/' . $orientacni;
+    }
+
+    /**
+     * Název ulice bez čísla domu.
+     *
+     * `supplier.street` drží celý adresní řádek („Dlouhá 1104/36"),
+     * zatímco formulář má ulici a číslo v oddělených polích. Bez tohohle
+     * odříznutí bylo číslo domu na přehledu dvakrát — jednou v ulici a jednou
+     * ve vlastním poli.
+     *
+     * Neodhaduje se: odřízne se jen koncovka, která se PŘESNĚ shoduje s číslem
+     * složeným z evidovaných polí. Když se neshoduje, zůstane adresní řádek tak,
+     * jak ho firma zadala — vymýšlet rozdělení by znamenalo poslat pojišťovně
+     * adresu, která takhle nikdy zapsaná nebyla.
+     */
+    private static function streetWithoutHouseNumber(
+        ?string $street,
+        ?string $houseNumber,
+        ?string $popisne,
+    ): ?string {
+        if ($street === null) {
+            return null;
+        }
+        foreach ([$houseNumber, $popisne] as $koncovka) {
+            if ($koncovka === null || $koncovka === '') {
+                continue;
+            }
+            if (str_ends_with($street, ' ' . $koncovka)) {
+                $zbytek = trim(substr($street, 0, -strlen($koncovka)));
+
+                return $zbytek === '' ? $street : $zbytek;
+            }
+        }
+
+        return $street;
     }
 
     /**

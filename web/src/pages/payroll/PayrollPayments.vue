@@ -11,6 +11,7 @@ import {
   type PayrollPaymentBatch,
   type PayrollPaymentEvidence,
   type PayrollPaymentExport,
+  type PayrollPaymentExportFormat,
   type PayrollPaymentLiability,
   type PayrollPaymentLiabilityState,
   type PayrollPaymentMatch,
@@ -36,7 +37,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 // Formátování je sdílené (useFormat) — místní kopie se lišily locale i tvarem
 // data od zbytku aplikace, viz komentář u `formatMoneyMinor`.
 import { formatDate, formatDateTime, formatMoneyMinor as formatMoney } from '@/composables/useFormat'
-import { localPayrollPeriod } from './payrollComponentsUi'
+import { payrollWorkingPeriod } from './payrollComponentsUi'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -58,7 +59,7 @@ const runShortcutRequested = route.query.focus === 'bank-order'
   && requestedRunId !== null
 const runShortcutApplied = ref(false)
 const runShortcutState = ref<'ready' | 'empty' | null>(null)
-const period = ref(requestedPeriod ?? localPayrollPeriod())
+const period = ref(requestedPeriod ?? payrollWorkingPeriod())
 const activeTab = ref<'liabilities' | 'batches' | 'settlements'>('liabilities')
 const loading = ref(true)
 /*
@@ -70,7 +71,14 @@ const loadFailed = ref(false)
 const materializing = ref(false)
 const creatingBatch = ref(false)
 const generatingBatchId = ref<number | null>(null)
+/*
+ * Z jedné dávky vzniká soubor pro banku i doklad příkazu v PDF. Bez rozlišení,
+ * který z nich se právě generuje, by hláška „Generuji…" naskočila u obou
+ * tlačítek naráz.
+ */
+const generatingFormat = ref<PayrollPaymentExportFormat | null>(null)
 const downloadingExportId = ref<number | null>(null)
+const hidingExportId = ref<number | null>(null)
 const items = ref<PayrollPaymentLiability[]>([])
 const periodTotals = ref({ amount_minor: 0, allocated_minor: 0, settled_minor: 0 })
 const runs = ref<PayrollRun[]>([])
@@ -136,7 +144,7 @@ const incomingAmount = ref('')
 const incomingConfirmed = ref(false)
 const matchingIncoming = ref(false)
 let loadSequence = 0
-const pendingExportKeys = new Map<number, string>()
+const pendingExportKeys = new Map<string, string>()
 const pendingReconciliationKeys = new Map<string, string>()
 
 const COLUMNS: ColumnDef[] = [
@@ -513,6 +521,56 @@ function isSelectable(item: PayrollPaymentLiability): boolean {
     || anchor.id === item.id
     || isSameBatchGroup(anchor, item)
 }
+
+/**
+ * Proč zrovna tenhle závazek nejde zaškrtnout.
+ *
+ * Zakázané zaškrtávátko bez vysvětlení vypadá jako porucha. Nejčastěji je
+ * závazek už v jiné dávce, případně se nehodí k té rozdělané: do jedné dávky
+ * patří jen platby se stejným dnem splatnosti, měnou a plátcem.
+ */
+function selectionBlockedReason(item: PayrollPaymentLiability): string | null {
+  if (isSelected(item.id) || isSelectable(item)) return null
+  if (item.batch_eligibility !== 'ready') {
+    return t('payroll.payments.batch.select_blocked_not_ready')
+  }
+  if (!['open', 'partially_batched'].includes(item.state)
+    || remainingMinor(item) <= 0
+  ) {
+    return t('payroll.payments.batch.select_blocked_batched')
+  }
+
+  return t('payroll.payments.batch.select_blocked_group')
+}
+
+/**
+ * Má vůbec smysl ukazovat sloupec s výběrem?
+ *
+ * Když je celé období zařazené do dávek, nešlo by zaškrtnout ani jedno pole
+ * a účetní kouká na sloupec šedivých zaškrtávátek bez důvodu. Sloupec se
+ * proto schová celý včetně hlavičky a místo něj se pod tabulkou objeví věta,
+ * proč vybírat není co - to je poctivější než zakázané ovládání.
+ *
+ * Řídí se tím, co je zaškrtnutelné TEĎ: jakmile přibude nezařazený závazek
+ * (další běh, oprava, částečná úhrada), sloupec se vrátí sám.
+ */
+const hasSelectableItems = computed(
+  () => items.value.some(item => isSelected(item.id) || isSelectable(item)),
+)
+
+/** Proč není co vybírat - stejné důvody jako u jednotlivého řádku. */
+const nothingToSelectReason = computed<string | null>(() => {
+  if (hasSelectableItems.value || items.value.length === 0) return null
+  const reasons = new Set(
+    items.value
+      .map(item => selectionBlockedReason(item))
+      .filter((reason): reason is string => reason !== null),
+  )
+
+  return reasons.size === 1
+    ? [...reasons][0]
+    : t('payroll.payments.batch.select_blocked_all')
+})
 
 function isOpenBatchable(item: PayrollPaymentLiability): boolean {
   return !(
@@ -940,38 +998,121 @@ async function createBatch(): Promise<void> {
   }
 }
 
-function idempotencyKey(batchId: number): string {
-  const pending = pendingExportKeys.get(batchId)
+/**
+ * Co za soubor tlačítko vyrobí - podle přípony, ne podle názvu formátu.
+ *
+ * Formát dávky je „abo", ale soubor se jmenuje `.kpc`, a účetní hledá na disku
+ * tohle. Ptát se jí, jestli chce „export", je zbytečná hádanka.
+ */
+function bankFileLabel(batch: PayrollPaymentBatch): string {
+  return batch.export_format === 'abo'
+    ? 'KPC'
+    : batch.export_format.toUpperCase()
+}
+
+/**
+ * Je tahle revize nahrazená novější?
+ *
+ * Skrýt jde jen nahrazená revize - poslední je ta platná a zmizet nesmí,
+ * jinak by u dávky nezbylo nic. Poznáme to z nejvyššího čísla revize v témž
+ * formátu; server si to pak ověří ještě sám podle řetězu revizí.
+ */
+function isOutdatedExport(
+  batch: PayrollPaymentBatch,
+  file: PayrollPaymentExport,
+): boolean {
+  return batch.exports.some(
+    other => other.export_format === file.export_format
+      && other.revision_no > file.revision_no,
+  )
+}
+
+/**
+ * Skryje nahrazenou revizi ze seznamu.
+ *
+ * Soubor se nemaže: tabulka exportů je neměnná, protože je to doklad o tom,
+ * co se poslalo do banky. Ze seznamu ale zmizí, aby se účetní nemusela
+ * rozhodovat mezi dvěma stejně pojmenovanými doklady.
+ */
+async function hideExport(file: PayrollPaymentExport): Promise<void> {
+  if (!auth.canWrite('payroll.payments') || hidingExportId.value !== null) return
+  hidingExportId.value = file.id
+  try {
+    await payrollPaymentsApi.hideExport(file.id)
+    toast.success(t('payroll.payments.batch.export_hidden'))
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(
+      error,
+      t('payroll.payments.batch.export_hide_failed'),
+    ))
+  } finally {
+    hidingExportId.value = null
+  }
+}
+
+/*
+ * Klíč je vázaný na dávku i formát: soubor pro banku a doklad příkazu jsou dva
+ * samostatné exporty a se sdíleným klíčem by si druhý z nich odnesl archiv toho
+ * prvního. Nedokončený pokus si klíč drží, aby retry nezaložil další revizi.
+ */
+function idempotencyKey(
+  batchId: number,
+  format?: PayrollPaymentExportFormat,
+): string {
+  const mapKey = `${batchId}:${format ?? 'batch'}`
+  const pending = pendingExportKeys.get(mapKey)
   if (pending) return pending
   const random = globalThis.crypto?.randomUUID?.()
     ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  const key = `payroll-export-${batchId}-${random}`
-  pendingExportKeys.set(batchId, key)
+  const key = format === undefined
+    ? `payroll-export-${batchId}-${random}`
+    : `payroll-export-${batchId}-${format}-${random}`
+  pendingExportKeys.set(mapKey, key)
   return key
 }
 
-async function generateExport(batch: PayrollPaymentBatch): Promise<void> {
+async function generateExport(
+  batch: PayrollPaymentBatch,
+  format?: PayrollPaymentExportFormat,
+): Promise<void> {
   if (
     !auth.canWrite('payroll.payments')
     || batch.export_format === 'manual'
     || generatingBatchId.value !== null
   ) return
   generatingBatchId.value = batch.id
+  generatingFormat.value = format ?? null
   try {
-    await payrollPaymentsApi.generateExport(
-      batch.id,
-      idempotencyKey(batch.id),
-    )
-    pendingExportKeys.delete(batch.id)
-    toast.success(t('payroll.payments.batch.export_created'))
+    await (format === undefined
+      ? payrollPaymentsApi.generateExport(
+        batch.id,
+        idempotencyKey(batch.id),
+      )
+      : payrollPaymentsApi.generateExport(
+        batch.id,
+        idempotencyKey(batch.id, format),
+        format,
+      ))
+    pendingExportKeys.delete(`${batch.id}:${format ?? 'batch'}`)
+    toast.success(t(
+      format === 'pdf'
+        ? 'payroll.payments.batch.pdf_created'
+        : 'payroll.payments.batch.export_created',
+    ))
     await load()
   } catch (error) {
     toast.error(apiErrorMessage(
       error,
-      t('payroll.payments.batch.export_failed'),
+      t(
+        format === 'pdf'
+          ? 'payroll.payments.batch.pdf_failed'
+          : 'payroll.payments.batch.export_failed',
+      ),
     ))
   } finally {
     generatingBatchId.value = null
+    generatingFormat.value = null
   }
 }
 
@@ -1515,7 +1656,7 @@ onMounted(load)
             <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
               <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
                 <tr>
-                  <th v-if="auth.canWrite('payroll.payments')" class="w-12 px-4 py-3">
+                  <th v-if="auth.canWrite('payroll.payments') && hasSelectableItems" class="w-12 px-4 py-3">
                     <input
                       type="checkbox"
                       class="h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500"
@@ -1535,12 +1676,13 @@ onMounted(load)
               </thead>
               <tbody class="divide-y divide-neutral-100">
                 <tr v-for="item in items" :key="item.id">
-                  <td v-if="auth.canWrite('payroll.payments')" class="px-4 py-3">
+                  <td v-if="auth.canWrite('payroll.payments') && hasSelectableItems" class="px-4 py-3">
                     <input
                       type="checkbox"
                       class="h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500 disabled:cursor-not-allowed disabled:opacity-40"
                       :checked="isSelected(item.id)"
                       :disabled="!isSelected(item.id) && !isSelectable(item)"
+                      :title="selectionBlockedReason(item) ?? undefined"
                       :aria-label="t('payroll.payments.batch.select_employee', {
                         name: recipientName(item),
                       })"
@@ -1583,6 +1725,14 @@ onMounted(load)
               </tbody>
             </table>
           </div>
+          <!-- Místo sloupce zakázaných zaškrtávátek jedna věta, proč vybírat není co. -->
+          <p
+            v-if="nothingToSelectReason && auth.canWrite('payroll.payments')"
+            class="border-t border-neutral-100 px-4 py-3 text-sm text-neutral-500"
+            data-test="nothing-to-select"
+          >
+            {{ nothingToSelectReason }}
+          </p>
         </section>
 
         <section data-layout="mobile" class="grid grid-cols-1 gap-3 md:hidden">
@@ -1590,11 +1740,12 @@ onMounted(load)
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div class="flex min-w-0 items-start gap-3">
                 <input
-                  v-if="auth.canWrite('payroll.payments')"
+                  v-if="auth.canWrite('payroll.payments') && hasSelectableItems"
                   type="checkbox"
                   class="mt-1 h-4 w-4 shrink-0 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500 disabled:cursor-not-allowed disabled:opacity-40"
                   :checked="isSelected(item.id)"
                   :disabled="!isSelected(item.id) && !isSelectable(item)"
+                  :title="selectionBlockedReason(item) ?? undefined"
                   :aria-label="t('payroll.payments.batch.select_employee', {
                     name: recipientName(item),
                   })"
@@ -1722,6 +1873,10 @@ onMounted(load)
                     <div v-if="batch.exports.length" class="space-y-2">
                       <div v-for="file in batch.exports" :key="file.id" class="flex flex-wrap items-center gap-2">
                         <span class="text-neutral-700">
+                          {{ file.export_format === 'pdf'
+                            ? t('payroll.payments.batch.export_document')
+                            : t('payroll.payments.batch.export_bank_file') }}
+                          ·
                           {{ t('payroll.payments.batch.revision', { revision: file.revision_no }) }}
                         </span>
                         <span class="text-xs text-neutral-500">
@@ -1741,6 +1896,21 @@ onMounted(load)
                             ? t('payroll.payments.batch.downloading')
                             : t('payroll.payments.batch.download') }}
                         </button>
+                        <!-- Nahrazenou revizi jde odklidit ze seznamu; platná zůstává vždy. -->
+                        <button
+                          v-if="auth.canWrite('payroll.payments') && isOutdatedExport(batch, file)"
+                          type="button"
+                          class="cursor-pointer rounded-md border border-danger-200 px-1.5 py-1 text-danger-600 hover:bg-danger-50 disabled:cursor-default disabled:opacity-50"
+                          :disabled="hidingExportId !== null"
+                          :title="t('payroll.payments.batch.hide_export_hint')"
+                          :aria-label="t('payroll.payments.batch.hide_export_hint')"
+                          data-test="hide-export"
+                          @click="hideExport(file)"
+                        >
+                          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M6 6l12 12M18 6L6 18" stroke-linecap="round" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
                     <span v-else class="text-neutral-500">
@@ -1750,20 +1920,44 @@ onMounted(load)
                     </span>
                   </td>
                   <td class="px-4 py-3 text-right">
-                    <button
+                    <div
                       v-if="batch.export_format !== 'manual' && auth.canWrite('payroll.payments')"
-                      type="button"
-                      :class="btnFilledSm('primary')"
-                      :disabled="generatingBatchId !== null"
-                      @click="generateExport(batch)"
+                      class="flex flex-wrap justify-end gap-2"
                     >
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path :d="ICONS.plus" />
-                      </svg>
-                      {{ generatingBatchId === batch.id
-                        ? t('payroll.payments.batch.generating')
-                        : t('payroll.payments.batch.generate') }}
-                    </button>
+                      <button
+                        type="button"
+                        :class="btnFilledSm('primary')"
+                        :disabled="generatingBatchId !== null"
+                        @click="generateExport(batch)"
+                      >
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.plus" />
+                        </svg>
+                        {{ generatingBatchId === batch.id && generatingFormat === null
+                          ? t('payroll.payments.batch.generating')
+                          : t('payroll.payments.batch.generate', {
+                            format: bankFileLabel(batch),
+                          }) }}
+                      </button>
+                      <!--
+                        Doklad příkazu je tisková příloha k souboru pro banku, ne
+                        jeho náhrada: vzniká z týchž zmrazených instrukcí dávky.
+                      -->
+                      <button
+                        type="button"
+                        data-test="batch-generate-pdf"
+                        :class="btnOutlineSm('neutral')"
+                        :disabled="generatingBatchId !== null"
+                        @click="generateExport(batch, 'pdf')"
+                      >
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.download" />
+                        </svg>
+                        {{ generatingBatchId === batch.id && generatingFormat === 'pdf'
+                          ? t('payroll.payments.batch.generating')
+                          : t('payroll.payments.batch.generate_pdf') }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -1800,6 +1994,10 @@ onMounted(load)
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p class="text-sm font-medium text-neutral-800">
+                      {{ file.export_format === 'pdf'
+                        ? t('payroll.payments.batch.export_document')
+                        : t('payroll.payments.batch.export_bank_file') }}
+                      ·
                       {{ t('payroll.payments.batch.revision', { revision: file.revision_no }) }}
                     </p>
                     <p class="mt-0.5 text-xs text-neutral-500">
@@ -1818,6 +2016,19 @@ onMounted(load)
                     </svg>
                     {{ t('payroll.payments.batch.download') }}
                   </button>
+                  <button
+                    v-if="auth.canWrite('payroll.payments') && isOutdatedExport(batch, file)"
+                    type="button"
+                    class="cursor-pointer rounded-md border border-danger-200 px-1.5 py-1 text-danger-600 hover:bg-danger-50 disabled:cursor-default disabled:opacity-50"
+                    :disabled="hidingExportId !== null"
+                    :title="t('payroll.payments.batch.hide_export_hint')"
+                    :aria-label="t('payroll.payments.batch.hide_export_hint')"
+                    @click="hideExport(file)"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path d="M6 6l12 12M18 6L6 18" stroke-linecap="round" />
+                    </svg>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1826,21 +2037,41 @@ onMounted(load)
                 ? t('payroll.payments.batch.manual')
                 : t('payroll.payments.batch.no_export') }}
             </p>
-            <button
+            <div
               v-if="batch.export_format !== 'manual' && auth.canWrite('payroll.payments')"
-              type="button"
-              class="cursor-pointer mt-4"
-              :class="btnFilled('primary')"
-              :disabled="generatingBatchId !== null"
-              @click="generateExport(batch)"
+              class="mt-4 flex flex-col gap-2"
             >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path :d="ICONS.plus" />
-              </svg>
-              {{ generatingBatchId === batch.id
-                ? t('payroll.payments.batch.generating')
-                : t('payroll.payments.batch.generate') }}
-            </button>
+              <button
+                type="button"
+                class="cursor-pointer"
+                :class="btnFilled('primary')"
+                :disabled="generatingBatchId !== null"
+                @click="generateExport(batch)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.plus" />
+                </svg>
+                {{ generatingBatchId === batch.id && generatingFormat === null
+                  ? t('payroll.payments.batch.generating')
+                  : t('payroll.payments.batch.generate', {
+                    format: bankFileLabel(batch),
+                  }) }}
+              </button>
+              <button
+                type="button"
+                class="cursor-pointer"
+                :class="btnOutline('neutral')"
+                :disabled="generatingBatchId !== null"
+                @click="generateExport(batch, 'pdf')"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.download" />
+                </svg>
+                {{ generatingBatchId === batch.id && generatingFormat === 'pdf'
+                  ? t('payroll.payments.batch.generating')
+                  : t('payroll.payments.batch.generate_pdf') }}
+              </button>
+            </div>
           </article>
         </section>
       </template>

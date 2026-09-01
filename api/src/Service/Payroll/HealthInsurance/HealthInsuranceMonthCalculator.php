@@ -87,6 +87,7 @@ final class HealthInsuranceMonthCalculator
         }
 
         $assessmentBase = 0;
+        $ppzAssessmentBase = 0;
         $employeeContribution = 0;
         $employerContribution = 0;
         $totalContribution = 0;
@@ -94,6 +95,10 @@ final class HealthInsuranceMonthCalculator
         $insurers = [];
         foreach ($people as $person) {
             $assessmentBase = $this->add($assessmentBase, $person->assessmentBaseMinorUnits);
+            $ppzAssessmentBase = $this->add(
+                $ppzAssessmentBase,
+                $person->ppzAssessmentBaseMinorUnits,
+            );
             $employeeContribution = $this->add(
                 $employeeContribution,
                 $person->employeeContributionMinorUnits ?? 0,
@@ -112,6 +117,7 @@ final class HealthInsuranceMonthCalculator
             $insurers[$person->insurerCode] ??= [
                 'people' => 0,
                 'base' => 0,
+                'ppz_base' => 0,
                 'employee' => 0,
                 'employer' => 0,
                 'total' => 0,
@@ -122,6 +128,10 @@ final class HealthInsuranceMonthCalculator
             $insurers[$person->insurerCode]['base'] = $this->add(
                 $insurers[$person->insurerCode]['base'],
                 $person->assessmentBaseMinorUnits,
+            );
+            $insurers[$person->insurerCode]['ppz_base'] = $this->add(
+                $insurers[$person->insurerCode]['ppz_base'],
+                $person->ppzAssessmentBaseMinorUnits,
             );
             $insurers[$person->insurerCode]['employee'] = $this->add(
                 $insurers[$person->insurerCode]['employee'],
@@ -146,6 +156,7 @@ final class HealthInsuranceMonthCalculator
                 $liability['employee'],
                 $liability['employer'],
                 $liability['total'],
+                $liability['ppz_base'],
             );
         }
 
@@ -161,6 +172,7 @@ final class HealthInsuranceMonthCalculator
             [],
             $ruleset->id,
             $ruleset->canonicalHash,
+            $ppzAssessmentBase,
         );
     }
 
@@ -367,6 +379,12 @@ final class HealthInsuranceMonthCalculator
         array $issues,
         bool $ppzCounted,
     ): HealthPersonMonthResult {
+        // Doplatek do minima se odvádí z minima pro TOHOTO zaměstnavatele (příjmy
+        // od jiných zaměstnavatelů si každý hlásí sám), takže právě tahle částka je
+        // vyměřovacím základem pro přehled o platbě pojistného.
+        $ppzAssessmentBase = $minimum->topUpPayer === null
+            ? $assessmentBase
+            : max($assessmentBase, $minimum->minimumForThisEmployerMinorUnits);
         $relationshipResults = array_map(
             static function (HealthRelationshipFacts $fact) use ($decisions): HealthRelationshipResult {
                 $decision = $decisions[$fact->relationship->relationshipId];
@@ -440,6 +458,7 @@ final class HealthInsuranceMonthCalculator
             $contribution?->minimumTopUpStep,
             $input->topUpResponsibilitySource,
             $contribution?->minimumContributionStep,
+            $ppzAssessmentBase,
         );
     }
 

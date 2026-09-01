@@ -34,6 +34,55 @@ final class PayrollDocumentAction
         private readonly IpMatcher $ipMatcher,
     ) {}
 
+    /**
+     * Skryje nahrazenou verzi dokumentu ze seznamu.
+     *
+     * Není to smazání: řádek dokumentu zůstává, protože je to doklad o tom,
+     * co zaměstnanec dostal, a ta tabulka je záměrně neměnná. Ze seznamu ale
+     * zmizí, aby účetní neměla dvě stejně pojmenované pásky a nemusela
+     * pokaždé znovu zjišťovat, která platí.
+     *
+     * @param array<string,string> $args
+     */
+    public function hide(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::WRITE,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $documentId = (int) ($args['id'] ?? 0);
+        if ($documentId <= 0) {
+            return Json::error($response, 'validation_failed', 'Skrytí vyžaduje platný dokument.', 422);
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $userId = $this->userId($request);
+        try {
+            $hidden = $this->documentRepository->hide($supplierId, $documentId, $userId);
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+        $this->activity->log(
+            'payroll.document_hidden',
+            $userId,
+            'payroll_document',
+            $hidden['document_id'],
+            [
+                'document_kind' => $hidden['document_kind'],
+                'document_revision_no' => $hidden['document_revision_no'],
+            ],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, $hidden);
+    }
+
     /** @param array<string,string> $args */
     public function list(Request $request, Response $response, array $args): Response
     {
@@ -606,7 +655,7 @@ final class PayrollDocumentAction
             'annual_revision_id', 'annual_revision_no', 'tax_year', 'purpose',
             'office_id', 'office_name',
             'employee_id', 'employee_name', 'document_kind', 'document_revision_no',
-            'supersedes_document_id', 'file_sha256', 'size_bytes', 'mime_type',
+            'supersedes_document_id', 'superseded', 'file_sha256', 'size_bytes', 'mime_type',
             'suggested_filename', 'created_at',
         ];
         $result = [];

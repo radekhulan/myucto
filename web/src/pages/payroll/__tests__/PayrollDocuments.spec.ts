@@ -21,7 +21,10 @@ const m = vi.hoisted(() => ({
   annualDocumentBatch: vi.fn(),
   annualDocumentBatchItems: vi.fn(),
   retryAnnualDocumentBatchItem: vi.fn(),
-  downloadPeriodExport: vi.fn(),
+  startPeriodExport: vi.fn(),
+  periodExportJob: vi.fn(),
+  runPeriodExportJob: vi.fn(),
+  downloadPeriodExportFile: vi.fn(),
   downloadDocument: vi.fn(),
   documentSecureLinks: vi.fn(),
   sendDocumentSecureLink: vi.fn(),
@@ -57,7 +60,10 @@ vi.mock('@/api/payroll', () => ({
     annualDocumentBatch: m.annualDocumentBatch,
     annualDocumentBatchItems: m.annualDocumentBatchItems,
     retryAnnualDocumentBatchItem: m.retryAnnualDocumentBatchItem,
-    downloadPeriodExport: m.downloadPeriodExport,
+    startPeriodExport: m.startPeriodExport,
+    periodExportJob: m.periodExportJob,
+    runPeriodExportJob: m.runPeriodExportJob,
+    downloadPeriodExportFile: m.downloadPeriodExportFile,
     downloadDocument: m.downloadDocument,
     documentSecureLinks: m.documentSecureLinks,
     sendDocumentSecureLink: m.sendDocumentSecureLink,
@@ -110,6 +116,36 @@ function deferred<T>(): {
     resolve = resolver
   })
   return { promise, resolve }
+}
+
+/** Job měsíčního archivu tak, jak ho vrací `/payroll/exports/...`. */
+function exportJobFixture(
+  status: string,
+  progress?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    id: 81,
+    scope: 'monthly',
+    period_start: '2026-07-01',
+    period_end: '2026-07-31',
+    status,
+    attempt_count: 1,
+    available_at: '2026-08-03 12:00:00',
+    export_id: status === 'completed' ? 91 : null,
+    last_error_code: null,
+    last_error_message: null,
+    created_at: '2026-08-03 12:00:00',
+    started_at: '2026-08-03 12:00:00',
+    completed_at: status === 'completed' ? '2026-08-03 12:00:01' : null,
+    progress: progress ?? {
+      planned: false,
+      total: null,
+      completed: 0,
+      failed: 0,
+      pending: 0,
+      current_part_kind: null,
+    },
+  }
 }
 
 describe('PayrollDocuments', () => {
@@ -343,7 +379,10 @@ describe('PayrollDocuments', () => {
       expires_at: '2026-08-08 00:00:00',
     })
     m.revokeDocumentSecureLink.mockResolvedValue({ revoked: true })
-    m.downloadPeriodExport.mockResolvedValue({
+    m.startPeriodExport.mockResolvedValue(exportJobFixture('completed'))
+    m.periodExportJob.mockResolvedValue(exportJobFixture('completed'))
+    m.runPeriodExportJob.mockResolvedValue(exportJobFixture('processing'))
+    m.downloadPeriodExportFile.mockResolvedValue({
       id: 91,
       scope: 'monthly',
       period_start: '2026-07-01',
@@ -422,17 +461,77 @@ describe('PayrollDocuments', () => {
     await wrapper.get('[data-test="download-monthly-period-export"]')
       .trigger('click')
     await flushPromises()
-    expect(m.downloadPeriodExport).toHaveBeenCalledWith('monthly', '2026-08')
+    expect(m.startPeriodExport).toHaveBeenCalledWith('monthly', '2026-08')
 
     await wrapper.get<HTMLInputElement>('[data-test="period-export-year"]')
       .setValue('2025')
     await wrapper.get('[data-test="download-annual-period-export"]')
       .trigger('click')
     await flushPromises()
-    expect(m.downloadPeriodExport).toHaveBeenCalledWith('annual', 2025)
+    expect(m.startPeriodExport).toHaveBeenCalledWith('annual', 2025)
     expect(m.toastSuccess).toHaveBeenCalledWith(expect.stringContaining(
       'mzdy-2026-07-abcdef123456.zip',
     ))
+    wrapper.unmount()
+  })
+
+  it('shows archive progress and lets a stuck job be pushed on without the cron', async () => {
+    m.startPeriodExport.mockResolvedValue(exportJobFixture('queued', {
+      planned: true,
+      total: 4,
+      completed: 1,
+      failed: 0,
+      pending: 3,
+      current_part_kind: 'document',
+    }))
+    m.periodExportJob.mockResolvedValue(exportJobFixture('queued', {
+      planned: true,
+      total: 4,
+      completed: 1,
+      failed: 0,
+      pending: 3,
+      current_part_kind: 'document',
+    }))
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+    const archiveTab = wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.archive')
+    await archiveTab!.trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="download-monthly-period-export"]')
+      .trigger('click')
+    await flushPromises()
+
+    const progress = wrapper.get('[data-test="period-export-progress"]')
+    expect(progress.text()).toContain('payroll.documents.period_export.progress')
+    expect(m.downloadPeriodExportFile).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="run-period-export-job"]').trigger('click')
+    await flushPromises()
+    expect(m.runPeriodExportJob).toHaveBeenCalledWith(81)
+    wrapper.unmount()
+  })
+
+  it('reports a failed archive with the message from the job', async () => {
+    m.startPeriodExport.mockResolvedValue({
+      ...exportJobFixture('failed'),
+      last_error_message: 'Podklad archivu už není k dispozici.',
+    })
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+    const archiveTab = wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.archive')
+    await archiveTab!.trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="download-monthly-period-export"]')
+      .trigger('click')
+    await flushPromises()
+
+    expect(m.toastError).toHaveBeenCalledWith('Podklad archivu už není k dispozici.')
+    expect(m.downloadPeriodExportFile).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('opens the archive directly without loading document or employee lists', async () => {
@@ -859,5 +958,100 @@ describe('PayrollDocuments', () => {
     expect(m.toastError).toHaveBeenCalledWith(
       'payroll.documents.secure_delivery.reason.recipient_email_missing',
     )
+  })
+
+  /*
+   * ─── Nahrazená verze dokumentu ────────────────────────────────────────────
+   *
+   * Po opravě běhu leží ve výpisu obě pásky vedle sebe. Nahrazená musí být na
+   * první pohled poznat a nesmí jít poslat zaměstnanci; stáhnout jde dál, je
+   * součástí auditní stopy.
+   */
+  function supersededListing(): void {
+    m.listDocuments.mockResolvedValue({
+      period: '2026-07',
+      revisions: [],
+      items: [
+        {
+          id: 21,
+          run_id: 11,
+          revision_id: 12,
+          revision_no: 3,
+          employee_id: 31,
+          employee_name: 'Testovací Zaměstnanec',
+          office_name: 'Praha',
+          document_kind: 'payslip',
+          document_revision_no: 3,
+          supersedes_document_id: null,
+          mime_type: 'application/pdf',
+          suggested_filename: 'vyplatni-paska-2026-07-abcdef123456.pdf',
+          file_sha256: 'a'.repeat(64),
+          size_bytes: 4567,
+          created_at: '2026-08-01 08:00:00',
+        },
+        {
+          id: 23,
+          run_id: 11,
+          revision_id: 15,
+          revision_no: 6,
+          employee_id: 31,
+          employee_name: 'Testovací Zaměstnanec',
+          office_name: 'Praha',
+          document_kind: 'payslip',
+          document_revision_no: 6,
+          supersedes_document_id: 21,
+          mime_type: 'application/pdf',
+          suggested_filename: 'vyplatni-paska-2026-07-cdef12345678.pdf',
+          file_sha256: 'c'.repeat(64),
+          size_bytes: 4599,
+          created_at: '2026-08-02 09:00:00',
+        },
+      ],
+      total: 2,
+    })
+  }
+
+  it('nahrazenou verzi odliší odznakem a aktuální nechá bez něj', async () => {
+    supersededListing()
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    const supersededRows = wrapper.findAll('[data-test="superseded-document-row"]')
+    expect(supersededRows).toHaveLength(1)
+    expect(supersededRows[0].text()).toContain('payroll.documents.superseded.badge')
+
+    const currentRows = wrapper.findAll('[data-test="document-row"]')
+    expect(currentRows).toHaveLength(1)
+    expect(currentRows[0].text()).not.toContain('payroll.documents.superseded.badge')
+  })
+
+  it('u nahrazeného dokumentu zakáže odeslání a řekne proč, stažení nechá', async () => {
+    supersededListing()
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    const supersededRow = wrapper.get('[data-test="superseded-document-row"]')
+    const blockedSend = supersededRow.get('[data-test="send-secure-link"]')
+    expect(blockedSend.attributes('disabled')).toBeDefined()
+    expect(blockedSend.attributes('title')).toBe('payroll.documents.superseded.send_blocked')
+    expect(supersededRow.get('[data-test="superseded-send-note"]').text())
+      .toBe('payroll.documents.superseded.send_blocked')
+    // Auditní stopa: nahrazený dokument musí zůstat ke stažení.
+    expect(supersededRow.get('[data-test="download-document"]').attributes('disabled'))
+      .toBeUndefined()
+
+    const currentRow = wrapper.get('[data-test="document-row"]')
+    const allowedSend = currentRow.get('[data-test="send-secure-link"]')
+    expect(allowedSend.attributes('disabled')).toBeUndefined()
+    expect(allowedSend.attributes('title')).toBeUndefined()
+    expect(currentRow.find('[data-test="superseded-send-note"]').exists()).toBe(false)
+
+    // Klik na zakázané tlačítko (mobilní karta bez `disabled` v jsdom apod.)
+    // nesmí odeslání spustit ani obejít.
+    await blockedSend.trigger('click')
+    await flushPromises()
+    expect(m.sendDocumentSecureLink).not.toHaveBeenCalled()
   })
 })

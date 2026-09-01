@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use DragonOfMercy\PhpPdf\PdfEditor;
 use MyInvoice\Bootstrap;
+use MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
@@ -120,6 +121,63 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             }
             $this->db->close();
         }
+    }
+
+    public function testEmployerIdentificationSplitsAddressAndPrefersPayrollContact(): void
+    {
+        /*
+         * Formulář pojišťovny má ulici a číslo domu v oddělených polích a ptá
+         * se na kontakt kvůli pojistnému. Dokud se do ulice posílal celý adresní
+         * řádek, bylo číslo domu na přehledu dvakrát a orientační číslo chybělo
+         * úplně; telefon se navíc bral firemní místo mzdového kontaktu.
+         */
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE supplier
+                SET street = "Dlouhá 1104/36",
+                    street_number_pop = "1104", street_number_orient = "36"
+              WHERE id = ?',
+        )->execute([$this->supplierId]);
+        // Nastaveni zamestnavatele je pro izolovanou firmu potreba zalozit;
+        // vychozi mzdova uctarna je povinna, proto se doplni take.
+        $pdo->prepare(
+            'INSERT INTO payroll_offices (supplier_id, code, name, is_active)
+             VALUES (?, "HQ", "Sidlo", 1)',
+        )->execute([$this->supplierId]);
+        $officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employer_settings
+                 (supplier_id, default_office_id, payroll_contact_phone)
+             VALUES (?, ?, "608123456")
+             ON DUPLICATE KEY UPDATE payroll_contact_phone = VALUES(payroll_contact_phone)',
+        )->execute([$this->supplierId, $officeId]);
+
+        $identification = (new PayrollHealthNotificationRepository($this->db))
+            ->findEmployerIdentification($this->supplierId);
+
+        self::assertIsArray($identification);
+        self::assertSame('Dlouhá', $identification['street']);
+        self::assertSame('1104/36', $identification['house_number']);
+        self::assertSame('608123456', $identification['phone']);
+    }
+
+    public function testEmployerAddressStaysUntouchedWhenItCarriesNoHouseNumber(): void
+    {
+        // Adresní řádek bez čísla se nesmí zkracovat odhadem.
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE supplier
+                SET street = "Zkušební", street_number_pop = "12",
+                    street_number_orient = NULL
+              WHERE id = ?',
+        )->execute([$this->supplierId]);
+
+        $identification = (new PayrollHealthNotificationRepository($this->db))
+            ->findEmployerIdentification($this->supplierId);
+
+        self::assertIsArray($identification);
+        self::assertSame('Zkušební', $identification['street']);
+        self::assertSame('12', $identification['house_number']);
     }
 
     public function testCapabilityNamesWhatIsPinnedAndWhatIsNot(): void

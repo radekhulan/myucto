@@ -11,6 +11,7 @@ import {
   payrollImportFingerprint,
   payrollImportIssues,
   payrollMinorToInput,
+  payrollQueryPeriod,
 } from '@/pages/payroll/payrollComponentsUi'
 
 function preview(overrides: Partial<PayrollInputImportPreview> = {}): PayrollInputImportPreview {
@@ -127,5 +128,19 @@ describe('payrollComponentsUi', () => {
 
   it('selects the payroll period from local time around midnight', () => {
     expect(localPayrollPeriod(new Date(2026, 7, 1, 0, 30))).toBe('2026-08')
+  })
+
+  it('keeps the period the user came with instead of jumping to this month', () => {
+    // V září se zpracovává srpen; přeskočení na dnešní měsíc by zadané částky
+    // uložilo do jiného období, než ve kterém účetní pracuje.
+    expect(payrollQueryPeriod({ period: '2026-08' }, '2026-09')).toBe('2026-08')
+    expect(payrollQueryPeriod({ period: ['2026-08'] }, '2026-09')).toBe('2026-08')
+  })
+
+  it('falls back to the current month on a missing or malformed period', () => {
+    expect(payrollQueryPeriod({}, '2026-09')).toBe('2026-09')
+    expect(payrollQueryPeriod({ period: '2026-13' }, '2026-09')).toBe('2026-09')
+    expect(payrollQueryPeriod({ period: '2026-8' }, '2026-09')).toBe('2026-09')
+    expect(payrollQueryPeriod({ period: 8 }, '2026-09')).toBe('2026-09')
   })
 })

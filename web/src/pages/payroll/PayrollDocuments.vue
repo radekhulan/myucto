@@ -11,6 +11,7 @@ import {
   type PayrollDocumentBatchItem,
   type PayrollDocumentList,
   type PayrollDocumentSecureLink,
+  type PayrollPeriodExportJob,
   type PayrollPeriodExportScope,
   type PayrollSecureDeliveryBlockedReason,
   type PayrollTaxCertificateKind,
@@ -19,8 +20,15 @@ import {
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
-import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
+import {
+  btnFilled,
+  btnOutline,
+  btnOutlineSm,
+  disabledTitle,
+  BTN_DISABLED_NOTE,
+  ICONS,
+} from '@/components/ui/buttonStyles'
+import { payrollWorkingPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -35,7 +43,7 @@ const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
-const period = ref(localPayrollPeriod())
+const period = ref(payrollWorkingPeriod())
 const year = ref(Number(period.value.slice(0, 4)))
 /**
  * Předvýběr z odkazu na kartě zaměstnance (`?person=7&tab=annual`).
@@ -66,12 +74,16 @@ const generatingAnnualKind = ref<AnnualGenerationKind | null>(null)
 const pendingCorrectionKind = ref<PayrollTaxCertificateKind | null>(null)
 const correctionReason = ref('')
 const downloadingId = ref<number | null>(null)
+const hidingDocumentId = ref<number | null>(null)
 const downloadingBundle = ref(false)
 const bundleError = ref('')
 const exportingScope = ref<PayrollPeriodExportScope | null>(null)
+const exportJob = ref<PayrollPeriodExportJob | null>(null)
+const rerunningExportJob = ref(false)
 let loadSequence = 0
 let batchPollTimer: ReturnType<typeof setTimeout> | null = null
 let annualBatchPollTimer: ReturnType<typeof setTimeout> | null = null
+let exportPollTimer: ReturnType<typeof setInterval> | null = null
 
 const COLUMNS: ColumnDef[] = [
   { key: 'document', labelKey: 'payroll.documents.document', required: true },
@@ -116,6 +128,47 @@ const visibleItems = computed(() =>
     : activeTab.value === 'annual'
       ? annualItems.value
       : [])
+/*
+ * ─── Nahrazené verze dokumentu ─────────────────────────────────────────────
+ *
+ * Po opravě mzdového běhu leží ve výpisu obě verze vedle sebe (páska revize 3
+ * i revize 6). Která platí, říká `supersedes_document_id` novějšího dokumentu:
+ * nahrazený je ten, na jehož `id` některý jiný řádek ukazuje. Aktuální řádky se
+ * nijak neznačí — odznak u každého druhého řádku by byl jen šum.
+ */
+const supersededIds = computed(() => {
+  const ids = new Set<number>()
+  for (const item of visibleItems.value) {
+    if (item.supersedes_document_id != null) ids.add(item.supersedes_document_id)
+  }
+  return ids
+})
+/**
+ * Odklidí nahrazenou verzi ze seznamu.
+ *
+ * Soubor se nemaže: tabulka dokumentů je neměnná, protože dokument je doklad
+ * o tom, co zaměstnanec dostal. Ze seznamu ale zmizí, aby u jednoho člověka
+ * a jednoho měsíce nezůstávaly dvě stejně pojmenované pásky.
+ */
+async function hideDocument(item: PayrollDocument): Promise<void> {
+  if (!isSuperseded(item) || hidingDocumentId.value !== null) return
+  hidingDocumentId.value = item.id
+  try {
+    await payrollApi.hideDocument(item.id)
+    toast.success(t('payroll.documents.superseded.hidden'))
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.superseded.hide_failed')))
+  } finally {
+    hidingDocumentId.value = null
+  }
+}
+
+function isSuperseded(item: PayrollDocument): boolean {
+  // Příznak ze serveru platí i tehdy, když novější verze padla na jinou
+  // stránku seznamu; dopočet z načtených řádků je jen záloha pro starší API.
+  return item.superseded ?? supersededIds.value.has(item.id)
+}
 const focusName = computed(() => {
   if (focusPersonId.value === null) return null
   return focusPersonName.value ?? t('payroll.agendas.focus.unknown_person')
@@ -489,17 +542,114 @@ async function load(): Promise<void> {
   }
 }
 
+/**
+ * Archiv se skládá po částech na pozadí, takže stránka jeho stav polluje
+ * a kreslí průběh — čekat na cron tick s nehybným tlačítkem už nemusíme.
+ */
+const exportJobActive = computed(() =>
+  exportJob.value !== null
+  && ['queued', 'processing', 'retry_wait'].includes(exportJob.value.status),
+)
+// Uvízlý job jde dotlačit ručně: „Pokračovat" u čekajícího, „Spustit znovu"
+// u toho, který skončil chybou.
+const exportJobResumable = computed(() =>
+  exportJob.value !== null
+  && ['queued', 'retry_wait', 'failed'].includes(exportJob.value.status),
+)
+const exportProgressPct = computed(() => {
+  const progress = exportJob.value?.progress
+  if (!progress || progress.total === null || progress.total <= 0) return 0
+  return Math.min(100, Math.round((progress.completed / progress.total) * 100))
+})
+const exportProgressLabel = computed(() => {
+  const progress = exportJob.value?.progress
+  // Dokud plán částí neexistuje, celkový počet NEZNÁME — vymyšlené „z Y" by
+  // se po naplánování skokem změnilo, a to je horší než přiznané čekání.
+  if (!progress || progress.total === null) {
+    return t('payroll.documents.period_export.progress_planning')
+  }
+  return t('payroll.documents.period_export.progress', {
+    done: progress.completed,
+    total: progress.total,
+  })
+})
+
+function clearExportPoll(): void {
+  if (exportPollTimer !== null) clearInterval(exportPollTimer)
+  exportPollTimer = null
+}
+
+function exportPeriodOf(job: PayrollPeriodExportJob): string | number {
+  return job.scope === 'monthly'
+    ? job.period_start.slice(0, 7)
+    : Number(job.period_start.slice(0, 4))
+}
+
 async function downloadPeriodExport(scope: PayrollPeriodExportScope): Promise<void> {
   if (exportingScope.value !== null || !auth.canWrite('payroll.documents')) return
   exportingScope.value = scope
+  exportJob.value = null
+  clearExportPoll()
   try {
-    const exported = await payrollApi.downloadPeriodExport(
+    const job = await payrollApi.startPeriodExport(
       scope,
       scope === 'monthly' ? period.value : year.value,
+    )
+    exportJob.value = job
+    await settlePeriodExport(job)
+  } catch (error) {
+    exportingScope.value = null
+    toast.error(apiErrorMessage(
+      error,
+      t('payroll.documents.period_export.failed'),
+    ))
+  }
+}
+
+async function settlePeriodExport(job: PayrollPeriodExportJob): Promise<void> {
+  if (job.status === 'completed') {
+    clearExportPoll()
+    await finishPeriodExport(job)
+    return
+  }
+  if (job.status === 'failed') {
+    clearExportPoll()
+    exportingScope.value = null
+    toast.error(
+      job.last_error_message ?? t('payroll.documents.period_export.failed'),
+    )
+    return
+  }
+  if (exportPollTimer === null) {
+    exportPollTimer = setInterval(() => void pollPeriodExport(), 2000)
+  }
+}
+
+async function pollPeriodExport(): Promise<void> {
+  const current = exportJob.value
+  if (current === null) {
+    clearExportPoll()
+    return
+  }
+  try {
+    const job = await payrollApi.periodExportJob(current.id)
+    exportJob.value = job
+    await settlePeriodExport(job)
+  } catch {
+    // Výpadek jednoho dotazu není konec exportu — příští tick to zkusí znovu.
+  }
+}
+
+async function finishPeriodExport(job: PayrollPeriodExportJob): Promise<void> {
+  try {
+    const exported = await payrollApi.downloadPeriodExportFile(
+      job,
+      exportPeriodOf(job),
     )
     toast.success(t('payroll.documents.period_export.downloaded', {
       filename: exported.suggested_filename,
     }))
+    await load()
   } catch (error) {
     toast.error(apiErrorMessage(
       error,
@@ -507,6 +657,25 @@ async function downloadPeriodExport(scope: PayrollPeriodExportScope): Promise<vo
     ))
   } finally {
     exportingScope.value = null
+  }
+}
+
+async function rerunPeriodExport(): Promise<void> {
+  const current = exportJob.value
+  if (current === null || rerunningExportJob.value) return
+  rerunningExportJob.value = true
+  try {
+    const job = await payrollApi.runPeriodExportJob(current.id)
+    exportJob.value = job
+    exportingScope.value = job.scope
+    await settlePeriodExport(job)
+  } catch (error) {
+    toast.error(apiErrorMessage(
+      error,
+      t('payroll.documents.period_export.run_failed'),
+    ))
+  } finally {
+    rerunningExportJob.value = false
   }
 }
 
@@ -730,7 +899,7 @@ function secureDeliveryStatusText(item: PayrollDocument): string {
 }
 
 async function sendSecureLink(item: PayrollDocument): Promise<void> {
-  if (sendingSecureLinkDocumentId.value !== null) return
+  if (sendingSecureLinkDocumentId.value !== null || isSuperseded(item)) return
   sendingSecureLinkDocumentId.value = item.id
   try {
     const result = await payrollApi.sendDocumentSecureLink(item.id)
@@ -774,6 +943,7 @@ onMounted(load)
 onBeforeUnmount(() => {
   clearBatchPoll()
   clearAnnualBatchPoll()
+  clearExportPoll()
 })
 </script>
 
@@ -1048,6 +1218,48 @@ onBeforeUnmount(() => {
         </article>
       </div>
 
+      <div
+        v-if="exportJob !== null"
+        data-test="period-export-progress"
+        class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="text-sm font-medium text-neutral-900">
+            {{ t('payroll.documents.period_export.job_status.' + exportJob.status) }}
+          </p>
+          <button
+            v-if="exportJobResumable"
+            type="button"
+            data-test="run-period-export-job"
+            :class="btnOutlineSm()"
+            :disabled="rerunningExportJob || !auth.canWrite('payroll.documents')"
+            @click="rerunPeriodExport()"
+          >
+            {{ t(exportJob.status === 'failed'
+              ? 'payroll.documents.period_export.run_again'
+              : 'payroll.documents.period_export.resume') }}
+          </button>
+        </div>
+        <div
+          v-if="exportJobActive"
+          class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-neutral-200"
+        >
+          <div
+            class="h-full bg-payroll-500 transition-all"
+            :style="{ width: exportProgressPct + '%' }"
+          ></div>
+        </div>
+        <p class="mt-1 text-xs text-neutral-500">
+          {{ exportProgressLabel }}
+        </p>
+        <p
+          v-if="exportJob.status === 'failed' && exportJob.last_error_message"
+          class="mt-1 text-xs text-danger-600"
+        >
+          {{ exportJob.last_error_message }}
+        </p>
+      </div>
+
       <p
         v-if="!auth.canWrite('payroll.documents')"
         class="mt-4 text-sm text-warning-700"
@@ -1289,8 +1501,23 @@ onBeforeUnmount(() => {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="item in visibleItems" :key="item.id">
-                <td v-if="tbl.isVisible('document')" class="px-4 py-3 font-medium text-neutral-900">{{ kindLabel(item) }}</td>
+              <tr
+                v-for="item in visibleItems"
+                :key="item.id"
+                :data-test="isSuperseded(item) ? 'superseded-document-row' : 'document-row'"
+                :class="isSuperseded(item) ? 'bg-neutral-50 text-neutral-400 opacity-60' : ''"
+              >
+                <td v-if="tbl.isVisible('document')" class="px-4 py-3 font-medium text-neutral-900">
+                  <span :class="isSuperseded(item) ? 'text-neutral-500' : ''">{{ kindLabel(item) }}</span>
+                  <span
+                    v-if="isSuperseded(item)"
+                    data-test="superseded-badge"
+                    class="ml-2 inline-block rounded-full bg-neutral-200 px-2 py-0.5 text-[11px] font-medium text-neutral-600"
+                    :title="t('payroll.documents.superseded.hint')"
+                  >
+                    {{ t('payroll.documents.superseded.badge') }}
+                  </span>
+                </td>
                 <td v-if="tbl.isVisible('employee')" class="px-4 py-3 text-neutral-600">{{ item.employee_name || t('payroll.documents.company') }}</td>
                 <td v-if="tbl.isVisible('office')" class="px-4 py-3 text-neutral-600">{{ item.office_name || (item.tax_year ? String(item.tax_year) : t('payroll.documents.company')) }}</td>
                 <td v-if="tbl.isVisible('revision')" class="px-4 py-3 text-neutral-600">{{ item.annual_revision_no ?? item.revision_no ?? '—' }}</td>
@@ -1311,6 +1538,21 @@ onBeforeUnmount(() => {
                       </svg>
                       {{ t('payroll.documents.download') }}
                     </button>
+                    <!-- Nahrazenou verzi jde odklidit ze seznamu; platná zůstává vždy. -->
+                    <button
+                      v-if="isSuperseded(item) && auth.canWrite('payroll.documents')"
+                      type="button"
+                      data-test="hide-document"
+                      class="cursor-pointer rounded-md border border-danger-200 px-1.5 py-1 text-danger-600 hover:bg-danger-50 disabled:cursor-default disabled:opacity-50"
+                      :disabled="hidingDocumentId !== null"
+                      :title="t('payroll.documents.superseded.hide_hint')"
+                      :aria-label="t('payroll.documents.superseded.hide_hint')"
+                      @click="hideDocument(item)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M6 6l12 12M18 6L6 18" stroke-linecap="round" />
+                      </svg>
+                    </button>
                     <template v-if="item.employee_id !== null">
                       <p data-test="secure-delivery-status" class="text-xs text-neutral-500">
                         {{ secureDeliveryStatusText(item) }}
@@ -1320,7 +1562,8 @@ onBeforeUnmount(() => {
                           type="button"
                           data-test="send-secure-link"
                           :class="btnOutlineSm('primary')"
-                          :disabled="sendingSecureLinkDocumentId !== null"
+                          :disabled="sendingSecureLinkDocumentId !== null || isSuperseded(item)"
+                          :title="disabledTitle(isSuperseded(item), t('payroll.documents.superseded.send_blocked'))"
                           @click="sendSecureLink(item)"
                         >
                           <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1350,6 +1593,13 @@ onBeforeUnmount(() => {
                           }}
                         </button>
                       </div>
+                      <p
+                        v-if="isSuperseded(item)"
+                        data-test="superseded-send-note"
+                        :class="[BTN_DISABLED_NOTE, 'text-right']"
+                      >
+                        {{ t('payroll.documents.superseded.send_blocked') }}
+                      </p>
                       <p v-if="liveSecureLink(item.id)" class="max-w-[14rem] text-right text-[11px] text-neutral-400">
                         {{ t('payroll.documents.secure_delivery.link_hidden_hint') }}
                       </p>
@@ -1363,10 +1613,23 @@ onBeforeUnmount(() => {
       </section>
 
       <section data-test="documents-cards" class="grid grid-cols-1 gap-3 md:hidden">
-        <article v-for="item in visibleItems" :key="item.id" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
+        <article
+          v-for="item in visibleItems"
+          :key="item.id"
+          :data-test="isSuperseded(item) ? 'superseded-document-card' : 'document-card'"
+          class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm"
+          :class="isSuperseded(item) ? 'opacity-60' : ''"
+        >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <h2 class="font-semibold text-neutral-900">{{ kindLabel(item) }}</h2>
+              <p
+                v-if="isSuperseded(item)"
+                data-test="superseded-badge"
+                class="mt-1 inline-block rounded-full bg-neutral-200 px-2 py-0.5 text-[11px] font-medium text-neutral-600"
+              >
+                {{ t('payroll.documents.superseded.badge') }}
+              </p>
               <p class="mt-1 truncate text-sm text-neutral-600">{{ item.employee_name || t('payroll.documents.company') }}</p>
             </div>
             <span class="shrink-0 rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-600">
@@ -1412,7 +1675,8 @@ onBeforeUnmount(() => {
                 type="button"
                 data-test="send-secure-link"
                 :class="[btnOutlineSm('primary'), 'flex-1 justify-center']"
-                :disabled="sendingSecureLinkDocumentId !== null"
+                :disabled="sendingSecureLinkDocumentId !== null || isSuperseded(item)"
+                :title="disabledTitle(isSuperseded(item), t('payroll.documents.superseded.send_blocked'))"
                 @click="sendSecureLink(item)"
               >
                 <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1442,6 +1706,13 @@ onBeforeUnmount(() => {
                 }}
               </button>
             </div>
+            <p
+              v-if="isSuperseded(item)"
+              data-test="superseded-send-note"
+              :class="[BTN_DISABLED_NOTE, 'mt-1']"
+            >
+              {{ t('payroll.documents.superseded.send_blocked') }}
+            </p>
             <p v-if="liveSecureLink(item.id)" class="mt-1 text-[11px] text-neutral-400">
               {{ t('payroll.documents.secure_delivery.link_hidden_hint') }}
             </p>

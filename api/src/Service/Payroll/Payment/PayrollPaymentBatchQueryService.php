@@ -112,6 +112,7 @@ final class PayrollPaymentBatchQueryService
      *   created_at:string,
      *   exports:list<array{
      *     id:int,
+     *     export_format:string,
      *     revision_no:int,
      *     file_sha256:string,
      *     size_bytes:int,
@@ -246,12 +247,22 @@ final class PayrollPaymentBatchQueryService
         }
         $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
         $exportStatement = $this->db->pdo()->prepare(
-            'SELECT id, batch_id, export_revision_no, file_sha256,
-                    size_bytes, mime_type, suggested_filename, created_at
-               FROM payroll_payment_exports
-              WHERE supplier_id = ?
-                AND batch_id IN (' . $placeholders . ')
-              ORDER BY batch_id, export_revision_no DESC',
+            'SELECT export.id, export.batch_id, export.export_format,
+                    export.export_revision_no,
+                    export.file_sha256, export.size_bytes, export.mime_type,
+                    export.suggested_filename, export.created_at
+               FROM payroll_payment_exports export
+               -- Skryté revize se nevypisují. Řádek exportu zůstává - je to
+               -- doklad o tom, co se poslalo do banky - ale seznam ukazuje
+               -- jen to, co platí.
+               LEFT JOIN payroll_payment_export_hidden hidden
+                 ON hidden.supplier_id = export.supplier_id
+                AND hidden.export_id = export.id
+              WHERE export.supplier_id = ?
+                AND hidden.export_id IS NULL
+                AND export.batch_id IN (' . $placeholders . ')
+              ORDER BY export.batch_id, export.export_format,
+                       export.export_revision_no DESC',
         );
         $exportStatement->execute([$supplierId, ...$batchIds]);
         foreach ($exportStatement->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -264,6 +275,9 @@ final class PayrollPaymentBatchQueryService
             }
             $batches[$batchId]['exports'][] = [
                 'id' => self::integer($row, 'id'),
+                // Dávka může mít vedle souboru pro banku i doklad příkazu,
+                // takže samotné číslo revize už export neurčuje.
+                'export_format' => self::text($row, 'export_format'),
                 'revision_no' => self::integer(
                     $row,
                     'export_revision_no',

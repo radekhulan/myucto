@@ -383,7 +383,9 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         );
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('nemá účinný ověřený účet');
+        // Hláška musí pojmenovat kód pracoviště, pod kterým se účet hledal —
+        // jinak účetní vidí „účet chybí" nad obrazovkou s ověřeným účtem.
+        $this->expectExceptionMessage('účinný ověřený účet pod kódem pracoviště');
         $this->service()->materialize(
             $this->supplierId,
             $revisionId,

@@ -708,6 +708,21 @@ final class PayrollRunSnapshotBuilder
     }
 
     /**
+     * Ověření obce a státu proti číselníku účinnému pro VYKAZOVANÉ OBDOBÍ.
+     *
+     * Provenience uložená u podmínek vztahu říká, proti čemu se hodnota ověřovala
+     * v den, kdy ji někdo zadal — což je jiná otázka než ta, na kterou odpovídá
+     * měsíční hlášení. Vztah vzniklý dřív, než ČSSZ začala číselníky vydávat,
+     * žádnou provenienci nemá a mít nemůže; kdyby byla podmínkou, nešel by
+     * takový člověk vykázat NIKDY, i když jeho obec v číselníku pro vykazovaný
+     * měsíc bez problému je. Zaměstnavatel s dlouholetým zaměstnancem by tak
+     * hlášení nesestavil vůbec.
+     *
+     * Uloženou provenienci proto bereme jako doklad navíc: když u podmínek je,
+     * musí být načtitelná (poškozený nebo neznámý otisk je chyba evidence).
+     * Když není, rozhoduje jen to, jestli obec a stát platí v číselníku
+     * účinném pro celé vykazované období — a to se ověřuje tak jako tak níže.
+     *
      * @param array<string,mixed> $row
      * @return array<string,string|null>|null
      */
@@ -723,10 +738,16 @@ final class PayrollRunSnapshotBuilder
         $overlayKey = $row['jmhz_external_codebook_overlay_key'];
         $manifestHash = $row['jmhz_external_codebook_manifest_sha256'];
         if (!is_string($code) || !is_string($country) || !is_string($name)
-            || !is_string($overlayKey)
-            || !is_string($manifestHash)
             || $this->jmhzExternalCodebooks === null
-            || !$this->jmhzExternalCodebooks->hasLoadableIdentity($overlayKey, $manifestHash)
+        ) {
+            return null;
+        }
+        if (is_string($overlayKey) !== is_string($manifestHash)) {
+            // Půl proveninence není proveninence.
+            return null;
+        }
+        if (is_string($overlayKey) && is_string($manifestHash)
+            && !$this->jmhzExternalCodebooks->hasLoadableIdentity($overlayKey, $manifestHash)
         ) {
             return null;
         }

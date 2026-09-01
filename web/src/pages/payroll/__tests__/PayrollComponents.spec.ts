@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 
@@ -113,8 +113,16 @@ vi.mock('@/composables/useUserPrefs', async () => {
 import PayrollComponents from '@/pages/payroll/PayrollComponents.vue'
 
 describe('PayrollComponents', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
+    // Stránka se otevírá na aktuálním měsíci, takže bez zafixovaných hodin
+    // testy s konkrétním obdobím přestanou platit prvního dalšího měsíce.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date(2026, 7, 12, 9, 0, 0))
     // Zúžení z adresy si nese jen ten test, který ho zadá — jinak by přeteklo
     // do dalších a ty by měřily něco jiného, než co mají v názvu.
     m.routeQuery = {}
@@ -317,7 +325,9 @@ describe('PayrollComponents', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('payroll.risky_savings.title')
-    expect(m.riskySavings).toHaveBeenCalledWith('2026-08')
+    // Hodiny jsou zafixované na 12. 8. 2026; obrazovka se otevírá na
+    // zpracovávaném měsíci, tedy na červenci.
+    expect(m.riskySavings).toHaveBeenCalledWith('2026-07')
   })
 
   it('uses at most three backend requests while mounting the default inputs tab', async () => {

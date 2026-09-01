@@ -76,8 +76,12 @@ export interface PayrollPayerOption {
   export_formats: Array<'abo' | 'sepa'>
 }
 
+/** Formáty exportu dávky: soubor pro banku (abo/sepa) a doklad příkazu (pdf). */
+export type PayrollPaymentExportFormat = 'abo' | 'sepa' | 'pdf'
+
 export interface PayrollPaymentExport {
   id: number
+  export_format: PayrollPaymentExportFormat
   revision_no: number
   file_sha256: string
   size_bytes: number
@@ -130,7 +134,7 @@ export interface PayrollPaymentBatchResult {
 export interface PayrollPaymentExportResult {
   export_id: number
   batch_id: number
-  export_format: 'abo' | 'sepa'
+  export_format: PayrollPaymentExportFormat
   export_revision_no: number
   source_snapshot_hash: string
   file_sha256: string
@@ -405,10 +409,20 @@ export const payrollPaymentsApi = {
       '/payroll/payments/reconciliation/incoming-refund-reversals',
       payload,
     ).then(response => response.data.event),
-  generateExport: (batchId: number, idempotencyKey: string) =>
+  /**
+   * Formát se posílá až při generování, nedědí se jen z dávky: vedle souboru
+   * pro banku jde z téže dávky vytvořit i doklad příkazu v PDF.
+   */
+  generateExport: (
+    batchId: number,
+    idempotencyKey: string,
+    exportFormat?: PayrollPaymentExportFormat,
+  ) =>
     api.post<PayrollPaymentExportResult>(
       `/payroll/payments/batches/${batchId}/exports`,
-      { idempotency_key: idempotencyKey },
+      exportFormat === undefined
+        ? { idempotency_key: idempotencyKey }
+        : { idempotency_key: idempotencyKey, export_format: exportFormat },
     ).then(response => response.data),
   createDownloadGrant: (exportId: number) =>
     api.post<{
@@ -420,6 +434,17 @@ export const payrollPaymentsApi = {
       `/payroll/payments/exports/${exportId}/download-grants`,
       { ttl_seconds: 120 },
     ).then(response => response.data),
+  /**
+   * Skryje nahrazenou revizi ze seznamu u dávky. Soubor se nemaže - tabulka
+   * exportů je neměnná, protože je to doklad o tom, co šlo do banky.
+   */
+  hideExport: (exportId: number) =>
+    api.delete<{
+      export_id: number
+      batch_id: number
+      export_format: PayrollPaymentExportFormat
+      export_revision_no: number
+    }>(`/payroll/payments/exports/${exportId}`).then(response => response.data),
   downloadExport: (token: string) =>
     api.post<Blob>(
       '/payroll/payments/exports/download',

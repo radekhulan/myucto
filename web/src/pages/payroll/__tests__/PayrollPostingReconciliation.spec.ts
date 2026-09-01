@@ -24,7 +24,8 @@ vi.mock('@/composables/useFormat', () => ({
   formatMoneyMinor: (value: number | null | undefined) => value == null ? '—' : `money:${value}`,
 }))
 vi.mock('@/pages/payroll/payrollComponentsUi', () => ({
-  localPayrollPeriod: () => '2026-08',
+  // Mzdové obrazovky se otevírají na zpracovávaném měsíci, tedy předchozím.
+  payrollWorkingPeriod: () => '2026-08',
 }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({

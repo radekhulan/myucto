@@ -932,6 +932,13 @@ final class Routes
                 [PayrollPaymentAction::class, 'createDownloadGrant'],
             );
             $g->post('/payments/exports/download', [PayrollPaymentAction::class, 'downloadExport']);
+            // Skrytí nahrazené revize ze seznamu. DELETE proto, že se tak
+            // chová z pohledu uživatele; samotný export se ale nemaže -
+            // tabulka je neměnná, viz PayrollPaymentExportRepository::hide().
+            $g->delete(
+                '/payments/exports/{exportId:[0-9]+}',
+                [PayrollPaymentAction::class, 'hideExport'],
+            );
             $g->post(
                 '/revisions/{revisionId:[0-9]+}/payments/liabilities',
                 [PayrollPaymentAction::class, 'materializeLiabilities'],
@@ -1011,6 +1018,13 @@ final class Routes
             );
             $g->get('/documents', [PayrollDocumentAction::class, 'list']);
             $g->get('/documents/annual', [PayrollDocumentAction::class, 'listAnnual']);
+            // Skrytí nahrazené verze ze seznamu. DELETE proto, že se tak chová
+            // z pohledu uživatele; dokument se ale nemaže - tabulka je
+            // neměnná, viz PayrollDocumentRepository::hide().
+            $g->delete(
+                '/documents/{id:[0-9]+}',
+                [PayrollDocumentAction::class, 'hide'],
+            );
             $g->post(
                 '/exports/monthly/{period:[0-9]{4}-[0-9]{2}}',
                 [PayrollPeriodExportAction::class, 'createMonthly'],
@@ -1022,6 +1036,11 @@ final class Routes
             $g->get(
                 '/exports/jobs/{jobId:[0-9]+}',
                 [PayrollPeriodExportAction::class, 'status'],
+            );
+            // Ruční doběhnutí uvízlého archivu — bez něj se čekalo na cron.
+            $g->post(
+                '/exports/jobs/{jobId:[0-9]+}/run',
+                [PayrollPeriodExportAction::class, 'run'],
             );
             $g->post(
                 '/exports/jobs/{jobId:[0-9]+}/download-grants',
@@ -2487,6 +2506,9 @@ final class Routes
         $app->get    ('/api/submissions/outbox',           [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'list']);
         $app->post   ('/api/submissions/outbox',           [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'enqueue']);
         $app->get    ('/api/submissions/outbox/{id:[0-9]+}/attempts', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'attempts']);
+        // Soubor odesílaný tímhle podáním. Ruční cesta datovkou ho po člověku
+        // chce jako přílohu, takže musí jít stáhnout přímo z podání.
+        $app->get    ('/api/submissions/outbox/{id:[0-9]+}/artifact',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'artifact']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/confirm',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'confirm']);
         // Odeslání datovkou v relaci potvrzené Mobilním klíčem. Stav a odeslání
         // je JEDEN endpoint schválně: potvrzení se dá vyzvednout jen jednou.

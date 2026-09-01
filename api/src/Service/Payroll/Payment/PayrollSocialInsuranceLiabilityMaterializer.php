@@ -498,11 +498,18 @@ final class PayrollSocialInsuranceLiabilityMaterializer
             $dueOn,
         );
         if (count($accounts) !== 1) {
-            throw new \DomainException(
-                count($accounts) === 0
-                    ? 'Správa sociálního zabezpečení nemá účinný ověřený účet.'
-                    : 'Správa sociálního zabezpečení má nejednoznačný účet.',
-            );
+            // Účet se hledá pod KÓDEM PRACOVIŠTĚ ČSSZ z nastavení zaměstnavatele,
+            // ne pod libovolným názvem. Bez uvedení kódu hlásila aplikace „účet
+            // chybí" i tehdy, když se účetní dívala na obrazovku s ověřeným účtem
+            // ČSSZ — jen zadaný pod jiným kódem, což z hlášky nešlo poznat.
+            throw new \DomainException(count($accounts) === 0
+                ? "Správa sociálního zabezpečení nemá k {$dueOn} účinný ověřený"
+                    . " účet pod kódem pracoviště {$institutionCode}."
+                    . ' Kód účtu instituce v Nastavení mezd → Účty institucí musí'
+                    . ' souhlasit s kódem správy sociálního zabezpečení'
+                    . ' v Nastavení mezd → Zaměstnavatel a účtárny.'
+                : "Správa sociálního zabezpečení má pod kódem pracoviště"
+                    . " {$institutionCode} k {$dueOn} víc než jeden účinný účet.");
         }
         $account = $accounts[0];
         $this->assertVerifiedAccount($supplierId, $dueOn, $account);

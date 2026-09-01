@@ -48,6 +48,44 @@ export function localPayrollPeriod(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
+/**
+ * Mzdový měsíc, na kterém se právě pracuje — tedy PŘEDCHOZÍ.
+ *
+ * Mzda se zpracovává až po skončení měsíce: v září se dělá srpen, výplata jde
+ * do poloviny září, podání a odvody do 20. září. Otevírat mzdové obrazovky na
+ * dnešním měsíci proto znamenalo pokaždé prázdno a ruční přepnutí o měsíc zpět
+ * — u každého seznamu, každého podání a každého exportu zvlášť. Pár kroků do
+ * měsíce se navíc dá zadat do špatného období, aniž si toho kdokoli všimne.
+ *
+ * Neplatí to všude: kde jde o dnešek (co je právě teď rozpracované, kdy se co
+ * naposledy stalo), zůstává {@link localPayrollPeriod}.
+ */
+export function payrollWorkingPeriod(date = new Date()): string {
+  const previous = new Date(date.getFullYear(), date.getMonth() - 1, 1)
+
+  return localPayrollPeriod(previous)
+}
+
+/**
+ * Období z URL, když je v ní platné; jinak zpracovávaný mzdový měsíc.
+ *
+ * Účetní se na mzdy dívá zpětně — v září zpracovává srpen. Stránka, která
+ * zahodí období, ze kterého na ni uživatel přišel, a otevře se na dnešním
+ * měsíci, ho tiše přepne do jiného období, než ve kterém pracuje; zadané
+ * částky pak sedí na špatný měsíc.
+ */
+export function payrollQueryPeriod(
+  query: Record<string, unknown>,
+  fallback = payrollWorkingPeriod(),
+): string {
+  const raw = query.period
+  const value = Array.isArray(raw) ? raw[0] : raw
+
+  return typeof value === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value)
+    ? value
+    : fallback
+}
+
 export function payrollImportFingerprint(source: PayrollImportFingerprintSource): string {
   return JSON.stringify([
     source.period,

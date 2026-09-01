@@ -223,8 +223,15 @@ final class JmhzScenario1ControlEvaluator
     /**
      * Místa, kde se doslovné znění katalogu vědomě neuplatňuje, protože by
      * neprošlo ani bezvadné podání. Patří do výstupu, ne jen do komentáře:
-     * až se podání zkusí ostře, tohle je seznam, který se má ověřit proti
-     * protokolu ČSSZ.
+     * účetní má vidět, kde se od textu odchylujeme.
+     *
+     * Ověřeno proti skutečnému protokolu ČSSZ. Referenční hlášení za 07/2026
+     * (VS 4442070407, podáno 4. 8. 2026) má základ 4 500 Kč a pojistné
+     * zaměstnance 320 Kč, tedy 7,111 % — doslovnou dolní mez 7,171 %
+     * (= 322,69 Kč) by neprošlo. Počet dnů 31 proti intervalu 1.–31. 7. by
+     * neprošel ani doslovné znění kontroly 134 (31 <= 30). ČSSZ přesto vrátila
+     * „Hlášení je zpracováno a je úplné" (stav 1). Doslovný text katalogu tedy
+     * skutečně odmítá platná podání a vynucovat ho by bylo chybné.
      *
      * @return array<int, string>
      */
@@ -1100,8 +1107,11 @@ final class JmhzScenario1ControlEvaluator
      * Text kontroly navíc žádá dolní mez 7,171 % z úhrnu základů. Ta se tady
      * NEVYNUCUJE: na doloženém minimálním případě (základ 1 000 Kč, pojistné
      * 71 Kč) by ji neprošlo ani zcela správné podání, protože 7,171 % z 1 000
-     * je 71,71 Kč. Uplatnit ji by znamenalo lokálně blokovat platná podání;
-     * o skutečné mezi rozhodne protokol ČSSZ. Ověřit proti PDF katalogu.
+     * je 71,71 Kč. Uplatnit ji by znamenalo lokálně blokovat platná podání.
+     *
+     * Potvrzeno protokolem ČSSZ: reálně přijaté hlášení za 07/2026 má poměr
+     * 320 / 4 500 = 7,111 %, tedy pod doslovnou mezí, a přesto je „zpracováno
+     * a úplné". Mez se proto nevynucuje ani do budoucna.
      *
      * @return list<JmhzControlVerdict>
      */

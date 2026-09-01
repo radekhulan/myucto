@@ -770,6 +770,48 @@ final readonly class SubmissionOutboxService
         return $this->outbox->listForSupplier($supplierId, $environment, $limit);
     }
 
+    /**
+     * Soubor, který se tímhle podáním odesílá — přesně ten a žádný jiný.
+     *
+     * U ručního odeslání datovou schránkou si ho člověk musí sám přiložit do
+     * zprávy. Nechat ho hledat v dokumentech znamená riziko, že přiloží jiný
+     * (starší běh, jiný měsíc) a spisová značka pak tvrdí něco o souboru,
+     * o kterém nic neví. Čte se stejnou cestou jako při odeslání.
+     *
+     * Vrací i uloženou kontrolní sumu: volající ověří, že se artefakt od
+     * zařazení do fronty nezměnil, a nenabídne ke stažení něco jiného, než
+     * co je zmrazené v podání.
+     *
+     * @return array{filename:string,mime:string,bytes:string,sha256:string,claimed_sha256:string}
+     */
+    public function artifactFor(int $supplierId, int $id): array
+    {
+        $row = $this->outbox->find($supplierId, $id);
+        if ($row === null) {
+            throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
+        }
+        $artifact = $this->artifacts->resolve(
+            $supplierId,
+            (string) $row['artifact_kind'],
+            (int) $row['artifact_id'],
+        );
+        if ($artifact === null) {
+            throw new SubmissionChannelException(
+                'artifact_missing',
+                'Soubor podání se nepodařilo načíst. Vygenerujte podklad znovu.',
+                409,
+            );
+        }
+
+        return [
+            'filename' => (string) $row['artifact_filename'],
+            'mime' => $artifact['mime'],
+            'bytes' => $artifact['bytes'],
+            'sha256' => hash('sha256', $artifact['bytes']),
+            'claimed_sha256' => (string) $row['artifact_sha256'],
+        ];
+    }
+
     /** @return list<array<string,mixed>> */
     public function attemptsFor(int $supplierId, int $id): array
     {

@@ -3824,6 +3824,8 @@ export interface PayrollDocument {
   document_kind: PayrollDocumentKind
   document_revision_no?: number
   supersedes_document_id?: number | null
+  /** Nahradila ho novější verze. Počítá server, aby to platilo i přes stránkování. */
+  superseded?: boolean
   file_sha256: string
   size_bytes: number
   mime_type: 'application/pdf' | 'application/zip'
@@ -3920,6 +3922,26 @@ export type PayrollPeriodExportJobStatus =
   | 'failed'
   | 'completed'
 
+export type PayrollPeriodExportPartKind =
+  | 'document'
+  | 'submission_artifact'
+  | 'submission_protocol'
+  | 'payment_export'
+  | 'archive'
+
+/**
+ * Průběh podle částí jobu. Části vznikají až prvním zpracováním, takže
+ * `planned: false` / `total: null` znamená „plán ještě neexistuje" — ne nulu.
+ */
+export interface PayrollPeriodExportJobProgress {
+  planned: boolean
+  total: number | null
+  completed: number
+  failed: number
+  pending: number
+  current_part_kind: PayrollPeriodExportPartKind | null
+}
+
 export interface PayrollPeriodExportJob {
   id: number
   scope: PayrollPeriodExportScope
@@ -3934,6 +3956,7 @@ export interface PayrollPeriodExportJob {
   created_at: string
   started_at: string | null
   completed_at: string | null
+  progress?: PayrollPeriodExportJobProgress
 }
 
 export type PayrollYearCloseStatus = 'open' | 'closed'
@@ -5308,6 +5331,67 @@ async function downloadDocumentById(
   }
 }
 
+function startPeriodExport(
+  scope: PayrollPeriodExportScope,
+  period: string | number,
+): Promise<PayrollPeriodExportJob> {
+  return api.post<PayrollPeriodExportJob>(
+    `/payroll/exports/${scope}/${period}`,
+    {},
+  ).then(response => response.data)
+}
+
+function periodExportJob(jobId: number): Promise<PayrollPeriodExportJob> {
+  return api.get<PayrollPeriodExportJob>(
+    `/payroll/exports/jobs/${jobId}`,
+  ).then(response => response.data)
+}
+
+async function downloadPeriodExportFile(
+  job: PayrollPeriodExportJob,
+  period: string | number,
+): Promise<PayrollPeriodExport> {
+  if (job.status !== 'completed' || job.export_id === null) {
+    throw new Error('Export mezd se nedokončil v očekávaném čase.')
+  }
+  const filename = `mzdy-${String(period)}.zip`
+  const grant = await api.post<{
+    grant_id: number
+    export_id: number
+    token: string
+    expires_at: string
+  }>(
+    `/payroll/exports/jobs/${job.id}/download-grants`,
+    { ttl_seconds: 120 },
+  ).then(response => response.data)
+  const response = await api.post<Blob>(
+    '/payroll/exports/download',
+    { token: grant.token },
+    { responseType: 'blob' },
+  )
+  const objectUrl = URL.createObjectURL(response.data)
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+
+  return {
+    id: job.export_id,
+    scope: job.scope,
+    period_start: job.period_start,
+    period_end: job.period_end,
+    file_sha256: '',
+    size_bytes: 0,
+    suggested_filename: filename,
+  }
+}
+
 export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
@@ -6211,6 +6295,16 @@ export const payrollApi = {
         ...(employeeId ? { employee_id: employeeId } : {}),
       },
     }).then(response => response.data),
+  /**
+   * Skryje nahrazenou verzi dokumentu ze seznamu. Soubor se nemaže - tabulka
+   * dokumentů je neměnná, protože je to doklad o tom, co zaměstnanec dostal.
+   */
+  hideDocument: (documentId: number) =>
+    api.delete<{
+      document_id: number
+      document_kind: string
+      document_revision_no: number
+    }>(`/payroll/documents/${documentId}`).then(response => response.data),
   listAnnualDocuments: (year: number, page?: PayrollPageParams, employeeId?: number) =>
     api.get<PayrollAnnualDocumentList>('/payroll/documents/annual', {
       params: {
@@ -6326,61 +6420,33 @@ export const payrollApi = {
       {},
       { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
+  startPeriodExport,
+  periodExportJob,
+  downloadPeriodExportFile,
+  /** Znovu odpálí worker na pozadí pro job, který uvízl ve frontě. */
+  runPeriodExportJob: (jobId: number) =>
+    api.post<PayrollPeriodExportJob>(
+      `/payroll/exports/jobs/${jobId}/run`,
+      {},
+    ).then(response => response.data),
+  /**
+   * Složená cesta „zařaď a stáhni" pro volání bez vlastního pollingu.
+   * Stránka mzdových dokumentů si polluje sama, aby uměla ukázat průběh.
+   */
   downloadPeriodExport: async (
     scope: PayrollPeriodExportScope,
     period: string | number,
   ): Promise<PayrollPeriodExport> => {
-    let job = await api.post<PayrollPeriodExportJob>(
-      `/payroll/exports/${scope}/${period}`,
-      {},
-    ).then(response => response.data)
+    let job = await startPeriodExport(scope, period)
     for (let poll = 0; job.status !== 'completed' && poll < 120; poll += 1) {
       if (job.status === 'failed') {
         throw new Error(job.last_error_message ?? 'Export mezd selhal.')
       }
       await new Promise<void>((resolve) => window.setTimeout(resolve, 1000))
-      job = await api.get<PayrollPeriodExportJob>(
-        `/payroll/exports/jobs/${job.id}`,
-      ).then(response => response.data)
-    }
-    if (job.status !== 'completed' || job.export_id === null) {
-      throw new Error('Export mezd se nedokončil v očekávaném čase.')
-    }
-    const grant = await api.post<{
-      grant_id: number
-      export_id: number
-      token: string
-      expires_at: string
-    }>(
-      `/payroll/exports/jobs/${job.id}/download-grants`,
-      { ttl_seconds: 120 },
-    ).then(response => response.data)
-    const response = await api.post<Blob>(
-      '/payroll/exports/download',
-      { token: grant.token },
-      { responseType: 'blob' },
-    )
-    const objectUrl = URL.createObjectURL(response.data)
-    try {
-      const anchor = document.createElement('a')
-      anchor.href = objectUrl
-      anchor.download = `mzdy-${scope === 'monthly' ? String(period) : String(period)}.zip`
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
-    } finally {
-      URL.revokeObjectURL(objectUrl)
+      job = await periodExportJob(job.id)
     }
 
-    return {
-      id: job.export_id,
-      scope: job.scope,
-      period_start: job.period_start,
-      period_end: job.period_end,
-      file_sha256: '',
-      size_bytes: 0,
-      suggested_filename: `mzdy-${scope === 'monthly' ? String(period) : String(period)}.zip`,
-    }
+    return downloadPeriodExportFile(job, period)
   },
   employmentExitDocuments: (employmentId: number) =>
     api.get<PayrollEmploymentExitDocumentList>(

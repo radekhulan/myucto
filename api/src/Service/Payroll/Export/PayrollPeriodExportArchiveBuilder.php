@@ -117,6 +117,12 @@ final class PayrollPeriodExportArchiveBuilder
             'Spravnost polozek overte podle manifest.json a CHECKSUMS.txt.',
             'Balicek neobsahuje prihlasovaci udaje, soukrome klice, certifikaty ani libovolne rucni prilohy podani.',
             '',
+            'SLOZKY',
+            '  documents/            platne vyplatni pasky a dokumenty obdobi',
+            '  documents/nahrazene/  starsi verze, ktere uz nahradila nova - nerozesilat',
+            '  submissions/          artefakty podani (JMHZ, pojistovny) a protokoly uradu',
+            '  payments/             platebni prikazy: soubor pro banku i tisteny doklad',
+            '',
         ]);
         $archiveEntries['manifest.json'] = $manifestJson;
         $archiveEntries['CHECKSUMS.txt'] = $checksums;

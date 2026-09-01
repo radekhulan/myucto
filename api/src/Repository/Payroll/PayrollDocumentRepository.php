@@ -151,6 +151,55 @@ final class PayrollDocumentRepository
      *
      * @return array{items:list<array<string,mixed>>,total:int}
      */
+    /**
+     * Skryje nahrazenou verzi dokumentu ze seznamu.
+     *
+     * Nemaže soubor: `payroll_generated_documents` je neměnná tabulka -
+     * dokument je doklad o tom, co zaměstnanec dostal. Skrýt jde proto JEN
+     * verzi, kterou už nahradila novější; poslední verze je ta platná
+     * a zmizet nesmí.
+     *
+     * @return array{document_id:int,document_kind:string,document_revision_no:int}
+     */
+    public function hide(int $supplierId, int $documentId, ?int $userId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT document.id, document.document_kind,
+                    document.document_revision_no,
+                    EXISTS (
+                        SELECT 1 FROM payroll_generated_documents newer
+                         WHERE newer.supplier_id = document.supplier_id
+                           AND newer.supersedes_document_id = document.id
+                    ) AS superseded
+               FROM payroll_generated_documents document
+              WHERE document.supplier_id = ? AND document.id = ?',
+        );
+        $statement->execute([$supplierId, $documentId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new \DomainException('Dokument nebyl nalezen.');
+        }
+        if (!(bool) $row['superseded']) {
+            throw new \DomainException(
+                'Skrýt jde jen verzi, kterou nahradila novější. '
+                . 'Tahle je poslední platná.',
+            );
+        }
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_generated_document_hidden
+                (supplier_id, document_id, hidden_by)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE document_id = document_id',
+        );
+        $insert->execute([$supplierId, $documentId, $userId]);
+
+        return [
+            'document_id' => (int) $row['id'],
+            'document_kind' => (string) $row['document_kind'],
+            'document_revision_no' => (int) $row['document_revision_no'],
+        ];
+    }
+
     public function listForPeriod(
         int $supplierId,
         string $periodStart,
@@ -179,7 +228,14 @@ final class PayrollDocumentRepository
           LEFT JOIN payroll_offices office
                  ON office.supplier_id = run.supplier_id
                 AND office.id = run.office_id
+          -- Skryté (nahrazené) verze se nevypisují. Řádek dokumentu zůstává,
+          -- protože je to doklad o tom, co zaměstnanec dostal; seznam ale
+          -- ukazuje jen to, co platí.
+          LEFT JOIN payroll_generated_document_hidden hidden
+                 ON hidden.supplier_id = document.supplier_id
+                AND hidden.document_id = document.id
               WHERE document.supplier_id = ?
+                AND hidden.document_id IS NULL
                 AND run.period_start = ?'
             . ($employeeId === null ? '' : ' AND document.employee_id = ?');
 
@@ -198,7 +254,16 @@ final class PayrollDocumentRepository
                     revision.status AS revision_status,
                     employee.full_name AS employee_name,
                     run.office_id,
-                    office.name AS office_name'
+                    office.name AS office_name,
+                    -- Nahrazeny dokument pozna server, ne obrazovka: novejsi
+                    -- verze muze pri strankovani padnout na jinou stranku a
+                    -- odznak by pak chybel prave tam, kde na nem zalezi -
+                    -- u pasky, kterou uz zamestnanci posilat nemame.
+                    EXISTS (
+                        SELECT 1 FROM payroll_generated_documents newer
+                         WHERE newer.supplier_id = document.supplier_id
+                           AND newer.supersedes_document_id = document.id
+                    ) AS superseded'
             . $from
             . ' ORDER BY document.document_kind = "monthly_bundle" DESC,
                        employee.full_name,
@@ -839,6 +904,9 @@ final class PayrollDocumentRepository
      */
     private static function cast(array $row): array
     {
+        if (array_key_exists('superseded', $row)) {
+            $row['superseded'] = (bool) $row['superseded'];
+        }
         foreach ([
             'id', 'supplier_id', 'document_revision_no',
             'size_bytes', 'revision_no', 'annual_revision_no', 'tax_year',

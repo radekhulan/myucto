@@ -44,7 +44,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { formatDate } from '@/composables/useFormat'
-import { localPayrollPeriod } from './payrollComponentsUi'
+import { payrollWorkingPeriod } from './payrollComponentsUi'
 import { appIsoDate } from '@/utils/date'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
 
@@ -79,7 +79,7 @@ const tbl = useTablePrefs('payroll-health-notifications', COLUMNS)
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 
-const period = ref(localPayrollPeriod())
+const period = ref(payrollWorkingPeriod())
 const filterInsurer = ref<string | null>(null)
 const filterKind = ref<HealthDutyKind | null>(null)
 const filterReported = ref<'all' | 'employer' | 'insured'>('all')

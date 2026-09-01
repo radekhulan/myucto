@@ -349,6 +349,109 @@ final class PayrollPaymentExportRepository
      *   suggested_filename:string
      * }|null
      */
+    /**
+     * Mzdové období, kterého se dávka týká.
+     *
+     * Dávka sama období nenese - má jen datum splatnosti, a to bývá až
+     * v následujícím měsíci (příkaz za srpen se platí v září). Účetní ale
+     * na dokladu potřebuje vidět, ZA CO se platí, ne kdy. Období se proto
+     * dotáhne přes závazky, ze kterých dávka vznikla.
+     *
+     * Když dávka sahá do víc měsíců (doplatky, opravy), vrátí se krajní
+     * hodnoty a doklad je vypíše jako rozsah - slučovat je do jednoho
+     * měsíce by tvrdilo něco, co není pravda.
+     *
+     * @return array{first:string,last:string}|null
+     */
+    public function periodRangeForBatch(int $supplierId, int $batchId): ?array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT MIN(run.period_start) AS first_period,
+                    MAX(run.period_start) AS last_period
+               FROM payroll_payment_items item
+               JOIN payroll_payment_allocations allocation
+                 ON allocation.supplier_id = item.supplier_id
+                AND allocation.item_id = item.id
+               JOIN payroll_payment_liabilities liability
+                 ON liability.supplier_id = allocation.supplier_id
+                AND liability.id = allocation.liability_id
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE item.supplier_id = ? AND item.batch_id = ?',
+        );
+        $statement->execute([$supplierId, $batchId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)
+            || !is_string($row['first_period'] ?? null)
+            || !is_string($row['last_period'] ?? null)
+        ) {
+            return null;
+        }
+
+        return [
+            'first' => $row['first_period'],
+            'last' => $row['last_period'],
+        ];
+    }
+
+    /**
+     * Skryje starou revizi exportu ze seznamu.
+     *
+     * Řádek exportu se nemaže a mazat nepůjde - tabulka je záměrně neměnná
+     * (triggery zakazují UPDATE i DELETE), protože je to doklad o tom, co se
+     * skutečně poslalo do banky. Skrytí se proto vede vedle, ve vlastní
+     * tabulce; seznam pak ukazuje jen platnou revizi.
+     *
+     * Skrýt jde JEN revizi, kterou už nahradila novější. Poslední revize je
+     * ta platná a ta zmizet nesmí - jinak by u dávky nezbylo nic a účetní by
+     * si myslela, že export neexistuje.
+     *
+     * @return array{export_id:int,batch_id:int,export_format:string,export_revision_no:int}
+     */
+    public function hide(int $supplierId, int $exportId, ?int $userId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT export.id, export.batch_id, export.export_format,
+                    export.export_revision_no,
+                    EXISTS (
+                        SELECT 1 FROM payroll_payment_exports newer
+                         WHERE newer.supplier_id = export.supplier_id
+                           AND newer.supersedes_export_id = export.id
+                    ) AS superseded
+               FROM payroll_payment_exports export
+              WHERE export.supplier_id = ? AND export.id = ?',
+        );
+        $statement->execute([$supplierId, $exportId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new \DomainException('Platební export nebyl nalezen.');
+        }
+        if (!(bool) $row['superseded']) {
+            throw new \DomainException(
+                'Skrýt jde jen revizi, kterou nahradila novější. '
+                . 'Tahle je poslední platná.',
+            );
+        }
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payment_export_hidden
+                (supplier_id, export_id, hidden_by)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE export_id = export_id',
+        );
+        $insert->execute([$supplierId, $exportId, $userId]);
+
+        return [
+            'export_id' => (int) $row['id'],
+            'batch_id' => (int) $row['batch_id'],
+            'export_format' => (string) $row['export_format'],
+            'export_revision_no' => (int) $row['export_revision_no'],
+        ];
+    }
+
     public function lockById(int $supplierId, int $exportId): ?array
     {
         $statement = $this->db->pdo()->prepare(

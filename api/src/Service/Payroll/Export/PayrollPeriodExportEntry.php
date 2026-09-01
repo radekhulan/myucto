@@ -10,6 +10,7 @@ final readonly class PayrollPeriodExportEntry
         'payroll_document',
         'submission_artifact',
         'submission_protocol',
+        'payroll_payment_export',
     ];
 
     public function __construct(
@@ -47,6 +48,7 @@ final readonly class PayrollPeriodExportEntry
             'payroll_document' => 'documents/',
             'submission_artifact' => 'submissions/',
             'submission_protocol' => 'protocols/',
+            'payroll_payment_export' => 'payments/',
         };
         if (!str_starts_with($name, $prefix)) {
             throw new \InvalidArgumentException(

@@ -79,7 +79,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 import PayrollHealthNotificationPanel
   from '@/pages/payroll/PayrollHealthNotificationPanel.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
+import { payrollWorkingPeriod } from '@/pages/payroll/payrollComponentsUi'
 
 /**
  * Vybere hodnotu v `SearchableSelect` přes jeho model. Rozbalovací seznam se
@@ -363,7 +363,7 @@ describe('PayrollHealthNotificationPanel', () => {
     await flushPromises()
 
     const lastCall = m.duties.mock.calls.at(-1)
-    expect(lastCall?.[0]).toBe(localPayrollPeriod())
+    expect(lastCall?.[0]).toBe(payrollWorkingPeriod())
     expect(lastCall?.[1]).toMatchObject({
       undocumented_code_only: true,
       limit: 50,
@@ -548,7 +548,7 @@ describe('PayrollHealthNotificationPanel', () => {
     await flushPromises()
 
     expect(m.registerPeriod).toHaveBeenCalledTimes(1)
-    expect(m.registerPeriod).toHaveBeenCalledWith(localPayrollPeriod())
+    expect(m.registerPeriod).toHaveBeenCalledWith(payrollWorkingPeriod())
     const result = wrapper.get('[data-test="health-hoz-sync-result"]')
     expect(result.text()).toContain('payroll.health_notifications.hoz_sync.done')
     const row = wrapper.get('[data-test="health-notification-row"]')
@@ -922,7 +922,7 @@ describe('PayrollHealthNotificationPanel', () => {
       status: 'draft',
       row_version: 2,
       insurer_code: '111',
-      period: localPayrollPeriod(),
+      period: payrollWorkingPeriod(),
       agenda_code: 'HOZ_2026',
       artifact_sha256: 'a1'.repeat(32),
       changes_count: 3,
@@ -947,7 +947,7 @@ describe('PayrollHealthNotificationPanel', () => {
     await wrapper.get('[data-test="health-prepare-bulk-action"]').trigger('click')
     await flushPromises()
 
-    expect(m.prepareBulk).toHaveBeenCalledWith(localPayrollPeriod(), '111')
+    expect(m.prepareBulk).toHaveBeenCalledWith(payrollWorkingPeriod(), '111')
 
     const result = wrapper.find('[data-test="health-prepare-bulk-result"]')
     expect(result.exists()).toBe(true)
@@ -957,7 +957,7 @@ describe('PayrollHealthNotificationPanel', () => {
     await download.trigger('click')
     await flushPromises()
 
-    expect(m.downloadBulk).toHaveBeenCalledWith(localPayrollPeriod(), '111')
+    expect(m.downloadBulk).toHaveBeenCalledWith(payrollWorkingPeriod(), '111')
   })
 
   it('u platného HOZ ohlásí platnost a počet vět', async () => {
@@ -969,7 +969,7 @@ describe('PayrollHealthNotificationPanel', () => {
       status: 'ready',
       row_version: 3,
       insurer_code: '205',
-      period: localPayrollPeriod(),
+      period: payrollWorkingPeriod(),
       agenda_code: 'HOZ_2026',
       artifact_sha256: 'b2'.repeat(32),
       changes_count: 5,
@@ -1012,7 +1012,7 @@ describe('PayrollHealthNotificationPanel', () => {
       status: 'ready',
       row_version: 3,
       insurer_code: '205',
-      period: localPayrollPeriod(),
+      period: payrollWorkingPeriod(),
       agenda_code: 'HOZ_2026',
       artifact_sha256: 'b2'.repeat(32),
       pdf_artifact_sha256: 'c3'.repeat(32),
