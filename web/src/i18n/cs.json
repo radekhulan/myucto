@@ -1746,7 +1746,26 @@
       },
       "load_failed_hint": "Mzdové běhy se nenačetly, takže nevíme, jestli za období nějaký existuje. Zkuste to prosím znovu.",
       "create_blocked_period": "Vyberte období, za které se má běh spočítat.",
-      "create_blocked_payment_date": "Doplňte datum výplaty — určuje splatnost odvodů i termíny podání."
+      "create_blocked_payment_date": "Doplňte datum výplaty — určuje splatnost odvodů i termíny podání.",
+      "preparation": {
+        "title": "Příprava vstupů za {period}",
+        "description_missing": "Než založíte běh, zkontrolujte, že je za tenhle měsíc zapsané všechno, z čeho se mzdy počítají.",
+        "description_draft": "Běh je zatím koncept, takže vstupy jde ještě měnit. Doplňte, co za tenhle měsíc chybí.",
+        "freeze_warning": "„Uzamknout vstupy“ zmrazí snímek vstupů. Co zapíšete potom, se do výpočtu ani do hlášení nedostane, dokud běh znovu neotevřete a nezaložíte novou revizi.",
+        "checklist_title": "Co se za tenhle měsíc odvede a odešle",
+        "quick_inputs": "Měsíční zadání mezd",
+        "quick_inputs_hint": "Hrubé mzdy, odměny a jednorázové položky za tenhle měsíc.",
+        "time": "Docházka",
+        "time_hint": "Odpracované hodiny, přesčasy a příplatky.",
+        "absences": "Nepřítomnosti",
+        "absences_hint": "Dovolená, nemoc a ostatní překážky v práci.",
+        "components": "Mzdové složky",
+        "components_hint": "Opakující se složky a benefity, které platí i mimo tenhle měsíc.",
+        "people": "Lidé",
+        "people_hint": "Nástupy, výstupy, prohlášení k dani a osobní evidence.",
+        "checklist_hide": "Skrýt přehled odvodů",
+        "checklist_show": "Zobrazit přehled odvodů"
+      }
     },
     "quick_inputs": {
       "title": "Rychlý měsíční vstup mezd",

@@ -908,4 +908,64 @@ describe('PayrollRuns', () => {
     expect(m.runs).toHaveBeenCalledWith(expect.any(String), { limit: 12, offset: 0 })
     expect(wrapper.find('[data-testid="payroll-runs-pagination"]').exists()).toBe(true)
   })
+  /*
+   * „Uzamknout vstupy" bylo primární tlačítko obrazovky, ale nic neříkalo, co
+   * se má před zámkem vyplnit ani kde. Zámek přitom zmrazí snímek vstupů a co
+   * se zapíše potom, se do výpočtu nedostane bez znovuotevření běhu.
+   */
+  it('nabídne přípravu vstupů s odkazy na zvolené období, dokud jde vstupy měnit', async () => {
+    m.runs.mockResolvedValue([run({ status: 'draft' })])
+
+    const wrapper = mount(PayrollRuns, {
+      global: {
+        stubs: {
+          RouterLink: {
+            props: ['to'],
+            template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    const prep = wrapper.get('[data-test="run-preparation"]')
+    expect(prep.text()).toContain('payroll.runs.preparation.description_draft')
+    expect(wrapper.get('[data-test="run-preparation-freeze"]').text())
+      .toBe('payroll.runs.preparation.freeze_warning')
+
+    // Odkaz, který zahodí období, otevře cizí měsíc — a zápis pak sedí jinam.
+    for (const target of ['prepare-quick-inputs', 'prepare-time', 'prepare-absences']) {
+      const to = JSON.parse(wrapper.get(`[data-test="${target}"]`).attributes('data-to') ?? '{}')
+      expect(to.query?.period).toBe('2026-08')
+    }
+
+    wrapper.unmount()
+  })
+
+  it('bez běhu za období vyzve k doplnění vstupů ještě před založením', async () => {
+    m.runs.mockResolvedValue([])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="run-preparation"]').text())
+      .toContain('payroll.runs.preparation.description_missing')
+
+    wrapper.unmount()
+  })
+
+  /*
+   * Po zamknutí vstupů by odkazy na pořizování lhaly: zapsat už jde, ale do
+   * běhu se to nedostane.
+   */
+  it('po zamknutí vstupů přípravu schová', async () => {
+    m.runs.mockResolvedValue([run({ status: 'inputs_locked' })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="run-preparation"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
 })

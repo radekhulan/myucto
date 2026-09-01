@@ -23,6 +23,13 @@ import { payrollWorkingPeriod } from './payrollComponentsUi'
  */
 const props = defineProps<{
   environment: PayrollRegzelEnvironment
+  /**
+   * Období řízené zvenčí. Když se předá, panel je VLOŽENÝ do cizí obrazovky
+   * (příprava mzdového běhu) a nesmí mít vlastní volbu měsíce ani prostředí —
+   * dvě políčka pro tentýž měsíc na jedné stránce jsou past: účetní přepne
+   * jedno, druhé zůstane, a čte pak dvě různá období vedle sebe.
+   */
+  period?: string
 }>()
 const emit = defineEmits<{
   'update:environment': [value: PayrollRegzelEnvironment]
@@ -34,7 +41,12 @@ const environmentModel = computed({
   get: () => props.environment,
   set: (value: PayrollRegzelEnvironment) => emit('update:environment', value),
 })
-const period = ref(payrollWorkingPeriod())
+const ownPeriod = ref(payrollWorkingPeriod())
+const embedded = computed(() => props.period !== undefined)
+const period = computed({
+  get: () => props.period ?? ownPeriod.value,
+  set: (value: string) => { ownPeriod.value = value },
+})
 const loading = ref(true)
 const error = ref('')
 const response = ref<PayrollMonthlyChecklistResponse | null>(null)
@@ -143,7 +155,7 @@ onMounted(load)
 
 <template>
   <section class="space-y-4" data-test="monthly-checklist-panel">
-    <div class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
+    <div v-if="!embedded" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="max-w-3xl">
           <h2 class="text-lg font-semibold text-neutral-900">

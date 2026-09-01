@@ -27,6 +27,8 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
+import PayrollMonthlyChecklistPanel from '@/pages/payroll/PayrollMonthlyChecklistPanel.vue'
+import type { PayrollRegzelEnvironment } from '@/api/payroll'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -76,6 +78,32 @@ const overrideReason = ref('')
 const overrideError = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
+const checklistEnvironment = ref<PayrollRegzelEnvironment>('production')
+const preparationOpen = ref(true)
+
+/**
+ * Běh zvoleného období, pokud existuje. Seznam je stránkovaný přes všechna
+ * období, takže se hledá podle měsíce, ne podle pozice.
+ */
+const periodRun = computed(
+  () => runs.value.find(run => run.period_start.slice(0, 7) === period.value) ?? null,
+)
+
+/**
+ * Příprava vstupů svítí, jen dokud jsou vstupy měnitelné — tedy když za období
+ * ještě není běh, nebo je v konceptu.
+ *
+ * Why: „Uzamknout vstupy" bylo na téhle obrazovce primární tlačítko, ale nic
+ * neříkalo, CO se má před zamknutím vyplnit ani kde. Zámek přitom zmrazí
+ * snímek vstupů; co se zapíše potom, se do výpočtu ani do hlášení nedostane
+ * bez znovuotevření běhu. Rozcestník i přehled odvodů proto patří sem, před
+ * zámek, ne až na mzdovou nástěnku.
+ *
+ * Po zamknutí blok mizí: odkazy na pořizování by v tu chvíli lhaly.
+ */
+const showPreparation = computed(
+  () => periodRun.value === null || periodRun.value.status === 'draft',
+)
 /*
  * Schválení výjimky je věcně část schválení mzdy („vím o vadě a přesto se
  * vyplácí"), proto stejné právo jako u příkazu `approve` — server to vynucuje
@@ -738,6 +766,110 @@ onMounted(load)
         </div>
       </div>
     </header>
+
+    <!--
+      Příprava vstupů. Stojí NAD seznamem běhů schválně: je to práce, která
+      musí být hotová dřív, než se zamkne, a účetní ji nemá hledat v menu.
+    -->
+    <section
+      v-if="!loading && !loadFailed && showPreparation"
+      class="rounded-xl border border-payroll-500/30 bg-payroll-50/40 p-4 shadow-sm sm:p-5"
+      data-test="run-preparation"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="max-w-3xl">
+          <h2 class="text-lg font-semibold text-neutral-900">
+            {{ t('payroll.runs.preparation.title', { period: formatPeriod(period) }) }}
+          </h2>
+          <p class="mt-1 text-sm text-neutral-700">
+            {{ periodRun
+              ? t('payroll.runs.preparation.description_draft')
+              : t('payroll.runs.preparation.description_missing') }}
+          </p>
+        </div>
+        <button
+          type="button"
+          :class="btnOutlineSm('neutral')"
+          data-test="run-preparation-toggle"
+          @click="preparationOpen = !preparationOpen"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.cycle" />
+          </svg>
+          {{ preparationOpen ? t('payroll.runs.preparation.checklist_hide') : t('payroll.runs.preparation.checklist_show') }}
+        </button>
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <RouterLink
+          :to="{ name: 'payroll-quick-inputs', query: { period } }"
+          class="group rounded-lg border border-payroll-500/40 bg-surface p-4 transition hover:border-payroll-500 hover:shadow-sm"
+          data-test="prepare-quick-inputs"
+        >
+          <svg class="h-5 w-5 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
+          <h3 class="mt-3 font-semibold text-neutral-900">{{ t('payroll.runs.preparation.quick_inputs') }}</h3>
+          <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.runs.preparation.quick_inputs_hint') }}</p>
+        </RouterLink>
+        <RouterLink
+          :to="{ name: 'payroll-time', query: { period } }"
+          class="group rounded-lg border border-neutral-200 bg-surface p-4 transition hover:border-payroll-500/60 hover:shadow-sm"
+          data-test="prepare-time"
+        >
+          <svg class="h-5 w-5 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
+          <h3 class="mt-3 font-semibold text-neutral-900">{{ t('payroll.runs.preparation.time') }}</h3>
+          <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.runs.preparation.time_hint') }}</p>
+        </RouterLink>
+        <RouterLink
+          :to="{ name: 'payroll-absences', query: { period } }"
+          class="group rounded-lg border border-neutral-200 bg-surface p-4 transition hover:border-payroll-500/60 hover:shadow-sm"
+          data-test="prepare-absences"
+        >
+          <svg class="h-5 w-5 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.calendar" /></svg>
+          <h3 class="mt-3 font-semibold text-neutral-900">{{ t('payroll.runs.preparation.absences') }}</h3>
+          <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.runs.preparation.absences_hint') }}</p>
+        </RouterLink>
+        <RouterLink
+          :to="{ name: 'payroll-components' }"
+          class="group rounded-lg border border-neutral-200 bg-surface p-4 transition hover:border-payroll-500/60 hover:shadow-sm"
+          data-test="prepare-components"
+        >
+          <svg class="h-5 w-5 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.tag" /></svg>
+          <h3 class="mt-3 font-semibold text-neutral-900">{{ t('payroll.runs.preparation.components') }}</h3>
+          <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.runs.preparation.components_hint') }}</p>
+        </RouterLink>
+        <RouterLink
+          :to="{ name: 'payroll-people' }"
+          class="group rounded-lg border border-neutral-200 bg-surface p-4 transition hover:border-payroll-500/60 hover:shadow-sm"
+          data-test="prepare-people"
+        >
+          <svg class="h-5 w-5 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+          <h3 class="mt-3 font-semibold text-neutral-900">{{ t('payroll.runs.preparation.people') }}</h3>
+          <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.runs.preparation.people_hint') }}</p>
+        </RouterLink>
+      </div>
+
+      <p class="mt-4 flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700">
+        <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.lock" />
+        </svg>
+        <span data-test="run-preparation-freeze">{{ t('payroll.runs.preparation.freeze_warning') }}</span>
+      </p>
+
+      <!--
+        Přehled toho, co se za měsíc odvede a odešle. Je to TÝŽ panel jako
+        v Podáních, jen řízený obdobím téhle stránky — druhá kopie by se s ním
+        dřív nebo později rozešla.
+      -->
+      <div v-if="preparationOpen" class="mt-5">
+        <h3 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          {{ t('payroll.runs.preparation.checklist_title') }}
+        </h3>
+        <PayrollMonthlyChecklistPanel
+          v-model:environment="checklistEnvironment"
+          :period="period"
+        />
+      </div>
+    </section>
 
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 2" :key="index" class="h-40 animate-pulse rounded-xl bg-neutral-100" />

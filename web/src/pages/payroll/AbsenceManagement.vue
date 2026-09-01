@@ -12,6 +12,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { apiErrorMessage } from '@/api/errors'
+import { localPayrollPeriod, payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import {
   payrollAbsenceApi,
   type AbsencePayload,
@@ -29,12 +30,21 @@ const toast = useToast()
 const auth = useAuthStore()
 const today = new Date()
 const year = today.getFullYear()
-const month = String(today.getMonth() + 1).padStart(2, '0')
-const monthStart = `${year}-${month}-01`
 function localDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
-const monthEnd = localDate(new Date(year, today.getMonth() + 1, 0))
+/*
+ * Filtr i nová nepřítomnost se otevírají na měsíci Z ODKAZU, když v něm je
+ * (`/payroll/absences?period=2026-08`), jinak na dnešním. Kdo sem přijde
+ * z přípravy mzdového běhu za srpen, musí vidět srpen — obrazovka, která
+ * období z odkazu zahodí, ho tiše přepne jinam a zapsaná absence pak sedí
+ * na cizí měsíc.
+ */
+const linkedPeriod = payrollQueryPeriod(route.query, localPayrollPeriod(today))
+const periodYear = Number(linkedPeriod.slice(0, 4))
+const periodMonthIndex = Number(linkedPeriod.slice(5, 7)) - 1
+const monthStart = `${linkedPeriod}-01`
+const monthEnd = localDate(new Date(periodYear, periodMonthIndex + 1, 0))
 const applicationQuarter = Math.floor(today.getMonth() / 3) + 1
 const applicationQuarterStartMonth = (applicationQuarter - 1) * 3
 const decisiveFrom = localDate(new Date(year, applicationQuarterStartMonth - 3, 1))

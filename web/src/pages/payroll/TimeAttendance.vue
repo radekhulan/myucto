@@ -43,7 +43,7 @@ import {
   formatPayrollMinutes,
   payrollWallTimeToIso,
 } from '@/pages/payroll/payrollTime'
-import { localPayrollPeriod, payrollWorkingPeriod } from '@/pages/payroll/payrollComponentsUi'
+import { localPayrollPeriod, payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -54,7 +54,10 @@ const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
-const period = ref(payrollWorkingPeriod())
+// Období z odkazu má přednost: kdo sem přijde z přípravy mzdového běhu za
+// srpen, musí vidět srpen. Stránka, která období zahodí a otevře se na
+// zpracovávaném měsíci, ho tiše přepne jinam a docházka pak sedí na cizí měsíc.
+const period = ref(payrollQueryPeriod(route.query))
 const incompleteOnly = ref(false)
 const loading = ref(false)
 /*

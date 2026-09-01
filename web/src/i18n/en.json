@@ -1746,7 +1746,26 @@
       },
       "load_failed_hint": "Payroll runs did not load, so we cannot tell whether one exists for this period. Please try again.",
       "create_blocked_period": "Pick the period the run should be calculated for.",
-      "create_blocked_payment_date": "Fill in the payment date — it drives both contribution due dates and filing deadlines."
+      "create_blocked_payment_date": "Fill in the payment date — it drives both contribution due dates and filing deadlines.",
+      "preparation": {
+        "title": "Input preparation for {period}",
+        "description_missing": "Before you create the run, check that everything the wages are calculated from is recorded for this month.",
+        "description_draft": "The run is still a draft, so inputs can still be changed. Fill in whatever is missing for this month.",
+        "freeze_warning": "“Lock inputs” freezes a snapshot of the inputs. Anything recorded afterwards will not reach the calculation or the reports until you reopen the run and create a new revision.",
+        "checklist_title": "What will be paid and filed for this month",
+        "quick_inputs": "Monthly wage entry",
+        "quick_inputs_hint": "Gross wages, bonuses and one-off items for this month.",
+        "time": "Attendance",
+        "time_hint": "Hours worked, overtime and surcharges.",
+        "absences": "Absences",
+        "absences_hint": "Holiday, sickness and other obstacles to work.",
+        "components": "Pay components",
+        "components_hint": "Recurring components and benefits that apply beyond this month.",
+        "people": "People",
+        "people_hint": "Starters, leavers, tax declarations and personal records.",
+        "checklist_hide": "Hide levy overview",
+        "checklist_show": "Show levy overview"
+      }
     },
     "quick_inputs": {
       "title": "Quick monthly payroll input",
