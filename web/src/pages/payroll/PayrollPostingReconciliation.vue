@@ -13,10 +13,10 @@ import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as formatMoney } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { localPayrollPeriod } from './payrollComponentsUi'
+import { payrollWorkingPeriod } from './payrollComponentsUi'
 
 const { t, te } = useI18n()
-const period = ref(localPayrollPeriod())
+const period = ref(payrollWorkingPeriod())
 const loading = ref(true)
 const loadError = ref('')
 const result = ref<PayrollPostingReconciliation | null>(null)

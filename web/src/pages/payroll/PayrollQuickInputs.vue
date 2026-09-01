@@ -24,11 +24,11 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import {
-  localPayrollPeriod,
   parsePayrollAmountToMinor,
   parsePayrollHoursToMilli,
   payrollInputEditable,
   payrollMinorToInput,
+  payrollQueryPeriod,
 } from '@/pages/payroll/payrollComponentsUi'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor } from '@/composables/useFormat'
@@ -92,7 +92,7 @@ const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
-const period = ref(localPayrollPeriod())
+const period = ref(payrollQueryPeriod(route.query))
 const loading = ref(false)
 /*
  * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu

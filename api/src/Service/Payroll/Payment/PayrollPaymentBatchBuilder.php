@@ -1331,7 +1331,15 @@ final class PayrollPaymentBatchBuilder
         );
         if ($account === null
             || $account['institution_type'] !== $institutionType
-            || $account['institution_code'] !== $institutionCode
+            // Kód instituce se porovnává bez ohledu na velikost písmen, protože
+            // tak ho porovnává i databáze, přes kterou se účet dohledal při
+            // materializaci závazku. Kdyby se tu trvalo na přesné shodě, účet
+            // uložený jako „ADVANCE_TAX" by závazek zmrazený pod „advance_tax"
+            // shodil na „účet neodpovídá zmrazenému cíli" — až u přípravy
+            // platebního příkazu, tedy dávno po zaúčtování mezd. Unikátní klíč
+            // nad (firma, typ, kód) má stejnou kolaci, takže dva kódy lišící se
+            // jen velikostí písmen vedle sebe existovat nemohou.
+            || mb_strtolower($account['institution_code']) !== mb_strtolower($institutionCode)
             || $account['currency_code'] !== $currencyCode
             || $account['valid_from'] > $plannedDate
             || ($account['valid_to'] !== null

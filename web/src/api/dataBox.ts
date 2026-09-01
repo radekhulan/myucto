@@ -1,4 +1,5 @@
 import { api } from './client'
+import { downloadApiFile } from '@/utils/downloadFile'
 
 /**
  * Datová schránka jako průřezový kanál podání.
@@ -575,6 +576,14 @@ export const dataBoxApi = {
 
   attempts: (id: number) =>
     api.get<{ items: OutboxAttempt[] }>(`/submissions/outbox/${id}/attempts`).then(r => r.data.items),
+
+  /**
+   * Stáhne přesně ten soubor, který podání odesílá. U ruční cesty datovkou ho
+   * člověk přikládá do zprávy sám, takže musí být po ruce přímo u podání —
+   * ne dohledávaný v dokumentech, kde se dá snadno sáhnout po jiném měsíci.
+   */
+  downloadArtifact: (id: number, filename: string) =>
+    downloadApiFile(`/submissions/outbox/${id}/artifact`, filename),
 
   confirm: (id: number, environment: string) =>
     api.post<{ row: OutboxSubmission; dispatched: boolean }>(

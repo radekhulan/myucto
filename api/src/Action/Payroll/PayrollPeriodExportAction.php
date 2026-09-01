@@ -157,12 +157,49 @@ final class PayrollPeriodExportAction
         if ($jobId === null) {
             return Json::error($response, 'not_found', 'Job exportu mezd nebyl nalezen.', 404);
         }
-        $job = $this->queue->detail($this->currentSupplierId($request), $jobId);
+        $supplierId = $this->currentSupplierId($request);
+        $job = $this->queue->detail($supplierId, $jobId);
         if ($job === null) {
             return Json::error($response, 'not_found', 'Job exportu mezd nebyl nalezen.', 404);
         }
 
-        return Json::ok($response, $this->jobPayload($job))
+        return Json::ok($response, $this->jobPayload($supplierId, $job))
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * POST /exports/jobs/{jobId}/run — ruční doběhnutí uvízlého jobu.
+     *
+     * Idempotentní: hotový job se jen vrátí (spawn by neměl co dělat) a druhý
+     * souběžný worker skončí na zámku souboru. Cizí job se tváří jako
+     * neexistující, aby se přes endpoint nedalo zjistit, co má jiná firma ve
+     * frontě.
+     *
+     * @param array<string,string> $args
+     */
+    public function run(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize($request, $response, AccessLevel::WRITE, $error)) {
+            return $this->errorResponse($error);
+        }
+        $jobId = $this->positiveInteger($args['jobId'] ?? null);
+        if ($jobId === null) {
+            return Json::error($response, 'not_found', 'Job exportu mezd nebyl nalezen.', 404);
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $job = $this->queue->detail($supplierId, $jobId);
+        if ($job === null) {
+            return Json::error($response, 'not_found', 'Job exportu mezd nebyl nalezen.', 404);
+        }
+        if ((string) $job['status'] !== 'completed') {
+            $this->spawnWorker($supplierId, $jobId);
+        }
+
+        return Json::ok($response, $this->jobPayload($supplierId, $job))
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
     }
@@ -191,7 +228,7 @@ final class PayrollPeriodExportAction
                 'payroll_export_not_ready',
                 'Export mezd ještě není dokončen.',
                 409,
-                ['job' => $this->jobPayload($job)],
+                ['job' => $this->jobPayload($supplierId, $job)],
             );
         }
 
@@ -348,6 +385,12 @@ final class PayrollPeriodExportAction
                 409,
             );
         }
+        // Archiv se skládá HNED, ne až příštím cron tickem — uživatel u toho
+        // stojí a čeká. Cron zůstává schválně jako pojistka: když se spawn
+        // nepovede (chybí PHP CLI, zamčený worker), job doběhne cronem. Není to
+        // tedy duplicitní spuštění omylem, ale dvě cesty k jedné frontě, kterou
+        // stejně serializuje zámek souboru ve workeru.
+        $this->spawnWorker($supplierId, (int) $job['id']);
         $this->activity->log(
             'payroll.period_export_queued',
             $userId,
@@ -365,15 +408,33 @@ final class PayrollPeriodExportAction
             $supplierId,
         );
 
-        return Json::ok($response, $this->jobPayload($job), 202)
+        return Json::ok($response, $this->jobPayload($supplierId, $job), 202)
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * Odpálí worker na pozadí (vzor ClosingPackageAction::spawnWorker).
+     * Návratovou hodnotu schválně neřešíme: neúspěšný spawn není chyba
+     * požadavku, job zůstává ve frontě a doběhne ho cron.
+     */
+    private function spawnWorker(int $supplierId, int $jobId): void
+    {
+        $rootDir = \MyInvoice\Bootstrap::rootDir();
+        \MyInvoice\Service\BackgroundProcess::spawnPhp(
+            $rootDir . '/api/bin/payroll-period-export-worker.php',
+            ['--supplier-id=' . $supplierId, '--job-id=' . $jobId],
+            \MyInvoice\Infrastructure\Config\RuntimePaths::log(
+                'payroll-period-export-worker.log',
+            ),
+            $rootDir,
+        );
     }
 
     /** @param array<string,mixed> $job
      *  @return array<string,mixed>
      */
-    private function jobPayload(array $job): array
+    private function jobPayload(int $supplierId, array $job): array
     {
         return [
             'id' => (int) $job['id'],
@@ -389,6 +450,7 @@ final class PayrollPeriodExportAction
             'created_at' => (string) $job['created_at'],
             'started_at' => $job['started_at'],
             'completed_at' => $job['completed_at'],
+            'progress' => $this->queue->progress($supplierId, (int) $job['id']),
         ];
     }
 

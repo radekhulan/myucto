@@ -43,7 +43,7 @@ import {
   formatPayrollMinutes,
   payrollWallTimeToIso,
 } from '@/pages/payroll/payrollTime'
-import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
+import { localPayrollPeriod, payrollWorkingPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -54,7 +54,7 @@ const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
-const period = ref(localPayrollPeriod())
+const period = ref(payrollWorkingPeriod())
 const incompleteOnly = ref(false)
 const loading = ref(false)
 /*

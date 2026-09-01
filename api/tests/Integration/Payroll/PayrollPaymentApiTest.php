@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
+use MyInvoice\Repository\Payroll\PayrollPaymentExportRepository;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -280,6 +281,42 @@ final class PayrollPaymentApiTest extends TestCase
         );
     }
 
+    public function testExportRejectsFormatThatIsNotText(): void
+    {
+        $response = $this->action->generateExport(
+            $this->request('session', 'POST')->withParsedBody([
+                'idempotency_key' => 'synthetic-export-key',
+                'export_format' => ['pdf'],
+            ]),
+            new Response(),
+            ['batchId' => '1'],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'validation_failed',
+            $this->json($response)['error']['code'] ?? null,
+        );
+    }
+
+    public function testExportRejectsUnsupportedFormat(): void
+    {
+        $response = $this->action->generateExport(
+            $this->request('session', 'POST')->withParsedBody([
+                'idempotency_key' => 'synthetic-export-key',
+                'export_format' => 'csv',
+            ]),
+            new Response(),
+            ['batchId' => '1'],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString(
+            'Formát',
+            (string) ($this->json($response)['error']['message'] ?? ''),
+        );
+    }
+
     public function testGenericMaterializationReportsBlockedKindsWithoutPartialErrorResponse(): void
     {
         $response = $this->action->materializeLiabilities(
@@ -530,6 +567,7 @@ final class PayrollPaymentApiTest extends TestCase
             $this->container->get(PayrollPaymentBatchBuilder::class),
             $this->container->get(PayrollPaymentExportService::class),
             $this->container->get(PayrollPaymentDownloadGrantService::class),
+            $this->container->get(PayrollPaymentExportRepository::class),
             $this->container->get(PayrollModuleAccess::class),
             $this->container->get(\MyInvoice\Service\Payroll\PayrollProductionGate::class),
             $failingLogger,

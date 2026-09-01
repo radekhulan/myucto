@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollPeriodExportRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentKeyRing;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorage;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentExportStorage;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -28,6 +29,7 @@ final class PayrollPeriodExportService
         private readonly PayrollPeriodExportArchiveBuilder $builder,
         private readonly PayrollPeriodExportStorage $storage,
         private readonly PayrollDocumentStorage $documents,
+        private readonly PayrollPaymentExportStorage $paymentExports,
         private readonly PayrollSubmissionService $submissions,
         private readonly SecretEncryption $encryption,
         private readonly PayrollSensitiveData $sensitiveData,
@@ -100,6 +102,9 @@ final class PayrollPeriodExportService
             $payload = $this->stringField($protocol, 'payload_xml');
             $plan[] = $this->partDescriptor('submission_protocol', $this->integerField($protocol, 'id'), $this->stringField($protocol, 'payload_sha256'), strlen($payload));
         }
+        foreach ($source['payment_exports'] as $paymentExport) {
+            $plan[] = $this->partDescriptor('payment_export', $this->integerField($paymentExport, 'id'), $this->stringField($paymentExport, 'file_sha256'), $this->integerField($paymentExport, 'size_bytes'));
+        }
         $plan[] = [
             'part_key' => hash('sha256', implode(':', ['archive', $scope->value, $periodStart, $periodEnd])),
             'part_kind' => 'archive',
@@ -131,6 +136,7 @@ final class PayrollPeriodExportService
             'document' => $this->documentPartBytes($supplierId, $source['documents'], $sourceId),
             'submission_artifact' => $this->submissionPartBytes($supplierId, $source['artifacts'], $sourceId),
             'submission_protocol' => $this->protocolPartBytes($source['protocols'], $sourceId),
+            'payment_export' => $this->paymentExportPartBytes($supplierId, $source['payment_exports'], $sourceId),
             default => throw new \UnexpectedValueException('Druh části exportu mezd není podporovaný.'),
         };
         $this->assertArchivedBytes($bytes, $expectedHash, $expectedSize);
@@ -448,9 +454,17 @@ final class PayrollPeriodExportService
                 $fileHash,
                 $fileSize,
             );
+            // Nahrazené dokumenty jdou do vlastní podsložky. Z archivu se
+            // nevyhazují - je to doklad o tom, co se dřív vydalo - ale
+            // v `documents/` zůstává jen to, co platí. Jinak by účetní našla
+            // dvě pásky téhož člověka za tentýž měsíc a nepoznala, která je
+            // ta pravá; přesně tomu má balíček předcházet.
+            $supersededDocument = (bool) ($document['superseded'] ?? false);
             $entries[] = new PayrollPeriodExportEntry(
                 sprintf(
-                    'documents/document-%012d.%s',
+                    $supersededDocument
+                        ? 'documents/nahrazene/document-%012d.%s'
+                        : 'documents/document-%012d.%s',
                     $documentId,
                     $this->extension($mimeType),
                 ),
@@ -526,6 +540,40 @@ final class PayrollPeriodExportService
         }
         unset($protocol);
 
+        foreach ($source['payment_exports'] as $paymentExport) {
+            $paymentExportId = $this->integerField($paymentExport, 'id');
+            $fileHash = $this->stringField($paymentExport, 'file_sha256');
+            $fileSize = $this->integerField($paymentExport, 'size_bytes');
+            /*
+             * Soubory prikazu nesou uplny Content-Type vcetne parametru
+             * (`text/plain; charset=us-ascii`). Do metadat polozky archivu
+             * patri jen samotny typ media - parametr kodovani neni druh
+             * obsahu a striktni kontrola na nem pravem padala.
+             */
+            $mimeType = strtolower(trim(explode(
+                ';',
+                $this->stringField($paymentExport, 'mime_type'),
+            )[0]));
+            $bytes = $completedPartBytes === null
+                ? $this->paymentExports->readVerified(
+                    $supplierId,
+                    $this->stringField($paymentExport, 'storage_key'),
+                )
+                : $completedPartBytes('payment_export', $paymentExportId, $fileHash, $fileSize);
+            $this->assertArchivedBytes($bytes, $fileHash, $fileSize);
+            $entries[] = new PayrollPeriodExportEntry(
+                sprintf(
+                    'payments/payment-order-%012d.%s',
+                    $paymentExportId,
+                    $this->extension($mimeType),
+                ),
+                $bytes,
+                $mimeType,
+                'payroll_payment_export',
+                $paymentExportId,
+            );
+        }
+
         $source['data']['documents'] = array_map(
             static function (array $document): array {
                 unset($document['storage_key']);
@@ -536,6 +584,14 @@ final class PayrollPeriodExportService
         );
         $source['data']['submission_artifacts'] = $source['artifacts'];
         $source['data']['imported_protocols'] = $source['protocols'];
+        $source['data']['payment_exports'] = array_map(
+            static function (array $paymentExport): array {
+                unset($paymentExport['storage_key']);
+
+                return $paymentExport;
+            },
+            $source['payment_exports'],
+        );
         $archive = $this->builder->build($source['data'], $entries);
 
         $stored = $this->storage->store($supplierId, $archive['bytes']);
@@ -604,6 +660,20 @@ final class PayrollPeriodExportService
             }
         }
         throw new \DomainException('Zdrojový dokument části exportu mezd nebyl nalezen.');
+    }
+
+    /** @param list<array<string,mixed>> $paymentExports */
+    private function paymentExportPartBytes(int $supplierId, array $paymentExports, int $sourceId): string
+    {
+        foreach ($paymentExports as $paymentExport) {
+            if ($this->integerField($paymentExport, 'id') === $sourceId) {
+                return $this->paymentExports->readVerified(
+                    $supplierId,
+                    $this->stringField($paymentExport, 'storage_key'),
+                );
+            }
+        }
+        throw new \DomainException('Zdrojovy platebni prikaz casti exportu mezd nebyl nalezen.');
     }
 
     /** @param list<array<string,mixed>> $artifacts */

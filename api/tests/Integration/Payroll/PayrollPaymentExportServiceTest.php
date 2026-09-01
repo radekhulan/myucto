@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollPaymentDownloadGrantService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentExportService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentExportStorage;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Pdf\PaymentOrderPdfRenderer;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -79,6 +80,7 @@ final class PayrollPaymentExportServiceTest extends TestCase
             new AboPaymentOrderWriter(),
             new SepaPaymentOrderWriter(new IbanValidator()),
             $this->storage,
+            new PaymentOrderPdfRenderer(),
         );
     }
 
@@ -394,6 +396,172 @@ final class PayrollPaymentExportServiceTest extends TestCase
         self::assertStringContainsString(
             'Zdravotni pojisteni 111',
             $bytes,
+        );
+    }
+
+    public function testPdfDocumentLivesNextToBankFileOfSameBatch(): void
+    {
+        $batchId = $this->insertBatch('abo', institutionSymbols: true);
+
+        $bankFile = $this->service->export(
+            $this->supplierId,
+            $batchId,
+            'synthetic-abo-with-document',
+            $this->userId,
+        );
+        $document = $this->service->export(
+            $this->supplierId,
+            $batchId,
+            'synthetic-pdf-document',
+            $this->userId,
+            null,
+            'pdf',
+        );
+
+        self::assertSame('abo', $bankFile['export_format']);
+        self::assertTrue($document['created']);
+        self::assertSame('pdf', $document['export_format']);
+        self::assertSame('application/pdf', $document['mime_type']);
+        self::assertSame(1, $document['export_revision_no']);
+        self::assertMatchesRegularExpression(
+            '/^mzdy-platby-2099-01-10-[0-9]+-prikaz\.pdf$/D',
+            $document['suggested_filename'],
+        );
+        self::assertNotSame(
+            $bankFile['export_id'],
+            $document['export_id'],
+            'Doklad nesmí přepsat soubor pro banku.',
+        );
+        self::assertSame(
+            2,
+            $this->countRows(
+                'payroll_payment_exports',
+                'supplier_id = ? AND batch_id = ?',
+                [$this->supplierId, $batchId],
+            ),
+        );
+
+        $bytes = $this->storage->readVerified(
+            $this->supplierId,
+            $document['storage_key'],
+        );
+        self::assertStringStartsWith('%PDF-', $bytes);
+        self::assertSame(hash('sha256', $bytes), $document['file_sha256']);
+        self::assertSame(strlen($bytes), $document['size_bytes']);
+        $manifest = $this->stringValue(
+            $this->exportRow($document['export_id']),
+            'manifest_json',
+        );
+        self::assertStringContainsString('"export_format":"pdf"', $manifest);
+        self::assertStringNotContainsString(
+            'Syntetická platební osoba',
+            $manifest,
+        );
+    }
+
+    public function testPdfDocumentReplaysArchivedRevisionForSameSnapshot(): void
+    {
+        $batchId = $this->insertBatch('sepa');
+
+        $first = $this->service->export(
+            $this->supplierId,
+            $batchId,
+            'synthetic-pdf-first',
+            $this->userId,
+            null,
+            'pdf',
+        );
+        $sameKey = $this->service->export(
+            $this->supplierId,
+            $batchId,
+            'synthetic-pdf-first',
+            $this->userId,
+            null,
+            'pdf',
+        );
+        $newKey = $this->service->export(
+            $this->supplierId,
+            $batchId,
+            'synthetic-pdf-second-key',
+            $this->userId,
+            null,
+            'pdf',
+        );
+
+        self::assertTrue($first['created']);
+        self::assertTrue($sameKey['replayed']);
+        self::assertTrue($newKey['replayed']);
+        self::assertSame($first['export_id'], $sameKey['export_id']);
+        self::assertSame(
+            $first['export_id'],
+            $newKey['export_id'],
+            'Týž snapshot dávky nesmí založit druhou revizi dokladu.',
+        );
+        self::assertSame($first['file_sha256'], $newKey['file_sha256']);
+        self::assertSame(
+            1,
+            $this->countRows(
+                'payroll_payment_exports',
+                'supplier_id = ? AND batch_id = ?',
+                [$this->supplierId, $batchId],
+            ),
+        );
+        self::assertSame(
+            2,
+            $this->countRows(
+                'payroll_payment_export_idempotency_keys',
+                'supplier_id = ? AND batch_id = ?',
+                [$this->supplierId, $batchId],
+            ),
+        );
+    }
+
+    public function testRejectsUnknownFormatAndCrossFormatIdempotencyKey(): void
+    {
+        $batchId = $this->insertBatch('abo');
+
+        try {
+            $this->service->export(
+                $this->supplierId,
+                $batchId,
+                'unsupported-format-export',
+                $this->userId,
+                null,
+                'csv',
+            );
+            self::fail('Nepodporovaný formát musí export zastavit.');
+        } catch (\InvalidArgumentException) {
+        }
+
+        try {
+            $this->service->export(
+                $this->supplierId,
+                $batchId,
+                'sepa-from-abo-batch',
+                $this->userId,
+                null,
+                'sepa',
+            );
+            self::fail('Soubor pro banku musí odpovídat formátu dávky.');
+        } catch (\DomainException) {
+        }
+
+        $this->service->export(
+            $this->supplierId,
+            $batchId,
+            'shared-idempotency-key',
+            $this->userId,
+            null,
+            'abo',
+        );
+        $this->expectException(\DomainException::class);
+        $this->service->export(
+            $this->supplierId,
+            $batchId,
+            'shared-idempotency-key',
+            $this->userId,
+            null,
+            'pdf',
         );
     }
 

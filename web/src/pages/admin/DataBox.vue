@@ -690,6 +690,27 @@ async function finishInboxPoll(result: { stored: number; failed: number; error?:
   await loadAll()
 }
 
+// ── Soubor, který podání odesílá ─────────────────────────────────────────────
+// Návod u ručního odeslání říká „přiložte soubor", takže musí jít stáhnout
+// přímo odsud. Hledat ho v dokumentech znamená riziko, že se přiloží jiný
+// (jiný měsíc, starší běh) a spisová značka pak odkazuje na něco jiného,
+// než co ve schránce skutečně leží.
+const downloadingArtifact = ref<number | null>(null)
+
+async function downloadArtifact(row: OutboxSubmission) {
+  if (downloadingArtifact.value !== null) return
+  downloadingArtifact.value = row.id
+  try {
+    await dataBoxApi.downloadArtifact(row.id, row.artifact_filename)
+  } catch (e) {
+    // Server odmítne vydat soubor, který se od zařazení do fronty změnil.
+    // Tuhle hlášku je potřeba ukázat doslova — je to věcný důvod, ne porucha.
+    toast.error(apiErrorMessage(e))
+  } finally {
+    downloadingArtifact.value = null
+  }
+}
+
 // ── Odeslání datovkou Mobilním klíčem ────────────────────────────────────────
 // Až doteď u ISDS zbývalo jen „označte si to jako odeslané" a člověk musel do
 // datovky sám. Přímý transport ale odesílat umí — jen výhradně v relaci, kterou
@@ -699,6 +720,13 @@ const mobileOutboxFor = ref<number | null>(null)
 const mobileOutboxUsername = ref('')
 const mobileOutboxCode = ref('')
 const mobileOutboxUseSaved = ref(false)
+/*
+ * Zapamatované přihlášení je JEDNO, společné pro příchozí i odchozí: ukládá se
+ * na firmu, uživatele a prostředí, nedělí se podle směru zprávy. Odchozím
+ * podáním tenhle přepínač dosud chyběl, takže si účetní musela kód pokaždé
+ * vypsat znovu, i když ho u příchozích už uložený měla.
+ */
+const rememberMobileOutboxCredential = ref(false)
 const mobileOutboxFlow = ref('')
 const mobileOutboxStatus = ref('')
 let mobileOutboxTimer: ReturnType<typeof setTimeout> | null = null
@@ -715,6 +743,7 @@ function openMobileOutbox(row: OutboxSubmission) {
   mobileOutboxStatus.value = ''
   mobileOutboxCode.value = ''
   mobileOutboxUseSaved.value = savedMobileCredential.value?.saved === true
+  rememberMobileOutboxCredential.value = false
   mobileOutboxUsername.value = savedMobileCredential.value?.username ?? ''
 }
 
@@ -741,10 +770,19 @@ async function startMobileOutbox(row: OutboxSubmission) {
       useSaved ? '' : mobileOutboxCode.value,
       useSaved,
     )
+    if (!useSaved && rememberMobileOutboxCredential.value) {
+      // Zapisuje se do téhož trezoru, ze kterého čtou i příchozí zprávy.
+      savedMobileCredential.value = await dataBoxApi.saveMobileKeyProfile(
+        environment.value,
+        mobileOutboxUsername.value.trim(),
+        mobileOutboxCode.value,
+      )
+    }
     mobileOutboxFlow.value = start.flow_token
     mobileOutboxStatus.value = start.description
     // Kód se v paměti nedrží déle, než je potřeba k jeho odeslání.
     mobileOutboxCode.value = ''
+    rememberMobileOutboxCredential.value = false
     void pollMobileOutbox(row)
   } catch (e) {
     toast.error(apiErrorMessage(e))
@@ -1405,7 +1443,15 @@ onUnmounted(clearMobileStatusTimer)
           <div class="min-w-0">
             <div class="font-medium">{{ row.subject }}</div>
             <div class="text-sm text-neutral-500">
-              {{ row.agenda_code }} · {{ row.artifact_filename }}
+              {{ row.agenda_code }} ·
+              <button
+                type="button"
+                class="cursor-pointer underline decoration-dotted underline-offset-2 hover:text-primary-700 disabled:cursor-default disabled:no-underline disabled:opacity-60"
+                :disabled="downloadingArtifact === row.id"
+                :title="t('databox.outbox.downloadArtifactHint')"
+                data-test="outbox-artifact-download"
+                @click="downloadArtifact(row)"
+              >{{ row.artifact_filename }}</button>
               <span v-if="row.recipient_box_id"> · <code>{{ row.recipient_box_id }}</code></span>
             </div>
             <div class="mt-1 text-xs text-neutral-400">
@@ -1453,7 +1499,16 @@ onUnmounted(clearMobileStatusTimer)
         >
           <div class="font-medium">{{ t('databox.manual.title') }}</div>
           <ol class="mt-2 list-decimal space-y-1 pl-5">
-            <li>{{ t('databox.manual.step1', { file: row.artifact_filename }) }}</li>
+            <li>
+              {{ t('databox.manual.step1') }}
+              <button
+                type="button"
+                class="cursor-pointer font-medium text-primary-700 underline underline-offset-2 hover:text-primary-800 disabled:cursor-default disabled:no-underline disabled:opacity-60"
+                :disabled="downloadingArtifact === row.id"
+                data-test="outbox-artifact-download-step"
+                @click="downloadArtifact(row)"
+              >{{ row.artifact_filename }}</button>
+            </li>
             <li>
               {{ t('databox.manual.step2', { box: row.recipient_box_id ?? '—' }) }}
               <code class="rounded bg-surface px-1">{{ row.correlation_reference }}</code>
@@ -1513,6 +1568,19 @@ onUnmounted(clearMobileStatusTimer)
           >
             <input v-model="mobileOutboxUseSaved" type="checkbox" />
             {{ t('databox.outbox.mobileKey.useSaved') }}
+          </label>
+          <!-- Totéž zapamatování jako u příchozích zpráv: jeden trezor na firmu,
+               uživatele a prostředí, ne zvlášť pro každý směr. -->
+          <label
+            v-if="mobileOutboxFlow === '' && !mobileOutboxUseSaved"
+            class="mt-3 flex items-center gap-2 text-sm"
+          >
+            <input
+              v-model="rememberMobileOutboxCredential"
+              type="checkbox"
+              data-test="outbox-remember-credential"
+            >
+            <span>{{ t('databox.inbox.rememberMobileCredential') }}</span>
           </label>
           <p v-if="mobileOutboxStatus" class="mt-3 text-sm text-neutral-700" data-test="outbox-mobile-key-status">
             {{ mobileOutboxStatus }}

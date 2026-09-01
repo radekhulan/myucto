@@ -50,13 +50,26 @@ final class PayrollPeriodExportJobRepository
                                 started_at = NULL, completed_at = NULL
                           WHERE supplier_id = ? AND id = ? AND status = "failed"',
                     )->execute([$supplierId, $jobId]);
+                    /*
+                     * Znovu vyzadany export zacina od NULOVEHO planu, ne od
+                     * zbytku toho starého. Casti jsou pracovni plan, ne dukaz -
+                     * dukazem je hotovy archiv. Kdyz se mezitim zmenil obsah
+                     * obdobi (pribyla paska nebo podani), stary plan uz nikdy
+                     * nebude sedet a jeho ozivovani znamenalo, ze se export za
+                     * to obdobi nedal dokoncit uz nikdy: kazdy dalsi pokus
+                     * skoncil na "obsah se zmenil". Historie pokusu zustava.
+                     */
                     $pdo->prepare(
-                        'UPDATE payroll_period_export_job_parts
-                            SET status = "queued", attempt_count = 0,
-                                available_at = UTC_TIMESTAMP(), lease_token = NULL,
-                                locked_at = NULL, storage_key = NULL,
-                                last_error_code = NULL, last_error_message = NULL
-                          WHERE supplier_id = ? AND job_id = ? AND status = "failed"',
+                        'DELETE attempt
+                           FROM payroll_period_export_job_part_attempts attempt
+                           JOIN payroll_period_export_job_parts part
+                             ON part.supplier_id = attempt.supplier_id
+                            AND part.id = attempt.job_part_id
+                          WHERE part.supplier_id = ? AND part.job_id = ?',
+                    )->execute([$supplierId, $jobId]);
+                    $pdo->prepare(
+                        'DELETE FROM payroll_period_export_job_parts
+                          WHERE supplier_id = ? AND job_id = ?',
                     )->execute([$supplierId, $jobId]);
                 }
             }
@@ -86,6 +99,60 @@ final class PayrollPeriodExportJobRepository
         return is_array($row) ? $this->publicRow($row) : null;
     }
 
+    /**
+     * Průběh jobu podle jeho ČÁSTÍ, pro polling ve frontendu.
+     *
+     * Části vznikají až prvním zpracováním (`ensureParts`), takže dokud plán
+     * neexistuje, je celkový počet POCTIVĚ neznámý — vrací se `null`, ne odhad.
+     * Odhadnutý počet by uživateli ukázal progress bar, který by se po
+     * naplánování skokem změnil, a to je horší než přiznané „ještě nevím".
+     *
+     * @return array{planned:bool,total:?int,completed:int,failed:int,pending:int,current_part_kind:?string}
+     */
+    public function progress(int $supplierId, int $jobId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT part_kind, status
+               FROM payroll_period_export_job_parts
+              WHERE supplier_id = ? AND job_id = ?
+              ORDER BY CASE part_kind WHEN "archive" THEN 1 ELSE 0 END, id',
+        );
+        $statement->execute([$supplierId, $jobId]);
+        $rows = array_values(array_filter($statement->fetchAll(PDO::FETCH_ASSOC), 'is_array'));
+
+        $completed = 0;
+        $failed = 0;
+        $processing = null;
+        $next = null;
+        foreach ($rows as $row) {
+            $status = (string) $row['status'];
+            if ($status === 'completed') {
+                ++$completed;
+                continue;
+            }
+            if ($status === 'failed') {
+                ++$failed;
+                continue;
+            }
+            if ($status === 'processing' && $processing === null) {
+                $processing = (string) $row['part_kind'];
+                continue;
+            }
+            if ($next === null) {
+                $next = (string) $row['part_kind'];
+            }
+        }
+
+        return [
+            'planned' => $rows !== [],
+            'total' => $rows === [] ? null : count($rows),
+            'completed' => $completed,
+            'failed' => $failed,
+            'pending' => count($rows) - $completed - $failed,
+            'current_part_kind' => $processing ?? $next,
+        ];
+    }
+
     /** @return array<string,mixed>|null */
     public function claimNext(): ?array
     {
@@ -112,7 +179,25 @@ final class PayrollPeriodExportJobRepository
                 return null;
             }
             $lease = random_bytes(16);
-            $attemptNo = (int) $row['attempt_count'] + 1;
+            /*
+             * Poradove cislo pokusu se bere z EVIDENCE POKUSU, ne z citace na
+             * jobu. Znovu vyzadany export citac vynuluje (aby mel job znovu
+             * plny rozpocet opakovani), zaznamy o predchozich pokusech ale
+             * zustavaji - a unikatni klic (firma, job, pokus) je pak srazil.
+             * Worker na tom padal neodchycenou vyjimkou, takze se neudelal ani
+             * ten export, ani zadny jiny, a uzivatel koukal na kolecko, ktere
+             * nikdy neskoncilo.
+             */
+            $lastAttempt = $pdo->prepare(
+                'SELECT COALESCE(MAX(attempt_no), 0)
+                   FROM payroll_period_export_job_attempts
+                  WHERE supplier_id = ? AND job_id = ?',
+            );
+            $lastAttempt->execute([(int) $row['supplier_id'], (int) $row['id']]);
+            $attemptNo = max(
+                (int) $row['attempt_count'],
+                (int) $lastAttempt->fetchColumn(),
+            ) + 1;
             $claim = $pdo->prepare(
                 'UPDATE payroll_period_export_jobs
                     SET status = "processing", attempt_count = ?, lease_token = ?,
@@ -143,10 +228,14 @@ final class PayrollPeriodExportJobRepository
     }
 
     /** @param array<string,mixed> $claim */
-    public function fail(array $claim, string $errorCode, string $message): void
-    {
+    public function fail(
+        array $claim,
+        string $errorCode,
+        string $message,
+        bool $retryable = true,
+    ): void {
         $failureCount = (int) ($claim['failure_count'] ?? 0) + 1;
-        $retry = $failureCount < self::MAX_ATTEMPTS;
+        $retry = $retryable && $failureCount < self::MAX_ATTEMPTS;
         $delay = min(3600, 30 * (2 ** max(0, $failureCount - 1)));
         $availableAt = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
             ->modify('+' . $delay . ' seconds')
@@ -211,12 +300,12 @@ final class PayrollPeriodExportJobRepository
             }
             if ($known !== []) {
                 if (count($known) !== count($planned)) {
-                    throw new \UnexpectedValueException('Existující plán částí exportu mezd se změnil.');
+                    throw PayrollPeriodExportPlanChangedException::forJob();
                 }
                 foreach ($planned as $partKey => $part) {
                     $row = $known[$partKey] ?? null;
                     if (!is_array($row) || !$this->samePartPlan($row, $part)) {
-                        throw new \UnexpectedValueException('Existující plán části exportu mezd se změnil.');
+                        throw PayrollPeriodExportPlanChangedException::forJob();
                     }
                 }
                 $this->finish($pdo, $owns, 'payroll_period_export_parts');
@@ -682,7 +771,7 @@ final class PayrollPeriodExportJobRepository
         $archive = ($part['part_kind'] ?? null) === 'archive';
         if (!is_string($part['part_key'] ?? null)
             || preg_match('/^[a-f0-9]{64}$/D', $part['part_key']) !== 1
-            || !in_array($part['part_kind'] ?? null, ['document', 'submission_artifact', 'submission_protocol', 'archive'], true)
+            || !in_array($part['part_kind'] ?? null, ['document', 'submission_artifact', 'submission_protocol', 'payment_export', 'archive'], true)
             || !is_int($part['source_id'] ?? null)
             || (!$archive && ($part['source_id'] <= 0
                 || !is_string($part['source_sha256'] ?? null)

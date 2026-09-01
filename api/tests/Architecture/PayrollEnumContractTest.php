@@ -83,6 +83,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Export\PayrollPeriodExportScope',
         'payroll.ts::PayrollPeriodExportJobStatus'
             => 'const:MyInvoice\Repository\Payroll\PayrollPeriodExportJobRepository::STATUSES',
+        'payroll.ts::PayrollPeriodExportPartKind'
+            => 'db:payroll_period_export_job_parts.part_kind',
         'payroll.ts::PayrollDeadlinePhase'
             => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::PHASES',
         'payroll.ts::PayrollRegistrationChangeDuty'
@@ -130,6 +132,11 @@ final class PayrollEnumContractTest extends TestCase
         // Druh nabídky pro serverové hledání v pickeru párování plateb.
         'payrollPayments.ts::PayrollPaymentOptionKind'
             => 'const:MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService::PICKER_KINDS',
+        // Co z jedné dávky vyrobit lze: soubor pro banku a doklad příkazu.
+        // Sloupec zná i formáty, které exportér nikdy nevyrobí, takže se páruje
+        // s výčtem exportéru, ne s ENUMem v databázi.
+        'payrollPayments.ts::PayrollPaymentExportFormat'
+            => 'const:MyInvoice\Service\Payroll\Payment\PayrollPaymentExportService::SUPPORTED_FORMATS',
         'payroll.ts::PayrollRunStatus'      => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunStatus',
         'payroll.ts::PayrollRunCommand'     => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunCommand',
         'payroll.ts::PayrollRunOutcomeCode' => 'consts:MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome',

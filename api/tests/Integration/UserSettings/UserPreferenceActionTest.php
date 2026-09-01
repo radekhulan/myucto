@@ -225,6 +225,29 @@ final class UserPreferenceActionTest extends TestCase
         self::assertSame('invalid_pref_key', $bad['body']['error']['code']);
     }
 
+    public function testPayrollGuideKeyAcceptedFilteredAndDeleted(): void
+    {
+        // Průvodce prvním nastavením MEZD — vlastní klíč vedle onboarding.guide.
+        $payload = ['hidden' => true, 'done' => ['employer', 'institutions']];
+
+        $put = $this->call('put', 'PUT', ['args' => ['key' => 'payroll.guide'], 'body' => $payload]);
+        self::assertSame(200, $put['status']);
+        self::assertSame($payload, $put['body']);
+
+        $filtered = $this->call('list', 'GET', ['query' => ['keys' => 'payroll.guide']]);
+        self::assertSame($payload, $filtered['body']['payroll.guide']);
+        self::assertCount(1, $filtered['body']);
+
+        $del = $this->call('delete', 'DELETE', ['args' => ['key' => 'payroll.guide']]);
+        self::assertSame(200, $del['status']);
+        self::assertTrue($del['body']['deleted']);
+
+        // Sousední klíč v namespace payroll.* whitelistovaný není.
+        $bad = $this->call('put', 'PUT', ['args' => ['key' => 'payroll.other'], 'body' => ['a' => 'b']]);
+        self::assertSame(422, $bad['status']);
+        self::assertSame('invalid_pref_key', $bad['body']['error']['code']);
+    }
+
     public function testReadonlyRoleCanWriteOwnPreferences(): void
     {
         $put = $this->call('put', 'PUT', ['args' => ['key' => 'table.invoices'], 'body' => ['density' => 'compact'], 'role' => 'readonly']);

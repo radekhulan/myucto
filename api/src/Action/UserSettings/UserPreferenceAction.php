@@ -18,8 +18,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   PUT    /api/user/preferences/{key}                                — upsert, vrací uložený payload
  *   DELETE /api/user/preferences/{key}                               — reset klíče, {"deleted": true}
  *
- * Povolené jsou `table.*`, `nav.order` a `keyboard.shortcuts`. Payload je opaque,
- * omezený velikostí a hloubkou; vlastnictví vždy určuje přihlášený uživatel.
+ * Povolené jsou `table.*`, `nav.order`, `keyboard.shortcuts` a klíče průvodců
+ * (`onboarding.guide`, `payroll.guide`). Payload je opaque, omezený velikostí
+ * a hloubkou; vlastnictví vždy určuje přihlášený uživatel.
  */
 final class UserPreferenceAction
 {
@@ -36,6 +37,13 @@ final class UserPreferenceAction
      * průvodce. Per uživatel (ne per firma): je to stav ČTENÍ návodu, ne stav dat.
      */
     private const ONBOARDING_KEY = 'onboarding.guide';
+
+    /**
+     * Průvodce prvním nastavením MEZD na přehledu mzdové sekce — sesterský klíč
+     * k `onboarding.guide`, ale vlastní: mzdy si uživatel odškrtává zvlášť od
+     * rozjezdu firmy a skrýt smí jen jednoho z nich.
+     */
+    private const PAYROLL_GUIDE_KEY = 'payroll.guide';
 
     /** Nav order a klávesové zkratky jsou o úroveň hlubší než ploché table.* prefy. */
     private const MAX_DEPTH = 4;
@@ -55,6 +63,7 @@ final class UserPreferenceAction
             $valid[] = self::NAV_ORDER_KEY;
             $valid[] = self::KEYBOARD_SHORTCUTS_KEY;
             $valid[] = self::ONBOARDING_KEY;
+            $valid[] = self::PAYROLL_GUIDE_KEY;
             $keys = array_values(array_unique(array_intersect($keys, $valid)));
             if ($keys === []) {
                 return Json::ok($response, (object) []);
@@ -125,7 +134,12 @@ final class UserPreferenceAction
 
     private function validPrefKey(string $key): bool
     {
-        if ($key === self::NAV_ORDER_KEY || $key === self::KEYBOARD_SHORTCUTS_KEY || $key === self::ONBOARDING_KEY) {
+        if (
+            $key === self::NAV_ORDER_KEY
+            || $key === self::KEYBOARD_SHORTCUTS_KEY
+            || $key === self::ONBOARDING_KEY
+            || $key === self::PAYROLL_GUIDE_KEY
+        ) {
             return true;
         }
         if (!str_starts_with($key, self::PREFIX)) {

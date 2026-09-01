@@ -253,9 +253,9 @@ final class HealthPaymentOverviewBuilder
                 $employee['full_name'] ?? null,
                 "people.{$index}.input_snapshot.employee.full_name",
             );
-            $assessmentBase = $this->minor(
-                $result['assessment_base_minor_units'] ?? null,
-                "people.{$index}.assessment_base_minor_units",
+            $assessmentBase = $this->ppzAssessmentBase(
+                $result,
+                "people.{$index}",
             );
             $employeeContribution = $this->minor(
                 $result['employee_contribution_minor_units'] ?? null,
@@ -326,9 +326,9 @@ final class HealthPaymentOverviewBuilder
                     $row['person_count'] ?? null,
                     "insurer_liabilities.{$index}.person_count",
                 ),
-                'assessment_base_minor_units' => $this->minor(
-                    $row['assessment_base_minor_units'] ?? null,
-                    "insurer_liabilities.{$index}.assessment_base_minor_units",
+                'assessment_base_minor_units' => $this->ppzAssessmentBase(
+                    $row,
+                    "insurer_liabilities.{$index}",
                 ),
                 'employee_contribution_minor_units' => $this->minor(
                     $row['employee_contribution_minor_units'] ?? null,
@@ -359,6 +359,35 @@ final class HealthPaymentOverviewBuilder
     }
 
     /**
+     * Vyměřovací základ pro PPZ.
+     *
+     * `ppz_assessment_base_minor_units` drží základ včetně dopočtu do minimálního
+     * vyměřovacího základu — z něj se pojistné skutečně odvádí, takže právě on patří
+     * do přehledu. Revize spočtené dřív, než se klíč začal ukládat, ho nemají; u nich
+     * se bere původní `assessment_base_minor_units`, protože jiná hodnota ve
+     * zmrazeném snapshotu není a dopočítat ji zpětně by znamenalo vykázat číslo,
+     * které z uloženého výpočtu neplyne.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function ppzAssessmentBase(array $row, string $path): int
+    {
+        if (array_key_exists('ppz_assessment_base_minor_units', $row)
+            && $row['ppz_assessment_base_minor_units'] !== null
+        ) {
+            return $this->minor(
+                $row['ppz_assessment_base_minor_units'],
+                "{$path}.ppz_assessment_base_minor_units",
+            );
+        }
+
+        return $this->minor(
+            $row['assessment_base_minor_units'] ?? null,
+            "{$path}.assessment_base_minor_units",
+        );
+    }
+
+    /**
      * @param array<string,mixed> $root
      * @param array<string,array<string,int>> $liabilities
      */
@@ -374,7 +403,10 @@ final class HealthPaymentOverviewBuilder
             foreach ($liabilities as $liability) {
                 $sum = $this->add($sum, $liability[$field]);
             }
-            if ($sum !== $this->minor($root[$field] ?? null, "result.{$field}")) {
+            $rootValue = $field === 'assessment_base_minor_units'
+                ? $this->ppzAssessmentBase($root, 'result')
+                : $this->minor($root[$field] ?? null, "result.{$field}");
+            if ($sum !== $rootValue) {
                 throw new HealthInsuranceOverviewException(
                     'health_insurance_totals_mismatch',
                     'Součet pojišťoven neodpovídá kořenovému zdravotnímu výsledku.',

@@ -66,6 +66,15 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
         public HealthMinimumTopUpResponsibilitySource $topUpResponsibilitySource =
             HealthMinimumTopUpResponsibilitySource::Declared,
         public ?CalculationStep $minimumContributionStep = null,
+        /**
+         * Vyměřovací základ, který za osobu vykazuje PPZ.
+         *
+         * Když se dopočítává minimální vyměřovací základ, odvádí se pojistné z minima
+         * pro tohoto zaměstnavatele — a přesně to musí být i v přehledu pro pojišťovnu.
+         * Skutečný příjem zůstává v `assessmentBaseMinorUnits`, protože z něj se počítá
+         * běžná část pojistného a bez něj by nešlo doložit, jak doplatek vznikl.
+         */
+        public int $ppzAssessmentBaseMinorUnits = 0,
     ) {}
 
     /** @return array<string,mixed> */
@@ -80,6 +89,7 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
             'insurer_code' => $this->insurerCode,
             'insurer_evidence_reference' => $this->insurerEvidenceReference,
             'assessment_base_minor_units' => $this->assessmentBaseMinorUnits,
+            'ppz_assessment_base_minor_units' => $this->ppzAssessmentBaseMinorUnits,
             'other_employer_assessment_base_minor_units' =>
                 $this->otherEmployerAssessmentBaseMinorUnits,
             'combined_assessment_base_minor_units' =>

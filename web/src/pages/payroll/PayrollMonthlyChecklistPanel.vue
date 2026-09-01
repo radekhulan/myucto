@@ -12,7 +12,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate } from '@/composables/useFormat'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
-import { localPayrollPeriod } from './payrollComponentsUi'
+import { payrollWorkingPeriod } from './payrollComponentsUi'
 
 /*
  * Tenhle panel NEODESÍLÁ ani negeneruje sám — je to skladač nad existujícími
@@ -34,7 +34,7 @@ const environmentModel = computed({
   get: () => props.environment,
   set: (value: PayrollRegzelEnvironment) => emit('update:environment', value),
 })
-const period = ref(localPayrollPeriod())
+const period = ref(payrollWorkingPeriod())
 const loading = ref(true)
 const error = ref('')
 const response = ref<PayrollMonthlyChecklistResponse | null>(null)

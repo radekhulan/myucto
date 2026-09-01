@@ -5,9 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Export;
 
 use MyInvoice\Repository\Payroll\PayrollPeriodExportJobRepository;
+use MyInvoice\Repository\Payroll\PayrollPeriodExportPlanChangedException;
 
 final class PayrollPeriodExportQueueService
 {
+    /** Stropy doběhnutí jednoho spuštění workeru — pojistka proti zacyklení. */
+    public const DRAIN_MAX_ITERATIONS = 200;
+    public const DRAIN_MAX_SECONDS = 240;
+
     public function __construct(
         private readonly PayrollPeriodExportJobRepository $jobs,
         private readonly PayrollPeriodExportService $exports,
@@ -47,6 +52,66 @@ final class PayrollPeriodExportQueueService
     public function detail(int $supplierId, int $jobId): ?array
     {
         return $this->jobs->detail($supplierId, $jobId);
+    }
+
+    /** @return array{planned:bool,total:?int,completed:int,failed:int,pending:int,current_part_kind:?string} */
+    public function progress(int $supplierId, int $jobId): array
+    {
+        return $this->jobs->progress($supplierId, $jobId);
+    }
+
+    /**
+     * Doběhne frontu do konce, ne jen jednu část.
+     *
+     * `processOne()` udělá vždy JEDNU část, takže archiv za měsíc se přes
+     * `processAvailable(1)` skládal tempem jedné části za cron tick. Spuštění
+     * z aplikace proto frontu drainuje — se stropem na počet iterací i na dobu
+     * běhu, aby se worker nemohl zacyklit na jobu, který se opakovaně vrací do
+     * fronty. S cílovým jobem se navíc končí, jakmile doběhne on sám; zbytek
+     * fronty patří cronu.
+     *
+     * @return array{processed:int,succeeded:int,failed:int,iterations:int,stopped:string}
+     */
+    public function drain(
+        ?int $supplierId = null,
+        ?int $jobId = null,
+        int $maxIterations = self::DRAIN_MAX_ITERATIONS,
+        int $maxSeconds = self::DRAIN_MAX_SECONDS,
+    ): array {
+        $result = ['processed' => 0, 'succeeded' => 0, 'failed' => 0, 'iterations' => 0, 'stopped' => 'idle'];
+        $iterationCap = max(1, min(1000, $maxIterations));
+        $deadline = microtime(true) + (float) max(1, min(900, $maxSeconds));
+        $targeted = $supplierId !== null && $jobId !== null;
+        while (true) {
+            if ($result['iterations'] >= $iterationCap) {
+                $result['stopped'] = 'iteration_limit';
+                break;
+            }
+            if (microtime(true) >= $deadline) {
+                $result['stopped'] = 'time_limit';
+                break;
+            }
+            $item = $this->processOne();
+            ++$result['iterations'];
+            if (!$item['processed']) {
+                $result['stopped'] = 'idle';
+                break;
+            }
+            ++$result['processed'];
+            $item['succeeded'] === true ? ++$result['succeeded'] : ++$result['failed'];
+            if (!$targeted) {
+                continue;
+            }
+            $detail = $this->jobs->detail($supplierId, $jobId);
+            if ($detail === null
+                || in_array((string) $detail['status'], ['completed', 'failed'], true)
+            ) {
+                $result['stopped'] = 'job_finished';
+                break;
+            }
+        }
+
+        return $result;
     }
 
     /** @return array{processed:bool,succeeded:bool|null,job_id:?int} */
@@ -107,7 +172,15 @@ final class PayrollPeriodExportQueueService
                 );
                 $succeeded = $failed === null;
             } else {
-                $this->jobs->fail($claim, self::errorCode($exception), $exception->getMessage());
+                // Zmeneny plan se opakovanim nespravi - obsah obdobi je jiny,
+                // nez ze ktereho se export zacal skladat. Job se proto zavira
+                // rovnou, at uzivatel neceka na tri marne pokusy.
+                $this->jobs->fail(
+                    $claim,
+                    self::errorCode($exception),
+                    $exception->getMessage(),
+                    !$exception instanceof PayrollPeriodExportPlanChangedException,
+                );
                 $succeeded = false;
             }
         }

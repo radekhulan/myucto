@@ -25,6 +25,8 @@ final readonly class HealthInsuranceMonthResult implements JsonSerializable
         public array $issues,
         public string $rulesetId,
         public string $rulesetHash,
+        /** Úhrn vyměřovacích základů pro PPZ; viz HealthInsurerLiabilityResult. */
+        public ?int $ppzAssessmentBaseMinorUnits = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -49,6 +51,7 @@ final readonly class HealthInsuranceMonthResult implements JsonSerializable
             'issues' => $this->issues,
             'ruleset_id' => $this->rulesetId,
             'ruleset_hash' => $this->rulesetHash,
+            'ppz_assessment_base_minor_units' => $this->ppzAssessmentBaseMinorUnits,
         ];
     }
 

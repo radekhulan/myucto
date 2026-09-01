@@ -720,6 +720,7 @@ describe('PayrollPayments', () => {
   it('generates a batch export and downloads it through a one-use grant', async () => {
     const exportedFile = {
       id: 61,
+      export_format: 'abo' as const,
       revision_no: 1,
       file_sha256: 'a'.repeat(64),
       size_bytes: 13,
@@ -807,6 +808,55 @@ describe('PayrollPayments', () => {
       'blob:synthetic-payroll-export',
     )
     click.mockRestore()
+  })
+
+  it('generates the payment order document next to the bank file', async () => {
+    m.batches.mockResolvedValue({
+      period: '2026-08',
+      items: [{
+        id: 51,
+        batch_reference: 'payroll-batch:synthetic',
+        channel: 'bank',
+        export_format: 'abo',
+        planned_payment_date: '2026-08-15',
+        currency_code: 'CZK',
+        declared_total_minor: 4_250_000,
+        declared_item_count: 1,
+        settled_minor: 0,
+        created_at: '2026-08-04 08:00:00',
+        exports: [{
+          id: 62,
+          export_format: 'pdf' as const,
+          revision_no: 1,
+          file_sha256: 'b'.repeat(64),
+          size_bytes: 2048,
+          mime_type: 'application/pdf',
+          suggested_filename: 'mzdy-platby-2026-08-15-51-prikaz.pdf',
+          created_at: '2026-08-04 08:05:00',
+        }],
+      }],
+    })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[1].trigger('click')
+
+    const desktop = wrapper.get('[data-layout="batch-desktop"]')
+    expect(desktop.text())
+      .toContain('payroll.payments.batch.export_document')
+
+    await desktop.get('[data-test="batch-generate-pdf"]').trigger('click')
+    await flushPromises()
+
+    expect(m.generateExport).toHaveBeenCalledOnce()
+    expect(m.generateExport).toHaveBeenCalledWith(
+      51,
+      expect.stringMatching(/^payroll-export-51-pdf-/),
+      'pdf',
+    )
+    expect(m.success).toHaveBeenCalledWith(
+      expect.stringContaining('payroll.payments.batch.pdf_created'),
+    )
   })
 
   it('hides generate and download actions from a read-only user on both layouts', async () => {

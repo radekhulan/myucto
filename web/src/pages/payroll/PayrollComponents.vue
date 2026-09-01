@@ -48,7 +48,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import {
   canApplyPayrollImport,
-  localPayrollPeriod,
+  payrollWorkingPeriod,
   monthStart,
   parsePayrollAmountToMinor,
   payrollEmploymentOptionsFromContext,
@@ -102,7 +102,7 @@ const activeTab = ref<Tab>(
     ? requestedTab as Tab
     : 'inputs',
 )
-const period = ref(localPayrollPeriod())
+const period = ref(payrollWorkingPeriod())
 const loading = ref(false)
 /*
  * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu

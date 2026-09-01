@@ -504,6 +504,29 @@ final readonly class JmhzProtocolParser
         );
     }
 
+    /**
+     * Hláška o nerozebratelném protokolu VČETNĚ toho, co ČSSZ opravdu poslala.
+     *
+     * Text protokolu je jediné, co říká, co je s podáním špatně. Když se
+     * nevejde do očekávaného tvaru „kód - text", nesmí se zahodit: účetní pak
+     * čte jen to, že aplikace něčemu nerozumí, a nemá se čeho chytit — ani co
+     * poslat na podporu. Kód se z takové hlášky ZÁMĚRNĚ nedohaduje; interpretace
+     * zůstává zavřená, viditelnost ne.
+     */
+    private static function unreadableMessage(string $message): string
+    {
+        $raw = trim($message);
+        if ($raw === '') {
+            return 'Protokol ČSSZ neobsahuje čitelnou chybovou hlášku.';
+        }
+        if (mb_strlen($raw) > 500) {
+            $raw = mb_substr($raw, 0, 500) . '…';
+        }
+
+        return 'Chybovou hlášku protokolu nelze rozebrat na kód a text.'
+            . ' ČSSZ vrátila: ' . $raw;
+    }
+
     /** @return list<JmhzProtocolError> */
     private function parseErrorMessage(string $message, string $firstCode): array
     {
@@ -522,7 +545,7 @@ final readonly class JmhzProtocolParser
             if (preg_match('/^([0-9]+)\s*-\s*(.*)$/us', $segment, $matches) !== 1) {
                 throw new JmhzTransportException(
                     'jmhz_protocol_error_message_unreadable',
-                    'Chybovou hlášku protokolu nelze rozebrat na kód a text.',
+                    self::unreadableMessage($message),
                 );
             }
             $errors[] = JmhzProtocolError::fromCode(
@@ -533,7 +556,7 @@ final readonly class JmhzProtocolParser
         if ($errors === []) {
             throw new JmhzTransportException(
                 'jmhz_protocol_error_message_unreadable',
-                'Chybovou hlášku protokolu nelze rozebrat na kód a text.',
+                self::unreadableMessage($message),
             );
         }
         $declared = trim($firstCode);

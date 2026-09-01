@@ -14,6 +14,7 @@ use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzTargetCatalog;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -27,6 +28,7 @@ final class PayrollComponentJmhzMappingsAction
         private readonly PayrollComponentRepository $components,
         private readonly PayrollComponentJmhzMappingRepository $mappings,
         private readonly PayrollComponentJmhzTargetCatalog $targets,
+        private readonly PayrollComponentJmhzMappingDefaults $mappingDefaults,
         private readonly Connection $db,
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
@@ -53,6 +55,15 @@ final class PayrollComponentJmhzMappingsAction
             return $error;
         }
         $supplierId = $this->currentSupplierId($request);
+        // Výchozí zařazení jednoznačných složek se doplňuje až při čtení téhle
+        // obrazovky, ne při zakládání firmy. Je to týž vzorec „doinstaluje se při
+        // prvním použití", jaký v modulu už používají číselníky JMHZ (balíček
+        // specifikace se instaluje teprve při zápisu mapování), takže dřív by
+        // nebylo na co mapovat. Účetní tak vidí předvyplněný stav rovnou tady
+        // a může ho přepsat; doplňuje se jen tam, kde ještě žádná volba není.
+        foreach ($this->mappingDefaults->apply($supplierId) as $default) {
+            $this->audit($request, 'payroll.component_jmhz_mapping.default_applied', $default, null);
+        }
         $mappings = $this->mappings->listForSupplier($supplierId);
         $items = [];
         foreach ($this->components->list($supplierId) as $component) {

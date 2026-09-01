@@ -9,10 +9,38 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\AboPaymentOrderWriter;
 use MyInvoice\Service\Payment\SepaPaymentOrderWriter;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Pdf\PaymentOrderPdfRenderer;
 
 final class PayrollPaymentExportService
 {
     private const EXPORTER_VERSION = 'payroll-payment-export.v1';
+
+    /**
+     * Verze tištěného dokladu příkazu.
+     *
+     * Vede se zvlášť od souboru pro banku schválně. Doklad se při opakovaném
+     * vygenerování nepřehrává podle bajtů (mPDF do PDF zapisuje čas vzniku),
+     * ale podle zmrazeného snapshotu - a ten se změnou VZHLEDU dokladu
+     * nemění. Bez vlastní verze by se po úpravě šablony už nikdy nedal
+     * získat doklad v novém rozložení.
+     *
+     * Zvyš ji vždy, když se změní `payment-order.twig` nebo to, co do něj
+     * posíláme. Účetní pak stačí klepnout na „Doklad příkazu (PDF)" znovu
+     * a vznikne nová revize; ta stará zůstává v archivu jako doklad o tom,
+     * co se tisklo dřív.
+     *
+     * Soubor pro banku se tím nedotkne - jeho verze zůstává, takže se
+     * nezakládají prázdné revize s totožným obsahem.
+     *
+     * v2: symboly VS/KS/SS ve vlastních sloupcích + období v hlavičce.
+     */
+    private const DOCUMENT_EXPORTER_VERSION = 'payroll-payment-order-pdf.v2';
+
+    /**
+     * Formáty, které z jedné dávky vyrobit lze. `abo`/`sepa` je soubor pro
+     * banku, `pdf` je tištěný doklad hromadného příkazu vedle něj.
+     */
+    public const SUPPORTED_FORMATS = ['abo', 'sepa', 'pdf'];
 
     public function __construct(
         private readonly PayrollPaymentExportRepository $exports,
@@ -20,7 +48,19 @@ final class PayrollPaymentExportService
         private readonly AboPaymentOrderWriter $abo,
         private readonly SepaPaymentOrderWriter $sepa,
         private readonly PayrollPaymentExportStorage $storage,
+        private readonly PaymentOrderPdfRenderer $pdf,
     ) {}
+
+    /**
+     * Doklad a soubor pro banku mají vlastní verzi exportéru - viz
+     * {@see self::DOCUMENT_EXPORTER_VERSION}.
+     */
+    private static function exporterVersion(string $format): string
+    {
+        return $format === 'pdf'
+            ? self::DOCUMENT_EXPORTER_VERSION
+            : self::EXPORTER_VERSION;
+    }
 
     /**
      * @param null|callable(array{
@@ -58,7 +98,15 @@ final class PayrollPaymentExportService
         string $idempotencyKey,
         ?int $actorUserId = null,
         ?callable $beforeCommit = null,
+        ?string $exportFormat = null,
     ): array {
+        if ($exportFormat !== null
+            && !in_array($exportFormat, self::SUPPORTED_FORMATS, true)
+        ) {
+            throw new \InvalidArgumentException(
+                'Formát platebního exportu není podporován.',
+            );
+        }
         if ($this->exports->hasActiveTransaction()) {
             throw new \LogicException(
                 'Platební export nelze spustit uvnitř cizí transakce.',
@@ -102,6 +150,7 @@ final class PayrollPaymentExportService
                 $idempotencyHash,
                 $actorUserId,
                 $beforeCommit,
+                $exportFormat,
                 &$stored,
             ): array {
                 if (!$this->exports->lockSupplier($supplierId)) {
@@ -118,6 +167,16 @@ final class PayrollPaymentExportService
                     if ($existing['batch_id'] !== $batchId) {
                         throw new \DomainException(
                             'Idempotentní klíč patří jiné platební dávce.',
+                        );
+                    }
+                    // Jedna dávka má dva exporty (soubor pro banku a doklad),
+                    // takže klíč musí být vázaný i na formát. Jinak by si
+                    // žádost o PDF odnesla archivovaný bankovní soubor.
+                    if ($exportFormat !== null
+                        && $existing['export_format'] !== $exportFormat
+                    ) {
+                        throw new \DomainException(
+                            'Idempotentní klíč patří jinému formátu exportu.',
                         );
                     }
                     $bytes = $this->storage->readVerified(
@@ -156,18 +215,59 @@ final class PayrollPaymentExportService
                         'Platební dávka nebyla nalezena.',
                     );
                 }
-                $prepared = $this->prepare($supplierId, $batch);
+                $format = $this->resolveFormat($batch, $exportFormat);
                 $latest = $this->exports->lockLatestRevision(
                     $supplierId,
                     $batchId,
-                    $batch['export_format'],
+                    $format,
                 );
+                $exporterVersion = self::exporterVersion($format);
+                if ($format === 'pdf'
+                    && $latest !== null
+                    && $latest['source_snapshot_hash']
+                        === $batch['snapshot_hash']
+                    && $latest['exporter_version'] === $exporterVersion
+                ) {
+                    /*
+                     * Doklad se neporovnává po bajtech jako soubor pro banku —
+                     * mPDF do PDF zapisuje čas vzniku, takže dvě vykreslení
+                     * téhož příkazu nikdy nemají stejný otisk. Vazba na
+                     * zmrazený snapshot dávky je ale silnější: stejný snapshot
+                     * znamená týž doklad, a ten se vydá z archivu.
+                     */
+                    $archived = $this->storage->readVerified(
+                        $supplierId,
+                        $latest['storage_key'],
+                    );
+                    if (strlen($archived) !== $latest['size_bytes']
+                        || !hash_equals(
+                            $latest['file_sha256'],
+                            hash('sha256', $archived),
+                        )
+                    ) {
+                        throw new \DomainException(
+                            'Archivovaný platební export nemá platnou integritu.',
+                        );
+                    }
+                    $replayed = $this->revisionReplay($latest);
+                    $this->exports->insertIdempotencyAlias(
+                        $supplierId,
+                        $batchId,
+                        $latest['export_id'],
+                        $idempotencyHash,
+                    );
+                    if ($beforeCommit !== null) {
+                        $beforeCommit($replayed);
+                    }
+
+                    return $replayed;
+                }
+                $prepared = $this->prepare($supplierId, $batch, $format);
                 $preparedHash = hash('sha256', $prepared['bytes']);
                 if ($latest !== null
                     && $latest['source_snapshot_hash']
                         === $batch['snapshot_hash']
-                    && $latest['exporter_version']
-                        === self::EXPORTER_VERSION
+                    && $latest['exporter_version'] === $exporterVersion
                     && hash_equals(
                         $latest['file_sha256'],
                         $preparedHash,
@@ -187,23 +287,7 @@ final class PayrollPaymentExportService
                             'Archivovaný platební export nemá očekávaný obsah.',
                         );
                     }
-                    $replayed = [
-                        'export_id' => $latest['export_id'],
-                        'batch_id' => $latest['batch_id'],
-                        'export_format' => $latest['export_format'],
-                        'export_revision_no' =>
-                            $latest['export_revision_no'],
-                        'source_snapshot_hash' =>
-                            $latest['source_snapshot_hash'],
-                        'file_sha256' => $latest['file_sha256'],
-                        'size_bytes' => $latest['size_bytes'],
-                        'mime_type' => $latest['mime_type'],
-                        'storage_key' => $latest['storage_key'],
-                        'suggested_filename' =>
-                            $latest['suggested_filename'],
-                        'created' => false,
-                        'replayed' => true,
-                    ];
+                    $replayed = $this->revisionReplay($latest);
                     $this->exports->insertIdempotencyAlias(
                         $supplierId,
                         $batchId,
@@ -230,9 +314,9 @@ final class PayrollPaymentExportService
                         'payroll-payment-export-manifest.v1',
                     'batch_id' => $batchId,
                     'batch_reference' => $batch['batch_reference'],
-                    'export_format' => $batch['export_format'],
+                    'export_format' => $format,
                     'export_revision_no' => $revisionNo,
-                    'exporter_version' => self::EXPORTER_VERSION,
+                    'exporter_version' => $exporterVersion,
                     'source_snapshot_hash' => $batch['snapshot_hash'],
                     'declared_total_minor' =>
                         $batch['declared_total_minor'],
@@ -256,11 +340,11 @@ final class PayrollPaymentExportService
                 $exportId = $this->exports->insert(
                     $supplierId,
                     $batchId,
-                    $batch['export_format'],
+                    $format,
                     $revisionNo,
                     $supersedesId,
                     $batch['snapshot_hash'],
-                    self::EXPORTER_VERSION,
+                    $exporterVersion,
                     $stored['file_sha256'],
                     $stored['size_bytes'],
                     $prepared['mime_type'],
@@ -280,7 +364,7 @@ final class PayrollPaymentExportService
                 $result = [
                     'export_id' => $exportId,
                     'batch_id' => $batchId,
-                    'export_format' => $batch['export_format'],
+                    'export_format' => $format,
                     'export_revision_no' => $revisionNo,
                     'source_snapshot_hash' => $batch['snapshot_hash'],
                     'file_sha256' => $stored['file_sha256'],
@@ -338,8 +422,11 @@ final class PayrollPaymentExportService
      *   suggested_filename:string
      * }
      */
-    private function prepare(int $supplierId, array $batch): array
-    {
+    private function prepare(
+        int $supplierId,
+        array $batch,
+        string $format,
+    ): array {
         if ($batch['channel'] !== 'bank'
             || $batch['direction'] !== 'outgoing'
             || !in_array($batch['export_format'], ['abo', 'sepa'], true)
@@ -468,7 +555,23 @@ final class PayrollPaymentExportService
 
         $filenameBase = 'mzdy-platby-'
             . $batch['planned_payment_date'] . '-' . $batch['id'];
-        if ($batch['export_format'] === 'abo') {
+        if ($format === 'pdf') {
+            return [
+                'bytes' => $this->pdf->render($this->paymentOrderView(
+                    $batch,
+                    $payer,
+                    $instructions,
+                    $totalMinor,
+                    $this->exports->periodRangeForBatch(
+                        $supplierId,
+                        (int) $batch['id'],
+                    ),
+                )),
+                'mime_type' => 'application/pdf',
+                'suggested_filename' => $filenameBase . '-prikaz.pdf',
+            ];
+        }
+        if ($format === 'abo') {
             if ($batch['currency_code'] !== 'CZK') {
                 throw new \DomainException(
                     'ABO export vyžaduje měnu CZK.',
@@ -538,6 +641,211 @@ final class PayrollPaymentExportService
             'mime_type' => 'application/xml',
             'suggested_filename' => $filenameBase . '.xml',
         ];
+    }
+
+    /**
+     * Formát se volí až při generování, nedědí se jen z dávky: k jedné dávce
+     * patří soubor pro banku i tištěný doklad příkazu. Bez explicitní volby
+     * zůstává původní chování, tedy formát dávky.
+     *
+     * @param array{export_format:string} $batch
+     */
+    private function resolveFormat(array $batch, ?string $requested): string
+    {
+        if ($requested === null) {
+            return $batch['export_format'];
+        }
+        if ($requested !== 'pdf'
+            && $requested !== $batch['export_format']
+        ) {
+            throw new \DomainException(
+                'Soubor pro banku lze vytvořit jen ve formátu dávky.',
+            );
+        }
+
+        return $requested;
+    }
+
+    /**
+     * @param array{
+     *   export_id:int,
+     *   batch_id:int,
+     *   export_format:string,
+     *   export_revision_no:int,
+     *   source_snapshot_hash:string,
+     *   file_sha256:string,
+     *   size_bytes:int,
+     *   mime_type:string,
+     *   storage_key:string,
+     *   suggested_filename:string
+     * } $latest
+     * @return array{
+     *   export_id:int,
+     *   batch_id:int,
+     *   export_format:string,
+     *   export_revision_no:int,
+     *   source_snapshot_hash:string,
+     *   file_sha256:string,
+     *   size_bytes:int,
+     *   mime_type:string,
+     *   storage_key:string,
+     *   suggested_filename:string,
+     *   created:bool,
+     *   replayed:bool
+     * }
+     */
+    private function revisionReplay(array $latest): array
+    {
+        return [
+            'export_id' => $latest['export_id'],
+            'batch_id' => $latest['batch_id'],
+            'export_format' => $latest['export_format'],
+            'export_revision_no' => $latest['export_revision_no'],
+            'source_snapshot_hash' => $latest['source_snapshot_hash'],
+            'file_sha256' => $latest['file_sha256'],
+            'size_bytes' => $latest['size_bytes'],
+            'mime_type' => $latest['mime_type'],
+            'storage_key' => $latest['storage_key'],
+            'suggested_filename' => $latest['suggested_filename'],
+            'created' => false,
+            'replayed' => true,
+        ];
+    }
+
+    /**
+     * Podklad pro doklad hromadného příkazu. Čerpá z týchž rozšifrovaných
+     * instrukcí jako soubor pro banku, aby se papír a bankovní soubor nemohly
+     * rozejít.
+     *
+     * @param array{
+     *   batch_reference:string,
+     *   planned_payment_date:string,
+     *   currency_code:string
+     * } $batch
+     * @param array<string,mixed> $payer
+     * @param list<array<string,mixed>> $instructions
+     * @return array<string,mixed>
+     */
+    /**
+     * Popis období pro hlavičku dokladu, např. „8 / 2026" nebo
+     * „7/2026 - 8/2026" u dávky přes víc měsíců.
+     *
+     * Vrací `null`, když se období dohledat nedá (dávka bez závazků nebo
+     * závazky bez běhu). Vymýšlet ho z data splatnosti by bylo horší než
+     * ho nenapsat vůbec - splatnost je obvykle v jiném měsíci.
+     *
+     * @param array{first:string,last:string}|null $range
+     */
+    private function periodLabel(?array $range): ?string
+    {
+        if ($range === null) {
+            return null;
+        }
+        $first = $this->monthLabel($range['first']);
+        $last = $this->monthLabel($range['last']);
+        if ($first === null || $last === null) {
+            return null;
+        }
+
+        return $first === $last ? $first : $first . ' - ' . $last;
+    }
+
+    private function monthLabel(string $date): ?string
+    {
+        if (preg_match('#^(\d{4})-(\d{2})-\d{2}$#D', $date, $matches) !== 1) {
+            return null;
+        }
+
+        return ((int) $matches[2]) . ' / ' . $matches[1];
+    }
+
+    /** @param array{first:string,last:string}|null $periodRange */
+    private function paymentOrderView(
+        array $batch,
+        array $payer,
+        array $instructions,
+        int $totalMinor,
+        ?array $periodRange = null,
+    ): array {
+        $items = [];
+        foreach ($instructions as $instruction) {
+            $items[] = [
+                'payee_name' => $this->requiredString(
+                    $instruction,
+                    'recipient_name',
+                    'instrukci příjemce',
+                ),
+                'account_number' => $this->nullableString(
+                    $instruction,
+                    'account_number',
+                ),
+                'bank_code' => $this->nullableString(
+                    $instruction,
+                    'bank_code',
+                ),
+                'iban' => $this->nullableString($instruction, 'iban'),
+                'variable_symbol' => $this->nullableString(
+                    $instruction,
+                    'variable_symbol',
+                ),
+                'constant_symbol' => $this->nullableString(
+                    $instruction,
+                    'constant_symbol',
+                ),
+                'specific_symbol' => $this->nullableString(
+                    $instruction,
+                    'specific_symbol',
+                ),
+                'description' => $this->nullableString(
+                    $instruction,
+                    'payment_message',
+                ),
+                'amount' => $this->majorAmount(
+                    $this->amountMinor($instruction),
+                ),
+                'currency' => $batch['currency_code'],
+            ];
+        }
+
+        return [
+            'title' => 'Hromadný příkaz k úhradě',
+            'note' => 'Mzdové platby a odvody',
+            // Období je to podstatné: datum splatnosti bývá až v dalším
+            // měsíci a bez období není z dokladu poznat, za co se platí.
+            'period_label' => $this->periodLabel($periodRange),
+            'payment_date' => $batch['planned_payment_date'],
+            'supplier' => [
+                'company_name' => $this->requiredString(
+                    $payer,
+                    'account_holder_name',
+                    'instrukci účtu plátce',
+                ),
+            ],
+            'payer' => [
+                'account_number' => $this->nullableString(
+                    $payer,
+                    'account_number',
+                ),
+                'bank_code' => $this->nullableString($payer, 'bank_code'),
+                'iban' => $this->nullableString($payer, 'iban'),
+            ],
+            'items' => $items,
+            'total_amount' => $this->majorAmount($totalMinor),
+            'currency' => $batch['currency_code'],
+        ];
+    }
+
+    /**
+     * Haléře na koruny jako přesný desetinný text — přes float by se u velkých
+     * mzdových dávek dala ztratit koruna.
+     */
+    private function majorAmount(int $amountMinor): string
+    {
+        return sprintf(
+            '%d.%02d',
+            intdiv($amountMinor, 100),
+            $amountMinor % 100,
+        );
     }
 
     private function cleanupCreatedStorage(

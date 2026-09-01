@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\Export\PayrollPeriodExportScope;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportService;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportQueueService;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportStorage;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentExportStorage;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -83,6 +84,7 @@ final class PayrollPeriodExportServiceTest extends TestCase
             new PayrollPeriodExportArchiveBuilder(),
             $this->storage,
             $documentStorage,
+            new PayrollPaymentExportStorage($secretEncryption),
             $submissionService,
             $secretEncryption,
             $sensitiveData,
@@ -550,6 +552,71 @@ final class PayrollPeriodExportServiceTest extends TestCase
         self::assertSame(5, $this->countRows(
             'payroll_period_export_job_parts WHERE job_id = ' . (int) $queued['id'] . ' AND status = "completed"',
         ));
+    }
+
+    /**
+     * Průběh pro polling: dokud plán částí neexistuje, celkový počet je
+     * NEZNÁMÝ (null), ne odhadnutá nula. Jakmile plán vznikne, počítá se
+     * z reálných částí — a `drain()` doveze job až do konce, ne po jedné části.
+     */
+    public function testJobProgressStaysUnknownUntilPartsArePlannedAndThenCountsThem(): void
+    {
+        $this->requirePartsMigration();
+        [$runId, $revisionId, $employeeIds, $revisionHash] = $this->approvedRevision(2);
+        foreach ($employeeIds as $index => $employeeId) {
+            $this->archiveDocument(
+                $runId,
+                $revisionId,
+                $employeeId,
+                $revisionHash,
+                '%PDF-1.4 synthetic progress part ' . $index,
+                'progress-part-' . $index,
+            );
+        }
+        $queued = $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
+        $jobId = (int) $queued['id'];
+
+        $unplanned = $this->queue->progress($this->supplierId, $jobId);
+        self::assertFalse($unplanned['planned']);
+        self::assertNull(
+            $unplanned['total'],
+            'Bez plánu částí se celkový počet nevymýšlí.',
+        );
+        self::assertSame(0, $unplanned['completed']);
+        self::assertSame(0, $unplanned['failed']);
+        self::assertNull($unplanned['current_part_kind']);
+
+        self::assertSame(
+            ['processed' => 1, 'succeeded' => 1, 'failed' => 0],
+            $this->queue->processAvailable(),
+        );
+        $planned = $this->queue->progress($this->supplierId, $jobId);
+        self::assertTrue($planned['planned']);
+        self::assertSame(3, $planned['total'], 'Dvě pásky a závěrečný archiv.');
+        self::assertSame(1, $planned['completed']);
+        self::assertSame(0, $planned['failed']);
+        self::assertSame(2, $planned['pending']);
+        self::assertNotNull($planned['current_part_kind']);
+
+        $drained = $this->queue->drain($this->supplierId, $jobId);
+        self::assertSame('job_finished', $drained['stopped']);
+        self::assertSame(2, $drained['processed']);
+        self::assertSame(2, $drained['succeeded']);
+
+        $done = $this->queue->progress($this->supplierId, $jobId);
+        self::assertSame(3, $done['total']);
+        self::assertSame(3, $done['completed']);
+        self::assertSame(0, $done['pending']);
+        self::assertNull($done['current_part_kind']);
+        $completed = $this->queue->detail($this->supplierId, $jobId);
+        self::assertIsArray($completed);
+        self::assertSame('completed', $completed['status']);
+        self::assertSame(
+            ['planned' => false, 'total' => null, 'completed' => 0, 'failed' => 0,
+                'pending' => 0, 'current_part_kind' => null],
+            $this->queue->progress($this->otherSupplierId, $jobId),
+            'Průběh cizího jobu se nesmí prolít do jiné firmy.',
+        );
     }
 
     public function testPartBackoffDoesNotConsumeParentFailureBudget(): void

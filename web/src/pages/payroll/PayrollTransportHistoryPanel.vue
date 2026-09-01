@@ -884,6 +884,21 @@ async function close(attempt: PayrollJmhzTransportAttempt) {
   }
 }
 
+/*
+ * Přepnutí prostředí je jiný seznam, ne jiný pohled na týž.
+ * Bez tohohle sledování zůstala na obrazovce data z prostředí, ze kterého se
+ * odcházelo — a protože v tom druhém typicky nic není, prázdný stav tvrdil
+ * „zatím nebylo nic odesláno" nad prostředím, kam se právě odeslalo. Uživatel
+ * to poznal jedině tím, že sám klikl na Obnovit. Stránkování se resetuje spolu
+ * s tím: offset patřil k jinému seznamu.
+ */
+watch(environment, () => {
+  attemptsOffset.value = 0
+  importedOffset.value = 0
+  void load()
+  void loadVariableSymbols()
+})
+
 onMounted(load)
 onMounted(loadVariableSymbols)
 </script>

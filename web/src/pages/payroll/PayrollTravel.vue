@@ -8,7 +8,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
-import { localPayrollPeriod } from './payrollComponentsUi'
+import { payrollWorkingPeriod } from './payrollComponentsUi'
 import { payrollWallTimeToIso } from './payrollTime'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
@@ -81,7 +81,7 @@ const pageSize = 20
 const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const employments = ref<PayrollAbsenceEmployment[]>([])
-const period = ref(localPayrollPeriod())
+const period = ref(payrollWorkingPeriod())
 const editorOpen = ref(false)
 const editingTrip = ref<TravelTrip | null>(null)
 const formError = ref('')

@@ -18,10 +18,13 @@ const m = vi.hoisted(() => ({
   error: vi.fn(),
   total: vi.fn(),
   push: vi.fn(),
+  replace: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: m.push }),
+  useRouter: () => ({ push: m.push, replace: m.replace }),
+  // Období si stránka drží v URL, ať přežije obnovení i sdílený odkaz.
+  useRoute: () => ({ query: {} }),
 }))
 
 vi.mock('@/api/payroll', () => ({

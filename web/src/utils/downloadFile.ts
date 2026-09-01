@@ -23,9 +23,28 @@ function saveBlob(data: Blob, disposition: string | undefined, fallback: string)
   URL.revokeObjectURL(objectUrl)
 }
 
+/**
+ * Chybová odpověď na stahování přijde jako JSON, ale `responseType: 'blob'`
+ * z ní udělá Blob a interceptorům i obrazovkám zbude prázdná hláška. Rozbalí
+ * se proto zpátky do objektu, aby se uživatel dozvěděl skutečný důvod.
+ */
+async function unwrapBlobError(error: any): Promise<never> {
+  const data = error?.response?.data
+  if (data instanceof Blob) {
+    try {
+      error.response.data = JSON.parse(await data.text())
+    } catch {
+      // Neparsovatelné tělo necháváme být — původní chyba je pořád lepší
+      // než chyba z parsování.
+    }
+  }
+  throw error
+}
+
 export async function downloadApiFile(url: string, fallbackFilename = 'export.xml'): Promise<void> {
   const requestUrl = url.startsWith('/api/') ? url.slice(4) : url
   const response = await api.get<Blob>(requestUrl, { responseType: 'blob' })
+    .catch(unwrapBlobError)
   saveBlob(response.data, response.headers['content-disposition'], fallbackFilename)
 }
 
@@ -40,5 +59,6 @@ export async function downloadApiFilePost(
 ): Promise<void> {
   const requestUrl = url.startsWith('/api/') ? url.slice(4) : url
   const response = await api.post<Blob>(requestUrl, payload, { responseType: 'blob' })
+    .catch(unwrapBlobError)
   saveBlob(response.data, response.headers['content-disposition'], fallbackFilename)
 }

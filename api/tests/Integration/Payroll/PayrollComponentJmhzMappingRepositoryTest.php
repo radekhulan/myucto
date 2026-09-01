@@ -226,18 +226,24 @@ final class PayrollComponentJmhzMappingRepositoryTest extends TestCase
         self::assertGreaterThanOrEqual(20, count($states));
         self::assertContains('missing', array_column($states, 'status'));
 
+        // ODMENA má výchozí zařazení, takže ji `list()` předvyplní; lifecycle se
+        // proto zkouší na složce, která default záměrně nemá.
+        $componentId = PayrollTimeValue::int(
+            $this->componentByCode('PROVIZE')['id'] ?? null,
+            'component_id',
+        );
         $missingResponse = $this->action->get(
-            $this->request('GET', "/api/payroll/components/{$this->componentId}/jmhz-mapping"),
+            $this->request('GET', "/api/payroll/components/{$componentId}/jmhz-mapping"),
             new Response(),
-            ['id' => (string) $this->componentId],
+            ['id' => (string) $componentId],
         );
         self::assertSame('missing', $this->json($missingResponse)['status']);
 
         $saveResponse = $this->action->put(
-            $this->request('PUT', "/api/payroll/components/{$this->componentId}/jmhz-mapping")
+            $this->request('PUT', "/api/payroll/components/{$componentId}/jmhz-mapping")
                 ->withParsedBody(['target_attribute_id' => '10330']),
             new Response(),
-            ['id' => (string) $this->componentId],
+            ['id' => (string) $componentId],
         );
         self::assertSame(200, $saveResponse->getStatusCode(), (string) $saveResponse->getBody());
         $saved = $this->json($saveResponse);
@@ -246,25 +252,25 @@ final class PayrollComponentJmhzMappingRepositoryTest extends TestCase
         self::assertSame(1, $mapping['row_version']);
 
         $conflictResponse = $this->action->put(
-            $this->request('PUT', "/api/payroll/components/{$this->componentId}/jmhz-mapping")
+            $this->request('PUT', "/api/payroll/components/{$componentId}/jmhz-mapping")
                 ->withParsedBody(['target_attribute_id' => '10331']),
             new Response(),
-            ['id' => (string) $this->componentId],
+            ['id' => (string) $componentId],
         );
         self::assertSame(409, $conflictResponse->getStatusCode());
 
         $removeResponse = $this->action->remove(
-            $this->request('DELETE', "/api/payroll/components/{$this->componentId}/jmhz-mapping")
+            $this->request('DELETE', "/api/payroll/components/{$componentId}/jmhz-mapping")
                 ->withParsedBody(['row_version' => 1]),
             new Response(),
-            ['id' => (string) $this->componentId],
+            ['id' => (string) $componentId],
         );
         self::assertSame(204, $removeResponse->getStatusCode());
 
         $after = $this->action->get(
-            $this->request('GET', "/api/payroll/components/{$this->componentId}/jmhz-mapping"),
+            $this->request('GET', "/api/payroll/components/{$componentId}/jmhz-mapping"),
             new Response(),
-            ['id' => (string) $this->componentId],
+            ['id' => (string) $componentId],
         );
         $afterBody = $this->json($after);
         self::assertSame('missing', $afterBody['status']);

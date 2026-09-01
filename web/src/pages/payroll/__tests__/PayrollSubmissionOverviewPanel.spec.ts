@@ -108,7 +108,7 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     vi.useRealTimers()
   })
 
-  it('vrátí ve 00:30 prvního dne v měsíci aktuální měsíc, ne předchozí', async () => {
+  it('vrátí ve 00:30 prvního dne v měsíci zpracovávaný měsíc podle místního času', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 7, 1, 0, 30))
 
@@ -121,8 +121,10 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
 
     const period = wrapper.get('[data-test="submission-overview-period"]')
       .element as HTMLInputElement
-    expect(period.value).toBe('2026-08')
-    expect(period.value).not.toBe('2026-07')
+    // Zpracovává se předchozí měsíc; hlídá se, že se počítá z MÍSTNÍHO data.
+    // V UTC je v tu chvíli ještě 31. 7., což by posunulo období o měsíc zpět.
+    expect(period.value).toBe('2026-07')
+    expect(period.value).not.toBe('2026-06')
   })
 
   it('drží místní datum i o půlnoci na Nový rok', async () => {
@@ -138,7 +140,7 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
 
     const period = wrapper.get('[data-test="submission-overview-period"]')
       .element as HTMLInputElement
-    expect(period.value).toBe('2027-01')
+    expect(period.value).toBe('2026-12')
   })
 
   it('pro VZP připraví a stáhne PDF artefakt místo interního JSON', async () => {
