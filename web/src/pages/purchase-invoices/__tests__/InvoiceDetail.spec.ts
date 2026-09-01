@@ -215,6 +215,15 @@ describe('InvoiceDetail.vue — bankovní úhrady', () => {
     expect(bankLinks(wrapper)).toHaveLength(0)
   })
 
+  it('inkaso ukáže způsob úhrady bez nadbytečného vysvětlení', async () => {
+    m.get.mockResolvedValue(makeInvoice({ payment_method: 'direct_debit' }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('payment_method.direct_debit')
+    expect(wrapper.text()).not.toContain('payment_method.non_transfer_tooltip')
+  })
+
   it('bankovní úhrada → proklik i na zaúčtování úhrady (deník s entry_id)', async () => {
     m.get.mockResolvedValue(
       makeInvoice({

@@ -1019,7 +1019,6 @@ const purchaseActions = computed<ActionItem[]>(() => {
               <span v-else>{{ t('payment_method.bank_transfer') }}</span>
             </dd>
           </div>
-          <p v-if="isNonTransferPayment" class="text-xs text-neutral-500">{{ t('payment_method.non_transfer_tooltip') }}</p>
         </dl>
         <button v-if="canPayWithQr" type="button" @click="openQr"
           class="mt-3 cursor-pointer text-sm text-primary-700 hover:underline inline-flex items-center gap-1.5">
@@ -1028,16 +1027,11 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </button>
       </div>
 
-      <!-- Daňové zařazení — všechno, co jde nastavit v editoru, musí být vidět i tady.
-           Dřív byla část těchhle polí schovaná v kartě Měna a část (typ majetku,
-           klasifikace plnění, plátcovství dodavatele) nebyla v detailu vůbec. -->
+      <!-- Daňové zařazení — rychlý přehled údajů, které přímo rozhodují o DPH.
+           Účetní klasifikace dokladu je ve sbalené sekci Zaúčtování níže. -->
       <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.classification.section') }}</h3>
         <dl class="space-y-2 text-sm">
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.fields.document_kind') }}</dt>
-            <dd class="font-medium text-right text-neutral-700">{{ t('purchase_invoice.document_kind.' + (invoice.document_kind || 'invoice')) }}</dd>
-          </div>
           <div class="flex justify-between gap-3">
             <dt class="text-neutral-500">{{ t('purchase_invoice.fields.reverse_charge') }}</dt>
             <dd class="font-medium text-right" :class="invoice.reverse_charge ? 'text-warning-600' : 'text-neutral-700'">
@@ -1051,51 +1045,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
             </dd>
           </div>
           <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_classification') }}</dt>
-            <dd class="font-medium text-right text-neutral-700">
-              <template v-if="invoice.vat_classification_code">
-                <span class="font-mono">{{ invoice.vat_classification_code }}</span>
-                <span v-if="vatClassificationLabel" class="ml-1 text-neutral-400">{{ vatClassificationLabel }}</span>
-              </template>
-              <span v-else class="text-neutral-400">—</span>
-            </dd>
-          </div>
-          <div class="flex justify-between gap-3">
             <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_deduction') }}</dt>
             <dd class="font-medium text-right" :class="invoice.vat_deduction === 'none' ? 'text-danger-600' : (invoice.vat_deduction === 'proportional' ? 'text-warning-600' : 'text-neutral-700')">
               {{ t('purchase_invoice.vat_deduction.' + (invoice.vat_deduction || 'full')) }}<span v-if="invoice.vat_deduction === 'proportional'"> ({{ invoice.vat_deduction_percent }} %)</span>
-            </dd>
-          </div>
-          <div class="flex justify-between gap-3 pt-2 border-t border-neutral-100">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.tax_deductible') }}</dt>
-            <dd class="font-medium text-right" :class="invoice.tax_deductible === false ? 'text-danger-600' : 'text-success-600'">
-              {{ invoice.tax_deductible === false ? t('common.no') : t('common.yes') }}
-            </dd>
-          </div>
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.fields.is_fixed_asset') }}</dt>
-            <dd class="font-medium text-right" :class="invoice.is_fixed_asset ? 'text-warning-600' : 'text-neutral-700'">
-              {{ invoice.is_fixed_asset ? t('common.yes') : t('common.no') }}
-            </dd>
-          </div>
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.expense_category') }}</dt>
-            <dd class="font-medium text-right text-neutral-700">
-              <template v-if="invoice.expense_category_label">
-                {{ invoice.expense_category_label }}
-                <span class="text-neutral-400">({{ invoice.expense_category_code }})</span>
-              </template>
-              <span v-else class="text-neutral-400">—</span>
-            </dd>
-          </div>
-          <!-- Zakázka (issue #29) — proklik na ekonomiku akce (výnos/náklad/marže). -->
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.project') }}</dt>
-            <dd class="font-medium text-right text-neutral-700">
-              <RouterLink v-if="invoice.project_id" :to="`/projects/${invoice.project_id}`" class="text-primary-600 hover:underline">
-                {{ invoice.project_name }}
-              </RouterLink>
-              <span v-else class="text-neutral-400">—</span>
             </dd>
           </div>
         </dl>
@@ -1113,8 +1065,58 @@ const purchaseActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
-    <!-- Zaúčtování — sbalené, načítá se na pozadí a zobrazí se jen u zaúčtovaného dokladu. -->
-    <DocumentPostingPanel source="purchase-invoices" :doc-id="invoice.id" />
+    <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
+         samotná kontace se dál načítá na pozadí. -->
+    <DocumentPostingPanel source="purchase-invoices" :doc-id="invoice.id" always-visible>
+      <dl class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-3 text-sm">
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('purchase_invoice.fields.document_kind') }}</dt>
+          <dd class="font-medium text-right text-neutral-700">{{ t('purchase_invoice.document_kind.' + (invoice.document_kind || 'invoice')) }}</dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_classification') }}</dt>
+          <dd class="font-medium text-right text-neutral-700">
+            <template v-if="invoice.vat_classification_code">
+              <span class="font-mono">{{ invoice.vat_classification_code }}</span>
+              <span v-if="vatClassificationLabel" class="ml-1 text-neutral-400">{{ vatClassificationLabel }}</span>
+            </template>
+            <span v-else class="text-neutral-400">—</span>
+          </dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('purchase_invoice.classification.tax_deductible') }}</dt>
+          <dd class="font-medium text-right" :class="invoice.tax_deductible === false ? 'text-danger-600' : 'text-success-600'">
+            {{ invoice.tax_deductible === false ? t('common.no') : t('common.yes') }}
+          </dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('purchase_invoice.fields.is_fixed_asset') }}</dt>
+          <dd class="font-medium text-right" :class="invoice.is_fixed_asset ? 'text-warning-600' : 'text-neutral-700'">
+            {{ invoice.is_fixed_asset ? t('common.yes') : t('common.no') }}
+          </dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('purchase_invoice.classification.expense_category') }}</dt>
+          <dd class="font-medium text-right text-neutral-700">
+            <template v-if="invoice.expense_category_label">
+              {{ invoice.expense_category_label }}
+              <span class="text-neutral-400">({{ invoice.expense_category_code }})</span>
+            </template>
+            <span v-else class="text-neutral-400">—</span>
+          </dd>
+        </div>
+        <!-- Zakázka (issue #29) — proklik na ekonomiku akce (výnos/náklad/marže). -->
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('purchase_invoice.classification.project') }}</dt>
+          <dd class="font-medium text-right text-neutral-700">
+            <RouterLink v-if="invoice.project_id" :to="`/projects/${invoice.project_id}`" class="text-primary-600 hover:underline">
+              {{ invoice.project_name }}
+            </RouterLink>
+            <span v-else class="text-neutral-400">—</span>
+          </dd>
+        </div>
+      </dl>
+    </DocumentPostingPanel>
 
     <!-- ═══ Položky ═══ -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

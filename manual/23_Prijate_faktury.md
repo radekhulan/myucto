@@ -466,10 +466,12 @@ faktury platí zrcadlově.
 Po uložení / přechodu na detail:
 
 - Vidíš dodavatele (s IČO/DIČ), datumy, položky, DPH rozpis, totály, K úhradě.
-- Karta **Daňové zařazení** shrnuje všechno, co jde nastavit v editoru: typ dokladu,
-  reverse charge, plátcovství dodavatele, VAT klasifikaci (kód i popis), nárok na
-  odpočet včetně procenta u kráceného, daňovou uznatelnost, dlouhodobý majetek
-  a kategorii nákladu. Ceny včetně DPH najdeš v kartě Měna, u data přijetí je
+- Karta **Daňové zařazení** nabízí rychlý přehled údajů přímo rozhodujících o DPH:
+  reverse charge, plátcovství dodavatele a nárok na odpočet včetně procenta u
+  kráceného. Typ dokladu, VAT klasifikaci (kód i popis), daňovou uznatelnost,
+  dlouhodobý majetek, kategorii nákladu a zakázku najdeš ve sbalené sekci
+  **Zaúčtování** spolu s kontací dokladu. Tato klasifikace je dostupná i před vznikem účetního zápisu.
+  Ceny včetně DPH najdeš v kartě Měna, u data přijetí je
   označené, jestli pochází z importu, nebo ho zadala účetní (viz [§ 23.2.4](#2324-danova-uznatelnost-a-narok-na-odpocet)).
 - U položek je vidět **druh nákladu** (služba / materiál / drobný nebo dlouhodobý
   majetek), jejich vlastní VAT klasifikace a období časového rozlišení.
