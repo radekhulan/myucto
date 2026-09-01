@@ -189,6 +189,40 @@ final class CrmPayableDdkpExclusionTest extends TestCase
         );
     }
 
+    public function testConfirmedAccountSettlementRemovesPurchaseFromPayableReads(): void
+    {
+        $overdue = (new \DateTimeImmutable('today'))->modify('-30 days')->format('Y-m-d');
+        $agingBefore = $this->agingTotal();
+        $actionBefore = $this->overduePayablesCount();
+        $snapshotBefore = count($this->invokeSnapshot('overdue_payables'));
+
+        $purchaseId = $this->purchase('invoice', $overdue, 199.0);
+        self::assertEqualsWithDelta($agingBefore + 199.0, $this->agingTotal(), 0.01);
+        self::assertSame($actionBefore + 1, $this->overduePayablesCount());
+        self::assertSame($snapshotBefore + 1, count($this->invokeSnapshot('overdue_payables')));
+
+        $this->settlePurchase($purchaseId, 199.0);
+        self::assertEqualsWithDelta($agingBefore, $this->agingTotal(), 0.01,
+            'Plně vyrovnaná přijatá faktura nesmí zůstat v aging závazků.');
+        self::assertSame($actionBefore, $this->overduePayablesCount(),
+            'Plně vyrovnaná přijatá faktura nesmí zůstat v „Zaplať dodavatelům".');
+        self::assertSame($snapshotBefore, count($this->invokeSnapshot('overdue_payables')),
+            'Snapshot skrytých akcí musí používat stejný zbytek jako živý widget.');
+
+        $future = (new \DateTimeImmutable('today'))->modify('+2 days')->format('Y-m-d');
+        $cashflowBefore = (float) $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK')['total_out'];
+        $futureId = $this->purchase('invoice', $future, 365.0);
+        self::assertEqualsWithDelta(
+            $cashflowBefore + 365.0,
+            (float) $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK')['total_out'],
+            0.01,
+        );
+        $this->settlePurchase($futureId, 365.0);
+        self::assertEqualsWithDelta($cashflowBefore,
+            (float) $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK')['total_out'], 0.01,
+            'Plně vyrovnaná faktura nesmí vytvářet budoucí odtok cashflow.');
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────
 
     private function agingTotal(): float
@@ -258,5 +292,20 @@ final class CrmPayableDdkpExclusionTest extends TestCase
             $net, round($gross - $net, 2), $gross, $this->userId,
         ]);
         return (int) $this->pdo->lastInsertId();
+    }
+
+    private function settlePurchase(int $purchaseId, float $amount): void
+    {
+        $accountId = (int) ($this->pdo->query(
+            "SELECT id FROM chart_of_accounts
+              WHERE supplier_id = {$this->supplierId} AND account_code LIKE '365%'
+              ORDER BY id LIMIT 1"
+        )->fetchColumn() ?: 0);
+        self::assertGreaterThan(0, $accountId, 'Test vyžaduje účet 365.');
+        $this->pdo->prepare(
+            "INSERT INTO invoice_settlements
+                (supplier_id, doc_type, doc_id, settled_on, amount, account_id, status, created_by)
+             VALUES (?, 'purchase_invoice', ?, CURDATE(), ?, ?, 'confirmed', ?)"
+        )->execute([$this->supplierId, $purchaseId, $amount, $accountId, $this->userId]);
     }
 }

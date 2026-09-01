@@ -14,6 +14,7 @@ use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
@@ -215,7 +216,52 @@ final class StatementMatcher
 
     public function match(int $transactionId): array
     {
-        $result = $this->doMatch($transactionId);
+        return $this->afterMatch($transactionId, $this->doMatch($transactionId, false));
+    }
+
+    /**
+     * Spáruje dávku ve dvou průchodech. Nejdřív proběhnou u všech pohybů silné
+     * deterministické shody a skórované návrhy, teprve potom přesná shoda
+     * částka+datum u dosud volných odchozích plateb bez VS.
+     *
+     * @param list<int> $transactionIds
+     * @return array<int,array<string,mixed>> Výsledky indexované ID transakce
+     */
+    public function matchBatch(array $transactionIds): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $transactionIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        $results = [];
+        foreach ($ids as $transactionId) {
+            $results[$transactionId] = $this->doMatch($transactionId, false);
+        }
+        foreach ($ids as $transactionId) {
+            $results[$transactionId] = $this->afterMatch($transactionId, $results[$transactionId]);
+        }
+        foreach ($ids as $transactionId) {
+            if (($results[$transactionId]['status'] ?? 'unmatched') !== 'unmatched') {
+                continue;
+            }
+            $fallback = $this->doMatch($transactionId, true);
+            if (($fallback['status'] ?? 'unmatched') !== 'unmatched') {
+                $results[$transactionId] = $this->afterMatch($transactionId, $fallback);
+            } elseif (!empty($fallback['requires_review'])) {
+                $results[$transactionId] = $fallback + array_intersect_key(
+                    $results[$transactionId],
+                    ['match_suggestion_id' => true],
+                );
+            } elseif (!isset($results[$transactionId]['match_suggestion_id'])) {
+                $results[$transactionId] = $fallback;
+            }
+        }
+        return $results;
+    }
+
+    /** @return array<string,mixed> */
+    private function afterMatch(int $transactionId, array $result): array
+    {
         if ($this->matchV2 === null) return $result;
         try {
             return $this->matchV2->afterMatch($transactionId, $result);
@@ -225,7 +271,7 @@ final class StatementMatcher
     }
 
     /** @return array<string,mixed> */
-    private function doMatch(int $transactionId): array
+    private function doMatch(int $transactionId, bool $allowAmountDateFallback): array
     {
         $pdo = $this->db->pdo();
         $tx = $pdo->prepare(
@@ -239,6 +285,25 @@ final class StatementMatcher
         $row = $tx->fetch(PDO::FETCH_ASSOC);
         if (!$row) {
             return ['status' => 'unmatched', 'reason' => 'transaction_not_found'];
+        }
+        $storedStatus = (string) ($row['match_status'] ?? 'unmatched');
+        if (in_array($storedStatus, ['auto_exact', 'manual', 'ignored'], true)) {
+            $result = ['status' => $storedStatus, 'already_recorded' => true];
+            if (!empty($row['matched_invoice_id'])) {
+                $result['invoice_id'] = (int) $row['matched_invoice_id'];
+            } else {
+                $purchase = $pdo->prepare(
+                    'SELECT purchase_invoice_id FROM payment_matches
+                      WHERE bank_transaction_id = ? AND purchase_invoice_id IS NOT NULL
+                      ORDER BY id LIMIT 1'
+                );
+                $purchase->execute([$transactionId]);
+                $purchaseId = $purchase->fetchColumn();
+                if ($purchaseId !== false) {
+                    $result['purchase_invoice_id'] = (int) $purchaseId;
+                }
+            }
+            return $result;
         }
         // Pohyb, který už spotřebovala mzdová platba, není volný — druhé
         // přiřazení k faktuře by tutéž korunu použilo dvakrát. Důvod
@@ -329,16 +394,28 @@ final class StatementMatcher
             // 2) karetní platby (bez VS) / VS bez shody → fuzzy dle částky + podobného
             //    názvu protistrany (u karet je název obchodníka odlišný od jména dodavatele).
             $res = $this->matchPurchaseFuzzy($pdo, $supplierId, abs($amount), (string) ($row['counterparty_name'] ?? ''), (string) $row['posted_at'], $transactionId, $txCurrency);
-            if (($res['status'] ?? 'unmatched') !== 'unmatched' || !empty($res['requires_review'])) {
+            $fuzzyReview = !empty($res['requires_review']) ? $res : null;
+            if (($res['status'] ?? 'unmatched') !== 'unmatched'
+                || ($fuzzyReview !== null && (!$allowAmountDateFallback || !empty($vs)))) {
                 return $res;
             }
-            // 3) poslední záchrana: shoda dle ČÁSTKY + DATA (±14 dní), stejně jako ruční
-            //    nabídka kandidátů (matchCandidates) — VČETNĚ zaplacených faktur a bez ohledu
-            //    na VS/název. Fuzzy nad tímto nestačí: vynechává paid (uživatel značí faktury
-            //    paid hned) a je moc přísný (0,05 Kč, shoda názvu), takže karetní/bez-VS platby
-            //    se automaticky nikdy nespárovaly, i když ručně se kandidát nabídl. Bezpečnost
-            //    drží pravidlo „právě jeden kandidát".
-            return $this->matchPurchaseByAmountDate($pdo, $supplierId, abs($amount), (string) $row['posted_at'], $transactionId, $txCurrency);
+            if (!$allowAmountDateFallback || !empty($vs)) {
+                return $res;
+            }
+            $fallback = $this->matchPurchaseByAmountDate(
+                $pdo,
+                $supplierId,
+                abs($amount),
+                (string) $row['posted_at'],
+                $transactionId,
+                $txCurrency,
+                (int) $row['statement_id'],
+                (string) ($row['counterparty_name'] ?? ''),
+            );
+            if (($fallback['status'] ?? 'unmatched') !== 'unmatched' || !empty($fallback['requires_review'])) {
+                return $fallback;
+            }
+            return $fuzzyReview ?? $fallback;
         }
 
         // Příchozí platby stále vyžadují VS (vystavené faktury se párují na náš VS).
@@ -678,8 +755,10 @@ final class StatementMatcher
         // Přesná shoda na náš VS i VS dodavatele + numerická shoda po normalizaci
         // (číslo dokladu s pomlčkou „PF-2026-0001" × jen-číslice z banky). Viz match().
         $vsDigits = VariableSymbolNormalizer::digits($vs);
+        $settled = PurchaseSettledExpr::settled('pi');
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number,
                        COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) AS amount_to_pay,
+                       ({$settled}) AS settled_amount,
                        pi.exchange_rate, pi.status, cur.code AS currency,
                        CASE WHEN pi.varsymbol = ? OR pi.vendor_invoice_number = ? THEN 2 ELSE 1 END AS vs_match_rank
                   FROM purchase_invoices pi
@@ -708,13 +787,24 @@ final class StatementMatcher
             return ['status' => 'unmatched', 'reason' => 'no_purchase_with_vs', 'tx_currency' => $txCurrency];
         }
 
-        $m = $this->expectedMatch((float) $pi['amount_to_pay'], (string) ($pi['currency'] ?? self::LOCAL_CURRENCY), (float) ($pi['exchange_rate'] ?: 0), $txCurrency);
+        $alreadyPaid = ($pi['status'] === 'paid');
+        $settledAmount = round((float) ($pi['settled_amount'] ?? 0.0), 2);
+        $remaining = round((float) $pi['amount_to_pay'] - $settledAmount, 2);
+        if (!$alreadyPaid && $remaining <= 0.005) {
+            return [
+                'status' => 'unmatched',
+                'reason' => 'already_paid_verify',
+                'requires_review' => true,
+                'purchase_invoice_id' => (int) $pi['id'],
+            ];
+        }
+        $compareAmount = $alreadyPaid ? (float) $pi['amount_to_pay'] : $remaining;
+        $m = $this->expectedMatch($compareAmount, (string) ($pi['currency'] ?? self::LOCAL_CURRENCY), (float) ($pi['exchange_rate'] ?: 0), $txCurrency);
         if ($m === null) {
             return ['status' => 'unmatched', 'reason' => 'currency_mismatch_purchase',
                     'tx_currency' => $txCurrency, 'invoice_currency' => $pi['currency']];
         }
 
-        $alreadyPaid = ($pi['status'] === 'paid');
         $diff = abs($absAmount - $m['expected']);
         if ($diff <= $m['exact']) {
             if ($alreadyPaid) {
@@ -826,7 +916,9 @@ final class StatementMatcher
     {
         // Měnu nefiltrujeme v SQL — částku porovnáváme přes expectedMatch (cizoměnová
         // faktura placená kartou z CZK účtu se přepočte kurzem faktury).
+        $settled = PurchaseSettledExpr::settled('pi');
         $sql = "SELECT pi.id, COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) AS amount_to_pay,
+                       ({$settled}) AS settled_amount,
                        pi.exchange_rate, c.company_name AS vendor_name, cur.code AS currency
                   FROM purchase_invoices pi
                   JOIN clients c ON c.id = pi.vendor_id
@@ -839,7 +931,11 @@ final class StatementMatcher
 
         $similar = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $m = $this->expectedMatch((float) $r['amount_to_pay'], (string) ($r['currency'] ?? self::LOCAL_CURRENCY), (float) ($r['exchange_rate'] ?: 0), $txCurrency);
+            $remaining = round((float) $r['amount_to_pay'] - (float) ($r['settled_amount'] ?? 0.0), 2);
+            if ($remaining <= 0.005) {
+                continue;
+            }
+            $m = $this->expectedMatch($remaining, (string) ($r['currency'] ?? self::LOCAL_CURRENCY), (float) ($r['exchange_rate'] ?: 0), $txCurrency);
             if ($m === null || abs($absAmount - $m['expected']) > $m['exact']) {
                 continue; // částka (po přepočtu) musí sedět
             }
@@ -865,55 +961,153 @@ final class StatementMatcher
     private const AMOUNT_DATE_DAY_WINDOW = 14;
 
     /**
-     * Poslední záchrana pro ODCHOZÍ platbu bez shody VS i názvu: napáruj přijatou fakturu
-     * dle ČÁSTKY (v toleranci expectedMatch — ±1 Kč, resp. 4 % u cizí měny) + DATA (±14 dní
-     * kolem posted_at), stejně jako ruční nabídka kandidátů (matchCandidates).
-     *
-     * Oproti fuzzy: (1) zahrnuje i ZAPLACENÉ faktury (uživatel je typicky značí paid hned,
-     * takže by jinak nikdy neprošly), (2) nevyžaduje shodu názvu, (3) volnější tolerance.
-     * Bezpečnost drží pravidlo „PRÁVĚ JEDEN kandidát": při 0 nebo 2+ shodách necháme
-     * unmatched (radši ručně než špatně). Faktury, které už mají párování (payment_matches),
-     * se vylučují, ať se druhá platba nenaváže na už vyrovnanou fakturu.
-     *
-     * Zapisujeme jako auto_partial (confidence 65) — bez VS/názvu jde o slabší důkaz, ať
-     * to uživatel v UI vidí jako „ke kontrole". Nezaplacenou fakturu překlopí na paid.
+     * Druhý průchod pro odchozí platbu bez VS. Automatická shoda vyžaduje přesnou
+     * částku i měnu, jediný volný doklad v okně ±14 dní a jediný dosud nespárovaný
+     * pohyb dané částky na výpisu. Ručně zaplacený doklad navíc musí mít stejné
+     * datum úhrady a společný významný token názvu dodavatele a obchodníka.
      */
-    private function matchPurchaseByAmountDate(\PDO $pdo, int $supplierId, float $absAmount, string $postedAt, int $transactionId, ?string $txCurrency): array
-    {
-        $win = self::AMOUNT_DATE_DAY_WINDOW;
-        $sql = "SELECT pi.id, pi.status,
-                       COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) AS amount_to_pay,
-                       pi.exchange_rate, cur.code AS currency
-                  FROM purchase_invoices pi
-             LEFT JOIN currencies cur ON cur.id = pi.currency_id
-                 WHERE pi.supplier_id = ?
-                   AND pi.status IN ('received', 'booked', 'paid')
-                   AND pi.document_kind <> 'tax_document' -- DDKP není platební cíl (viz matchPurchase)
-                   AND (ABS(DATEDIFF(pi.due_date, ?)) <= ? OR ABS(DATEDIFF(pi.issue_date, ?)) <= ?)
-                   AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.purchase_invoice_id = pi.id)";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$supplierId, $postedAt, $win, $postedAt, $win]);
+    private function matchPurchaseByAmountDate(
+        \PDO $pdo,
+        int $supplierId,
+        float $absAmount,
+        string $postedAt,
+        int $transactionId,
+        ?string $txCurrency,
+        int $statementId,
+        string $counterpartyName,
+    ): array {
+        if ($txCurrency === null || trim($txCurrency) === '') {
+            return ['status' => 'unmatched', 'reason' => 'amount_date_currency_unknown'];
+        }
+        $currency = strtoupper($txCurrency);
+        $settled = PurchaseSettledExpr::settled('pi');
+        $pdo->beginTransaction();
+        try {
+            $lock = $pdo->prepare(
+                "SELECT match_status, variable_symbol
+                   FROM bank_transactions
+                  WHERE id = ? AND statement_id = ?
+                  FOR UPDATE"
+            );
+            $lock->execute([$transactionId, $statementId]);
+            $lockedTx = $lock->fetch(PDO::FETCH_ASSOC);
+            if ($lockedTx === false
+                || (string) $lockedTx['match_status'] !== 'unmatched'
+                || trim((string) ($lockedTx['variable_symbol'] ?? '')) !== '') {
+                $pdo->rollBack();
+                return ['status' => 'unmatched', 'reason' => 'amount_date_transaction_not_free'];
+            }
 
-        $matches = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $m = $this->expectedMatch((float) $r['amount_to_pay'], (string) ($r['currency'] ?? self::LOCAL_CURRENCY), (float) ($r['exchange_rate'] ?: 0), $txCurrency);
-            if ($m === null) {
-                continue; // měny nejdou spolehlivě porovnat → přeskoč
+            $sameAmount = $pdo->prepare(
+                "SELECT COUNT(*)
+                   FROM bank_transactions bt
+                  WHERE bt.statement_id = ?
+                    AND bt.match_status = 'unmatched'
+                    AND bt.amount < 0
+                    AND ABS(ABS(bt.amount) - ?) < 0.005
+                    AND UPPER(COALESCE(NULLIF(bt.currency, ''), ?)) = ?"
+            );
+            $sameAmount->execute([$statementId, $absAmount, $currency, $currency]);
+            if ((int) $sameAmount->fetchColumn() !== 1) {
+                $pdo->rollBack();
+                return ['status' => 'unmatched', 'reason' => 'ambiguous_amount_transaction'];
             }
-            if (abs($absAmount - $m['expected']) <= $m['partial']) {
-                $matches[] = $r;
+
+            $win = self::AMOUNT_DATE_DAY_WINDOW;
+            $stmt = $pdo->prepare(
+                "SELECT pi.id, pi.status, pi.paid_at, pi.payment_method,
+                        COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) AS amount_to_pay,
+                        ({$settled}) AS settled_amount,
+                        cur.code AS currency, c.company_name AS vendor_name
+                   FROM purchase_invoices pi
+                   JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
+                   JOIN currencies cur ON cur.id = pi.currency_id
+                  WHERE pi.supplier_id = ?
+                    AND pi.status IN ('received', 'booked', 'paid')
+                    AND pi.document_kind = 'invoice'
+                    AND pi.cash_register_id IS NULL
+                    AND pi.payment_method IN ('bank_transfer', 'card', 'direct_debit')
+                    AND (ABS(DATEDIFF(pi.due_date, ?)) <= ? OR ABS(DATEDIFF(pi.issue_date, ?)) <= ?)
+                  FOR UPDATE"
+            );
+            $stmt->execute([$supplierId, $postedAt, $win, $postedAt, $win]);
+
+            $matches = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $candidate) {
+                if (strtoupper((string) $candidate['currency']) !== $currency) {
+                    continue;
+                }
+                $settledAmount = round((float) $candidate['settled_amount'], 2);
+                if (abs($settledAmount) >= 0.005) {
+                    continue;
+                }
+                $expected = round((float) $candidate['amount_to_pay'], 2);
+                if (abs($absAmount - $expected) >= 0.005) {
+                    continue;
+                }
+                $matches[] = $candidate;
             }
+            if (count($matches) !== 1) {
+                $pdo->rollBack();
+                return [
+                    'status' => 'unmatched',
+                    'reason' => $matches === [] ? 'no_amount_date_match' : 'ambiguous_amount_date_match',
+                ];
+            }
+
+            $pi = $matches[0];
+            $alreadyPaid = (string) $pi['status'] === 'paid';
+            if ($alreadyPaid && (
+                (string) ($pi['paid_at'] ?? '') !== $postedAt
+                || $this->nameSimilarity($counterpartyName, (string) $pi['vendor_name']) <= 0.0
+            )) {
+                $pdo->rollBack();
+                return [
+                    'status' => 'unmatched',
+                    'reason' => 'amount_date_requires_review',
+                    'requires_review' => true,
+                    'purchase_invoice_id' => (int) $pi['id'],
+                    'amount_date' => true,
+                ];
+            }
+
+            if (!$alreadyPaid) {
+                $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?")
+                    ->execute([$postedAt, $pi['id']]);
+            }
+            $pdo->prepare(
+                "INSERT INTO payment_matches
+                    (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
+                 VALUES (?, ?, ?, ?, 'auto', 80)"
+            )->execute([$supplierId, $transactionId, $pi['id'], $absAmount]);
+            $pdo->prepare(
+                "UPDATE bank_transactions
+                    SET match_status = 'auto_exact', matched_at = NOW()
+                  WHERE id = ? AND match_status = 'unmatched'"
+            )->execute([$transactionId]);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
         }
-        if (count($matches) !== 1) {
-            return ['status' => 'unmatched', 'reason' => $matches === [] ? 'no_amount_date_match' : 'ambiguous_amount_date_match'];
-        }
-        $pi = $matches[0];
+
+        $this->clientBankAccounts?->captureForPurchaseInvoiceTransaction((int) $pi['id'], $transactionId);
+        $this->logPaymentMatch(
+            'purchase_invoice',
+            (int) $pi['id'],
+            $supplierId,
+            'auto_exact',
+            $absAmount,
+            '',
+            $transactionId,
+            $alreadyPaid,
+        );
         return [
-            'status' => 'unmatched',
-            'reason' => 'amount_date_requires_review',
-            'requires_review' => true,
+            'status' => 'auto_exact',
             'purchase_invoice_id' => (int) $pi['id'],
             'amount_date' => true,
+            'second_pass' => true,
+            'already_paid' => $alreadyPaid,
         ];
     }
 

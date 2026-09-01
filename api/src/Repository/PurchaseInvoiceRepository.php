@@ -761,9 +761,11 @@ final class PurchaseInvoiceRepository
         }
         if (!empty($filters['unpaid_only'])) {
             $where[] = "pi.status IN ('received','booked')";
+            $where[] = PayablePredicate::outstandingBalanceCondition('pi');
         }
         if (!empty($filters['overdue'])) {
             $where[] = "pi.status IN ('received','booked') AND pi.due_date <= CURDATE()";
+            $where[] = PayablePredicate::outstandingBalanceCondition('pi');
         }
         // Neuhrazené K DATU X (task #4) — historický protějšek `unpaid_only`/`overdue`
         // výše. Přijaté faktury NEMAJÍ obdobu `invoice_payments` — zdroj pravdy o úhradě
@@ -1353,7 +1355,9 @@ final class PurchaseInvoiceRepository
         [$where, $params] = $this->paymentCandidatesWhere($supplierId, $currency, $includeNonTransfer);
         $sql = "SELECT pi.id, pi.vendor_invoice_number, pi.varsymbol, pi.document_kind,
                        pi.vendor_id, pi.issue_date, pi.due_date,
-                       pi.total_with_vat, pi.amount_to_pay, pi.rounding,
+                       pi.total_with_vat,
+                       GREATEST(" . PayablePredicate::remainingExpression('pi') . ", 0) AS amount_to_pay,
+                       pi.rounding,
                        (pi.pdf_path IS NOT NULL AND pi.pdf_path <> '') AS has_pdf,
                        pi.payment_account_number, pi.payment_bank_code, pi.payment_iban, pi.payment_bic,
                        pi.payment_variable_symbol, pi.payment_constant_symbol,
@@ -1435,7 +1439,7 @@ final class PurchaseInvoiceRepository
         $where = [
             "pi.supplier_id = ?",
             "pi.status IN ('received','booked')",
-            "pi.amount_to_pay > 0",
+            PayablePredicate::outstandingBalanceCondition('pi'),
             "pi.document_kind <> 'tax_document'",
         ];
         $params = [$supplierId];

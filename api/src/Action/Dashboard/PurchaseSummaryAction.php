@@ -260,12 +260,14 @@ final class PurchaseSummaryAction
         $purchaseCount = (int) $stmt->fetchColumn();
 
         // Nezaplacené závazky per měna
+        $remaining = PayablePredicate::remainingExpression('pi');
         $stmt = $pdo->prepare(
-            "SELECT cur.code AS currency, COUNT(*) AS cnt, SUM(pi.amount_to_pay) AS total
+            "SELECT cur.code AS currency, COUNT(*) AS cnt, SUM(GREATEST({$remaining}, 0)) AS total
                FROM purchase_invoices pi
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
-                AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude() . "
+                AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude()
+                . PayablePredicate::excludeFullySettled() . "
               GROUP BY cur.code"
         );
         $stmt->execute([$sid]);
@@ -279,10 +281,11 @@ final class PurchaseSummaryAction
 
         // Po splatnosti — počet
         $stmt = $pdo->prepare(
-            "SELECT COUNT(*) FROM purchase_invoices
-              WHERE supplier_id = ?
-                AND status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude('') . "
-                AND due_date < CURDATE()"
+            "SELECT COUNT(*) FROM purchase_invoices pi
+              WHERE pi.supplier_id = ?
+                AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude()
+                . PayablePredicate::excludeFullySettled() . "
+                AND pi.due_date < CURDATE()"
         );
         $stmt->execute([$sid]);
         $overdueCount = (int) $stmt->fetchColumn();
@@ -327,15 +330,18 @@ final class PurchaseSummaryAction
     /** Po splatnosti — nezaplacené závazky s due_date < dnes (top 20). */
     private function overdue(\PDO $pdo, int $sid): array
     {
+        $remaining = PayablePredicate::remainingExpression('pi');
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind, pi.vendor_id,
-                       cur.code AS currency, pi.issue_date, pi.due_date, pi.amount_to_pay, pi.status,
+                       cur.code AS currency, pi.issue_date, pi.due_date,
+                       GREATEST({$remaining}, 0) AS amount_to_pay, pi.status,
                        c.company_name AS vendor_company_name,
                        DATEDIFF(CURDATE(), pi.due_date) AS days_overdue
                   FROM purchase_invoices pi
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
-                   AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude() . "
+                   AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude()
+                   . PayablePredicate::excludeFullySettled() . "
                    AND pi.due_date < CURDATE()
                  ORDER BY pi.due_date ASC
                  LIMIT 20";
@@ -347,14 +353,17 @@ final class PurchaseSummaryAction
     /** Před splatností — nezaplacené závazky s due_date >= dnes (top 20). */
     private function unpaidUpcoming(\PDO $pdo, int $sid): array
     {
+        $remaining = PayablePredicate::remainingExpression('pi');
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind, pi.vendor_id,
-                       cur.code AS currency, pi.issue_date, pi.due_date, pi.amount_to_pay, pi.status,
+                       cur.code AS currency, pi.issue_date, pi.due_date,
+                       GREATEST({$remaining}, 0) AS amount_to_pay, pi.status,
                        c.company_name AS vendor_company_name
                   FROM purchase_invoices pi
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
-                   AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude() . "
+                   AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude()
+                   . PayablePredicate::excludeFullySettled() . "
                    AND pi.due_date >= CURDATE()
                  ORDER BY pi.due_date ASC
                  LIMIT 20";
@@ -701,17 +710,19 @@ final class PurchaseSummaryAction
      */
     private function cashflowOutForecast(\PDO $pdo, int $sid): array
     {
+        $remaining = PayablePredicate::remainingExpression('pi');
         $sql = "SELECT cur.code AS currency,
-                       SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY) THEN pi.amount_to_pay ELSE 0 END) AS out_30,
-                       SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 60 DAY) THEN pi.amount_to_pay ELSE 0 END) AS out_60,
-                       SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 90 DAY) THEN pi.amount_to_pay ELSE 0 END) AS out_90,
+                       SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY) THEN GREATEST({$remaining}, 0) ELSE 0 END) AS out_30,
+                       SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 60 DAY) THEN GREATEST({$remaining}, 0) ELSE 0 END) AS out_60,
+                       SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 90 DAY) THEN GREATEST({$remaining}, 0) ELSE 0 END) AS out_90,
                        SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS count_30,
                        SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 60 DAY) THEN 1 ELSE 0 END) AS count_60,
                        SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 90 DAY) THEN 1 ELSE 0 END) AS count_90
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
-                   AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude() . "
+                   AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude()
+                   . PayablePredicate::excludeFullySettled() . "
                    AND pi.due_date >= CURDATE()
                  GROUP BY cur.code";
         $stmt = $pdo->prepare($sql);
@@ -732,17 +743,19 @@ final class PurchaseSummaryAction
      */
     private function dueBuckets(\PDO $pdo, int $sid): array
     {
+        $remaining = PayablePredicate::remainingExpression('pi');
         $sql = "SELECT cur.code AS currency,
                        SUM(CASE WHEN pi.due_date = CURDATE() THEN 1 ELSE 0 END) AS today_count,
-                       SUM(CASE WHEN pi.due_date = CURDATE() THEN pi.amount_to_pay ELSE 0 END) AS today_total,
+                       SUM(CASE WHEN pi.due_date = CURDATE() THEN GREATEST({$remaining}, 0) ELSE 0 END) AS today_total,
                        SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL (6 - WEEKDAY(CURDATE())) DAY) THEN 1 ELSE 0 END) AS week_count,
-                       SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL (6 - WEEKDAY(CURDATE())) DAY) THEN pi.amount_to_pay ELSE 0 END) AS week_total,
+                       SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL (6 - WEEKDAY(CURDATE())) DAY) THEN GREATEST({$remaining}, 0) ELSE 0 END) AS week_total,
                        SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND LAST_DAY(CURDATE()) THEN 1 ELSE 0 END) AS month_count,
-                       SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND LAST_DAY(CURDATE()) THEN pi.amount_to_pay ELSE 0 END) AS month_total
+                       SUM(CASE WHEN pi.due_date BETWEEN CURDATE() AND LAST_DAY(CURDATE()) THEN GREATEST({$remaining}, 0) ELSE 0 END) AS month_total
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
-                   AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude() . "
+                   AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude()
+                   . PayablePredicate::excludeFullySettled() . "
                    AND pi.due_date >= CURDATE()
                  GROUP BY cur.code";
         $stmt = $pdo->prepare($sql);
@@ -763,12 +776,13 @@ final class PurchaseSummaryAction
      */
     private function agingReport(\PDO $pdo, int $sid): array
     {
+        $remaining = PayablePredicate::remainingExpression('pi');
         $sql = "SELECT cur.code AS currency,
-                       SUM(CASE WHEN pi.due_date >= CURDATE() THEN pi.amount_to_pay ELSE 0 END) AS current_amt,
-                       SUM(CASE WHEN pi.due_date < CURDATE() AND DATEDIFF(CURDATE(), pi.due_date) BETWEEN 1 AND 30 THEN pi.amount_to_pay ELSE 0 END) AS b1_30,
-                       SUM(CASE WHEN pi.due_date < CURDATE() AND DATEDIFF(CURDATE(), pi.due_date) BETWEEN 31 AND 60 THEN pi.amount_to_pay ELSE 0 END) AS b31_60,
-                       SUM(CASE WHEN pi.due_date < CURDATE() AND DATEDIFF(CURDATE(), pi.due_date) BETWEEN 61 AND 90 THEN pi.amount_to_pay ELSE 0 END) AS b61_90,
-                       SUM(CASE WHEN pi.due_date < CURDATE() AND DATEDIFF(CURDATE(), pi.due_date) > 90 THEN pi.amount_to_pay ELSE 0 END) AS b90_plus,
+                       SUM(CASE WHEN pi.due_date >= CURDATE() THEN GREATEST({$remaining}, 0) ELSE 0 END) AS current_amt,
+                       SUM(CASE WHEN pi.due_date < CURDATE() AND DATEDIFF(CURDATE(), pi.due_date) BETWEEN 1 AND 30 THEN GREATEST({$remaining}, 0) ELSE 0 END) AS b1_30,
+                       SUM(CASE WHEN pi.due_date < CURDATE() AND DATEDIFF(CURDATE(), pi.due_date) BETWEEN 31 AND 60 THEN GREATEST({$remaining}, 0) ELSE 0 END) AS b31_60,
+                       SUM(CASE WHEN pi.due_date < CURDATE() AND DATEDIFF(CURDATE(), pi.due_date) BETWEEN 61 AND 90 THEN GREATEST({$remaining}, 0) ELSE 0 END) AS b61_90,
+                       SUM(CASE WHEN pi.due_date < CURDATE() AND DATEDIFF(CURDATE(), pi.due_date) > 90 THEN GREATEST({$remaining}, 0) ELSE 0 END) AS b90_plus,
                        SUM(CASE WHEN pi.due_date >= CURDATE() THEN 1 ELSE 0 END) AS current_n,
                        SUM(CASE WHEN pi.due_date < CURDATE() AND DATEDIFF(CURDATE(), pi.due_date) BETWEEN 1 AND 30 THEN 1 ELSE 0 END) AS b1_30_n,
                        SUM(CASE WHEN pi.due_date < CURDATE() AND DATEDIFF(CURDATE(), pi.due_date) BETWEEN 31 AND 60 THEN 1 ELSE 0 END) AS b31_60_n,
@@ -777,7 +791,8 @@ final class PurchaseSummaryAction
                   FROM purchase_invoices pi
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
-                   AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude() . "
+                   AND pi.status IN " . self::UNPAID_STATUSES . $this->payableDocKindExclude()
+                   . PayablePredicate::excludeFullySettled() . "
                  GROUP BY cur.code";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$sid]);

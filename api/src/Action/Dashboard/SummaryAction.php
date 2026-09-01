@@ -531,11 +531,13 @@ final class SummaryAction
 
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) AS cnt,
-                    COALESCE(SUM(pi.total_with_vat * IF(cur.code = 'CZK' OR pi.exchange_rate IS NULL, 1, pi.exchange_rate)), 0) AS unpaid_czk
+                    COALESCE(SUM(GREATEST(" . PayablePredicate::remainingExpression('pi') . ", 0)
+                    * IF(cur.code = 'CZK' OR pi.exchange_rate IS NULL, 1, pi.exchange_rate)), 0) AS unpaid_czk
                FROM purchase_invoices pi
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
                 AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
+                . PayablePredicate::excludeFullySettled()
         );
         $stmt->execute([$sid]);
         $piUnpaid = $stmt->fetch(\PDO::FETCH_ASSOC) ?: ['cnt' => 0, 'unpaid_czk' => 0];
@@ -545,7 +547,8 @@ final class SummaryAction
             "SELECT COUNT(*) AS cnt
                FROM purchase_invoices pi
               WHERE pi.supplier_id = ?
-                AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument() . "
+                AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
+                . PayablePredicate::excludeFullySettled() . "
                 AND pi.due_date < ?"
         );
         $stmt->execute([$sid, $today]);

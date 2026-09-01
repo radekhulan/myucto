@@ -82,6 +82,8 @@ final class PaymentMethodCandidateFilterTest extends TestCase
         if (!isset($this->db)) return;
         $pdo = $this->db->pdo();
         foreach ($this->piIds as $id) {
+            $pdo->prepare("DELETE FROM invoice_settlements WHERE doc_type = 'purchase_invoice' AND doc_id = ?")
+                ->execute([$id]);
             $pdo->prepare('DELETE FROM purchase_invoices WHERE id = ?')->execute([$id]);
         }
         foreach ($this->vendorIds as $id) {
@@ -163,6 +165,27 @@ final class PaymentMethodCandidateFilterTest extends TestCase
             $this->repo->countPaymentCandidates($this->supplierId, null, true),
             'countPaymentCandidates musí použít stejný WHERE jako listPaymentCandidates (opt-out)',
         );
+    }
+
+    public function testPaymentCandidatesUseRemainingAmountAfterAccountSettlement(): void
+    {
+        $vendor = $this->vendor('Dodavatel se zápočtem', 'CZ21000010', null);
+        $partialId = $this->candidateInvoice($vendor, 'PMCF-S1', 'bank_transfer');
+        $settledId = $this->candidateInvoice($vendor, 'PMCF-S2', 'bank_transfer');
+
+        $this->settle($partialId, 210.0);
+        $this->settle($settledId, 1210.0);
+
+        $rows = $this->repo->listPaymentCandidates($this->supplierId);
+        $byId = [];
+        foreach ($rows as $row) {
+            $byId[(int) $row['id']] = $row;
+        }
+
+        self::assertArrayHasKey($partialId, $byId);
+        self::assertSame(1000.0, $byId[$partialId]['amount_to_pay']);
+        self::assertArrayNotHasKey($settledId, $byId,
+            'Plně vyrovnaný doklad nesmí platební příkaz nabídnout podruhé.');
     }
 
     public function testVendorDefaultPaymentMethodIsAppliedWithVendorSource(): void
@@ -285,6 +308,21 @@ final class PaymentMethodCandidateFilterTest extends TestCase
         )->execute([$id]);
 
         return $id;
+    }
+
+    private function settle(int $purchaseId, float $amount): void
+    {
+        $accountId = (int) ($this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts
+              WHERE supplier_id = {$this->supplierId} AND account_code LIKE '365%'
+              ORDER BY id LIMIT 1"
+        )->fetchColumn() ?: 0);
+        self::assertGreaterThan(0, $accountId, 'Test vyžaduje účet 365.');
+        $this->db->pdo()->prepare(
+            "INSERT INTO invoice_settlements
+                (supplier_id, doc_type, doc_id, settled_on, amount, account_id, status, created_by)
+             VALUES (?, 'purchase_invoice', ?, CURDATE(), ?, ?, 'confirmed', ?)"
+        )->execute([$this->supplierId, $purchaseId, $amount, $accountId, $this->userId]);
     }
 
     private function vendor(string $name, string $dic, ?string $defaultPaymentMethod): int

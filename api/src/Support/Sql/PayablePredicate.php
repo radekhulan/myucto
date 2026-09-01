@@ -46,4 +46,22 @@ final class PayablePredicate
         $prefix = $alias === '' ? '' : $alias . '.';
         return sprintf("COALESCE(%sdocument_kind, '') <> '%s'", $prefix, self::NON_PAYABLE_DOCUMENT_KIND);
     }
+
+    /** Zbytek závazku po odečtení banky, vzájemného zápočtu a zápočtu proti účtu. */
+    public static function remainingExpression(string $alias = 'pi'): string
+    {
+        return PurchaseSettledExpr::remaining($alias);
+    }
+
+    /** Podmínka, že na přijaté faktuře zbývá k úhradě více než půl haléře. */
+    public static function outstandingBalanceCondition(string $alias = 'pi'): string
+    {
+        return '(' . self::remainingExpression($alias) . ') > 0.005';
+    }
+
+    /** SQL fragment vylučující plně vyrovnané přijaté faktury. */
+    public static function excludeFullySettled(string $alias = 'pi'): string
+    {
+        return ' AND ' . self::outstandingBalanceCondition($alias);
+    }
 }

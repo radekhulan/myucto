@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Bank\BankMessageNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 final class MatchCandidateProvider
@@ -98,8 +99,7 @@ final class MatchCandidateProvider
             "SELECT 'purchase_invoice' AS candidate_type, p.id, p.vendor_id AS client_id,
                     COALESCE(NULLIF(p.vendor_invoice_number,''), p.varsymbol) AS ref,
                     p.amount_to_pay,
-                    COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                               WHERE pm.purchase_invoice_id = p.id), 0) AS paid_total,
+                    (" . PurchaseSettledExpr::settled('p') . ") AS paid_total,
                     p.document_kind AS invoice_type, p.status, p.exchange_rate,
                     p.issue_date, p.due_date, cur.code AS currency, c.company_name AS party
                FROM purchase_invoices p
