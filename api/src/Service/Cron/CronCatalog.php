@@ -134,6 +134,18 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Mzdové úložiště se zálohuje zvlášť: pásky a archivy nespadají
+                // ani pod Dokumenty, ani pod faktury, a bez téhle zálohy by po
+                // obnově zbyla metadata bez obsahu.
+                'script' => 'cron-backup-payroll',
+                'recommended' => 'daily_0240',
+                'linux_cron' => '40 2 * * *',
+                'windows_schtasks' => '/sc daily /st 02:40',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-bank-scan',
                 'recommended' => 'every_30_min',
                 'linux_cron' => '*/30 * * * *',

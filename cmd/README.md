@@ -52,6 +52,7 @@ má vždy přednost před oběma.
 | `cron-backup.{cmd,sh}` | mariadb-dump celé DB do `storage/backup/YYYY-MM-DD.zip`, retention 30 dní |
 | `cron-backup-pdf.{cmd,sh}` | ZIP všech PDF (`storage/invoices/` + `storage/work-reports/`) do `storage/backup/{dbname}-pdf-YYYY-MM-DD.zip`, stejná retention jako `cron-backup` |
 | `cron-backup-documents.{cmd,sh}` | ZIP celé sekce Dokumenty (`storage/documents/`, všechny typy; vynechává `_thumbs`/`_jobs`) do `storage/backup/{dbname}-documents-YYYY-MM-DD.zip`, stejná retention; oddělené od `cron-backup-pdf` (ten Dokumenty nezahrnuje) |
+| `cron-backup-payroll.{cmd,sh}` | ZIP mzdového úložiště (`storage/payroll-documents/`, `payroll-period-exports/`, `payroll-payment-exports/`) do `storage/backup/{dbname}-payroll-YYYY-MM-DD.zip`, stejná retention. Do žádné z ostatních záloh tyhle soubory nespadají — po obnově by zbyla metadata bez obsahu. Ukládá je tak, jak leží (šifrované, pod otiskem), pro člověka přikládá `MANIFEST.csv` |
 | `cron-bank-scan.{cmd,sh}` | Auto-import nových GPC výpisů z `private/bank-incoming/` + matching plateb na faktury |
 | `cron-bank-email-notices.{cmd,sh}` | IMAP polling bankovních e-mailových avíz, parsování plateb a matching na faktury (konfigurace v **Admin → Bankovní účty**) |
 | `cron-scan-purchase-inbox.{cmd,sh}` | Import nových přijatých dokladů z nastaveného inbox adresáře |
@@ -133,6 +134,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-backup` | 4× denně | `0 2,8,14,20 * * *` (ranní běh před cleanupem) |
 | `cron-backup-pdf` | 1× denně | 02:30 (po DB backupu) |
 | `cron-backup-documents` | 1× denně | 02:35 (po PDF backupu) |
+| `cron-backup-payroll` | 1× denně | 02:40 (po Dokumentech) |
 | `cron-bank-scan` | každých 15–30 minut | `*/30 * * * *` |
 | `cron-bank-email-notices` | každých 30 minut | `*/30 * * * *` |
 | `cron-scan-purchase-inbox` | každých 10 minut | `*/10 * * * *` |
@@ -205,6 +207,7 @@ schtasks /create /tn "MyUcto Cleanup"   /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cr
 schtasks /create /tn "MyUcto Backup"    /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup.cmd"         /sc daily /st 02:00 /ri 360 /du 24:00 /ru SYSTEM
 schtasks /create /tn "MyUcto BackupPDF" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-pdf.cmd"     /sc daily /st 02:30 /ru SYSTEM
 schtasks /create /tn "MyUcto BackupDocs" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-documents.cmd" /sc daily /st 02:35 /ru SYSTEM
+schtasks /create /tn "MyUcto BackupPayroll" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-payroll.cmd" /sc daily /st 02:40 /ru SYSTEM
 schtasks /create /tn "MyUcto BankScan"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-scan.cmd"      /sc minute /mo 30 /ru SYSTEM
 schtasks /create /tn "MyUcto BankEmailNotices" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-email-notices.cmd" /sc minute /mo 30 /ru SYSTEM
 schtasks /create /tn "MyUcto PurchaseInbox" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-scan-purchase-inbox.cmd" /sc minute /mo 10 /ru SYSTEM
@@ -267,6 +270,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
   0  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup.sh
  30  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-pdf.sh
  35  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-documents.sh
+ 40  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-payroll.sh
 */30 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-scan.sh
 */30 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-email-notices.sh
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-scan-purchase-inbox.sh
