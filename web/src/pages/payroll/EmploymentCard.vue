@@ -1617,6 +1617,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
     </p>
     <EmploymentRegistrationPanel
       :employment-id="employment.id"
+      :person-id="employment.employee_id"
       :can-write="canWrite"
     />
 

@@ -46,6 +46,7 @@ import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -745,6 +746,74 @@ async function downloadArtifact(row: OutboxSubmission) {
 // datovky sám. Přímý transport ale odesílat umí — jen výhradně v relaci, kterou
 // účetní právě potvrdila v mobilu. Potvrzení se dá vyzvednout JEN JEDNOU, takže
 // odeslání proběhne v témže volání, které to potvrzení vyzvedne.
+/*
+ * Odeslání jménem a heslem. Heslo se nikam neukládá — projde jedním
+ * requestem do ISDS a zmizí s ním, proto se u každé zprávy zadává znovu.
+ */
+const passwordOutboxFor = ref<number | null>(null)
+const passwordOutboxUsername = ref('')
+const passwordOutboxPassword = ref('')
+
+function openPasswordOutbox(row: OutboxSubmission) {
+  passwordOutboxFor.value = row.id
+  passwordOutboxUsername.value = ''
+  passwordOutboxPassword.value = ''
+}
+
+function closePasswordOutbox() {
+  passwordOutboxFor.value = null
+  passwordOutboxUsername.value = ''
+  passwordOutboxPassword.value = ''
+}
+
+async function submitPasswordOutbox(row: OutboxSubmission) {
+  if (busyId.value === row.id) return
+  if (passwordOutboxUsername.value.trim() === '' || passwordOutboxPassword.value === '') return
+  busyId.value = row.id
+  try {
+    const result = await dataBoxApi.passwordSend(
+      row.id,
+      environment.value,
+      passwordOutboxUsername.value.trim(),
+      passwordOutboxPassword.value,
+    )
+    toast[result.dispatched ? 'success' : 'warning'](
+      result.dispatched
+        ? t('databox.outbox.passwordSend.sent')
+        : t('databox.outbox.passwordSend.notSent'),
+    )
+    closePasswordOutbox()
+    await loadAll()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('databox.outbox.passwordSend.failed')))
+  } finally {
+    busyId.value = null
+  }
+}
+
+/*
+ * Certifikátem odesílá stroj, ne člověk — proto se to potvrzuje. Potvrzení
+ * je vědomý krok, který jde doložit, ne formalita navíc.
+ */
+async function sendWithCertificate(row: OutboxSubmission) {
+  if (busyId.value === row.id) return
+  if (!window.confirm(t('databox.outbox.certificateSend.confirm', { subject: row.subject }))) return
+  busyId.value = row.id
+  try {
+    const result = await dataBoxApi.certificateSend(row.id, environment.value)
+    toast[result.dispatched ? 'success' : 'warning'](
+      result.dispatched
+        ? t('databox.outbox.certificateSend.sent')
+        : t('databox.outbox.certificateSend.notSent'),
+    )
+    await loadAll()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('databox.outbox.certificateSend.failed')))
+  } finally {
+    busyId.value = null
+  }
+}
+
 const mobileOutboxFor = ref<number | null>(null)
 const mobileOutboxUsername = ref('')
 const mobileOutboxCode = ref('')
@@ -1174,14 +1243,12 @@ onUnmounted(clearMobileStatusTimer)
           </p>
         </details>
       </div>
-      <select
+      <EnvironmentSwitch
         v-model="environment"
-        class="h-9 min-w-[11rem] rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 shadow-xs outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
-        @change="changeEnvironment"
-      >
-        <option value="production">{{ t('databox.env.production') }}</option>
-        <option value="test">{{ t('databox.env.test') }}</option>
-      </select>
+        :production-label="t('databox.env.production')"
+        :test-label="t('databox.env.test')"
+        @update:model-value="changeEnvironment"
+      />
     </header>
 
     <nav class="flex flex-wrap gap-2 border-b border-neutral-200">
@@ -1600,6 +1667,45 @@ onUnmounted(clearMobileStatusTimer)
           Odeslání Mobilním klíčem. Kód je „komunikační kód" z portálu ISDS,
           tedy samostatný kód pro přístup aplikace — NENÍ to heslo do datovky.
         -->
+        <!-- Přihlášení jménem a heslem pro jedno odeslání. -->
+        <div
+          v-if="passwordOutboxFor === row.id"
+          class="mt-3 rounded-md border border-primary-200 bg-primary-50/40 p-3"
+          data-test="outbox-password-form"
+        >
+          <p class="text-sm text-neutral-700">{{ t('databox.outbox.passwordSend.intro') }}</p>
+          <p
+            v-if="environment === 'test'"
+            class="mt-2 rounded-md border border-warning-200 bg-warning-50 p-2 text-xs text-warning-800"
+          >
+            {{ t('databox.outbox.mobileKey.testEnvironmentWarning') }}
+          </p>
+          <div class="mt-3 grid gap-3 sm:grid-cols-2">
+            <label class="block">
+              <span class="text-sm font-medium">{{ t('databox.outbox.passwordSend.username') }}</span>
+              <input v-model="passwordOutboxUsername" type="text" maxlength="128" autocomplete="off" class="form-input mt-1 w-full" />
+            </label>
+            <label class="block">
+              <span class="text-sm font-medium">{{ t('databox.outbox.passwordSend.password') }}</span>
+              <input v-model="passwordOutboxPassword" type="password" maxlength="512" autocomplete="off" class="form-input mt-1 w-full" />
+            </label>
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              :class="btnFilled('primary')"
+              :disabled="busyId === row.id || passwordOutboxUsername.trim() === '' || passwordOutboxPassword === ''"
+              data-test="outbox-password-submit"
+              @click="submitPasswordOutbox(row)"
+            >
+              {{ t('databox.outbox.passwordSend.submit') }}
+            </button>
+            <button type="button" :class="btnOutline('neutral')" :disabled="busyId === row.id" @click="closePasswordOutbox">
+              {{ t('common.cancel') }}
+            </button>
+          </div>
+        </div>
+
         <div
           v-if="mobileOutboxFor === row.id"
           class="mt-3 rounded-md border border-primary-200 bg-primary-50/40 p-3"
@@ -1724,6 +1830,37 @@ onUnmounted(clearMobileStatusTimer)
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
             </svg>
             {{ t('databox.outbox.markSent') }}
+          </button>
+          <!--
+            Odeslat smí každá metoda, kterou umí i čtení. Dřív tu stál jen
+            Mobilní klíč, i když ISDS relaci naváže stejně jménem a heslem —
+            účetní bez Mobilního klíče zprávu připravila a odeslat nemohla.
+          -->
+          <button
+            v-if="primaryAction(row) === 'markSent' && passwordOutboxFor !== row.id && mobileOutboxFor !== row.id"
+            type="button"
+            :class="btnOutline('primary')"
+            :disabled="busyId === row.id"
+            data-test="outbox-password-send"
+            @click="openPasswordOutbox(row)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" />
+            </svg>
+            {{ t('databox.outbox.passwordSend.action') }}
+          </button>
+          <button
+            v-if="primaryAction(row) === 'markSent' && currentCredential?.auth_mode === 'certificate'"
+            type="button"
+            :class="btnOutline('primary')"
+            :disabled="busyId === row.id"
+            data-test="outbox-certificate-send"
+            @click="sendWithCertificate(row)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.badgeCheck" />
+            </svg>
+            {{ t('databox.outbox.certificateSend.action') }}
           </button>
           <button
             v-if="primaryAction(row) === 'markSent' && mobileOutboxFor !== row.id"

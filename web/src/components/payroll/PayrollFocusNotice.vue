@@ -22,6 +22,12 @@ defineProps<{
    * (cizí nebo zaniklý vztah). Lišta to proto řekne větou a nabídne zrušení.
    */
   missing?: boolean
+  /**
+   * `name` je lidský popis, ne id. Bez příznaku hláška o slepém zúžení uvede
+   * `name` jako číslo („č. 42"), protože volající, který jméno nemá odkud
+   * vzít, posílá id vztahu.
+   */
+  named?: boolean
 }>()
 
 defineEmits<{ clear: [] }>()
@@ -36,7 +42,9 @@ const { t } = useI18n()
   >
     <span class="min-w-0">
       {{ missing
-        ? t('payroll.agendas.focus.missing', { name })
+        ? t(named
+          ? 'payroll.agendas.focus.missing_named'
+          : 'payroll.agendas.focus.missing', { name })
         : t('payroll.agendas.focus.title', { name }) }}
     </span>
     <button

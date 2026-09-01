@@ -123,7 +123,36 @@ final class DirectIsdsInboxTransportTest extends TestCase
 
     // ───────────────────── odesílání v potvrzené relaci ─────────────────────
 
-    public function testSendIsRefusedWithoutConfirmedHumanSession(): void
+    /**
+     * Odesílat smí každý způsob přihlášení, kterým se dá s ISDS mluvit —
+     * dřív jen Mobilní klíč a SMS. Jméno a heslo relaci naváže stejně, jen se
+     * autentizuje každý požadavek zvlášť, takže nevzniká cookie; kdo měl
+     * u schránky jen heslo, zprávu připravil a odeslat ji nemohl.
+     */
+    public function testSendIsAllowedWithUsernameAndPassword(): void
+    {
+        $calls = 0;
+        $transport = new DirectIsdsInboxTransport(
+            static function (string $url, string $body) use (&$calls): array {
+                $calls++;
+                return str_contains($body, 'CreateMessage')
+                    ? ['status' => 200, 'body' => self::sendResponse('9900110022')]
+                    : ['status' => 200, 'body' => self::sentListResponse([])];
+            },
+        );
+
+        $receipt = $transport->createMessage($this->passwordContext(), 'abcdefg', 'Věc', 'MU-1', self::attachment());
+
+        self::assertSame('9900110022', $receipt->messageId);
+        self::assertGreaterThan(0, $calls);
+    }
+
+    /**
+     * Bez čehokoliv, čím se dá přihlásit, se odmítá dál — a dřív, než cokoliv
+     * odejde. Fail-closed zůstává; uvolnilo se jen to, CO se za přihlášení
+     * považuje.
+     */
+    public function testSendIsRefusedWithoutAnyCredentials(): void
     {
         $calls = 0;
         $transport = new DirectIsdsInboxTransport(
@@ -132,10 +161,15 @@ final class DirectIsdsInboxTransportTest extends TestCase
                 return ['status' => 200, 'body' => self::listResponse()];
             },
         );
+        $context = new ChannelContext(
+            7,
+            'test',
+            new ChannelCredentials(boxId: '', authMode: 'password'),
+        );
 
         try {
-            $transport->createMessage($this->passwordContext(), 'abcdefg', 'Věc', 'MU-1', self::attachment());
-            self::fail('Bez relace potvrzené člověkem se nesmí odesílat.');
+            $transport->createMessage($context, 'abcdefg', 'Věc', 'MU-1', self::attachment());
+            self::fail('Bez přihlašovacích údajů se nesmí odesílat.');
         } catch (SubmissionChannelException $e) {
             self::assertSame('isds_send_requires_confirmed_session', $e->errorCode);
         }

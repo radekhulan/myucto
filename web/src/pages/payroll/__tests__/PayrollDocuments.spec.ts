@@ -1054,4 +1054,102 @@ describe('PayrollDocuments', () => {
     await flushPromises()
     expect(m.sendDocumentSecureLink).not.toHaveBeenCalled()
   })
+
+  /*
+   * Prázdná agenda a nenačtená agenda vedou uživatele k opačnému jednání
+   * (vystav dokumenty vs. zkus to znovu), takže je nesmí kreslit stejně.
+   */
+  it('offers a retry instead of an empty state when the documents fail to load', async () => {
+    m.listDocuments.mockRejectedValue(new Error('network'))
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('payroll.documents.load_failed_hint')
+    expect(wrapper.text()).not.toContain('payroll.documents.empty_description')
+
+    m.listDocuments.mockResolvedValue({
+      period: '2026-07',
+      revisions: [],
+      items: [],
+      total: 0,
+    })
+    await wrapper.get('[data-test="load-failed"] [data-test="empty-state-cta"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.documents.empty_description')
+  })
+
+  it('shows the empty state when the period genuinely has no document', async () => {
+    m.listDocuments.mockResolvedValue({
+      period: '2026-07',
+      revisions: [],
+      items: [],
+      total: 0,
+    })
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.documents.empty_description')
+  })
+
+  /*
+   * Zúžení přichází z odkazu na kartě zaměstnance, takže id zná jen adresní
+   * řádek — uživatel ne. Lišta ho proto musí pojmenovat jménem, ne číslem.
+   */
+  it('names the person in the notice about a narrowing that returned nothing', async () => {
+    m.routeQuery = { person: '31' }
+    m.person.mockResolvedValue({ id: 31, full_name: 'Testovací Zaměstnanec' })
+    m.listDocuments.mockResolvedValue({
+      period: '2026-07',
+      revisions: [],
+      items: [],
+      total: 0,
+    })
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="payroll-focus-notice"]').text()).toContain(
+      'payroll.agendas.focus.missing_named:{"name":"Testovací Zaměstnanec"}',
+    )
+  })
+
+  it('falls back to a generic wording instead of the raw id when the name is unreachable', async () => {
+    m.routeQuery = { person: '31' }
+    m.person.mockRejectedValue(new Error('forbidden'))
+    m.listDocuments.mockResolvedValue({
+      period: '2026-07',
+      revisions: [],
+      items: [],
+      total: 0,
+    })
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="payroll-focus-notice"]').text()
+    expect(notice).toContain(
+      'payroll.agendas.focus.missing_named:{"name":"payroll.agendas.focus.unknown_person"}',
+    )
+    expect(notice).not.toContain('"name":"31"')
+  })
+
+  it('hides the narrowing notice while the load has failed', async () => {
+    m.routeQuery = { person: '31' }
+    m.listDocuments.mockRejectedValue(new Error('network'))
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    // Po výpadku nevíme, jestli zúžení něco vrátilo — tvrdit „nic tu není"
+    // by byl stejný omyl jako prázdný stav.
+    expect(wrapper.find('[data-test="payroll-focus-notice"]').text())
+      .not.toContain('payroll.agendas.focus.missing')
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(true)
+  })
 })

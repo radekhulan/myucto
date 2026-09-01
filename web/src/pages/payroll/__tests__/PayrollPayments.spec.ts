@@ -634,6 +634,92 @@ describe('PayrollPayments', () => {
     expect(m.error).toHaveBeenCalled()
   })
 
+  /*
+   * Toast unese jediný důvod. Opravit se přitom musí všechny, takže je stránka
+   * musí vypsat naráz — jinak účetní opravuje první nález a o dalších neví.
+   */
+  it('lists every reason why the liability preparation failed', async () => {
+    m.runs.mockResolvedValue([
+      {
+        id: 11,
+        period_start: '2026-08-01',
+        payment_date: '2026-08-15',
+        status: 'approved',
+        current_revision_no: 1,
+        revision_id: 12,
+        revision_no: 1,
+        revision_status: 'approved',
+        payment_materialization_supported: true,
+        row_version: 5,
+        result_snapshot: null,
+        available_commands: [],
+        validations: [],
+      },
+      {
+        id: 21,
+        period_start: '2026-08-01',
+        payment_date: '2026-08-15',
+        status: 'approved',
+        current_revision_no: 2,
+        revision_id: 22,
+        revision_no: 2,
+        revision_status: 'approved',
+        payment_materialization_supported: true,
+        row_version: 2,
+        result_snapshot: null,
+        available_commands: [],
+        validations: [],
+      },
+    ])
+    m.materialize
+      .mockRejectedValueOnce(new Error('chybí bankovní účet plátce'))
+      .mockResolvedValueOnce({
+        liability_ids: [],
+        created_count: 0,
+        preparation_issues: [
+          { message: 'zaměstnanec bez bankovního spojení' },
+          { message: 'odvod bez variabilního symbolu' },
+        ],
+      })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    const button = wrapper.findAll('header button')
+      .find(item => item.text().includes('payroll.payments.materialize'))
+    await button!.trigger('click')
+    await flushPromises()
+
+    const rows = wrapper.findAll('[data-test="materialize-error-row"]')
+    expect(rows).toHaveLength(3)
+    const panel = wrapper.get('[data-test="materialize-error"]').text()
+    expect(panel).toContain('chybí bankovní účet plátce')
+    expect(panel).toContain('zaměstnanec bez bankovního spojení')
+    expect(panel).toContain('odvod bez variabilního symbolu')
+    // Číslo revize řekne, kterého běhu se důvod týká.
+    expect(panel).toContain('payroll.payments.batch.revision:{"revision":1}')
+    expect(panel).toContain('payroll.payments.batch.revision:{"revision":2}')
+
+    await wrapper.get('[data-test="materialize-error"] button').trigger('click')
+    expect(wrapper.find('[data-test="materialize-error"]').exists()).toBe(false)
+  })
+
+  /*
+   * „abo" ve sloupci formátu nutí účetní vědět, co ta zkratka znamená —
+   * zakládací formulář jí přitom nabízí tentýž formát už pojmenovaný.
+   */
+  it('names the batch format instead of printing its code', async () => {
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[1].trigger('click')
+    await flushPromises()
+
+    const chips = wrapper.findAll('[data-test="batch-format"]')
+    expect(chips.length).toBeGreaterThan(0)
+    for (const chip of chips) {
+      expect(chip.text()).toBe('payroll.payments.batch.format.abo')
+    }
+  })
+
   it('reuses the pending idempotency key after an export timeout', async () => {
     m.generateExport
       .mockRejectedValueOnce(new Error('synthetic timeout'))

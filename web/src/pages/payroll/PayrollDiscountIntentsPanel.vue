@@ -31,6 +31,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
 const { t } = useI18n()
@@ -63,16 +64,6 @@ const employmentOptions = computed(() =>
       ? `${employment.code} (${employment.start_date ?? '?'} – ${employment.end_date})`
       : `${employment.code} (${employment.start_date ?? '?'})`,
   })))
-const environmentOptions = computed(() => [
-  {
-    value: 'production' as PayrollRegzelEnvironment,
-    label: t('payroll.regzel.environment.production'),
-  },
-  {
-    value: 'test' as PayrollRegzelEnvironment,
-    label: t('payroll.regzel.environment.test'),
-  },
-])
 const canCreate = computed(() =>
   canWrite.value
   && !creating.value
@@ -433,12 +424,16 @@ onMounted(async () => {
             {{ t('payroll.discountIntents.employeeInformedHint') }}
           </span>
         </label>
-        <label class="block text-sm">
+        <div class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.regzel.environment.label') }}
           </span>
-          <SearchableSelect v-model="environment" :options="environmentOptions" />
-        </label>
+          <EnvironmentSwitch
+            v-model="environment"
+            :aria-label="t('payroll.regzel.environment.label')"
+            data-test="discount-intent-environment"
+          />
+        </div>
       </div>
 
       <ActionBar

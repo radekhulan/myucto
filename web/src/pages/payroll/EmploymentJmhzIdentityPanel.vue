@@ -7,7 +7,7 @@ import {
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
-import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
 import { todayIso } from './employmentLifecycleUi'
 
@@ -43,10 +43,6 @@ const error = ref('')
 const success = ref('')
 let skipNextDateReload = false
 
-const environmentOptions = computed(() => [
-  { value: 'test' as const, label: t('payroll.regzel.environment.test') },
-  { value: 'production' as const, label: t('payroll.regzel.environment.production') },
-])
 const complete = computed(() => status.value !== null
   && status.value.person_external_identifier !== null
   && status.value.employment_external_identifier !== null)
@@ -181,17 +177,17 @@ watch(() => [props.startDate, props.endDate], () => {
       </p>
 
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label class="text-xs text-neutral-600">
+        <div class="text-xs text-neutral-600">
           {{ t('payroll.people.jmhz_identity.environment') }}
-          <SearchableSelect
-            v-model="environment"
-            :options="environmentOptions"
-            :clearable="false"
-            accent="payroll"
-            class="mt-1"
-            data-test="jmhz-identity-environment"
-          />
-        </label>
+          <div class="mt-1">
+            <EnvironmentSwitch
+              v-model="environment"
+              size="sm"
+              :aria-label="t('payroll.people.jmhz_identity.environment')"
+              data-test="jmhz-identity-environment"
+            />
+          </div>
+        </div>
         <label class="text-xs text-neutral-600">
           {{ t('payroll.people.jmhz_identity.on_date') }}
           <input

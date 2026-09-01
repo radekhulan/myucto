@@ -805,6 +805,7 @@
       "focus": {
         "title": "The list is narrowed to {name}.",
         "missing": "Narrowing (no. {name}) returned no record for this selection — the employment or person does not belong to this company, did not exist in the period, or the link is stale.",
+        "missing_named": "The list is narrowed to {name}, but no record is left in this selection — the employment or person does not belong to this company, did not exist in the period, or the link is stale.",
         "unknown_person": "the selected employee",
         "clear": "Clear narrowing"
       }
@@ -1068,7 +1069,8 @@
       "materialized": "{count} new payment liabilities were created.",
       "materialized_replay": "All liabilities had already been prepared; no duplicate was created.",
       "materialize_failed": "Payment liabilities could not be prepared.",
-      "materialize_partial_failed": "{count} payroll runs could not be prepared; the remaining runs were processed. {detail}",
+      "materialize_partial_failed": "{count} payroll runs could not be prepared; the remaining runs were processed. The reasons are listed above the list.",
+      "materialize_failures": "Liabilities that could not be prepared: {count}. Fix the reasons below and run the preparation again.",
       "load_failed": "Payroll payments could not be loaded.",
       "readonly_hint": "You have read-only access — liability preparation, payment batches, exports and matching are disabled.",
       "tabs_label": "Payroll payment sections",
@@ -2358,6 +2360,7 @@
       "bundle_created": "The monthly bundle is ready to download.",
       "bundle_failed": "The monthly bundle could not be created.",
       "load_failed": "Payroll documents could not be loaded.",
+      "load_failed_hint": "Payroll documents did not load, so we cannot tell whether any were issued for this period. Please try again.",
       "download": "Download",
       "download_failed": "The document could not be downloaded.",
       "empty_title": "No documents have been created for the selected period",
@@ -2640,14 +2643,14 @@
         "unworked_evidence_hint": "The source includes an absence. Treat it as review evidence and explicitly confirm the conditional-block values.",
         "unworked_occurred": "Were there unworked hours this month?",
         "obstacles_occurred": "Were there obstacles to work this month?",
-        "unworked_total": "Total unworked hours (10275)",
-        "unworked_paid": "Paid or unreduced hours (10276)",
-        "dpn_without_compensation": "Temporary incapacity without employer compensation (10277)",
-        "dpn_with_compensation": "Temporary incapacity with employer compensation (10278)",
-        "vacation": "Vacation taken (10279)",
-        "care": "Care with nursing-benefit entitlement (10280)",
-        "employee_obstacle": "Paid employee-side obstacles (10471)",
-        "employer_obstacle": "Employer-side obstacles (10472)",
+        "unworked_total": "Total unworked hours",
+        "unworked_paid": "Paid or unreduced hours",
+        "dpn_without_compensation": "Temporary incapacity without employer compensation",
+        "dpn_with_compensation": "Temporary incapacity with employer compensation",
+        "vacation": "Vacation taken",
+        "care": "Care with nursing-benefit entitlement",
+        "employee_obstacle": "Paid employee-side obstacles",
+        "employer_obstacle": "Employer-side obstacles",
         "required_missing": "Fill in “{field}” — without it the working-time summary cannot be created.",
         "conditional_missing": "Answer both questions above.",
         "as_agreed": "Worked exactly the prescribed fund",
@@ -4042,6 +4045,16 @@
           "saved": "Version {version} was stored and is ready for a new A1 preview.",
           "load_failed": "The REGZEC A1 profile could not be loaded.",
           "save_failed": "The REGZEC A1 profile could not be saved.",
+          "error_title": "Nothing was saved — the server state is unchanged",
+          "error_kept": "Your values stay in the form and are backed up in this browser, so you keep them even after closing the card or reloading the page.",
+          "error_person_hint": "The missing value is not entered here — it comes from the person's records. Add it on the person card under “Employee registration details” and “Address history”, then come back.",
+          "error_person_link": "Open the person card",
+          "error_above": "Nothing was saved. The red box at the top says what is missing and where to add it.",
+          "draft_title": "You have an unsaved profile here",
+          "draft_hint": "An unsent version of this form from {saved} is stored in this browser. Continue with it?",
+          "draft_restore": "Continue with the unsaved version",
+          "draft_discard": "Discard the unsaved version",
+          "draft_restored": "The unsaved profile is back in the form. It reaches the server only once you save.",
           "variant": "Variant A1-{variant} per the ČSSZ business matrix.",
           "missing_title": "What the application does not track",
           "diverged_title": "The snapshot has drifted from master data",
@@ -12199,6 +12212,13 @@
     "entry": "entry"
   },
   "common": {
+    "environmentSwitch": {
+      "legend": "Environment",
+      "production": "Production",
+      "test": "Test environment",
+      "productionHint": "You are working with live data and live credentials.",
+      "testHint": "Careful: test environment. Neither the data nor the credentials are live."
+    },
     "storage_quota": {
       "warning": "The storage allowance for this installation is running out ({percent} %).",
       "warning_no_percent": "The storage allowance for this installation is running out.",
@@ -19370,6 +19390,23 @@
         "sent": "The submission was sent through the data box.",
         "notDispatched": "The session was confirmed but the submission was not sent. Check its state.",
         "testEnvironmentWarning": "You are in the test environment. The test ISDS (datovka-test.gov.cz) has its own accounts — credentials for the live data box will not work here. Switch to the live environment above to send a real filing."
+      },
+      "passwordSend": {
+        "action": "Send with username and password",
+        "intro": "The sign-in applies to this one send only. The password goes to ISDS and is never stored.",
+        "username": "ISDS username",
+        "password": "Data box password",
+        "submit": "Sign in and send",
+        "sent": "The message was sent.",
+        "notSent": "The message stayed in the queue — check the attempt history.",
+        "failed": "The message could not be sent."
+      },
+      "certificateSend": {
+        "action": "Send with certificate",
+        "confirm": "Send “{subject}” with the company system certificate? Nobody stands behind a certificate, so sending it is your confirmation.",
+        "sent": "The message was sent with the system certificate.",
+        "notSent": "The message stayed in the queue — check the attempt history.",
+        "failed": "The message could not be sent with the certificate."
       }
     },
     "manual": {

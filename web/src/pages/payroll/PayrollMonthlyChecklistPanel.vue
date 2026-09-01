@@ -8,7 +8,7 @@ import {
   type PayrollMonthlyChecklistResponse,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
-import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate } from '@/composables/useFormat'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
@@ -50,11 +50,6 @@ const period = computed({
 const loading = ref(true)
 const error = ref('')
 const response = ref<PayrollMonthlyChecklistResponse | null>(null)
-
-const environmentOptions = computed(() => [
-  { value: 'production' as const, label: t('payroll.regzel.environment.production') },
-  { value: 'test' as const, label: t('payroll.regzel.environment.test') },
-])
 
 const items = computed(() => response.value?.items ?? [])
 const summary = computed(() => response.value?.summary ?? {
@@ -183,17 +178,16 @@ onMounted(load)
             data-test="monthly-checklist-period"
           >
         </label>
-        <label class="block text-sm font-medium text-neutral-700">
+        <div class="block text-sm font-medium text-neutral-700">
           {{ t('payroll.submissions.overview.environment') }}
-          <SearchableSelect
-            v-model="environmentModel"
-            class="mt-1"
-            :options="environmentOptions"
-            :clearable="false"
-            accent="payroll"
-            data-test="monthly-checklist-environment"
-          />
-        </label>
+          <div class="mt-1">
+            <EnvironmentSwitch
+              v-model="environmentModel"
+              :aria-label="t('payroll.submissions.overview.environment')"
+              data-test="monthly-checklist-environment"
+            />
+          </div>
+        </div>
       </div>
     </div>
 

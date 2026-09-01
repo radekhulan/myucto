@@ -69,6 +69,19 @@ const loading = ref(true)
  */
 const loadFailed = ref(false)
 const materializing = ref(false)
+/**
+ * Proč příprava závazků neprošla — každý běh zvlášť.
+ *
+ * Příprava jede přes všechny revize, takže důvodů může být tolik, kolik je
+ * běhů. Toast unese jeden a účetní pak opravuje první nález, zatímco o dalších
+ * neví; panel je vypíše všechny a zůstane na obrazovce, dokud je nezavře.
+ */
+interface MaterializeFailure {
+  key: string
+  revisionNo: number | null
+  message: string
+}
+const materializeFailures = ref<MaterializeFailure[]>([])
 const creatingBatch = ref(false)
 const generatingBatchId = ref<number | null>(null)
 /*
@@ -1011,6 +1024,16 @@ function bankFileLabel(batch: PayrollPaymentBatch): string {
 }
 
 /**
+ * Formát dávky větou, ne kódem ze sloupce.
+ *
+ * „abo" nebo „sepa" v seznamu nutí účetní vědět, co ta zkratka znamená;
+ * zakládací formulář jí přitom nabízí tytéž formáty už pojmenované.
+ */
+function batchFormatLabel(batch: PayrollPaymentBatch): string {
+  return t(`payroll.payments.batch.format.${batch.export_format}`)
+}
+
+/**
  * Je tahle revize nahrazená novější?
  *
  * Skrýt jde jen nahrazená revize - poslední je ta platná a zmizet nesmí,
@@ -1141,9 +1164,10 @@ async function downloadExport(file: PayrollPaymentExport): Promise<void> {
 async function materialize(): Promise<void> {
   if (!canMaterialize.value || materializing.value) return
   materializing.value = true
+  materializeFailures.value = []
   let created = 0
   let succeeded = 0
-  const failures: unknown[] = []
+  const failures: MaterializeFailure[] = []
   for (const run of materializableRevisions.value) {
     if (run.revision_id === null) continue
     try {
@@ -1152,14 +1176,21 @@ async function materialize(): Promise<void> {
       )
       created += result.created_count
       succeeded += 1
-      failures.push(...result.preparation_issues.map(issue =>
-        new Error(issue.message),
-      ))
+      failures.push(...result.preparation_issues.map((issue, index) => ({
+        key: `${run.revision_id}-issue-${index}`,
+        revisionNo: run.revision_no,
+        message: issue.message,
+      })))
     } catch (error) {
-      failures.push(error)
+      failures.push({
+        key: `${run.revision_id}-error`,
+        revisionNo: run.revision_no,
+        message: apiErrorMessage(error, t('payroll.payments.materialize_failed')),
+      })
     }
   }
   try {
+    materializeFailures.value = failures
     if (succeeded > 0) {
       toast.success(t(
         created > 0
@@ -1169,13 +1200,10 @@ async function materialize(): Promise<void> {
       ))
     }
     if (failures.length > 0) {
-      const detail = apiErrorMessage(
-        failures[0],
-        t('payroll.payments.materialize_failed'),
-      )
+      // Toast jen upozorní; důvody drží panel, protože jich bývá víc než jeden.
       toast.error(t(
         'payroll.payments.materialize_partial_failed',
-        { count: failures.length, detail },
+        { count: failures.length },
       ))
     }
     if (succeeded > 0) {
@@ -1487,6 +1515,41 @@ onMounted(load)
         </div>
       </div>
     </header>
+
+    <!--
+      Příprava závazků padá po jednotlivých bězích, takže důvodů bývá víc.
+      Panel místo toastu: uživatel musí vidět, KTERÁ revize neprošla a proč.
+    -->
+    <section
+      v-if="materializeFailures.length"
+      class="rounded-xl border border-danger-500/40 bg-danger-50 p-4 text-sm text-danger-700"
+      data-test="materialize-error"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <p class="font-semibold">
+          {{ t('payroll.payments.materialize_failures', {
+            count: materializeFailures.length,
+          }) }}
+        </p>
+        <button :class="btnOutline('neutral')" @click="materializeFailures = []">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.close') }}
+        </button>
+      </div>
+      <ul class="mt-2 space-y-2">
+        <li
+          v-for="failure in materializeFailures"
+          :key="failure.key"
+          data-test="materialize-error-row"
+          class="border-t border-danger-500/20 pt-2 first:border-t-0 first:pt-0"
+        >
+          <p v-if="failure.revisionNo !== null" class="font-medium">
+            {{ t('payroll.payments.batch.revision', { revision: failure.revisionNo }) }}
+          </p>
+          <p class="mt-0.5 max-w-prose leading-snug">{{ failure.message }}</p>
+        </li>
+      </ul>
+    </section>
 
     <section
       v-if="runShortcutRequested"
@@ -1859,8 +1922,11 @@ onMounted(load)
                     </span>
                   </td>
                   <td class="px-4 py-3">
-                    <span class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium uppercase text-payroll-700">
-                      {{ batch.export_format }}
+                    <span
+                      class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700"
+                      data-test="batch-format"
+                    >
+                      {{ batchFormatLabel(batch) }}
                     </span>
                   </td>
                   <td class="px-4 py-3 text-right text-neutral-700">
@@ -1985,8 +2051,11 @@ onMounted(load)
                   }) }}
                 </p>
               </div>
-              <span class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium uppercase text-payroll-700">
-                {{ batch.export_format }}
+              <span
+                class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700"
+                data-test="batch-format"
+              >
+                {{ batchFormatLabel(batch) }}
               </span>
             </div>
             <div v-if="batch.exports.length" class="mt-4 space-y-3">

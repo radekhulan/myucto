@@ -510,13 +510,13 @@ describe('PayrollSubmissions', () => {
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.statutory'))).toBe(true)
     await clickTab(wrapper, 'regzel')
     await flushPromises()
-    expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
+    expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(1)
     expect(wrapper.text()).toContain('payroll.regzel.environment.production_warning')
 
-    const environment = wrapper.get('[data-test="regzel-environment"] input')
-    await environment.trigger('focus')
-    await environment.trigger('keydown', { key: 'ArrowDown' })
-    await environment.trigger('keydown', { key: 'Enter' })
+    // Prostředí se přepíná viditelným segmentovým přepínačem, ne rozbalovacím
+    // seznamem — testovací volba musí být vidět bez rozkliknutí.
+    const environment = wrapper.get('[data-test="regzel-environment"]')
+    await environment.get('[data-test="environment-switch-test"]').trigger('click')
     await flushPromises()
 
     expect(m.snapshots).toHaveBeenLastCalledWith('test', { limit: 25, offset: 0 })

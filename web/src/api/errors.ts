@@ -10,6 +10,18 @@
  *
  * Tím uživatel vidí konkrétní pole, ne jen generické "Validace selhala".
  */
+/**
+ * Strojový kód chyby z téže odpovědi.
+ *
+ * Hláška je pro člověka a mění se s překladem; kód je stabilní, takže jen podle
+ * něj smí obrazovka rozhodnout, co uživateli nabídne dál (třeba odkaz tam, kde
+ * se chybějící údaj doplňuje). Chyba bez odpovědi (síť, timeout) kód nemá.
+ */
+export function apiErrorCode(err: any): string {
+  const code = err?.response?.data?.error?.code
+  return typeof code === 'string' ? code : ''
+}
+
 export function apiErrorMessage(err: any, fallback = 'Operace selhala'): string {
   const data = err?.response?.data?.error
   if (!data) return err?.message || fallback

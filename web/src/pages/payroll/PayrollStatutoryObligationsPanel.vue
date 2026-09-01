@@ -11,6 +11,7 @@ import {
   type PayrollStatutoryObligationOverview,
 } from '@/api/payroll'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
@@ -46,10 +47,6 @@ const paymentAmount = ref('')
 const confirmed = ref(false)
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
-const environmentOptions = computed(() => [
-  { value: 'production', label: t('payroll.regzel.environment.production') },
-  { value: 'test', label: t('payroll.regzel.environment.test') },
-])
 const peopleOptions = computed(() => people.value.map(person => ({
   value: person.id,
   label: person.full_name,
@@ -206,17 +203,17 @@ watch(period, load)
           </p>
         </div>
         <div class="flex flex-wrap gap-3">
-          <label class="block min-w-44">
+          <div class="block min-w-44">
             <span class="mb-1 block text-xs font-medium text-neutral-600">
               {{ t('payroll.submissions.statutory.environment') }}
             </span>
-            <SearchableSelect
+            <EnvironmentSwitch
               v-model="environmentModel"
-              :options="environmentOptions"
-              :clearable="false"
-              accent="payroll"
+              size="sm"
+              :aria-label="t('payroll.submissions.statutory.environment')"
+              data-test="statutory-environment"
             />
-          </label>
+          </div>
           <label class="block">
             <span class="mb-1 block text-xs font-medium text-neutral-600">
               {{ t('payroll.submissions.statutory.period') }}

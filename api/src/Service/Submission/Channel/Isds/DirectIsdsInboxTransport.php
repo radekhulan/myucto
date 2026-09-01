@@ -730,17 +730,21 @@ final class DirectIsdsInboxTransport implements IsdsTransport
         }
     }
 
+    /**
+     * Smí se z tohohle kontextu odeslat?
+     *
+     * Pravidlo je JEDNO a bydlí v {@see hasConfirmedSession()} — tahle metoda
+     * ho jen převede na konkrétní chybu. Dřív tu stál vlastní seznam režimů,
+     * který se s ním rozešel: transport už jméno a heslo pustil, ale odeslání
+     * pak spadlo na hlášku „lze odeslat jen v relaci potvrzené Mobilním klíčem",
+     * takže se zpráva neodeslala a důvod nedával smysl.
+     */
     private function assertConfirmedSession(ChannelContext $context): void
     {
-        if (!in_array($context->credentials->authMode, self::CONFIRMED_SESSION_MODES, true)) {
-            throw new SubmissionChannelException(
-                'isds_send_requires_confirmed_session',
-                'Datovou schránkou lze odeslat jen v relaci, kterou jste právě potvrdil(a) v Mobilním klíči '
-                . 'nebo SMS kódem. Systémovým certifikátem se odesílat nesmí — u odeslání musí být člověk.',
-                409,
-            );
+        if (self::hasConfirmedSession($context)) {
+            return;
         }
-        if ($context->credentials->sessionCookie === null) {
+        if (in_array($context->credentials->authMode, self::CONFIRMED_SESSION_MODES, true)) {
             throw new SubmissionChannelException(
                 'isds_session_missing',
                 'Přihlášení k datové schránce není dokončené, takže se odesílat nesmí. '
@@ -748,6 +752,12 @@ final class DirectIsdsInboxTransport implements IsdsTransport
                 409,
             );
         }
+        throw new SubmissionChannelException(
+            'isds_send_requires_confirmed_session',
+            'K odeslání chybí přihlášení k datové schránce. Použijte Mobilní klíč, '
+            . 'SMS kód, jméno s heslem, nebo systémový certifikát firmy.',
+            409,
+        );
     }
 
     /**

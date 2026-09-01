@@ -127,8 +127,10 @@ describe('PayrollStatutoryObligationsPanel', () => {
     await flushPromises()
     await wrapper.get('[data-test="statutory-agenda-NEMPRI"] button').trigger('click')
 
+    // Prostředí se přepíná segmentovým přepínačem, takže jediný <select>
+    // v panelu je výběr osoby.
     const selects = wrapper.findAll('select')
-    await selects[1]!.setValue('15')
+    await selects[0]!.setValue('15')
     await wrapper.get('[data-test="statutory-case-reference"]').setValue('EDPN-SYNTH-1')
     await wrapper.get('[data-test="statutory-receipt-reference"]').setValue('CSSZ-SYNTH-1')
     await wrapper.get('[data-test="statutory-completed-on"]').setValue('2026-08-20')
