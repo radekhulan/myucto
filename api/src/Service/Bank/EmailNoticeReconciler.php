@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\GoPay\GoPayService;
 use PDO;
 
 /**
@@ -51,7 +52,10 @@ final class EmailNoticeReconciler
      */
     private const CARD_FX_TOLERANCE_RATIO = 0.05;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly GoPayService $gopay,
+    ) {}
 
     /**
      * Pokus o převzetí párování z e-mailového avíza nebo iDokladu pro novou GPC transakci.
@@ -132,6 +136,9 @@ final class EmailNoticeReconciler
                           SELECT 1 FROM invoices i
                            WHERE i.id = bt.matched_invoice_id AND i.supplier_id = ?
                       ))
+                   OR EXISTS (SELECT 1 FROM gopay_clearings gc
+                               WHERE gc.payout_match_transaction_id = bt.id
+                                 AND gc.supplier_id = ?)
                 )"
         );
         $cand->execute([
@@ -141,7 +148,7 @@ final class EmailNoticeReconciler
             $gpc['posted_at'], self::DATE_WINDOW_DAYS,
             $gpc['posted_at'], self::DATE_WINDOW_DAYS,
             $supplierId,
-            $supplierId, $supplierId, $supplierId,
+            $supplierId, $supplierId, $supplierId, $supplierId,
         ]);
         $rows = $cand->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
@@ -412,6 +419,11 @@ final class EmailNoticeReconciler
                 ->execute([$gpcTxId, $emailTxId, $supplierId]);
             $pdo->prepare('UPDATE payment_matches SET bank_transaction_id = ? WHERE bank_transaction_id = ? AND supplier_id = ?')
                 ->execute([$gpcTxId, $emailTxId, $supplierId]);
+            $pdo->prepare(
+                'UPDATE gopay_clearings
+                    SET payout_match_transaction_id = ?
+                  WHERE payout_match_transaction_id = ? AND supplier_id = ?'
+            )->execute([$gpcTxId, $emailTxId, $supplierId]);
 
             // Karetní blokace zúčtovaná jiným kurzem: evidovaná úhrada nesla blokovanou
             // částku, GPC je zdroj pravdy. `payment_matches.amount` je vždy absolutní
@@ -456,6 +468,8 @@ final class EmailNoticeReconciler
                     )
                   WHERE id = ?"
             )->execute([$emailStatementId, $emailStatementId]);
+
+            $this->gopay->completeTransferredPayout($supplierId, $gpcTxId);
 
             if ($owns) {
                 $pdo->commit();

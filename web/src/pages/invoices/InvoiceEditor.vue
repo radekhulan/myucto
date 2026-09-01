@@ -457,6 +457,7 @@ const form = ref<{
   income_tax_exempt: boolean
   income_tax_exempt_reason: string
   language: 'cs' | 'en'
+  supplier_order_number: string
   note_above_items: string
   note_below_items: string
   advance_paid_amount: number
@@ -488,6 +489,7 @@ const form = ref<{
   income_tax_exempt: false,
   income_tax_exempt_reason: '',
   language: 'cs',
+  supplier_order_number: '',
   note_above_items: '',
   note_below_items: '',
   advance_paid_amount: 0,
@@ -780,6 +782,7 @@ onMounted(async () => {
       income_tax_exempt: (inv as { income_tax_exempt?: boolean }).income_tax_exempt ?? false,
       income_tax_exempt_reason: (inv as { income_tax_exempt_reason?: string | null }).income_tax_exempt_reason ?? '',
       language: inv.language,
+      supplier_order_number: inv.supplier_order_number ?? '',
       note_above_items: inv.note_above_items ?? '',
       note_below_items: inv.note_below_items ?? '',
       advance_paid_amount: inv.advance_paid_amount,
@@ -1717,6 +1720,7 @@ async function submit() {
       income_tax_exempt: form.value.income_tax_exempt,
       income_tax_exempt_reason: form.value.income_tax_exempt ? (form.value.income_tax_exempt_reason || null) : null,
       language: form.value.language,
+      supplier_order_number: form.value.supplier_order_number.trim() || null,
       note_above_items: form.value.note_above_items || null,
       note_below_items: form.value.note_below_items || null,
       advance_paid_amount: form.value.advance_paid_amount,
@@ -2146,6 +2150,13 @@ async function deleteDraft() {
             <div v-else-if="editedVarsymbol" class="rounded-md bg-neutral-50 border border-neutral-200 p-3 text-sm">
               <span class="text-neutral-500">{{ t(varsymbolLabelKey) }}:</span>
               <code class="ml-2 font-mono font-semibold">{{ editedVarsymbol }}</code>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.supplier_order_number') }}</label>
+              <input v-model="form.supplier_order_number" type="text" maxlength="80"
+                :placeholder="t('invoice.supplier_order_number_placeholder')"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
+              <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.supplier_order_number_hint') }}</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.issue_date') }} *</label>

@@ -2072,6 +2072,8 @@ final class Routes
             $g->get   ('/gopay/clearings/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'detail']);
             $g->get   ('/gopay/clearings/{id:[0-9]+}/download',       [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'download']);
             $g->post  ('/gopay/clearings/{id:[0-9]+}/process',        [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'process']);
+            $g->post  ('/gopay/clearings/{id:[0-9]+}/payout-match',   [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'associatePayout']);
+            $g->get   ('/gopay/payout-candidates/{transactionId:[0-9]+}', [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'payoutCandidate']);
             $g->get   ('/bank-posting-rules',                        [\MyInvoice\Action\Accounting\Bank\BankPostingRuleAction::class, 'list']);
             $g->post  ('/bank-posting-rules',                        [\MyInvoice\Action\Accounting\Bank\BankPostingRuleAction::class, 'create']);
             $g->post  ('/bank-posting-rules/dry-run',                [\MyInvoice\Action\Accounting\Bank\BankPostingRuleAction::class, 'dryRun']);

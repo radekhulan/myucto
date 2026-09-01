@@ -15,6 +15,7 @@ import {
 } from '@/api/bank'
 import { invoicesApi } from '@/api/invoices'
 import { documentRequestsApi } from '@/api/documentRequests'
+import { gopayApi, type GoPayPayoutCandidate } from '@/api/gopay'
 import type { Client } from '@/api/clients'
 
 const POSTING_REASON_KEYS: Record<string, string> = {
@@ -134,6 +135,9 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const matchVarsymbol = ref('')
   const matchCandidates = ref<MatchCandidate[]>([])
   const loadingCandidates = ref(false)
+  const gopayCandidate = ref<GoPayPayoutCandidate | null>(null)
+  const loadingGoPayCandidate = ref(false)
+  const matchingGoPay = ref(false)
   const candidatesFallback = ref(false)
   const splitSuggestions = ref<SplitSuggestion[]>([])
   const loadingSplit = ref(false)
@@ -154,6 +158,18 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     matchVarsymbol.value = tx.variable_symbol || ''
     matchError.value = ''
     matchCandidates.value = []
+    gopayCandidate.value = null
+    loadingGoPayCandidate.value = tx.amount > 0 && tx.source !== 'idoklad'
+    if (loadingGoPayCandidate.value) {
+      gopayApi.payoutCandidate(tx.id)
+        .then(candidate => {
+          if (matchingTx.value === tx.id) gopayCandidate.value = candidate
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (matchingTx.value === tx.id) loadingGoPayCandidate.value = false
+        })
+    }
     candidatesFallback.value = false
     loadingCandidates.value = true
     bankApi.matchCandidates(tx.id)
@@ -229,6 +245,24 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   function closeMatch() { matchingTx.value = null }
+
+  async function confirmGoPayCandidate() {
+    if (!matchingTx.value || !gopayCandidate.value || matchingGoPay.value) return
+    matchingGoPay.value = true
+    matchError.value = ''
+    try {
+      const result = await gopayApi.associatePayout(gopayCandidate.value.id, matchingTx.value)
+      matchingTx.value = null
+      toast.success(result.payout_issue_code === 'email_notice_provisional'
+        ? t('bank.gopay_match.notice_matched')
+        : t('bank.gopay_match.statement_matched'))
+      await opts.reload()
+    } catch (e) {
+      matchError.value = apiErrorMessage(e, t('bank.gopay_match.failed'))
+    } finally {
+      matchingGoPay.value = false
+    }
+  }
 
   async function confirmSuggestion(s: SplitSuggestion) {
     if (!matchingTx.value) return
@@ -358,11 +392,12 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     expandedDocs, toggleDocs,
     // manuální match modal
     matchingTx, matchCtx, matchVarsymbol, matchCandidates, loadingCandidates, candidatesFallback,
+    gopayCandidate, loadingGoPayCandidate, matchingGoPay,
     splitSuggestions, loadingSplit, splitWindow,
     anchorInvoiceId, anchorOptions, anchorSelected, anchorLoading,
     currentSuggestion,
     startMatch, widenSplitWindow, onAnchorSearch, onAnchorSelect,
-    confirmSuggestion, confirmCandidate, confirmMatch, closeMatch,
+    confirmSuggestion, confirmCandidate, confirmMatch, confirmGoPayCandidate, closeMatch,
     // vytvoření přijaté faktury
     createTx, createVendorId, vendorModalOpen, creatingPi,
     openCreate, onVendorCreated, submitCreatePurchase, closeCreate,

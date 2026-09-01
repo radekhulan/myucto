@@ -225,6 +225,7 @@ export interface Invoice {
   income_tax_exempt: boolean
   income_tax_exempt_reason: string | null
   language: 'cs' | 'en'
+  supplier_order_number: string | null
   note_above_items: string | null
   note_below_items: string | null
   revenue_category_id: number | null
@@ -477,6 +478,7 @@ export interface InvoicePayload {
   income_tax_exempt?: boolean
   income_tax_exempt_reason?: string | null
   language?: 'cs' | 'en'
+  supplier_order_number?: string | null
   note_above_items?: string | null
   note_below_items?: string | null
   advance_paid_amount?: number

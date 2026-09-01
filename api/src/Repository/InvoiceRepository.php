@@ -1129,12 +1129,13 @@ final class InvoiceRepository
             (invoice_type, parent_invoice_id, client_id, project_id, supplier_id, branding_profile_id,
              issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language,
              note_above_items, note_below_items, advance_paid_amount, discount_percent, varsymbol,
+             supplier_order_number,
              payment_method, status, vat_classification_code, revenue_category, revenue_category_id,'
             . ($hasExempt ? ' income_tax_exempt, income_tax_exempt_reason,' : '')
             . ($hasReminders ? ' auto_send_reminders,' : '')
             . ($hasSimplified ? ' is_simplified,' : '')
             . ' created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?,'
             . ($hasExempt ? ' ?, ?,' : '')
             . ($hasReminders ? ' ?,' : '')
             . ($hasSimplified ? ' ?,' : '')
@@ -1159,6 +1160,7 @@ final class InvoiceRepository
             (float) ($data['advance_paid_amount'] ?? 0),
             self::clampDiscountPercent($data['discount_percent'] ?? 0),
             $manualVarsymbol,
+            self::normalizeSupplierOrderNumber($data['supplier_order_number'] ?? null),
             $paymentMethod,
             !empty($data['vat_classification_code']) ? (string) $data['vat_classification_code'] : null,
             !empty($data['revenue_category']) ? (string) $data['revenue_category'] : null,
@@ -1237,7 +1239,7 @@ final class InvoiceRepository
                 client_id = ?, project_id = ?, branding_profile_id = ?,
                 issue_date = ?, tax_date = ?, due_date = ?,
                 currency_id = ?, reverse_charge = ?, prices_include_vat = ?, language = ?,
-                note_above_items = ?, note_below_items = ?,
+                note_above_items = ?, note_below_items = ?, supplier_order_number = ?,
                 advance_paid_amount = ?, discount_percent = ?,
                 vat_classification_code = ?, revenue_category = ?, revenue_category_id = ?'
               . ($hasExempt ? ', income_tax_exempt = ?, income_tax_exempt_reason = ?' : '')
@@ -1262,6 +1264,7 @@ final class InvoiceRepository
             (string) ($data['language'] ?? 'cs'),
             $data['note_above_items'] ?? null,
             $data['note_below_items'] ?? null,
+            self::normalizeSupplierOrderNumber($data['supplier_order_number'] ?? null),
             (float) ($data['advance_paid_amount'] ?? 0),
             self::clampDiscountPercent($data['discount_percent'] ?? 0),
             !empty($data['vat_classification_code']) ? (string) $data['vat_classification_code'] : null,
@@ -1768,6 +1771,18 @@ final class InvoiceRepository
             return null;
         }
         return mb_substr($s, 0, 190);
+    }
+
+    private static function normalizeSupplierOrderNumber(mixed $value): ?string
+    {
+        $number = trim((string) ($value ?? ''));
+        if ($number === '') {
+            return null;
+        }
+        if (mb_strlen($number) > 80) {
+            throw new \InvalidArgumentException('Číslo objednávky dodavatele má max 80 znaků.');
+        }
+        return $number;
     }
 
     /**

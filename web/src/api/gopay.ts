@@ -60,6 +60,7 @@ export interface GoPayClearing {
   movement_count: number
   posted_count: number
   issue_count: number
+  payout_match_transaction_id: number | null
   bank_transaction_id: number | null
   imported_at: string
   processed_at: string | null
@@ -101,6 +102,10 @@ export interface GoPayImportResult {
   clearing: GoPayClearingDetail
 }
 
+export interface GoPayPayoutCandidate extends GoPayClearing {
+  transaction_source: 'email_notice' | 'statement'
+}
+
 export const gopayApi = {
   settings: (currency = 'CZK') =>
     api.get<GoPaySettingsResponse>('/accounting/gopay/settings', { params: { currency } }).then(r => r.data),
@@ -119,6 +124,13 @@ export const gopayApi = {
   },
   process: (id: number) =>
     api.post<GoPayClearingDetail>(`/accounting/gopay/clearings/${id}/process`, {}).then(r => r.data),
+  payoutCandidate: (transactionId: number) =>
+    api.get<{ candidate: GoPayPayoutCandidate | null }>(`/accounting/gopay/payout-candidates/${transactionId}`)
+      .then(r => r.data.candidate),
+  associatePayout: (clearingId: number, transactionId: number) =>
+    api.post<GoPayClearingDetail>(`/accounting/gopay/clearings/${clearingId}/payout-match`, {
+      transaction_id: transactionId,
+    }).then(r => r.data),
   downloadUrl: (id: number): string => {
     const base = api.defaults.baseURL ?? ''
     return `${base.replace(/\/$/, '')}/accounting/gopay/clearings/${id}/download`

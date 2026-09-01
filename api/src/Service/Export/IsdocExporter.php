@@ -250,11 +250,12 @@ final class IsdocExporter
 
         // OrderReferences/ContractReferences — schema vyžaduje kolekce wrappers
         // s elementy nesoucími @id atribut a vnitřní SalesOrderID resp. ID+IssueDate.
-        if (!empty($invoice['project_number'])) {
+        $orderNumber = trim((string) ($invoice['supplier_order_number'] ?? $invoice['project_number'] ?? ''));
+        if ($orderNumber !== '') {
             $orderRefs = $dom->createElementNS(self::NS, 'OrderReferences');
             $orderRef = $dom->createElementNS(self::NS, 'OrderReference');
             $orderRef->setAttribute('id', 'O1');
-            $this->el($dom, $orderRef, 'SalesOrderID', (string) $invoice['project_number']);
+            $this->el($dom, $orderRef, 'SalesOrderID', $orderNumber);
             $orderRefs->appendChild($orderRef);
             $root->appendChild($orderRefs);
         }

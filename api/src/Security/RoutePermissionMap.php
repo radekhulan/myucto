@@ -453,6 +453,7 @@ final class RoutePermissionMap
         ['*', '#^/api/accounting/bank-accounts(/|$)#', 'accounting', AccessLevel::WRITE],
         ['POST', '#^/api/accounting/gopay/clearings/import$#', 'bank.import', AccessLevel::WRITE],
         ['POST', '#^/api/accounting/gopay/clearings/[0-9]+/process$#', 'bank.post', AccessLevel::WRITE],
+        ['POST', '#^/api/accounting/gopay/clearings/[0-9]+/payout-match$#', 'bank.match', AccessLevel::WRITE],
         ['PUT', '#^/api/accounting/gopay/settings$#', 'bank.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/gopay(/|$)#', 'bank', AccessLevel::READ],
         ['POST', '#^/api/bank-statements/(upload|upload-pdf|scan)$#', 'bank.import', AccessLevel::WRITE],

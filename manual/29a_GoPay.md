@@ -35,15 +35,27 @@ Stejné XML lze nahrát opakovaně. Nevzniknou duplicitní účetní zápisy, ex
 vyúčtování se pouze znovu zpracuje. To je užitečné, pokud byl bankovní výpis nebo
 některý doklad načten až později.
 
+Pokud příchozí převod nejprve dorazí jen jako bankovní avízo, otevřete u něj
+**Ručně spárovat**. Aplikace nabídne odpovídající GoPay vyúčtování podle částky,
+měny, variabilního symbolu, data a účtu odesílatele. Avízo se nezaúčtuje. Po importu
+skutečného GPC výpisu se vazba automaticky převede na jeho bankovní pohyb a teprve
+ten vytvoří zápis přijetí převodu `221 Banka / 261 Peníze na cestě`.
+
 ## Párování dokladů
 
 Platba se páruje přednostně podle GoPay ID uloženého u úhrady faktury. Pokud tam
-ID není, použije se přesné číslo objednávky z řádku `Objednávka: MYU...` v poznámce
-dokladu spolu s částkou a měnou. Vratka se stejným způsobem páruje s dobropisem.
+ID není, použije se přesné **Číslo objednávky dodavatele** uložené na dokladu spolu
+s částkou a měnou. U historických dokladů zůstává fallback na řádek
+`Objednávka: MYU...` v poznámce. Vratka se stejným způsobem páruje s dobropisem.
 
 Doklad musí být před importem zaúčtovaný. Pokud chybí, částka nesouhlasí nebo je
 výsledek nejednoznačný, pohyb zůstane ve stavu **Ke kontrole**. Po opravě dokladu
 zvolte u vyúčtování **Zpracovat znovu**.
+
+V účetním deníku je vazba obousměrná. U zaúčtování faktury nebo dobropisu se v
+části **Souvisí** zobrazí konkrétní GoPay pohyb a jeho zápis. Z GoPay zápisu se lze
+stejným způsobem vrátit na zaúčtování dokladu. Vazba se odvozuje z uloženého GoPay
+pohybu, takže se zobrazuje i u dříve importovaných vyúčtování.
 
 ## Účetní zápisy
 
