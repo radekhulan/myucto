@@ -573,11 +573,11 @@ describe('TimeAttendance', () => {
     const approve = wrapper.findAll('button')
       .find(button => button.text() === 'payroll.time.approve')
     await approve!.trigger('click')
-    await wrapper.get('[data-test="jmhz-standard-fund"]').setValue('168')
+    // Měsíc bez absencí se otevře připravený: obě otázky mají „ne" a čísla jsou
+    // z návrhu serveru, takže po doplnění fondu je schválení jeden klik.
     expect(wrapper.get('[data-test="jmhz-work-summary-form"] button[type="submit"]')
       .attributes('disabled')).toBeDefined()
-    await wrapper.get('[data-test="jmhz-unworked-no"]').setValue(true)
-    await wrapper.get('[data-test="jmhz-obstacles-no"]').setValue(true)
+    await wrapper.get('[data-test="jmhz-standard-fund"]').setValue('168')
     expect(wrapper.get('[data-test="jmhz-work-summary-form"] button[type="submit"]')
       .attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')

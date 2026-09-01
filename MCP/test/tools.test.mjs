@@ -50,12 +50,114 @@ test('katalog má unikátní názvy a nové domény', () => {
   for (const name of [
     'save_project', 'project_profitability', 'get_document', 'link_document',
     'save_logbook_car', 'save_logbook_trip', 'save_logbook_fueling', 'logbook_summary',
+    'list_payroll_people', 'get_payroll_person', 'change_payroll_salary',
+    'list_payroll_components', 'create_payroll_input', 'get_payroll_salary_result',
+    'save_payroll_time_entry', 'create_payroll_absence',
   ]) {
     assert.ok(TOOLS_BY_NAME.has(name), name);
   }
   assert.equal(tool('project_profitability').write, false);
   assert.equal(tool('logbook_summary').write, false);
   assert.equal(tool('delete_logbook_trip').destructive, true);
+  assert.equal(tool('get_payroll_salary_result').write, false);
+  assert.equal(tool('change_payroll_salary').write, true);
+  for (const forbidden of [
+    'calculate_payroll_run', 'approve_payroll_run', 'post_payroll_run',
+    'prepare_payroll_payments', 'close_payroll_run', 'send_payroll_submission',
+    'decide_payroll_absence', 'cancel_payroll_absence',
+  ]) {
+    assert.equal(TOOLS_BY_NAME.has(forbidden), false, forbidden);
+  }
+});
+
+test('změna mzdy od data posílá jen povolená pole do nové verze', async () => {
+  const client = new FakeClient({
+    'GET /payroll/people/7': {
+      person: {
+        id: 7,
+        employments: [{
+          id: 11,
+          row_version: 4,
+          monthly_gross_minor: 5000000,
+          terms: [{
+            id: 20,
+            effective_from: '2026-01-01',
+            effective_to: null,
+            planned_start_on: '2026-01-01',
+            weekly_hours: '40.00',
+            workload_basis_points: 10000,
+            social_insurance_participation: 'automatic',
+            health_insurance_participation: 'automatic',
+            tax_regime: 'advance',
+            tax_declaration_signed: true,
+            is_primary: true,
+          }],
+        }],
+      },
+    },
+  });
+
+  await tool('change_payroll_salary').run(client, {
+    employee_id: 7,
+    employment_id: 11,
+    change_kind: 'new_terms',
+    effective_from: '2026-09-01',
+    monthly_gross_minor: 5500000,
+    reason: 'Navýšení sjednané mzdy',
+  }, 'change_payroll_salary');
+
+  assert.deepEqual(client.calls.map(({ method, path }) => [method, path]), [
+    ['GET', '/payroll/people/7'],
+    ['PUT', '/payroll/employments/11/terms'],
+  ]);
+  assert.deepEqual(client.calls[1].body, {
+    change_reason: 'Navýšení sjednané mzdy',
+    row_version: 4,
+    monthly_gross_minor: 5500000,
+    effective_from: '2026-09-01',
+  });
+});
+
+test('oprava mzdy používá aktuální verzi bez data účinnosti', async () => {
+  const client = new FakeClient({
+    'GET /payroll/people/7': {
+      person: { id: 7, employments: [{ id: 11, row_version: 4 }] },
+    },
+  });
+
+  await tool('change_payroll_salary').run(client, {
+    employee_id: 7,
+    employment_id: 11,
+    change_kind: 'correction',
+    monthly_gross_minor: 5500000,
+    reason: 'Oprava chybně zadané mzdy',
+  }, 'change_payroll_salary');
+
+  assert.deepEqual(client.calls.map(({ method, path }) => [method, path]), [
+    ['GET', '/payroll/people/7'],
+    ['PATCH', '/payroll/employments/11/terms/current'],
+  ]);
+  assert.deepEqual(client.calls[1].body, {
+    change_reason: 'Oprava chybně zadané mzdy',
+    row_version: 4,
+    monthly_gross_minor: 5500000,
+  });
+});
+
+test('výsledek mzdy se dohledá přes nejnovější revizi měsíce', async () => {
+  const client = new FakeClient({
+    'GET /payroll/runs': { runs: [{ id: 3, revision_id: 19, period_start: '2026-08-01' }] },
+    'GET /payroll/revisions/19/net-results/7': { net_result: { net_pay_minor: 4123400 } },
+  });
+
+  const result = await tool('get_payroll_salary_result').run(client, {
+    employee_id: 7,
+    period: '2026-08',
+  }, 'get_payroll_salary_result');
+
+  assert.equal(result.net_result.net_pay_minor, 4123400);
+  assert.deepEqual(client.calls[0].query, { period: '2026-08', limit: 200, offset: 0 });
+  assert.equal(client.calls[1].path, '/payroll/revisions/19/net-results/7');
 });
 
 test('úprava zakázky zachová nezadaná pole úplného PUT payloadu', async () => {

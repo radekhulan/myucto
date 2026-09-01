@@ -214,6 +214,14 @@ const LOGBOOK_FUELING_FIELDS = [
   'amount_without_vat', 'amount_vat', 'amount_with_vat', 'currency', 'odometer', 'station',
   'vendor_id', 'receipt_number', 'note',
 ];
+
+const payrollEmploymentFrom = (detail, employmentId) => {
+  const person = detail?.person ?? detail;
+  const employment = person?.employments?.find((row) => Number(row?.id) === Number(employmentId));
+  if (!employment) throw new Error(`Pracovní vztah #${employmentId} u zaměstnance nebyl nalezen.`);
+  return employment;
+};
+
 const LOGBOOK_FUELING_INPUT = {
   id: int('ID tankování při úpravě; bez ID se založí nové.'),
   car_id: int('ID vozidla.'),
@@ -533,6 +541,338 @@ export const TOOLS = [
     run: (c, _a, tool) => c.get('/suppliers', null, tool),
   },
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // Mzdy - personální údaje a vstupy bez řízení mzdového běhu
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'list_payroll_people',
+    title: 'Seznam zaměstnanců',
+    description:
+      'Najde zaměstnance a vrátí lehký přehled jejich pracovních vztahů. '
+      + 'Pro sjednanou mzdu a úplné podmínky načti následně `get_payroll_person`.',
+    inputSchema: schema({
+      filter: str('Filtr zaměstnanců.', { enum: ['all', 'active', 'needs_setup'] }),
+      query: str('Hledání podle jména.', { maxLength: 100 }),
+      limit: int('Počet záznamů, nejvýše 200.', { minimum: 1, maximum: 200 }),
+      offset: int('Kolik záznamů přeskočit.', { minimum: 0 }),
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/payroll/people', {
+      filter: a.filter,
+      q: a.query,
+      limit: a.limit,
+      offset: a.offset,
+    }, tool),
+  },
+  {
+    name: 'get_payroll_person',
+    title: 'Detail zaměstnance a sjednané mzdy',
+    description:
+      'Vrátí osobu a všechny pracovní vztahy. `monthly_gross_minor` je aktuálně '
+      + 'sjednaná měsíční hrubá mzda v haléřích; `terms` obsahují její historické podmínky.',
+    inputSchema: schema({ employee_id: int('ID zaměstnance.') }, ['employee_id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/payroll/people/${a.employee_id}`, null, tool),
+  },
+  {
+    name: 'change_payroll_salary',
+    title: 'Změnit sjednanou mzdu',
+    description:
+      'Změní měsíční hrubou mzdu pracovního vztahu. `new_terms` založí novou verzi '
+      + 'od `effective_from`, takže starší období zachovají původní mzdu. `correction` opraví '
+      + 'chybnou částku v aktuální verzi bez změny účinnosti; server ji odmítne, pokud už byla '
+      + 'verze použita ve mzdovém běhu. Nástroj nesmí měnit ostatní pracovní podmínky.',
+    inputSchema: schema({
+      employee_id: int('ID zaměstnance.'),
+      employment_id: int('ID pracovního vztahu, jehož mzda se mění.'),
+      change_kind: str('`new_terms` pro změnu od data, `correction` pro opravu překlepu.', {
+        enum: ['new_terms', 'correction'],
+      }),
+      effective_from: date('Datum účinnosti změny; povinné pro `new_terms`.'),
+      monthly_gross_minor: int('Nová měsíční hrubá mzda v haléřích.', { minimum: 0 }),
+      reason: str('Věcný důvod změny nebo opravy.', { minLength: 3, maxLength: 500 }),
+    }, ['employee_id', 'employment_id', 'change_kind', 'monthly_gross_minor', 'reason']),
+    write: true,
+    run: async (c, a, tool) => {
+      const detail = await c.get(`/payroll/people/${a.employee_id}`, null, tool);
+      const employment = payrollEmploymentFrom(detail, a.employment_id);
+      const body = {
+        row_version: employment.row_version,
+        monthly_gross_minor: a.monthly_gross_minor,
+        change_reason: a.reason,
+      };
+      if (a.change_kind === 'new_terms') {
+        if (!a.effective_from) throw new Error('Pro změnu mzdy je povinné effective_from.');
+        return c.put(`/payroll/employments/${a.employment_id}/terms`, {
+          ...body,
+          effective_from: a.effective_from,
+        }, tool);
+      }
+      return c.patch(`/payroll/employments/${a.employment_id}/terms/current`, body, tool);
+    },
+  },
+  {
+    name: 'list_payroll_components',
+    title: 'Seznam mzdových složek',
+    description:
+      'Vrátí mzdové složky a jejich ID pro zadání odměny, srážky nebo jiného měsíčního vstupu.',
+    inputSchema: schema({ effective_on: date('Datum, ke kterému mají složky platit.') }),
+    write: false,
+    run: (c, a, tool) => c.get('/payroll/components', { effective_on: a.effective_on }, tool),
+  },
+  {
+    name: 'list_payroll_inputs',
+    title: 'Měsíční mzdové vstupy',
+    description: 'Rozpracované, schválené i uzamčené vstupy mzdy za měsíc. Nástroj je pouze čte.',
+    inputSchema: schema({
+      period: str('Měsíc YYYY-MM.', { pattern: '^\\d{4}-\\d{2}$' }),
+      employment_id: int('Volitelně jen jeden pracovní vztah.'),
+      limit: int('Počet záznamů, nejvýše 200.', { minimum: 1, maximum: 200 }),
+      offset: int('Kolik záznamů přeskočit.', { minimum: 0 }),
+    }, ['period']),
+    write: false,
+    run: (c, a, tool) => c.get('/payroll/inputs', {
+      period: a.period,
+      employment_id: a.employment_id,
+      limit: a.limit,
+      offset: a.offset,
+    }, tool),
+  },
+  {
+    name: 'create_payroll_input',
+    title: 'Zadat mzdový vstup',
+    description:
+      'Založí odměnu, srážku nebo jinou mzdovou složku jako koncept. ID složky zjisti přes '
+      + '`list_payroll_components`. Tohle vstup NESCHVÁLÍ a nespustí výpočet mzdy.',
+    inputSchema: schema({
+      employee_id: int('ID zaměstnance.'),
+      employment_id: int('ID pracovního vztahu.'),
+      component_id: int('ID mzdové složky.'),
+      period: str('Měsíc YYYY-MM.', { pattern: '^\\d{4}-\\d{2}$' }),
+      source_period: str('Zdrojový měsíc YYYY-MM, pokud se liší.'),
+      amount_minor: int('Částka v haléřích. Znaménko určuje definice mzdové složky.'),
+      quantity_milliunits: int('Množství v tisícinách jednotky.'),
+      source_kind: str('Původ ručního vstupu.', { enum: ['manual', 'correction'] }),
+      external_id: str('Volitelný idempotentní identifikátor externího systému.'),
+    }, ['employee_id', 'employment_id', 'component_id', 'period', 'amount_minor']),
+    write: true,
+    run: (c, a, tool) => c.post('/payroll/inputs', {
+      employee_id: a.employee_id,
+      employment_id: a.employment_id,
+      component_id: a.component_id,
+      period: a.period,
+      source_period: a.source_period ?? null,
+      amount_minor: a.amount_minor,
+      quantity_milliunits: a.quantity_milliunits ?? null,
+      source_kind: a.source_kind ?? 'manual',
+      external_id: a.external_id ?? null,
+    }, tool),
+  },
+  {
+    name: 'update_payroll_input',
+    title: 'Upravit mzdový vstup',
+    description:
+      'Upraví existující mzdový vstup ve stavu `draft`. Po schválení nebo uzamčení ho server odmítne.',
+    inputSchema: schema({
+      id: int('ID mzdového vstupu.'),
+      row_version: int('Aktuální verze vstupu.', { minimum: 1 }),
+      employee_id: int('ID zaměstnance.'),
+      employment_id: int('ID pracovního vztahu.'),
+      component_id: int('ID mzdové složky.'),
+      period: str('Měsíc YYYY-MM.', { pattern: '^\\d{4}-\\d{2}$' }),
+      source_period: str('Zdrojový měsíc YYYY-MM, pokud se liší.'),
+      amount_minor: int('Částka v haléřích.'),
+      quantity_milliunits: int('Množství v tisícinách jednotky.'),
+      source_kind: str('Původ vstupu.', { enum: ['manual', 'correction'] }),
+      external_id: str('Volitelný idempotentní identifikátor externího systému.'),
+    }, ['id', 'row_version', 'employee_id', 'employment_id', 'component_id', 'period', 'amount_minor']),
+    write: true,
+    run: (c, a, tool) => c.put(`/payroll/inputs/${a.id}`, {
+      row_version: a.row_version,
+      employee_id: a.employee_id,
+      employment_id: a.employment_id,
+      component_id: a.component_id,
+      period: a.period,
+      source_period: a.source_period ?? null,
+      amount_minor: a.amount_minor,
+      quantity_milliunits: a.quantity_milliunits ?? null,
+      source_kind: a.source_kind ?? 'manual',
+      external_id: a.external_id ?? null,
+    }, tool),
+  },
+  {
+    name: 'list_payroll_runs',
+    title: 'Seznam mzdových běhů',
+    description:
+      'Najde mzdové běhy a jejich aktuální revize. Pouze čtení: MCP neumí běh vytvořit, '
+      + 'počítat, schválit, zaúčtovat, připravit platby ani uzavřít.',
+    inputSchema: schema({
+      period: str('Volitelný měsíc YYYY-MM.', { pattern: '^\\d{4}-\\d{2}$' }),
+      limit: int('Počet záznamů, nejvýše 200.', { minimum: 1, maximum: 200 }),
+      offset: int('Kolik záznamů přeskočit.', { minimum: 0 }),
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/payroll/runs', {
+      period: a.period,
+      limit: a.limit,
+      offset: a.offset,
+    }, tool),
+  },
+  {
+    name: 'get_payroll_salary_result',
+    title: 'Výsledek mzdy zaměstnance',
+    description:
+      'Vrátí vypočtený rozpad mzdy konkrétního zaměstnance. Lze zadat přímo `revision_id`, '
+      + 'nebo měsíc; v tom případě nástroj vybere nejnovější dostupnou revizi měsíce. '
+      + 'Jen čte již vypočtený výsledek a žádný výpočet nespouští.',
+    inputSchema: schema({
+      employee_id: int('ID zaměstnance.'),
+      revision_id: int('ID konkrétní revize mzdového běhu.'),
+      period: str('Měsíc YYYY-MM, pokud není zadáno revision_id.', { pattern: '^\\d{4}-\\d{2}$' }),
+    }, ['employee_id']),
+    write: false,
+    run: async (c, a, tool) => {
+      let revisionId = a.revision_id;
+      let run = null;
+      if (!revisionId) {
+        if (!a.period) throw new Error('Zadej revision_id nebo period.');
+        const page = await c.get('/payroll/runs', { period: a.period, limit: 200, offset: 0 }, tool);
+        const runs = page?.runs ?? [];
+        run = runs.find((row) => Number(row?.revision_id) > 0) ?? null;
+        revisionId = run?.revision_id;
+        if (!revisionId) throw new Error(`Pro období ${a.period} není dostupná vypočtená revize mzdy.`);
+      }
+      const result = await c.get(
+        `/payroll/revisions/${revisionId}/net-results/${a.employee_id}`,
+        null,
+        tool,
+      );
+      return { ...(run ? { run } : {}), ...result };
+    },
+  },
+  {
+    name: 'get_payroll_time_month',
+    title: 'Docházka za měsíc',
+    description: 'Vrátí směny, zápisy docházky, součty a stav přesčasových limitů. Nic neschvaluje.',
+    inputSchema: schema({
+      period: str('Měsíc YYYY-MM.', { pattern: '^\\d{4}-\\d{2}$' }),
+      employment_id: int('Volitelně jen jeden pracovní vztah.'),
+      incomplete_only: bool('Jen neúplné vztahy.'),
+      limit: int('Počet vztahů, nejvýše 200.', { minimum: 1, maximum: 200 }),
+      offset: int('Kolik vztahů přeskočit.', { minimum: 0 }),
+    }, ['period']),
+    write: false,
+    run: (c, a, tool) => c.get('/payroll/time/month', {
+      period: a.period,
+      employment_id: a.employment_id,
+      incomplete: a.incomplete_only ? 1 : 0,
+      limit: a.limit,
+      offset: a.offset,
+    }, tool),
+  },
+  {
+    name: 'save_payroll_time_entry',
+    title: 'Zadat docházku nebo přesčas',
+    description:
+      'Uloží versionovaný záznam docházky. Pro přesčas nastav `category: overtime`. '
+      + 'Nový řádek používá `supersedes_id: null` a `row_version: 0`; při opravě pošli '
+      + 'ID a verzi původního řádku. `month_row_version` vezmi z `get_payroll_time_month`. '
+      + 'Tento nástroj měsíc NESCHVÁLÍ.',
+    inputSchema: schema({
+      employment_id: int('ID pracovního vztahu.'),
+      category: str('Kategorie práce.', {
+        enum: ['regular', 'overtime', 'night', 'weekend', 'holiday', 'difficult_environment'],
+      }),
+      starts_at: str('Začátek v ISO 8601 včetně časové zóny.'),
+      ends_at: str('Konec v ISO 8601 včetně časové zóny.'),
+      timezone: str('IANA časová zóna.', { default: 'Europe/Prague' }),
+      break_minutes: int('Neplacená přestávka v minutách.', { minimum: 0 }),
+      supersedes_id: int('ID nahrazovaného záznamu při opravě.'),
+      row_version: int('Verze nahrazovaného záznamu, pro nový řádek 0.', { minimum: 0 }),
+      month_row_version: int('Aktuální verze měsíce docházky.', { minimum: 0 }),
+      difficulty_factor_count: int('Počet ztěžujících vlivů, jen pro difficult_environment.', { minimum: 1, maximum: 255 }),
+    }, ['employment_id', 'category', 'starts_at', 'ends_at', 'break_minutes', 'row_version', 'month_row_version']),
+    write: true,
+    run: (c, a, tool) => c.post('/payroll/time/entries', {
+      employment_id: a.employment_id,
+      category: a.category,
+      starts_at: a.starts_at,
+      ends_at: a.ends_at,
+      timezone: a.timezone ?? 'Europe/Prague',
+      break_minutes: a.break_minutes,
+      supersedes_id: a.supersedes_id ?? null,
+      row_version: a.row_version,
+      month_row_version: a.month_row_version,
+      ...(a.difficulty_factor_count === undefined ? {} : { difficulty_factor_count: a.difficulty_factor_count }),
+    }, tool),
+  },
+  {
+    name: 'list_payroll_absences',
+    title: 'Seznam absencí',
+    description: 'Absence, dovolené a DPN v zadaném období.',
+    inputSchema: schema({
+      from: date('Začátek období.'),
+      to: date('Konec období.'),
+      employment_id: int('Volitelně jen jeden pracovní vztah.'),
+      limit: int('Počet záznamů, nejvýše 200.', { minimum: 1, maximum: 200 }),
+      offset: int('Kolik záznamů přeskočit.', { minimum: 0 }),
+    }, ['from', 'to']),
+    write: false,
+    run: (c, a, tool) => c.get('/payroll/time/absences', {
+      from: a.from,
+      to: a.to,
+      employment_id: a.employment_id,
+      limit: a.limit,
+      offset: a.offset,
+    }, tool),
+  },
+  {
+    name: 'list_payroll_average_earnings',
+    title: 'Průměrné výdělky pro náhrady',
+    description:
+      'Vrátí snapshoty průměrného hodinového výdělku. Jejich ID je povinné pro DPN, '
+      + 'dovolenou a některé překážky v práci.',
+    inputSchema: schema({ employment_id: int('ID pracovního vztahu.') }, ['employment_id']),
+    write: false,
+    run: (c, a, tool) => c.get('/payroll/time/averages', { employment_id: a.employment_id }, tool),
+  },
+  {
+    name: 'create_payroll_absence',
+    title: 'Zadat absenci nebo neschopenku',
+    description:
+      'Založí absenci ve stavu `requested`. Pro neschopenku použij `dpn`. DPN, dovolená '
+      + 'a překážky vyžadují `average_snapshot_id` z `list_payroll_average_earnings`. '
+      + 'Samotné založení absenci neschvaluje.',
+    inputSchema: schema({
+      employment_id: int('ID pracovního vztahu.'),
+      absence_type: str('Druh absence.', {
+        enum: [
+          'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
+          'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
+          'employer_obstacle', 'compensatory_time_off', 'unexcused', 'other',
+        ],
+      }),
+      date_from: date('První den absence.'),
+      date_to: date('Poslední den absence.'),
+      timezone_name: str('IANA časová zóna.', { default: 'Europe/Prague' }),
+      partial_first_minutes: int('Minuty absence v prvním dni při částečném dni.', { minimum: 1 }),
+      partial_last_minutes: int('Minuty absence v posledním dni při částečném dni.', { minimum: 1 }),
+      average_snapshot_id: int('ID schváleného snapshotu průměrného výdělku.'),
+      note: str('Poznámka.', { maxLength: 1000 }),
+    }, ['employment_id', 'absence_type', 'date_from', 'date_to']),
+    write: true,
+    run: (c, a, tool) => c.post('/payroll/time/absences', {
+      employment_id: a.employment_id,
+      absence_type: a.absence_type,
+      date_from: a.date_from,
+      date_to: a.date_to,
+      timezone_name: a.timezone_name ?? 'Europe/Prague',
+      partial_first_minutes: a.partial_first_minutes ?? null,
+      partial_last_minutes: a.partial_last_minutes ?? null,
+      average_snapshot_id: a.average_snapshot_id ?? null,
+      note: a.note ?? null,
+    }, tool),
+  },
   // ──────────────────────────────────────────────────────────────────────────
   // Odběratelé
   // ──────────────────────────────────────────────────────────────────────────

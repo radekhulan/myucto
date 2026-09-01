@@ -150,6 +150,73 @@ final class ApiScopeMiddlewareTest extends TestCase
         );
     }
 
+    public function testBearerCanUseLimitedPayrollPersonnelAndInputSurface(): void
+    {
+        foreach ([
+            ['GET', '/api/payroll/people', 'read'],
+            ['GET', '/api/payroll/people/7', 'read'],
+            ['GET', '/api/payroll/components', 'read'],
+            ['GET', '/api/payroll/inputs?period=2026-08', 'read'],
+            ['POST', '/api/payroll/inputs', 'read_write'],
+            ['PUT', '/api/payroll/inputs/8', 'read_write'],
+            ['PUT', '/api/payroll/employments/4/terms', 'read_write'],
+            ['PATCH', '/api/payroll/employments/4/terms/current', 'read_write'],
+            ['GET', '/api/payroll/runs', 'read'],
+            ['GET', '/api/payroll/runs/9', 'read'],
+            ['GET', '/api/payroll/revisions/12/net-results/7', 'read'],
+            ['GET', '/api/payroll/time/month', 'read'],
+            ['POST', '/api/payroll/time/entries', 'read_write'],
+            ['GET', '/api/payroll/time/absences', 'read'],
+            ['POST', '/api/payroll/time/absences', 'read_write'],
+            ['GET', '/api/payroll/time/averages', 'read'],
+        ] as [$method, $path, $scope]) {
+            $response = $this->middleware()->process(
+                $this->bearer($method, $path, $scope),
+                $this->okHandler(),
+            );
+            self::assertSame(204, $response->getStatusCode(), "bearer {$method} {$path}");
+        }
+    }
+
+    public function testBearerCannotControlPayrollRunsOrSensitivePayrollSurface(): void
+    {
+        foreach ([
+            ['POST', '/api/payroll/people'],
+            ['DELETE', '/api/payroll/people/7'],
+            ['POST', '/api/payroll/components'],
+            ['POST', '/api/payroll/time/averages'],
+            ['POST', '/api/payroll/runs'],
+            ['DELETE', '/api/payroll/runs/9'],
+        ] as [$method, $path]) {
+            $response = $this->middleware()->process(
+                $this->bearer($method, $path, 'read_write'),
+                $this->okHandler(),
+            );
+            self::assertSame(403, $response->getStatusCode(), "bearer {$method} {$path}");
+            self::assertSame('token_write_forbidden', $this->errorCode($response));
+        }
+
+        foreach ([
+            ['POST', '/api/payroll/runs/9/commands/calculate'],
+            ['POST', '/api/payroll/runs/9/commands/approve'],
+            ['POST', '/api/payroll/runs/9/commands/post'],
+            ['POST', '/api/payroll/runs/9/commands/prepare_payments'],
+            ['POST', '/api/payroll/runs/9/commands/close'],
+            ['POST', '/api/payroll/time/months/2026-08/approve'],
+            ['POST', '/api/payroll/time/absences/3/decision'],
+            ['POST', '/api/payroll/time/absences/3/cancel'],
+            ['POST', '/api/payroll/submissions/sickness-cases'],
+            ['GET', '/api/payroll/documents'],
+        ] as [$method, $path]) {
+            $response = $this->middleware()->process(
+                $this->bearer($method, $path, 'read_write'),
+                $this->okHandler(),
+            );
+            self::assertSame(403, $response->getStatusCode(), "bearer {$method} {$path}");
+            self::assertSame('token_endpoint_forbidden', $this->errorCode($response));
+        }
+    }
+
     public function testBearerCanReachStockAndEshopModules(): void
     {
         // MCP server nad nimi staví nástroje pro zboží a zásoby; případné vypnutí

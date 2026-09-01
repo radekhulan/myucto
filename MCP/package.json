@@ -1,7 +1,7 @@
 {
   "name": "myucto-mcp",
   "version": "1.0.0",
-  "description": "MCP server pro MyÚčto.cz — fakturace, zakázky, dokumenty, kniha jízd, e-shop/sklad a statistika",
+  "description": "MCP server pro MyÚčto.cz: fakturace, mzdy, zakázky, dokumenty, kniha jízd, e-shop/sklad a statistika",
   "license": "MIT",
   "type": "module",
   "main": "src/index.mjs",

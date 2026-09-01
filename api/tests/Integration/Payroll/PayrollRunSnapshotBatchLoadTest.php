@@ -224,6 +224,41 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         );
     }
 
+    public function testSnapshotUsesSalaryEffectiveForThePayrollPeriod(): void
+    {
+        $this->seed(1);
+        $employmentId = $this->ids(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        )[0];
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET monthly_gross_minor = 9000000
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET monthly_gross_minor = CASE
+                    WHEN effective_from = "2026-01-01" THEN 4000000
+                    ELSE 5000000
+                END
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$this->supplierId, $employmentId]);
+
+        $employments = $this->build()->data['people'][0]['employments'];
+        $selected = array_values(array_filter(
+            $employments,
+            static fn (array $row): bool => (int) $row['employment']['id'] === $employmentId,
+        ));
+
+        self::assertCount(1, $selected);
+        self::assertSame(
+            5_000_000,
+            $selected[0]['employment']['monthly_gross_minor'],
+            'Červnový snapshot musí použít červnovou verzi mzdy, ne nejnovější hlavičku vztahu.',
+        );
+    }
+
     /**
      * Dávkové načtení nesmí přiřadit řádky jiné osobě.
      *

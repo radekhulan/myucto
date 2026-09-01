@@ -233,6 +233,7 @@ export interface PayrollEmploymentTerms {
   planned_start_on: string
   actual_start_on: string | null
   fixed_term_end_on: string | null
+  monthly_gross_minor?: number | null
   weekly_hours: string | null
   leave_entitlement_weeks_override?: number | null
   workload_basis_points: number
@@ -331,6 +332,7 @@ export type PayrollEmploymentTermsPayload = Omit<
   PayrollEmploymentTerms,
   'id' | 'office_code' | 'effective_to' | 'jmhz_external_codebook_overlay_key'
     | 'jmhz_external_codebook_manifest_sha256' | 'row_version' | 'created_at'
+    | 'monthly_gross_minor'
     | 'risky_work' | 'social_employer_rate_category'
     | 'social_employer_rate_category_evidence'
     | 'social_part_time_discount_reason' | 'social_part_time_discount_evidence'
@@ -338,6 +340,7 @@ export type PayrollEmploymentTermsPayload = Omit<
     | 'jmhz_orchard_discount_eligible' | 'jmhz_specific_legal_fact_applies'
     | 'jmhz_ozp_employment_support_applies' | 'jmhz_deep_mining_work_applies'
 > & {
+  monthly_gross_minor?: number | null
   risky_work?: boolean
   social_employer_rate_category?: PayrollSocialEmployerRateCategory
   social_employer_rate_category_evidence?: string | null

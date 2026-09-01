@@ -391,8 +391,8 @@ final class PayrollComponentsInputsApiTest extends TestCase
             ),
             new Response(),
         );
-        self::assertSame(403, $bearer->getStatusCode());
-        self::assertSame('session_required', $this->errorCode($bearer));
+        self::assertSame(200, $bearer->getStatusCode());
+        self::assertArrayHasKey('components', $this->json($bearer));
     }
 
     public function testApprovalOnlyRoleCanApproveDraftInput(): void

@@ -50,11 +50,17 @@ final class PayrollDocumentsApiContractTest extends TestCase
         );
     }
 
-    public function testSessionOnlyPayrollDocumentsStayOutsideBearerOpenApi(): void
+    public function testSessionOnlyPayrollDocumentEndpointsStayOutsideBearerOpenApi(): void
     {
         $openApi = $this->read('api/openapi.yaml');
 
-        self::assertStringNotContainsString('/api/v1/payroll/', $openApi);
+        foreach ([
+            '/api/v1/payroll/documents',
+            '/api/v1/payroll/runs/{runId}/revisions/{revisionId}/documents',
+            '/api/v1/payroll/people/{employeeId}/documents',
+        ] as $path) {
+            self::assertStringNotContainsString($path, $openApi);
+        }
     }
 
     public function testTaxCertificateGenerationHasExactWritePermission(): void

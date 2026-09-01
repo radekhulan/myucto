@@ -14,6 +14,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelatio
  *   planned_start_on:string,
  *   actual_start_on:?string,
  *   fixed_term_end_on:?string,
+ *   monthly_gross_minor:?int,
  *   weekly_hours:?string,
  *   leave_entitlement_weeks_override:?int,
  *   workload_basis_points:int,
@@ -338,6 +339,7 @@ final class PayrollEmploymentValidator
             'planned_start_on' => $plannedStart,
             'actual_start_on' => $this->optionalDate($input, 'actual_start_on'),
             'fixed_term_end_on' => $fixedEnd,
+            'monthly_gross_minor' => $this->optionalMonthlyGrossMinor($input),
             'weekly_hours' => $hours === null ? null : (string) $hours,
             'leave_entitlement_weeks_override' => $this->leaveWeeksOverride(
                 $input['leave_entitlement_weeks_override'] ?? null,
@@ -464,10 +466,10 @@ final class PayrollEmploymentValidator
     /**
      * Pravidelná hrubá mzda z těla požadavku, je-li vůbec poslaná.
      *
-     * Mzdu drží pracovní vztah, ne verze podmínek. Obrazovka, která ji
-     * nenabízí, klíč neposílá — a `null` z chybějícího klíče se nesmí splést
-     * s vědomým „mzda není sjednaná". Rozlišuje to volající přes
-     * `array_key_exists()`; tady jde jen o tvar hodnoty.
+     * Mzdu drží verzované podmínky vztahu. Obrazovka, která ji nenabízí, klíč
+     * neposílá — a `null` z chybějícího klíče se nesmí splést s vědomým
+     * „mzda není sjednaná". Rozlišuje to volající přes `array_key_exists()`;
+     * tady jde jen o tvar hodnoty.
      *
      * @param array<string,mixed> $input
      */

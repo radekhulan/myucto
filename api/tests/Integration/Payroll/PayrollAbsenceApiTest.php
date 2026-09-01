@@ -392,6 +392,60 @@ final class PayrollAbsenceApiTest extends TestCase
         self::assertSame('payroll_disabled', $this->json($disabled)['error']['code']);
     }
 
+    public function testBearerCanEnterAbsenceButCannotApproveOrCancelIt(): void
+    {
+        $averageId = $this->createApprovedAverage();
+
+        $listed = $this->action->list(
+            $this->request('GET', authMethod: 'bearer')->withQueryParams([
+                'from' => '2026-06-01',
+                'to' => '2026-06-30',
+            ]),
+            new Response(),
+        );
+        self::assertSame(200, $listed->getStatusCode());
+
+        $averages = $this->action->averages(
+            $this->request('GET', authMethod: 'bearer')->withQueryParams([
+                'employment_id' => $this->employmentId,
+            ]),
+            new Response(),
+        );
+        self::assertSame(200, $averages->getStatusCode());
+
+        $payload = $this->absencePayload($averageId);
+        $payload['date_from'] = '2026-06-17';
+        $payload['date_to'] = '2026-06-17';
+        $created = $this->action->create(
+            $this->request('POST', authMethod: 'bearer')->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode());
+        $absence = $this->json($created)['absence'];
+        self::assertSame('requested', $absence['status']);
+
+        $decision = $this->action->decision(
+            $this->request('POST', authMethod: 'bearer')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(403, $decision->getStatusCode());
+        self::assertSame('session_required', $this->json($decision)['error']['code']);
+
+        $cancel = $this->action->cancel(
+            $this->request('POST', authMethod: 'bearer')->withParsedBody([
+                'row_version' => $absence['row_version'],
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(403, $cancel->getStatusCode());
+        self::assertSame('session_required', $this->json($cancel)['error']['code']);
+    }
+
     /**
      * Stav 3 — nárok na rok vůbec není určený. Zůstatek není nula, je neznámý,
      * takže se dovolená schválí bez ptaní a odpověď nese jen upozornění. Tohle je

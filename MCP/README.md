@@ -2,7 +2,7 @@
 
 MCP server (Model Context Protocol) nad veřejným REST API MyÚčta. Zpřístupní
 AI klientovi — Claude Code, Claude Desktop, IDE rozšíření — **fakturaci,
-zakázky, dokumenty, knihu jízd, e-shop se skladem a statistiku**.
+mzdové údaje a vstupy, zakázky, dokumenty, knihu jízd, e-shop se skladem a statistiku**.
 
 Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 **Nastavení firmy → MCP server**. Tenhle soubor je technická poznámka k repozitáři.
@@ -21,6 +21,7 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník |
 | Statistika | tržby, zisk, trendy, top odběratelé i dodavatelé, cash flow, platební morálka |
 | E-shop a sklad | **čtení i zápis** — zboží a obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky/výdejky/převodky, inventury |
+| Mzdy | čtení osob a výsledků; změna sjednané mzdy od data se zachováním historie, mzdové vstupy, přesčasy a nové absence; schvalování absencí a řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
 E-shopová a skladová vrstva je naopak **obousměrná** — pohyb je dohledatelný ve
@@ -118,7 +119,7 @@ systémové autority načte sám (`tls.setDefaultCACertificates`, Node 22.15+)
 a výsledek vypíše na stderr:
 
 ```
-MyÚčto MCP v1.0.0 připojen — 181 nástrojů, API https://…/api/v1; TLS: +134 systémových certifikátů
+MyÚčto MCP v1.0.0 připojen — 195 nástrojů, API https://…/api/v1; TLS: +134 systémových certifikátů
 ```
 
 Zbylé příčiny selhání: neúplný řetěz (chybí mezilehlý certifikát — oprava patří

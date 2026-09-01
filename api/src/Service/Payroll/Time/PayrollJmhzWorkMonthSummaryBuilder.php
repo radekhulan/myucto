@@ -15,7 +15,41 @@ final class PayrollJmhzWorkMonthSummaryBuilder
 {
     public const DERIVATION_VERSION = 'jmhz-work-month.v2';
 
-    public function __construct(private readonly Connection $db) {}
+    /**
+     * Zákonná týdenní doba podle § 79 odst. 1 zákoníku práce.
+     *
+     * Z ní se počítá NÁVRH stanoveného měsíčního fondu (atribut 10259).
+     * Kratší zákonná doba podle § 79 odst. 2 (37,5 h u podzemní a třísměnné
+     * práce, 38,75 h u dvousměnné) je výjimka, kterou aplikace u vztahu
+     * nevede — proto je to návrh k přepsání, ne dopočtená hodnota.
+     */
+    private const STATUTORY_WEEKLY_MINUTES = 2400;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollCalendarFundService $fund,
+    ) {}
+
+    /**
+     * Návrh stanoveného měsíčního fondu (10259) v hodinách.
+     *
+     * Why: dřív se nenavrhoval vůbec a účetní ho musela do dialogu opsat
+     * ručně — u stovky vztahů stokrát totéž číslo, které aplikace umí spočítat.
+     * Prázdné pole navíc odcházelo na server a vracelo se jako
+     * „standard_fund_hours musí být nezáporné desetinné číslo".
+     *
+     * Počítá se ze zákonné týdenní doby rozvržené na pondělí až pátek, se
+     * svátky, které {@see PayrollCalendarFundService} zná. Není to fond
+     * TOHOTO zaměstnance (ten je 10260) — je to doba stanovená pro profesi,
+     * tedy plný úvazek v daném měsíci.
+     */
+    private function standardFundSuggestion(string $periodStart): string
+    {
+        $weekPattern = array_fill_keys([1, 2, 3, 4, 5], (int) (self::STATUTORY_WEEKLY_MINUTES / 5));
+        $month = $this->fund->month(substr($periodStart, 0, 7), $weekPattern);
+
+        return self::minutesSuggestion($month['fund_minutes']);
+    }
 
     /** @return array<string,mixed> */
     public function preview(
@@ -99,7 +133,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'source_snapshot_json' => $sourceJson,
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
             'suggestions' => [
-                'standard_fund_hours' => null,
+                'standard_fund_hours' => $this->standardFundSuggestion($periodStart),
                 'agreed_fund_hours' => self::minutesSuggestion($agreedMinutes),
                 'weekly_work_hours' => $employment['weekly_hours'],
                 'evidence_days' => $evidenceDays,

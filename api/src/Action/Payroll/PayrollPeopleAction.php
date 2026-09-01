@@ -34,9 +34,7 @@ final class PayrollPeopleAction
 
     public function list(Request $request, Response $response): Response
     {
-        if (!$this->requireSession($request, $response, $error)) {
-            return $this->guardFailure($error);
-        }
+        $error = null;
         if (!$this->requirePermission($request, $response, 'payroll', AccessLevel::READ, $error)) {
             return $this->guardFailure($error);
         }
@@ -108,9 +106,7 @@ final class PayrollPeopleAction
     /** @param array{id:string} $args */
     public function detail(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireSession($request, $response, $error)) {
-            return $this->guardFailure($error);
-        }
+        $error = null;
         if (!$this->requirePermission($request, $response, 'payroll', AccessLevel::READ, $error)) {
             return $this->guardFailure($error);
         }

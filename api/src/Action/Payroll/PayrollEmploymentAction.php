@@ -88,36 +88,44 @@ final class PayrollEmploymentAction
     /** @param array{id:string} $args */
     public function addTerms(Request $request, Response $response, array $args): Response
     {
-        if (($error = $this->authorize($request, $response)) !== null) {
+        if (($error = $this->authorize($request, $response, true)) !== null) {
             return $error;
         }
         try {
             $body = $this->body($request);
             $supplierId = $this->currentSupplierId($request);
             $employmentId = (int) $args['id'];
+            $body = $this->bearerSalaryBody(
+                $request,
+                $supplierId,
+                $employmentId,
+                $body,
+                true,
+            );
+            $terms = $this->validator->terms(
+                $body,
+                // Uložený kód CZ-ISCO smí projít, i když v číselníku není —
+                // hodnotu bere validátor odsud, nikdy z požadavku klienta.
+                $this->employments->currentCzIscoCode($supplierId, $employmentId),
+                // Zařazení pro srážkovou daň drží klient jen tehdy, když ho
+                // zná; jinak se přebírá to uložené, ať ho uložení podmínek
+                // nešoupne zpátky na „neurčeno".
+                $this->employments->currentOtherWithholdingEligibility(
+                    $supplierId,
+                    $employmentId,
+                ),
+                $this->employments->currentRelationType($supplierId, $employmentId),
+            );
             $employment = $this->employments->addTerms(
                 $supplierId,
                 $employmentId,
-                $this->validator->terms(
-                    $body,
-                    // Uložený kód CZ-ISCO smí projít, i když v číselníku není —
-                    // hodnotu bere validátor odsud, nikdy z požadavku klienta.
-                    $this->employments->currentCzIscoCode($supplierId, $employmentId),
-                    // Zařazení pro srážkovou daň drží klient jen tehdy, když ho
-                    // zná; jinak se přebírá to uložené, ať ho uložení podmínek
-                    // nešoupne zpátky na „neurčeno".
-                    $this->employments->currentOtherWithholdingEligibility(
-                        $supplierId,
-                        $employmentId,
-                    ),
-                    $this->employments->currentRelationType($supplierId, $employmentId),
-                ),
+                $terms,
                 $this->validator->rowVersion($body),
                 $this->userId($request),
                 $this->ip($request),
                 $request->getHeaderLine('User-Agent'),
-                // Mzdu drží vztah, ne verze podmínek — obrazovky, které ji
-                // nenabízejí, klíč vůbec neposílají a uložená hodnota zůstává.
+                // Obrazovky, které mzdu nenabízejí, klíč vůbec neposílají
+                // a do nové verze se přenese hodnota předchozí verze.
                 array_key_exists('monthly_gross_minor', $body),
                 $this->validator->optionalMonthlyGrossMinor($body),
             );
@@ -143,7 +151,7 @@ final class PayrollEmploymentAction
      */
     public function correctTerms(Request $request, Response $response, array $args): Response
     {
-        if (($error = $this->authorize($request, $response)) !== null) {
+        if (($error = $this->authorize($request, $response, true)) !== null) {
             return $error;
         }
         try {
@@ -154,19 +162,27 @@ final class PayrollEmploymentAction
             if ($current === null) {
                 throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek k opravě.');
             }
+            $body = $this->bearerSalaryBody(
+                $request,
+                $supplierId,
+                $employmentId,
+                $body,
+                false,
+            );
             $body['effective_from'] = $current;
+            $terms = $this->validator->terms(
+                $body,
+                $this->employments->currentCzIscoCode($supplierId, $employmentId),
+                $this->employments->currentOtherWithholdingEligibility(
+                    $supplierId,
+                    $employmentId,
+                ),
+                $this->employments->currentRelationType($supplierId, $employmentId),
+            );
             $employment = $this->employments->correctTerms(
                 $supplierId,
                 $employmentId,
-                $this->validator->terms(
-                    $body,
-                    $this->employments->currentCzIscoCode($supplierId, $employmentId),
-                    $this->employments->currentOtherWithholdingEligibility(
-                        $supplierId,
-                        $employmentId,
-                    ),
-                    $this->employments->currentRelationType($supplierId, $employmentId),
-                ),
+                $terms,
                 $this->validator->rowVersion($body),
                 $this->userId($request),
                 $this->ip($request),
@@ -324,9 +340,13 @@ final class PayrollEmploymentAction
         return Json::ok($response, ['employment' => $employment]);
     }
 
-    private function authorize(Request $request, Response $response): ?Response
+    private function authorize(
+        Request $request,
+        Response $response,
+        bool $allowBearer = false,
+    ): ?Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+        if (!$allowBearer && $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error(
                 $response,
                 'session_required',
@@ -374,6 +394,49 @@ final class PayrollEmploymentAction
             return $error ?? throw new \LogicException('Chybí chybová odpověď modulu.');
         }
         return null;
+    }
+
+    /** @param array<string,mixed> $body
+     *  @return array<string,mixed>
+     */
+    private function bearerSalaryBody(
+        Request $request,
+        int $supplierId,
+        int $employmentId,
+        array $body,
+        bool $newTerms,
+    ): array {
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'bearer') {
+            return $body;
+        }
+        $allowed = [
+            'row_version' => true,
+            'monthly_gross_minor' => true,
+            'change_reason' => true,
+        ];
+        if ($newTerms) {
+            $allowed['effective_from'] = true;
+        }
+        if (array_diff_key($body, $allowed) !== []) {
+            throw new \InvalidArgumentException(
+                'Token může v pracovních podmínkách změnit pouze sjednanou mzdu.',
+            );
+        }
+        if (($newTerms && !array_key_exists('effective_from', $body))
+            || !array_key_exists('monthly_gross_minor', $body)
+            || !array_key_exists('change_reason', $body)
+        ) {
+            throw new \InvalidArgumentException(
+                $newTerms
+                    ? 'Změna sjednané mzdy vyžaduje datum účinnosti, částku a důvod.'
+                    : 'Oprava sjednané mzdy vyžaduje částku a důvod.',
+            );
+        }
+        $current = $this->employments->currentTerms($supplierId, $employmentId);
+        if ($current === null) {
+            throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek.');
+        }
+        return [...$current, ...$body];
     }
 
     /** @return array<string,mixed> */

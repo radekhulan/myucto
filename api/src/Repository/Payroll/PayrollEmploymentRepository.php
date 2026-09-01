@@ -135,7 +135,9 @@ final class PayrollEmploymentRepository
                     employment.is_primary, employment.start_date,
                     employment.actual_start_date, employment.end_date,
                     employment.archived_at, employment.is_legacy_projection,
-                    employment.monthly_gross_minor, employment.row_version
+                    ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossToday() . '
+                      AS monthly_gross_minor,
+                    employment.row_version
                FROM payroll_employments employment
                LEFT JOIN payroll_offices office
                  ON office.supplier_id = employment.supplier_id
@@ -245,6 +247,7 @@ final class PayrollEmploymentRepository
                 $employeeId,
                 (string) $data['terms']['effective_from'],
             );
+            $data['terms']['monthly_gross_minor'] = $data['monthly_gross_minor'];
             if ($data['code'] === '') {
                 $data['code'] = $this->nextEmploymentCode($supplierId, $employeeId);
             }
@@ -390,6 +393,12 @@ final class PayrollEmploymentRepository
         return is_string($value) && $value !== '' ? $value : null;
     }
 
+    /** @return array<string,mixed>|null */
+    public function currentTerms(int $supplierId, int $employmentId): ?array
+    {
+        return $this->terms($supplierId, $employmentId)[0] ?? null;
+    }
+
     /**
      * OPRAVA platné verze podmínek — přepis na místě, bez nové verze.
      *
@@ -458,6 +467,9 @@ final class PayrollEmploymentRepository
             if ($previous === null) {
                 throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek k opravě.');
             }
+            $data['monthly_gross_minor'] = $replaceMonthlyGross
+                ? $monthlyGrossMinor
+                : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor']);
             // Účinnost je vlastnost opravované verze, ne údaj z požadavku.
             $data['effective_from'] = (string) $previous['effective_from'];
             $data['tax_declaration_signed'] = $this->taxDeclarationSigned(
@@ -499,14 +511,6 @@ final class PayrollEmploymentRepository
             }
 
             $diff = $this->diff($previous, $data);
-            if ($replaceMonthlyGross
-                && $employment['monthly_gross_minor'] !== $monthlyGrossMinor
-            ) {
-                $diff['monthly_gross_minor'] = [
-                    'from' => $employment['monthly_gross_minor'],
-                    'to' => $monthlyGrossMinor,
-                ];
-            }
             /*
              * Oprava, která nic nezměnila, na časovou osu nepatří — jinak by
              * se do historie zapisovalo každé otevření a zavření formuláře.
@@ -611,6 +615,9 @@ final class PayrollEmploymentRepository
                     'Nová smluvní verze musí začínat později než dosud poslední verze.'
                 );
             }
+            $data['monthly_gross_minor'] = $replaceMonthlyGross
+                ? $monthlyGrossMinor
+                : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor']);
             if ($previous !== null) {
                 $previousEnd = (new \DateTimeImmutable($data['effective_from']))
                     ->modify('-1 day')
@@ -649,14 +656,6 @@ final class PayrollEmploymentRepository
             }
 
             $diff = $this->diff($previous, $data);
-            if ($replaceMonthlyGross
-                && $employment['monthly_gross_minor'] !== $monthlyGrossMinor
-            ) {
-                $diff['monthly_gross_minor'] = [
-                    'from' => $employment['monthly_gross_minor'],
-                    'to' => $monthlyGrossMinor,
-                ];
-            }
             $this->insertEvent(
                 $supplierId,
                 $employmentId,
@@ -1132,6 +1131,7 @@ final class PayrollEmploymentRepository
                     terms.effective_from, terms.effective_to,
                     terms.contract_signed_on, terms.planned_start_on,
                     terms.actual_start_on, terms.fixed_term_end_on,
+                    terms.monthly_gross_minor,
                     terms.weekly_hours, terms.leave_entitlement_weeks_override,
                     terms.workload_basis_points,
                     terms.work_place, terms.regular_workplace,
@@ -1321,7 +1321,7 @@ final class PayrollEmploymentRepository
             'INSERT INTO payroll_employment_terms
                 (supplier_id, employment_id, office_id, effective_from,
                  contract_signed_on, planned_start_on, actual_start_on,
-                 fixed_term_end_on, weekly_hours, leave_entitlement_weeks_override,
+                 fixed_term_end_on, monthly_gross_minor, weekly_hours, leave_entitlement_weeks_override,
                  workload_basis_points,
                  work_place, regular_workplace, cz_isco_code, activity_code,
                  jmhz_relationship_detail_code,
@@ -1345,7 +1345,7 @@ final class PayrollEmploymentRepository
                  social_part_time_discount_notified_on,
                  tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -1355,6 +1355,7 @@ final class PayrollEmploymentRepository
             $data['planned_start_on'],
             $data['actual_start_on'],
             $data['fixed_term_end_on'],
+            $data['monthly_gross_minor'],
             $data['weekly_hours'],
             $data['leave_entitlement_weeks_override'],
             $data['workload_basis_points'],
@@ -1407,7 +1408,7 @@ final class PayrollEmploymentRepository
             'UPDATE payroll_employment_terms SET
                  office_id = ?,
                  contract_signed_on = ?, planned_start_on = ?, actual_start_on = ?,
-                 fixed_term_end_on = ?, weekly_hours = ?,
+                 fixed_term_end_on = ?, monthly_gross_minor = ?, weekly_hours = ?,
                  leave_entitlement_weeks_override = ?, workload_basis_points = ?,
                  work_place = ?, regular_workplace = ?, cz_isco_code = ?,
                  activity_code = ?, jmhz_relationship_detail_code = ?,
@@ -1437,6 +1438,7 @@ final class PayrollEmploymentRepository
             $data['planned_start_on'],
             $data['actual_start_on'],
             $data['fixed_term_end_on'],
+            $data['monthly_gross_minor'],
             $data['weekly_hours'],
             $data['leave_entitlement_weeks_override'],
             $data['workload_basis_points'],

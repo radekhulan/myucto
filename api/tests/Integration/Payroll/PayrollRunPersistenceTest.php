@@ -241,10 +241,23 @@ final class PayrollRunPersistenceTest extends TestCase
             ),
             new Response(),
         );
-        self::assertSame(403, $bearerResponse->getStatusCode());
+        self::assertSame(200, $bearerResponse->getStatusCode());
+        self::assertCount(1, $this->json($bearerResponse)['runs']);
+
+        $bearerCommand = $this->action->command(
+            $this->apiRequest(
+                'POST',
+                "/api/payroll/runs/{$created['id']}/commands/calculate",
+                $role,
+                'bearer',
+            ),
+            new Response(),
+            ['id' => (string) $created['id'], 'command' => 'calculate'],
+        );
+        self::assertSame(403, $bearerCommand->getStatusCode());
         self::assertSame(
             'session_required',
-            $this->json($bearerResponse)['error']['code'],
+            $this->json($bearerCommand)['error']['code'],
         );
     }
 

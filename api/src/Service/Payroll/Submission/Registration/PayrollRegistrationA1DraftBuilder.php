@@ -48,13 +48,14 @@ final class PayrollRegistrationA1DraftBuilder
             $this->miss(
                 'identity',
                 $identityError ?? 'K rozhodnému dni chybí historická identita '
-                    . 'osoby. Doplňte ji na kartě osoby (Identita).',
+                    . 'osoby. Doplňte ji na kartě osoby → Údaje pro registraci zaměstnance.',
             );
         } elseif ($citizenship === null) {
             $this->miss(
                 'identity.citizenship_country_code',
                 'Osoba nemá k rozhodnému dni státní občanství. Doplňte je na '
-                . 'kartě osoby (Identita) — rozhoduje o povinných skupinách A1.',
+                . 'kartě osoby → Údaje pro registraci zaměstnance — rozhoduje '
+                . 'o povinných skupinách A1.',
             );
         }
         $foreigner = $citizenship !== null && $citizenship !== 'CZ';
@@ -90,7 +91,7 @@ final class PayrollRegistrationA1DraftBuilder
             $this->miss(
                 'permanent_address',
                 'Osoba nemá k rozhodnému dni evidovanou adresu trvalého '
-                . 'pobytu. Doplňte ji na kartě osoby (Adresy).',
+                . 'pobytu. Doplňte ji na kartě osoby → Historie adres.',
             );
         }
         $permanentCountry = $permanentAddress['country_code'] ?? null;
