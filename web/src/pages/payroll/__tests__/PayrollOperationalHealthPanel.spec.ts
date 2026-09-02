@@ -62,6 +62,22 @@ function healthFixture() {
   }
 }
 
+/**
+ * Dlaždice nesou prokliky na místo, kde se daný stav řeší — bez routeru je
+ * `RouterLink` v jednotkovém testu neinstancovatelný, takže se stubuje a
+ * zároveň zpřístupní cíl (`data-to`) pro kontrolu.
+ */
+const routerLinkStub = {
+  props: ['to'],
+  template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
+}
+
+function mountPanel() {
+  return mount(PayrollOperationalHealthPanel, {
+    global: { stubs: { RouterLink: routerLinkStub } },
+  })
+}
+
 describe('PayrollOperationalHealthPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -69,7 +85,7 @@ describe('PayrollOperationalHealthPanel', () => {
   })
 
   it('shows only the aggregate operational counts', async () => {
-    const wrapper = mount(PayrollOperationalHealthPanel)
+    const wrapper = mountPanel()
     await flushPromises()
 
     expect(wrapper.get('[data-test="operational-health"]').text())
@@ -135,7 +151,7 @@ describe('PayrollOperationalHealthPanel', () => {
       },
       overdue_unpaid_liabilities: 0,
     })
-    const wrapper = mount(PayrollOperationalHealthPanel)
+    const wrapper = mountPanel()
     await flushPromises()
 
     expect(wrapper.get('[data-test="liabilities-card"]').classes()).toContain('bg-success-50')
@@ -151,12 +167,32 @@ describe('PayrollOperationalHealthPanel', () => {
       .toContain('payroll.dashboard.operational_health.never_pending')
   })
 
+  /**
+   * Čísla, která hlásí poruchu a nikam nevedou, jsou slepá ulička: uživatel
+   * vidí „Selhalo: 4" a musí v menu hádat, kde se dávky dokumentů řeší.
+   */
+  it('každá dlaždice vede tam, kde se ten stav řeší', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const target = (testId: string) =>
+      JSON.parse(wrapper.get(`[data-test="${testId}"]`).attributes('data-to') ?? 'null')
+
+    expect(target('document-batches-link')).toEqual({ name: 'payroll-documents' })
+    expect(target('period-exports-link')).toEqual({ name: 'payroll-documents' })
+    expect(target('submissions-link')).toEqual({ name: 'payroll-submissions' })
+    expect(target('isds-outbox-link'))
+      .toEqual({ name: 'payroll-submissions-tab', params: { tab: 'transport' } })
+    expect(target('reconciliation-link')).toEqual({ name: 'payroll-posting-reconciliation' })
+    expect(target('liabilities-link')).toEqual({ name: 'payroll-payments' })
+  })
+
   it('renders nothing while loading and recovers from the retryable warning', async () => {
     let rejectInitial!: (reason?: unknown) => void
     const pending = new Promise((_, reject) => { rejectInitial = reject })
     m.operationalHealth.mockReturnValueOnce(pending)
 
-    const wrapper = mount(PayrollOperationalHealthPanel)
+    const wrapper = mountPanel()
     expect(wrapper.find('[data-test="operational-health"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="operational-health-unavailable"]').exists()).toBe(false)
 

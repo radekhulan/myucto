@@ -54,6 +54,17 @@ vi.mock('@/composables/useUserPrefs', async () => {
   }
 })
 
+/**
+ * Rozpis dopadu překládá klíče přes `te()` + fallback na syrový klíč. Mock
+ * proto musí `te` odpovědět stejně jako katalog: pro známé názvy ANO, pro
+ * neznámou tabulku NE — jinak by test neuhlídal ani jedno z obou chování.
+ */
+const KNOWN_CASCADE_KEYS = [
+  'payroll.erasure.cascade.identifiers',
+  'payroll.erasure.cascade.addresses',
+  'payroll.erasure.cascade.payroll_generated_documents',
+]
+
 vi.mock('vue-i18n', async (importOriginal) => {
   const { ref } = await import('vue')
   return {
@@ -61,6 +72,7 @@ vi.mock('vue-i18n', async (importOriginal) => {
     useI18n: () => ({
       t: (key: string, params?: Record<string, unknown>) =>
         params ? `${key}:${JSON.stringify(params)}` : key,
+      te: (key: string) => KNOWN_CASCADE_KEYS.includes(key),
       locale: ref('cs-CZ'),
     }),
   }
@@ -152,6 +164,33 @@ describe('PayrollErasure', () => {
     expect(wrapper.get('[data-test="erasure-residue-11"]').text()).toContain('payroll_documents')
   })
 
+  /**
+   * Rozpis dopadu je to jediné, podle čeho schvalující posoudí ROZSAH
+   * nevratného úkonu. Vypisovat v něm názvy databázových tabulek znamená
+   * nechat ho odklepnout něco, čemu nerozumí.
+   */
+  it('rozpis dopadu píše, co ten klíč znamená, ne název tabulky', async () => {
+    m.proposal.mockResolvedValue({
+      proposal: proposal(),
+      items: [item({
+        cascade_counts: {
+          identity: { identifiers: 3, neznama_tabulka: 1 },
+          residue: { payroll_generated_documents: 2 },
+        },
+      })],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="erasure-proposal-42"]').trigger('click')
+    await flushPromises()
+
+    const row = wrapper.get('[data-test="erasure-item-11"]').text()
+    expect(row).toContain('payroll.erasure.cascade.identifiers')
+    expect(row).toContain('payroll.erasure.cascade.payroll_generated_documents')
+    // Neznámý klíč se ukáže tak, jak je — zmizet nesmí.
+    expect(row).toContain('neznama_tabulka')
+  })
+
   it('schválení a provedení jsou dva různé kroky, ne jedno tlačítko', async () => {
     const wrapper = mountPage()
     await flushPromises()
@@ -200,6 +239,34 @@ describe('PayrollErasure', () => {
     await wrapper.get('[data-test="erasure-confirm-run"]').trigger('click')
     await flushPromises()
     expect(m.executeProposal).toHaveBeenCalledWith(42)
+  })
+
+  /**
+   * Pojistky zůstávají obě — jen se přestaly tvářit jako rozbité tlačítko.
+   * U nevratného kroku je „ono to nejde a nevím proč" ta nejhorší varianta.
+   */
+  it('vypnuté provedení říká, CO mu ještě chybí', async () => {
+    m.proposals.mockResolvedValue([proposal({ status: 'approved' })])
+    m.proposal.mockResolvedValue({ proposal: proposal({ status: 'approved' }), items: [item()] })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="erasure-proposal-42"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="erasure-execute"]').trigger('click')
+
+    expect(wrapper.get('[data-test="erasure-confirm-blocked"]').text())
+      .toContain('payroll.erasure.confirm_missing_ack')
+
+    await wrapper.get('[data-test="erasure-confirm-ack"]').setValue(true)
+    expect(wrapper.get('[data-test="erasure-confirm-blocked"]').text())
+      .toContain('payroll.erasure.confirm_missing_id')
+
+    await wrapper.get('[data-test="erasure-confirm-id"]').setValue('41')
+    expect(wrapper.get('[data-test="erasure-confirm-blocked"]').text())
+      .toContain('payroll.erasure.confirm_wrong_id')
+
+    await wrapper.get('[data-test="erasure-confirm-id"]').setValue('42')
+    expect(wrapper.find('[data-test="erasure-confirm-blocked"]').exists()).toBe(false)
   })
 
   it('bez práva zápisu se návrh dá jen číst', async () => {

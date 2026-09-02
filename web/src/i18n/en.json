@@ -976,7 +976,8 @@
         "codebooks": "Code lists",
         "submissions": "Submission versions"
       },
-      "reason_why": "The reason is stored in the audit trail — for an overridden statutory rate it is the only record of why the company departed from the shipped value."
+      "reason_why": "The reason is stored in the audit trail — for an overridden statutory rate it is the only record of why the company departed from the shipped value.",
+      "action_blocked": "{action}: {reason}"
     },
     "title": "Payroll",
     "subtitle": "HR and payroll records, monthly runs, documents, payments, automatic posting and statutory submissions.",
@@ -993,6 +994,7 @@
       "blockers_title": "What prevents closing",
       "blocker": {
         "schema_unavailable": "The required payroll records are unavailable in the database.",
+        "unknown": "Another blocker prevents closing that this version cannot name. Please contact support.",
         "missing_months": "Missing closed periods: {months}.",
         "open_corrections": "{count} payroll run corrections are still open.",
         "open_submissions": "{count} statutory submissions are not finished.",
@@ -1005,9 +1007,9 @@
       "close_confirm": "Do you really want to close payroll year {year}? Reopening requires an audit reason.",
       "blocked_hint": "Resolve every listed blocker first.",
       "blocker_open": "Open",
-      "reopen_reason_hint": "The reason needs at least ten characters — it is the audit trail for reopening a closed year."
-      ,"close_read_only": "Only a user with payroll approval rights can close the payroll year."
-      ,"reopen_read_only": "Only a user with payroll reopen rights can reopen a closed year.",
+      "reopen_reason_hint": "The reason needs at least ten characters — it is the audit trail for reopening a closed year.",
+      "close_read_only": "Only a user with payroll approval rights can close the payroll year.",
+      "reopen_read_only": "Only a user with payroll reopen rights can reopen a closed year.",
       "reopen": "Reopen year",
       "reopen_reason": "Reason for reopening",
       "reopen_reason_placeholder": "Describe the reason in at least ten characters…",
@@ -1044,6 +1046,7 @@
       "download_dpsvd2": "Download withholding tax XML",
       "download_blocked": "There is nothing to build the statement from for this year. Approve the payroll runs first.",
       "download_done": "The statement XML has been downloaded.",
+      "export_not_allowed": "Only a user with report export rights can download the statement XML. The figures below are read-only.",
       "download_failed": "The statement XML could not be downloaded.",
       "load_failed": "The statement data could not be loaded.",
       "part_one": "Part I — by month",
@@ -4907,6 +4910,9 @@
         "snooze_modal_title": "Snooze reminder",
         "snooze_until": "Snooze until",
         "snooze_until_required": "Enter the date and time to snooze until.",
+        "snooze_until_past": "The snooze date must be in the future — please pick a later date and time.",
+        "problem_unknown": "Needs attention",
+        "status_unknown": "Unknown state",
         "snooze_reason": "Snooze reason",
         "snooze_reason_placeholder": "E.g. waiting for a document from the client.",
         "snooze_reason_required": "Please provide a reason for snoozing.",

@@ -350,7 +350,48 @@ describe('PayrollEmployeeCards', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="employee-cards-failed"]').text())
-      .toBe('payroll.employee_cards.load_failed')
+      .toContain('payroll.employee_cards.load_failed')
+  })
+
+  /**
+   * Věta „nepodařilo se načíst" bez tlačítka je slepá ulička — jediná cesta
+   * ven byla obnovit celou stránku.
+   */
+  it('z nenačtených karet vede cesta ven, ne jen hláška', async () => {
+    m.employeeCards.mockRejectedValue(new Error('500'))
+    const wrapper = mountCards()
+    await flushPromises()
+
+    m.employeeCards.mockResolvedValue(cardMonth([row({ employment_id: 1 })]))
+    await wrapper.get('[data-test="employee-cards-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="employee-cards-failed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="employee-card-1"]').exists()).toBe(true)
+  })
+
+  /**
+   * Prázdný VÝSLEDEK není prázdná agenda: lidé tu jsou, jen je schoval filtr.
+   * Bez tlačítka „zrušit filtr" se z něj nedalo vrátit jinak než ručním
+   * mazáním hledaného výrazu a klikáním zpět na výchozí filtr.
+   */
+  it('prázdný výsledek filtru nabídne filtr zrušit', async () => {
+    m.employeeCards.mockResolvedValue(cardMonth([], { total: 0, summary: { people: 3, gross_preview_minor: 0, away: 0, attention: 0 } }))
+    const wrapper = mountCards()
+    await flushPromises()
+
+    // Výchozí filtr nic neschovává — nabízet jeho zrušení by mátlo.
+    expect(wrapper.find('[data-test="employee-cards-clear-filters"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="employee-filter-away"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="employee-cards-clear-filters"]').exists()).toBe(true)
+
+    m.employeeCards.mockResolvedValue(cardMonth([row({ employment_id: 1 })]))
+    await wrapper.get('[data-test="employee-cards-clear-filters"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="employee-card-1"]').exists()).toBe(true)
   })
 
   it('o konceptu i o prázdném měsíci mlčí — štítek stavu by byl jen šum', async () => {

@@ -18,9 +18,14 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: m.canWrite }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, parameters?: Record<string, string | number>) =>
+      parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
+    te: () => true,
     locale: { value: 'cs' },
   }),
 }))
@@ -180,6 +185,37 @@ describe('PayrollJmhzOrdinaryEvidencePanel', () => {
     expect(wrapper.get('a').attributes('href')).toBe('/payroll/runs')
     expect(wrapper.text()).toContain('jmhz_evidence_attention_run_action')
     expect(wrapper.text()).not.toContain('jmhz_ordinary_evidence_profile_missing')
+  })
+
+  /**
+   * Karta se načítá sama při otevření záložky. Bez tlačítka u chybové hlášky
+   * neexistovala žádná cesta zpátky kromě přenačtení celé stránky.
+   */
+  it('po neúspěšném načtení nabídne opakování a zkusí to znovu', async () => {
+    m.get.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = mount(PayrollJmhzOrdinaryEvidencePanel, {
+      props: { runs: [run] as never[] },
+    })
+    await flushPromises()
+
+    const retry = wrapper.get('[data-test="jmhz-ordinary-evidence-retry-18"]')
+    m.get.mockResolvedValue({ scopes: [], evidences: [] })
+    await retry.trigger('click')
+    await flushPromises()
+
+    expect(m.get).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-test="jmhz-ordinary-evidence-retry-18"]').exists()).toBe(false)
+  })
+
+  /** „2026-07" vedle „01.07.2026" ve zbytku appky vypadá jako useknuté datum. */
+  it('období karty ukáže česky, ne jako strojové YYYY-MM', async () => {
+    const wrapper = mount(PayrollJmhzOrdinaryEvidencePanel, {
+      props: { runs: [run] as never[] },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('srpen 2026')
+    expect(wrapper.text()).not.toContain('2026-08')
   })
 
   it('v režimu jen pro čtení nepovolí potvrzení', async () => {

@@ -203,6 +203,26 @@ describe('PayrollPostingReconciliation', () => {
     expect(wrapper.text()).toContain('payroll.posting_reconciliation.empty_no_run.title')
     expect(wrapper.text()).toContain('payroll.posting_reconciliation.empty_no_run.message')
     expect(wrapper.find('[data-test="reconciliation-desktop"]').exists()).toBe(false)
+    // Prázdný stav bez prokliku byl slepá ulička: text říkal, že běh chybí,
+    // ale cesta k jeho založení odsud nevedla.
+    expect(wrapper.text()).toContain('payroll.posting_reconciliation.open_runs')
+    expect(wrapper.html()).toContain('/payroll/runs')
+  })
+
+  it('i neschválený běh nabídne cestu tam, kde se schvaluje', async () => {
+    m.reconciliation.mockResolvedValue(reconciliation({
+      revision: null,
+      journal_state: 'no_revision',
+      overall_status: 'info',
+      categories: [],
+    }))
+
+    const wrapper = mount(PayrollPostingReconciliationPage)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('payroll.posting_reconciliation.empty_unapproved.title')
+    expect(wrapper.text()).toContain('payroll.posting_reconciliation.open_runs')
+    expect(wrapper.html()).toContain('/payroll/runs')
   })
 
   it('reloads, reports an API failure and recovers through retry', async () => {

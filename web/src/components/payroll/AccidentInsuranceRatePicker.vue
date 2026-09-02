@@ -256,9 +256,21 @@ onMounted(load)
                   </button>
                 </td>
               </tr>
+              <!-- Prázdný výsledek hledání není prázdný sazebník: řádky tu
+                   jsou, jen je schoval filtr. Bez tlačítka se z toho stavu
+                   dalo dostat jen ručním vymazáním pole. -->
               <tr v-if="visibleRows.length === 0">
                 <td colspan="4" class="px-3 py-4 text-center text-sm text-neutral-500">
-                  {{ t('payroll.employer.accident_insurance.schedule.no_results') }}
+                  <p>{{ t('payroll.employer.accident_insurance.schedule.no_results') }}</p>
+                  <button
+                    type="button"
+                    :class="btnOutlineSm('neutral')"
+                    class="mt-2"
+                    data-testid="accident-rate-clear-filter"
+                    @click="filter = ''"
+                  >
+                    {{ t('common.empty_state.clear_filters') }}
+                  </button>
                 </td>
               </tr>
             </tbody>

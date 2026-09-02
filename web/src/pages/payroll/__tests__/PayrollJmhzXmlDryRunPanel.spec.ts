@@ -25,9 +25,14 @@ vi.mock('@/api/payrollAbsences', () => ({
   payrollAbsenceApi: { context: m.context },
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, parameters?: Record<string, string | number>) =>
+      parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
+    te: () => true,
     locale: { value: 'cs' },
   }),
 }))
@@ -371,6 +376,51 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     expect(
       wrapper.get('[data-test="jmhz-dry-run-start-18"]').attributes('disabled'),
     ).toBeDefined()
+    // Zhasnuté tlačítko bez věty vypadá jako porucha aplikace.
+    expect(wrapper.get('[data-test="jmhz-dry-run-blocked-18"]').text())
+      .toContain('payroll.submissions.overview.jmhz_dry_run_read_only')
     expect(m.freeze).not.toHaveBeenCalled()
+  })
+
+  /** Čeká se na volbu účtárny — a musí to být napsané, ne jen zhasnuté. */
+  it('u víc účtáren řekne, na co se čeká', async () => {
+    m.offices.mockResolvedValue([
+      {
+        office_id: 4,
+        code: 'UC4',
+        name: 'Mzdová účtárna 4',
+        social_security_variable_symbol: '1234567890',
+        submittable: true,
+      },
+      {
+        office_id: 5,
+        code: 'UC5',
+        name: 'Mzdová účtárna 5',
+        social_security_variable_symbol: '2234567890',
+        submittable: true,
+      },
+    ])
+
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [run] as never[] },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="jmhz-dry-run-blocked-18"]').text())
+      .toContain('payroll.submissions.overview.jmhz_social_multiple_offices')
+
+    await wrapper.get(`[data-test="jmhz-dry-run-office-18"] select`).setValue('4')
+    expect(wrapper.find('[data-test="jmhz-dry-run-blocked-18"]').exists()).toBe(false)
+  })
+
+  /** Období karty v lidském tvaru, ne strojové „2026-08". */
+  it('období karty ukáže česky', async () => {
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [run] as never[] },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('srpen 2026')
+    expect(wrapper.text()).not.toContain('2026-08')
   })
 })

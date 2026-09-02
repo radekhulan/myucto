@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { RouteLocationRaw } from 'vue-router'
 import {
   payrollApi,
   type PayrollCapabilitiesResponse,
   type PayrollRun,
   type PayrollSetupCheck,
+  type PayrollSetupCheckItem,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -26,6 +28,13 @@ const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(true)
+/**
+ * Načtení stavu modulu selhalo. Bez tohohle příznaku končilo selhání prázdnou
+ * stránkou: `capabilities` zůstalo `null`, `v-else-if` nechytlo nic a po
+ * uživateli zbyl jen nadpis a toast, který za pár vteřin zmizel — tedy stav
+ * BEZ VIDITELNÉ AKCE VEN.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const capabilities = ref<PayrollCapabilitiesResponse | null>(null)
 const currentPeriod = localPayrollPeriod()
@@ -61,6 +70,31 @@ const setupBlockers = computed(() =>
     ? setupCheck.value.checks.filter(item => item.status === 'blocked')
     : [],
 )
+
+/**
+ * Kam se který blokátor doplňuje.
+ *
+ * Why: seznam dřív jen převyprávěl serverovou hlášku („Chybí profil
+ * zaměstnavatele", „Vyplňte registrační číslo … Mzdy → Podání → Certifikát")
+ * a nabídl jediný odkaz na Nastavení mezd. Text tedy říkal KAM jít, ale
+ * proklik tam nevedl — uživatel si šest záložek nastavení a dvanáct záložek
+ * podání musel najít sám. Kódy jsou z `PayrollSetupCheckService::check()`.
+ */
+const SETUP_BLOCKER_LINKS: Record<string, RouteLocationRaw> = {
+  employer_settings: { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' },
+  effective_policy: { name: 'payroll-settings', query: { tab: 'policies' } },
+  home_office_policy: { name: 'payroll-settings', query: { tab: 'policies' } },
+  travel_expense_policy: { name: 'payroll-settings', query: { tab: 'policies' } },
+  secure_delivery: { name: 'payroll-settings', query: { tab: 'policies' } },
+  automatic_posting: { name: 'payroll-settings', query: { tab: 'accounting' } },
+  jmhz_registry: { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-registration' },
+  jmhz_certificate: { name: 'payroll-submissions-tab', params: { tab: 'certificate' } },
+}
+
+/** Neznámý kód (nová kontrola, zdrojový blokátor) míří na obecné nastavení. */
+function blockerLink(item: PayrollSetupCheckItem): RouteLocationRaw {
+  return SETUP_BLOCKER_LINKS[item.code] ?? { name: 'payroll-settings' }
+}
 
 /**
  * Hlavička sekce používá sdílený `ActionBar` (AGENTS.md §Frontend): jedna plná
@@ -136,10 +170,12 @@ async function load() {
   try {
     const data = await payrollApi.capabilities()
     capabilities.value = data
+    loadFailed.value = false
     if (data.state.start_period) {
       startPeriod.value = data.state.start_period
     }
   } catch {
+    loadFailed.value = true
     toast.error(t('payroll.load_failed'))
   } finally {
     loading.value = false
@@ -271,6 +307,30 @@ onMounted(load)
       <div v-for="index in 3" :key="index" class="h-32 animate-pulse rounded-xl bg-neutral-100" />
     </div>
 
+    <!--
+      Selhání načtení nesmí skončit prázdnou stránkou: o stavu modulu nevíme
+      NIC, takže se nedá ukázat ani „mzdy jsou vypnuté". Jediná smysluplná
+      akce je zkusit to znovu — a ta tu musí zůstat vidět, na rozdíl od toastu.
+    -->
+    <section
+      v-else-if="loadFailed && !capabilities"
+      class="rounded-xl border border-danger-500/30 bg-danger-50 p-4 sm:p-6"
+      role="alert"
+      data-test="payroll-dashboard-failed"
+    >
+      <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.load_failed') }}</h2>
+      <p class="mt-1 max-w-3xl text-sm text-neutral-700">{{ t('payroll.dashboard.load_failed_hint') }}</p>
+      <button
+        type="button"
+        :class="[btnOutline('danger'), 'mt-3']"
+        data-test="payroll-dashboard-retry"
+        @click="load"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+        {{ t('common.empty_state.retry') }}
+      </button>
+    </section>
+
     <template v-else-if="capabilities && state">
       <section
         v-if="!isEnabled"
@@ -300,6 +360,14 @@ onMounted(load)
               {{ saving ? t('common.saving') : t('payroll.activation.enable') }}
             </button>
           </div>
+          <!--
+            Bez práva `payroll.settings` tu dřív zbyl nadpis a odstavec bez
+            jediného tlačítka — obrazovka, ze které nevede žádná akce a která
+            nenapoví ani proč. Teď se aspoň řekne, kdo mzdy zapnout může.
+          -->
+          <p v-else class="max-w-2xl text-sm text-neutral-600" data-test="activation-no-permission">
+            {{ t('payroll.activation.no_permission') }}
+          </p>
         </div>
       </section>
 
@@ -329,10 +397,23 @@ onMounted(load)
               {{ t('payroll.dashboard.setup.action') }}
             </RouterLink>
           </div>
+          <!--
+            Každý nesplněný krok je proklikatelný. Hláška ze serveru sice říká,
+            kam jít („Mzdy → Podání → Certifikát"), ale bez odkazu si to
+            uživatel musel v šesti záložkách nastavení a dvanácti záložkách
+            podání najít sám.
+          -->
           <ul class="mt-3 space-y-1.5 text-sm text-warning-800">
-            <li v-for="item in setupBlockers" :key="item.code" class="flex gap-2">
+            <li v-for="item in setupBlockers" :key="item.code" class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span aria-hidden="true">•</span>
               <span>{{ item.message }}</span>
+              <RouterLink
+                :to="blockerLink(item)"
+                class="font-medium text-warning-900 underline decoration-dotted underline-offset-2"
+                :data-test="`setup-blocker-link-${item.code}`"
+              >
+                {{ t('payroll.dashboard.setup.resolve') }}
+              </RouterLink>
             </li>
           </ul>
         </section>

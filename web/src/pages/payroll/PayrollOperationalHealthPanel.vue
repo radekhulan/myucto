@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import { payrollApi, type PayrollOperationalHealth } from '@/api/payroll'
+import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 
 const { t, locale } = useI18n()
 const health = ref<PayrollOperationalHealth | null>(null)
@@ -16,6 +18,22 @@ async function load() {
     unavailable.value = true
   }
 }
+
+/**
+ * Kam se která dlaždice řeší.
+ *
+ * Why: panel vypisoval samá čísla („Selhalo: 3", „Neuzavřeno: 2") a NIKAM
+ * nevedl. Číslo, které říká, že je něco rozbité, a nedá se na něj kliknout,
+ * je slepá ulička — uživatel musel v menu s dvaceti položkami hádat, kde se
+ * dávky dokumentů nebo odmítnutá podání vlastně řeší.
+ */
+const TILE_LINK = {
+  documents: { name: 'payroll-documents' },
+  submissions: { name: 'payroll-submissions' },
+  outbox: { name: 'payroll-submissions-tab', params: { tab: 'transport' } },
+  reconciliation: { name: 'payroll-posting-reconciliation' },
+  payments: { name: 'payroll-payments' },
+} as const
 
 function formatAge(seconds: number | null): string {
   if (seconds === null) return t('payroll.dashboard.operational_health.never_pending')
@@ -103,6 +121,9 @@ onMounted(load)
             </dd>
           </div>
         </dl>
+        <RouterLink :to="TILE_LINK.documents" class="mt-2 inline-flex text-xs font-medium text-primary-700 underline decoration-dotted underline-offset-2" data-test="document-batches-link">
+          {{ t('payroll.dashboard.operational_health.open_documents') }}
+        </RouterLink>
       </div>
 
       <div class="rounded-lg bg-neutral-50 p-3">
@@ -133,6 +154,9 @@ onMounted(load)
             </dd>
           </div>
         </dl>
+        <RouterLink :to="TILE_LINK.documents" class="mt-2 inline-flex text-xs font-medium text-primary-700 underline decoration-dotted underline-offset-2" data-test="period-exports-link">
+          {{ t('payroll.dashboard.operational_health.open_documents') }}
+        </RouterLink>
       </div>
 
       <div class="rounded-lg bg-neutral-50 p-3">
@@ -147,6 +171,9 @@ onMounted(load)
           <dt>{{ t('payroll.dashboard.operational_health.open_issues') }}</dt>
           <dd class="text-right font-semibold text-danger-700" data-test="submission-issues">{{ health.submissions.open_blocker_or_error_issues }}</dd>
         </dl>
+        <RouterLink :to="TILE_LINK.submissions" class="mt-2 inline-flex text-xs font-medium text-primary-700 underline decoration-dotted underline-offset-2" data-test="submissions-link">
+          {{ t('payroll.dashboard.operational_health.open_submissions') }}
+        </RouterLink>
       </div>
 
       <div class="rounded-lg bg-neutral-50 p-3">
@@ -161,6 +188,9 @@ onMounted(load)
           <dt>{{ t('payroll.dashboard.operational_health.rejected') }}</dt>
           <dd class="text-right font-semibold text-danger-700">{{ health.isds_outbox.rejected }}</dd>
         </dl>
+        <RouterLink :to="TILE_LINK.outbox" class="mt-2 inline-flex text-xs font-medium text-primary-700 underline decoration-dotted underline-offset-2" data-test="isds-outbox-link">
+          {{ t('payroll.dashboard.operational_health.open_outbox') }}
+        </RouterLink>
       </div>
 
       <div
@@ -193,6 +223,9 @@ onMounted(load)
           <dt>{{ t('payroll.dashboard.operational_health.reconciliation_periods') }}</dt>
           <dd class="text-right font-semibold">{{ health.reconciliation.periods }}</dd>
         </dl>
+        <RouterLink :to="TILE_LINK.reconciliation" class="mt-2 inline-flex text-xs font-medium text-primary-700 underline decoration-dotted underline-offset-2" data-test="reconciliation-link">
+          {{ t('payroll.dashboard.operational_health.open_reconciliation') }}
+        </RouterLink>
       </div>
 
       <div
@@ -236,6 +269,9 @@ onMounted(load)
         >
           {{ health.overdue_unpaid_liabilities }}
         </p>
+        <RouterLink :to="TILE_LINK.payments" class="mt-2 inline-flex text-xs font-medium text-primary-700 underline decoration-dotted underline-offset-2" data-test="liabilities-link">
+          {{ t('payroll.dashboard.operational_health.open_payments') }}
+        </RouterLink>
       </div>
     </div>
   </section>
@@ -254,7 +290,10 @@ onMounted(load)
           {{ t('payroll.dashboard.operational_health.unavailable') }}
         </p>
       </div>
-      <button type="button" class="cursor-pointer shrink-0" data-test="operational-health-retry" @click="load">
+      <!-- Bez tříd tlačítka to byl holý text v odstavci: jediná cesta ven z
+           chybového stavu nevypadala jako klikací prvek. -->
+      <button type="button" :class="[btnOutline('warning'), 'shrink-0']" data-test="operational-health-retry" @click="load">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
         {{ t('payroll.dashboard.operational_health.retry') }}
       </button>
     </div>

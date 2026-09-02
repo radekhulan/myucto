@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 
 const m = vi.hoisted(() => ({
   overview: vi.fn(),
   peopleOptions: vi.fn(),
   record: vi.fn(),
+  searchDocuments: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -15,12 +16,15 @@ vi.mock('@/api/payroll', () => ({
     recordStatutoryObligationEvidence: m.record,
   },
 }))
+vi.mock('@/api/documents', () => ({
+  documentsApi: { search: m.searchDocuments },
+}))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: () => true }),
 }))
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ t: (key: string) => key, te: () => true }),
 }))
 
 import PayrollStatutoryObligationsPanel from '@/pages/payroll/PayrollStatutoryObligationsPanel.vue'
@@ -33,6 +37,24 @@ const SearchableSelectStub = defineComponent({
     <option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option>
   </select>`,
 })
+
+/**
+ * Dokument se vybírá vyhledáváním, ne opsaným ID z adresního řádku Dokumentů.
+ * Test proto jde stejnou cestou jako účetní: napsat dotaz, hledat, kliknout.
+ */
+async function pickDocument(wrapper: VueWrapper, id: number) {
+  m.searchDocuments.mockResolvedValue([{
+    id,
+    title: `Doručenka ${id}`,
+    original_name: `dorucenka-${id}.pdf`,
+    scope: 'company',
+    deleted_at: null,
+  }])
+  await wrapper.get('[data-test="statutory-document-query"]').setValue('doručenka')
+  await wrapper.get('[data-test="statutory-document-search"]').trigger('click')
+  await flushPromises()
+  await wrapper.get('[data-test="statutory-document-option"]').trigger('click')
+}
 
 function matrix() {
   return {
@@ -134,7 +156,7 @@ describe('PayrollStatutoryObligationsPanel', () => {
     await wrapper.get('[data-test="statutory-case-reference"]').setValue('EDPN-SYNTH-1')
     await wrapper.get('[data-test="statutory-receipt-reference"]').setValue('CSSZ-SYNTH-1')
     await wrapper.get('[data-test="statutory-completed-on"]').setValue('2026-08-20')
-    await wrapper.get('[data-test="statutory-document-id"]').setValue('44')
+    await pickDocument(wrapper, 44)
 
     const save = wrapper.get('[data-test="statutory-evidence-save"]')
     expect((save.element as HTMLButtonElement).disabled).toBe(true)
@@ -169,7 +191,7 @@ describe('PayrollStatutoryObligationsPanel', () => {
     await wrapper.get('[data-test="statutory-case-reference"]').setValue('SYNTH-Q3-2026')
     await wrapper.get('[data-test="statutory-receipt-reference"]').setValue('SYNTH-PAYMENT-1')
     await wrapper.get('[data-test="statutory-completed-on"]').setValue('2026-08-20')
-    await wrapper.get('[data-test="statutory-document-id"]').setValue('45')
+    await pickDocument(wrapper, 45)
     await wrapper.get('[data-test="statutory-confirmation"]').setValue(true)
     await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
     await flushPromises()

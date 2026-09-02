@@ -35,7 +35,10 @@ vi.mock('@/composables/useToast', () => ({
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
-    t: (key: string) => key,
+    // Parametry se do textu propisují: hláška validace jmenuje vadná POLE,
+    // takže bez nich by test neuhlídal to podstatné.
+    t: (key: string, params?: Record<string, unknown>) =>
+      params ? `${key}:${JSON.stringify(params)}` : key,
   }),
 }))
 
@@ -489,6 +492,56 @@ describe('HealthInsurerAccounts', () => {
     expect(wrapper.text()).toContain('Syntetická zdravotní pojišťovna')
 
     confirm.mockRestore()
+    wrapper.unmount()
+  })
+
+  /**
+   * „Zkontrolujte vyplněná pole." nad patnácti poli ve třech sloupcích
+   * neříkalo nic: vadné pole se opticky nijak neliší (`aria-invalid` je pro
+   * čtečku), takže uživatel hledal naslepo.
+   */
+  it('hláška validace jmenuje konkrétní vadná pole', async () => {
+    const wrapper = await mountComponent([])
+
+    const add = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.add')
+    await add!.trigger('click')
+
+    await wrapper.get('[data-testid="health-create-manual-code"]').trigger('click')
+    await wrapper.get('[data-testid="health-create-name"]').setValue('Nová pojišťovna')
+    await wrapper.get('[data-testid="health-create-vs"]').setValue('nečíslo')
+
+    const submit = wrapper.get('[data-testid="health-account-create"]').findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.create')
+    await submit!.trigger('click')
+    await flushPromises()
+
+    expect(m.createInstitutionAccount).not.toHaveBeenCalled()
+    const message = wrapper.get('[data-testid="health-create-validation"]').text()
+    expect(message).toContain('payroll.employer.health_accounts.validation_fields')
+    expect(message).toContain('payroll.employer.health_accounts.bank_account')
+    expect(message).toContain('payroll.employer.health_accounts.variable_symbol')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * Přepnutí na ruční kód bylo jednosměrné — omylem kliknutý odkaz znamenal
+   * zrušit celý rozdělaný formulář, aby se nabídka pojišťoven vrátila.
+   */
+  it('z ručního kódu vede cesta zpět k výběru ze seznamu', async () => {
+    const wrapper = await mountComponent([])
+
+    const add = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.add')
+    await add!.trigger('click')
+
+    await wrapper.get('[data-testid="health-create-manual-code"]').trigger('click')
+    expect(wrapper.find('[data-testid="health-create-insurer"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="health-create-back-to-picker"]').trigger('click')
+    expect(wrapper.find('[data-testid="health-create-insurer"]').exists()).toBe(true)
+
     wrapper.unmount()
   })
 })

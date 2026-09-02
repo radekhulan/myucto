@@ -33,6 +33,11 @@ const auth = useAuthStore()
 const toast = useToast()
 
 const loading = ref(true)
+/**
+ * Přehled se nenačetl. Bez příznaku zůstal po selhání jen nadpis a mizící
+ * toast — stránka bez jediné viditelné akce ven.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const overview = ref<PayrollRulesetOverview | null>(null)
 const detail = ref<PayrollRulesetDetail | null>(null)
@@ -212,7 +217,9 @@ async function load() {
   loading.value = true
   try {
     overview.value = await payrollRulesetsApi.overview()
+    loadFailed.value = false
   } catch (error: unknown) {
+    loadFailed.value = true
     toast.error(errorMessage(error, t('payroll.rulesets.load_failed')))
   } finally {
     loading.value = false
@@ -326,6 +333,35 @@ function changedParameters(): Record<string, Record<string, unknown>> {
 }
 
 const hasChanges = computed(() => Object.keys(changedParameters()).length > 0)
+
+/**
+ * Proč zrovna teď nejde uložit — a to VIDITELNĚ, ne až toastem po kliknutí.
+ *
+ * Why: `:disabled` viselo jen na `hasChanges`, jenže `save()` navíc vyžaduje
+ * důvod. Tlačítko tedy vypadalo použitelně, kliknutí ale skončilo varováním.
+ * Tlačítko a hláška pod ním teď mluví o týchž podmínkách.
+ *
+ * Důvod je POVINNÝ ZÁMĚRNĚ a není to naše libovůle: přepisem legislativní
+ * sazby přebírá zákazník odpovědnost za výpočet a auditní stopa musí nést,
+ * proč se od dodané hodnoty odchýlil. Bez toho je záznam v auditu k ničemu.
+ */
+const saveBlockedReason = computed<string | null>(() => {
+  if (!hasChanges.value) return t('payroll.rulesets.nothing_changed')
+  if (reason.value.trim() === '') return t('payroll.rulesets.reason_required')
+  return null
+})
+
+/** Totéž pro stavový příkaz (schválit / aktivovat): tooltip na dotyku neexistuje. */
+const commandBlockedReason = computed<string | null>(() => {
+  if (!detail.value?.next_command) return null
+  const blocker = detail.value.blockers[0]?.message
+  if (blocker) return blocker
+  if (detail.value.next_command === 'activate' && !canActivate.value) {
+    return t('payroll.rulesets.impact_preview.required')
+  }
+  if (reason.value.trim() === '') return t('payroll.rulesets.reason_required')
+  return null
+})
 
 async function save() {
   if (!detail.value) return
@@ -584,6 +620,23 @@ onMounted(load)
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-24 animate-pulse rounded-xl bg-neutral-100" />
     </div>
+
+    <!-- Nenačtený přehled = prázdná stránka. Zkusit znovu je jediná akce, která
+         tu dává smysl, a musí zůstat vidět (toast za pár vteřin zmizí). -->
+    <section
+      v-else-if="loadFailed && !overview"
+      class="rounded-xl border border-danger-500/30 bg-danger-50 p-4 sm:p-6"
+      role="alert"
+      data-test="ruleset-load-failed"
+    >
+      <p class="text-sm text-danger-700">{{ t('payroll.rulesets.load_failed') }}</p>
+      <button type="button" :class="[btnOutline('danger'), 'mt-3']" data-test="ruleset-load-retry" @click="load">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.cycle" />
+        </svg>
+        {{ t('common.empty_state.retry') }}
+      </button>
+    </section>
 
     <section
       v-for="group in overview?.domains ?? []"
@@ -1255,7 +1308,35 @@ onMounted(load)
               :placeholder="t('payroll.rulesets.reason_placeholder')"
               data-test="ruleset-reason"
             >
+            <span class="mt-1 block text-xs text-neutral-500">
+              {{ t('payroll.rulesets.reason_why') }}
+            </span>
           </label>
+
+          <!--
+            Co brání KTERÉ akci, se říká větou u tlačítek. Dřív to nesl jen
+            `title`, který se na dotykovém displeji nezobrazí vůbec, a u
+            „Uložit" ani ten ne — o povinném důvodu se uživatel dozvěděl až
+            varováním po kliknutí. Každé tlačítko má vlastní řádek: jedna
+            společná věta by nešla přiřadit ke správnému z nich.
+          -->
+          <div
+            v-if="saveBlockedReason || commandBlockedReason"
+            class="space-y-0.5 text-right text-xs text-neutral-500"
+          >
+            <p v-if="commandBlockedReason && detail.next_command" data-test="ruleset-command-blocked">
+              {{ t('payroll.rulesets.action_blocked', {
+                action: t(`payroll.rulesets.command.${detail.next_command}`),
+                reason: commandBlockedReason,
+              }) }}
+            </p>
+            <p v-if="saveBlockedReason" data-test="ruleset-save-blocked">
+              {{ t('payroll.rulesets.action_blocked', {
+                action: t('common.save'),
+                reason: saveBlockedReason,
+              }) }}
+            </p>
+          </div>
 
           <div class="flex flex-wrap justify-end gap-2">
             <button
@@ -1284,7 +1365,13 @@ onMounted(load)
               </svg>
               {{ t(`payroll.rulesets.command.${detail.next_command}`) }}
             </button>
-            <button :class="btnFilled('primary')" :disabled="saving || !hasChanges" @click="save">
+            <button
+              :class="btnFilled('primary')"
+              :disabled="saving || saveBlockedReason !== null"
+              :title="saveBlockedReason ?? undefined"
+              data-test="ruleset-save"
+              @click="save"
+            >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path :d="ICONS.check" />
               </svg>

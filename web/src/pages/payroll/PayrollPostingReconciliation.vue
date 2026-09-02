@@ -205,6 +205,11 @@ onMounted(load)
     </p>
 
     <template v-else-if="result">
+      <!--
+        Oba prázdné stavy říkají, že se porovnávat nedá, dokud běh neexistuje
+        (resp. není schválený) — a to se řeší jinde, na Mzdových bězích. Bez
+        prokliku to byla slepá ulička: text kam jít, ale žádná cesta.
+      -->
       <EmptyState
         v-if="hasNoRun"
         boxed
@@ -212,6 +217,9 @@ onMounted(load)
         accent="neutral"
         :title="t('payroll.posting_reconciliation.empty_no_run.title')"
         :message="t('payroll.posting_reconciliation.empty_no_run.message')"
+        :cta="t('payroll.posting_reconciliation.open_runs')"
+        cta-icon="cycle"
+        to="/payroll/runs"
       />
       <EmptyState
         v-else-if="isUnapproved"
@@ -220,6 +228,9 @@ onMounted(load)
         accent="warning"
         :title="t('payroll.posting_reconciliation.empty_unapproved.title')"
         :message="t('payroll.posting_reconciliation.empty_unapproved.message')"
+        :cta="t('payroll.posting_reconciliation.open_runs')"
+        cta-icon="cycle"
+        to="/payroll/runs"
       />
       <template v-else>
         <section

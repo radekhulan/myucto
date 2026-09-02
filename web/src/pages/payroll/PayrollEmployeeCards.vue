@@ -177,6 +177,19 @@ async function load() {
   }
 }
 
+/** Je prázdný výsledek dílem hledání nebo filtru? Pak z něj musí vést cesta ven. */
+const isFiltered = computed(() => search.value.trim() !== '' || statusFilter.value !== 'active')
+
+function clearFilters() {
+  const hadSearch = search.value !== ''
+  search.value = ''
+  statusFilter.value = 'active'
+  offset.value = 0
+  // Změna `search` spustí vlastní (debouncovaný) watcher, který načte sám;
+  // volat load i tady by týž dotaz vystřelilo dvakrát.
+  if (!hadSearch) void load()
+}
+
 function setStatus(value: PayrollEmployeeCardStatusFilter) {
   if (statusFilter.value === value) return
   statusFilter.value = value
@@ -230,13 +243,21 @@ onBeforeUnmount(() => {
       <div v-for="index in 3" :key="index" class="h-44 animate-pulse rounded-xl bg-neutral-100" />
     </div>
 
-    <p
+    <!-- Selhalo načtení: o kartách nevíme nic, takže jediná cesta ven je
+         zkusit to znovu. Dřív tu zůstala jen věta a uživatel musel obnovit
+         celou stránku. -->
+    <div
       v-else-if="failed"
       class="mt-4 rounded-lg border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-800"
+      role="alert"
       data-test="employee-cards-failed"
     >
-      {{ t('payroll.employee_cards.load_failed') }}
-    </p>
+      <p>{{ t('payroll.employee_cards.load_failed') }}</p>
+      <button type="button" :class="[btnOutline('warning'), 'mt-3']" data-test="employee-cards-retry" @click="load">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+        {{ t('common.empty_state.retry') }}
+      </button>
+    </div>
 
     <!--
       Dva různé prázdné stavy. „Firma nemá nikoho" a „nikdo není v tomhle měsíci
@@ -316,12 +337,25 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <p
+      <!-- Prázdný VÝSLEDEK není prázdná agenda: lidé tu jsou, jen je schoval
+           filtr nebo hledaný výraz. Jediná užitečná akce je filtr zrušit. -->
+      <div
         v-if="total === 0"
         class="mt-4 rounded-lg border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500"
+        data-test="employee-cards-no-results"
       >
-        {{ t('payroll.employee_cards.no_results') }}
-      </p>
+        <p>{{ t('payroll.employee_cards.no_results') }}</p>
+        <button
+          v-if="isFiltered"
+          type="button"
+          :class="[btnOutline('neutral'), 'mt-3']"
+          data-test="employee-cards-clear-filters"
+          @click="clearFilters"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.empty_state.clear_filters') }}
+        </button>
+      </div>
 
       <div v-else class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         <article

@@ -37,8 +37,16 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
+  useI18n: () => ({
+    t: (key: string, parameters?: Record<string, string | number>) =>
+      parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
+    te: () => true,
+    locale: { value: 'cs' },
+  }),
 }))
 
 vi.mock('@/components/ui/SearchableSelect.vue', () => ({
@@ -166,6 +174,50 @@ describe('PayrollEldpPanel', () => {
    * říct NAD formulářem a přípravu vůbec nenabídnout — jinak vypadá zrušená
    * roční povinnost pořád jako úkol, který má účetní odbavit.
    */
+  /**
+   * Zhasnuté tlačítko nad formulářem o šesti polích neřeklo, které z nich
+   * zlobí — a poznámku o pěti znacích (naše podmínka, vynucuje ji
+   * `EldpAnnualStatementBuilder`) neuhodne nikdo.
+   */
+  it('vyjmenuje, co k přípravě chybí, místo mlčky zhasnutého tlačítka', async () => {
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+    wrapper.findComponent({ name: 'PayrollPersonSearchSelect' })
+      .vm.$emit('update:modelValue', 11)
+    await flushPromises()
+    wrapper.findAllComponents({ name: 'SearchableSelect' })[0]!
+      .vm.$emit('update:modelValue', 101)
+    await flushPromises()
+
+    const blockers = wrapper.get('[data-test="eldp-prepare-blockers"]').text()
+    expect(blockers).toContain('payroll.eldp.blockers.excluded')
+    expect(blockers).toContain('payroll.eldp.blockers.deducted')
+    expect(blockers).toContain('payroll.eldp.blockers.note')
+
+    await fillConfirmation(wrapper)
+    expect(wrapper.find('[data-test="eldp-prepare-blockers"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="eldp-prepare"]').attributes('disabled')).toBeUndefined()
+  })
+
+  /**
+   * Chyba načtení podkladu se dřív zahazovala: obrazovka po výběru vztahu
+   * jen zhasla a účetní z toho četla „za tenhle rok nic není".
+   */
+  it('selhání podkladu řekne nahlas, ne prázdnou obrazovkou', async () => {
+    m.eldpStatement.mockRejectedValue(new Error('boom'))
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+    wrapper.findComponent({ name: 'PayrollPersonSearchSelect' })
+      .vm.$emit('update:modelValue', 11)
+    await flushPromises()
+    wrapper.findAllComponents({ name: 'SearchableSelect' })[0]!
+      .vm.$emit('update:modelValue', 101)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="eldp-error"]').text())
+      .toContain('payroll.eldp.errors.statementLoadFailed')
+  })
+
   it('nenabídne přípravu tam, kde evidenční list sestavuje ČSSZ', async () => {
     m.eldpStatement.mockResolvedValue({
       statement: null,
