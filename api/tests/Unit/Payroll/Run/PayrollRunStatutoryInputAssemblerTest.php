@@ -1160,4 +1160,55 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             ],
         ];
     }
+    /**
+     * Storno náhrady při DPN nesmí shodit běh do ručního posouzení.
+     *
+     * Náhrada je osvobozená od daně a tím pádem mimo vyměřovací základ
+     * sociálního i zdravotního pojistného, takže do žádné ze tří domén
+     * nevstupuje. Kontrola nezápornosti přesto běžela před filtrem podle
+     * zacházení a shodila všechny tři — období pak šlo odblokovat jen ručním
+     * SQL.
+     */
+    public function testNegativeAmountOfAnExemptComponentDoesNotBlockAnyDomain(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $person = &$snapshot['people'][0];
+        $input = &$person['employments'][0]['inputs'][0];
+        $input['amount_minor'] = -50_000;
+        $input['component']['tax_treatment'] = 'exempt';
+        $input['component']['social_treatment'] = 'excluded';
+        $input['component']['health_treatment'] = 'excluded';
+        unset($input, $person);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        $codes = array_map(static fn ($issue): string => $issue->code, $bundle->issues);
+        self::assertNotContains('negative_component_requires_revision', $codes);
+    }
+
+    /**
+     * Zúžení guardu se nesmí přelít na složku, která do základu vstupuje:
+     * záporný zákonný příplatek je věcný problém, ne falešný poplach.
+     */
+    public function testNegativeAmountOfAnIncludedComponentStillBlocks(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $person = &$snapshot['people'][0];
+        $input = &$person['employments'][0]['inputs'][0];
+        $input['amount_minor'] = -50_000;
+        $input['component']['tax_treatment'] = 'included';
+        $input['component']['social_treatment'] = 'included';
+        $input['component']['health_treatment'] = 'included';
+        unset($input, $person);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        $keys = array_map(
+            static fn ($issue): string => $issue->domain . '|' . $issue->code,
+            $bundle->issues,
+        );
+        foreach (['social_insurance', 'health_insurance', 'income_tax'] as $domain) {
+            self::assertContains($domain . '|negative_component_requires_revision', $keys);
+        }
+    }
 }
