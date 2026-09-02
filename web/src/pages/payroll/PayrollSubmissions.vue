@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from '@/composables/useFormat'
 import { computed, onMounted, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
@@ -480,9 +481,11 @@ onMounted(loadInboxBadge)
           <svg class="h-5 w-5 text-success-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path :d="ICONS.checkCircle" />
           </svg>
+          <!-- `row_version` je optimistický zámek, ne verze profilu; účetní
+               z něj nic nevyčte. Datum je čas potvrzení, patří do lidského
+               tvaru jako všude jinde. -->
           {{ t('payroll.regzel.prepare.profile_confirmed', {
-            at: profile.evidence_confirmed_at,
-            version: profile.row_version,
+            at: formatDateTime(profile.evidence_confirmed_at),
           }) }}
         </div>
 
@@ -567,7 +570,7 @@ onMounted(loadInboxBadge)
               </thead>
               <tbody class="divide-y divide-neutral-100">
                 <tr v-for="snapshot in snapshots" :key="snapshot.id">
-                  <td v-if="snapshotsTbl.isVisible('created_at')" class="px-4 py-3 text-neutral-900">{{ snapshot.created_at }}</td>
+                  <td v-if="snapshotsTbl.isVisible('created_at')" class="px-4 py-3 text-neutral-900">{{ formatDateTime(snapshot.created_at) }}</td>
                   <td v-if="snapshotsTbl.isVisible('office')" class="px-4 py-3 text-neutral-700">{{ officeLabel(snapshot.office_id) }}</td>
                   <td v-if="snapshotsTbl.isVisible('version')" class="px-4 py-3 text-neutral-700">XSD {{ snapshot.xsd_version }}</td>
                   <td v-if="snapshotsTbl.isVisible('size')" class="px-4 py-3 text-neutral-700">{{ readableBytes(snapshot.xml_byte_size) }}</td>
@@ -599,7 +602,7 @@ onMounted(loadInboxBadge)
             <div class="flex items-start justify-between gap-3">
               <div>
                 <h3 class="font-medium text-neutral-900">REGZELDOPL25</h3>
-                <p class="mt-1 text-xs text-neutral-500">{{ snapshot.created_at }}</p>
+                <p class="mt-1 text-xs text-neutral-500">{{ formatDateTime(snapshot.created_at) }}</p>
               </div>
               <span class="rounded-full bg-neutral-100 px-2 py-1 text-xs text-neutral-700">
                 XSD {{ snapshot.xsd_version }}

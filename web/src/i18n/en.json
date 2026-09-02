@@ -5315,7 +5315,7 @@
         "description": "Creates an immutable encrypted snapshot, validates XML against the pinned official XSD 1.2 and makes it available for download. Nothing is sent automatically.",
         "open_settings": "Edit REGZEL profile",
         "profile_required": "First confirm the employer REGZEL profile in Payroll settings.",
-        "profile_confirmed": "REGZEL profile v{version} confirmed at {at}.",
+        "profile_confirmed": "REGZEL profile confirmed on {at}.",
         "office_required": "Select an active payroll office.",
         "confirmation": "I confirm that the selected environment, office, identifiers and evidence flags are current for this particular XML snapshot.",
         "confirmation_required": "Confirm that all source data is current before preparing XML.",
