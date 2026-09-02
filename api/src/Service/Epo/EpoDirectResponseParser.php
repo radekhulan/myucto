@@ -68,7 +68,11 @@ final class EpoDirectResponseParser
                 );
                 continue;
             }
-            if (in_array($type, ['S', 'K', 'E'], true)) {
+            // `N` = NEPROPUSTNÁ chyba. Chyběla tu, takže zkušební podání
+            // s nepropustnou vadou se hlásilo jako „prošlo" — přesně to, co
+            // ostrý EPO nepřijme. Propustná (`P`) a informativní (`I`) projdou
+            // dál, protože ty podání nebrání.
+            if (in_array($type, ['S', 'K', 'E', 'N'], true)) {
                 $blocking = true;
             }
         }
