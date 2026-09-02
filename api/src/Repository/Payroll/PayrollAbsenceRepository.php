@@ -357,17 +357,9 @@ final class PayrollAbsenceRepository
             $windowFrom = $windowFrom->modify('+1 day');
         }
         $absenceTo = new \DateTimeImmutable((string) $absence['date_to'], $timezone);
-        $isSickness = in_array(
-            $absence['absence_type'],
-            ['dpn', 'quarantine'],
-            true,
-        );
         $windowTo = $absenceTo;
-        if ($isSickness) {
-            // Délka okna náhrady mzdy podle § 192 ZP se historicky měnila
-            // (21 → 14 dnů), proto je v rulesetu, ne v literálu.
-            $windowEnd = AbsenceRuleset::forDate($this->rulesets, (string) $absence['date_from'])
-                ->sicknessWindowEnd($windowFrom);
+        if (self::isSickness($absence)) {
+            $windowEnd = $this->sicknessWindowEnd($absence, $windowFrom);
             if ($windowEnd < $absenceTo) {
                 $windowTo = $windowEnd;
             }
@@ -376,6 +368,88 @@ final class PayrollAbsenceRepository
             return [];
         }
 
+        return $this->segmentsBetween($absence, $windowFrom, $windowTo, $holidayTreatment);
+    }
+
+    /**
+     * Naplánované směny nemoci LEŽÍCÍ AŽ ZA oknem náhrady mzdy podle § 192 ZP.
+     *
+     * Doplněk k {@see publishedShiftSegments}, který u DPN a karantény vrací
+     * právě to okno. Za ním zaměstnavatel náhradu neposkytuje (dávku vyplácí
+     * ČSSZ), ale hodiny jsou pořád neodpracované a měsíční hlášení je chce
+     * uvést zvlášť (atribut 10277 proti 10278). Bez tohohle doplňku by se dala
+     * z evidence odvodit jen ta placená část a delší nemoc by hlášení
+     * podhodnotila.
+     *
+     * Dělení je čistý řez podle data: obě metody čtou tytéž publikované směny
+     * a tutéž logiku částečně zameškaných směn, jen na disjunktních rozsazích
+     * dnů. Svátek se tu neřeší — mimo okno náhrady za něj zaměstnavatel nic
+     * neposkytuje, takže bez rozvržené směny je hodin nula.
+     *
+     * @param array<string,mixed> $absence
+     * @return list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int}>
+     */
+    public function publishedShiftSegmentsBeyondSicknessWindow(
+        array $absence,
+        bool $firstDayFullyWorked,
+    ): array {
+        if (!self::isSickness($absence) || !$this->db->hasTable('payroll_shifts')) {
+            return [];
+        }
+        $timezone = new \DateTimeZone((string) $absence['timezone_name']);
+        $windowFrom = new \DateTimeImmutable((string) $absence['date_from'], $timezone);
+        if ($firstDayFullyWorked) {
+            $windowFrom = $windowFrom->modify('+1 day');
+        }
+        $absenceTo = new \DateTimeImmutable((string) $absence['date_to'], $timezone);
+        $tailFrom = $this->sicknessWindowEnd($absence, $windowFrom)->modify('+1 day');
+        if ($tailFrom < $windowFrom) {
+            $tailFrom = $windowFrom;
+        }
+        if ($tailFrom > $absenceTo) {
+            return [];
+        }
+
+        return $this->segmentsBetween(
+            $absence,
+            $tailFrom,
+            $absenceTo,
+            AbsenceHolidayTreatment::Ignore,
+        );
+    }
+
+    /** @param array<string,mixed> $absence */
+    private static function isSickness(array $absence): bool
+    {
+        return in_array($absence['absence_type'] ?? null, ['dpn', 'quarantine'], true);
+    }
+
+    /**
+     * Poslední den okna náhrady mzdy podle § 192 ZP.
+     *
+     * Délka okna se historicky měnila (21 → 14 dnů), proto je v rulesetu,
+     * ne v literálu.
+     *
+     * @param array<string,mixed> $absence
+     */
+    private function sicknessWindowEnd(
+        array $absence,
+        \DateTimeImmutable $windowFrom,
+    ): \DateTimeImmutable {
+        return AbsenceRuleset::forDate($this->rulesets, (string) $absence['date_from'])
+            ->sicknessWindowEnd($windowFrom);
+    }
+
+    /**
+     * @param array<string,mixed> $absence
+     * @return list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int}>
+     */
+    private function segmentsBetween(
+        array $absence,
+        \DateTimeImmutable $windowFrom,
+        \DateTimeImmutable $windowTo,
+        AbsenceHolidayTreatment $holidayTreatment,
+    ): array {
         $utc = new \DateTimeZone('UTC');
         $queryFrom = $windowFrom->setTime(0, 0)->setTimezone($utc)->format('Y-m-d H:i:s');
         $queryTo = $windowTo->modify('+1 day')->setTime(0, 0)->setTimezone($utc)->format('Y-m-d H:i:s');

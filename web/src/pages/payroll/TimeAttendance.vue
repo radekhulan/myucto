@@ -528,19 +528,44 @@ function openApproval(item: PayrollTimeOverviewItem) {
   approvalWeeklyWork.value = suggestions?.weekly_work_hours ?? ''
   approvalWorked.value = suggestions?.worked_hours ?? ''
   /*
-   * Měsíc bez absencí se otevře rovnou připravený k potvrzení: obě otázky
-   * mají odpověď „ne" a všechna čtyři čísla jsou z návrhu serveru, takže
-   * schválení je jeden klik.
+   * Předvyplňuje se jen to, co SERVER umí doložit z evidence.
    *
-   * Odpověď se předvyplňuje jen tam, kde ji SERVER umí doložit z evidence
-   * (`requires_unworked_hours_followup`). Měsíc s absencí zůstává nezodpovězený
-   * — tam je odpověď lidské rozhodnutí a předvyplnit ji by znamenalo vyplnit
-   * hlášení pro ČSSZ za účetní.
+   * Měsíc bez absencí: obě otázky „ne", čtyři čísla z návrhu — jeden klik.
+   *
+   * Měsíc s dovolenou, nemocí, ošetřovným nebo překážkou v práci: server
+   * hodiny dopočítá z týchž publikovaných směn, ze kterých vznikla náhrada
+   * mzdy, a pošle je v návrhu. Dřív tu účetní osm čísel opisovala ručně a
+   * když je nechala prázdná, shodila tím měsíční hlášení celé firmy.
+   * Potvrzení se NEPŘESKAKUJE — hodnoty jsou předvyplněné, odeslat je musí
+   * pořád člověk.
+   *
+   * Zůstane-li návrh nezodpovězený (`unworked_hours_occurred === null`),
+   * měsíc obsahuje absenci, kterou modul neumí doložit; pak se nevyplňuje
+   * nic a rozhodnutí je na účetní jako dosud. Bezabsenční měsíc má odpověď
+   * „ne" i tehdy, když návrh interakce vůbec nepřišel — plyne rovnou
+   * z `requires_unworked_hours_followup`.
    */
   const bezAbsenci = preview !== null && !preview.requires_unworked_hours_followup
-  approvalUnworkedOccurred.value = bezAbsenci ? false : null
-  approvalObstaclesOccurred.value = bezAbsenci ? false : null
   clearConditionalValues()
+  approvalUnworkedOccurred.value
+    = suggestions?.unworked_hours_occurred ?? (bezAbsenci ? false : null)
+  approvalObstaclesOccurred.value = approvalUnworkedOccurred.value === null
+    ? null
+    : (suggestions?.work_obstacles_occurred ?? (bezAbsenci ? false : null))
+  if (approvalUnworkedOccurred.value === true) {
+    approvalUnworkedTotal.value = suggestions?.unworked_total_hours ?? ''
+    approvalUnworkedPaid.value = suggestions?.unworked_paid_hours ?? ''
+    approvalDpnWithoutCompensation.value
+      = suggestions?.dpn_without_employer_compensation_hours ?? ''
+    approvalDpnWithCompensation.value
+      = suggestions?.dpn_with_employer_compensation_hours ?? ''
+    approvalVacation.value = suggestions?.vacation_hours ?? ''
+    approvalCare.value = suggestions?.care_hours ?? ''
+  }
+  if (approvalObstaclesOccurred.value === true) {
+    approvalEmployeeObstacle.value = suggestions?.employee_obstacle_paid_hours ?? ''
+    approvalEmployerObstacle.value = suggestions?.employer_obstacle_hours ?? ''
+  }
   approvalNote.value = ''
 }
 
