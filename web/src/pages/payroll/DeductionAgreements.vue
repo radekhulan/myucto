@@ -158,7 +158,13 @@ function commandsFor(status: DeductionAgreementStatus): DeductionAgreementComman
   if (status === 'draft') return ['activate', 'end', 'cancel']
   if (status === 'active') return ['pause', 'end']
   if (status === 'paused') return ['resume', 'end']
-  return []
+  /*
+   * Ukončeno i zrušeno vede zpátky. „Ukončit" šlo zmáčknout jedním klikem
+   * odkudkoli a dohoda tím umřela: měnit ji nešlo a žádný krok z toho stavu
+   * neodcházel, takže se musela zakládat znovu a rozpadla se historie srážek.
+   * Návrat míří do POZASTAVENO, ne do AKTIVNÍ — srážky se samy nerozjedou.
+   */
+  return ['reopen']
 }
 
 function commandVariant(command: DeductionAgreementCommand) {
@@ -172,6 +178,7 @@ function commandIcon(command: DeductionAgreementCommand): keyof typeof ICONS {
   if (command === 'cancel') return 'x'
   if (command === 'end') return 'archive'
   if (command === 'pause') return 'pause'
+  if (command === 'reopen') return 'uturn'
   return 'check'
 }
 

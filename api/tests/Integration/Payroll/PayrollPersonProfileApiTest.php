@@ -562,9 +562,154 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertSame('ready', $this->json($response)['profile']['profile_status']);
     }
 
+    /**
+     * Díra v rozdělení výplaty je VĚTA, ne odmítnutí uložení.
+     *
+     * Kontrola bývala podmínkou uložení, takže rozpracovaná výměna účtu
+     * (druhý účet přidán, podíly zatím nesrovnané) držela jako rukojmí i
+     * opravu jména nebo adresy. Uložit proto jde; odmítne se až prohlášení
+     * karty za hotovou — a text věty je v obou případech týž.
+     */
+    /**
+     * Cesta zpět z omylem přidaného řádku.
+     *
+     * Karta uměla řádky jen přidávat a měnit — druhý účet zadaný omylem
+     * (formulář nabízí jako výchozí účinnost dnešek) tak zůstal navždy a svým
+     * podílem navíc rozbil součet rozdělení výplaty. Smaže se jen to, o co se
+     * ještě neopírá schválená mzda.
+     */
+    public function testSavedRowsCanBeDeleted(): void
+    {
+        $created = $this->json($this->put(
+            $this->supplierId,
+            $this->employeeId,
+            $this->completePayload(),
+        ))['profile'];
+        self::assertCount(1, $created['accounts']);
+
+        $withSecondAccount = $this->completePayload();
+        $withSecondAccount['row_version'] = $created['row_version'];
+        $withSecondAccount['identity_history'] = [];
+        $withSecondAccount['addresses'] = [];
+        $withSecondAccount['contacts'] = [];
+        $withSecondAccount['identifiers'] = [];
+        $withSecondAccount['accounts'] = [[
+            'label' => 'Omylem přidaný účet',
+            'bank_account' => 'CZ6508000000192000145399',
+            'allocation_basis_points' => 10000,
+            'effective_from' => '2026-05-01',
+            'is_active' => true,
+        ]];
+        $twoAccounts = $this->put($this->supplierId, $this->employeeId, $withSecondAccount);
+        // Nesrovnaný součet uložení NEBLOKUJE — jinak by omyl u účtu držel
+        // jako rukojmí i opravu jména.
+        self::assertSame(200, $twoAccounts->getStatusCode(), (string) $twoAccounts->getBody());
+        $profile = $this->json($twoAccounts)['profile'];
+        self::assertCount(2, $profile['accounts']);
+        self::assertNotSame([], $profile['payout_warnings']);
+
+        $mistake = array_values(array_filter(
+            $profile['accounts'],
+            static fn (array $row): bool => $row['label'] === 'Omylem přidaný účet',
+        ))[0];
+
+        $removal = $this->completePayload();
+        $removal['row_version'] = $profile['row_version'];
+        $removal['identity_history'] = [];
+        $removal['addresses'] = [];
+        $removal['contacts'] = [];
+        $removal['identifiers'] = [];
+        $removal['accounts'] = [['id' => $mistake['id'], 'delete' => true]];
+        $cleaned = $this->put($this->supplierId, $this->employeeId, $removal);
+
+        self::assertSame(200, $cleaned->getStatusCode(), (string) $cleaned->getBody());
+        $after = $this->json($cleaned)['profile'];
+        self::assertCount(1, $after['accounts']);
+        self::assertSame([], $after['payout_warnings']);
+    }
+
+    /** Smazat nový, neuložený řádek nedává smysl a řekne se to větou. */
+    public function testDeletionWithoutIdIsRefusedWithAnExplanation(): void
+    {
+        $payload = $this->completePayload();
+        $payload['accounts'] = [['delete' => true]];
+        $response = $this->put($this->supplierId, $this->employeeId, $payload);
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString(
+            'stačí odebrat z formuláře',
+            (string) $this->json($response)['error']['message'],
+        );
+    }
+
+    /**
+     * Kontrola je samostatná akce PŘED uložením, ne jeho podmínka: `dry_run`
+     * projde tytéž kontroly a nic neuloží.
+     */
+    public function testDryRunReportsProblemsWithoutWriting(): void
+    {
+        $payload = $this->completePayload();
+        $payload['accounts'][0]['allocation_basis_points'] = 5000;
+        $response = $this->put($this->supplierId, $this->employeeId, $payload);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertNotSame([], $this->json($response)['profile']['payout_warnings']);
+        self::assertSame(1, $this->profileRowCount($this->employeeId));
+
+        $rehearsal = $this->completePayload();
+        $rehearsal['dry_run'] = true;
+        $rehearsal['row_version'] = $this->json($response)['profile']['row_version'];
+        $rehearsal['identity_history'] = [];
+        $rehearsal['addresses'] = [];
+        $rehearsal['contacts'] = [];
+        $rehearsal['identifiers'] = [];
+        $rehearsal['accounts'] = [];
+        $rehearsal['secure_delivery_channel'] = 'paper';
+        $checked = $this->put($this->supplierId, $this->employeeId, $rehearsal);
+
+        self::assertSame(200, $checked->getStatusCode(), (string) $checked->getBody());
+        self::assertTrue($this->json($checked)['dry_run']);
+        // Nic se neuložilo — kanál zůstal takový, jaký byl.
+        self::assertSame(
+            'portal',
+            $this->json($this->get($this->supplierId, $this->employeeId))['profile']['secure_delivery_channel'],
+        );
+    }
+
+    public function testPayoutAllocationGapIsWarnedButDoesNotBlockSaving(): void
+    {
+        $payload = $this->completePayload();
+        $payload['accounts'] = [
+            [
+                'label' => 'První interval',
+                'bank_account' => '1000000005/0100',
+                'allocation_basis_points' => 10000,
+                'effective_from' => '2026-01-01',
+                'effective_to' => '2026-06-30',
+                'is_active' => true,
+            ],
+            [
+                'label' => 'Druhý interval',
+                'bank_account' => 'CZ6508000000192000145399',
+                'allocation_basis_points' => 10000,
+                'effective_from' => '2026-08-01',
+                'is_active' => true,
+            ],
+        ];
+
+        $response = $this->put($this->supplierId, $this->employeeId, $payload);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $warnings = $this->json($response)['profile']['payout_warnings'];
+        self::assertCount(1, $warnings);
+        self::assertStringContainsString('2026-07-01', (string) $warnings[0]);
+        self::assertSame(1, $this->profileRowCount($this->employeeId));
+    }
+
     public function testPayoutAllocationIsValidatedAtEveryFutureBoundary(): void
     {
         $payload = $this->completePayload();
+        $payload['profile_status'] = 'ready';
         $payload['accounts'] = [
             [
                 'label' => 'První interval',
@@ -636,6 +781,7 @@ final class PayrollPersonProfileApiTest extends TestCase
             $this->db,
             $this->sensitiveData,
             new FailingPayrollActivityLogger($this->db),
+            new \MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze($this->db),
         );
         $activityBefore = (int) $this->db->pdo()->query(
             'SELECT COUNT(*) FROM activity_log'

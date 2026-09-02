@@ -660,6 +660,11 @@ export interface PayrollForeignPermitView {
 }
 
 export interface PayrollForeignPermitPayload {
+  /**
+   * ID opravovaného oprávnění. Bez něj se zapisuje nové; s ním se přepíše
+   * existující. Oprávnění bývalo neměnné, takže překlep neměl cestu ven.
+   */
+  id?: number | null
   permit_kind: PayrollForeignPermitKind
   permit_label: string
   issuing_country_code: string
@@ -667,6 +672,12 @@ export interface PayrollForeignPermitPayload {
   valid_until: string
   document_id: number
   supersedes_permit_id?: number | null
+}
+
+/** Smazání omylem zapsaného oprávnění — týž endpoint, jen jiné tělo. */
+export interface PayrollForeignPermitDeletePayload {
+  id: number
+  delete: true
 }
 
 export interface PayrollPersonProfile {
@@ -684,8 +695,30 @@ export interface PayrollPersonProfile {
   contacts: PayrollPersonContact[]
   identifiers: PayrollPersonIdentifier[]
   accounts: PayrollPersonAccount[]
+  /**
+   * Nesrovnané rozdělení výplaty jako VĚTA, ne jako odmítnutí uložení.
+   * Tvrdě se odmítá až u karty ve stavu „hotová".
+   */
+  payout_warnings?: string[]
+  /** Do kdy historii kryje schválená mzda — dál zpět už řádek nejde smazat. */
+  frozen_through?: string | null
   created_at: string | null
   updated_at: string | null
+}
+
+/**
+ * Smazání uloženého řádku karty osoby.
+ *
+ * Karta uměla řádky jen přidávat a měnit, takže omylem přidaná verze jména
+ * (formulář nabízí jako výchozí dnešek) nebo účet navíc zůstaly navždy — a
+ * účet navíc rozbil součet rozdělení výplaty, čímž zablokoval uložení celé
+ * karty. Server smaže jen to, o co se ještě neopírá schválená mzda.
+ */
+export interface PayrollPersonRowDeletion {
+  id: number
+  delete: true
+  /** Server řadu identifikátorů rozlišuje typem, i když ji jen maže. */
+  identifier_type?: PayrollPersonIdentifierType
 }
 
 export interface PayrollPersonIdentityPayload {
@@ -750,11 +783,13 @@ export interface PayrollPersonProfilePayload {
   cash_allocation_basis_points: number
   payout_effective_on: string
   secure_delivery_channel: PayrollSecureDeliveryChannel
-  identity_history: PayrollPersonIdentityPayload[]
-  addresses: PayrollPersonAddressPayload[]
-  contacts: PayrollPersonContactPayload[]
-  identifiers: PayrollPersonIdentifierPayload[]
-  accounts: PayrollPersonAccountPayload[]
+  identity_history: (PayrollPersonIdentityPayload | PayrollPersonRowDeletion)[]
+  addresses: (PayrollPersonAddressPayload | PayrollPersonRowDeletion)[]
+  contacts: (PayrollPersonContactPayload | PayrollPersonRowDeletion)[]
+  identifiers: (PayrollPersonIdentifierPayload | PayrollPersonRowDeletion)[]
+  accounts: (PayrollPersonAccountPayload | PayrollPersonRowDeletion)[]
+  /** Zkouška nanečisto: projde všechny kontroly a nic neuloží. */
+  dry_run?: boolean
 }
 
 export interface PayrollPersonQuickEditEmploymentPayload {
@@ -2311,6 +2346,8 @@ export interface PayrollJmhzIdentityPayload {
   valid_from: string
   source_reference?: string | null
   evidence_confirmed: true
+  /** Přepsat chybně opsané číslo (jen ruční zápis, ne číslo z protokolu). */
+  replace_existing?: boolean
 }
 
 export type PayrollSubmissionObligationStatus =
@@ -5017,6 +5054,8 @@ export interface PayrollRun {
   revision_status: string | null
   payment_materialization_supported: boolean
   can_delete: boolean
+  /** Proč běh smazat nejde. `null` = jde, nebo rozhodnutí není k dispozici. */
+  delete_blocker: string | null
   result_snapshot: PayrollRunResultSnapshot | null
   available_commands: PayrollRunCommand[]
   validations: PayrollRunValidation[]
@@ -5709,10 +5748,18 @@ export const payrollApi = {
       `/payroll/people/${employeeId}/foreign-permits`,
       { params: asOf === undefined ? {} : { as_of: asOf } },
     ).then(response => response.data.permits),
-  createForeignPermit: (employeeId: number, payload: PayrollForeignPermitPayload) =>
+  createForeignPermit: (
+    employeeId: number,
+    payload: PayrollForeignPermitPayload | PayrollForeignPermitDeletePayload,
+  ) =>
     api.post<{ permits: PayrollForeignPermitView }>(
       `/payroll/people/${employeeId}/foreign-permits`,
       payload,
+    ).then(response => response.data.permits),
+  deleteForeignPermit: (employeeId: number, permitId: number) =>
+    api.post<{ permits: PayrollForeignPermitView }>(
+      `/payroll/people/${employeeId}/foreign-permits`,
+      { id: permitId, delete: true },
     ).then(response => response.data.permits),
     /** Počáteční stavy zákonných kumulací za rok — úhrny z předchozího zpracování. */
   statutoryOpenings: (employeeId: number, year: number) =>
@@ -5746,6 +5793,16 @@ export const payrollApi = {
   savePersonProfile: (id: number, payload: PayrollPersonProfilePayload) =>
     api.put<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`, payload)
       .then(response => response.data.profile),
+  /**
+   * Kontrola karty PŘED uložením. Projde tutéž zápisovou cestu včetně kontrol,
+   * které vidí až uložený stav, a pak transakci vrátí zpět — nic se neuloží
+   * a rozdělaná práce zůstává ve formuláři.
+   */
+  checkPersonProfile: (id: number, payload: PayrollPersonProfilePayload) =>
+    api.put<{ profile: PayrollPersonProfile }>(
+      `/payroll/people/${id}/profile`,
+      { ...payload, dry_run: true },
+    ).then(response => response.data.profile),
   /**
    * Odkrytí maskovaných údajů. Endpoint existoval od začátku, ale nikdo ho nevolal —
    * karta zaměstnance tak ukazovala „••••4523" bez možnosti se na vlastní data podívat.
@@ -5788,6 +5845,27 @@ export const payrollApi = {
     api.put<PayrollDependantsResponse>(
       `/payroll/people/${id}/dependants/${dependantId}/claims/${claimId}`,
       payload,
+    ).then(response => response.data),
+  /**
+   * Smazání omylem založené vyživované osoby. Evidence uměla osoby jen
+   * zakládat a měnit, takže osoba zapsaná u špatného zaměstnance zůstala
+   * navždy a blokovala rodné číslo i u toho správného.
+   */
+  deletePersonDependant: (id: number, dependantId: number, rowVersion: number) =>
+    api.put<PayrollDependantsResponse>(
+      `/payroll/people/${id}/dependants/${dependantId}`,
+      { row_version: rowVersion, delete: true },
+    ).then(response => response.data),
+  /** Smazání nároku, který nikdy neměl vzniknout (schválenou mzdu server hlídá). */
+  deletePersonDependantClaim: (
+    id: number,
+    dependantId: number,
+    claimId: number,
+    rowVersion: number,
+  ) =>
+    api.put<PayrollDependantsResponse>(
+      `/payroll/people/${id}/dependants/${dependantId}/claims/${claimId}`,
+      { row_version: rowVersion, delete: true },
     ).then(response => response.data),
   savePersonQuickEdit: (id: number, payload: PayrollPersonQuickEditPayload) =>
     api.put<PayrollPersonQuickEditResponse>(`/payroll/people/${id}/quick-edit`, payload)

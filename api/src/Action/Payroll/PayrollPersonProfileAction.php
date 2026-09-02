@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollPersonNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollPersonProfileConflictException;
@@ -21,11 +22,15 @@ final class PayrollPersonProfileAction
 {
     use PayrollActionSupport;
 
+    /** Bod návratu pro `dry_run` uvnitř cizí transakce. */
+    private const REHEARSAL_SAVEPOINT = 'payroll_person_profile_rehearsal';
+
     public function __construct(
         private readonly PayrollPersonProfileRepository $profiles,
         private readonly PayrollPersonProfileValidator $validator,
         private readonly PayrollModuleAccess $access,
         private readonly IpMatcher $ipMatcher,
+        private readonly Connection $db,
     ) {}
 
     /** @param array{id:string} $args */
@@ -94,8 +99,36 @@ final class PayrollPersonProfileAction
             );
         }
 
+        /*
+         * Kontrola je SAMOSTATNÁ AKCE PŘED uložením, ne jeho podmínka.
+         *
+         * `dry_run: true` projde tutéž zápisovou cestu — tedy i kontroly, které
+         * vidí až uložený stav (překryv intervalů, součet rozdělení výplaty,
+         * podmínky stavu „hotová") — a pak celou transakci vrátí zpět. Uživatel
+         * se tak dozví, co je špatně, aniž by cokoli riskoval, a rozdělaná
+         * práce mu zůstává ve formuláři.
+         */
+        $dryRun = $body['dry_run'] ?? false;
+        if (!is_bool($dryRun)) {
+            return Json::error($response, 'validation_failed', 'dry_run musí být boolean.', 422);
+        }
+
         $supplierId = $this->currentSupplierId($request);
         $employeeId = (int) $args['id'];
+        $pdo = $this->db->pdo();
+        // Uvnitř cizí transakce (testy, dávkové zpracování) se zkouška zabalí
+        // do SAVEPOINTu — jinak by `dry_run` tiše zapsal, což je horší než
+        // kdyby neexistoval.
+        $rehearsal = $dryRun;
+        $rehearsalOwnsTransaction = false;
+        if ($rehearsal) {
+            if ($pdo->inTransaction()) {
+                $pdo->exec('SAVEPOINT ' . self::REHEARSAL_SAVEPOINT);
+            } else {
+                $pdo->beginTransaction();
+                $rehearsalOwnsTransaction = true;
+            }
+        }
         try {
             $normalized = $this->validator->validate($body);
             $profile = $this->profiles->save(
@@ -110,16 +143,41 @@ final class PayrollPersonProfileAction
                 $request->getHeaderLine('User-Agent'),
             );
         } catch (PayrollPersonNotFoundException) {
+            $this->rollBackRehearsal($rehearsal, $rehearsalOwnsTransaction);
             return Json::error($response, 'not_found', 'Zaměstnanec nenalezen.', 404);
         } catch (PayrollPersonProfileConflictException $e) {
+            $this->rollBackRehearsal($rehearsal, $rehearsalOwnsTransaction);
             return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
                 'current_row_version' => $e->currentVersion,
             ]);
         } catch (\InvalidArgumentException $e) {
+            $this->rollBackRehearsal($rehearsal, $rehearsalOwnsTransaction);
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (\Throwable $e) {
+            $this->rollBackRehearsal($rehearsal, $rehearsalOwnsTransaction);
+            throw $e;
         }
+        $this->rollBackRehearsal($rehearsal, $rehearsalOwnsTransaction);
 
-        return Json::ok($response, ['profile' => $profile]);
+        return Json::ok($response, ['profile' => $profile, 'dry_run' => $dryRun]);
+    }
+
+    private function rollBackRehearsal(bool $rehearsal, bool $ownsTransaction): void
+    {
+        if (!$rehearsal) {
+            return;
+        }
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            return;
+        }
+        if ($ownsTransaction) {
+            $pdo->rollBack();
+
+            return;
+        }
+        $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::REHEARSAL_SAVEPOINT);
+        $pdo->exec('RELEASE SAVEPOINT ' . self::REHEARSAL_SAVEPOINT);
     }
 
     private function requireSession(

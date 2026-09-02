@@ -1046,7 +1046,7 @@ onMounted(load)
             </p>
           </div>
           <div
-            v-if="visibleCommands(run).length || (canWrite && run.can_delete)"
+            v-if="visibleCommands(run).length || (canWrite && (run.can_delete || run.delete_blocker))"
             class="flex flex-wrap justify-end gap-2"
           >
             <button
@@ -1075,6 +1075,18 @@ onMounted(load)
               </svg>
               {{ t('payroll.runs.delete') }}
             </button>
+            <!--
+              Když smazat nejde, tlačítko dřív jen zmizelo a účetní nevěděla
+              proč. Důvod rozhodnutí zná, tak ho ukaž — i kdyby to mělo být
+              jen „běh má účetní stopu".
+            -->
+            <p
+              v-else-if="canWrite && run.delete_blocker"
+              :data-testid="`payroll-run-${run.id}-delete-blocker`"
+              class="self-center text-xs text-neutral-500"
+            >
+              {{ run.delete_blocker }}
+            </p>
           </div>
         </div>
 

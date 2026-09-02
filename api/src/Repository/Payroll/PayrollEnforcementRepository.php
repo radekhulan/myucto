@@ -514,6 +514,23 @@ final class PayrollEnforcementRepository implements
             if ($update->rowCount() !== 1) {
                 $this->throwClaimConflictOrNotFound($supplierId, $caseId, $claimId);
             }
+            $storedDelivery = self::nullableStringValue(
+                $claim['first_payer_delivered_on'] ?? null,
+                'first_payer_delivered_on',
+            );
+            if ($legalBasis === DeductionLegalBasis::Statutory
+                && $firstPayerDeliveredOn !== null
+                && $firstPayerDeliveredOn !== $storedDelivery
+            ) {
+                $this->propagateDeliveryToSameOrder(
+                    $supplierId,
+                    $caseId,
+                    $claimId,
+                    $orderKey,
+                    $firstPayerDeliveredOn,
+                    $case,
+                );
+            }
             $caseVersion = $this->invalidateCaseAfterClaimMutation($supplierId, $caseId);
             $result = $this->claimForCase($supplierId, $caseId, $claimId)
                 ?? throw new \RuntimeException('Pohledávka nebyla po opravě nalezena.');
@@ -606,7 +623,16 @@ final class PayrollEnforcementRepository implements
         }
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * @return array<string,mixed>
+     *
+     * `$effectiveFrom` je oprava data účinnosti případu, ne nový právní krok.
+     * Formulář nabízel dnešek, takže případ doručený v červnu se běžně uložil
+     * s dnešní účinností — a `activeClaimRows` ho pak do žádného dřívějšího
+     * měsíce nepustila (`c.effective_from <= ?`). Dokud je případ ve stavu
+     * „přijato", nevstoupil do žádného výpočtu, takže tu opravu nemá co brzdit;
+     * po aktivaci ji tahle metoda odmítne.
+     */
     public function updateCaseEvidence(
         int $supplierId,
         int $caseId,
@@ -616,6 +642,7 @@ final class PayrollEnforcementRepository implements
         ?int $userId,
         ?int $recipientInstitutionId = null,
         bool $updateRecipientInstitution = false,
+        ?string $effectiveFrom = null,
     ): array {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -630,6 +657,32 @@ final class PayrollEnforcementRepository implements
             );
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollEnforcementConflictException($currentVersion);
+            }
+            $storedEffectiveFrom = PayrollTimeValue::string(
+                $case['effective_from'] ?? null,
+                'effective_from',
+            );
+            if ($effectiveFrom !== null && $effectiveFrom !== $storedEffectiveFrom) {
+                self::assertDate($effectiveFrom, 'effective_from');
+                if (PayrollTimeValue::string($case['status'] ?? null, 'status') !== 'received') {
+                    throw new \DomainException(
+                        'Datum účinnosti jde opravit jen u případu ve stavu '
+                        . '„Přijato — čeká na ověření“. Aktivovaný případ posuňte '
+                        . 'standardním stavovým krokem (odklad nebo zastavení).',
+                    );
+                }
+                $this->yearClose->assertOpenForDateRange(
+                    $supplierId,
+                    $effectiveFrom,
+                    $effectiveFrom,
+                );
+                $moveEffectiveFrom = $pdo->prepare(
+                    'UPDATE payroll_enforcement_cases
+                        SET effective_from = ?
+                      WHERE supplier_id = ? AND id = ?'
+                );
+                $moveEffectiveFrom->execute([$effectiveFrom, $supplierId, $caseId]);
+                $case['effective_from'] = $effectiveFrom;
             }
             if (
                 !$recipientVerified
@@ -1290,6 +1343,307 @@ final class PayrollEnforcementRepository implements
                 'id', 'employee_id', 'row_version',
             ], ['eligibility_verified', 'excluded_for_maintenance'])
             : throw new \RuntimeException('Vyživovaná osoba nebyla po vytvoření nalezena.');
+    }
+
+    /**
+     * Oprava vyživované osoby, dokud podle ní neproběhl výpočet srážky.
+     *
+     * Formulář nabízel jako platnost dnešek, takže dítě zapsané v září
+     * nezvyšovalo nezabavitelnou částku za červen — a srazilo se víc, než
+     * zákon dovolí. Bez téhle cesty to nešlo napravit vůbec: záznam se nedal
+     * ani změnit, ani smazat.
+     *
+     * Zmrazený měsíc je hranice. Jakmile podle záznamu proběhl měsíční výpočet,
+     * je to doklad o tom, z čeho se srazilo, a mění se jen novou revizí běhu —
+     * tichý přepis by zpětně změnil částku, kterou zaměstnanec dostal na účet
+     * a oprávněný do rukou.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>|null `null` = záznam neexistuje
+     */
+    public function updateDependant(
+        int $supplierId,
+        int $employeeId,
+        int $dependantId,
+        array $data,
+        int $expectedVersion,
+    ): ?array {
+        $kind = self::requiredString($data, 'dependant_kind');
+        if (!in_array($kind, ['dependant', 'spouse_partner'], true)) {
+            throw new \InvalidArgumentException('Neplatný druh vyživované osoby.');
+        }
+        $validFrom = self::requiredString($data, 'valid_from');
+        self::assertDate($validFrom, 'valid_from');
+        $validTo = self::nullableDate($data, 'valid_to');
+        if ($validTo !== null && $validTo < $validFrom) {
+            throw new \InvalidArgumentException('Konec platnosti nesmí předcházet začátku.');
+        }
+        $pension = self::quarterPensionFromInput($kind, $data);
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->assertEmployee($supplierId, $employeeId);
+            $current = $this->lockOwnedDependant($supplierId, $employeeId, $dependantId);
+            if ($current === null) {
+                if ($ownsTransaction) {
+                    $pdo->commit();
+                }
+                return null;
+            }
+            $currentVersion = PayrollTimeValue::int(
+                $current['row_version'] ?? null,
+                'row_version',
+            );
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollEnforcementConflictException($currentVersion);
+            }
+            $storedFrom = PayrollTimeValue::string($current['valid_from'] ?? null, 'valid_from');
+            $storedTo = self::nullableStringValue($current['valid_to'] ?? null, 'valid_to');
+            // Obě okna, staré i nové. Vytáhnout osobu ZE zpočítaného měsíce je
+            // stejný zpětný přepis jako ji do něj přidat.
+            $this->assertDependantMonthsOpen($supplierId, $employeeId, $storedFrom, $storedTo);
+            $this->assertDependantMonthsOpen($supplierId, $employeeId, $validFrom, $validTo);
+            $this->yearClose->assertOpenForDateRange($supplierId, $storedFrom, $storedTo ?? $storedFrom);
+            $this->yearClose->assertOpenForDateRange($supplierId, $validFrom, $validTo ?? $validFrom);
+
+            $update = $pdo->prepare(
+                'UPDATE payroll_enforcement_dependants
+                    SET dependant_kind = ?, valid_from = ?, valid_to = ?,
+                        eligibility_verified = ?, excluded_for_maintenance = ?,
+                        quarter_pension_evidence = ?, quarter_pension_holder = ?,
+                        quarter_pension_kind = ?, quarter_pension_documented_on = ?,
+                        row_version = row_version + 1
+                  WHERE supplier_id = ? AND employee_id = ? AND id = ? AND row_version = ?'
+            );
+            $update->execute([
+                $kind,
+                $validFrom,
+                $validTo,
+                self::boolInt($data, 'eligibility_verified'),
+                self::boolInt($data, 'excluded_for_maintenance'),
+                $pension['evidence'],
+                $pension['holder'],
+                $pension['kind'],
+                $pension['documented_on'],
+                $supplierId,
+                $employeeId,
+                $dependantId,
+                $expectedVersion,
+            ]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEnforcementConflictException($currentVersion);
+            }
+            // Měsíční podklady musí projít znovu očima — a to u obou oken,
+            // protože se mohlo změnit i to, které měsíce osoba vůbec zasahuje.
+            $this->invalidateDependantEvidence(
+                $supplierId,
+                $employeeId,
+                (string) $current['dependant_kind'],
+                $storedFrom,
+                $storedTo,
+            );
+            $this->invalidateDependantEvidence(
+                $supplierId,
+                $employeeId,
+                $kind,
+                $validFrom,
+                $validTo,
+            );
+            $result = $this->dependantById($supplierId, $dependantId)
+                ?? throw new \RuntimeException('Vyživovaná osoba nebyla po opravě nalezena.');
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            self::rollbackOwned($pdo, $ownsTransaction);
+            throw $e;
+        }
+    }
+
+    /**
+     * Smaže omylem zapsanou vyživovanou osobu, podle které ještě nic nepočítalo.
+     *
+     * @return array<string,mixed>|null `null` = záznam neexistuje
+     */
+    public function deleteDependant(
+        int $supplierId,
+        int $employeeId,
+        int $dependantId,
+        int $expectedVersion,
+    ): ?array {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->assertEmployee($supplierId, $employeeId);
+            $current = $this->lockOwnedDependant($supplierId, $employeeId, $dependantId);
+            if ($current === null) {
+                if ($ownsTransaction) {
+                    $pdo->commit();
+                }
+                return null;
+            }
+            $currentVersion = PayrollTimeValue::int(
+                $current['row_version'] ?? null,
+                'row_version',
+            );
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollEnforcementConflictException($currentVersion);
+            }
+            $storedFrom = PayrollTimeValue::string($current['valid_from'] ?? null, 'valid_from');
+            $storedTo = self::nullableStringValue($current['valid_to'] ?? null, 'valid_to');
+            $this->assertDependantMonthsOpen($supplierId, $employeeId, $storedFrom, $storedTo);
+            $this->yearClose->assertOpenForDateRange(
+                $supplierId,
+                $storedFrom,
+                $storedTo ?? $storedFrom,
+            );
+
+            $delete = $pdo->prepare(
+                'DELETE FROM payroll_enforcement_dependants
+                  WHERE supplier_id = ? AND employee_id = ? AND id = ? AND row_version = ?'
+            );
+            $delete->execute([$supplierId, $employeeId, $dependantId, $expectedVersion]);
+            if ($delete->rowCount() !== 1) {
+                throw new PayrollEnforcementConflictException($currentVersion);
+            }
+            $this->invalidateDependantEvidence(
+                $supplierId,
+                $employeeId,
+                (string) $current['dependant_kind'],
+                $storedFrom,
+                $storedTo,
+            );
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+
+            return self::castBooleansAndIntegers(
+                $current,
+                ['id', 'employee_id', 'row_version'],
+                ['eligibility_verified', 'excluded_for_maintenance'],
+            );
+        } catch (\Throwable $e) {
+            self::rollbackOwned($pdo, $ownsTransaction);
+            throw $e;
+        }
+    }
+
+    /** @return array<string,mixed>|null */
+    private function lockOwnedDependant(
+        int $supplierId,
+        int $employeeId,
+        int $dependantId,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, employee_id, dependant_kind, valid_from, valid_to,
+                    eligibility_verified, excluded_for_maintenance,
+                    quarter_pension_evidence, quarter_pension_holder,
+                    quarter_pension_kind, quarter_pension_documented_on,
+                    row_version
+               FROM payroll_enforcement_dependants
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $employeeId, $dependantId]);
+        $value = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $value === false
+            ? null
+            : PayrollTimeValue::row($value, 'enforcement_dependant');
+    }
+
+    /** @return array<string,mixed>|null */
+    private function dependantById(int $supplierId, int $dependantId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, employee_id, dependant_kind, valid_from, valid_to,
+                    eligibility_verified, excluded_for_maintenance,
+                    quarter_pension_evidence, quarter_pension_holder,
+                    quarter_pension_kind, quarter_pension_documented_on,
+                    row_version
+               FROM payroll_enforcement_dependants
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $dependantId]);
+        $value = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $value === false ? null : self::castBooleansAndIntegers(
+            PayrollTimeValue::row($value, 'enforcement_dependant'),
+            ['id', 'employee_id', 'row_version'],
+            ['eligibility_verified', 'excluded_for_maintenance'],
+        );
+    }
+
+    /**
+     * Měsíce, do kterých platnost osoby zasahuje, nesmějí mít spočítanou srážku.
+     *
+     * Snapshot výpočtu nese jen POČET uznaných vyživovaných osob, ne jejich
+     * klíče — jednotlivý záznam se tedy k výsledku napojit nedá a hranicí je
+     * překryv období. Hláška pojmenuje první zmrazený měsíc, protože právě
+     * podle něj se pozná, jestli stačí revize běhu, nebo jde o měsíc už
+     * odeslaný a zaúčtovaný.
+     */
+    private function assertDependantMonthsOpen(
+        int $supplierId,
+        int $employeeId,
+        string $validFrom,
+        ?string $validTo,
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT MIN(period_start)
+               FROM payroll_enforcement_month_results
+              WHERE supplier_id = ? AND employee_id = ?
+                AND LAST_DAY(period_start) >= ?
+                AND period_start <= COALESCE(?, '9999-12-31')"
+        );
+        $stmt->execute([$supplierId, $employeeId, $validFrom, $validTo]);
+        $frozen = $stmt->fetchColumn();
+        if (!is_string($frozen) || $frozen === '') {
+            return;
+        }
+
+        throw new PayrollEnforcementDependantFrozenException(
+            substr($frozen, 0, 7),
+            'Podle téhle vyživované osoby už proběhl výpočet srážky za '
+            . substr($frozen, 0, 7) . ', takže je to doklad o tom, z čeho se '
+            . 'srazilo, a měnit se nesmí. Chcete-li výsledek opravit, založte '
+            . 'novou revizi mzdového běhu za dotčené měsíce; do ní se nová '
+            . 'platnost promítne. Osobu s jinou dobou platnosti můžete zapsat '
+            . 'jako nový záznam, který se dotkne jen dosud nespočítaných měsíců.',
+        );
+    }
+
+    /**
+     * Měsíční podklady, kterých se změna dotkla, spadnou zpět do posouzení.
+     * Ověření „vyživované osoby doloženy“ se vztahuje k tomu, co v evidenci
+     * bylo v okamžiku zaškrtnutí — po zásahu do ní už neplatí.
+     */
+    private function invalidateDependantEvidence(
+        int $supplierId,
+        int $employeeId,
+        string $kind,
+        string $validFrom,
+        ?string $validTo,
+    ): void {
+        $column = $kind === 'spouse_partner'
+            ? 'spouse_evidence_complete'
+            : 'dependants_evidence_complete';
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE payroll_enforcement_person_month_evidence
+                SET {$column} = 0, row_version = row_version + 1
+              WHERE supplier_id = ? AND employee_id = ?
+                AND LAST_DAY(period_start) >= ?
+                AND period_start <= COALESCE(?, '9999-12-31')"
+        );
+        $stmt->execute([$supplierId, $employeeId, $validFrom, $validTo]);
     }
 
     /**
@@ -2129,6 +2483,66 @@ final class PayrollEnforcementRepository implements
         }
     }
 
+    /**
+     * Oprava data doručení platí pro CELÝ exekuční příkaz, ne pro jednu položku.
+     *
+     * Pohledávky ze stejného příkazu (`enforcement_order_key`) mají podle
+     * § 280 odst. 3 o. s. ř. z definice stejné pořadí. Kdyby se opravila jen ta
+     * jedna, kterou má účetní zrovna otevřenou, rozešly by se sourozenci
+     * v datu, ze kterého se pořadí odvozuje. Sourozenci se proto opraví s ní —
+     * a předtím projdou toutéž kontrolou stopy, takže jakmile se o kteréhokoli
+     * z nich něco opírá, neprojde ani ta původní oprava.
+     *
+     * @param array<string,mixed> $case
+     */
+    private function propagateDeliveryToSameOrder(
+        int $supplierId,
+        int $caseId,
+        int $claimId,
+        string $orderKey,
+        string $deliveredOn,
+        array $case,
+    ): void {
+        $siblings = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_enforcement_claims
+              WHERE supplier_id = ? AND case_id = ? AND enforcement_order_key = ?
+                AND id <> ? AND legal_basis = \'statutory\'
+                AND NOT (first_payer_delivered_on <=> ?)
+              FOR UPDATE'
+        );
+        $siblings->execute([$supplierId, $caseId, $orderKey, $claimId, $deliveredOn]);
+        $rows = $siblings->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            return;
+        }
+        $update = $this->db->pdo()->prepare(
+            'UPDATE payroll_enforcement_claims
+                SET first_payer_delivered_on = ?, priority_date = ?,
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND case_id = ? AND id = ?'
+        );
+        foreach ($rows as $row) {
+            $siblingId = PayrollTimeValue::int($row['id'] ?? null, 'id');
+            $this->assertClaimCanBeMutated($supplierId, $caseId, $siblingId, $row, $case);
+            $this->assertFactDatesOpen(
+                $supplierId,
+                self::nullableStringValue($row['priority_date'] ?? null, 'priority_date'),
+                $deliveredOn,
+            );
+            try {
+                $update->execute([
+                    $deliveredOn,
+                    $deliveredOn,
+                    $supplierId,
+                    $caseId,
+                    $siblingId,
+                ]);
+            } catch (\PDOException $e) {
+                $this->throwClaimMutationDatabaseFailure($e);
+            }
+        }
+    }
+
     /** @param array<string,mixed> $case */
     private function assertClaimTypeMatchesCase(
         DeductionLegalBasis $legalBasis,
@@ -2445,27 +2859,43 @@ final class PayrollEnforcementRepository implements
             $claim['priority_date'] ?? null,
             'priority_date',
         );
+        /*
+         * Překlep v datu doručení jde OPRAVIT, dokud se o pohledávku nic
+         * neopírá. Volající ({@see updateUnusedClaim}) sem pustí jen pohledávku
+         * v případu ve stavu „přijato“ bez alokace, ledgeru, zmrazeného
+         * mzdového výsledku i platebního závazku — tedy nic, čí pořadí by šlo
+         * zpětně přepsat. Dřív byla neměnná od první vteřiny a jediná cesta ven
+         * vedla přes smazání a nové založení pohledávky, což hláška neřekla.
+         * Zmizet ale to datum nesmí: podle § 280 odst. 3 o. s. ř. je jediným
+         * kritériem pořadí zákonné pohledávky.
+         */
         $delivery = $storedDelivery;
         if (array_key_exists('first_payer_delivered_on', $data)) {
             $requestedDelivery = self::nullableDate($data, 'first_payer_delivered_on');
-            if ($storedDelivery !== null && $requestedDelivery !== $storedDelivery) {
+            if ($requestedDelivery === null && $storedDelivery !== null) {
                 throw new \InvalidArgumentException(
-                    'Datum doručení prvnímu plátci nelze po založení pohledávky změnit.',
+                    'Zákonná pohledávka se nesmí zůstat bez data doručení prvnímu '
+                    . 'plátci — odvozuje se z něj pořadí (§ 280 odst. 3 o. s. ř.).',
                 );
             }
-            if ($storedDelivery === null && $requestedDelivery !== null) {
-                $delivery = $requestedDelivery;
-            }
+            $delivery = $requestedDelivery ?? $storedDelivery;
         }
         if ($sameOrder !== null) {
             $referenceDelivery = self::nullableStringValue(
                 $sameOrder['first_payer_delivered_on'] ?? null,
                 'first_payer_delivered_on',
             );
-            if ($referenceDelivery === null
-                || ($storedDelivery !== null && $referenceDelivery !== $storedDelivery)) {
+            if ($referenceDelivery === null) {
                 throw new \InvalidArgumentException(
-                    'Stejný exekuční příkaz nemůže změnit datum doručení prvnímu plátci.',
+                    'Referenční pohledávka nemá datum doručení prvnímu plátci.',
+                );
+            }
+            if (array_key_exists('first_payer_delivered_on', $data)
+                && $delivery !== null
+                && $delivery !== $referenceDelivery
+            ) {
+                throw new \InvalidArgumentException(
+                    'Stejný exekuční příkaz musí převzít datum doručení prvnímu plátci.',
                 );
             }
             $delivery = $referenceDelivery;

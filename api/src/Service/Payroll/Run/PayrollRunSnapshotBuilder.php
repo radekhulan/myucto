@@ -817,9 +817,23 @@ final class PayrollRunSnapshotBuilder
             ))
             ->findEffective($supplierId, $periodStart);
         if ($policy === null) {
-            throw new \DomainException(
-                'Pro mzdové období chybí účinná zaměstnavatelská politika.',
-            );
+            /*
+             * Hláška musí jmenovat období, jinak účetní neví, který měsíc
+             * vlastně vadí — a hlavně musí říct, CO S TÍM. Typická příčina je
+             * mzdová politika založená s účinností „dnes": pak platí až od
+             * dneška a všechny dřívější měsíce zůstanou bez ní, přestože
+             * pravidla tehdy samozřejmě platila taky.
+             */
+            throw new \DomainException(sprintf(
+                'Za období %s není účinná žádná zaměstnavatelská mzdová '
+                    . 'politika%s. Otevřete Mzdy → Nastavení zaměstnavatele → '
+                    . 'Mzdové politiky a založte politiku s účinností od %s '
+                    . 'nebo dřívější (u té nejstarší patří datum, odkdy firma '
+                    . 'vede mzdy, ne dnešek).',
+                self::formatPeriod($periodStart),
+                $this->describeEarliestPolicy($supplierId, $periodStart),
+                $periodStart,
+            ));
         }
         $id = $policy['id'] ?? null;
         $rowVersion = $policy['row_version'] ?? null;
@@ -840,6 +854,41 @@ final class PayrollRunSnapshotBuilder
             'row_version' => $rowVersion,
             'automatic_posting_enabled' => $automaticPosting,
         ];
+    }
+
+    private static function formatPeriod(string $periodStart): string
+    {
+        $period = \DateTimeImmutable::createFromFormat('Y-m-d', $periodStart);
+
+        return $period === false ? $periodStart : $period->format('m/Y');
+    }
+
+    /**
+     * Dovětek, který účetní řekne, PROČ politika nesedí: skoro vždy proto, že
+     * ta nejstarší uložená začíná až po hledaném období — typicky dneškem.
+     */
+    private function describeEarliestPolicy(
+        int $supplierId,
+        string $periodStart,
+    ): string {
+        try {
+            $statement = $this->db->pdo()->prepare(
+                'SELECT MIN(valid_from) FROM payroll_employer_policies
+                  WHERE supplier_id = ?',
+            );
+            $statement->execute([$supplierId]);
+            $earliest = $statement->fetchColumn();
+        } catch (\PDOException) {
+            return '';
+        }
+        if (!is_string($earliest) || $earliest === '') {
+            return ' (zatím není uložená žádná)';
+        }
+        if ($earliest <= $periodStart) {
+            return '';
+        }
+
+        return sprintf(' (nejstarší uložená platí až od %s)', $earliest);
     }
 
     /** @return list<array<string,mixed>> */

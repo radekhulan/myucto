@@ -81,8 +81,13 @@ final class PayrollSecureDeliveryService
         // Idempotence je vázaná na dokument a jeho obsah: nový odkaz na TÝŽ obsah
         // se nezaloží dvakrát, ale po opravné revizi (jiný `file_sha256`) ano,
         // protože to už je jiná páska. Dvojklik účetní tak nepošle dva odkazy.
+        //
+        // Součástí klíče je i pořadí zneplatněných/nedoručených odkazů — jinak
+        // šlo pásku poslat jen jednou za život a „zneplatnit a poslat znovu"
+        // tiše nedělalo nic (viz `deadLinkGeneration()`).
         $idempotencyKey = 'payroll-document-secure-link:' . $documentId
-            . ':' . substr((string) ($document['file_sha256'] ?? ''), 0, 32);
+            . ':' . substr((string) ($document['file_sha256'] ?? ''), 0, 32)
+            . ':' . $this->links->deadLinkGeneration($supplierId, $documentId);
 
         $created = $this->links->create(
             $supplierId,

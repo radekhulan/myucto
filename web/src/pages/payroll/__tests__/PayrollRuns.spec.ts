@@ -84,6 +84,7 @@ function run(overrides: Partial<PayrollRun> = {}): PayrollRun {
     revision_status: null,
     payment_materialization_supported: false,
     can_delete: true,
+    delete_blocker: null,
     result_snapshot: null,
     available_commands: [],
     validations: [],
@@ -343,6 +344,22 @@ describe('PayrollRuns', () => {
 
     expect(wrapper.find('[data-testid="delete-payroll-run-15"]').exists()).toBe(false)
     expect(m.deleteRun).not.toHaveBeenCalled()
+  })
+
+  // Schované tlačítko účetní nic neřekne. Běh se stane nesmazatelným hned
+  // prvním „Uzamknout vstupy" a bez důvodu to vypadá jako závada aplikace.
+  it('says why the run cannot be deleted instead of just hiding the button', async () => {
+    m.runs.mockResolvedValue([run({
+      can_delete: false,
+      delete_blocker: 'Mzdový běh už obsahuje neměnnou revizi.',
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const blocker = wrapper.find('[data-testid="payroll-run-15-delete-blocker"]')
+    expect(blocker.exists()).toBe(true)
+    expect(blocker.text()).toBe('Mzdový běh už obsahuje neměnnou revizi.')
   })
 
   // Seznam běhů posílal celý výsledkový snapshot každého běhu včetně osobního

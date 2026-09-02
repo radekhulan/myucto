@@ -13,7 +13,6 @@ import { useToast } from '@/composables/useToast'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { addDaysIso } from '@/utils/date'
-import { todayIso } from './employmentLifecycleUi'
 
 const props = defineProps<{
   personId: number
@@ -36,16 +35,41 @@ const selectedDocument = ref<DocItem | null>(null)
 const alerts = computed(() => view.value?.alerts ?? [])
 const history = computed(() => view.value?.history ?? [])
 
+/**
+ * ID opravovaného oprávnění; null = zapisuje se nové.
+ *
+ * Oprávnění bývalo neměnné (databázový trigger zakazoval UPDATE i DELETE),
+ * takže překlep v datu nebo v čísle byl trvalý a „obnovení" musí začínat
+ * později, takže se ani nedal obejít. Editace je proto stejný formulář,
+ * jen předvyplněný.
+ */
+const editingId = ref<number | null>(null)
+
 function emptyForm(): PayrollForeignPermitPayload {
   return {
     permit_kind: 'residence',
     permit_label: '',
     issuing_country_code: 'CZ',
-    effective_from: todayIso(),
+    /*
+     * Účinnost se NEPŘEDVYPLŇUJE dneškem.
+     *
+     * Oprávnění má datum vytištěné na dokladu a dnešek s ním skoro nikdy
+     * nesedí — předvyplněný dnešek se přitom tvářil jako správná hodnota
+     * a uživatel ho odklikl. Prázdné pole je povinné, takže formulář odešle
+     * až datum, které někdo skutečně opsal.
+     */
+    effective_from: '',
     valid_until: '',
     document_id: 0,
     supersedes_permit_id: null,
   }
+}
+
+function resetForm(): void {
+  editingId.value = null
+  form.value = emptyForm()
+  clearDocument()
+  saveError.value = ''
 }
 
 function statusClass(status: string): string {
@@ -59,7 +83,10 @@ function statusClass(status: string): string {
 }
 
 function validDocumentId(): number | null {
-  return selectedDocument.value?.id ?? null
+  // Při opravě se doklad nevybírá znovu — uložené ID zůstává ve formuláři,
+  // i když jeho název z DMS neznáme. Jinak by oprava překlepu v datu nutila
+  // uživatele znovu prohledat Dokumenty.
+  return selectedDocument.value?.id ?? (form.value.document_id > 0 ? form.value.document_id : null)
 }
 
 async function searchDocuments(): Promise<void> {
@@ -121,13 +148,13 @@ async function save(): Promise<void> {
   try {
     view.value = await payrollApi.createForeignPermit(props.personId, {
       ...form.value,
+      id: editingId.value,
       permit_label: form.value.permit_label.trim(),
       issuing_country_code: form.value.issuing_country_code.trim().toUpperCase(),
       document_id: documentId,
       supersedes_permit_id: form.value.supersedes_permit_id || null,
     })
-    form.value = emptyForm()
-    clearDocument()
+    resetForm()
     toast.success(t('payroll.people.foreign_permits.saved'))
   } catch (error) {
     saveError.value = apiErrorMessage(error, t('payroll.people.foreign_permits.save_failed'))
@@ -136,7 +163,44 @@ async function save(): Promise<void> {
   }
 }
 
+function editPermit(id: number): void {
+  const permit = history.value.find(item => item.id === id)
+  if (!permit) return
+  editingId.value = id
+  saveError.value = ''
+  form.value = {
+    permit_kind: permit.permit_kind as PayrollForeignPermitKind,
+    permit_label: permit.permit_label,
+    issuing_country_code: permit.issuing_country_code,
+    effective_from: permit.effective_from,
+    valid_until: permit.valid_until,
+    document_id: permit.document_id ?? 0,
+    supersedes_permit_id: permit.supersedes_permit_id ?? null,
+  }
+  // Doklad se nevybírá znovu: jeho název známe jen z vyhledávání v DMS, ale
+  // uložené ID ve formuláři zůstává (viz validDocumentId()).
+  selectedDocument.value = null
+  documentQuery.value = permit.document_id === null ? '' : `#${permit.document_id}`
+  documentCandidates.value = []
+}
+
+async function removePermit(id: number): Promise<void> {
+  if (saving.value) return
+  saveError.value = ''
+  saving.value = true
+  try {
+    view.value = await payrollApi.deleteForeignPermit(props.personId, id)
+    if (editingId.value === id) resetForm()
+    toast.success(t('common.deleted'))
+  } catch (error) {
+    saveError.value = apiErrorMessage(error, t('common.delete_failed'))
+  } finally {
+    saving.value = false
+  }
+}
+
 function selectPredecessor(id: number): void {
+  editingId.value = null
   form.value.supersedes_permit_id = id
   const permit = history.value.find(item => item.id === id)
   if (permit) {
@@ -145,7 +209,7 @@ function selectPredecessor(id: number): void {
   }
 }
 
-watch(() => props.personId, () => { form.value = emptyForm(); clearDocument(); void load() })
+watch(() => props.personId, () => { resetForm(); void load() })
 onMounted(() => { void load() })
 </script>
 
@@ -190,12 +254,25 @@ onMounted(() => { void load() })
               <button v-if="canWrite && permit.status !== 'superseded'" type="button" :class="[btnOutline('neutral'), '!px-2 !py-1 !text-xs']" @click="selectPredecessor(permit.id)">
                 {{ t('payroll.people.foreign_permits.renew') }}
               </button>
+              <!--
+                Oprava a smazání. Oprávnění bývalo neměnné (databázový trigger
+                zakazoval UPDATE i DELETE) a formulář přitom nabízí jako
+                výchozí účinnost dnešek — překlep tak neměl cestu ven.
+              -->
+              <button v-if="canWrite" type="button" :class="[btnOutline('neutral'), '!px-2 !py-1 !text-xs']" data-test="foreign-permit-edit" @click="editPermit(permit.id)">
+                {{ t('common.edit') }}
+              </button>
+              <button v-if="canWrite" type="button" :class="[btnOutline('danger'), '!px-2 !py-1 !text-xs']" :disabled="saving" data-test="foreign-permit-delete" @click="removePermit(permit.id)">
+                {{ t('common.delete') }}
+              </button>
             </div>
           </article>
         </div>
 
         <form v-if="canWrite" class="grid grid-cols-1 gap-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 sm:grid-cols-2 lg:grid-cols-3" data-test="foreign-permit-form" @submit.prevent="save">
-          <p class="text-sm font-medium text-neutral-900 sm:col-span-2 lg:col-span-3">{{ t('payroll.people.foreign_permits.add_title') }}</p>
+          <p class="text-sm font-medium text-neutral-900 sm:col-span-2 lg:col-span-3" data-test="foreign-permit-form-title">
+            {{ editingId === null ? t('payroll.people.foreign_permits.add_title') : `${t('common.edit')} · #${editingId}` }}
+          </p>
           <label class="text-xs text-neutral-600">
             {{ t('payroll.people.foreign_permits.kind_label') }}
             <select v-model="form.permit_kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm" data-test="foreign-permit-kind">
@@ -258,7 +335,10 @@ onMounted(() => { void load() })
             >{{ t('payroll.people.foreign_permits.document_open_dms') }}</RouterLink>
           </p>
           <p v-if="saveError" class="rounded-md border border-danger-500/30 bg-danger-50 p-2 text-xs text-danger-700 sm:col-span-2 lg:col-span-3" role="alert" data-test="foreign-permit-error">{{ saveError }}</p>
-          <div class="flex justify-end sm:col-span-2 lg:col-span-3">
+          <div class="flex justify-end gap-2 sm:col-span-2 lg:col-span-3">
+            <button v-if="editingId !== null" type="button" :class="btnOutline('neutral')" data-test="foreign-permit-cancel" @click="resetForm">
+              {{ t('common.cancel') }}
+            </button>
             <button type="submit" :class="btnFilled('primary')" :disabled="saving" data-test="foreign-permit-save">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
               {{ saving ? t('common.saving') : t('payroll.people.foreign_permits.save') }}

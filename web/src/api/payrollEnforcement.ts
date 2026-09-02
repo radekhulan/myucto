@@ -516,6 +516,9 @@ export const payrollEnforcementApi = {
       recipient_verified: boolean
       row_version: number
       recipient_institution_id?: number | null
+      // Oprava data účinnosti případu. Server ji přijme jen dokud je případ
+      // ve stavu „přijato“, tedy dokud nevstoupil do žádného výpočtu.
+      effective_from?: string
     },
   ) =>
     api.put<{ case: EnforcementCaseDetail }>(
@@ -582,6 +585,30 @@ export const payrollEnforcementApi = {
       `/payroll/enforcement/people/${employeeId}/dependants`,
       payload,
     ).then(response => response.data.dependant),
+  /*
+   * Oprava a smazání vyživované osoby. Nezabavitelnou částku řídí `valid_from`,
+   * takže špatná platnost znamená sraženou částku proti zákonu — a dokud tyhle
+   * dvě cesty nebyly, nešlo to napravit vůbec. Server je odmítne, jakmile podle
+   * záznamu proběhl měsíční výpočet; v odpovědi pak nese `frozen_period`.
+   */
+  updateDependant: (
+    employeeId: number,
+    dependantId: number,
+    payload: EnforcementDependantPayload & { row_version: number },
+  ) =>
+    api.put<{ dependant: EnforcementDependant }>(
+      `/payroll/enforcement/people/${employeeId}/dependants/${dependantId}`,
+      payload,
+    ).then(response => response.data.dependant),
+  deleteDependant: (
+    employeeId: number,
+    dependantId: number,
+    rowVersion: number,
+  ) =>
+    api.delete<{ deleted: boolean, id: number }>(
+      `/payroll/enforcement/people/${employeeId}/dependants/${dependantId}`,
+      { data: { row_version: rowVersion } },
+    ).then(response => response.data),
   cooperationCandidates: (environment: string) =>
     api.get<{ candidates: XmlzamCandidate[] }>(
       '/payroll/enforcement/cooperation/candidates',

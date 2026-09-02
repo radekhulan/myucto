@@ -3520,7 +3520,9 @@
         "identifier_required": "Enter the person's OIČ or the relation's ID PPV. Whichever you already have from ČSSZ is enough.",
         "valid_from_required": "Fill in the date the identifier is valid from.",
         "confirm_required": "Tick the confirmation that the values match the ČSSZ record.",
-        "permission_required": "Saving requires permission to edit both the person and the employment."
+        "permission_required": "Saving requires permission to edit both the person and the employment.",
+        "correct": "Correct",
+        "correction_hint": "You are correcting a manually typed number. The previous value is discarded and replaced by what you save. Submissions already sent stay unchanged."
       },
       "openings": {
         "title": "This employee started before you began running payroll here",
@@ -5533,9 +5535,9 @@
       "registration_effective_from": "Effective from",
       "registration_source_reference": "Source reference",
       "registration_undo": "Undo",
-        "registration_undone": "The latest registration was undone.",
-        "registration_undo_failed": "The registration could not be undone.",
-        "registration_history_empty": "This payroll office has no evidenced registration history; new preparations will be blocked until one is created.",
+      "registration_undone": "The latest registration was undone.",
+      "registration_undo_failed": "The registration could not be undone.",
+      "registration_history_empty": "This payroll office has no evidenced registration history; new preparations will be blocked until one is created.",
       "registration_history_failed": "Social security registration history could not be loaded.",
       "registration_saved": "The new effective social security registration was saved.",
       "registration_save_failed": "The social security registration could not be saved.",
@@ -6326,7 +6328,8 @@
         "pause": "Pause",
         "resume": "Resume",
         "end": "End",
-        "cancel": "Cancel"
+        "cancel": "Cancel",
+        "reopen": "Reopen"
       },
       "change_kind": {
         "created": "Created",
@@ -6335,7 +6338,8 @@
         "paused": "Paused",
         "resumed": "Resumed",
         "ended": "Ended",
-        "cancelled": "Cancelled"
+        "cancelled": "Cancelled",
+        "reopened": "Reopened"
       },
       "ledger_kind": {
         "withheld": "Withheld",
@@ -6493,6 +6497,9 @@
         "other": "The claim has a legal, payroll or payment link and must remain in the history."
       },
       "dependant_created": "The dependant was added.",
+      "dependant_updated": "The dependant has been corrected.",
+      "dependant_deleted": "The dependant has been deleted.",
+      "dependant_delete_confirm": "Really delete this dependant? The protected amount will be recalculated for the affected months.",
       "evidence_saved": "The evidence verification state was saved.",
       "month_evidence_saved": "The monthly evidence was saved.",
       "month_evidence_load_failed": "The monthly evidence could not be loaded.",
@@ -16002,6 +16009,7 @@
       "stock": "Stock",
       "eshop": "E-shop codebooks",
       "logbook": "Logbook",
+      "payroll": "Payroll",
       "settings": "Company settings",
       "utilities": "Utilities",
       "profile": "Personal profile"

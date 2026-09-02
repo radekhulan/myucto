@@ -24,6 +24,8 @@ const m = vi.hoisted(() => ({
   monthEvidence: vi.fn(),
   dependants: vi.fn(),
   addDependant: vi.fn(),
+  updateDependant: vi.fn(),
+  deleteDependant: vi.fn(),
   peoplePage: vi.fn(),
   person: vi.fn(),
   institutionAccounts: vi.fn(),
@@ -74,6 +76,8 @@ vi.mock('@/api/payrollEnforcement', () => ({
     saveMonthEvidence: vi.fn(),
     dependants: m.dependants,
     addDependant: m.addDependant,
+    updateDependant: m.updateDependant,
+    deleteDependant: m.deleteDependant,
   },
 }))
 
@@ -898,6 +902,53 @@ describe('EnforcementCases', () => {
       await wrapper.get('[data-test="dependants-toggle"]').trigger('click')
       expect(wrapper.get('[data-test="dependants-panel"]').text())
         .toContain('payroll.enforcement.dependant_kind.dependant')
+      wrapper.unmount()
+    })
+
+    /*
+     * Vyživovaná osoba se zapisovala s DNEŠNÍ platností a opravit to nešlo
+     * vůbec. Nezabavitelnou částku přitom řídí `valid_from`, takže překlep
+     * znamenal sraženou částku proti zákonu.
+     */
+    it('opraví platnost vyživované osoby beze změny ostatních polí', async () => {
+      m.dependants.mockResolvedValue([dependantOf()])
+      m.updateDependant.mockResolvedValue(dependantOf({ valid_from: '2026-06-01' }))
+
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+      await wrapper.get('[data-test="dependants-toggle"]').trigger('click')
+
+      await wrapper.get('[data-test="dependant-edit-1"]').trigger('click')
+      const validFrom = wrapper.get('[data-test="dependant-form"] input[type="date"]')
+      expect((validFrom.element as HTMLInputElement).value).toBe('2020-01-01')
+      await validFrom.setValue('2026-06-01')
+      await wrapper.get('[data-test="dependant-form"]').trigger('submit')
+      await flushPromises()
+
+      expect(m.addDependant).not.toHaveBeenCalled()
+      expect(m.updateDependant).toHaveBeenCalledWith(3, 1, expect.objectContaining({
+        valid_from: '2026-06-01',
+        row_version: 1,
+      }))
+      wrapper.unmount()
+    })
+
+    it('smaže omylem zapsanou vyživovanou osobu po potvrzení', async () => {
+      m.dependants.mockResolvedValue([dependantOf()])
+      m.deleteDependant.mockResolvedValue({ deleted: true, id: 1 })
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+      await wrapper.get('[data-test="dependants-toggle"]').trigger('click')
+
+      await wrapper.get('[data-test="dependant-delete-1"]').trigger('click')
+      await flushPromises()
+
+      expect(m.deleteDependant).toHaveBeenCalledWith(3, 1, 1)
+      confirm.mockRestore()
       wrapper.unmount()
     })
 

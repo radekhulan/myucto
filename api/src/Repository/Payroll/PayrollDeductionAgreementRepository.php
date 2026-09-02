@@ -43,6 +43,36 @@ final class PayrollDeductionAgreementRepository
 
     public const LIST_DEFAULT_LIMIT = 50;
 
+    private const STATUS_LABELS = [
+        'draft' => 'návrh',
+        'active' => 'aktivní',
+        'paused' => 'pozastavená',
+        'ended' => 'ukončená',
+        'cancelled' => 'zrušená',
+    ];
+
+    private const COMMAND_LABELS = [
+        'activate' => 'aktivovat',
+        'pause' => 'pozastavit',
+        'resume' => 'obnovit',
+        'end' => 'ukončit',
+        'cancel' => 'zrušit',
+        'reopen' => 'znovu otevřít',
+    ];
+
+    /** @return list<string> */
+    private static function commandsFrom(DeductionAgreementStatus $status): array
+    {
+        $available = [];
+        foreach (DeductionAgreementCommand::cases() as $command) {
+            if (in_array($status, $command->allowedFrom(), true)) {
+                $available[] = self::COMMAND_LABELS[$command->value] ?? $command->value;
+            }
+        }
+
+        return $available === [] ? ['žádný'] : $available;
+    }
+
     public function __construct(private readonly Connection $db) {}
 
     /**
@@ -228,7 +258,9 @@ final class PayrollDeductionAgreementRepository
             $status = DeductionAgreementStatus::from((string) $current['status']);
             if ($status->isTerminal()) {
                 throw new \DomainException(
-                    'Ukončenou ani zrušenou dohodu už nelze měnit.',
+                    'Ukončenou ani zrušenou dohodu nelze měnit přímo. '
+                    . 'Vraťte ji nejdřív krokem „Znovu otevřít“ — vrátí se do '
+                    . 'pozastaveného stavu, kde ji lze opravit, a teprve pak ji obnovte.',
                 );
             }
             $withheld = (int) $current['withheld_total_minor'];
@@ -338,9 +370,12 @@ final class PayrollDeductionAgreementRepository
             $current = $this->lock($supplierId, $id);
             $status = DeductionAgreementStatus::from((string) $current['status']);
             if (!in_array($status, $command->allowedFrom(), true)) {
-                throw new \DomainException(
-                    'Dohoda o srážce není ve stavu, ze kterého lze tento krok provést.',
-                );
+                throw new \DomainException(sprintf(
+                    'Dohoda je ve stavu „%s“ a tenhle krok z něj nevede. '
+                    . 'Možné kroky odsud: %s.',
+                    self::STATUS_LABELS[$status->value] ?? $status->value,
+                    implode(', ', self::commandsFrom($status)),
+                ));
             }
             if ($command->requiresEmptyLedger()
                 && ((int) $current['withheld_total_minor'] > 0
@@ -361,6 +396,9 @@ final class PayrollDeductionAgreementRepository
                     );
                 }
                 $validTo = $effective;
+            }
+            if ($command->reopensValidity()) {
+                $validTo = null;
             }
 
             $stmt = $this->db->pdo()->prepare(

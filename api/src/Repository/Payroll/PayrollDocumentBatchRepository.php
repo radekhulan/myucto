@@ -468,9 +468,38 @@ final class PayrollDocumentBatchRepository
         $this->refreshBatch((int) $claim['supplier_id'], (int) $claim['batch_id']);
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * @return array<string,mixed>
+     */
     public function retry(int $supplierId, int $batchId, int $itemId): array
     {
+        /*
+         * Kontrola PŘED akcí, ne po ní. Fronta si položky bere jen k revizi,
+         * která je stále schválená a má sedící otisk; u nahrazené revize
+         * se položka po „Opakovat" nikdy nezvedla, jen se ztratila ve stavu
+         * `queued` a celá dávka uvázla v `retry_wait` — a s ní i měsíční ZIP,
+         * protože ten se vydává až po `completed`. Radši to odmítneme hned
+         * a řekneme proč.
+         */
+        $stale = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_document_batches batch
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = batch.supplier_id
+                AND revision.id = batch.revision_id
+              WHERE batch.supplier_id = ? AND batch.id = ?
+                AND (revision.status <> "approved"
+                     OR revision.result_snapshot_hash <> batch.source_snapshot_hash)
+              LIMIT 1'
+        );
+        $stale->execute([$supplierId, $batchId]);
+        if ($stale->fetchColumn() !== false) {
+            throw new \DomainException(
+                'Dávka patří k revizi, kterou už nahradila novější. Opakováním '
+                . 'by se položka jen zasekla ve frontě. Doklady vygenerujte '
+                . 'znovu nad platnou revizí mzdového běhu.',
+            );
+        }
         $statement = $this->db->pdo()->prepare(
             'UPDATE payroll_document_batch_items
                 SET status = "queued", available_at = UTC_TIMESTAMP(),

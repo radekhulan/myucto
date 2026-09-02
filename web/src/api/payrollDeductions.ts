@@ -15,12 +15,17 @@ export type DeductionAgreementStatus =
   | 'ended'
   | 'cancelled'
 
+/**
+ * `reopen` je návrat z ukončení nebo zrušení do POZASTAVENÉHO stavu. Srážky se
+ * samy nerozjedou — do mzdového běhu vstupuje jen aktivní dohoda.
+ */
 export type DeductionAgreementCommand =
   | 'activate'
   | 'pause'
   | 'resume'
   | 'end'
   | 'cancel'
+  | 'reopen'
 
 export const deductionAgreementKinds: DeductionAgreementKind[] = [
   'advance', 'meal', 'contribution', 'damage', 'other',

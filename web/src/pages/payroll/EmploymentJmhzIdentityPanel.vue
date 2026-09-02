@@ -8,7 +8,7 @@ import {
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
-import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { todayIso } from './employmentLifecycleUi'
 
 const props = defineProps<{
@@ -36,6 +36,13 @@ const employmentIdentifier = ref('')
 const sourceReference = ref('')
 const evidenceConfirmed = ref(false)
 const status = ref<PayrollJmhzIdentityStatus | null>(null)
+/*
+ * Obě čísla se opisují ručně z protokolu ČSSZ, takže překlep je běžný. Bez
+ * režimu opravy se formulář po uložení schoval a chybné číslo se pak vezlo
+ * v každém dalším hlášení — z aplikace z toho nevedla cesta ven.
+ */
+const correctingPerson = ref(false)
+const correctingEmployment = ref(false)
 const loaded = ref(false)
 const loading = ref(false)
 const saving = ref(false)
@@ -47,16 +54,45 @@ const complete = computed(() => status.value !== null
   && status.value.person_external_identifier !== null
   && status.value.employment_external_identifier !== null)
 const canWrite = computed(() => props.canWriteEmployment && props.canWritePerson)
+const personEditable = computed(() => status.value !== null
+  && (status.value.person_external_identifier === null || correctingPerson.value))
+const employmentEditable = computed(() => status.value !== null
+  && (status.value.employment_external_identifier === null
+    || correctingEmployment.value))
+const formOpen = computed(() => personEditable.value || employmentEditable.value)
+const correcting = computed(() => correctingPerson.value || correctingEmployment.value)
 /*
  * Stačí JEDEN z identifikátorů: OIČ osoby a ID PPV vztahu chodí z ČSSZ zvlášť
  * a účetní je typicky dostane po částech. Povinné je jen to, co uživatel právě
  * zadává, plus potvrzení podkladu — obojí drží ČSSZ, ne náš kód.
  */
 const hasIdentifierToSave = computed(() =>
-  (status.value?.person_external_identifier === null
-    && personIdentifier.value.trim() !== '')
-  || (status.value?.employment_external_identifier === null
-    && employmentIdentifier.value.trim() !== ''))
+  (personEditable.value && personIdentifier.value.trim() !== '')
+  || (employmentEditable.value && employmentIdentifier.value.trim() !== ''))
+
+function startPersonCorrection(): void {
+  correctingPerson.value = true
+  personIdentifier.value = ''
+  evidenceConfirmed.value = false
+  success.value = ''
+}
+
+function startEmploymentCorrection(): void {
+  correctingEmployment.value = true
+  employmentIdentifier.value = ''
+  evidenceConfirmed.value = false
+  success.value = ''
+}
+
+function cancelCorrection(): void {
+  correctingPerson.value = false
+  correctingEmployment.value = false
+  personIdentifier.value = ''
+  employmentIdentifier.value = ''
+  sourceReference.value = ''
+  evidenceConfirmed.value = false
+  error.value = ''
+}
 const canSave = computed(() => canWrite.value
   && !saving.value
   && evidenceConfirmed.value
@@ -106,22 +142,26 @@ async function save(): Promise<void> {
   error.value = ''
   success.value = ''
   try {
+    const wasCorrecting = correcting.value
     await payrollApi.saveJmhzIdentity(props.employmentId, {
       environment: environment.value,
-      person_external_identifier: status.value?.person_external_identifier === null
-        ? personIdentifier.value.trim()
+      person_external_identifier: personEditable.value
+        ? personIdentifier.value.trim() || null
         : null,
-      employment_external_identifier: status.value?.employment_external_identifier === null
-        ? employmentIdentifier.value.trim()
+      employment_external_identifier: employmentEditable.value
+        ? employmentIdentifier.value.trim() || null
         : null,
       valid_from: validFrom.value,
       source_reference: sourceReference.value.trim() || null,
       evidence_confirmed: true,
+      replace_existing: wasCorrecting,
     })
     if (onDate.value !== validFrom.value) {
       skipNextDateReload = true
       onDate.value = validFrom.value
     }
+    correctingPerson.value = false
+    correctingEmployment.value = false
     personIdentifier.value = ''
     employmentIdentifier.value = ''
     sourceReference.value = ''
@@ -142,11 +182,8 @@ function openPanel(event: Event): void {
 }
 
 watch(environment, () => {
-  personIdentifier.value = ''
-  employmentIdentifier.value = ''
-  sourceReference.value = ''
+  cancelCorrection()
   validFrom.value = props.startDate ?? initialDate.value
-  evidenceConfirmed.value = false
   if (loaded.value) void load()
 })
 watch(onDate, () => {
@@ -266,6 +303,19 @@ watch(() => [props.startDate, props.endDate], () => {
             <p v-else class="mt-1 text-sm font-medium text-warning-700">
               {{ t('payroll.people.jmhz_identity.missing') }}
             </p>
+            <button
+              v-if="status.person_external_identifier && canWrite && !correctingPerson"
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              class="mt-2"
+              data-test="jmhz-identity-correct-person"
+              @click="startPersonCorrection"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.edit" />
+              </svg>
+              {{ t('payroll.people.jmhz_identity.correct') }}
+            </button>
           </div>
           <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
             <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
@@ -277,18 +327,38 @@ watch(() => [props.startDate, props.endDate], () => {
             <p v-else class="mt-1 text-sm font-medium text-warning-700">
               {{ t('payroll.people.jmhz_identity.missing') }}
             </p>
+            <button
+              v-if="status.employment_external_identifier && canWrite && !correctingEmployment"
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              class="mt-2"
+              data-test="jmhz-identity-correct-employment"
+              @click="startEmploymentCorrection"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.edit" />
+              </svg>
+              {{ t('payroll.people.jmhz_identity.correct') }}
+            </button>
           </div>
         </div>
 
         <form
-          v-if="!complete"
+          v-if="formOpen"
           class="space-y-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3"
           data-test="jmhz-identity-form"
           @submit.prevent="save"
         >
+          <p
+            v-if="correcting"
+            class="rounded-md border border-warning-500/30 bg-warning-50 p-3 text-xs text-warning-800"
+            data-test="jmhz-identity-correction-hint"
+          >
+            {{ t('payroll.people.jmhz_identity.correction_hint') }}
+          </p>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label
-              v-if="status.person_external_identifier === null"
+              v-if="personEditable"
               class="text-xs text-neutral-600"
             >
               {{ t('payroll.people.jmhz_identity.person_identifier') }}
@@ -305,7 +375,7 @@ watch(() => [props.startDate, props.endDate], () => {
               </span>
             </label>
             <label
-              v-if="status.employment_external_identifier === null"
+              v-if="employmentEditable"
               class="text-xs text-neutral-600"
             >
               {{ t('payroll.people.jmhz_identity.employment_identifier') }}
@@ -367,6 +437,15 @@ watch(() => [props.startDate, props.endDate], () => {
             >
               {{ saveDisabledReason }}
             </p>
+            <button
+              v-if="correcting"
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              data-test="jmhz-identity-cancel-correction"
+              @click="cancelCorrection"
+            >
+              {{ t('common.cancel') }}
+            </button>
             <button
               type="submit"
               :class="btnFilled('success')"

@@ -136,12 +136,60 @@ describe('EmploymentJmhzIdentityPanel', () => {
       valid_from: '2026-08-01',
       source_reference: null,
       evidence_confirmed: true,
+      replace_existing: false,
     })
     expect(m.get).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('******0001')
     expect(wrapper.text()).toContain('******************0002')
     expect(wrapper.text()).not.toContain('1000000001')
     expect(wrapper.text()).not.toContain('200000000000000000002')
+  })
+
+  /*
+   * Obě čísla se opisují ručně z protokolu ČSSZ, takže překlep je běžný.
+   * Dokud se formulář po uložení schoval, nešla chyba opravit vůbec — a chybné
+   * číslo se pak vezlo v každém dalším měsíčním hlášení.
+   */
+  it('nabídne opravu už uloženého čísla a pošle ji jako náhradu', async () => {
+    m.get.mockResolvedValue(complete)
+    const wrapper = mountPanel()
+    await openPanel(wrapper)
+
+    expect(wrapper.find('[data-test="jmhz-identity-form"]').exists()).toBe(false)
+    await wrapper.get('[data-test="jmhz-identity-correct-person"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="jmhz-identity-correction-hint"]').exists()).toBe(true)
+    await wrapper.get('[data-test="jmhz-person-identifier"]').setValue('1000000002')
+    await wrapper.get('[data-test="jmhz-identity-confirmed"]').setValue(true)
+    await wrapper.get('[data-test="jmhz-identity-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.save).toHaveBeenCalledWith(17, {
+      environment: 'test',
+      person_external_identifier: '1000000002',
+      employment_external_identifier: null,
+      valid_from: '2026-08-01',
+      source_reference: null,
+      evidence_confirmed: true,
+      replace_existing: true,
+    })
+  })
+
+  it('opravu jde vzít zpět, aniž by se cokoliv odeslalo', async () => {
+    m.get.mockResolvedValue(complete)
+    const wrapper = mountPanel()
+    await openPanel(wrapper)
+
+    await wrapper.get('[data-test="jmhz-identity-correct-employment"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="jmhz-employment-identifier"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="jmhz-identity-cancel-correction"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="jmhz-identity-form"]').exists()).toBe(false)
+    expect(m.save).not.toHaveBeenCalled()
   })
 
   it('u zašedlého Uložit řekne, co konkrétně chybí', async () => {

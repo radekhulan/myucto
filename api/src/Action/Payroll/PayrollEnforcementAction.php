@@ -12,6 +12,7 @@ use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Repository\Payroll\PayrollEnforcementClaimMutationBlockedException;
 use MyInvoice\Repository\Payroll\PayrollEnforcementConflictException;
 use MyInvoice\Repository\Payroll\PayrollEnforcementDeletionBlockedException;
+use MyInvoice\Repository\Payroll\PayrollEnforcementDependantFrozenException;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
@@ -350,6 +351,12 @@ final class PayrollEnforcementAction
                             'recipient_institution_id',
                         ),
                         array_key_exists('recipient_institution_id', $body),
+                        array_key_exists('effective_from', $body)
+                            ? PayrollTimeValue::string(
+                                $body['effective_from'] ?? null,
+                                'effective_from',
+                            )
+                            : null,
                     );
                     $this->audit(
                         $request,
@@ -359,6 +366,8 @@ final class PayrollEnforcementAction
                     return $case;
                 },
             ), 'enforcement_case');
+        } catch (PayrollYearClosedException $e) {
+            return self::yearClosedError($response, $e);
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollEnforcementConflictException $e) {
@@ -734,6 +743,145 @@ final class PayrollEnforcementAction
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
         return Json::ok($response, ['dependant' => $dependant], 201);
+    }
+
+    /**
+     * Oprava vyživované osoby.
+     *
+     * Nezabavitelnou částku řídí `valid_from`, a formulář nabízel dnešek —
+     * dítě zapsané v září tak nezvyšovalo ochranu za červen a srazilo se víc,
+     * než zákon dovolí. Opravit to dosud nešlo vůbec. Hranicí je spočítaný
+     * měsíc: podle čeho už proběhl výpočet, to je doklad.
+     *
+     * @param array{employeeId:string,dependantId:string} $args
+     */
+    public function updateDependant(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        if (($error = $this->authorizeInsolvency(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->input($request);
+            $dependant = $this->transactional(
+                function () use ($request, $args, $body): ?array {
+                    $dependant = $this->repository->updateDependant(
+                        $this->currentSupplierId($request),
+                        (int) $args['employeeId'],
+                        (int) $args['dependantId'],
+                        $body,
+                        $this->positiveInt($body['row_version'] ?? null, 'row_version'),
+                    );
+                    if ($dependant !== null) {
+                        $this->audit(
+                            $request,
+                            'payroll.enforcement.dependant.updated',
+                            $dependant,
+                            'payroll_enforcement_dependant',
+                        );
+                    }
+                    return $dependant;
+                },
+            );
+        } catch (PayrollYearClosedException $e) {
+            return self::yearClosedError($response, $e);
+        } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (PayrollEnforcementConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        } catch (PayrollEnforcementDependantFrozenException $e) {
+            return self::dependantFrozenError($response, $e);
+        }
+
+        return $dependant === null
+            ? Json::error($response, 'not_found', 'Vyživovaná osoba nebyla nalezena.', 404)
+            : Json::ok($response, ['dependant' => $dependant]);
+    }
+
+    /**
+     * Smaže omylem zapsanou vyživovanou osobu, podle které ještě nic nepočítalo.
+     *
+     * @param array{employeeId:string,dependantId:string} $args
+     */
+    public function deleteDependant(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        if (($error = $this->authorizeInsolvency(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->input($request);
+            $deleted = $this->transactional(
+                function () use ($request, $args, $body): ?array {
+                    $dependant = $this->repository->deleteDependant(
+                        $this->currentSupplierId($request),
+                        (int) $args['employeeId'],
+                        (int) $args['dependantId'],
+                        $this->positiveInt($body['row_version'] ?? null, 'row_version'),
+                    );
+                    if ($dependant !== null) {
+                        $this->audit(
+                            $request,
+                            'payroll.enforcement.dependant.deleted',
+                            $dependant,
+                            'payroll_enforcement_dependant',
+                        );
+                    }
+                    return $dependant;
+                },
+            );
+        } catch (PayrollYearClosedException $e) {
+            return self::yearClosedError($response, $e);
+        } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (PayrollEnforcementConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        } catch (PayrollEnforcementDependantFrozenException $e) {
+            return self::dependantFrozenError($response, $e);
+        }
+
+        return $deleted === null
+            ? Json::error($response, 'not_found', 'Vyživovaná osoba nebyla nalezena.', 404)
+            : Json::ok($response, [
+                'deleted' => true,
+                'id' => PayrollTimeValue::int($deleted['id'] ?? null, 'id'),
+            ]);
+    }
+
+    /** Odmítnutí nese měsíc, kvůli kterému to nejde — klient na něj umí proklikat. */
+    private static function dependantFrozenError(
+        Response $response,
+        PayrollEnforcementDependantFrozenException $exception,
+    ): Response {
+        return Json::error(
+            $response,
+            'enforcement_dependant_change_blocked',
+            $exception->getMessage(),
+            409,
+            ['frozen_period' => $exception->frozenPeriod],
+        );
     }
 
     private function authorizeInsolvency(

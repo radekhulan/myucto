@@ -889,6 +889,24 @@ final class PayrollRunCommandService
                     null,
                     $actorUserId,
                 );
+                /*
+                 * Zrušení musí zahodit i rozdělanou revizi. Bez toho zůstala
+                 * opravná revize ve stavu `snapshot`/`calculated`/`reviewed`
+                 * viset, `PayrollYearCloseRepository::openCorrectionCount()`
+                 * ji počítal dál a uzávěrka mzdového roku byla NATRVALO
+                 * zablokovaná — zrušený běh už novou revizi nezaloží, takže
+                 * cesta ven nevedla. Až po `updateRun`: trigger z migrace 1722
+                 * se dívá na to, že běh UŽ JE `cancelled`.
+                 */
+                if ($command === PayrollRunCommand::CANCEL) {
+                    $this->runs->abandonRevisionsOnCancel($supplierId, $runId);
+                    $revision = $revision === null
+                        ? null
+                        : $this->runs->revision(
+                            $supplierId,
+                            (int) $revision['id'],
+                        );
+                }
             }
 
             $revisionId = $revision === null ? null : (int) $revision['id'];

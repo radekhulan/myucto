@@ -829,6 +829,64 @@ final class PayrollRegistrationIdentityRepository
         return $raw === false ? null : $this->externalId($this->row($raw));
     }
 
+    /**
+     * Zahodí ručně opsaný identifikátor, aby šel přepsat správnou hodnotou.
+     *
+     * Číslo od ČSSZ se opisuje z protokolu ručně, takže překlep je běžný.
+     * Bez tohohle kroku se překlep nedal opravit vůbec: nová hodnota narazí
+     * na „v evidenci je jiná hodnota", stará se nedá ani upravit, ani zrušit,
+     * a chybné číslo se pak veze v každém měsíčním hlášení.
+     *
+     * Maže se JEN ruční zápis (`verified_manual_import`). Číslo převzaté
+     * z protokolu ČSSZ je doklad o tom, co úřad přidělil, a zůstává.
+     * Odeslaná podání mají vlastní zmrazené kopie, ty se tímhle nemění.
+     *
+     * @return bool zda se něco smazalo
+     */
+    public function discardManualPersonExternalId(
+        int $supplierId,
+        int $externalId,
+    ): bool {
+        $statement = $this->db->pdo()->prepare(
+            'DELETE FROM payroll_person_external_ids
+              WHERE supplier_id = ? AND id = ?
+                AND source_kind = "verified_manual_import"'
+        );
+        $statement->execute([$supplierId, $externalId]);
+
+        return $statement->rowCount() === 1;
+    }
+
+    /** @see discardManualPersonExternalId */
+    public function discardManualExternalId(
+        int $supplierId,
+        int $externalId,
+    ): bool {
+        $statement = $this->db->pdo()->prepare(
+            'DELETE FROM payroll_employment_external_ids
+              WHERE supplier_id = ? AND id = ?
+                AND source_kind = "verified_manual_import"'
+        );
+        $statement->execute([$supplierId, $externalId]);
+
+        return $statement->rowCount() === 1;
+    }
+
+    /** Je na identifikátor navázaná rozpracovaná úloha ztotožnění? */
+    public function externalIdHasResolutionTask(
+        int $supplierId,
+        int $externalId,
+    ): bool {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_identity_resolution_tasks
+              WHERE supplier_id = ? AND resolved_external_id_id = ?
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $externalId]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
     public function closeExternalId(
         int $supplierId,
         int $externalId,

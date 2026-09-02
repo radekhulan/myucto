@@ -306,7 +306,7 @@ final class PayrollRunDeletionTest extends TestCase
         $run = $this->createRun($this->supplierId, '2031-07-01');
         $this->insertRevision($run, 'revision');
 
-        $this->assertDeleteConflict($run, 'payroll_run_has_revision');
+        $this->assertDeleteConflict($run, 'payroll_run_has_working_revision');
     }
 
     public function testLaterStatusAndNonzeroRevisionPointerCannotBeDeleted(): void
@@ -331,7 +331,7 @@ final class PayrollRunDeletionTest extends TestCase
         )->execute([$this->supplierId, $revisionPointer['id']]);
         $this->assertDeleteConflict(
             $revisionPointer,
-            'payroll_run_has_revision',
+            'payroll_run_has_working_revision',
         );
     }
 
@@ -482,7 +482,12 @@ final class PayrollRunDeletionTest extends TestCase
             $this->userId,
         ]);
 
-        $this->assertDeleteConflict($run, 'payroll_run_has_posting');
+        /*
+         * Připravená účtovací dávka mazání NEBLOKUJE: do deníku nic nešlo,
+         * takže není co chránit. Blokuje až rozpracovaná revize, kterou tady
+         * fixtura zakládá — a to je jiný, mírnější důvod.
+         */
+        $this->assertDeleteConflict($run, 'payroll_run_has_working_revision');
     }
 
     public function testPaymentBlocksWithDownstreamCode(): void
@@ -609,19 +614,29 @@ final class PayrollRunDeletionTest extends TestCase
     }
 
     /** @param array<string,mixed> $run */
-    private function insertRevision(array $run, string $suffix): int
-    {
+    /**
+     * @param string $status `snapshot` je rozpracovaná revize, `approved`
+     *        schválená. Rozdíl je podstatný: rozpracovaná dnes blokuje mazání
+     *        sama o sobě, takže test navazujícího blokátoru (doklady, účtování)
+     *        by se k němu vůbec nedostal a ověřoval by něco jiného, než tvrdí.
+     */
+    private function insertRevision(
+        array $run,
+        string $suffix,
+        string $status = 'snapshot',
+    ): int {
         $hash = hash('sha256', "synthetic-{$suffix}");
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_revisions
                 (supplier_id, run_id, revision_no, revision_kind, status,
                  schema_version, ruleset_manifest_hash, input_snapshot_json,
                  input_snapshot_hash, idempotency_key_hash)
-             VALUES (?, ?, 1, "regular", "snapshot", "synthetic.v1",
+             VALUES (?, ?, 1, "regular", ?, "synthetic.v1",
                      ?, "{}", ?, ?)',
         )->execute([
             $this->supplierId,
             $run['id'],
+            $status,
             $hash,
             $hash,
             hash('sha256', "synthetic-revision-{$suffix}", true),

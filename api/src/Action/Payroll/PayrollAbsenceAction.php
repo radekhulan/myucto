@@ -161,6 +161,28 @@ final class PayrollAbsenceAction
                 $pdo->beginTransaction();
             }
             try {
+                /*
+                 * Průměr se kontroluje TADY, ne při ukládání absence. Zápis
+                 * nepřítomnosti je evidence, schválení je peníze — teprve z něj
+                 * vzniká mzdový vstup. Hláška proto říká, co chybí a kde se to
+                 * doplní; dřív se tahle podmínka tvářila jako chyba formuláře
+                 * a absenci nešlo vůbec uložit.
+                 */
+                if ($decision === 'approved'
+                    && in_array(
+                        $absence['absence_type'],
+                        PayrollAbsenceValidator::TYPES_REQUIRING_AVERAGE,
+                        true,
+                    )
+                    && $absence['average_snapshot_id'] === null
+                ) {
+                    throw new \InvalidArgumentException(
+                        'Schválení téhle nepřítomnosti počítá náhradu z průměrného '
+                        . 'výdělku — doplňte schválený průměr za čtvrtletí, do kterého '
+                        . 'spadá ' . $absence['date_from'] . ' (záložka Průměry). '
+                        . 'Absence zůstává uložená, nic se neztratí.',
+                    );
+                }
                 if ($decision === 'approved' && $absence['absence_type'] === 'vacation') {
                     // § 219 odst. 1 ZP — svátek uvnitř dovolené se nečerpá.
                     $segments = $this->absences->publishedShiftSegments(

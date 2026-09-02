@@ -513,7 +513,20 @@ final class PayrollLeaveRepository
         bool $overdrawConfirmed = false,
     ): array {
         if ($minutes <= 0) {
-            throw new \InvalidArgumentException('Čerpání dovolené vyžaduje publikované směny.');
+            /*
+             * Dovolená se od roku 2021 čerpá v HODINÁCH podle rozvrhu směn
+             * (§ 216 odst. 4 ZP), takže bez rozvržené a publikované směny není
+             * z čeho odečíst — to je věcně správně a neuvolňuje se to. Hláška
+             * ale musí říct, kde se to spraví: „vyžaduje publikované směny“
+             * účetní nechávalo hledat, o jakou obrazovku jde.
+             */
+            throw new \InvalidArgumentException(
+                'Ve dnech ' . (string) $absence['date_from'] . ' – '
+                . (string) $absence['date_to'] . ' nemá zaměstnanec žádnou publikovanou '
+                . 'směnu, takže není z čeho dovolenou odečíst — od roku 2021 se čerpá '
+                . 'v hodinách podle rozvrhu (§ 216 odst. 4 ZP). Rozvrhněte a publikujte '
+                . 'směny v Docházce a schválení zopakujte; nepřítomnost zůstává uložená.',
+            );
         }
         $supplierId = (int) $absence['supplier_id'];
         $employmentId = (int) $absence['employment_id'];

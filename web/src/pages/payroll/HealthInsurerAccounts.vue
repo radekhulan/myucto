@@ -93,6 +93,17 @@ function localToday(): string {
   return `${year}-${month}-${day}`
 }
 
+/*
+ * Účet instituce se hledá podle data splatnosti závazku, ne podle dneška.
+ * Předvyplněný DNEŠEK proto tiše znemožnil doplatit starší měsíce: firma, která
+ * nastoupí v září a dopočítává leden až srpen, neměla pro ty měsíce žádný
+ * účinný účet — a `valid_from` už u uloženého účtu měnit nejde. Začátek roku
+ * je bezpečnější výchozí hodnota; pole zůstává plně editovatelné.
+ */
+function defaultValidFrom(): string {
+  return `${new Date().getFullYear()}-01-01`
+}
+
 function emptyCreate(): PayrollInstitutionAccountCreatePayload {
   return {
     institution_type: 'health_insurer',
@@ -103,7 +114,7 @@ function emptyCreate(): PayrollInstitutionAccountCreatePayload {
     variable_symbol: null,
     specific_symbol: null,
     constant_symbol: null,
-    valid_from: localToday(),
+    valid_from: defaultValidFrom(),
     valid_to: null,
     source_kind: 'official_document',
     source_reference: '',

@@ -828,7 +828,7 @@ final class PayrollQuickInputRepository
                         $supplierId,
                         (int) $item['employee_id'],
                         $employmentId,
-                        $componentIds[self::BASE_CODE],
+                        self::componentId($componentIds, self::BASE_CODE),
                         $period,
                         self::BASE_CODE,
                         $row['base_amount_minor'],
@@ -957,7 +957,7 @@ final class PayrollQuickInputRepository
                         $supplierId,
                         (int) $item['employee_id'],
                         $employmentId,
-                        $componentIds[self::BONUS_CODE],
+                        self::componentId($componentIds, self::BONUS_CODE),
                         $period,
                         self::BONUS_CODE,
                         $row['bonus_amount_minor'],
@@ -1715,7 +1715,7 @@ final class PayrollQuickInputRepository
                 $supplierId,
                 (int) $item['employee_id'],
                 $employmentId,
-                $componentIds[$kind->componentCode()],
+                self::componentId($componentIds, $kind->componentCode()),
                 $period,
                 $kind->componentCode(),
                 null,
@@ -1827,7 +1827,7 @@ final class PayrollQuickInputRepository
             $supplierId,
             (int) $item['employee_id'],
             $employmentId,
-            $componentIds[$kind->componentCode()],
+            self::componentId($componentIds, $kind->componentCode()),
             $period,
             $kind->componentCode(),
             $amount,
@@ -1879,7 +1879,7 @@ final class PayrollQuickInputRepository
                 $supplierId,
                 $employeeId,
                 $employmentId,
-                $componentIds[$code],
+                self::componentId($componentIds, $code),
                 $period,
                 $code,
                 $amount,
@@ -2190,7 +2190,20 @@ final class PayrollQuickInputRepository
         }
     }
 
-    /** @return array<string,int> */
+    /**
+     * Mapa kódů spravovaných složek na id účinné verze.
+     *
+     * Vrací se i neúplná. Dřív se tu kvůli JEDNÉ chybějící složce shazovalo
+     * celé uložení měsíce (v obrazovce klidně 500 vztahů) hláškou
+     * „Chybí účinná mzdová složka X" — a přitom stačilo, že si někdo složku
+     * deaktivoval nebo že měla platnost až od dalšího měsíce. Načtení měsíce
+     * přitom projde vždy, takže se to poznalo až při Uložit.
+     *
+     * Chybějící kód se teď projeví až u pole, které ho opravdu potřebuje, jako
+     * jedna položka v seznamu neúspěchů — zbytek měsíce se uloží.
+     *
+     * @return array<string,int>
+     */
     private function componentIds(int $supplierId, string $effectiveOn): array
     {
         $codes = self::managedCodes();
@@ -2208,12 +2221,25 @@ final class PayrollQuickInputRepository
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $result[(string) $row['code']] = (int) $row['id'];
         }
-        foreach ($codes as $code) {
-            if (!isset($result[$code])) {
-                throw new \InvalidArgumentException("Chybí účinná mzdová složka {$code}.");
-            }
-        }
+
         return $result;
+    }
+
+    /**
+     * @param array<string,int> $componentIds
+     */
+    private static function componentId(array $componentIds, string $code): int
+    {
+        $id = $componentIds[$code] ?? null;
+        if ($id === null) {
+            throw new \InvalidArgumentException(
+                "Pro tenhle měsíc není účinná mzdová složka {$code}. Otevřete "
+                . 'Mzdy → Mzdové složky, složku aktivujte nebo jí založte verzi '
+                . 'platnou od tohoto měsíce. Ostatní pole se uložila.',
+            );
+        }
+
+        return $id;
     }
 
     /**

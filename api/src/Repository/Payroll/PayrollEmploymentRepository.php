@@ -410,11 +410,23 @@ final class PayrollEmploymentRepository
      * lže a mzdový běh počítá dvě období tam, kde je jedno.
      *
      * Rozdíl proti {@see addTerms()}:
-     *   - `effective_from` se NEMĚNÍ (bere se uložené, viz volající akce),
+     *   - `effective_from` se nemění, DOKUD o to uživatel výslovně nepožádá
+     *     (`$correctEffectiveFrom`) — viz níže,
      *   - řádek podmínek se přepíše, nevzniká nový,
      *   - událost je `terms_corrected`, ne `terms_changed`,
      *   - NEZAKLÁDÁ se sada povinností: oprava překlepu není změna podmínek,
      *     ze které by plynula nová oznamovací povinnost.
+     *
+     * ## Oprava data účinnosti
+     *
+     * Formulář nové verze nabízí jako výchozí účinnost DNEŠEK. Kdo přidal
+     * verzi dřív, než si vzpomněl, že zvýšení platí od 1. 7., si tím zapsal
+     * špatné datum a neuměl ho vrátit: oprava účinnost MLČKY přepisovala
+     * uloženou hodnotou, nová verze musí začínat později a smazat verzi nejde.
+     * S `$correctEffectiveFrom` se proto datum posunout dá — ale jen tam, kde
+     * to nic nepřepisuje: za konec předchozí verze a mimo období, za které je
+     * mzda zaúčtovaná nebo vyplacená (kontroluje se STARÝ i NOVÝ rozsah).
+     * Předchozí verze se posunu přizpůsobí, aby řada zůstala souvislá.
      *
      * @param TermsInput $data
      * @return array<string,mixed>
@@ -429,6 +441,7 @@ final class PayrollEmploymentRepository
         ?string $userAgent,
         bool $replaceMonthlyGross = false,
         ?int $monthlyGrossMinor = null,
+        bool $correctEffectiveFrom = false,
     ): array {
         return $this->transaction(function () use (
             $supplierId,
@@ -440,6 +453,7 @@ final class PayrollEmploymentRepository
             $userAgent,
             $replaceMonthlyGross,
             $monthlyGrossMinor,
+            $correctEffectiveFrom,
         ): array {
             $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
             $employeeId = (int) $employment['employee_id'];
@@ -470,21 +484,63 @@ final class PayrollEmploymentRepository
             $data['monthly_gross_minor'] = $replaceMonthlyGross
                 ? $monthlyGrossMinor
                 : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor']);
-            // Účinnost je vlastnost opravované verze, ne údaj z požadavku.
-            $data['effective_from'] = (string) $previous['effective_from'];
+            $storedFrom = (string) $previous['effective_from'];
+            $storedTo = $previous['effective_to'] === null
+                ? null
+                : (string) $previous['effective_to'];
+            // Účinnost je vlastnost opravované verze, ne údaj z požadavku —
+            // dokud si uživatel výslovně neřekne, že opravuje právě ji.
+            if (!$correctEffectiveFrom) {
+                $data['effective_from'] = $storedFrom;
+            }
+            $movedFrom = (string) $data['effective_from'];
             $data['tax_declaration_signed'] = $this->taxDeclarationSigned(
                 $supplierId,
                 $employeeId,
-                $data['effective_from'],
+                $movedFrom,
             );
-            $this->assertTermsCorrectable(
-                $supplierId,
-                $employmentId,
-                $data['effective_from'],
-                $previous['effective_to'] === null ? null : (string) $previous['effective_to'],
-            );
+            $this->assertTermsCorrectable($supplierId, $employmentId, $storedFrom, $storedTo);
+            $predecessor = null;
+            if ($movedFrom !== $storedFrom) {
+                // Nový rozsah musí být volný stejně jako ten starý; jinak by
+                // se oprava data protáhla do už vyplaceného měsíce.
+                $this->assertTermsCorrectable($supplierId, $employmentId, $movedFrom, $storedTo);
+                $predecessor = $this->previousTermsForUpdate(
+                    $supplierId,
+                    $employmentId,
+                    (int) $previous['id'],
+                );
+                $this->assertEffectiveFromMovable(
+                    $movedFrom,
+                    $storedTo,
+                    $predecessor,
+                    $employment,
+                );
+            }
 
             $this->updateTerms($supplierId, (int) $previous['id'], $data);
+            if ($movedFrom !== $storedFrom) {
+                // `updateTerms()` účinnost záměrně nepíše — je to vlastnost
+                // verze, ne položka formuláře. Posun je proto vlastní zápis.
+                $this->db->pdo()->prepare(
+                    'UPDATE payroll_employment_terms
+                        SET effective_from = ?
+                      WHERE supplier_id = ? AND id = ?'
+                )->execute([$movedFrom, $supplierId, (int) $previous['id']]);
+            }
+            if ($predecessor !== null) {
+                // Řada podmínek musí zůstat souvislá — posunutá verze si bere
+                // den, který dosud patřil té předchozí.
+                $this->db->pdo()->prepare(
+                    'UPDATE payroll_employment_terms
+                        SET effective_to = ?, row_version = row_version + 1
+                      WHERE supplier_id = ? AND id = ?'
+                )->execute([
+                    (new \DateTimeImmutable($movedFrom))->modify('-1 day')->format('Y-m-d'),
+                    $supplierId,
+                    (int) $predecessor['id'],
+                ]);
+            }
             $update = $this->db->pdo()->prepare(
                 'UPDATE payroll_employments
                     SET office_id = ?, is_primary = ?, start_date = ?,
@@ -855,11 +911,22 @@ final class PayrollEmploymentRepository
             $this->lifecycle->assertTransition($from, $target);
             $this->assertTransitionDate($employment, $target, $effectiveOn);
 
+            // Návrat z omylem zapsaného ukončení. Datum konce musí zmizet —
+            // jinak by vztah byl „aktivní do včerejška", což nedává smysl ani
+            // mzdovému běhu, ani hlášení.
+            $reopening = $from === 'ended' && $target === 'active';
+            if ($reopening) {
+                $this->assertReopenable($supplierId, $employmentId);
+            }
+
             $assignments = ['status = ?', 'row_version = row_version + 1'];
             $values = [$target];
             if ($target === 'active' && $employment['actual_start_date'] === null) {
                 $assignments[] = 'actual_start_date = ?';
                 $values[] = $effectiveOn;
+            }
+            if ($reopening) {
+                $assignments[] = 'end_date = NULL';
             }
             // Návrat z archivu je ÚKLID, ne nové ukončení: datum konce už platí
             // a přepsat ho dnešním dnem by z opravy omylu udělalo změnu historie.
@@ -1546,6 +1613,75 @@ final class PayrollEmploymentRepository
     }
 
     /** @return array<string,string|int|bool|null>|null */
+    /**
+     * Verze podmínek TĚSNĚ PŘED danou — protějšek posunuté účinnosti.
+     *
+     * @return array<string,string|int|bool|null>|null
+     */
+    private function previousTermsForUpdate(
+        int $supplierId,
+        int $employmentId,
+        int $currentTermsId,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ? AND id <> ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $employmentId, $currentTermsId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : $this->cast($this->row($row));
+    }
+
+    /**
+     * Kam až smí posunutá účinnost.
+     *
+     * Věty musí říct, čím je posun omezený — „nepovedlo se" by uživatele
+     * poslalo hádat mezi třemi různými důvody.
+     *
+     * @param array<string,string|int|bool|null>|null $predecessor
+     * @param array<string,string|int|bool|null> $employment
+     */
+    private function assertEffectiveFromMovable(
+        string $movedFrom,
+        ?string $storedTo,
+        ?array $predecessor,
+        array $employment,
+    ): void {
+        if ($storedTo !== null && $movedFrom > $storedTo) {
+            throw new \DomainException(sprintf(
+                'Účinnost nelze posunout za konec této verze (%s).',
+                $storedTo,
+            ));
+        }
+        if ($predecessor !== null) {
+            $predecessorFrom = (string) $predecessor['effective_from'];
+            if ($movedFrom <= $predecessorFrom) {
+                throw new \DomainException(sprintf(
+                    'Účinnost musí zůstat pozdější než předchozí verze podmínek'
+                    . ' (od %s). Opravte nejdřív ji, nebo verzi ponechte a novou'
+                    . ' skutečnost zapište od data, kdy začíná platit.',
+                    $predecessorFrom,
+                ));
+            }
+
+            return;
+        }
+        // Bez předchozí verze je hranicí nástup: podmínky nemůžou platit dřív,
+        // než vztah vůbec vznikl.
+        $start = $employment['actual_start_date'] ?? $employment['start_date'] ?? null;
+        if (is_string($start) && $start !== '' && $movedFrom < $start) {
+            throw new \DomainException(sprintf(
+                'První verze podmínek nemůže začít před nástupem (%s).',
+                $start,
+            ));
+        }
+    }
+
     private function latestTermsForUpdate(int $supplierId, int $employmentId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -1866,6 +2002,32 @@ final class PayrollEmploymentRepository
             throw new \DomainException(
                 'Nejdřív doplňte datum nástupu v podmínkách vztahu, teprve pak jde '
                 . 'položku odškrtnout.',
+            );
+        }
+    }
+
+    /**
+     * Vrátit ukončení jde, dokud z něj nevyšel doklad ven.
+     *
+     * Výstupní doklad (zápočtový list, potvrzení o zdanitelných příjmech) je
+     * neměnný a odešel zaměstnanci; jeho revize se navíc váže PŘESNĚ na datum
+     * konce, takže by vztah bez data konce nechala viset. Zbytek — hlášení,
+     * mzdy za odpracované období — návratu nepřekáží: ta období se nemění.
+     */
+    private function assertReopenable(int $supplierId, int $employmentId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_employment_exit_revisions
+              WHERE supplier_id = ? AND employment_id = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        if ($stmt->fetchColumn() !== false) {
+            throw new \DomainException(
+                'K tomuhle vztahu je už vydaný výstupní doklad, takže ukončení'
+                . ' nejde vzít zpět. Pokud osoba pokračuje, založte jí nový'
+                . ' pracovní vztah od data, kdy znovu nastoupila.',
             );
         }
     }

@@ -107,6 +107,15 @@ final class PayrollJmhzIdentityAction
                     'evidence_confirmed',
                 ),
                 $actor,
+                /*
+                 * Oprava překlepu v opsaném čísle. Bez ní se chybně zadané
+                 * OIČ / ID PPV nedalo z aplikace nijak spravit a táhlo se
+                 * do každého dalšího hlášení.
+                 */
+                $this->optionalBoolean(
+                    $body['replace_existing'] ?? null,
+                    'replace_existing',
+                ),
             );
         } catch (\OutOfBoundsException $exception) {
             return $this->error($response, 'not_found', $exception, 404);
@@ -216,6 +225,18 @@ final class PayrollJmhzIdentityAction
 
     private function requiredBoolean(mixed $value, string $field): bool
     {
+        if (!is_bool($value)) {
+            throw new \InvalidArgumentException("{$field} musí být ano/ne.");
+        }
+
+        return $value;
+    }
+
+    private function optionalBoolean(mixed $value, string $field): bool
+    {
+        if ($value === null) {
+            return false;
+        }
         if (!is_bool($value)) {
             throw new \InvalidArgumentException("{$field} musí být ano/ne.");
         }

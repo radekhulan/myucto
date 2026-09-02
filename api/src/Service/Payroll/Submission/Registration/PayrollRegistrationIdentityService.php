@@ -1158,6 +1158,7 @@ final readonly class PayrollRegistrationIdentityService
         ?string $sourceReference,
         bool $evidenceConfirmed,
         ?int $createdBy,
+        bool $replaceExisting = false,
     ): array {
         $this->positive($supplierId, 'Firma');
         $this->positive($employmentId, 'Pracovní vztah');
@@ -1206,6 +1207,7 @@ final readonly class PayrollRegistrationIdentityService
             $validFrom,
             $reference,
             $createdBy,
+            $replaceExisting,
         ): array {
             $employment = $this->repository->lockEmployment(
                 $supplierId,
@@ -1230,6 +1232,22 @@ final readonly class PayrollRegistrationIdentityService
                     . 'pracovního vztahu. Zadejte den mezi nástupem '
                     . 'a skončením vztahu.',
                 );
+            }
+            if ($replaceExisting) {
+                if ($personIdentifier !== null) {
+                    $this->discardManualPersonIdentifier(
+                        $supplierId,
+                        $employment['employee_id'],
+                        $environment,
+                    );
+                }
+                if ($employmentIdentifier !== null) {
+                    $this->discardManualEmploymentIdentifier(
+                        $supplierId,
+                        $employmentId,
+                        $environment,
+                    );
+                }
             }
 
             return [
@@ -1261,6 +1279,94 @@ final readonly class PayrollRegistrationIdentityService
                     ),
             ];
         });
+    }
+
+    /**
+     * Zahodí ručně opsané OIČ / IK MPSV, aby šlo přepsat správnou hodnotou.
+     *
+     * Opis dvou čísel z protokolu ČSSZ je ruční práce a překlep v něm dřív
+     * neměl cestu ven: nová hodnota narazila na „v evidenci je jiná hodnota"
+     * a stávající řádek nešel ani upravit, ani zrušit. Protože je navíc
+     * hodnota unikátní v celé firmě, blokoval překlep i zadání téhož čísla
+     * u správné osoby.
+     *
+     * Zahodit jde jen ruční zápis a jen dokud na něm nevisí rozpracované
+     * ztotožnění. Číslo převzaté z protokolu ČSSZ je doklad o tom, co úřad
+     * přidělil, a nemaže se; odeslaná podání mají vlastní zmrazené kopie.
+     */
+    private function discardManualPersonIdentifier(
+        int $supplierId,
+        int $employeeId,
+        string $environment,
+    ): void {
+        $existing = $this->repository->activePersonExternalId(
+            $supplierId,
+            $employeeId,
+            $environment,
+            'ik_mpsv',
+        );
+        if ($existing === null) {
+            return;
+        }
+        if ($existing['source_kind'] !== 'verified_manual_import') {
+            throw new \DomainException(self::fieldNote(
+                'person_external_identifier',
+                'převzal systém z protokolu ČSSZ, takže se nepřepisuje ručně. '
+                . 'Nové číslo doložte novým protokolem od ČSSZ.',
+            ));
+        }
+        $this->repository->discardManualPersonExternalId(
+            $supplierId,
+            $existing['id'],
+        );
+    }
+
+    /** @see discardManualPersonIdentifier */
+    private function discardManualEmploymentIdentifier(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+    ): void {
+        $existing = $this->repository->activeExternalId(
+            $supplierId,
+            $employmentId,
+            $environment,
+            'id_ppv',
+        );
+        if ($existing === null) {
+            return;
+        }
+        if ($existing['source_kind'] !== 'verified_manual_import') {
+            throw new \DomainException(self::fieldNote(
+                'employment_external_identifier',
+                'převzal systém z protokolu ČSSZ, takže se nepřepisuje ručně. '
+                . 'Nové číslo doložte novým protokolem od ČSSZ.',
+            ));
+        }
+        /*
+         * Na řádek může ukazovat úloha ztotožnění (FK RESTRICT), a tu z aplikace
+         * zavřít nejde. Smazání by skončilo neošetřenou chybou databáze, takže
+         * v tom případě řádek jen ukončíme dnem před novou platností — cesta
+         * ven zůstane otevřená, jen se historie nezahazuje.
+         */
+        if ($this->repository->externalIdHasResolutionTask(
+            $supplierId,
+            $existing['id'],
+        )) {
+            $this->repository->closeExternalId(
+                $supplierId,
+                $existing['id'],
+                $existing['row_version'],
+                $existing['valid_from'],
+                null,
+            );
+
+            return;
+        }
+        $this->repository->discardManualExternalId(
+            $supplierId,
+            $existing['id'],
+        );
     }
 
     /**

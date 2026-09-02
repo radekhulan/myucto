@@ -132,23 +132,13 @@ final class PayrollAbsenceRepository
                 (string) $data['date_to'],
             );
             $this->lockEmployment($supplierId, (int) $data['employment_id']);
-            $overlap = $pdo->prepare(
-                "SELECT id
-                   FROM payroll_absences
-                  WHERE supplier_id = ? AND employment_id = ?
-                    AND status IN ('requested','approved')
-                    AND date_from <= ? AND date_to >= ?
-                  LIMIT 1 FOR UPDATE"
-            );
-            $overlap->execute([
+            $this->assertNoOverlap(
                 $supplierId,
-                $data['employment_id'],
-                $data['date_to'],
-                $data['date_from'],
-            ]);
-            if ($overlap->fetchColumn() !== false) {
-                throw new PayrollAbsenceOverlapException();
-            }
+                (int) $data['employment_id'],
+                (string) $data['date_from'],
+                (string) $data['date_to'],
+                null,
+            );
 
             if ($data['average_snapshot_id'] !== null) {
                 $this->assertApprovedAverage(
@@ -223,11 +213,31 @@ final class PayrollAbsenceRepository
                     (string) $absence['date_to'],
                 );
             }
+            /*
+             * Zamítnutí je vratné. Zamítnutá absence nic nematerializovala —
+             * nemá mzdový vstup, nečerpá dovolenou, neblokuje ani překryv —
+             * takže překliknuté „Zamítnout“ nesmí být konec. Jediné, co je
+             * potřeba ohlídat, je překryv: mezitím mohla vzniknout náhradní
+             * absence na stejné dny.
+             */
+            if ($absence !== null
+                && $decision === 'approved'
+                && ($absence['status'] ?? null) === 'rejected'
+            ) {
+                $this->assertNoOverlap(
+                    $supplierId,
+                    (int) $absence['employment_id'],
+                    (string) $absence['date_from'],
+                    (string) $absence['date_to'],
+                    $id,
+                );
+            }
             $stmt = $pdo->prepare(
                 "UPDATE payroll_absences
                     SET status = ?, decided_by = ?, decided_at = NOW(),
                         row_version = row_version + 1
-                  WHERE supplier_id = ? AND id = ? AND row_version = ? AND status = 'requested'"
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?
+                    AND status IN ('requested', 'rejected')"
             );
             $stmt->execute([$decision, $userId, $supplierId, $id, $expectedVersion]);
             if ($stmt->rowCount() !== 1) {
@@ -559,6 +569,48 @@ final class PayrollAbsenceRepository
         }
     }
 
+    /**
+     * Překryv nepřítomností s KONKRÉTNÍM viníkem.
+     *
+     * Hláška „ve zvoleném období už existuje překrývající se absence“ účetní
+     * neřekla která — musela seznam projít očima a u pěti set lidí to je
+     * hledání jehly. Kolizní záznam se proto pojmenuje včetně dat a stavu,
+     * protože cesta ven (zrušit ten druhý, nebo zúžit rozsah) se odvíjí
+     * právě od nich.
+     */
+    private function assertNoOverlap(
+        int $supplierId,
+        int $employmentId,
+        string $dateFrom,
+        string $dateTo,
+        ?int $excludeId,
+    ): void {
+        $sql = "SELECT id, absence_type, date_from, date_to, status
+                   FROM payroll_absences
+                  WHERE supplier_id = ? AND employment_id = ?
+                    AND status IN ('requested','approved')
+                    AND date_from <= ? AND date_to >= ?";
+        $params = [$supplierId, $employmentId, $dateTo, $dateFrom];
+        if ($excludeId !== null) {
+            $sql .= ' AND id <> ?';
+            $params[] = $excludeId;
+        }
+        $stmt = $this->db->pdo()->prepare($sql . ' ORDER BY date_from LIMIT 1 FOR UPDATE');
+        $stmt->execute($params);
+        $conflict = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($conflict)) {
+            return;
+        }
+
+        throw new PayrollAbsenceOverlapException(
+            (int) $conflict['id'],
+            (string) $conflict['absence_type'],
+            (string) $conflict['date_from'],
+            (string) $conflict['date_to'],
+            (string) $conflict['status'],
+        );
+    }
+
     private function lockEmployment(int $supplierId, int $employmentId): void
     {
         $stmt = $this->db->pdo()->prepare(
@@ -573,17 +625,27 @@ final class PayrollAbsenceRepository
     private function throwConflictOrInvalid(int $supplierId, int $id, int $expectedVersion): never
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT row_version FROM payroll_absences WHERE supplier_id = ? AND id = ?'
+            'SELECT row_version, status FROM payroll_absences WHERE supplier_id = ? AND id = ?'
         );
         $stmt->execute([$supplierId, $id]);
-        $current = $stmt->fetchColumn();
-        if ($current === false) {
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
             throw new \InvalidArgumentException('Absence nebyla nalezena.');
         }
-        if ((int) $current !== $expectedVersion) {
-            throw new PayrollAbsenceConflictException((int) $current);
+        if ((int) $row['row_version'] !== $expectedVersion) {
+            throw new PayrollAbsenceConflictException((int) $row['row_version']);
         }
-        throw new \InvalidArgumentException('Absenci v tomto stavu nelze změnit.');
+        // Stav řekni jménem a rovnou i to, co s ním jde dělat — „v tomto stavu
+        // to nelze“ účetní nechávalo hádat, jestli je slepá ulička, nebo ne.
+        throw new \InvalidArgumentException(match ((string) $row['status']) {
+            'cancelled' => 'Tahle nepřítomnost je zrušená. Zrušení se nevrací zpět — '
+                . 'zapište nepřítomnost znovu, období už není blokované.',
+            'approved' => 'Tahle nepřítomnost je už schválená. Chcete-li ji změnit, '
+                . 'nejdřív ji zrušte (čerpání dovolené i mzdový vstup se vrátí) '
+                . 'a zapište ji znovu.',
+            default => 'Nepřítomnost je ve stavu „' . (string) $row['status']
+                . '“ a tenhle krok z něj nevede.',
+        });
     }
 
     /** @param array<string,mixed> $row @return array<string,mixed> */

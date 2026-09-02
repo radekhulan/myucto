@@ -13,8 +13,21 @@ use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
  * až migrace 1272 a rozpadat `full_name` aplikace nesmí. Z formuláře přijde vždy
  * vyplněné; NULL nese verze, u které jméno zatím nikdo nerozdělil.
  *
+ * ## `delete`
+ *
+ * Karta osoby uměla řádky jen PŘIDÁVAT a MĚNIT. Řádek, který uživatel založil
+ * omylem — druhá verze jména s dnešním datem, adresa vyplněná u špatné osoby,
+ * bankovní účet zadaný dvakrát — už nešel odstranit vůbec; formulář dovolil
+ * smazat jen neuložený řádek. Přitom právě omylem přidaný účet rozbije součet
+ * rozdělení výplaty a tím zablokuje uložení CELÉ karty. `delete: true` u řádku
+ * s `id` je proto cesta zpět; co je uzavřené schválenou mzdou, hlídá zápisová
+ * cesta ({@see \MyInvoice\Repository\Payroll\PayrollPersonProfileRepository}).
+ *
+ * Mazaný řádek se dál NEVALIDUJE — jeho obsah stejně zmizí a trvat na tom,
+ * aby byl nejdřív správně vyplněný, je přesně ta past, kterou odstraňujeme.
+ *
  * @phpstan-type IdentityInput array{
- *   id:?int,full_name:string,first_name:?string,last_name:?string,
+ *   id:?int,delete:bool,full_name:string,first_name:?string,last_name:?string,
  *   title_prefix_present:bool,title_prefix:?string,
  *   title_suffix_present:bool,title_suffix:?string,
  *   birth_surname_present:bool,birth_surname:?string,birth_surname_source_id:?int,
@@ -25,10 +38,10 @@ use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
  *   sex_present:bool,sex:?string,
  *   effective_from:string,effective_to:?string
  * }
- * @phpstan-type AddressInput array{id:?int,address_type:string,address_present:bool,street_line:?string,city:?string,postal_code:?string,country_code:?string,effective_from:string,effective_to:?string}
- * @phpstan-type ContactInput array{id:?int,contact_type:string,value:?string,is_primary:bool,is_active:bool}
- * @phpstan-type IdentifierInput array{id:?int,identifier_type:string,value:?string}
- * @phpstan-type AccountInput array{id:?int,label:string,bank_account:?string,allocation_basis_points:int,effective_from:string,effective_to:?string,is_active:bool}
+ * @phpstan-type AddressInput array{id:?int,delete:bool,address_type:string,address_present:bool,street_line:?string,city:?string,postal_code:?string,country_code:?string,effective_from:string,effective_to:?string}
+ * @phpstan-type ContactInput array{id:?int,delete:bool,contact_type:string,value:?string,is_primary:bool,is_active:bool}
+ * @phpstan-type IdentifierInput array{id:?int,delete:bool,identifier_type:string,value:?string}
+ * @phpstan-type AccountInput array{id:?int,delete:bool,label:string,bank_account:?string,allocation_basis_points:int,effective_from:string,effective_to:?string,is_active:bool}
  * @phpstan-type ProfileInput array{
  *   profile_status:string,
  *   payout_method:string,
@@ -76,8 +89,13 @@ final class PayrollPersonProfileValidator
         $identifiers = $this->identifiers($input['identifiers'] ?? []);
         $accounts = $this->accounts($input['accounts'] ?? []);
 
+        // Mazané řádky do překryvu nepatří — v uložené kartě po nich nic
+        // nezůstane, takže by kontrola hlásila konflikt s něčím, co zaniká.
         $identityIntervals = [];
         foreach ($identityHistory as $row) {
+            if ($row['delete']) {
+                continue;
+            }
             $identityIntervals[] = [
                 'group' => 'identity',
                 'effective_from' => $row['effective_from'],
@@ -86,6 +104,9 @@ final class PayrollPersonProfileValidator
         }
         $addressIntervals = [];
         foreach ($addresses as $row) {
+            if ($row['delete']) {
+                continue;
+            }
             $addressIntervals[] = [
                 'group' => $row['address_type'],
                 'effective_from' => $row['effective_from'],
@@ -168,6 +189,10 @@ final class PayrollPersonProfileValidator
         foreach ($rows as $index => $row) {
             $path = "identity_history.{$index}";
             $id = $this->optionalId($row['id'] ?? null, "identity_history.{$index}.id");
+            if ($this->deletion($row, $path, $id)) {
+                $result[] = $this->deletedIdentity((int) $id);
+                continue;
+            }
             $birthSurnamePresent = array_key_exists('birth_surname', $row)
                 && $row['birth_surname'] !== null;
             $birthSurname = $birthSurnamePresent
@@ -203,6 +228,7 @@ final class PayrollPersonProfileValidator
             }
             $result[] = [
                 'id' => $id,
+                'delete' => false,
                 'full_name' => $this->text(
                     $row['full_name'] ?? null,
                     "identity_history.{$index}.full_name",
@@ -271,14 +297,76 @@ final class PayrollPersonProfileValidator
                 ),
             ];
             $this->assertInterval($result[array_key_last($result)], "identity_history.{$index}");
-            if ($result[array_key_last($result)]['effective_from'] > date('Y-m-d')) {
-                throw new \InvalidArgumentException(
-                    "identity_history.{$index}.effective_from nesmí být v budoucnosti."
-                );
-            }
+            /*
+             * Účinnost SMÍ být v budoucnu.
+             *
+             * Zákaz tu byl kvůli tomu, aby „aktuální" verze zůstala ta dnešní —
+             * jenže to zařizuje čtecí cesta (`effectiveName()` a
+             * `synchronizeCurrentLegacyIdentity()` berou verzi platnou DNES),
+             * takže budoucí řádek nic nerozbije. Zákaz naopak odmítal uložit
+             * skutečnost, kterou uživatel ví dopředu a zákon ji vyžaduje
+             * ohlásit — svatbu k 1. dni příštího měsíce — a nutil ho vracet se
+             * k tomu „až to nastane". Nedodržený slib je horší než budoucí
+             * řádek.
+             */
         }
 
         return $result;
+    }
+
+    /**
+     * Řádek označený ke smazání.
+     *
+     * `delete` bez `id` nedává smysl — neuložený řádek uživatel odstraní
+     * z formuláře. Říká se to větou, ne mlčením: tichý `continue` by vypadal
+     * jako smazání, které proběhlo.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function deletion(array $row, string $path, ?int $id): bool
+    {
+        $delete = $row['delete'] ?? false;
+        if (!is_bool($delete)) {
+            throw new \InvalidArgumentException("{$path}.delete musí být boolean.");
+        }
+        if ($delete && $id === null) {
+            throw new \InvalidArgumentException(
+                "{$path}: smazat jde jen uložený záznam, nový stačí odebrat z formuláře."
+            );
+        }
+
+        return $delete;
+    }
+
+    /** @return IdentityInput */
+    private function deletedIdentity(int $id): array
+    {
+        return [
+            'id' => $id,
+            'delete' => true,
+            'full_name' => '-',
+            'first_name' => null,
+            'last_name' => null,
+            'title_prefix_present' => false,
+            'title_prefix' => null,
+            'title_suffix_present' => false,
+            'title_suffix' => null,
+            'birth_surname_present' => false,
+            'birth_surname' => null,
+            'birth_surname_source_id' => null,
+            'birth_date_present' => false,
+            'birth_date' => null,
+            'birth_place_present' => false,
+            'birth_place' => null,
+            'birth_country_code_present' => false,
+            'birth_country_code' => null,
+            'citizenship_country_code_present' => false,
+            'citizenship_country_code' => null,
+            'sex_present' => false,
+            'sex' => null,
+            'effective_from' => '1970-01-01',
+            'effective_to' => null,
+        ];
     }
 
     /** @return list<AddressInput> */
@@ -288,6 +376,21 @@ final class PayrollPersonProfileValidator
         $result = [];
         foreach ($rows as $index => $row) {
             $id = $this->optionalId($row['id'] ?? null, "addresses.{$index}.id");
+            if ($this->deletion($row, "addresses.{$index}", $id)) {
+                $result[] = [
+                    'id' => $id,
+                    'delete' => true,
+                    'address_type' => 'residence',
+                    'address_present' => false,
+                    'street_line' => null,
+                    'city' => null,
+                    'postal_code' => null,
+                    'country_code' => null,
+                    'effective_from' => '1970-01-01',
+                    'effective_to' => null,
+                ];
+                continue;
+            }
             $addressKeys = ['street_line', 'city', 'postal_code', 'country_code'];
             $presentCount = count(array_filter(
                 $addressKeys,
@@ -321,6 +424,7 @@ final class PayrollPersonProfileValidator
             }
             $result[] = [
                 'id' => $id,
+                'delete' => false,
                 'address_type' => $this->enum(
                     $row['address_type'] ?? null,
                     self::ADDRESS_TYPES,
@@ -340,12 +444,9 @@ final class PayrollPersonProfileValidator
                     "addresses.{$index}.effective_to",
                 ),
             ];
+            // Ohlášené stěhování k budoucímu datu je běžný a legitimní zápis;
+            // zákaz budoucí účinnosti ho odmítal uložit. Viz identityHistory().
             $this->assertInterval($result[array_key_last($result)], "addresses.{$index}");
-            if ($result[array_key_last($result)]['effective_from'] > date('Y-m-d')) {
-                throw new \InvalidArgumentException(
-                    "addresses.{$index}.effective_from nesmí být v budoucnosti."
-                );
-            }
         }
 
         return $result;
@@ -359,6 +460,17 @@ final class PayrollPersonProfileValidator
         $primary = [];
         foreach ($rows as $index => $row) {
             $id = $this->optionalId($row['id'] ?? null, "contacts.{$index}.id");
+            if ($this->deletion($row, "contacts.{$index}", $id)) {
+                $result[] = [
+                    'id' => $id,
+                    'delete' => true,
+                    'contact_type' => 'email',
+                    'value' => null,
+                    'is_primary' => false,
+                    'is_active' => false,
+                ];
+                continue;
+            }
             $type = $this->enum(
                 $row['contact_type'] ?? null,
                 self::CONTACT_TYPES,
@@ -389,6 +501,7 @@ final class PayrollPersonProfileValidator
             }
             $result[] = [
                 'id' => $id,
+                'delete' => false,
                 'contact_type' => $type,
                 'value' => $contactValue,
                 'is_primary' => $isPrimary,
@@ -416,6 +529,10 @@ final class PayrollPersonProfileValidator
             }
             $types[$type] = true;
             $id = $this->optionalId($row['id'] ?? null, "identifiers.{$index}.id");
+            if ($this->deletion($row, "identifiers.{$index}", $id)) {
+                $result[] = ['id' => $id, 'delete' => true, 'identifier_type' => $type, 'value' => null];
+                continue;
+            }
             $plaintext = $this->nullableText(
                 $row['value'] ?? null,
                 "identifiers.{$index}.value",
@@ -429,6 +546,7 @@ final class PayrollPersonProfileValidator
             }
             $result[] = [
                 'id' => $id,
+                'delete' => false,
                 'identifier_type' => $type,
                 'value' => $plaintext,
             ];
@@ -444,6 +562,19 @@ final class PayrollPersonProfileValidator
         $result = [];
         foreach ($rows as $index => $row) {
             $id = $this->optionalId($row['id'] ?? null, "accounts.{$index}.id");
+            if ($this->deletion($row, "accounts.{$index}", $id)) {
+                $result[] = [
+                    'id' => $id,
+                    'delete' => true,
+                    'label' => '-',
+                    'bank_account' => null,
+                    'allocation_basis_points' => 0,
+                    'effective_from' => '1970-01-01',
+                    'effective_to' => null,
+                    'is_active' => false,
+                ];
+                continue;
+            }
             $plaintext = $this->nullableText(
                 $row['bank_account'] ?? null,
                 "accounts.{$index}.bank_account",
@@ -457,6 +588,7 @@ final class PayrollPersonProfileValidator
             }
             $result[] = [
                 'id' => $id,
+                'delete' => false,
                 'label' => $this->text($row['label'] ?? null, "accounts.{$index}.label", 128),
                 'bank_account' => $plaintext,
                 'allocation_basis_points' => $this->integer(
