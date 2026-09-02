@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, markRaw, onMounted, onUnmounted, nextTick } from 'vue'
+import { safeReturnPath } from '@/utils/returnPath'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { clearLoginBounces, loginRedirectLoopDetected } from '@/router'
@@ -147,7 +148,9 @@ onMounted(async () => {
   await auth.refresh()
   if (auth.isAuthenticated) {
     if (await finishDomainLoginIfNeeded()) return
-    router.replace(postLoginTarget(auth.domainContext?.locked ? requestedDomainReturnPath() : '/'))
+    router.replace(postLoginTarget(auth.domainContext?.locked
+      ? requestedDomainReturnPath()
+      : requestedReturnPath('/')))
     return
   }
   if (auth.domainContext?.locked) {
@@ -161,7 +164,9 @@ onMounted(async () => {
   if (demo?.auto_login && demo.email && demo.password && demoLoginCanRun()) {
     try {
       await auth.login(demo.email, demo.password)
-      router.replace('/')
+      // I demo musí doručit na adresu, na kterou člověk klikl — jinak je
+      // odkaz do dema k ničemu právě tam, kde se ukazuje konkrétní obrazovka.
+      router.replace(postLoginTarget(requestedReturnPath('/')))
       return
     } catch {
       error.value = t('auth.demo_login_failed')
@@ -198,6 +203,11 @@ function postLoginTarget(fallback: string): string {
 function requestedDomainReturnPath(): string {
   const candidate = route.query.return_to
   return isClientDomainAuthenticatedPath(candidate) ? candidate : '/portal'
+}
+
+/** Kam se vrátit po přihlášení; kontrolu dělá {@link safeReturnPath}. */
+function requestedReturnPath(fallback: string): string {
+  return safeReturnPath(route.query.return_to, fallback)
 }
 
 function requestedDomainHandoffPath(): string | null {
@@ -255,7 +265,7 @@ async function submit() {
     // Ruční přihlášení uspělo — počítadlo odrazů už nemá co hlídat.
     clearLoginBounces()
     if (await finishDomainLoginIfNeeded()) return
-    router.push(postLoginTarget(auth.isClientRole ? '/portal' : '/'))
+    router.push(postLoginTarget(requestedReturnPath(auth.isClientRole ? '/portal' : '/')))
   } catch (e: any) {
     const code = e?.response?.data?.error?.code
     const msg  = e?.response?.data?.error?.message
@@ -335,7 +345,7 @@ async function loginWithPasskey() {
     await authApi.passkeyLoginVerify(flow.flow_token, credential)
     await auth.refresh()
     if (await finishDomainLoginIfNeeded()) return
-    router.push('/')
+    router.push(postLoginTarget(requestedReturnPath('/')))
   } catch (e: any) {
     const code = e?.response?.data?.error?.code
     if (code === 'captcha_failed') {
@@ -362,7 +372,7 @@ async function verifyPasskey() {
     await authApi.passkeyLoginVerify(flow.flowToken, credential)
     await auth.refresh()
     if (await finishDomainLoginIfNeeded()) return
-    router.push('/')
+    router.push(postLoginTarget(requestedReturnPath('/')))
   } catch (e: any) {
     // Verify endpoint spotřebuje flow už při prvním pokusu. Po browser cancelu
     // jej také zahodíme, protože klient bezpečně nepozná, zda request odešel.
@@ -412,7 +422,7 @@ async function resendCode() {
       resendOtp: true,
     })
     // Úspěch by tu být neměl (kód je vyžadovaný), ale pro jistotu:
-    router.push('/')
+    router.push(postLoginTarget(requestedReturnPath('/')))
   } catch (e: any) {
     const data = e?.response?.data?.error
     if (data?.code === 'email_otp_required') {
