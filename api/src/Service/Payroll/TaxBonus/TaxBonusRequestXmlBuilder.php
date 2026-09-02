@@ -51,10 +51,19 @@ final class TaxBonusRequestXmlBuilder
     public const ZAD_TYP_BEZNA = 'B';
     public const ZAD_TYP_DODATECNA = 'D';
 
+    /** Způsob vrácení podle XSD: na adresu / na účet. */
+    public const VR_ZPUSOB_ADRESA = 'A';
+    public const VR_ZPUSOB_UCET = 'U';
+
     /**
      * @param array<string,mixed> $supplier Řádek dodavatele z
      *        {@see \MyInvoice\Service\Report\EpoSupplierBlockBuilder::loadSupplier()}.
-     * @param array{verze_sw?:string,verze_pis?:string,zad_typ?:string,kc_ponech?:int} $meta
+     * @param array{
+     *   verze_sw?:string,verze_pis?:string,zad_typ?:string,
+     *   kc_ponech?:int,kc_vraceni?:int,kc_prevedeni?:int,
+     *   vr_zpusob?:string,vr_c_komds?:string,vr_pbu?:string,vr_k_bank?:string,
+     *   vr_naz_bank?:string,vr_sp_symb?:string
+     * } $meta
      * @return array{xml:string,warnings:list<string>}
      */
     public function build(array $supplier, TaxBonusClaim $claim, array $meta = []): array
@@ -101,15 +110,35 @@ final class TaxBonusRequestXmlBuilder
         $vetaD->setAttribute('kc_bonus_vl', (string) $claim->ownFundsCzk);
         $vetaD->setAttribute('d_bonus', $claim->bonusDateEpo());
 
-        // Ponechání části částky na úhradu splatných povinností na dani ze závislé
-        // činnosti — volba plátce, ne výpočet. Nejvýš to, o co se žádá.
+        // ── Naložení s částkou z ř. 3 — části a) až d) tiskopisu ────────────
+        // Volba plátce, ne výpočet: EPO má na to NEPROPUSTNOU kontrolu
+        // („Hodnota ř.3 je vyplněna a není vyplněna žádná částka vrácení,
+        // převedení či ponechání"). Bez ní žádost neprojde, takže se tu radši
+        // odmítne s vysvětlením, než aby se odeslala a spadla až na portálu.
+        // Převedení na jinou daň (`VetaS`) tenhle builder zatím nestaví —
+        // vyžaduje i cílovou daň a období, což je vlastní zadání.
         $ponech = (int) ($meta['kc_ponech'] ?? 0);
-        if ($ponech > 0) {
-            if ($ponech > $claim->ownFundsCzk) {
-                throw new \DomainException(
-                    'Ponechaná částka nesmí převýšit částku z ř. 3.',
-                );
+        $vraceni = (int) ($meta['kc_vraceni'] ?? 0);
+        foreach ([['Ponechaná částka', $ponech], ['Vrácená částka', $vraceni]] as [$label, $amount]) {
+            if ($amount < 0) {
+                throw new \DomainException($label . ' nesmí být záporná.');
             }
+        }
+        $disposed = $ponech + $vraceni;
+        if ($disposed === 0) {
+            throw new \DomainException(
+                'U žádosti chybí, jak se má s částkou z ř. 3 naložit. '
+                . 'Zvolte vrácení daňového bonusu nebo jeho ponechání na '
+                . 'úhradu záloh — bez jedné z těchto částek daňový portál '
+                . 'žádost nepřijme.',
+            );
+        }
+        if ($disposed > $claim->ownFundsCzk) {
+            throw new \DomainException(
+                'Součet vrácené a ponechané částky nesmí převýšit částku z ř. 3.',
+            );
+        }
+        if ($ponech > 0) {
             $vetaD->setAttribute('kc_ponech', (string) $ponech);
         }
         $root->appendChild($vetaD);
@@ -121,6 +150,48 @@ final class TaxBonusRequestXmlBuilder
         $vetaP = $dom->createElement('VetaP');
         EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, false);
         $root->appendChild($vetaP);
+
+        // ── VetaV — vrácení bonusu (část a) tiskopisu) ───────────────────────
+        // Pořadí prvků je dané schématem: VetaD, VetaP, teprve pak VetaV.
+        if ($vraceni > 0) {
+            $zpusob = strtoupper(trim((string) ($meta['vr_zpusob'] ?? self::VR_ZPUSOB_UCET)));
+            if (!in_array($zpusob, [self::VR_ZPUSOB_ADRESA, self::VR_ZPUSOB_UCET], true)) {
+                throw new \DomainException(
+                    'Způsob vrácení daňového bonusu musí být na účet nebo na adresu.',
+                );
+            }
+            $vetaV = $dom->createElement('VetaV');
+            $vetaV->setAttribute('kc_vraceni', (string) $vraceni);
+            $vetaV->setAttribute('vr_zpusob', $zpusob);
+            if ($zpusob === self::VR_ZPUSOB_UCET) {
+                // `vr_c_komds` je číslo účtu, `vr_pbu` jeho PŘEDČÍSLÍ (nejvýš
+                // 6 číslic) — schéma je má oddělené a záměna jednoho za druhé
+                // padne až na XSD.
+                $account = trim((string) ($meta['vr_c_komds'] ?? ''));
+                $bankCode = trim((string) ($meta['vr_k_bank'] ?? ''));
+                if ($account === '' || $bankCode === '') {
+                    throw new \DomainException(
+                        'Vrácení daňového bonusu na účet vyžaduje číslo účtu '
+                        . 'i kód banky.',
+                    );
+                }
+                $vetaV->setAttribute('vr_c_komds', $account);
+                $vetaV->setAttribute('vr_k_bank', $bankCode);
+                $prefix = trim((string) ($meta['vr_pbu'] ?? ''));
+                if ($prefix !== '') {
+                    $vetaV->setAttribute('vr_pbu', $prefix);
+                }
+                $bankName = trim((string) ($meta['vr_naz_bank'] ?? ''));
+                if ($bankName !== '') {
+                    $vetaV->setAttribute('vr_naz_bank', $bankName);
+                }
+                $specific = trim((string) ($meta['vr_sp_symb'] ?? ''));
+                if ($specific !== '') {
+                    $vetaV->setAttribute('vr_sp_symb', $specific);
+                }
+            }
+            $root->appendChild($vetaV);
+        }
 
         return [
             'xml' => (string) $dom->saveXML(),

@@ -15,6 +15,13 @@ use PHPUnit\Framework\TestCase;
  */
 final class TaxBonusRequestXmlBuilderTest extends TestCase
 {
+    /**
+     * Naložení s částkou z ř. 3 je u obou tiskopisů povinné (EPO na to má
+     * nepropustnou kontrolu), takže ho potřebuje i každý test, který ověřuje
+     * jen tvar dokumentu.
+     */
+    private const DISPOSITION = ['kc_ponech' => 100];
+
     /** @return array<string,mixed> */
     private function supplier(): array
     {
@@ -53,7 +60,7 @@ final class TaxBonusRequestXmlBuilderTest extends TestCase
 
     public function testMonthlyRequestStructure(): void
     {
-        $xml = (new TaxBonusRequestXmlBuilder())->build($this->supplier(), $this->monthlyClaim())['xml'];
+        $xml = (new TaxBonusRequestXmlBuilder())->build($this->supplier(), $this->monthlyClaim(), self::DISPOSITION)['xml'];
 
         self::assertStringContainsString('<Pisemnost', $xml);
         self::assertStringContainsString('<DPZMB1', $xml);
@@ -81,7 +88,7 @@ final class TaxBonusRequestXmlBuilderTest extends TestCase
 
     public function testAnnualRequestUsesTaxPeriodInsteadOfMonth(): void
     {
-        $xml = (new TaxBonusRequestXmlBuilder())->build($this->supplier(), $this->annualClaim())['xml'];
+        $xml = (new TaxBonusRequestXmlBuilder())->build($this->supplier(), $this->annualClaim(), self::DISPOSITION)['xml'];
 
         self::assertStringContainsString('<DPZDB1', $xml);
         self::assertStringContainsString('dokument="DB1"', $xml);
@@ -108,7 +115,7 @@ final class TaxBonusRequestXmlBuilderTest extends TestCase
         $supplier['opr_jmeno'] = '';
         $supplier['opr_prijmeni'] = '';
 
-        $xml = (new TaxBonusRequestXmlBuilder())->build($supplier, $this->monthlyClaim())['xml'];
+        $xml = (new TaxBonusRequestXmlBuilder())->build($supplier, $this->monthlyClaim(), self::DISPOSITION)['xml'];
 
         self::assertStringContainsString('typ_ds="F"', $xml);
         self::assertStringContainsString('jmeno="Josef"', $xml);
@@ -121,7 +128,7 @@ final class TaxBonusRequestXmlBuilderTest extends TestCase
         $supplier = $this->supplier();
         $supplier['financial_office_code'] = '';
 
-        $result = (new TaxBonusRequestXmlBuilder())->build($supplier, $this->monthlyClaim());
+        $result = (new TaxBonusRequestXmlBuilder())->build($supplier, $this->monthlyClaim(), self::DISPOSITION);
 
         self::assertNotEmpty($result['warnings']);
         self::assertStringContainsString('c_ufo_cil="451"', $result['xml']);
@@ -149,9 +156,77 @@ final class TaxBonusRequestXmlBuilderTest extends TestCase
         $this->assertXsdPasses(TaxBonusClaim::FORM_MONTHLY, $result['xml']);
     }
 
+    /**
+     * Žádost bez naložení s částkou z ř. 3 daňový portál odmítne nepropustnou
+     * kontrolou („Hodnota ř.3 je vyplněna a není vyplněna žádná částka vrácení,
+     * převedení či ponechání"). Dřív se takové XML postavilo a spadlo až na
+     * portálu; teď se odmítne rovnou a s vysvětlením.
+     */
+    public function testRequestWithoutAnyDispositionIsRefused(): void
+    {
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessageMatches('/jak se má s částkou z ř\. 3 naložit/u');
+
+        (new TaxBonusRequestXmlBuilder())->build(
+            $this->supplier(),
+            $this->monthlyClaim(),
+        );
+    }
+
+    public function testRefundToAccountEmitsVetaVAndPassesXsd(): void
+    {
+        $result = (new TaxBonusRequestXmlBuilder())->build(
+            $this->supplier(),
+            $this->monthlyClaim(),
+            [
+                'kc_vraceni' => 3_800,
+                'vr_zpusob' => TaxBonusRequestXmlBuilder::VR_ZPUSOB_UCET,
+                'vr_c_komds' => '100000008',
+                'vr_k_bank' => '0800',
+                'vr_naz_bank' => 'Testovací banka',
+            ],
+        );
+
+        self::assertStringContainsString('<VetaV', $result['xml']);
+        self::assertStringContainsString('kc_vraceni="3800"', $result['xml']);
+        self::assertStringContainsString('vr_zpusob="U"', $result['xml']);
+        // Číslo účtu patří do `vr_c_komds`; `vr_pbu` je jen předčíslí a má
+        // v XSD nejvýš 6 číslic, takže záměna padne až na schématu.
+        self::assertStringContainsString('vr_c_komds="100000008"', $result['xml']);
+        self::assertStringNotContainsString('vr_pbu=', $result['xml']);
+        $this->assertXsdPasses(TaxBonusClaim::FORM_MONTHLY, $result['xml']);
+    }
+
+    public function testRefundToAccountWithoutBankDetailsIsRefused(): void
+    {
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessageMatches('/číslo účtu/u');
+
+        (new TaxBonusRequestXmlBuilder())->build(
+            $this->supplier(),
+            $this->monthlyClaim(),
+            ['kc_vraceni' => 3_800, 'vr_zpusob' => TaxBonusRequestXmlBuilder::VR_ZPUSOB_UCET],
+        );
+    }
+
+    public function testDispositionsTogetherCannotExceedTheClaimedAmount(): void
+    {
+        $this->expectException(\DomainException::class);
+
+        (new TaxBonusRequestXmlBuilder())->build(
+            $this->supplier(),
+            $this->monthlyClaim(),
+            [
+                'kc_ponech' => 1_000,
+                'kc_vraceni' => 3_000,
+                'vr_zpusob' => TaxBonusRequestXmlBuilder::VR_ZPUSOB_ADRESA,
+            ],
+        );
+    }
+
     private function assertPassesXsd(string $formCode, TaxBonusClaim $claim): void
     {
-        $result = (new TaxBonusRequestXmlBuilder())->build($this->supplier(), $claim);
+        $result = (new TaxBonusRequestXmlBuilder())->build($this->supplier(), $claim, self::DISPOSITION);
         $this->assertXsdPasses($formCode, $result['xml']);
     }
 

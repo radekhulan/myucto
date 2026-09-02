@@ -106,6 +106,18 @@ final class TaxBonusRequestAction
         if (isset($query['kc_ponech']) && $query['kc_ponech'] !== '') {
             $meta['kc_ponech'] = (int) $query['kc_ponech'];
         }
+        // Vrácení bonusu (část a) tiskopisu). Bez některé z částek naložení
+        // s ř. 3 daňový portál žádost nepřijme — builder to odmítne s vysvětlením
+        // a odpověď se sem vrátí jako 422, ne jako rozbité XML.
+        if (isset($query['kc_vraceni']) && $query['kc_vraceni'] !== '') {
+            $meta['kc_vraceni'] = (int) $query['kc_vraceni'];
+        }
+        foreach (['vr_zpusob', 'vr_c_komds', 'vr_pbu', 'vr_k_bank', 'vr_naz_bank', 'vr_sp_symb'] as $key) {
+            $value = trim((string) ($query[$key] ?? ''));
+            if ($value !== '') {
+                $meta[$key] = $value;
+            }
+        }
 
         try {
             $result = $this->service->build($supplierId, $year, $month, $formCode, $meta);

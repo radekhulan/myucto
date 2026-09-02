@@ -53,6 +53,41 @@ XML;
         self::assertSame('dic', $result['messages'][1]['field']);
     }
 
+    /**
+     * Nepropustná chyba (`Typ="N"`) podání zastaví — ostrý EPO ho s ní
+     * nepřijme. Dřív se propadala mezi propustné a zkušební běh hlásil
+     * „prošlo" u výkazu, který ve skutečnosti projít nemůže; to je horší než
+     * chyba, protože brána svítí zeleně.
+     */
+    public function testBlocksImpassableTestErrors(): void
+    {
+        $xml = <<<'XML'
+<Chyby>
+  <Chyba Typ="N" Zkr="KONTROLA" Radek="13"><Text>Jedná se o dodatečné VDA, na ř. 13 Části I. hodnota Sl.10 musí být &lt;&gt; 0.</Text></Chyba>
+  <Chyba Typ="P" Zkr="WARN"><Text>Číslo územního pracoviště není vyplněno.</Text></Chyba>
+  <Chyba Typ="I" Zkr="TEST_REZIM"><Text>Testovací režim.</Text></Chyba>
+</Chyby>
+XML;
+
+        $result = (new EpoDirectResponseParser())->testResult($xml);
+
+        self::assertFalse($result['passed']);
+        self::assertSame('13', $result['messages'][0]['line']);
+    }
+
+    /** Propustná chyba sama o sobě podání nebrání — zůstává „prošlo". */
+    public function testPassableErrorsAloneDoNotBlock(): void
+    {
+        $xml = <<<'XML'
+<Chyby>
+  <Chyba Typ="P" Zkr="WARN"><Text>Zadané datum není pracovní den.</Text></Chyba>
+  <Chyba Typ="I" Zkr="TEST_REZIM"><Text>Testovací režim.</Text></Chyba>
+</Chyby>
+XML;
+
+        self::assertTrue((new EpoDirectResponseParser())->testResult($xml)['passed']);
+    }
+
     public function testRecognizesOfflineReceiptWithoutExposingItAsError(): void
     {
         $result = (new EpoDirectResponseParser())->submitEnvelope(
