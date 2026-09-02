@@ -638,6 +638,163 @@ describe('TimeAttendance', () => {
   })
 
   /**
+   * Měsíc s dovolenou i nemocí se dřív otevíral prázdný a účetní osm čísel
+   * opisovala ručně z evidence, kterou aplikace už má; když je nechala prázdná
+   * a měsíc schválila jako bezabsenční, shodilo to hlášení celé firmy. Server
+   * je teď dopočítá a dialog je předvyplní — potvrdit je musí pořád člověk.
+   */
+  it('prefills the conditional JMHZ blocks from the absence suggestion', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 32, full_name: 'Osoba s dovolenou', code: 'ZAM-43' },
+        month: { status: 'open', row_version: 4 },
+        calendar: null,
+        summary: {
+          fund_minutes: 10_560,
+          planned_minutes: 10_080,
+          actual_minutes: 7_680,
+          difference_minutes: -2_400,
+          category_minutes: {},
+          incomplete: false,
+        },
+        jmhz_work_summary: {
+          preview: {
+            derivation_version: 'jmhz-work-month.v2',
+            source_snapshot_sha256: 'b'.repeat(64),
+            suggestions: {
+              standard_fund_hours: '168',
+              agreed_fund_hours: '176',
+              weekly_work_hours: '40.00',
+              evidence_days: 30,
+              worked_hours: '128',
+              unworked_hours_occurred: true,
+              work_obstacles_occurred: false,
+              unworked_total_hours: '40',
+              unworked_paid_hours: '40',
+              dpn_without_employer_compensation_hours: null,
+              dpn_with_employer_compensation_hours: null,
+              vacation_hours: '40',
+              care_hours: null,
+              employee_obstacle_paid_hours: null,
+              employer_obstacle_hours: null,
+            },
+            issues: [],
+            requires_unworked_hours_followup: true,
+          },
+          current_revision: null,
+        },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+
+    expect((wrapper.get('[data-test="jmhz-unworked-yes"]').element as HTMLInputElement)
+      .checked).toBe(true)
+    expect((wrapper.get('[data-test="jmhz-obstacles-no"]').element as HTMLInputElement)
+      .checked).toBe(true)
+    expect((wrapper.get('[data-test="jmhz-unworked-total"]').element as HTMLInputElement)
+      .value).toBe('40')
+    expect((wrapper.get('[data-test="jmhz-unworked-paid"]').element as HTMLInputElement)
+      .value).toBe('40')
+    expect((wrapper.get('[data-test="jmhz-vacation"]').element as HTMLInputElement)
+      .value).toBe('40')
+    expect((wrapper.get('[data-test="jmhz-dpn-with-compensation"]').element as HTMLInputElement)
+      .value).toBe('')
+
+    // Předvyplněno ano, odesláno ne — potvrzení zůstává na člověku.
+    expect(m.approveTimeMonth).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth).toHaveBeenCalledWith(expect.any(String),
+      expect.objectContaining({
+        employment_id: 32,
+        jmhz_work_summary: expect.objectContaining({
+          unworked_hours_occurred: true,
+          work_obstacles_occurred: false,
+          unworked_total_hours: '40',
+          unworked_paid_hours: '40',
+          vacation_hours: '40',
+          dpn_with_employer_compensation_hours: null,
+          dpn_without_employer_compensation_hours: null,
+          care_hours: null,
+          employee_obstacle_paid_hours: null,
+          employer_obstacle_hours: null,
+        }),
+      }),
+    )
+  })
+
+  /**
+   * Měsíc s absencí, kterou modul neumí doložit (server nepošle odpověď na
+   * IN07), zůstává nezodpovězený — návrh se nedomýšlí.
+   */
+  it('leaves the interactions unanswered when the suggestion is undecided', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 33, full_name: 'Osoba s neplaceným volnem', code: 'ZAM-44' },
+        month: { status: 'open', row_version: 2 },
+        calendar: null,
+        summary: {
+          fund_minutes: 10_560,
+          planned_minutes: 10_080,
+          actual_minutes: 9_600,
+          difference_minutes: -480,
+          category_minutes: {},
+          incomplete: false,
+        },
+        jmhz_work_summary: {
+          preview: {
+            derivation_version: 'jmhz-work-month.v2',
+            source_snapshot_sha256: 'c'.repeat(64),
+            suggestions: {
+              standard_fund_hours: '168',
+              agreed_fund_hours: '176',
+              weekly_work_hours: '40.00',
+              evidence_days: 30,
+              worked_hours: '160',
+              unworked_hours_occurred: null,
+              work_obstacles_occurred: null,
+              unworked_total_hours: null,
+              unworked_paid_hours: null,
+              dpn_without_employer_compensation_hours: null,
+              dpn_with_employer_compensation_hours: null,
+              vacation_hours: null,
+              care_hours: null,
+              employee_obstacle_paid_hours: null,
+              employer_obstacle_hours: null,
+            },
+            issues: [],
+            requires_unworked_hours_followup: true,
+          },
+          current_revision: null,
+        },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+
+    expect((wrapper.get('[data-test="jmhz-unworked-yes"]').element as HTMLInputElement)
+      .checked).toBe(false)
+    expect((wrapper.get('[data-test="jmhz-unworked-no"]').element as HTMLInputElement)
+      .checked).toBe(false)
+    expect(wrapper.get('[data-test="jmhz-work-summary-form"] button[type="submit"]')
+      .attributes('disabled')).toBeDefined()
+  })
+
+  /**
    * Porušený zákaz práce přesčas nesmí splynout s překročeným limitem: panel se
    * obarvuje jako chyba, u každého nálezu je vidět ustanovení a přibude věta,
    * že bez ruční výjimky běh neschválíte.

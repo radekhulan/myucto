@@ -28,6 +28,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollCalendarFundService $fund,
+        private readonly PayrollJmhzAbsenceHoursDeriver $absenceHours,
     ) {}
 
     /**
@@ -138,7 +139,13 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 'weekly_work_hours' => $employment['weekly_hours'],
                 'evidence_days' => $evidenceDays,
                 'worked_hours' => self::minutesSuggestion($workedMinutes),
-            ],
+            ] + self::conditionalSuggestions($this->absenceHours->derive(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+                $periodEnd->format('Y-m-d'),
+                $absences,
+            )),
             'issues' => array_merge(
                 $employmentIssues,
                 $calendarIssues,
@@ -146,6 +153,74 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 $absenceIssues,
             ),
             'requires_unworked_hours_followup' => $absences !== [],
+        ];
+    }
+
+    /**
+     * Návrh podmíněných bloků 10275–10280 a 10471/10472 z evidovaných absencí.
+     *
+     * Why: bez návrhu musela účetní osm čísel opsat ručně z evidence, kterou
+     * aplikace už má — a když je nechala prázdná a měsíc schválila jako
+     * bezabsenční, shodilo to o krok dál celé měsíční hlášení na
+     * `jmhz_eldp_work_summary_mismatch`. Jedna dovolená tak zablokovala JMHZ
+     * celé firmy.
+     *
+     * Návrh se jen předvyplní; potvrdit ho musí pořád člověk (potvrzení je
+     * `explicit_confirmation` v provenienci). Hodiny počítá
+     * {@see PayrollJmhzAbsenceHoursDeriver} ze stejných publikovaných směn,
+     * ze kterých vznikla náhrada mzdy.
+     *
+     * Nula se navrhuje jako `null`, ne jako „0": kontrola 286 hlášení i
+     * `validateConditionalValues()` berou vyplněnou nulu jako tvrzení, a
+     * ELDP řez s dovolenou vyžaduje ostatní bloky výslovně nevyplněné.
+     *
+     * Metoda je veřejná a statická záměrně: je to čistý převod minut na
+     * desetinné hodiny bez databáze, takže se dá ověřit testem přímo, bez
+     * sestavování celého náhledu měsíce.
+     *
+     * @param array{supported:bool,minutes:array<string,int>,total:int,paid:int} $derived
+     * @return array<string,string|bool|null>
+     */
+    public static function conditionalSuggestions(array $derived): array
+    {
+        $blocks = [
+            'unworked_total_hours' => $derived['total'],
+            'unworked_paid_hours' => $derived['paid'],
+            'dpn_without_employer_compensation_hours' =>
+                $derived['minutes']['dpn_without_employer_compensation'],
+            'dpn_with_employer_compensation_hours' =>
+                $derived['minutes']['dpn_with_employer_compensation'],
+            'vacation_hours' => $derived['minutes']['vacation'],
+            'care_hours' => $derived['minutes']['care'],
+            'employee_obstacle_paid_hours' => $derived['minutes']['employee_obstacle_paid'],
+            'employer_obstacle_hours' => $derived['minutes']['employer_obstacle'],
+        ];
+        $suggestions = [];
+        $expressible = true;
+        foreach ($blocks as $field => $minutes) {
+            $value = $minutes === 0 ? null : self::minutesSuggestion($minutes);
+            $expressible = $expressible && ($minutes === 0 || $value !== null);
+            $suggestions[$field] = $value;
+        }
+        $obstacleMinutes = $derived['minutes']['employee_obstacle_paid']
+            + $derived['minutes']['employer_obstacle'];
+        /*
+         * Nedoložený měsíc zůstává nezodpovězený. `supported = false` znamená
+         * druh absence, který hlášení nemá kam zapsat, nebo ještě neschválenou
+         * absenci; nevyjádřitelná hodnota znamená minuty, které se na přesnou
+         * millihodinu nepřevedou. V obou případech by částečný návrh v součtu
+         * 10275 tiše chyběl, takže se nenavrhuje nic.
+         */
+        if (!$derived['supported'] || !$expressible) {
+            return array_map(static fn (): null => null, $suggestions) + [
+                'unworked_hours_occurred' => null,
+                'work_obstacles_occurred' => null,
+            ];
+        }
+
+        return $suggestions + [
+            'unworked_hours_occurred' => $derived['total'] > 0,
+            'work_obstacles_occurred' => $obstacleMinutes > 0,
         ];
     }
 

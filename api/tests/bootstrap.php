@@ -40,6 +40,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Repository/PayrollEmployeeRepository.php',
     '*/api/src/Repository/PayrollMonthlyRecordRepository.php',
     '*/api/src/Repository/PostingRuleRepository.php',
+    '*/api/src/Repository/Payroll/PayrollAbsenceRepository.php',
     '*/api/src/Repository/Payroll/PayrollDocumentAccessLinkRepository.php',
     '*/api/src/Repository/Payroll/PayrollDocumentRepository.php',
     '*/api/src/Repository/Payroll/PayrollEmployerPolicyRepository.php',
