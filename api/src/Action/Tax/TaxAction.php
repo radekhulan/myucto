@@ -83,8 +83,9 @@ final class TaxAction
             'constants'       => $c,
             'available_years' => $this->availableYears($sid, $currentYear),
             // Příjmy označené „osvobozeno od daně z příjmů" (§4 / přefakturace) — do
-            // výpočtu daně ani pojistného NEvstupují (jsou už vyloučené v annualIncome);
-            // tady jen pro transparentní zobrazení „z toho vyloučeno" v UI.
+            // výpočtu daně ani pojistného NEvstupují (vyloučené jsou v annualIncome,
+            // monthlyIncome i v deníkovém monthlyTaxableIncome); tady jen pro transparentní
+            // zobrazení „z toho vyloučeno" v UI.
             'exempt_income'   => $this->profiles->annualExemptIncome($sid, $year, $isVat),
             'last_month'      => $this->lastMonthEstimate($sid, $flags),
         ];
@@ -131,9 +132,12 @@ final class TaxAction
                 ? ['year' => $prevYear, 'income' => $prevIncome, 'constants' => $this->constants->forYear($prevYear)]
                 : null;
         } else {
-            // Běžící rok → projekce a sledování limitů
+            // Běžící rok → projekce a sledování limitů. Obě větve musí vracet TOTÉŽ:
+            // zdanitelný příjem bez osvobozených (§4) a u plátce DPH bez DPH — kasově
+            // z deníku, jinak z fakturace. Dřív tu deníková větev sčítala i osvobozený
+            // kbelík, a to v brutto (#52).
             $monthly = $flags['accounting_mode'] === 'tax_evidence'
-                ? $this->cashJournal->monthlyIncomeForFlatTax($sid, $year)
+                ? $this->cashJournal->monthlyTaxableIncome($sid, $year)
                 : $this->profiles->monthlyIncome($sid, $year, $isVat);
             [$ytd, $months] = $this->ytd($monthly, $year, $currentYear, (int) date('n'));
             $payload['mode']           = 'forecast';

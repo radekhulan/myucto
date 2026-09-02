@@ -217,9 +217,16 @@ final class CashJournalRepository
                                                    THEN ip.amount * (i.total_without_vat / i.total_with_vat)
                                               ELSE ip.amount END
                                          * {$ipRateBank}, 2)) AS czk_base,
-                               SUM(ROUND(CASE WHEN i.income_tax_exempt = 1
-                                              THEN ip.amount * {$ipRateBank}
-                                              ELSE 0 END, 2)) AS czk_exempt,
+                               -- Osvobozená noha se dělí na základ/DPH STEJNĚ jako zdanitelná
+                               -- vedle ní (#52): u plátce DPH je osvobozený PŘÍJEM částka bez
+                               -- DPH — DPH z takové faktury je průběžná položka státu, ne příjem
+                               -- poplatníka. Zbytek (amount − czk_base − czk_exempt) padne do
+                               -- income_nontax v CashJournalService::bankIncomeAlloc().
+                               SUM(ROUND(CASE WHEN i.income_tax_exempt <> 1 THEN 0
+                                              WHEN {$payerAtIp} = 1 AND i.total_with_vat > 0
+                                                   THEN ip.amount * (i.total_without_vat / i.total_with_vat)
+                                              ELSE ip.amount END
+                                         * {$ipRateBank}, 2)) AS czk_exempt,
                                MIN(ip.invoice_id) AS any_invoice_id
                           FROM invoice_payments ip
                           JOIN invoices i ON i.id = ip.invoice_id AND i.supplier_id = {$sid}
