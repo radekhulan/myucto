@@ -120,7 +120,13 @@ final class TaxStatementCalculatorTest extends TestCase
         ));
     }
 
-    public function testYearWithoutAnyApprovedRunIsRefused(): void
+    /**
+     * Regrese: rok bez jediného schváleného běhu vyhazoval výjimku, takže
+     * nulové vyúčtování — které je řádné podání podle § 38j odst. 4 ZDP —
+     * nešlo sestavit vůbec. Nově se sestaví prázdné a chybějící podklad
+     * se pojmenuje ve varování.
+     */
+    public function testYearWithoutAnyApprovedRunIsBuiltAsNilStatement(): void
     {
         $overrides = [];
         for ($month = 1; $month <= 12; $month++) {
@@ -130,8 +136,19 @@ final class TaxStatementCalculatorTest extends TestCase
             ];
         }
 
-        $this->expectException(\DomainException::class);
-        (new TaxStatementCalculator())->dependentActivity($this->basis($overrides));
+        $calculator = new TaxStatementCalculator();
+        $dependent = $calculator->dependentActivity($this->basis($overrides));
+        $withholding = $calculator->withholdingTax($this->basis($overrides));
+
+        self::assertSame([], $dependent->months);
+        self::assertSame([], $withholding->months);
+        foreach ([$dependent->warnings, $withholding->warnings] as $warnings) {
+            self::assertNotEmpty(array_filter(
+                $warnings,
+                static fn (string $warning): bool
+                    => str_contains($warning, 'sestavené jako nulové'),
+            ));
+        }
     }
 
     public function testNonResidentsProduceAnAnnexWarningInsteadOfAHalfFilledAnnex(): void

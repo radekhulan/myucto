@@ -113,6 +113,28 @@ describe('JmhzEmployerAnnualEvidenceSettings', () => {
     ])
   })
 
+  /**
+   * Regrese: souhrn chybějících polí byl jen výčet vět. Účetní věděla CO
+   * chybí, ne KDE se to vyplňuje — a roční evidence se vyplňuje jednou za
+   * rok, takže formulář nikdo nezná zpaměti. Položka proto vede na pole.
+   */
+  it('z chybějícího pole vede proklik rovnou do toho pole', async () => {
+    const wrapper = mount(JmhzEmployerAnnualEvidenceSettings, {
+      props: { canWrite: true },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="jmhz-employer-annual-save"]').trigger('click')
+    await flushPromises()
+
+    const field = wrapper.get('[data-test="jmhz-annual-ownership"]').element as HTMLSelectElement
+    field.scrollIntoView = vi.fn()
+
+    await wrapper.get('[data-test="jmhz-annual-validation-link-ownership"]').trigger('click')
+
+    expect(field.scrollIntoView).toHaveBeenCalled()
+    expect(field.classList.contains('ring-2')).toBe(true)
+  })
+
   it('selhané načtení nabídne opakování, ne prázdnou sekci', async () => {
     m.load.mockRejectedValueOnce(new Error('offline'))
     const wrapper = mount(JmhzEmployerAnnualEvidenceSettings, {

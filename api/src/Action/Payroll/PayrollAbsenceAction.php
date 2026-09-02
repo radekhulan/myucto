@@ -129,7 +129,7 @@ final class PayrollAbsenceAction
                 $this->userId($request),
             );
         } catch (PayrollYearClosedException $e) {
-            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
+            return self::yearClosedError($response, $e);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollAbsenceOverlapException $e) {
@@ -235,7 +235,7 @@ final class PayrollAbsenceAction
                 throw $e;
             }
         } catch (PayrollYearClosedException $e) {
-            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
+            return self::yearClosedError($response, $e);
         } catch (PayrollLeaveOverdrawException $e) {
             return Json::error($response, 'leave_overdraw_confirmation_required', $e->getMessage(), 409, [
                 'balance_minutes' => $e->balanceMinutes,
@@ -298,7 +298,7 @@ final class PayrollAbsenceAction
                 throw $e;
             }
         } catch (PayrollYearClosedException $e) {
-            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
+            return self::yearClosedError($response, $e);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollAbsenceConflictException $e) {

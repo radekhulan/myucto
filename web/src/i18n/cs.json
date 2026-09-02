@@ -1016,7 +1016,8 @@
       "closed": "Mzdový rok je uzavřen.",
       "reopened": "Mzdový rok je znovu otevřen.",
       "load_failed": "Stav roční uzávěrky se nepodařilo načíst.",
-      "save_failed": "Roční uzávěrku se nepodařilo uložit."
+      "save_failed": "Roční uzávěrku se nepodařilo uložit.",
+      "open_action": "Otevřít roční uzávěrku"
     },
     "annual_report": {
       "title": "Roční přehled mezd",
@@ -1065,7 +1066,8 @@
       "withholding_balance": "Rozdíl odvedeno − mělo být sraženo",
       "annex_one": "Příloha č. 1 — počet zaměstnanců k 1. prosinci",
       "annex_one_empty": "Žádný vztah nemá vyplněnou obec místa výkonu práce, příloha č. 1 by zůstala prázdná.",
-      "privacy_hint": "Podklad neobsahuje jména, osobní identifikátory ani detail jednotlivých zaměstnanců."
+      "privacy_hint": "Podklad neobsahuje jména, osobní identifikátory ani detail jednotlivých zaměstnanců.",
+      "validation_failed": "Stažené XML neprošlo kontrolou proti schématu — podatelna EPO ho v tomhle stavu odmítne. Soubor je uložený, ale před podáním doplňte, co chybí."
     },
     "payments": {
       "title": "Mzdové příkazy a úhrady",
@@ -2628,7 +2630,9 @@
         "already_settled": "Roční zúčtování za tento rok už proběhlo. Provádí se jednou ročně.",
         "ruleset_year_not_covered": "Pro tento rok nemáme účinná daňová pravidla na celý rok, takže roční částky nelze odvodit.",
         "tax_year_not_finished": "Zdaňovací období ještě neskončilo. Roční zúčtování jde provést až od 1. ledna následujícího roku.",
-        "taxpayer_credit_evidence_missing": "Zaměstnanec má podepsané prohlášení k dani, ale v evidenci nároků mu chybí sleva na poplatníka. Doplňte ji v kartě zaměstnance — bez ní by zúčtování spočítalo daň bez roční slevy."
+        "taxpayer_credit_evidence_missing": "Zaměstnanec má podepsané prohlášení k dani, ale v evidenci nároků mu chybí sleva na poplatníka. Doplňte ji v kartě zaměstnance — bez ní by zúčtování spočítalo daň bez roční slevy.",
+        "request_date_missing": "U podané žádosti chybí datum podání. Bez něj nejde doložit, že žádost přišla do 15. února. Podklady jsou uložené, doplňte datum v poli Datum žádosti.",
+        "prior_documents_date_missing": "U doložených dokladů předchozích zaměstnavatelů chybí datum převzetí. Bez něj nejde doložit lhůtu do 15. února. Podklady jsou uložené, doplňte datum v poli Datum převzetí dokladů."
       },
       "settle_read_only": "Provést zúčtování může jen uživatel s právem schvalovat mzdy.",
       "settle_unavailable": "Náhled zúčtování zatím neprošel. Načtěte ho znovu, nebo zkontrolujte podklady zaměstnance.",
@@ -5351,7 +5355,8 @@
         "statementLoadFailed": "Podklad evidenčního listu se pro tento vztah a rok nepodařilo načíst. Zkuste to prosím znovu.",
         "prepareFailed": "Evidenční list se nepodařilo sestavit.",
         "downloadFailed": "Kontrolní XML evidenčního listu se nepodařilo stáhnout."
-      }
+      },
+      "noteOptionalHint": "Nepovinné. ČSSZ poznámku nepřebírá, zůstává jen ve vaší evidenci jako zápis, proč list vznikl. Předvyplňujeme ji podle důvodu přípustnosti."
     },
     "regzel": {
       "description": "Bezpečně připraví pouze doplňující údaje zaměstnavatele. Prvotní registrace, změny životního cyklu a opravy zůstávají zablokované.",
