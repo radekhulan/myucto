@@ -52,6 +52,15 @@ CSV a jiné strojové zpracování. Patří mezi ně například `MZDA_MESICNI`,
 `PRISPEVEK_STRAVOVANI` a `CESTOVNI_NAHRADA`. Stejné kódy používej také ve
 sloupci `component_code` importovaného souboru.
 
+Náhrady vázané na schválenou absenci — `NAHRADA_MZDY_DOVOLENA` podle § 222
+a `NAHRADA_MZDY_DPN` podle § 192 — se **ručně ani importem zadat nedají**.
+Vznikají při schválení [absence](59_Absence_a_dovolena.md) z jejích hodin
+a ze zmrazeného průměrného výdělku; ruční částka by se rozešla s evidencí
+nároku. U nemoci je to navíc daňová otázka: osvobozena je podle § 6 odst. 9
+písm. p) zákona o daních z příjmů jen náhrada do výše minimálního zákonného
+nároku, takže sjednanou vyšší náhradu podle § 192 odst. 3 zadej jako běžnou
+zdanitelnou složku.
+
 Zákonné příplatky podle § 114 až § 118 mají vlastní složky
 `PRIPLATEK_PRESCAS`, `PRIPLATEK_SVATEK`, `PRIPLATEK_NOCNI`,
 `PRIPLATEK_VIKEND` a `PRIPLATEK_ZTIZENE_PROSTREDI`. **Nezadávají se ručně ani

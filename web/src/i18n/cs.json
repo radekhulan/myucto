@@ -1790,6 +1790,7 @@
       "base": "Základní mzda",
       "base_amount": "Základní mzda (Kč)",
       "income_amount": "Měsíční základ / příjem (Kč)",
+      "base_proration": "Kráceno o {replaced} h absence z fondu {fund} h.",
       "income_labels": {
         "employment": "Základní měsíční mzda (Kč)",
         "agreement": "Základní odměna z dohody (Kč)",
@@ -1902,6 +1903,7 @@
         "partial_month_base_required": "Pracovní vztah trvá jen část měsíce. Zadejte potvrzenou základní mzdu ručně.",
         "suspended_month_base_required": "Pracovní vztah byl v měsíci přerušen. Zadejte potvrzený základ nebo příjem ručně.",
         "employment_state_base_required": "Stav pracovního vztahu vyžaduje ruční potvrzení základu nebo příjmu.",
+        "absence_month_base_required": "Absenci v měsíci nelze spolehlivě přepočítat na krácení mzdy. Doplňte pracovní kalendář a rozhodněte o absenci, nebo zadejte základní mzdu ručně.",
         "base_managed_elsewhere_link": "Otevřít mzdové složky"
       },
       "load_failed_hint": "Mzdové vstupy za toto období se nenačetly. Nezadávejte je znovu — nejdřív zkuste načtení zopakovat, ať nevzniknou duplicity.",

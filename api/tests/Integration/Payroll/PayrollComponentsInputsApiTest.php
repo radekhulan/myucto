@@ -265,6 +265,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'MZDA_UKOLOVA',
             'NAHRADA_KONKURENCNI_DOLOZKA',
             'NAHRADA_MZDY',
+            'NAHRADA_MZDY_DOVOLENA',
             'NAHRADA_MZDY_DPN',
             'NEPENEZNI_PRIJEM',
             'ODMENA',
@@ -288,6 +289,58 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'VZDELAVANI',
             'ZDRAVOTNI_BENEFIT',
         ], $codes);
+    }
+
+    /**
+     * Ruční částka na náhradě při DPN je daňová vada, ne jen nepořádek.
+     *
+     * Složka je klasifikovaná jako osvobozená, ale § 6 odst. 9 písm. p) ZDP
+     * osvobozuje náhradu při dočasné pracovní neschopnosti jen DO VÝŠE
+     * MINIMÁLNÍHO NÁROKU (§ 192 odst. 2 ZP). Vyšší náhradu, kterou § 192
+     * odst. 3 ZP dovoluje sjednat, by bylo nutné rozdělit na osvobozenou
+     * a zdanitelnou část — a ručně zadané číslo by se místo toho tiše celé
+     * neodvedlo. Totéž platí pro náhradu za dovolenou, která musí sedět na
+     * hodiny odepsané z knihy dovolené a na zmrazený průměrný výdělek.
+     */
+    public function testStatutoryAbsenceCompensationCannotBeEnteredByHand(): void
+    {
+        foreach (['NAHRADA_MZDY_DPN', 'NAHRADA_MZDY_DOVOLENA'] as $index => $code) {
+            $response = $this->inputs->create(
+                $this->request('POST', '/api/payroll/inputs')->withParsedBody(
+                    $this->inputPayload(
+                        $this->defaultComponentId($code),
+                        900_000,
+                        'manual-absence-' . $index,
+                    ),
+                ),
+                new Response(),
+            );
+
+            self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+            self::assertStringContainsString(
+                'vzniká ze schválené absence',
+                (string) $response->getBody(),
+            );
+        }
+    }
+
+    private function defaultComponentId(string $code): int
+    {
+        $response = $this->components->list(
+            $this->request('GET', '/api/payroll/components')
+                ->withQueryParams(['effective_on' => '2026-06-01']),
+            new Response(),
+        );
+        self::assertSame(200, $response->getStatusCode());
+        $components = $this->json($response)['components'] ?? null;
+        self::assertIsArray($components);
+        foreach ($components as $component) {
+            if (($component['code'] ?? null) === $code) {
+                return PayrollTimeValue::int($component['id'] ?? null, 'component_id');
+            }
+        }
+
+        self::fail("Výchozí složka {$code} chybí.");
     }
 
     public function testApprovalFreezesExemptionBasisInComponentSnapshot(): void

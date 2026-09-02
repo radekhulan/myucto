@@ -213,7 +213,9 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     {
         self::assertCount(3, $this->people);
         self::assertSame(1, $this->countScenarioRows('payroll_absences'));
-        self::assertSame(4, $this->countScenarioRows('payroll_inputs'));
+        // Pátým vstupem je náhrada mzdy za dovolenou (§ 222 odst. 1 ZP), kterou
+        // schválení absence materializuje vedle tří základů a jedné odměny.
+        self::assertSame(5, $this->countScenarioRows('payroll_inputs'));
         self::assertSame(
             [
                 ['employment_type' => 'hpp', 'relation_type' => 'employment'],
@@ -250,8 +252,10 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             1,
             $this->frozenAbsenceCount($calculated->revision['input_snapshot']),
         );
+        // 9 325 000 základů a odměn + 600 000 náhrady za dovolenou
+        // (8 h x 750 Kč průměrného výdělku).
         self::assertSame(
-            9_325_000,
+            9_925_000,
             $calculated->revision['result_snapshot']['totals']['source_amount_minor'],
         );
         $blockers = $this->blockingValidations((int) $calculated->revision['id']);
@@ -429,7 +433,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         [$debitTotal, $creditTotal] = $this->journalTotals($journalEntryId);
         self::assertSame($debitTotal, $creditTotal);
         self::assertSame(
-            9_325_000,
+            9_925_000,
             $this->journalBalanceMinor($journalEntryId, ['521']),
             'Osobní náklad v deníku musí sedět na hrubý objem zmrazené revize.',
         );

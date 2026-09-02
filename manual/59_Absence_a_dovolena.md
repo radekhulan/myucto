@@ -75,6 +75,27 @@ Schválení čerpání zapíše zápornou položku podle publikovaných směn. Z
 schváleného čerpání ji nemaže, ale vytvoří kladnou reverzi a označí absenci
 pro kontrolu případné opravy mzdy.
 
+**Schválená dovolená zakládá i náhradu mzdy.** Za dobu jejího čerpání přísluší
+podle § 222 odst. 1 zákoníku práce náhrada mzdy ve výši průměrného výdělku, a ta
+je samostatnou položkou mzdy, ne součástí základní mzdy. Aplikace ji proto při
+schválení dovolené založí jako mzdový vstup složky **Náhrada mzdy za dovolenou**
+(`NAHRADA_MZDY_DOVOLENA`) v tom měsíci, do kterého čerpání spadá; hodiny bere ze
+stejných směn jako kniha dovolené a sazbu ze zmrazeného snapshotu průměrného
+výdělku. Na výplatní pásce má vlastní řádek s hodinami i sazbou (§ 142 odst. 5
+zákoníku práce) a do měsíčního hlášení jde vlastním atributem.
+
+Ručně se tahle složka zadat nedá; její částka je vázaná na schválené čerpání
+a na schválený průměr. Zrušení dovolené vstup nemaže — vytvoří zápornou korekci
+ve **stejném** měsíci, protože oprava nároku patří období, ve kterém nárok vznikl.
+Zaplacené peníze se vypořádají samostatně srážkou podle § 147 odst. 1 písm. e)
+zákoníku práce.
+
+Náhrada za dovolenou se zdaňuje a vstupuje do vyměřovacích základů obou
+pojištění, ale do dalšího průměrného výdělku nikoli: § 353 zjišťuje průměr
+z hrubé mzdy za odpracovanou dobu a náhrada odpracovanou dobou není. Součet
+zkrácené základní mzdy a náhrady se proto běžné měsíční mzdě přesně rovnat
+nemusí — náhrada vychází z výdělku minulého čtvrtletí.
+
 **Svátek v době dovolené se nečerpá.** Připadne-li svátek na den, na který je
 rozvržená směna a zároveň schválená dovolená, směna se z čerpání vypustí —
 týden dovolené kolem vánočních svátků tedy nespotřebuje celých pět směn, ale
