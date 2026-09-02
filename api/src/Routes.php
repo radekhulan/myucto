@@ -1761,6 +1761,10 @@ final class Routes
             $g->post('/time/absences/{id:[0-9]+}/decision', [PayrollAbsenceAction::class, 'decision']);
             $g->post('/time/absences/{id:[0-9]+}/cancel', [PayrollAbsenceAction::class, 'cancel']);
             $g->get('/time/averages', [PayrollAbsenceAction::class, 'averages']);
+            // Konkrétní cesta musí předcházet `{id}` routám níž — jinak by
+            // `suggestion` spadlo do parametru. Je to čtení: návrh vstupů
+            // průměru z uzavřených běhů, který účetní teprve potvrzuje.
+            $g->get('/time/averages/suggestion', [PayrollAbsenceAction::class, 'averageSuggestion']);
             $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
             $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
             $g->delete('/time/averages/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteAverage']);

@@ -88,6 +88,43 @@ export interface PayrollAbsencesPage {
   offset: number
 }
 
+/**
+ * Návrh vstupů průměrného výdělku odvozený z uzavřených mzdových běhů.
+ *
+ * `ready === false` znamená, že se odvodit NEDÁ — čísla jsou pak `null` a
+ * důvod nese `blockers`. Částečný návrh se nevrací nikdy: sečtený neúplný
+ * základ vypadá jako hotové číslo a nikdo na něm nepozná, že měsíc chybí.
+ *
+ * `longer_period_allocated_minor` je vždy `null`: poměrnou část mzdy za období
+ * delší než čtvrtletí (§ 358 ZP) aplikace v datech nerozlišuje.
+ */
+export interface AverageEarningSuggestion {
+  employment_id: number
+  applicable_year: number
+  applicable_quarter: number
+  decisive_from: string
+  decisive_to: string
+  minimum_worked_days: number
+  ready: boolean
+  blockers: string[]
+  gross_earnings_minor: number | null
+  longer_period_allocated_minor: null
+  worked_minutes: number | null
+  worked_days: number | null
+  months: Array<{
+    period_start: string
+    run_id: number | null
+    revision_id: number | null
+    revision_no: number | null
+    gross_earnings_minor: number | null
+    worked_minutes: number | null
+    worked_days: number | null
+    work_summary_id: number | null
+    blockers: string[]
+  }>
+  input_version: string
+}
+
 export interface LeaveEntitlementCandidate {
   employment_id: number
   employee_name: string
@@ -168,6 +205,18 @@ export const payrollAbsenceApi = {
     api.get<{ snapshots: AverageSnapshot[] }>('/payroll/time/averages', {
       params: { employment_id: employmentId },
     }).then(response => response.data.snapshots),
+  /**
+   * Návrh vstupů průměru. Čte jen zmrazené běhy, nic neukládá — průměr vzniká
+   * až tím, že účetní čísla potvrdí a odešle `createAverage`.
+   */
+  averageSuggestion: (employmentId: number, year: number, quarter: number) =>
+    api.get<{ suggestion: AverageEarningSuggestion }>('/payroll/time/averages/suggestion', {
+      params: {
+        employment_id: employmentId,
+        applicable_year: year,
+        applicable_quarter: quarter,
+      },
+    }).then(response => response.data.suggestion),
   createAverage: (payload: Record<string, unknown>) =>
     api.post<{ snapshot: AverageSnapshot }>('/payroll/time/averages', payload)
       .then(response => response.data.snapshot),
