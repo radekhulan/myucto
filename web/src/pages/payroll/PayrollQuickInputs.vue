@@ -1151,9 +1151,25 @@ onMounted(() => {
                   >
                     {{ employmentStatusLabel(row) }}
                   </span>
-                  <p v-for="blocker in row.blockers" :key="blocker" class="mt-2 text-xs text-warning-700">
-                    {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
-                  </p>
+                  <template v-for="blocker in row.blockers" :key="blocker">
+                    <p class="mt-2 text-xs text-warning-700">
+                      {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
+                      <!--
+                        Blokátor říkal, CO brání zápisu, ale ne KDE se to mění.
+                        Předpis základní mzdy bydlí v Mzdových složkách a u firmy
+                        s pevnou měsíční mzdou je tenhle stav každý měsíc, takže
+                        účetní hledala pokaždé znovu.
+                      -->
+                      <RouterLink
+                        v-if="blocker === 'base_managed_elsewhere'"
+                        :to="{ name: 'payroll-components', query: { employment: String(row.employment_id) } }"
+                        class="underline decoration-dotted underline-offset-2 hover:text-warning-900"
+                        :data-test="`quick-base-managed-link-${row.employment_id}`"
+                      >
+                        {{ t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') }}
+                      </RouterLink>
+                    </p>
+                  </template>
                 </td>
                 <td v-if="tbl.isVisible('income_amount')" class="px-4 py-4">
                   <p
