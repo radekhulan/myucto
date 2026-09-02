@@ -15,6 +15,7 @@ import {
   type PayrollRunValidation,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
+import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
@@ -35,6 +36,8 @@ const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 const toast = useToast()
+/* Uzavřený mzdový rok blokuje i zdejší zápis — hláška musí vést na uzávěrku. */
+const showPayrollError = usePayrollYearClosedToast()
 const loading = ref(false)
 /*
  * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
@@ -538,7 +541,7 @@ async function createRun() {
     toast.success(t('payroll.runs.created'))
     await load()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.runs.save_failed'))
+    showPayrollError(error, t('payroll.runs.save_failed'))
   } finally {
     saving.value = false
   }
@@ -804,7 +807,7 @@ async function deleteRun() {
     pendingDelete.value = null
     await load()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.runs.delete_failed'))
+    showPayrollError(error, t('payroll.runs.delete_failed'))
     if (error?.response?.status === 409) {
       await load()
       pendingDelete.value = reloadedRun(run)

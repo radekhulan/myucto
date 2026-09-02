@@ -1016,7 +1016,8 @@
       "closed": "Payroll year is closed.",
       "reopened": "Payroll year is open again.",
       "load_failed": "The payroll year-close status could not be loaded.",
-      "save_failed": "The payroll year close could not be saved."
+      "save_failed": "The payroll year close could not be saved.",
+      "open_action": "Open the year close"
     },
     "annual_report": {
       "title": "Annual payroll overview",
@@ -1065,7 +1066,8 @@
       "withholding_balance": "Remitted minus what should have been withheld",
       "annex_one": "Annex 1 - headcount as of 1 December",
       "annex_one_empty": "No employment has a place-of-work municipality filled in, so annex 1 would be empty.",
-      "privacy_hint": "The data contains no names, personal identifiers or per-employee detail."
+      "privacy_hint": "The data contains no names, personal identifiers or per-employee detail.",
+      "validation_failed": "The downloaded XML failed schema validation — the EPO filing desk will reject it as it stands. The file is saved, but fill in what is missing before filing."
     },
     "payments": {
       "title": "Payroll payment orders and settlement",
@@ -2628,7 +2630,9 @@
         "already_settled": "The annual settlement for this year has already been performed. It is done once a year.",
         "ruleset_year_not_covered": "We have no effective tax rules covering the whole of this year, so annual amounts cannot be derived.",
         "tax_year_not_finished": "The tax year has not ended yet. The annual settlement can only be performed from 1 January of the following year.",
-        "taxpayer_credit_evidence_missing": "The employee has signed the taxpayer declaration, but the basic taxpayer credit is missing from their claim records. Add it on the employee card — without it the settlement would compute the tax without the annual credit."
+        "taxpayer_credit_evidence_missing": "The employee has signed the taxpayer declaration, but the basic taxpayer credit is missing from their claim records. Add it on the employee card — without it the settlement would compute the tax without the annual credit.",
+        "request_date_missing": "The request is recorded as submitted but has no submission date. Without it there is no proof the request arrived by 15 February. The record is saved — fill in the request date.",
+        "prior_documents_date_missing": "The prior employers' documents are recorded as provided but have no receipt date. Without it the 15 February deadline cannot be evidenced. The record is saved — fill in the receipt date."
       },
       "settle_read_only": "Only a user allowed to approve payroll can perform the settlement.",
       "settle_unavailable": "The settlement preview did not go through. Reload it or check the employee's documents.",
@@ -5351,7 +5355,8 @@
         "statementLoadFailed": "The record sheet source data for this employment and year could not be loaded. Please try again.",
         "prepareFailed": "The record sheet could not be built.",
         "downloadFailed": "The record sheet control XML could not be downloaded."
-      }
+      },
+      "noteOptionalHint": "Optional. ČSSZ does not accept the note; it stays in your own records as a trace of why the sheet was issued. We prefill it from the eligibility reason."
     },
     "regzel": {
       "description": "Safely prepares supplemental employer information only. Initial registration, lifecycle changes and corrections remain blocked.",

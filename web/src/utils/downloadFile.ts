@@ -41,11 +41,22 @@ async function unwrapBlobError(error: any): Promise<never> {
   throw error
 }
 
-export async function downloadApiFile(url: string, fallbackFilename = 'export.xml'): Promise<void> {
+/**
+ * Vrací hlavičky odpovědi, aby volající mohl zobrazit i to, co se o souboru
+ * dozvěděl server — typicky výsledek kontroly podání proti XSD. Stažení tím
+ * neblokujeme: soubor se uloží vždy, hlavičky jsou informace navíc. Volající,
+ * kteří je nepotřebují, návratovou hodnotu prostě ignorují.
+ */
+export async function downloadApiFile(
+  url: string,
+  fallbackFilename = 'export.xml',
+): Promise<Record<string, string>> {
   const requestUrl = url.startsWith('/api/') ? url.slice(4) : url
   const response = await api.get<Blob>(requestUrl, { responseType: 'blob' })
     .catch(unwrapBlobError)
   saveBlob(response.data, response.headers['content-disposition'], fallbackFilename)
+
+  return (response.headers ?? {}) as Record<string, string>
 }
 
 /**

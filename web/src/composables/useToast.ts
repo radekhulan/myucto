@@ -28,7 +28,12 @@ export function useToast() {
   return {
     toasts,
     success: (t: string, action?: Toast['action']) => push('success', t, action ? 10000 : 5000, action),
-    error:   (t: string) => push('error', t, 8000),
+    /*
+     * Chyba smí nést akci ze stejného důvodu jako úspěch: „rok je uzavřený"
+     * bez prokliku na uzávěrku je slepá ulička — uživatel ví, co se stalo,
+     * ale ne kam jít. S akcí toast drží déle, aby ji stihl kliknout.
+     */
+    error:   (t: string, action?: Toast['action']) => push('error', t, action ? 12000 : 8000, action),
     info:    (t: string) => push('info', t),
     warning: (t: string) => push('warning', t, 6000),
     dismiss,

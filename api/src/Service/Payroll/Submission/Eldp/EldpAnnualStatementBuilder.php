@@ -111,14 +111,23 @@ final class EldpAnnualStatementBuilder
                     . 'evidenční list lze sestavit jen s výslovným potvrzením, že žádné nejsou.',
             );
         }
+        // Poznámka je NAŠE pole, ne položka evidenčního listu — ČSSZ ji nikde
+        // nepřijímá ani nečte, do XML se nedostane a slouží jen jako interní
+        // stopa, proč byl list sestaven. Vyžadovat ji jako podmínku sestavení
+        // proto znamenalo blokovat zákonnou povinnost kvůli naší evidenci.
+        // Zůstává jen horní mez, aby se do sloupce vešla.
         $note = $confirmation['note'] ?? null;
-        if (!is_string($note)
-            || mb_strlen(trim($note), 'UTF-8') < 5
-            || mb_strlen(trim($note), 'UTF-8') > 500
-        ) {
+        if ($note !== null && !is_string($note)) {
             throw new EldpValidationException(
                 'eldp_confirmation_note_invalid',
-                'Potvrzení evidenčního listu musí mít 5 až 500 znaků.',
+                'Poznámka evidenčního listu musí být text.',
+            );
+        }
+        $note = $note === null ? '' : trim($note);
+        if (mb_strlen($note, 'UTF-8') > 500) {
+            throw new EldpValidationException(
+                'eldp_confirmation_note_invalid',
+                'Poznámka evidenčního listu smí mít nejvýše 500 znaků.',
             );
         }
 

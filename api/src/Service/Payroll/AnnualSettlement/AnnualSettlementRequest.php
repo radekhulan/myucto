@@ -32,46 +32,44 @@ final readonly class AnnualSettlementRequest
         if ($taxYear < 2000 || $taxYear > 2199) {
             throw new \InvalidArgumentException('Rok žádosti není platný.');
         }
-        if ($status === AnnualSettlementRequestStatus::Requested && $requestedOn === null) {
-            throw new \InvalidArgumentException(
-                'Podaná žádost musí mít datum.',
-            );
-        }
-        if ($status !== AnnualSettlementRequestStatus::Requested
-            && $requestedOn !== null
+        // Rozpracovaná evidence se ukládá tak, jak je.
+        //
+        // Dřív tu stálo pět tvrdých podmínek na dvojice polí („podaná žádost
+        // musí mít datum", „doložené doklady musí mít datum převzetí" …) a
+        // každá z nich uložení ODMÍTLA. Účetní, která zaškrtla „požádal" a
+        // ještě nestihla opsat datum z papíru, přišla o celý formulář —
+        // včetně věcí, které vyplnila správně.
+        //
+        // Podmínky nezmizely, jen se přesunuly tam, kam patří: do posouzení
+        // (`AnnualSettlementEligibility`). Zúčtování bez data žádosti nebo bez
+        // data převzetí dokladů se dál NEPROVEDE, protože u obou je datum
+        // jediné, čím se doloží dodržení lhůty podle § 38ch odst. 1 a 3 —
+        // ale rozdělaná evidence se kvůli tomu neztratí.
+    }
+
+    /**
+     * Chybí-li u vyplněného stavu jeho datum, není to důvod evidenci
+     * neuložit — je to důvod neprovést zúčtování. Vrací překážky, které z
+     * neúplnosti plynou; prázdné pole znamená „po téhle stránce je podklad
+     * úplný".
+     *
+     * @return list<AnnualSettlementBlocker>
+     */
+    public function incompletenessBlockers(): array
+    {
+        $blockers = [];
+        if ($this->status === AnnualSettlementRequestStatus::Requested
+            && $this->requestedOn === null
         ) {
-            throw new \InvalidArgumentException(
-                'Datum žádosti smí nést jen podaná žádost.',
-            );
+            $blockers[] = AnnualSettlementBlocker::RequestDateMissing;
         }
-        if ($priorEmployers === AnnualSettlementPriorEmployers::AllDocumented
-            && $priorDocumentsReceivedOn === null
+        if ($this->priorEmployers === AnnualSettlementPriorEmployers::AllDocumented
+            && $this->priorDocumentsReceivedOn === null
         ) {
-            throw new \InvalidArgumentException(
-                'Doložené doklady předchozích plátců musí mít datum převzetí.',
-            );
+            $blockers[] = AnnualSettlementBlocker::PriorDocumentsDateMissing;
         }
-        if ($priorEmployers !== AnnualSettlementPriorEmployers::AllDocumented
-            && $priorDocumentsReceivedOn !== null
-        ) {
-            throw new \InvalidArgumentException(
-                'Datum převzetí dokladů smí nést jen doložený stav.',
-            );
-        }
-        if ($filingObligation === AnnualSettlementFilingObligation::Required
-            && trim((string) $filingObligationReason) === ''
-        ) {
-            throw new \InvalidArgumentException(
-                'Povinnost podat přiznání musí mít uvedený důvod.',
-            );
-        }
-        if ($annualClaims === AnnualSettlementAnnualClaims::PresentUnsupported
-            && trim((string) $annualClaimsNote) === ''
-        ) {
-            throw new \InvalidArgumentException(
-                'Ročně uplatňované položky musí být popsané.',
-            );
-        }
+
+        return $blockers;
     }
 
     public static function unknown(int $taxYear): self

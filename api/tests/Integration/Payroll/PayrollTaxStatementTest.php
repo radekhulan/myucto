@@ -166,10 +166,31 @@ final class PayrollTaxStatementTest extends TestCase
         );
     }
 
-    public function testYearWithoutApprovedRunsIsRefused(): void
+    /**
+     * Regrese: rok bez schváleného běhu dřív shodil celý podklad výjimkou,
+     * takže vyúčtování nešlo ani zobrazit, ani stáhnout. Nulové vyúčtování je
+     * přitom řádné podání (§ 38j odst. 4 ZDP) — sestaví se, jen to řekne.
+     */
+    public function testYearWithoutApprovedRunsStillBuildsNilStatement(): void
     {
-        $this->expectException(\DomainException::class);
-        $this->service->preview($this->supplierId, 2025);
+        $preview = $this->service->preview($this->supplierId, 2025);
+
+        self::assertSame([], $preview['dpzvd6']['months']);
+        self::assertSame([], $preview['dpsvd2']['months']);
+        self::assertNotSame([], $preview['dpzvd6']['warnings']);
+        self::assertStringContainsString(
+            'nulové',
+            implode(' ', $preview['dpzvd6']['warnings']),
+        );
+    }
+
+    public function testNilStatementStillProducesSchemaValidXml(): void
+    {
+        foreach (['dpzvd6', 'dpsvd2'] as $form) {
+            $built = $this->service->build($this->supplierId, 2025, $form);
+            self::assertStringContainsString('<?xml', $built['xml']);
+            self::assertNotSame([], $built['warnings']);
+        }
     }
 
     public function testApiNeedsThePermissionAndTheEnabledPayrollModule(): void

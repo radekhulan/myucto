@@ -38,6 +38,7 @@ import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, 
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import EnforcementLegalFacts from '@/pages/payroll/EnforcementLegalFacts.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
@@ -52,6 +53,8 @@ import { appIsoDate } from '@/utils/date'
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+/* Uzavřený mzdový rok blokuje i exekuční evidenci — hláška musí vést na uzávěrku. */
+const showPayrollError = usePayrollYearClosedToast()
 const loading = ref(true)
 /*
  * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
@@ -705,7 +708,7 @@ async function createCase() {
     if (summary) await selectCase(summary)
     toast.success(t('payroll.enforcement.case_created'))
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.enforcement.save_failed'))
+    showPayrollError(error, t('payroll.enforcement.save_failed'))
   } finally {
     saving.value = false
   }
@@ -818,7 +821,7 @@ async function saveMonthEvidence() {
     )
     toast.success(t('payroll.enforcement.month_evidence_saved'))
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.enforcement.save_failed'))
+    showPayrollError(error, t('payroll.enforcement.save_failed'))
   } finally {
     saving.value = false
   }
@@ -983,7 +986,7 @@ async function addClaim() {
     ) {
       await handleMutationError(error)
     } else {
-      toast.error(error?.response?.data?.error?.message || error?.message || t('payroll.enforcement.save_failed'))
+      showPayrollError(error, t('payroll.enforcement.save_failed'))
     }
   } finally {
     saving.value = false

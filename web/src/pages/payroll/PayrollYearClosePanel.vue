@@ -6,13 +6,35 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatDateTime, formatPeriod } from '@/composables/useFormat'
+import { useRoute } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 
 const props = defineProps<{ initialYear: number }>()
 const { t, te } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
-const year = ref(props.initialYear)
+/*
+ * Panel se montuje i mimo router (testy, náhledy), kde `useRoute()` vrací
+ * `undefined`; rok z adresy je pohodlí navíc, ne podmínka funkčnosti.
+ */
+const route = useRoute() as ReturnType<typeof useRoute> | undefined
+
+/**
+ * Rok z prokliku „rok je uzavřený".
+ *
+ * Uzavřený rok blokuje zápis napříč agendami (nepřítomnosti, exekuce,
+ * závazky, podání, běhy) a hláška o tom uměla jen říct „rok nejprve znovu
+ * otevřete". Odkud přijde proklik, ví jen server — proto rok cestuje v adrese
+ * a panel se na něj rovnou přepne, aby účetní nemusela hledat, který rok to
+ * byl. Nesmyslná hodnota se ignoruje: dotaz v adrese může přepsat kdokoli.
+ */
+function yearFromRoute(): number | null {
+  const raw = route?.query.yearCloseYear
+  const value = Number(Array.isArray(raw) ? raw[0] : raw)
+  return Number.isInteger(value) && value >= 2000 && value <= 2200 ? value : null
+}
+
+const year = ref(yearFromRoute() ?? props.initialYear)
 const data = ref<PayrollYearCloseStatusResponse | null>(null)
 const loading = ref(false)
 const saving = ref(false)
@@ -114,11 +136,29 @@ async function reopen(): Promise<void> {
 }
 
 watch(year, () => void load())
+
+/*
+ * Proklik z jiné agendy míří na TUTÉŽ stránku (uzávěrka žije na mzdovém
+ * rozcestníku), takže se panel nepřemontuje a rok z adresy by se jinak
+ * projevil až po ručním obnovení. Ručně přepsaný rok se nepřepisuje zpátky —
+ * reaguje se jen na změnu dotazu.
+ */
+watch(() => route?.query.yearCloseYear, () => {
+  const requested = yearFromRoute()
+  if (requested !== null) {
+    year.value = requested
+  }
+})
+
 onMounted(load)
 </script>
 
 <template>
-  <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6" data-test="payroll-year-close">
+  <section
+    id="payroll-year-close"
+    class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+    data-test="payroll-year-close"
+  >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.year_close.title') }}</h2>
