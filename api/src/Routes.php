@@ -1420,6 +1420,10 @@ final class Routes
                 '/submissions/registration/{employmentId:[0-9]+}/a1-profile',
                 [PayrollRegistrationAction::class, 'saveA1Profile'],
             );
+            $g->post(
+                '/submissions/registration/{employmentId:[0-9]+}/a1-profile/check',
+                [PayrollRegistrationAction::class, 'checkA1Profile'],
+            );
             $g->get(
                 '/submissions/registration/{employmentId:[0-9]+}/events',
                 [PayrollRegistrationAction::class, 'events'],

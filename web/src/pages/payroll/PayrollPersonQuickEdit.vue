@@ -310,12 +310,15 @@ function profilePayload(): PayrollPersonProfilePayload {
           full_name: row.id === identity?.id && !appendIdentityVersion
             ? fullName
             : row.full_name,
+          // Starší verze bez rozděleného jména se posílá tak, jak je (null).
+          // Prázdný řetězec by z „nikdo to zatím nerozdělil" udělal zadanou
+          // hodnotu a jméno se dohadovat nesmí (migrace 1272).
           first_name: row.id === identity?.id && !appendIdentityVersion
             ? form.first_name.trim()
-            : (row.first_name ?? ''),
+            : row.first_name,
           last_name: row.id === identity?.id && !appendIdentityVersion
             ? form.last_name.trim()
-            : (row.last_name ?? ''),
+            : row.last_name,
           title_prefix: row.title_prefix,
           title_suffix: row.title_suffix,
           birth_date: row.birth_date,
@@ -490,15 +493,11 @@ function validate(): boolean {
     saveError.value = t('payroll.people.quick_edit.name_required')
     return false
   }
-  const selectedIdentity = currentIdentity.value
-  const incompleteHistory = profile.value?.identity_history.some(row =>
-    row.id !== selectedIdentity?.id
-    && (!row.first_name?.trim() || !row.last_name?.trim()),
-  ) ?? false
-  if (incompleteHistory) {
-    saveError.value = t('payroll.people.quick_edit.structured_history_required')
-    return false
-  }
+  // Historický řádek bez rozděleného jména kartu NEBLOKUJE. Dřív tu stála
+  // podmínka, která odmítla uložit cokoliv, dokud někdo ručně nerozdělí jméno
+  // ve verzi identity, kterou tenhle formulář ani nezobrazuje — účetní tak
+  // nemohla opravit ani telefon. Rozdělené jméno vyžaduje až PREZEC a hromadné
+  // oznámení, a to se ptá na AKTUÁLNÍ verzi (ta povinná zůstává níž).
   // Stát u české adresy nikdo needituje a prázdné pole vracelo „Vyplňte ulici,
   // obec, PSČ i stát." — čtvrtou povinnou položkou kvůli hodnotě, která je
   // ve výchozím nastavení vždy stejná. Dosadí se, místo aby blokovala uložení.

@@ -24,17 +24,23 @@ final class PayrollOpeningBalanceAction
 {
     use PayrollActionSupport;
 
-    /** Měsíční částky, které uživatel opisuje ze sestavy předchozího programu. */
+    /**
+     * Měsíční částky, které uživatel opisuje ze sestavy předchozího programu.
+     *
+     * Klíč je sloupec, hodnota je NÁZEV SLOUPCE V TABULCE NA OBRAZOVCE. Hláška
+     * musí ukázat na buňku, do které se má sáhnout; „Částka
+     * »advance_base_minor_units« za měsíc 3" účetní nikam nenavede.
+     */
     private const MONTH_FIELDS = [
-        'social_assessment_base_minor_units',
-        'advance_base_minor_units',
-        'advance_tax_minor_units',
-        'withholding_base_minor_units',
-        'withholding_tax_minor_units',
-        'applied_non_refundable_credits_minor_units',
-        'applied_child_credit_minor_units',
-        'tax_bonus_minor_units',
-        'bonus_qualifying_income_minor_units',
+        'social_assessment_base_minor_units' => 'Vyměřovací základ sociálního pojištění',
+        'advance_base_minor_units' => 'Základ zálohové daně',
+        'advance_tax_minor_units' => 'Záloha na daň',
+        'withholding_base_minor_units' => 'Základ srážkové daně',
+        'withholding_tax_minor_units' => 'Srážková daň',
+        'applied_non_refundable_credits_minor_units' => 'Uplatněné slevy na dani',
+        'applied_child_credit_minor_units' => 'Uplatněné daňové zvýhodnění na děti',
+        'tax_bonus_minor_units' => 'Daňový bonus',
+        'bonus_qualifying_income_minor_units' => 'Příjem rozhodný pro bonus',
     ];
 
     public function __construct(
@@ -108,12 +114,12 @@ final class PayrollOpeningBalanceAction
             $seen[$month] = true;
 
             $row = ['month' => $month];
-            foreach (self::MONTH_FIELDS as $field) {
+            foreach (self::MONTH_FIELDS as $field => $label) {
                 $amount = filter_var($item[$field] ?? 0, FILTER_VALIDATE_INT);
                 if ($amount === false || $amount < 0) {
                     throw new \InvalidArgumentException(sprintf(
-                        'Částka „%s" za měsíc %d musí být nezáporné celé číslo v haléřích.',
-                        $field,
+                        'Sloupec „%s" v měsíci %d musí být částka nula nebo vyšší.',
+                        $label,
                         $month,
                     ));
                 }

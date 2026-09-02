@@ -224,13 +224,33 @@ final class PayrollDeductionAgreementAction
         return $body === null ? [] : PayrollTimeValue::row($body, 'request_body');
     }
 
+    /**
+     * Chybová hláška končí v toastu nad formulářem dohody, takže mluví o poli,
+     * které uživatel vidí — ne o názvu sloupce (`employee_id`, `row_version`).
+     */
+    private const FIELD_LABELS = [
+        'employee_id' => 'Zaměstnanec',
+        'row_version' => 'Verze záznamu',
+        'effective_from' => 'Účinnost od',
+        'effective_on' => 'Účinnost změny',
+        'reason' => 'Důvod',
+        'status' => 'Stav dohody',
+    ];
+
+    private static function label(string $field): string
+    {
+        return self::FIELD_LABELS[$field] ?? $field;
+    }
+
     private function positiveInt(mixed $value, string $field): int
     {
         $result = filter_var($value, FILTER_VALIDATE_INT, [
             'options' => ['min_range' => 1],
         ]);
         if (!is_int($result)) {
-            throw new \InvalidArgumentException("Pole {$field} musí být kladné celé číslo.");
+            throw new \InvalidArgumentException(
+                self::label($field) . ' musí být vyplněný.',
+            );
         }
 
         return $result;
@@ -249,7 +269,9 @@ final class PayrollDeductionAgreementAction
             return null;
         }
         if (!is_string($value) || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value) !== 1) {
-            throw new \InvalidArgumentException("Pole {$field} musí být datum ve tvaru RRRR-MM-DD.");
+            throw new \InvalidArgumentException(
+                self::label($field) . ' musí být datum ve tvaru RRRR-MM-DD.',
+            );
         }
 
         return $value;
@@ -262,7 +284,9 @@ final class PayrollDeductionAgreementAction
         }
         $text = trim(PayrollTimeValue::string($value, $field));
         if (mb_strlen($text, 'UTF-8') > 500) {
-            throw new \InvalidArgumentException("Pole {$field} může mít nejvýše 500 znaků.");
+            throw new \InvalidArgumentException(
+                self::label($field) . ' může mít nejvýše 500 znaků.',
+            );
         }
 
         return $text === '' ? null : $text;

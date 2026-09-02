@@ -397,6 +397,7 @@ const holdForm = reactive({
   reason: 'enforcement' as PayrollRetentionHoldReason,
   description: '',
   placedOn: appIsoDate(),
+  showValidation: false,
 })
 
 function openHold(employeeId: number | null = null) {
@@ -406,18 +407,25 @@ function openHold(employeeId: number | null = null) {
   holdForm.reason = 'enforcement'
   holdForm.description = ''
   holdForm.placedOn = appIsoDate()
+  holdForm.showValidation = false
 }
 
+/**
+ * Popis zadržení zůstává povinný: zadržení přebíjí lhůtu a zastaví výmaz, a
+ * proč to bylo v pořádku, se za rok pozná jen z téhle věty. Výčet důvodů na to
+ * nestačí — „exekuce" neřekne která.
+ *
+ * Hlášky ale patří K POLI, ne do toastu: ten se vypsal nad modálem a po pár
+ * vteřinách zmizel, takže dialog jen mlčky zůstal otevřený.
+ */
+const holdPersonMissing = computed(() =>
+  holdForm.employeeId === null || holdForm.employeeId <= 0)
+const holdDescriptionMissing = computed(() => holdForm.description.trim() === '')
+
 async function saveHold() {
-  const employeeId = holdForm.employeeId
-  if (employeeId === null || employeeId <= 0) {
-    toast.error(t('payroll.retention.hold_person_required'))
-    return
-  }
-  if (holdForm.description.trim() === '') {
-    toast.error(t('payroll.retention.hold_description_required'))
-    return
-  }
+  holdForm.showValidation = true
+  if (holdPersonMissing.value || holdDescriptionMissing.value) return
+  const employeeId = holdForm.employeeId as number
   holdForm.saving = true
   try {
     await payrollRetentionApi.placeHold({
@@ -1078,6 +1086,11 @@ onMounted(reloadAll)
             :candidates="holdCandidateOptions"
             :clearable="false"
           />
+          <p
+            v-if="holdForm.showValidation && holdPersonMissing"
+            class="mt-1 text-xs text-danger-600"
+            data-test="retention-hold-person-error"
+          >{{ t('payroll.retention.hold_person_required') }}</p>
         </div>
 
         <div>
@@ -1098,15 +1111,22 @@ onMounted(reloadAll)
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-hold-description`">
             {{ t('payroll.retention.col.description') }}
+            <span class="text-danger-600" aria-hidden="true">*</span>
           </label>
           <textarea
             :id="`${pageId}-hold-description`"
             v-model="holdForm.description"
             rows="2"
             maxlength="255"
+            data-test="retention-hold-description"
             :placeholder="t('payroll.retention.hold_description_placeholder')"
             class="w-full px-2 py-1.5 border border-neutral-300 rounded-md text-sm bg-surface"
           ></textarea>
+          <p
+            v-if="holdForm.showValidation && holdDescriptionMissing"
+            class="mt-1 text-xs text-danger-600"
+            data-test="retention-hold-description-error"
+          >{{ t('payroll.retention.hold_description_required') }}</p>
         </div>
 
         <div>

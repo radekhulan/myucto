@@ -10,7 +10,7 @@ import {
 } from '@/api/payrollEnforcement'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { appIsoDate } from '@/utils/date'
@@ -62,6 +62,31 @@ const canSave = computed(() => canWrite.value
   && !saving.value
   && !leavingApprovedInstruction.value
   && standardReady.value)
+
+/**
+ * Proč je Uložit zašedlé.
+ *
+ * Tři podmínky schváleného oddlužení (pracovní vztah, účet správce, rozhodnutí)
+ * nejsou naše libovůle — z nich se skládá NEMĚNNÝ platební pokyn a
+ * `PayrollEnforcementRepository::saveMonthEvidence()` bez nich režim
+ * `approved_standard` odmítne. Zašedlé tlačítko bez věty ale účetní neřeklo,
+ * KTERÝ z těch tří údajů chybí; hlásilo se to až 409 z jiné obrazovky.
+ *
+ * Ostatní režimy (upozornění, částka určená soudem) žádnou z těch tří položek
+ * nepotřebují — a částku určenou soudem lze uložit i prázdnou, protože měsíc
+ * stejně padá do ručního posouzení (`court_determined_insolvency_amount_requires_manual_review`).
+ */
+const saveBlockedReason = computed<string | null>(() => {
+  if (!canWrite.value) return t('payroll.insolvency.blocked.read_only')
+  if (evidence.value === null) return null
+  if (leavingApprovedInstruction.value) return t('payroll.insolvency.explicit_cancel_required')
+  if (evidence.value.insolvency_mode !== 'approved_standard') return null
+  if (!canReadDocuments.value) return t('payroll.insolvency.document_permission')
+  if (employmentId.value === null) return t('payroll.insolvency.blocked.employment')
+  if (accountId.value === null) return t('payroll.insolvency.blocked.account')
+  if (documentId.value === null) return t('payroll.insolvency.blocked.document')
+  return null
+})
 
 function applyLoaded(loadedEvidence: EnforcementMonthEvidence, loadedOptions: InsolvencyOptions) {
   evidence.value = loadedEvidence
@@ -284,7 +309,7 @@ watch([employeeId, period], load, { immediate: true })
       v-else-if="employeeId === null"
       :title="t('payroll.insolvency.empty_title')"
       :message="t('payroll.insolvency.empty_message')"
-      :icon-path="ICONS.user"
+      icon="user"
     />
 
     <section v-else-if="evidence" class="rounded-lg border border-neutral-200 bg-surface p-4">
@@ -347,9 +372,16 @@ watch([employeeId, period], load, { immediate: true })
         </div>
       </div>
 
+      <!--
+        Částka určená soudem je NEPOVINNÁ. Režim stejně padá do ručního posouzení
+        (`court_determined_insolvency_amount_requires_manual_review`) a do žádného
+        výpočtu nevstupuje, takže není důvod držet zápis rukojmím čísla, které
+        účetní v okamžiku zaevidování usnesení často ještě nemá.
+      -->
       <label v-if="evidence.insolvency_mode === 'court_determined_amount'" class="mt-4 block text-xs font-medium text-neutral-600">
         {{ t('payroll.insolvency.court_amount') }}
-        <input v-model="courtAmountCzk" inputmode="decimal" :disabled="!canWrite || saving" class="mt-1 w-full max-w-sm rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+        <input v-model="courtAmountCzk" inputmode="decimal" :disabled="!canWrite || saving" data-test="insolvency-court-amount" class="mt-1 w-full max-w-sm rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+        <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('payroll.insolvency.court_amount_hint') }}</span>
       </label>
 
       <div v-if="hasApprovedInstruction" class="mt-4 rounded-md border border-success-200 bg-success-50 p-3 text-xs text-success-700">
@@ -360,7 +392,7 @@ watch([employeeId, period], load, { immediate: true })
       </div>
 
       <div class="mt-5 flex flex-wrap gap-2">
-        <button type="button" :class="btnFilled('primary')" :disabled="!canSave" data-test="insolvency-save" @click="save">
+        <button type="button" :class="btnFilled('primary')" :disabled="!canSave" :title="disabledTitle(!canSave, saveBlockedReason)" data-test="insolvency-save" @click="save">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
           {{ t('common.save') }}
         </button>
@@ -368,6 +400,7 @@ watch([employeeId, period], load, { immediate: true })
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
           {{ t('payroll.insolvency.cancel') }}
         </button>
+        <p v-if="!canSave && saveBlockedReason && !leavingApprovedInstruction" :class="[BTN_DISABLED_NOTE, 'w-full']" data-test="insolvency-save-blocked">{{ saveBlockedReason }}</p>
       </div>
     </section>
   </div>

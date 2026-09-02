@@ -11,9 +11,10 @@ import {
   type EnforcementClaimBreakdown,
   type EnforcementRecipientInstruction,
 } from '@/api/payrollEnforcement'
-import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
+import { appIsoDate } from '@/utils/date'
 
 const props = defineProps<{
   caseId: number
@@ -42,14 +43,20 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null
 let searchSequence = 0
 
 const partyRoles = ['court', 'executor', 'beneficiary'] as const
+/*
+ * Dnešek se bere z účetní zóny (`appIsoDate`), ne z `toISOString()`. UTC je
+ * v ČR celý rok pozadu za půlnocí, takže mezi 00:00 a 02:00 vracel `toISOString()`
+ * VČEREJŠEK — nová revize se uložila s datem o den zpět a `latestParties`
+ * (`effective_from <= currentDate`) ji hned po uložení nezobrazila.
+ */
 const party = ref({
   party_role: 'executor' as EnforcementCaseParty['party_role'],
-  effective_from: new Date().toISOString().slice(0, 10),
+  effective_from: appIsoDate(),
   party_name: '',
   party_reference: '',
 })
 const recipientInstruction = ref({
-  effective_from: new Date().toISOString().slice(0, 10),
+  effective_from: appIsoDate(),
   recipient_party_id: null as number | null,
   payment_account_id: null as number | null,
   change_reason: '',
@@ -62,7 +69,7 @@ const breakdown = ref({
   change_reason: '',
 })
 
-const currentDate = new Date().toISOString().slice(0, 10)
+const currentDate = appIsoDate()
 
 const latestParties = computed(() => partyRoles.map((role) => ({
   role,
@@ -78,10 +85,18 @@ const recipientPartyOptions = computed(() => (['executor', 'beneficiary'] as con
     .sort((left, right) => right.revision_no - left.revision_no)[0] ?? null)
   .filter((party): party is EnforcementCaseParty => party !== null))
 
-const effectiveRecipientAccounts = computed(() => props.recipientAccounts.filter((account) =>
-  account.institution_type === 'other_recipient'
-    && account.currency_code === 'CZK'
-    && account.verified_on <= recipientInstruction.value.effective_from
+/*
+ * Účty, které do platební instrukce vůbec můžou vstoupit — ověřený CZK účet typu
+ * „jiný příjemce". Tenhle seznam rozhoduje o tlačítku i o větě nad ním; dřív se
+ * obojí řídilo `props.recipientAccounts` (VŠECHNY účty firmy, včetně zdravotních
+ * pojišťoven a cizích měn), takže tlačítko svítilo a formulář se otevřel s prázdným
+ * výběrem účtu — hláška pod tlačítkem přitom tvrdila, že účet existuje.
+ */
+const eligibleRecipientAccounts = computed(() => props.recipientAccounts.filter((account) =>
+  account.institution_type === 'other_recipient' && account.currency_code === 'CZK'))
+
+const effectiveRecipientAccounts = computed(() => eligibleRecipientAccounts.value.filter((account) =>
+  account.verified_on <= recipientInstruction.value.effective_from
     && account.valid_from <= recipientInstruction.value.effective_from
     && (account.valid_to === null || account.valid_to >= recipientInstruction.value.effective_from),
 ))
@@ -99,8 +114,17 @@ const selectedClaim = computed(() => props.claims.find(
   claim => claim.id === breakdownClaimId.value,
 ) ?? null)
 
+/**
+ * Prázdná složka rozpadu je nula, ne chyba.
+ *
+ * Většina rozhodnutí úroky, náklady ani výživné vůbec nevyčísluje — vynutit tam
+ * ručně napsanou nulu je povinnost, kterou si aplikace vymyslela sama. Kontrolu
+ * proti evidované částce to nijak neobchází: součet se pořád musí trefit na
+ * korunu (DB trigger `trg_payroll_enforcement_claim_breakdown_insert`).
+ */
 function parseMinor(value: string): number | null {
   const normalized = value.trim().replace(/\s/g, '').replace(',', '.')
+  if (normalized === '') return 0
   if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null
   const amount = Math.round(Number(normalized) * 100)
   return Number.isSafeInteger(amount) && amount >= 0 ? amount : null
@@ -119,6 +143,14 @@ const breakdownTotal = computed(() => Object.values(breakdownValues.value)
 const breakdownMatches = computed(() => selectedClaim.value !== null
   && breakdownTotal.value === selectedClaim.value.outstanding_minor_units)
 
+/*
+ * Zdrojový dokument NENÍ naše libovůle: `source_document_id` je v tabulkách
+ * `payroll_enforcement_case_parties` a `..._claim_breakdowns` NOT NULL a DB
+ * trigger navíc ověřuje, že jde o živý dokument téhle firmy se sedícím SHA-256.
+ * Celý smysl agendy je doložitelná stopa „kdo to tvrdí a z čeho" — údaj bez
+ * rozhodnutí by v případě sporu s exekutorem nebo soudem nic nedokládal.
+ * Zůstává povinný; co se tu dalo opravit, je aby bylo VIDĚT, že chybí.
+ */
 const canSubmitParty = computed(() => party.value.party_name.trim() !== ''
   && party.value.effective_from !== ''
   && selectedDocument.value !== null)
@@ -132,6 +164,34 @@ const canSubmitRecipientInstruction = computed(() =>
   && recipientInstruction.value.payment_account_id !== null
   && selectedDocument.value !== null,
 )
+
+/*
+ * Věta „proč to nejde" pod každým zašedlým tlačítkem. Bez ní zůstala jediná
+ * viditelná stopa u chybějícího dokumentu prázdné vyhledávací pole — tlačítko
+ * mlčelo a účetní neměla podle čeho jednat.
+ */
+const partyBlockedReason = computed<string | null>(() => {
+  if (party.value.party_name.trim() === '') return t('payroll.enforcement.legal_facts.blocked.party_name')
+  if (party.value.effective_from === '') return t('payroll.enforcement.legal_facts.blocked.effective_from')
+  if (selectedDocument.value === null) return t('payroll.enforcement.legal_facts.blocked.document')
+  return null
+})
+
+const recipientInstructionBlockedReason = computed<string | null>(() => {
+  const value = recipientInstruction.value
+  if (value.effective_from === '') return t('payroll.enforcement.legal_facts.blocked.effective_from')
+  if (value.recipient_party_id === null) return t('payroll.enforcement.legal_facts.blocked.recipient_party')
+  if (value.payment_account_id === null) return t('payroll.enforcement.legal_facts.blocked.recipient_account')
+  if (selectedDocument.value === null) return t('payroll.enforcement.legal_facts.blocked.document')
+  return null
+})
+
+const breakdownBlockedReason = computed<string | null>(() => {
+  if (breakdownTotal.value === null) return t('payroll.enforcement.legal_facts.blocked.breakdown_amount')
+  if (!breakdownMatches.value) return t('payroll.enforcement.legal_facts.total_mismatch')
+  if (selectedDocument.value === null) return t('payroll.enforcement.legal_facts.blocked.document')
+  return null
+})
 
 watch(documentQuery, (query) => {
   if (searchTimer) clearTimeout(searchTimer)
@@ -204,7 +264,7 @@ function openPartyForm(role: EnforcementCaseParty['party_role'] = 'executor') {
   showPartyForm.value = true
   party.value = {
     party_role: role,
-    effective_from: new Date().toISOString().slice(0, 10),
+    effective_from: appIsoDate(),
     party_name: '',
     party_reference: '',
   }
@@ -230,7 +290,7 @@ function openRecipientInstructionForm() {
   breakdownClaimId.value = null
   const defaultParty = recipientPartyOptions.value[0] ?? null
   recipientInstruction.value = {
-    effective_from: new Date().toISOString().slice(0, 10),
+    effective_from: appIsoDate(),
     recipient_party_id: defaultParty?.id ?? null,
     payment_account_id: null,
     change_reason: '',
@@ -374,7 +434,7 @@ onMounted(load)
           <label class="text-xs font-medium text-neutral-600 sm:col-span-2">{{ t('payroll.enforcement.legal_facts.party_reference') }}<input v-model="party.party_reference" maxlength="128" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
           <label class="relative text-xs font-medium text-neutral-600 sm:col-span-2">{{ t('payroll.enforcement.legal_facts.source_document') }}<input v-model="documentQuery" :readonly="selectedDocument !== null" required type="search" autocomplete="off" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 pr-9 text-sm" :placeholder="t('payroll.enforcement.legal_facts.document_search')"><button v-if="selectedDocument" type="button" class="cursor-pointer absolute right-2 top-7 rounded p-1 text-neutral-400 hover:text-danger-600" :title="t('common.remove')" @click="resetDocument"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg></button><ul v-if="documentCandidates.length" class="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-neutral-200 bg-surface shadow-lg"><li v-for="document in documentCandidates" :key="document.id"><button type="button" class="cursor-pointer flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-payroll-50" @click="selectDocument(document)"><span class="truncate">{{ document.title }}</span><span class="shrink-0 text-xs uppercase text-neutral-400">{{ document.doc_type }}</span></button></li></ul></label>
         </div>
-        <div class="mt-4 flex flex-wrap justify-end gap-2"><button type="button" :class="btnOutline('neutral')" @click="closeForms"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" :class="btnFilled('primary')" :disabled="saving || !canSubmitParty"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
+        <div class="mt-4 flex flex-wrap items-center justify-end gap-2"><p v-if="partyBlockedReason" :class="[BTN_DISABLED_NOTE, 'mr-auto']" data-test="party-blocked">{{ partyBlockedReason }}</p><button type="button" :class="btnOutline('neutral')" @click="closeForms"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" :class="btnFilled('primary')" :disabled="saving || !canSubmitParty" :title="disabledTitle(!canSubmitParty, partyBlockedReason)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
       </form>
 
       <div class="mt-5 border-t border-neutral-200 pt-4">
@@ -388,7 +448,7 @@ onMounted(load)
             type="button"
             :class="btnOutline('primary')"
             data-test="add-recipient-instruction"
-            :disabled="recipientPartyOptions.length === 0 || recipientAccounts.length === 0"
+            :disabled="recipientPartyOptions.length === 0 || eligibleRecipientAccounts.length === 0"
             @click="openRecipientInstructionForm"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
@@ -396,7 +456,7 @@ onMounted(load)
           </button>
         </div>
         <p v-if="recipientPartyOptions.length === 0" class="mt-3 rounded-md border border-warning-200 bg-warning-50 p-3 text-xs text-warning-700">{{ t('payroll.enforcement.legal_facts.recipient_party_missing') }}</p>
-        <p v-else-if="recipientAccounts.length === 0" class="mt-3 rounded-md border border-warning-200 bg-warning-50 p-3 text-xs text-warning-700">{{ t('payroll.enforcement.legal_facts.recipient_account_missing') }}</p>
+        <p v-else-if="eligibleRecipientAccounts.length === 0" data-test="recipient-account-missing" class="mt-3 rounded-md border border-warning-200 bg-warning-50 p-3 text-xs text-warning-700">{{ t('payroll.enforcement.legal_facts.recipient_account_missing') }}</p>
         <ol v-if="recipientInstructions.length" class="mt-3 space-y-2" data-test="recipient-instruction-history">
           <li v-for="instruction in recipientInstructions" :key="instruction.id" class="rounded-md border border-neutral-200 p-3 text-sm">
             <div class="flex flex-wrap items-start justify-between gap-2">
@@ -423,7 +483,7 @@ onMounted(load)
           <label class="relative text-xs font-medium text-neutral-600 sm:col-span-2">{{ t('payroll.enforcement.legal_facts.source_document') }}<input v-model="documentQuery" :readonly="selectedDocument !== null" required type="search" autocomplete="off" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 pr-9 text-sm" :placeholder="t('payroll.enforcement.legal_facts.document_search')" data-test="recipient-instruction-document"><button v-if="selectedDocument" type="button" class="cursor-pointer absolute right-2 top-7 rounded p-1 text-neutral-400 hover:text-danger-600" :title="t('common.remove')" @click="resetDocument"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg></button><ul v-if="documentCandidates.length" class="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-neutral-200 bg-surface shadow-lg"><li v-for="document in documentCandidates" :key="document.id"><button type="button" :data-test="`recipient-instruction-document-${document.id}`" class="cursor-pointer flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-payroll-50" @click="selectDocument(document)"><span class="truncate">{{ document.title }}</span><span class="shrink-0 text-xs uppercase text-neutral-400">{{ document.doc_type }}</span></button></li></ul></label>
           <label class="text-xs font-medium text-neutral-600 sm:col-span-2">{{ t('payroll.enforcement.legal_facts.change_reason') }}<textarea v-model="recipientInstruction.change_reason" rows="2" maxlength="500" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="recipient-instruction-reason" /></label>
         </div>
-        <div class="mt-4 flex flex-wrap justify-end gap-2"><button type="button" :class="btnOutline('neutral')" @click="closeForms"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" :class="btnFilled('primary')" :disabled="saving || !canSubmitRecipientInstruction"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
+        <div class="mt-4 flex flex-wrap items-center justify-end gap-2"><p v-if="recipientInstructionBlockedReason" :class="[BTN_DISABLED_NOTE, 'mr-auto']" data-test="recipient-instruction-blocked">{{ recipientInstructionBlockedReason }}</p><button type="button" :class="btnOutline('neutral')" @click="closeForms"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" :class="btnFilled('primary')" :disabled="saving || !canSubmitRecipientInstruction" :title="disabledTitle(!canSubmitRecipientInstruction, recipientInstructionBlockedReason)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
       </form>
 
       <div class="mt-5 border-t border-neutral-200 pt-4">
@@ -448,11 +508,10 @@ onMounted(load)
       </div>
 
       <form v-if="selectedClaim" data-test="enforcement-breakdown-form" class="mt-4 rounded-md border border-primary-200 bg-primary-50 p-4" @submit.prevent="appendBreakdown">
-        <div class="grid grid-cols-2 gap-3 lg:grid-cols-4"><label v-for="field in (['principal','interest','costs','maintenance'] as const)" :key="field" class="text-xs font-medium text-neutral-600">{{ t(`payroll.enforcement.legal_facts.${field}`) }}<input v-model="breakdown[field]" required inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label></div>
+        <div class="grid grid-cols-2 gap-3 lg:grid-cols-4"><label v-for="field in (['principal','interest','costs','maintenance'] as const)" :key="field" class="text-xs font-medium text-neutral-600">{{ t(`payroll.enforcement.legal_facts.${field}`) }}<input v-model="breakdown[field]" inputmode="decimal" :placeholder="t('payroll.enforcement.legal_facts.zero_placeholder')" :data-test="`breakdown-${field}`" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label></div>
         <div class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm" :class="breakdownMatches ? 'border-success-200 bg-success-50 text-success-700' : 'border-warning-200 bg-warning-50 text-warning-700'"><span>{{ t('payroll.enforcement.legal_facts.entered_total') }}: {{ breakdownTotal === null ? '—' : money(breakdownTotal) }}</span><span>{{ t('payroll.enforcement.legal_facts.required_total') }}: {{ money(selectedClaim.outstanding_minor_units) }}</span></div>
         <div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2"><label class="text-xs font-medium text-neutral-600">{{ t('payroll.enforcement.legal_facts.change_reason') }}<textarea v-model="breakdown.change_reason" maxlength="500" rows="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label><label class="relative text-xs font-medium text-neutral-600">{{ t('payroll.enforcement.legal_facts.source_document') }}<input v-model="documentQuery" :readonly="selectedDocument !== null" required type="search" autocomplete="off" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 pr-9 text-sm" :placeholder="t('payroll.enforcement.legal_facts.document_search')"><button v-if="selectedDocument" type="button" class="cursor-pointer absolute right-2 top-7 rounded p-1 text-neutral-400 hover:text-danger-600" :title="t('common.remove')" @click="resetDocument"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg></button><ul v-if="documentCandidates.length" class="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-neutral-200 bg-surface shadow-lg"><li v-for="document in documentCandidates" :key="document.id"><button type="button" class="cursor-pointer flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-payroll-50" @click="selectDocument(document)"><span class="truncate">{{ document.title }}</span><span class="shrink-0 text-xs uppercase text-neutral-400">{{ document.doc_type }}</span></button></li></ul></label></div>
-        <p v-if="!breakdownMatches" class="mt-2 text-xs text-warning-700">{{ t('payroll.enforcement.legal_facts.total_mismatch') }}</p>
-        <div class="mt-4 flex flex-wrap justify-end gap-2"><button type="button" :class="btnOutline('neutral')" @click="closeForms"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" :class="btnFilled('primary')" :disabled="saving || !canSubmitBreakdown"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
+        <div class="mt-4 flex flex-wrap items-center justify-end gap-2"><p v-if="breakdownBlockedReason" :class="[BTN_DISABLED_NOTE, 'mr-auto']" data-test="breakdown-blocked">{{ breakdownBlockedReason }}</p><button type="button" :class="btnOutline('neutral')" @click="closeForms"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" :class="btnFilled('primary')" :disabled="saving || !canSubmitBreakdown" :title="disabledTitle(!canSubmitBreakdown, breakdownBlockedReason)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
       </form>
 
       <p v-if="canWrite && !canReadDocuments" class="mt-4 rounded-md border border-warning-200 bg-warning-50 p-3 text-xs text-warning-700">{{ t('payroll.enforcement.document_permission_required') }}</p>

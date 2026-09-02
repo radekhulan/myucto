@@ -2520,6 +2520,61 @@ final class PayrollEnforcementApiTest extends TestCase
         ], $audit->fetchAll(PDO::FETCH_COLUMN));
     }
 
+    /**
+     * Hláška o zamítnuté pohledávce končí v toastu na obrazovce exekucí. Nesmí
+     * v ní být název databázového sloupce — účetní podle „first_payer_delivered_on"
+     * nepozná, do kterého políčka formuláře má sáhnout. Zároveň to potvrzuje, že
+     * datum doručení prvnímu plátci ZŮSTÁVÁ povinné: odvozuje se z něj pořadí
+     * podle § 280 odst. 3 o. s. ř.
+     */
+    public function testRejectedClaimNamesTheFormFieldNotTheColumn(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+
+        $body = $this->statutoryClaimBody();
+        unset($body['first_payer_delivered_on']);
+        $missingDelivery = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody($body),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(422, $missingDelivery->getStatusCode());
+        $message = $this->errorMessage($missingDelivery);
+        self::assertStringNotContainsString('first_payer_delivered_on', $message);
+        self::assertStringContainsString('prvnímu plátci', $message);
+
+        $brokenDate = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'order_issued_on' => '19. 5. 2026',
+                ]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(422, $brokenDate->getStatusCode());
+        $dateMessage = $this->errorMessage($brokenDate);
+        self::assertStringNotContainsString('order_issued_on', $dateMessage);
+        self::assertStringContainsString('Datum vydání příkazu', $dateMessage);
+
+        $missingWeight = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'category' => 'current_maintenance',
+                    'maintenance_weight_minor_units' => null,
+                ]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(422, $missingWeight->getStatusCode());
+        $weightMessage = $this->errorMessage($missingWeight);
+        self::assertStringNotContainsString('maintenance_weight', $weightMessage);
+        self::assertStringContainsString('§ 279', $weightMessage);
+    }
+
     public function testStatutoryClaimPriorityIsDerivedFromFirstPayerDelivery(): void
     {
         $case = $this->createCase($this->employeeId);
@@ -3143,6 +3198,15 @@ final class PayrollEnforcementApiTest extends TestCase
             'error',
         );
         return PayrollTimeValue::string($error['code'] ?? null, 'error.code');
+    }
+
+    private function errorMessage(ResponseInterface $response): string
+    {
+        $error = PayrollTimeValue::row(
+            $this->json($response)['error'] ?? null,
+            'error',
+        );
+        return PayrollTimeValue::string($error['message'] ?? null, 'error.message');
     }
 
     /** @return array<string,mixed> */

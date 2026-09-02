@@ -65,6 +65,34 @@ final class PayrollDependantValidator
     ];
 
     /**
+     * Hláška musí jmenovat POLE VE FORMULÁŘI, ne klíč v payloadu. „Pole
+     * existence_from musí být datum YYYY-MM-DD." účetní neřekne, kam se podívat.
+     *
+     * @var array<string,string>
+     */
+    private const FIELD_LABELS = [
+        'relation' => 'Vztah k zaměstnanci',
+        'full_name' => 'Jméno a příjmení',
+        'given_name' => 'Jméno',
+        'family_name' => 'Příjmení',
+        'birth_date' => 'Datum narození',
+        'birth_number' => 'Rodné číslo',
+        'existence_from' => 'Vyživovaná od',
+        'existence_to' => 'Vyživovaná do',
+        'note' => 'Poznámka',
+        'ztp_p' => 'Držitel průkazu ZTP/P',
+        'student' => 'Studium',
+        'child_order' => 'Pořadí dítěte',
+        'claim_reason' => 'Důvod nároku',
+        'evidence_status' => 'Doloženost nároku',
+        'evidence_reference' => 'Odkaz na doklad',
+        'shared_household_confirmed' => 'Společně hospodařící domácnost',
+        'other_claimant_excluded' => 'Nikdo jiný zvýhodnění neuplatňuje',
+        'effective_from' => 'Nárok od',
+        'effective_to' => 'Nárok do',
+    ];
+
+    /**
      * @param array<string,mixed> $input
      * @return DependantInput
      */
@@ -76,7 +104,7 @@ final class PayrollDependantValidator
         $existenceTo = $this->nullableDate($input, 'existence_to');
         if ($existenceTo !== null && $existenceTo < $existenceFrom) {
             throw new InvalidArgumentException(
-                'existence_to nesmí předcházet existence_from.',
+                'Konec vyživování nesmí předcházet jeho začátku.',
             );
         }
         if ($existenceFrom < $birthDate) {
@@ -92,7 +120,7 @@ final class PayrollDependantValidator
             $raw = $input['birth_number'];
             if (!is_string($raw) || trim($raw) === '') {
                 throw new InvalidArgumentException(
-                    'birth_number musí být neprázdný text.',
+                    'Rodné číslo nesmí být prázdné. Když ho zatím nemáte, nechte pole prázdné.',
                 );
             }
             $birthNumber = CzechBirthNumber::normalize($raw);
@@ -131,7 +159,7 @@ final class PayrollDependantValidator
         ]);
         if (!is_int($order)) {
             throw new InvalidArgumentException(
-                'child_order musí být celé číslo 1 až 20.',
+                'Pořadí dítěte musí být číslo 1 až 20.',
             );
         }
 
@@ -147,7 +175,7 @@ final class PayrollDependantValidator
         $to = $this->nullableDate($input, 'effective_to');
         if ($to !== null && $to < $from) {
             throw new InvalidArgumentException(
-                'effective_to nesmí předcházet effective_from.',
+                'Konec nároku nesmí předcházet jeho začátku.',
             );
         }
         if (substr($from, 8, 2) !== '01') {
@@ -192,12 +220,18 @@ final class PayrollDependantValidator
             ->format('Y-m-d');
     }
 
+    /** Popisek pole tak, jak stojí ve formuláři; neznámý klíč zůstane sám sebou. */
+    private static function label(string $key): string
+    {
+        return self::FIELD_LABELS[$key] ?? $key;
+    }
+
     /** @param array<string,mixed> $input @param list<string> $allowed */
     private function enum(array $input, string $key, array $allowed): string
     {
         $value = $input[$key] ?? null;
         if (!is_string($value) || !in_array($value, $allowed, true)) {
-            throw new InvalidArgumentException("Pole {$key} má nepovolenou hodnotu.");
+            throw new InvalidArgumentException(sprintf('„%s“ má nepovolenou hodnotu.', self::label($key)));
         }
 
         return $value;
@@ -208,16 +242,16 @@ final class PayrollDependantValidator
     {
         $value = $input[$key] ?? null;
         if (!is_string($value)) {
-            throw new InvalidArgumentException("Pole {$key} musí být text.");
+            throw new InvalidArgumentException(sprintf('„%s“ musí být text.', self::label($key)));
         }
         $value = trim($value);
         if ($value === '' || mb_strlen($value, 'UTF-8') > $maximum) {
             throw new InvalidArgumentException(
-                "Pole {$key} musí mít 1 až {$maximum} znaků.",
+                sprintf('„%s“ musí mít 1 až %d znaků.', self::label($key), $maximum),
             );
         }
         if (preg_match('/[\x00-\x1F\x7F]/u', $value) === 1) {
-            throw new InvalidArgumentException("Pole {$key} obsahuje řídicí znak.");
+            throw new InvalidArgumentException(sprintf('„%s“ obsahuje nepovolený znak.', self::label($key)));
         }
         CzechBirthNumber::rejectMaskPlaceholder($value);
 
@@ -246,14 +280,17 @@ final class PayrollDependantValidator
             return null;
         }
         if (!is_string($value)) {
-            throw new InvalidArgumentException("Pole {$key} musí být text.");
+            throw new InvalidArgumentException(sprintf('„%s“ musí být text.', self::label($key)));
         }
         $value = trim($value);
         if (strlen($value) > 500
             || preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D', $value) !== 1
         ) {
             throw new InvalidArgumentException(
-                "Pole {$key} není kanonická reference na doklad.",
+                sprintf(
+                    '„%s“ smí obsahovat jen písmena, číslice a znaky . : / _ - bez mezer.',
+                    self::label($key),
+                ),
             );
         }
 
@@ -270,7 +307,7 @@ final class PayrollDependantValidator
         if ($value === 0 || $value === 1 || $value === '0' || $value === '1') {
             return (bool) (int) $value;
         }
-        throw new InvalidArgumentException("Pole {$key} musí být true nebo false.");
+        throw new InvalidArgumentException(sprintf('„%s“ musí být ano, nebo ne.', self::label($key)));
     }
 
     /** @param array<string,mixed> $input */
@@ -278,11 +315,11 @@ final class PayrollDependantValidator
     {
         $value = $input[$key] ?? null;
         if (!is_string($value)) {
-            throw new InvalidArgumentException("Pole {$key} musí být datum YYYY-MM-DD.");
+            throw new InvalidArgumentException(sprintf('„%s“ musí být datum ve tvaru DD. MM. RRRR.', self::label($key)));
         }
         $parsed = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
         if ($parsed === false || $parsed->format('Y-m-d') !== $value) {
-            throw new InvalidArgumentException("Pole {$key} musí být datum YYYY-MM-DD.");
+            throw new InvalidArgumentException(sprintf('„%s“ musí být datum ve tvaru DD. MM. RRRR.', self::label($key)));
         }
 
         return $value;

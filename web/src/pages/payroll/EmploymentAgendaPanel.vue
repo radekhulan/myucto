@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { payrollApi, type PayrollAgendaSummaryItem } from '@/api/payroll'
-import { BTN_DISABLED_NOTE, ICONS, MENU_ICON, disabledTitle } from '@/components/ui/buttonStyles'
+import { BTN_DISABLED_NOTE, ICONS, MENU_ICON, btnOutlineSm, disabledTitle } from '@/components/ui/buttonStyles'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -177,13 +177,27 @@ const GRID = computed(() => props.compact === true
     </div>
 
     <template v-else>
-      <p
+      <!--
+        Hláška bez akce je slepá ulička: uživatel vidí, že se souhrn nenačetl,
+        a nemá čím to zkusit znovu jinak než přenačtením celé stránky.
+      -->
+      <div
         v-if="failed"
-        class="mt-3 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
+        class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
         data-test="employment-agendas-failed"
       >
-        {{ t('payroll.agendas.load_failed') }}
-      </p>
+        <span>{{ t('payroll.agendas.load_failed') }}</span>
+        <button
+          type="button"
+          :class="btnOutlineSm('warning')"
+          :disabled="loading"
+          data-test="employment-agendas-retry"
+          @click="load"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+          {{ t('common.refresh') }}
+        </button>
+      </div>
 
       <!-- Rozvržení mřížky viz `GRID`. Odkazy jsou <a>, takže se seznam projde tabulátorem bez myši. -->
       <ul

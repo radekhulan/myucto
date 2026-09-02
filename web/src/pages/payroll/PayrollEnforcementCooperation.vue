@@ -10,7 +10,7 @@ import {
   type XmlzamResponsePreview,
 } from '@/api/payrollEnforcement'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 
@@ -43,6 +43,32 @@ const canPreview = computed(() => canWrite.value
   && xsdComplete.value
   && (!requestsWages.value || periods.value.length > 0)
   && !busy.value)
+
+/*
+ * Proč nejde udělat náhled. Dřív visely pod tlačítkem jen dvě věty (žádný případ,
+ * chybějící období) — nevybraný případ u osoby s víc exekucemi a chybějící právo
+ * zápisu tlačítko zhasly bez jediného slova.
+ */
+const previewBlockedReason = computed<string | null>(() => {
+  if (requestDetail.value === null) return null
+  if (!canWrite.value) return t('payroll.enforcement_cooperation.read_only')
+  if (!xsdComplete.value) return t('payroll.enforcement_cooperation.partial_scope_blocked')
+  if (cases.value.length === 0) return t('payroll.enforcement_cooperation.no_case')
+  if (selectedCaseId.value === null) return t('payroll.enforcement_cooperation.case_required')
+  if (requestsWages.value && periods.value.length === 0) {
+    return t('payroll.enforcement_cooperation.period_required')
+  }
+  return null
+})
+
+/*
+ * Zmrazená odpověď bez spárovaného příjemce je slepá ulička: tlačítko Zařadit
+ * k odeslání se vůbec nevykreslí (`v-if="requestDetail.recipient"`) a na
+ * obrazovce nezůstane nic, podle čeho by se dalo jednat. Věta s odkazem do
+ * datové schránky říká, kam pro nápravu.
+ */
+const dispatchBlocked = computed(() => frozenResponseId.value !== null
+  && !requestDetail.value?.recipient)
 
 function errorMessage(error: any, fallback: string): string {
   return error?.response?.data?.error?.message || fallback
@@ -222,7 +248,8 @@ watch(selectedCaseId, resetResponse)
           </div>
         </article>
       </div>
-      <EmptyState v-else-if="!loading && requestDetail === null" class="mt-4" :title="t('payroll.enforcement_cooperation.empty_title')" :description="t('payroll.enforcement_cooperation.empty_hint')" icon="inbox" />
+      <!-- `description` prop na EmptyState neexistuje — text se tiše zahazoval a zůstal jen nadpis. -->
+      <EmptyState v-else-if="!loading && requestDetail === null" class="mt-4" :title="t('payroll.enforcement_cooperation.empty_title')" :message="t('payroll.enforcement_cooperation.empty_hint')" icon="inbox" />
     </section>
 
     <template v-if="requestDetail">
@@ -268,12 +295,11 @@ watch(selectedCaseId, resetResponse)
           </div>
         </div>
         <div class="mt-4 flex flex-wrap items-center gap-3">
-          <button data-test="xmlzam-preview" :class="btnFilled('primary')" :disabled="!canPreview" @click="createPreview">
+          <button data-test="xmlzam-preview" :class="btnFilled('primary')" :disabled="!canPreview" :title="disabledTitle(!canPreview, previewBlockedReason)" @click="createPreview">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.eye" /></svg>
             {{ t('payroll.enforcement_cooperation.preview') }}
           </button>
-          <p v-if="cases.length === 0" class="text-sm text-warning-700">{{ t('payroll.enforcement_cooperation.no_case') }}</p>
-          <p v-else-if="requestsWages && periods.length === 0" class="text-sm text-warning-700">{{ t('payroll.enforcement_cooperation.period_required') }}</p>
+          <p v-if="previewBlockedReason" :class="BTN_DISABLED_NOTE" data-test="xmlzam-preview-blocked">{{ previewBlockedReason }}</p>
         </div>
       </section>
 
@@ -301,6 +327,10 @@ watch(selectedCaseId, resetResponse)
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.send" /></svg>
             {{ t('payroll.enforcement_cooperation.enqueue') }}
           </button>
+        </div>
+        <div v-if="dispatchBlocked" class="mt-4 rounded-md border border-warning-300 bg-warning-50 p-3 text-sm text-warning-800" data-test="xmlzam-dispatch-blocked">
+          <p>{{ t('payroll.enforcement_cooperation.dispatch_blocked') }}</p>
+          <RouterLink class="mt-2 inline-flex font-medium text-primary-700 hover:underline" to="/admin/databox">{{ t('payroll.enforcement_cooperation.open_databox') }}</RouterLink>
         </div>
         <div v-if="queuedOutboxId !== null" class="mt-4 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700">
           <p>{{ t('payroll.enforcement_cooperation.queued_hint') }}</p>

@@ -1972,6 +1972,161 @@ final class PayrollRegistrationActionTest extends TestCase
         }
     }
 
+    /**
+     * Uložení musí projít i s prázdným povinným polem. Účetní jinak nechá
+     * hodinu práce v prohlížeči, než se vrátí chybějící údaj doplnit.
+     */
+    public function testIncompleteA1ProfileIsSavedAsDraftAndNamesTheGaps(): void
+    {
+        $this->seedA1MasterData();
+        $payload = $this->completeA1Payload();
+        $payload['facts']['highest_education_code'] = null;
+        $payload['employment']['work_mode_code'] = null;
+
+        $response = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($payload),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $profile = $this->json($response)['profile'];
+        self::assertSame('draft', $profile['status']);
+        self::assertSame(1, $profile['row_version']);
+        $fields = array_column($profile['problems'], 'field');
+        self::assertContains('facts.highest_education_code', $fields);
+        self::assertContains('employment.work_mode_code', $fields);
+        foreach ($profile['problems'] as $problem) {
+            self::assertNotSame('', trim((string) $problem['message']));
+        }
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT status FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ? AND employment_id = ?'
+        );
+        $statement->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(['draft'], $statement->fetchAll(PDO::FETCH_COLUMN));
+
+        // Vyplněná část se opravdu uložila, ne jen „přijala".
+        $stored = $this->json(($this->action)->a1Profile(
+            $this->request('GET'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ))['profile'];
+        self::assertSame('draft', $stored['status']);
+        self::assertSame('Účetní', $stored['employment']['position_name']);
+        self::assertSame('Praha', $stored['permanent_address']['city']);
+        self::assertNull($stored['facts']['highest_education_code']);
+    }
+
+    /** Kontrola pojmenuje vady, ale nic nezaloží. */
+    public function testA1ProfileCheckNamesGapsWithoutSaving(): void
+    {
+        $this->seedA1MasterData();
+        $payload = $this->completeA1Payload();
+        $payload['facts']['highest_education_code'] = null;
+        $payload['permanent_address']['house_number'] = null;
+
+        $response = ($this->action)->checkA1Profile(
+            $this->request('POST')->withParsedBody($payload),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertFalse($body['complete']);
+        $fields = array_column($body['problems'], 'field');
+        self::assertContains('facts.highest_education_code', $fields);
+        self::assertContains('permanent_address.house_number', $fields);
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ? AND employment_id = ?'
+        );
+        $statement->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(0, (int) $statement->fetchColumn());
+
+        $complete = ($this->action)->checkA1Profile(
+            $this->request('POST')->withParsedBody($this->completeA1Payload()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertTrue($this->json($complete)['complete']);
+        self::assertSame([], $this->json($complete)['problems']);
+    }
+
+    /** Úplnost se vynucuje až tam, kde z profilu vzniká podání. */
+    public function testPreparingSubmissionRefusesADraftProfile(): void
+    {
+        $this->seedA1MasterData();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $payload = $this->completeA1Payload();
+        $payload['facts']['highest_education_code'] = null;
+        ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($payload),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        $response = $this->post();
+
+        self::assertSame(422, $response->getStatusCode());
+        $error = $this->json($response)['error'];
+        self::assertSame(
+            'registration_regzec_a1_required_field_missing',
+            $error['code'],
+        );
+        self::assertStringContainsString(
+            'facts.highest_education_code',
+            $error['message'],
+        );
+        self::assertSame(0, $this->countSubmissions());
+    }
+
+    /**
+     * Koncept ověřenou verzi nepřepíše — ta zůstane na svém řádku i se svým
+     * otiskem, protože z ní se podává.
+     */
+    public function testDraftDoesNotReplaceTheVerifiedVersion(): void
+    {
+        $this->seedA1MasterData();
+        $verified = $this->json(($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($this->completeA1Payload()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ))['profile'];
+        self::assertSame('verified', $verified['status']);
+
+        $incomplete = $this->completeA1Payload();
+        $incomplete['row_version'] = 1;
+        $incomplete['employment']['position_name'] = null;
+        $draft = $this->json(($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($incomplete),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ))['profile'];
+        self::assertSame('draft', $draft['status']);
+        self::assertSame(2, $draft['row_version']);
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT row_version, status, reference_hash
+               FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY row_version'
+        );
+        $statement->execute([$this->supplierId, $this->employmentId]);
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(2, $rows);
+        self::assertSame('verified', $rows[0]['status']);
+        self::assertSame($verified['reference_hash'], $rows[0]['reference_hash']);
+        self::assertSame('draft', $rows[1]['status']);
+    }
+
     /** Kmenové tabulky osoby a pracovního vztahu, do kterých se nesmí zapsat. */
     private const MASTER_DATA_TABLES = [
         'payroll_employees',

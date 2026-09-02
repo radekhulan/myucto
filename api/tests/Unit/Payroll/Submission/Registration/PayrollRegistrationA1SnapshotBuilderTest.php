@@ -56,6 +56,81 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Kontrola ve formuláři a kontrola při podání musí padat na týchž polích.
+     * Sběrný režim proto běží nad stejnými pravidly, jen místo první výjimky
+     * vrátí celý seznam — a u pole řekne i to, kde se zadává.
+     */
+    public function testProblemsCollectEveryGapAtOnce(): void
+    {
+        $source = self::source('1', '1');
+        $source['facts']['highest_education_code'] = null;
+        $source['employment']['position_name'] = null;
+        $source['permanent_address']['house_number'] = null;
+        $source['permanent_address']['city'] = null;
+
+        $problems = (new PayrollRegistrationA1SnapshotBuilder())->problems(
+            $source,
+            self::identity(),
+            self::scope(),
+        );
+
+        $fields = array_column($problems, 'field');
+        self::assertContains('facts.highest_education_code', $fields);
+        self::assertContains('employment.position_name', $fields);
+        self::assertContains('permanent_address.house_number', $fields);
+        foreach ($problems as $problem) {
+            self::assertNotSame('', trim($problem['message']));
+            self::assertSame(
+                'registration_regzec_a1_required_field_missing',
+                $problem['code'],
+            );
+        }
+        $byField = array_column($problems, 'message', 'field');
+        self::assertStringContainsString(
+            'nejvyšší dosažené vzdělání',
+            $byField['facts.highest_education_code'],
+        );
+        self::assertStringContainsString(
+            'v tomhle formuláři',
+            $byField['employment.position_name'],
+        );
+        self::assertStringContainsString(
+            'Historie adres',
+            $byField['permanent_address.city'],
+        );
+    }
+
+    /** Úplný snímek nemá co hlásit. */
+    public function testProblemsAreEmptyForACompleteSnapshot(): void
+    {
+        self::assertSame([], (new PayrollRegistrationA1SnapshotBuilder())->problems(
+            self::source('1', '1'),
+            self::identity(),
+            self::scope(),
+        ));
+    }
+
+    /** Chybějící občanství pojmenuje sekci karty osoby, ne jen sloupec. */
+    public function testMissingCitizenshipNamesThePlaceWhereItIsEntered(): void
+    {
+        $identity = self::identity();
+        $identity['citizenship_country_code'] = null;
+
+        $problems = (new PayrollRegistrationA1SnapshotBuilder())->problems(
+            self::source('1', '1'),
+            $identity,
+            self::scope(),
+        );
+
+        $byField = array_column($problems, 'message', 'field');
+        self::assertArrayHasKey('citizenship_country_code', $byField);
+        self::assertStringContainsString(
+            'Údaje pro registraci zaměstnance',
+            $byField['citizenship_country_code'],
+        );
+    }
+
     public function testAllA1VariantsSerializeAndPassPinnedXsd(): void
     {
         foreach ([['1', '1'], ['10', null], ['11', '1']] as [$activity, $detail]) {

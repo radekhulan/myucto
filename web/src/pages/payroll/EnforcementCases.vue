@@ -100,6 +100,15 @@ const canWrite = computed(() => auth.canWrite('payroll.enforcement'))
 const canReadDocuments = computed(() => auth.canRead('documents'))
 const canReadPeople = computed(() => auth.canRead('payroll'))
 const canManageInsolvency = computed(() => auth.canWrite('payroll.insolvency'))
+/*
+ * Měsíční evidence i vyživované osoby jdou přes `payroll.enforcement`
+ * (`PayrollEnforcementAction::authorize(WRITE)`) A NAVÍC přes
+ * `payroll.insolvency`. Panel se přitom zpřístupňoval jen podle druhého z nich,
+ * takže uživatel s právem zápisu do oddlužení a jen čtením exekucí odklikal
+ * potvrzení, dal Uložit a dostal 403 — tlačítko slibovalo něco, o čem se předem
+ * vědělo, že spadne.
+ */
+const canEditMonthEvidence = computed(() => canWrite.value && canManageInsolvency.value)
 const canReadPayrollSettings = computed(() => auth.canRead('payroll.settings'))
 const recipientAccounts = ref<PayrollInstitutionAccount[]>([])
 
@@ -352,6 +361,22 @@ const hasMonthlyExceptions = computed(() => {
     || evidence.insolvency_recipient_verified
     || evidence.court_determined_amount_minor_units !== null
   )
+})
+
+/**
+ * Nezabavitelná částka zadaná ručně musí být číslo, jinak `saveMonthEvidence()`
+ * spadne až v `minorUnits()` a účetní dostane toast bez vazby na pole. Hodnotu
+ * samotnou tahle kontrola NEMĚNÍ — prázdné pole zůstává „bez výjimky" (null).
+ */
+const protectedOverrideInvalid = computed(() => {
+  const normalized = protectedOverrideCzk.value.trim().replace(/\s/g, '').replace(',', '.')
+  return normalized !== '' && !/^\d+(?:\.\d{1,2})?$/.test(normalized)
+})
+
+const monthEvidenceBlockedReason = computed<string | null>(() => {
+  if (!canEditMonthEvidence.value) return t('payroll.enforcement.month_evidence_read_only')
+  if (protectedOverrideInvalid.value) return t('payroll.enforcement.validation.amount')
+  return null
 })
 
 const monthlyExceptionLabels = computed(() => {
@@ -1318,6 +1343,15 @@ onMounted(load)
               </select>
               <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('payroll.enforcement.recipient_account_hint') }}</span>
             </label>
+            <!--
+              Prázdný výběr příjemce po výpadku načtení účtů vypadá stejně jako
+              „účty nejsou nastavené". Varování patří i sem, ne jen k formuláři
+              nového případu — na účtech visí i platební instrukce v právních
+              skutečnostech pod tímhle panelem.
+            -->
+            <p v-if="supportFailed" class="mt-3 rounded-md border border-warning-500/40 bg-warning-50 p-3 text-xs text-warning-800" role="alert" data-test="evidence-support-failed">
+              {{ t('payroll.enforcement.support_failed') }}
+            </p>
           </section>
           <section class="rounded-lg border border-neutral-200 bg-surface p-4">
             <h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.ledger') }}</h3>
@@ -1379,9 +1413,16 @@ onMounted(load)
             </div>
             <div class="flex flex-wrap items-end gap-2">
               <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.period') }}<input v-model="evidencePeriod" type="month" class="mt-1 block rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-              <button :class="btnOutline('success')" :disabled="saving" @click="saveMonthEvidence"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button>
+              <button
+                data-test="month-evidence-save"
+                :class="btnOutline('success')"
+                :disabled="saving || monthEvidenceBlockedReason !== null"
+                :title="disabledTitle(monthEvidenceBlockedReason !== null, monthEvidenceBlockedReason)"
+                @click="saveMonthEvidence"
+              ><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button>
             </div>
           </div>
+          <p v-if="monthEvidenceBlockedReason" :class="[BTN_DISABLED_NOTE, 'mt-2']" data-test="month-evidence-blocked">{{ monthEvidenceBlockedReason }}</p>
 
           <div class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
             <h4 class="font-medium text-neutral-900">{{ t('payroll.enforcement.monthly_routine_title') }}</h4>
@@ -1396,7 +1437,7 @@ onMounted(load)
                 <label class="flex items-center gap-2" :class="evidenceActionable(monthEvidenceScope?.[row.key]) ? 'text-neutral-700' : 'text-neutral-400'">
                   <input
                     v-model="monthEvidence[row.field]"
-                    :disabled="!evidenceActionable(monthEvidenceScope?.[row.key])"
+                    :disabled="!canEditMonthEvidence || !evidenceActionable(monthEvidenceScope?.[row.key])"
                     type="checkbox"
                     class="rounded border-neutral-300 text-payroll-600 disabled:cursor-not-allowed disabled:opacity-50"
                     :data-test="`month-evidence-${row.key}`"
@@ -1436,12 +1477,12 @@ onMounted(load)
               <p class="mb-4 text-xs text-neutral-500">{{ t('payroll.enforcement.monthly_exceptions.hint') }}</p>
               <div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
                 <div class="space-y-3">
-                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.has_multiple_payers" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-test="month-evidence-multiple-payers">{{ t('payroll.enforcement.month_evidence.multiple_payers') }}</label>
-                  <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.pension') }}<select v-model="monthEvidence.pension_evidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="value in pensionEvidenceValues" :key="value" :value="value">{{ t(`payroll.enforcement.month_evidence.pension_${value === 'verified' ? 'receives' : value}`) }}</option></select></label>
+                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.has_multiple_payers" :disabled="!canEditMonthEvidence" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-test="month-evidence-multiple-payers">{{ t('payroll.enforcement.month_evidence.multiple_payers') }}</label>
+                  <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.pension') }}<select v-model="monthEvidence.pension_evidence" :disabled="!canEditMonthEvidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="value in pensionEvidenceValues" :key="value" :value="value">{{ t(`payroll.enforcement.month_evidence.pension_${value === 'verified' ? 'receives' : value}`) }}</option></select></label>
                 </div>
                 <div class="space-y-3">
-                  <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.protected_override_czk') }}<input v-model="protectedOverrideCzk" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.protected_amount_override_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.protected_override_verified') }}</label>
+                  <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.protected_override_czk') }}<input v-model="protectedOverrideCzk" :disabled="!canEditMonthEvidence" inputmode="decimal" data-test="month-evidence-protected-override" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" :class="protectedOverrideInvalid ? 'border-danger-500' : ''"><span v-if="protectedOverrideInvalid" class="mt-1 block text-xs text-danger-700" data-test="protected-override-invalid">{{ t('payroll.enforcement.validation.amount') }}</span></label>
+                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.protected_amount_override_verified" :disabled="!canEditMonthEvidence" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.protected_override_verified') }}</label>
                 </div>
                 <div class="space-y-3 rounded-md border border-payroll-200 bg-payroll-50 p-3">
                   <p class="text-sm font-medium text-neutral-900">{{ t('payroll.enforcement.insolvency_workspace_title') }}</p>
@@ -1500,7 +1541,7 @@ onMounted(load)
                   </p>
                 </div>
               </div>
-              <form class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5" @submit.prevent="addDependant">
+              <form v-if="canEditMonthEvidence" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5" @submit.prevent="addDependant">
                 <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.dependant_type') }}<select v-model="newDependant.dependant_kind" data-test="dependant-kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option value="dependant">{{ t('payroll.enforcement.dependant_kind.dependant') }}</option><option value="spouse_partner">{{ t('payroll.enforcement.dependant_kind.spouse_partner') }}</option></select></label>
                 <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.valid_from') }}<input v-model="newDependant.valid_from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
                 <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.valid_to') }}<input v-model="newDependant.valid_to" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
@@ -1549,6 +1590,7 @@ onMounted(load)
                   {{ dependantError }}
                 </p>
               </form>
+              <p v-else :class="[BTN_DISABLED_NOTE, 'mt-4']" data-test="dependants-read-only">{{ t('payroll.enforcement.month_evidence_read_only') }}</p>
             </div>
           </div>
         </section>

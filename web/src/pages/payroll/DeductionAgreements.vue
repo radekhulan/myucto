@@ -15,7 +15,7 @@ import {
   type DeductionAgreementSummary,
 } from '@/api/payrollDeductions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
@@ -192,6 +192,28 @@ const detailActions = computed<ActionItem[]>(() => {
 function apiMessage(error: any, fallback: string): string {
   return error?.response?.data?.error?.message || error?.message || t(fallback)
 }
+
+/**
+ * Proč nejde uložit.
+ *
+ * `PayrollPersonSearchSelect` posílá `required` na textové pole s HLEDANÝM
+ * TEXTEM, ne na vybrané id — kdo jméno jen napsal a nevybral ze seznamu, prošel
+ * nativní validací a dostal až po odeslání „Vyberte zaměstnance". Tady se to
+ * pozná dřív a je u toho vidět proč.
+ *
+ * Název dohody zůstává povinný záměrně: je to popisek řádku srážky na výplatním
+ * lístku (`PayslipDocumentSnapshotMapper`), a § 142 odst. 5 zákoníku práce
+ * ukládá zaměstnavateli vydat písemný doklad o provedených srážkách — nepojmenovaná
+ * srážka by tuhle povinnost nesplnila a generování pásky by na ní spadlo.
+ */
+const saveBlockedReason = computed<string | null>(() => {
+  if (!canWrite.value) return t('payroll.deductions.validation.read_only')
+  if (creating.value && !form.value.employee_id) {
+    return t('payroll.deductions.validation.employee')
+  }
+  if (form.value.title.trim() === '') return t('payroll.deductions.validation.title')
+  return null
+})
 
 async function load() {
   loading.value = true
@@ -658,10 +680,17 @@ onMounted(load)
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
           </button>
-          <button type="submit" :class="btnFilled('primary')" :disabled="saving || !canWrite">
+          <button
+            type="submit"
+            data-test="deduction-save"
+            :class="btnFilled('primary')"
+            :disabled="saving || saveBlockedReason !== null"
+            :title="disabledTitle(saveBlockedReason !== null, saveBlockedReason)"
+          >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
             {{ t('common.save') }}
           </button>
+          <p v-if="saveBlockedReason" :class="[BTN_DISABLED_NOTE, 'w-full text-right']" data-test="deduction-save-blocked">{{ saveBlockedReason }}</p>
         </div>
       </form>
 

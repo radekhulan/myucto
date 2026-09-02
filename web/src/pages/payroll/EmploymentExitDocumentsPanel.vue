@@ -147,6 +147,69 @@ const canGenerate = computed(() =>
   && (!hasExistingCertificate.value || correctionReason.value.trim() !== ''),
 )
 
+/*
+ * Devět podmínek pod jedním zašedlým tlačítkem je slepá ulička: uživatel vidí,
+ * že to nejde, ale ne proč. Pořadí odpovídá pořadí polí ve formuláři, aby
+ * věta ukazovala na to nejbližší nevyplněné místo.
+ *
+ * Povinnost polí „druh konaných prací" a „dosažená kvalifikace" plyne
+ * z § 313 odst. 1 písm. b) zákoníku práce — jsou to náležitosti potvrzení
+ * o zaměstnání, bez nich by doklad nebyl platný.
+ */
+const generateBlockReason = computed(() => {
+  if (!props.canWrite || generating.value) return ''
+  if (workDescription.value.trim() === '') {
+    return t('payroll.people.exit_documents.blocked.work_description')
+  }
+  if (achievedQualification.value.trim() === '') {
+    return t('payroll.people.exit_documents.blocked.qualification')
+  }
+  if (!exposureAssessmentComplete.value) {
+    return t('payroll.people.exit_documents.blocked.exposure')
+  }
+  if (!deductionEvidenceComplete.value) {
+    return t('payroll.people.exit_documents.blocked.deduction_evidence')
+  }
+  if (!deductionAssessmentComplete.value) {
+    return t('payroll.people.exit_documents.blocked.deduction')
+  }
+  if (!pensionPeriodsComplete.value) {
+    return t('payroll.people.exit_documents.blocked.pension_periods')
+  }
+  if (!pensionCategoryAssessmentComplete.value) {
+    return t('payroll.people.exit_documents.blocked.pension_category')
+  }
+  if (hasExistingCertificate.value && correctionReason.value.trim() === '') {
+    return t('payroll.people.exit_documents.blocked.correction_reason')
+  }
+  return ''
+})
+
+const averageBlockReason = computed(() => {
+  if (!props.canWrite || generating.value) return ''
+  if (!pensionInsurancePeriodsComplete.value) {
+    return t('payroll.people.exit_documents.blocked.pension_periods')
+  }
+  if (!terminationAssessmentComplete.value) {
+    return t('payroll.people.exit_documents.blocked.termination')
+  }
+  if (hasExistingAverage.value && averageCorrectionReason.value.trim() === '') {
+    return t('payroll.people.exit_documents.blocked.correction_reason')
+  }
+  return ''
+})
+
+const statementBlockReason = computed(() => {
+  if (!props.canWrite || generating.value) return ''
+  if (requestedPurpose.value.trim() === '') {
+    return t('payroll.people.exit_documents.blocked.requested_purpose')
+  }
+  if (hasExistingStatement.value && statementCorrectionReason.value.trim() === '') {
+    return t('payroll.people.exit_documents.blocked.correction_reason')
+  }
+  return ''
+})
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   return `${(bytes / 1024).toFixed(1)} kB`
@@ -540,6 +603,13 @@ onMounted(() => void load())
           <p v-if="formError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert">
             {{ formError }}
           </p>
+          <p
+            v-if="generateBlockReason"
+            class="rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-800"
+            data-test="employment-certificate-block-reason"
+          >
+            {{ generateBlockReason }}
+          </p>
           <div class="flex flex-wrap justify-end gap-2">
             <button type="button" :class="btnOutline('neutral')" @click="showForm = false">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
@@ -676,6 +746,13 @@ onMounted(() => void load())
           <p v-if="formError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert">
             {{ formError }}
           </p>
+          <p
+            v-if="averageBlockReason"
+            class="rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-800"
+            data-test="average-certificate-block-reason"
+          >
+            {{ averageBlockReason }}
+          </p>
           <div class="flex flex-wrap justify-end gap-2">
             <button type="button" :class="btnOutline('neutral')" @click="showAverageForm = false">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
@@ -763,6 +840,13 @@ onMounted(() => void load())
           </label>
           <p v-if="formError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert">
             {{ formError }}
+          </p>
+          <p
+            v-if="statementBlockReason"
+            class="rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-800"
+            data-test="average-statement-block-reason"
+          >
+            {{ statementBlockReason }}
           </p>
           <div class="flex flex-wrap justify-end gap-2">
             <button type="button" :class="btnOutline('neutral')" @click="showStatementForm = false">

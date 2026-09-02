@@ -208,12 +208,19 @@ final class PayrollPersonProfileValidator
                     "identity_history.{$index}.full_name",
                     191,
                 ),
-                'first_name' => $this->text(
+                // NULL smí projít, protože sloupce jsou nullable od migrace 1272
+                // a starší verze identity strukturované jméno prostě nemají.
+                // Zákon jméno vyžaduje v `full_name` (to povinné zůstává);
+                // rozdělené jméno chce až PREZEC/hromadné oznámení, a to si
+                // vynucuje vlastní kontrola nad AKTUÁLNÍ verzí. Tvrdá povinnost
+                // tady odmítala uložit celou kartu kvůli historickému řádku,
+                // který formulář ani neukazuje.
+                'first_name' => $this->nullableText(
                     $row['first_name'] ?? null,
                     "identity_history.{$index}.first_name",
                     96,
                 ),
-                'last_name' => $this->text(
+                'last_name' => $this->nullableText(
                     $row['last_name'] ?? null,
                     "identity_history.{$index}.last_name",
                     96,

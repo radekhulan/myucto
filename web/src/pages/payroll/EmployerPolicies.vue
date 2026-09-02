@@ -97,29 +97,59 @@ const deliveryOptions = computed(() => options<PayrollDeliveryChannel>(
   'delivery',
   ['disabled', 'employee_portal', 'smime_email', 'manual_handover'],
 ))
-const valid = computed(() => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(form.value.valid_from)) return false
+/**
+ * Co brání uložení, pojmenované po polích. Jedna společná věta „zkontrolujte
+ * období platnosti, výplatní den, ověření kanálu a délku reference" nutila
+ * účetní hledat, které ze čtyř to je.
+ *
+ * Datum ověření doručovacího kanálu tu ZÁMĚRNĚ NENÍ. Vyžadovat ho k uložení
+ * politiky byla naše podmínka, ne cizí: skutečnou pojistkou je
+ * {@see PayrollSecureDeliveryPolicy} na straně serveru, která bez potvrzeného
+ * data výplatnici stejně neodešle. Do teď stačilo vybrat způsob předávání a
+ * celá politika (výplatní den, zaokrouhlení, dovolená) se odmítla uložit.
+ */
+const problems = computed<string[]>(() => {
+  const list: string[] = []
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(form.value.valid_from)) {
+    list.push(t('payroll.employer.policies.validation_fields.valid_from'))
+  }
   const validTo = nullable(form.value.valid_to)
   if (validTo !== null
-    && (!/^\d{4}-\d{2}-\d{2}$/.test(validTo)
-      || validTo < form.value.valid_from)) {
-    return false
+    && (!/^\d{4}-\d{2}-\d{2}$/.test(validTo) || validTo < form.value.valid_from)) {
+    list.push(t('payroll.employer.policies.validation_fields.valid_to'))
   }
   if (!Number.isInteger(form.value.payday_day)
     || form.value.payday_day < 1
     || form.value.payday_day > 31) {
-    return false
+    list.push(t('payroll.employer.policies.validation_fields.payday_day'))
   }
+  // Čtyři týdny jsou zákonné minimum podle § 213 odst. 1 zákoníku práce,
+  // horní mez je jen pojistka proti překlepu.
   if (!Number.isInteger(form.value.leave_entitlement_weeks)
     || form.value.leave_entitlement_weeks < 4
-    || form.value.leave_entitlement_weeks > 12) return false
-  if ((form.value.source_reference?.length ?? 0) > 255) return false
-  if (form.value.delivery_channel === 'disabled') {
-    return form.value.delivery_verified_on === null
+    || form.value.leave_entitlement_weeks > 12) {
+    list.push(t('payroll.employer.policies.validation_fields.leave_entitlement_weeks'))
   }
-  return form.value.delivery_verified_on !== null
-    && /^\d{4}-\d{2}-\d{2}$/.test(form.value.delivery_verified_on)
+  if ((form.value.source_reference?.length ?? 0) > 255) {
+    list.push(t('payroll.employer.policies.validation_fields.source_reference'))
+  }
+  const verifiedOn = nullable(form.value.delivery_verified_on)
+  if (verifiedOn !== null && !/^\d{4}-\d{2}-\d{2}$/.test(verifiedOn)) {
+    list.push(t('payroll.employer.policies.validation_fields.delivery_verified_on'))
+  }
+  return list
 })
+
+const valid = computed(() => problems.value.length === 0)
+
+/**
+ * Kanál je vybraný, ale datum ověření chybí. Není to chyba — politika se uloží.
+ * Je to věta o tom, že se přes ten kanál zatím nic neodešle, protože doručovací
+ * brána vyžaduje potvrzené datum.
+ */
+const deliveryUnverified = computed(() =>
+  form.value.delivery_channel !== 'disabled'
+  && nullable(form.value.delivery_verified_on) === null)
 
 function options<T extends string>(group: string, values: T[]) {
   return values.map(value => ({
@@ -635,11 +665,15 @@ onMounted(load)
         </button>
       </div>
       <div
-        v-if="showValidation && !valid"
+        v-if="showValidation && problems.length > 0"
         class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
         role="alert"
+        data-test="policy-validation"
       >
-        {{ t('payroll.employer.policies.validation') }}
+        <p class="font-medium">{{ t('payroll.employer.policies.validation') }}</p>
+        <ul class="mt-2 list-disc space-y-1 pl-5">
+          <li v-for="problem in problems" :key="problem">{{ problem }}</li>
+        </ul>
       </div>
 
       <div class="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
@@ -770,6 +804,7 @@ onMounted(load)
             :clearable="false"
             :disabled="!canWrite"
             accent="payroll"
+            data-test="policy-delivery-channel"
             @update:model-value="form.delivery_channel = $event ?? 'disabled'; normalizeDelivery()"
           />
         </div>
@@ -780,9 +815,15 @@ onMounted(load)
           <input
             v-model="form.delivery_verified_on"
             type="date"
+            data-test="policy-delivery-verified-on"
             :disabled="!canWrite || form.delivery_channel === 'disabled'"
             class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50"
           >
+          <span
+            v-if="deliveryUnverified"
+            class="mt-1 block text-xs text-warning-700"
+            data-test="policy-delivery-unverified"
+          >{{ t('payroll.employer.policies.delivery_verified_on_hint') }}</span>
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">
