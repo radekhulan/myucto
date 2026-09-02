@@ -16,6 +16,21 @@ use InvalidArgumentException;
  */
 final class CzechBirthNumber
 {
+    /**
+     * Jen číslice, bez lomítka — tvar, který chtějí úřední schémata.
+     *
+     * PROČ ZVLÁŠŤ: {@see normalize()} vrací kanonický ČESKÝ tvar `RRMMDD/XXXX`,
+     * protože tak se rodné číslo píše a tak ho účetní čte. Schémata ČSSZ
+     * (`client/@bno`, `t:simpleNNType`) ale berou 9 až 10 číslic a lomítko
+     * odmítnou. Bez téhle konverze spadl na správně uloženém rodném čísle
+     * KAŽDÝ český zaměstnanec — hláška pak tvrdila, že je údaj neplatný,
+     * a účetní ho neměla jak „opravit", protože byl od začátku v pořádku.
+     */
+    public static function digits(string $value): string
+    {
+        return (string) preg_replace('/\D/', '', self::normalize($value));
+    }
+
     /** @return string kanonický tvar RRMMDD/XXXX */
     public static function normalize(string $value): string
     {

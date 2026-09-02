@@ -166,6 +166,27 @@ final class PayrollRegistrationIdentitySnapshotBuilderTest extends TestCase
         }
     }
 
+    /**
+     * Rodné číslo se v evidenci drží v kanonickém českém tvaru s lomítkem —
+     * tak se píše a tak ho účetní zadá. Schéma ČSSZ ale bere jen číslice,
+     * takže bez převodu neprošel snímek ŽÁDNÉMU českému zaměstnanci
+     * s desetimístným rodným číslem a hláška tvrdila, že je údaj neplatný,
+     * i když byl od začátku v pořádku.
+     */
+    public function testPrevadiRodneCisloSLomitkemNaSameCislice(): void
+    {
+        $source = $this->source();
+        $source['identifiers']['birth_number'] = '910203/0014';
+        $source['identifier_sources']['birth_number'] = [
+            'id' => 151,
+            'row_version' => 1,
+        ];
+
+        $snapshot = $this->builder->build($this->scope(), $source);
+
+        self::assertSame('9102030014', $snapshot->identifiers['birth_number']);
+    }
+
     public function testRegzecIgnoresPrezecDomesticEligibility(): void
     {
         $source = $this->source();
