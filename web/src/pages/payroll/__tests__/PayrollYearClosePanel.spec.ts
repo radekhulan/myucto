@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   closeYear: vi.fn(),
   reopenYear: vi.fn(),
   canWrite: vi.fn((permission: string) => permission === 'payroll.approve'),
+  routeQuery: {} as Record<string, string | undefined>,
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -37,6 +38,8 @@ vi.mock('vue-router', () => ({
     props: ['to'],
     template: '<a><slot /></a>',
   },
+  // Panel čte rok z adresy (proklik „rok je uzavřený" z jiné agendy).
+  useRoute: () => ({ query: m.routeQuery }),
 }))
 
 import PayrollYearClosePanel from '@/pages/payroll/PayrollYearClosePanel.vue'

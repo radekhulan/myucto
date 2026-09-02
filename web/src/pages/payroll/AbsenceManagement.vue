@@ -13,6 +13,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import Modal from '@/components/ui/Modal.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { apiErrorMessage } from '@/api/errors'
+import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
 import { localPayrollPeriod, payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import {
   payrollAbsenceApi,
@@ -29,6 +30,12 @@ import {
 const { t } = useI18n()
 const route = useRoute()
 const toast = useToast()
+/*
+ * Uzavřená roční uzávěrka blokuje zápis i tady, přestože o ní tahle obrazovka
+ * nic neví. Chybová hláška proto nese proklik rovnou na uzávěrku s tím rokem,
+ * o který šlo — jinak je to slepá ulička.
+ */
+const showPayrollError = usePayrollYearClosedToast()
 const auth = useAuthStore()
 const today = new Date()
 const year = today.getFullYear()
@@ -659,7 +666,7 @@ async function cancel(item: PayrollAbsence) {
     toast.success(t('payroll_absence.messages.cancelled'))
     await loadData()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.save_failed'))
+    showPayrollError(error, t('payroll_absence.messages.save_failed'))
   } finally {
     saving.value = false
   }
@@ -756,7 +763,7 @@ async function approveAverage(item: AverageSnapshot) {
     toast.success(t('payroll_absence.messages.average_approved'))
     await loadData()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.save_failed'))
+    showPayrollError(error, t('payroll_absence.messages.save_failed'))
   } finally {
     saving.value = false
   }

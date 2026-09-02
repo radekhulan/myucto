@@ -10,6 +10,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -25,6 +26,29 @@ trait PayrollActionSupport
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $id = (int) ($user['id'] ?? 0);
         return $id > 0 ? $id : null;
+    }
+
+    /**
+     * Uzavřený mzdový rok blokuje zápis napříč agendami — nepřítomnosti,
+     * exekuce, závazky, podání i běhy. Věta o tom stála sama: řekla rok a
+     * poradila „rok nejprve znovu otevřete", ale nikam nevedla. Účetní musela
+     * uhodnout, že se to dělá na Roční uzávěrce mezd, a doklikat se tam.
+     *
+     * Rok proto jede v odpovědi jako údaj, ne jen ve větě, a frontend z něj
+     * staví proklik rovnou na tu uzávěrku. Kód `payroll_year_closed` zůstává
+     * beze změny, aby se stávající obsluha nerozbila.
+     */
+    private static function yearClosedError(
+        Response $response,
+        PayrollYearClosedException $exception,
+    ): Response {
+        return Json::error(
+            $response,
+            'payroll_year_closed',
+            $exception->getMessage(),
+            409,
+            ['year' => $exception->year],
+        );
     }
 
     /**

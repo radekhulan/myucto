@@ -314,7 +314,7 @@ final class PayrollRunsAction
                 $this->requiredUserId($request),
             );
         } catch (PayrollYearClosedException $e) {
-            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
+            return self::yearClosedError($response, $e);
         } catch (PayrollPeriodOwnedException $e) {
             return Json::error($response, 'payroll_period_owned', $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\DomainException|\OutOfBoundsException $e) {
@@ -360,7 +360,7 @@ final class PayrollRunsAction
                 $this->requiredUserId($request),
             );
         } catch (PayrollYearClosedException $e) {
-            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
+            return self::yearClosedError($response, $e);
         } catch (PayrollRunConflictException $e) {
             return Json::error(
                 $response,
@@ -460,7 +460,7 @@ final class PayrollRunsAction
                 $reason,
             );
         } catch (PayrollYearClosedException $e) {
-            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
+            return self::yearClosedError($response, $e);
         } catch (PayrollRunConflictException $e) {
             return Json::error(
                 $response,

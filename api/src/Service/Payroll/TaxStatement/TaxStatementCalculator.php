@@ -164,11 +164,21 @@ final class TaxStatementCalculator
     /** @param list<string> $warnings */
     private function appendCoverageWarnings(TaxStatementBasis $basis, array &$warnings): void
     {
+        // Nulové vyúčtování je řádné podání, ne chyba. Plátce daně, který se
+        // registroval, podává podle § 38j odst. 4 ZDP vyúčtování i za rok, kdy
+        // nikomu nic nevyplatil — a stejně tak účetní potřebuje tiskopis dřív,
+        // než stihne schválit poslední běh. Dokud tady stál `throw`, obojí
+        // znamenalo, že se sestava nedala vygenerovat vůbec a účetní musela
+        // z aplikace ven. Chybějící podklad se proto pojmenuje, ale neblokuje.
         if (!$basis->hasApprovedRun()) {
-            throw new \DomainException(
-                'Za zvolený rok není žádný schválený mzdový běh, '
-                . 'ze kterého by šlo vyúčtování sestavit.',
+            $warnings[] = sprintf(
+                'Za rok %d není žádný schválený mzdový běh — vyúčtování je '
+                . 'sestavené jako nulové. Pokud v roce mzdy byly, schvalte '
+                . 'nejdřív mzdové běhy a sestavu vygenerujte znovu.',
+                $basis->year,
             );
+
+            return;
         }
         $missing = [];
         foreach ($basis->months as $month) {

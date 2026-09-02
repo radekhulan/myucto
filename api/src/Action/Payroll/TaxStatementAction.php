@@ -155,6 +155,35 @@ final class TaxStatementAction
         ], 'xml');
         $response->getBody()->write($result['xml']);
 
+        // Výsledek kontroly proti XSD putoval jen do archivu a do logu. Účetní
+        // stáhla soubor, který EPO odmítne, a nic jí to neřeklo — chybu našla
+        // až na portálu. Stav i první chyby proto jedou s odpovědí; stažení
+        // ale nadále nikdo neblokuje, protože i vadné XML je podklad, se kterým
+        // se dá pracovat.
+        $response = $response->withHeader(
+            'X-Submission-Validation',
+            (string) $archived['validation_status'],
+        );
+        $validationErrors = is_array($archived['validation_errors'])
+            ? $archived['validation_errors']
+            : [];
+        if ($validationErrors !== []) {
+            $response = $response->withHeader(
+                'X-Submission-Validation-Errors',
+                rawurlencode(mb_substr(
+                    implode(' | ', array_map(
+                        static fn (mixed $error): string => is_string($error)
+                            ? $error
+                            : (string) (is_array($error) ? ($error['message'] ?? '') : ''),
+                        array_slice($validationErrors, 0, 5),
+                    )),
+                    0,
+                    900,
+                    'UTF-8',
+                )),
+            );
+        }
+
         return $response
             ->withHeader('Content-Type', 'application/xml; charset=utf-8')
             ->withHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')

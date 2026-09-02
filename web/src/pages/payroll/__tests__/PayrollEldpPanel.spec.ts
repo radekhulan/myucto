@@ -176,8 +176,8 @@ describe('PayrollEldpPanel', () => {
    */
   /**
    * Zhasnuté tlačítko nad formulářem o šesti polích neřeklo, které z nich
-   * zlobí — a poznámku o pěti znacích (naše podmínka, vynucuje ji
-   * `EldpAnnualStatementBuilder`) neuhodne nikdo.
+   * zlobí. Poznámka mezi překážkami už NENÍ — ČSSZ ji nepřebírá, byla to jen
+   * naše evidence, a zákonná povinnost nesmí stát na interním zápisu.
    */
   it('vyjmenuje, co k přípravě chybí, místo mlčky zhasnutého tlačítka', async () => {
     const wrapper = mount(PayrollEldpPanel)
@@ -192,9 +192,33 @@ describe('PayrollEldpPanel', () => {
     const blockers = wrapper.get('[data-test="eldp-prepare-blockers"]').text()
     expect(blockers).toContain('payroll.eldp.blockers.excluded')
     expect(blockers).toContain('payroll.eldp.blockers.deducted')
-    expect(blockers).toContain('payroll.eldp.blockers.note')
+    expect(blockers).not.toContain('payroll.eldp.blockers.note')
 
     await fillConfirmation(wrapper)
+    expect(wrapper.find('[data-test="eldp-prepare-blockers"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="eldp-prepare"]').attributes('disabled')).toBeUndefined()
+  })
+
+  /**
+   * Regrese: prázdná poznámka držela tlačítko Připravit zhasnuté, přestože
+   * ČSSZ žádnou poznámku nečeká. Potvrzení vyloučených a odečítaných dob
+   * samo o sobě musí stačit.
+   */
+  it('nechá připravit list i s prázdnou poznámkou', async () => {
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+    wrapper.findComponent({ name: 'PayrollPersonSearchSelect' })
+      .vm.$emit('update:modelValue', 11)
+    await flushPromises()
+    wrapper.findAllComponents({ name: 'SearchableSelect' })[0]!
+      .vm.$emit('update:modelValue', 101)
+    await flushPromises()
+
+    await wrapper.get('[data-test="eldp-excluded-confirm"]').setValue(true)
+    await wrapper.get('[data-test="eldp-deducted-confirm"]').setValue(true)
+    await wrapper.get('[data-test="eldp-note"]').setValue('')
+    await flushPromises()
+
     expect(wrapper.find('[data-test="eldp-prepare-blockers"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="eldp-prepare"]').attributes('disabled')).toBeUndefined()
   })

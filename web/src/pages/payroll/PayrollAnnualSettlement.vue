@@ -175,6 +175,54 @@ const annualBonusEligible = computed(() =>
     ?? annualBonusEligibilityReason.value === 'eligible',
 )
 
+/*
+ * Kam se jde překážka doplnit.
+ *
+ * Seznam pod „Co brání provedení" končil větou typu „Doplňte odpověď" — jenže
+ * formulář má nad sebou dvanáct polí a účetní hledala, které z nich to je.
+ * U překážek, jejichž pole je na TÉTO obrazovce, je proto položka klikací a
+ * pole se otevře a vysvítí. U ostatních (karta zaměstnance, karta dítěte)
+ * zůstává věta, protože cíl leží mimo tenhle formulář.
+ */
+const requestedOnField = ref<HTMLInputElement | null>(null)
+const priorDocumentsField = ref<HTMLInputElement | null>(null)
+const filingObligationField = ref<HTMLSelectElement | null>(null)
+const annualClaimsField = ref<HTMLSelectElement | null>(null)
+const caregiverStatusField = ref<HTMLSelectElement | null>(null)
+
+const BLOCKER_FIELDS: Record<string, () => HTMLElement | null> = {
+  request_date_missing: () => requestedOnField.value,
+  not_requested: () => requestedOnField.value,
+  prior_documents_date_missing: () => priorDocumentsField.value,
+  prior_employer_documents_missing: () => priorDocumentsField.value,
+  filing_obligation_unknown: () => filingObligationField.value,
+  must_file_tax_return: () => filingObligationField.value,
+  annual_only_claims_unknown: () => annualClaimsField.value,
+  annual_only_claims_unsupported: () => annualClaimsField.value,
+  child_jmhz_evidence_incomplete: () => caregiverStatusField.value,
+}
+
+function blockerHasField(code: string): boolean {
+  return BLOCKER_FIELDS[code] !== undefined
+}
+
+function focusBlockerField(code: string): void {
+  const element = BLOCKER_FIELDS[code]?.() ?? null
+  if (element === null) return
+  element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  element.focus()
+  /*
+   * Samotný fokus je na `<select>` v některých prohlížečích sotva vidět —
+   * prstenec proto chvíli drží navíc, aby účetní poznala, kam ji odkaz
+   * poslal, i když se mezitím podívala jinam.
+   */
+  element.classList.add('ring-2', 'ring-payroll-500', 'ring-offset-1')
+  window.setTimeout(
+    () => element.classList.remove('ring-2', 'ring-payroll-500', 'ring-offset-1'),
+    2000,
+  )
+}
+
 /**
  * Proč je „Provést" zašedlé. Věta musí odpovídat TÉŽE podmínce, která tlačítko
  * vypnula — do teď chybějící oprávnění hlásilo „zaměstnanec o zúčtování
@@ -752,7 +800,9 @@ onMounted(async () => {
                   {{ t('payroll.annual_settlement.requested_on') }}
                 </span>
                 <input
+                  ref="requestedOnField"
                   v-model="form.requested_on"
+                  data-test="annual-settlement-requested-on"
                   type="date"
                   class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
                 >
@@ -794,7 +844,9 @@ onMounted(async () => {
                   {{ t('payroll.annual_settlement.prior_documents_received_on') }}
                 </span>
                 <input
+                  ref="priorDocumentsField"
                   v-model="form.prior_documents_received_on"
+                  data-test="annual-settlement-prior-documents-on"
                   type="date"
                   class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
                 >
@@ -805,7 +857,9 @@ onMounted(async () => {
                   {{ t('payroll.annual_settlement.filing_obligation') }}
                 </span>
                 <select
+                  ref="filingObligationField"
                   v-model="form.filing_obligation"
+                  data-test="annual-settlement-filing-obligation"
                   class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
                 >
                   <option
@@ -836,7 +890,9 @@ onMounted(async () => {
                   {{ t('payroll.annual_settlement.annual_claims') }}
                 </span>
                 <select
+                  ref="annualClaimsField"
                   v-model="form.annual_claims"
+                  data-test="annual-settlement-annual-claims"
                   class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
                 >
                   <option
@@ -875,6 +931,7 @@ onMounted(async () => {
                     {{ t('payroll.annual_settlement.other_caregiver_status') }}
                   </span>
                   <select
+                    ref="caregiverStatusField"
                     v-model="form.other_household_caregiver_status"
                     data-test="annual-settlement-caregiver-status"
                     class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
@@ -1256,7 +1313,16 @@ onMounted(async () => {
                 <ul class="mt-2 space-y-1.5 text-sm text-neutral-700">
                   <li v-for="code in blockers" :key="code" class="flex gap-2">
                     <span aria-hidden="true">•</span>
-                    <span>{{ t(`payroll.annual_settlement.blocker.${code}`) }}</span>
+                    <button
+                      v-if="blockerHasField(code)"
+                      type="button"
+                      class="text-left underline decoration-dotted underline-offset-2 hover:text-payroll-700"
+                      :data-test="`annual-settlement-blocker-link-${code}`"
+                      @click="focusBlockerField(code)"
+                    >
+                      {{ t(`payroll.annual_settlement.blocker.${code}`) }}
+                    </button>
+                    <span v-else>{{ t(`payroll.annual_settlement.blocker.${code}`) }}</span>
                   </li>
                 </ul>
               </div>
