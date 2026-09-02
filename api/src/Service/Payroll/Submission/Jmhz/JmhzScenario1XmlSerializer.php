@@ -1642,6 +1642,24 @@ final class JmhzScenario1XmlSerializer
         if ($total === null && ($components === null || $components === [])) {
             return;
         }
+        /*
+         * Sekce BEZ kódu ELDP je vztah, který žádný ELDP nemá — dohoda pod
+         * hranicí účasti má nula dnů pojištění. Nula vyloučených dob tam není
+         * tvrzení, ale prázdno, takže není co zapisovat a není proč padat:
+         * jedna DPP by jinak shodila celé hlášení na tom, že nemá kód.
+         *
+         * V sekci S kódem se nula naopak zapisuje — tam je to tvrzení „žádné
+         * vyloučené doby nebyly", a vynechat ho by znamenalo mlčet.
+         *
+         * Kontrola níž tak zůstává na tom, na čem záleží: vyloučené doby, které
+         * NĚCO tvrdí, ale nemají se kam zapsat.
+         */
+        if ($total === 0
+            && !$this->hasNonZeroExcludedDays($components)
+            && !(is_string($code) && $code !== '')
+        ) {
+            return;
+        }
         if (!is_string($code) || $code === '') {
             $this->invalid(
                 'jmhz_xml_eldp_excluded_days_without_code',
@@ -1792,6 +1810,21 @@ final class JmhzScenario1XmlSerializer
     private function object(mixed $value): array
     {
         return is_array($value) && !array_is_list($value) ? $value : [];
+    }
+
+    /** @param mixed $components rozpad vyloučených dob, jak ho zmrazil builder */
+    private function hasNonZeroExcludedDays(mixed $components): bool
+    {
+        if (!is_array($components)) {
+            return false;
+        }
+        foreach ($components as $value) {
+            if (is_int($value) && $value !== 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @return list<array<string,mixed>> */
