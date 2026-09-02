@@ -66,6 +66,7 @@ Každý modul má vlastní kapitolu manuálu — odkazy vedou na detail.
 | **Podvojné účetnictví** | Účtový rozvrh, předkontace, [automat účtování](manual/46_Automat.md), účetní deník, hlavní kniha, předvaha, rozvaha, výsledovka, saldokonto. |
 | **Daně a evidence** | [Přiznání DPH, kontrolní a souhrnné hlášení](manual/36_Vykazy_DPH.md), [režim OSS](manual/40_OSS.md), [DPFO/DPPO](manual/38_Dan_z_prijmu.md), [daňová evidence](manual/90_Danova_evidence.md), archiv XML a asistované i přímé podání přes EPO API. |
 | **Uzávěrka** | [Účetní období](manual/87_Uzaverka.md), závěrková mapa K1–K10, [kontroly a inventarizace](manual/79_Ucetni_kontroly_a_inventarizace.md), odpisy, časové rozlišení, závěrkový balíček. |
+| **Mzdy a personalistika** | [Karty zaměstnanců](manual/69_Zamestnanci.md) s více pracovními vztahy a souběhy, [mzdové složky](manual/74_Mzdove_slozky_a_vstupy.md), [absence a dovolená](manual/59_Absence_a_dovolena.md), [docházka a směny](manual/60_Dochazka_a_smeny.md), [mzdové běhy](manual/63_Mzdove_behy.md), [srážky a exekuce](manual/71_Srazky_a_exekuce.md), [roční zúčtování](manual/67_Rocni_zuctovani.md), [podání a hlášení](manual/68_Podani_a_hlaseni.md), [shoda účtování mezd](manual/64_Shoda_uctovani_mezd.md). |
 | **Majetek a sklad** | Karty majetku a odpisy, skladové karty a pohyby, inventura, automatická výdejka při fakturaci, napojení e-shopu. |
 | **Reporting a portál** | Přehled tržeb, nákladů, pohledávek a cash-flow, [klientský portál](manual/43_Pruvodce_ucetniho.md), responzivní rozhraní, role admin / účetní / klient / pouze pro čtení. |
 | **Více firem a API** | [Neomezený počet firemních agend](manual/91_Multi_supplier.md) v jedné instalaci, [REST API v1](manual/99_API.md) s osobními tokeny a scopes. |
@@ -124,8 +125,9 @@ SHA-256 otisk podpisového certifikátu v
 EPO lze použít asistovaně, nebo přímo s kvalifikovaným certifikátem. Přímý test
 podání nic právně neodešle a úspěšná technická validace sama nepotvrzuje věcnou
 správnost přiznání. Na ostatní portály veřejné správy systém podání automaticky
-neposílá. Mzdový modul je zjednodušený účetní můstek, nikoli plnohodnotný
-personální a mzdový systém. Mimo rozsah zůstává výroba a kusovníky. Přehled OSVČ
+neposílá. Mzdový modul pokrývá pouze roky, které má výslovně označené jako
+podporované; kde pravidlo pro daný rok chybí, ostrý mzdový běh se odmítne, místo
+aby se počítal odhadem. Mimo rozsah zůstává výroba a kusovníky. Přehled OSVČ
 pro zdravotní pojišťovny je pouze podklad. Aktuální omezení jednotlivých modulů
 popisují příslušné kapitoly manuálu; daňové a účetní výstupy před finálním
 použitím odborně zkontrolujte.

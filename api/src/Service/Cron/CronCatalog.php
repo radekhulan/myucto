@@ -266,6 +266,27 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Detekce hlásitelných změn v registru pojištěnců. DENNĚ stačí:
+                // lhůta je osm dnů (§ 19 odst. 5 zákona č. 323/2025 Sb.), takže
+                // i změna zachycená až následující ráno nechává sedm dnů na
+                // vyřízení. Častější běh by nic nepřidal — návrh stejně čeká na
+                // člověka, který ho ve frontě odešle. 05:00 je po nočních
+                // zálohách a před ranním provozem, aby dešifrování stovek vztahů
+                // nešlo proti uživatelům.
+                //
+                // `critical` = true: úloha, která nejede, znamená TIŠE utíkající
+                // zákonné lhůty — a to je přesně ten typ výpadku, který se jinak
+                // pozná až po pokutě.
+                'script' => 'cron-payroll-registration-changes',
+                'recommended' => 'daily_0500',
+                'linux_cron' => '0 5 * * *',
+                'windows_schtasks' => '/sc daily /st 05:00',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => true,
+                'requires_feature' => CronJobGate::FEATURE_PAYROLL,
+            ],
+            [
                 // Jediná měsíční úloha v katalogu. Účtuje předchozí měsíc, takže musí běžet
                 // až po jeho konci; 04:00 prvního dne je po nočních zálohách a před ranním
                 // provozem. `max_age_hours` = 33 dní: měsíční úloha nesmí hlásit „nejede"

@@ -5,11 +5,52 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationSweepTargets;
 use PDO;
 
-final class PayrollModuleStateRepository
+final class PayrollModuleStateRepository implements PayrollRegistrationSweepTargets
 {
     public function __construct(private readonly Connection $db) {}
+
+    /**
+     * Firmy se zapnutými mzdami — cíle nočních mzdových úloh.
+     *
+     * Dvě záměrná rozhodnutí:
+     *
+     * - **Chybějící sloupec `payroll_enabled` = nikdo mzdy nemá.** Shodně
+     *   s {@see \MyInvoice\Service\Payroll\PayrollModuleAccess::isEnabled()}:
+     *   mzdy jsou opt-in (migrace 1290) a schématu, které o přepínači ještě
+     *   neví, se neotevírají.
+     * - **Ze stavu plného modulu se vylučuje jen `disabled`.** `suspended`
+     *   nebo `setup` firma ve výběru ZŮSTÁVÁ: registrační povinnost vůči
+     *   registru pojištěnců nezmizí tím, že si účetní pozastavila zpracování
+     *   mezd, a detekce sama nic neodesílá — vyrobí jen návrh s termínem.
+     *   Chybějící řádek stavu se počítá jako „nevylučuje": raději porovnat
+     *   navíc než ztratit zákonnou lhůtu.
+     *
+     * @return list<int>
+     */
+    public function payrollEnabledSupplierIds(): array
+    {
+        if (!$this->db->hasColumn('supplier', 'payroll_enabled')) {
+            return [];
+        }
+        $sql = $this->db->hasTable('payroll_module_state')
+            ? "SELECT supplier.id
+                 FROM supplier
+            LEFT JOIN payroll_module_state state ON state.supplier_id = supplier.id
+                WHERE supplier.payroll_enabled = 1
+                  AND (state.status IS NULL OR state.status <> 'disabled')
+             ORDER BY supplier.id"
+            : 'SELECT id FROM supplier WHERE payroll_enabled = 1 ORDER BY id';
+
+        $statement = $this->db->pdo()->query($sql);
+        $rows = $statement === false
+            ? []
+            : $statement->fetchAll(PDO::FETCH_COLUMN);
+
+        return array_map('intval', is_array($rows) ? $rows : []);
+    }
 
     /**
      * @return array{

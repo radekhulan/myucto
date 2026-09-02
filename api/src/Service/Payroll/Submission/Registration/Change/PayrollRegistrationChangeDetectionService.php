@@ -61,7 +61,8 @@ use Psr\Clock\ClockInterface;
  * NENAHRAZUJE, proto z jedné změny vzniknou DVĚ povinnosti, každá s vlastním
  * termínem.
  */
-final readonly class PayrollRegistrationChangeDetectionService
+final readonly class PayrollRegistrationChangeDetectionService implements
+    PayrollRegistrationChangeSweeper
 {
     public const SCHEMA_REFERENCE = 'payroll-registration-change-findings.v1';
 
@@ -125,7 +126,12 @@ final readonly class PayrollRegistrationChangeDetectionService
      * Hromadný průchod za celou firmu. Porovná jen vztahy, u kterých se od
      * posledního porovnání pohnul zdroj hlásitelných údajů.
      *
-     * @return array{scanned:int,changed:int,skipped:int}
+     * `created` je počet NOVĚ založených návrhů, ne počet nalezených povinností:
+     * návrh na tentýž rozešlý stav vzniká jednou (unikátní klíč nad otiskem),
+     * takže opakovaný průchod vrátí nulu. Bez toho by noční běh neuměl říct,
+     * kolik lhůt vlastně vzniklo — a to je jediné číslo, které účetní zajímá.
+     *
+     * @return array{scanned:int,changed:int,skipped:int,created:int}
      */
     public function sweep(
         int $supplierId,
@@ -139,6 +145,7 @@ final readonly class PayrollRegistrationChangeDetectionService
         $scanned = 0;
         $changed = 0;
         $skipped = 0;
+        $created = 0;
         foreach ($this->proposals->staleEmployments(
             $supplierId,
             $environment,
@@ -164,9 +171,19 @@ final readonly class PayrollRegistrationChangeDetectionService
             if ($result['proposals'] !== []) {
                 ++$changed;
             }
+            foreach ($result['proposals'] as $proposal) {
+                if (($proposal['created'] ?? false) === true) {
+                    ++$created;
+                }
+            }
         }
 
-        return ['scanned' => $scanned, 'changed' => $changed, 'skipped' => $skipped];
+        return [
+            'scanned' => $scanned,
+            'changed' => $changed,
+            'skipped' => $skipped,
+            'created' => $created,
+        ];
     }
 
     /**

@@ -50,6 +50,15 @@ Kontrola se dá pouštět opakovaně: porovnávají se jen vztahy, u kterých se
 opravdu pohnul, takže se povinnosti nezakládají dvakrát. Když je vztahů hodně,
 hlásí kontrola, že další čekají — spusťte ji v tom případě ještě jednou.
 
+Na tlačítko ale nikdo spoléhat nemusí: totéž projde **každou noc sama** plánovaná
+úloha `cron-payroll-registration-changes` (denně v 05:00), a to u všech firem se
+zapnutými mzdami. Denní běh stačí, protože lhůta je osm dnů — změna zachycená až
+ráno nechává sedm dnů na vyřízení. Úloha **nikdy nic neodesílá**: založí jen
+návrh povinnosti s termínem, který uvidíte tady ve frontě a v přehledu termínů.
+Odeslat ho musí člověk. Naplánování úlohy popisuje
+[§ 5.5 Cron skripty](05_Po_instalaci.md#55-cron-skripty), její stav najdete
+v **Systém → Plánované úlohy**.
+
 Fronta ukazuje i podání, která odeslat nejde, a u každého uvádí důvod: typicky
 že podání ještě není zmrazené, že už bylo odesláno, že už čeká v odchozí frontě
 datové schránky, že má neopravené chyby, nebo že pro danou agendu aplikace

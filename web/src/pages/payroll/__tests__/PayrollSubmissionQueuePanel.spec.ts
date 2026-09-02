@@ -265,6 +265,7 @@ describe('PayrollSubmissionQueuePanel', () => {
       scanned: 120,
       changed: 4,
       skipped: 0,
+      created: 4,
       has_more: false,
     })
     const wrapper = mountPanel()

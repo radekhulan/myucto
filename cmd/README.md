@@ -67,6 +67,7 @@ má vždy přednost před oběma.
 | `cron-ai-worker.{cmd,sh}` | Zpracování fronty AI návrhů účtování (`--supplier=N`, `--limit=N`, `--dry-run`) |
 | `cron-payroll-document-worker.{cmd,ps1,sh}` | Asynchronní generování mzdových PDF po osobách, retry a dokončení měsíčního ZIPu; táhne i frontu ročních dokumentů (mzdový list, potvrzení o zdanitelných příjmech) — měsíční pásky mají přednost (`--limit=N`; PowerShell: `-Limit N`) |
 | `cron-payroll-period-export-worker.{cmd,ps1,sh}` | Asynchronní sestavení mzdového exportu období/roku; durable lease a retry (`--limit=N`; PowerShell: `-Limit N`). Aplikace tentýž worker spouští po zařazení archivu rovnou na pozadí (`--job-id=N --supplier-id=N`, doběhne celý job se stropem `--max-iterations=N` a `--max-seconds=N`); cron je pojistka pro případ, že se spawn nepovede |
+| `cron-payroll-registration-changes.{cmd,sh}` | **Denně** — detekce hlásitelných změn v registru pojištěnců (ČSSZ) u všech firem se zapnutými mzdami. Zakládá jen **návrh povinnosti s termínem**, nikdy nic neodesílá; podání z návrhu vyrobí člověk ve frontě **Mzdy → Podání a hlášení**. Bez cronu se detekce spouští jen při otevření karty zaměstnance nebo na tlačítko ve frontě, takže osmidenní lhůta (§ 19 odst. 5 zákona č. 323/2025 Sb.) tiše utíká. Opakované spuštění je bezpečné — porovnávají se jen vztahy, u kterých se pohnul vodoznak zdroje (`--environment=test`, `--supplier=ID`, `--batch=N`, `--max-batches=N`) |
 | `cron-ai-rule-miner.{cmd,sh}` | Noční vytěžení návrhových pravidel z potvrzených korekcí (`--supplier=N`, `--days=N`, `--dry-run`) |
 | `cron-payroll-post.{cmd,sh}` | **1× měsíčně** — zaúčtuje mzdovou rekapitulaci za předchozí měsíc zaměstnancům, kteří mají na kartě „Účtovat automaticky" a vyplněnou pravidelnou hrubou mzdu (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`). Jen podvojné účetnictví; datum zápisu je poslední den účtovaného měsíce |
 | `cron-vat-clearing.{cmd,sh}` | **1× měsíčně** — interní doklad zúčtování DPH: převede daň zdaňovacího období z analytik 343.100 (vstup) a 343.200 (výstup) na zúčtovací 343.900 (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`, `--force`). Jen plátci v podvojném účetnictví; datum zápisu je poslední den období, zaúčtování idempotentní |
@@ -149,6 +150,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-ai-worker` | každých 10 minut | `*/10 * * * *` |
 | `cron-payroll-document-worker` | každou minutu | `* * * * *` |
 | `cron-payroll-period-export-worker` | každou minutu | `* * * * *` |
+| `cron-payroll-registration-changes` | 1× denně (jen firmy se mzdami) | 05:00 (`0 5 * * *`) |
 | `cron-ai-rule-miner` | 1× denně v noci | 04:00 |
 | `cron-vat-status-apply` | 1× denně (po půlnoci) | 00:30 |
 | `cron-journal-integrity-check` | 1× denně (v noci) | 02:30 |
@@ -222,6 +224,7 @@ schtasks /create /tn "MyUcto AutomationDigest"  /tr "C:\inetpub\wwwroot\myucto.c
 schtasks /create /tn "MyUcto AI Worker"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-worker.cmd" /sc minute /mo 10 /ru SYSTEM
 schtasks /create /tn "MyUcto Payroll Documents" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-document-worker.ps1" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto Payroll Period Export" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-period-export-worker.ps1" /sc minute /mo 1 /ru SYSTEM
+schtasks /create /tn "MyUcto PayrollRegistrationChanges" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-registration-changes.cmd" /sc daily /st 05:00 /ru SYSTEM
 schtasks /create /tn "MyUcto AI Rule Miner"     /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-rule-miner.cmd" /sc daily /st 04:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VatStatusApply"    /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-vat-status-apply.cmd"          /sc daily /st 00:30 /ru SYSTEM
 schtasks /create /tn "MyUcto JournalIntegrity"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-journal-integrity-check.cmd"     /sc daily /st 02:30 /ru SYSTEM
@@ -286,6 +289,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
   *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-document-worker.sh
   *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-period-export-worker.sh
   0  4  *   *   *    /var/www/myucto.cz/cmd/cron-ai-rule-miner.sh
+  0  5  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-registration-changes.sh
  30  0  *   *   *    /var/www/myucto.cz/cmd/cron-vat-status-apply.sh
  30  2  *   *   *    /var/www/myucto.cz/cmd/cron-journal-integrity-check.sh
   0  4  1   *   *    /var/www/myucto.cz/cmd/cron-payroll-post.sh

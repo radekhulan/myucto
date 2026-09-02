@@ -60,6 +60,8 @@ final class CronJobGate
     public const FEATURE_DOUBLE_ENTRY = 'double_entry';
     /** Aspoň jeden dodavatel vede podvojné účetnictví a je plátce/identifikovaná osoba. */
     public const FEATURE_VAT_DOUBLE_ENTRY = 'vat_double_entry';
+    /** Aspoň jeden dodavatel má zapnuté mzdy (opt-in per firma, migrace 1290). */
+    public const FEATURE_PAYROLL = 'payroll';
 
     /**
      * Sondy k `requires_feature` z {@see CronCatalog}. Jeden indexovaný dotaz
@@ -67,9 +69,14 @@ final class CronJobGate
      *
      * Dotazy jsou ZÁMĚRNĚ shodné s výběrem kandidátů v samotných úlohách
      * ({@see \MyInvoice\Service\Accounting\Payroll\PayrollAutoPostService::doubleEntrySupplierIds()},
-     * {@see \MyInvoice\Service\Accounting\Vat\VatClearingService::candidateSupplierIds()}),
+     * {@see \MyInvoice\Service\Accounting\Vat\VatClearingService::candidateSupplierIds()},
+     * {@see \MyInvoice\Repository\Payroll\PayrollModuleStateRepository::payrollEnabledSupplierIds()}),
      * jen zkrácené na existenci. Kdyby se rozešly, hlásili bychom „neaktivní"
      * o úloze, která práci má — a to je horší než falešný poplach.
+     *
+     * U mezd je sonda schválně PERMISIVNĚJŠÍ než výběr úlohy: neptá se na stav
+     * plného modulu. Odchylka stojí nanejvýš jeden prázdný běh, kdežto opačná
+     * chyba by úlohu tiše umlčela.
      *
      * @var array<string,string>
      */
@@ -79,6 +86,7 @@ final class CronJobGate
               WHERE accounting_mode = 'double_entry'
                 AND (is_vat_payer = 1 OR is_identified = 1)
               LIMIT 1",
+        self::FEATURE_PAYROLL => 'SELECT 1 FROM supplier WHERE payroll_enabled = 1 LIMIT 1',
     ];
 
     private ?bool $aiOptInCache = null;

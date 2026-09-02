@@ -158,6 +158,19 @@ final class Bootstrap
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Payroll\Garnishment\RepositoryPayrollGarnishmentPort::class,
                 ),
+            // Noční detekce hlásitelných změn v registru pojištěnců
+            // (cron-payroll-registration-changes). Obě rozhraní míří na tutéž
+            // implementaci, jakou volá karta zaměstnance i tlačítko ve frontě
+            // podání — druhá cesta k detekci vzniknout nesmí, jinak by se
+            // výsledek lišil podle toho, kdo ji spustil.
+            \MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeSweeper::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService::class,
+                ),
+            \MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationSweepTargets::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Repository\Payroll\PayrollModuleStateRepository::class,
+                ),
             // Runtime registry = ověřený default z kódu (CzechPayrollRulesets2026)
             // sloučený s DB overridem z administrace (migrace 1306), stejně jako
             // u ročních daňových konstant. Bez tohohle bindu by „aktivace" rulesetu
