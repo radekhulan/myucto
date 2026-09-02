@@ -2490,6 +2490,8 @@ final class Routes
         // přehledy ZP…). Systémový certifikát je vždy nastavení aktuální firmy.
         $app->get    ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'list']);
         $app->post   ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'save']);
+        // Nabídka certifikátů ze sdíleného trezoru — jen metadata, bez tajemství.
+        $app->get    ('/api/settings/databox/certificates', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'certificates']);
         $app->get    ('/api/settings/databox/mobile-key',  [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'mobileKeyProfile']);
         $app->post   ('/api/settings/databox/mobile-key',  [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'saveMobileKeyProfile']);
         $app->delete ('/api/settings/databox/mobile-key/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'deleteMobileKeyProfile']);

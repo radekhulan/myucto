@@ -51,6 +51,36 @@ final class DataBoxSettingsAction
         ]);
     }
 
+    /**
+     * Certifikáty ze sdíleného trezoru, ze kterých jde vybírat.
+     *
+     * POUZE metadata: popisek, subject, otisk a platnost. Ciphertext se pro
+     * tuhle otázku vůbec nečte, takže neexistuje cesta, kterou by se sem
+     * soukromý klíč dostal.
+     *
+     * Platnost je tu hlavní obsah, ne ozdoba: dokud měl každý kanál vlastní
+     * kopii, nikdo neviděl, že ta zbylá jsou prošlá — poznalo se to až
+     * z odmítnutého podání.
+     */
+    public function certificates(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::READ)) !== null) {
+            return $denied;
+        }
+
+        try {
+            $items = $this->credentials->listSharedCertificates(
+                $this->userId($request),
+                SupplierGuard::currentId($request),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        return Json::ok($response, ['items' => $items])
+            ->withHeader('Cache-Control', 'private, no-store');
+    }
+
     public function save(Request $request, Response $response): Response
     {
         if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
@@ -61,21 +91,37 @@ final class DataBoxSettingsAction
         $body = (array) ($request->getParsedBody() ?? []);
 
         try {
-            $certificate = '';
-            $file = $request->getUploadedFiles()['certificate'] ?? null;
-            if ($file instanceof UploadedFileInterface && $file->getError() === UPLOAD_ERR_OK) {
-                $certificate = (string) $file->getStream()->getContents();
-            }
+            // Dvě cesty k certifikátu, nikdy obě naráz: buď se vybere ze
+            // sdíleného trezoru (`credential_id`), nebo se nahraje soubor.
+            // Odkaz má přednost — je to výslovná volba z formuláře, kdežto
+            // prázdný file input pošle prohlížeč i tak.
+            $credentialId = (int) ($body['credential_id'] ?? 0);
+            if ($credentialId > 0) {
+                $saved = $this->credentials->saveFromVault(
+                    $supplierId,
+                    (string) ($body['environment'] ?? 'production'),
+                    (string) ($body['label'] ?? ''),
+                    (string) ($body['box_id'] ?? ''),
+                    $credentialId,
+                    $userId,
+                );
+            } else {
+                $certificate = '';
+                $file = $request->getUploadedFiles()['certificate'] ?? null;
+                if ($file instanceof UploadedFileInterface && $file->getError() === UPLOAD_ERR_OK) {
+                    $certificate = (string) $file->getStream()->getContents();
+                }
 
-            $saved = $this->credentials->save(
-                $supplierId,
-                (string) ($body['environment'] ?? 'production'),
-                (string) ($body['label'] ?? ''),
-                (string) ($body['box_id'] ?? ''),
-                $certificate,
-                isset($body['certificate_password']) ? (string) $body['certificate_password'] : null,
-                $userId,
-            );
+                $saved = $this->credentials->save(
+                    $supplierId,
+                    (string) ($body['environment'] ?? 'production'),
+                    (string) ($body['label'] ?? ''),
+                    (string) ($body['box_id'] ?? ''),
+                    $certificate,
+                    isset($body['certificate_password']) ? (string) $body['certificate_password'] : null,
+                    $userId,
+                );
+            }
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
