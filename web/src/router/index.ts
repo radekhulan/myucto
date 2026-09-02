@@ -381,8 +381,14 @@ export async function authorizationGuard(
        * na přehledu a hledanou stránku si musel najít znovu. Přihlášení ho na
        * ni po ověření vrátí; kontrolu, že jde o vlastní cestu, dělá `Login`,
        * protože ta hodnota může přijít i z ručně upravené adresy.
+       *
+       * Na zamčené zákaznické doméně se adresa nenese: tam ji o řádek výš
+       * pustí jen auditovaná klientská routa a cokoli mimo ni by přes
+       * `return_to` rozšířilo klientskou plochu.
        */
-      return { name: 'login', query: { return_to: to.fullPath } }
+      return auth.domainContext?.locked
+        ? { name: 'login' }
+        : { name: 'login', query: { return_to: to.fullPath } }
     }
   }
 

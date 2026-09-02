@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { readStorageQuotaHeaders } from '@/api/storageQuota'
+import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 import { safeReturnPath } from '@/utils/returnPath'
 
 export const api = axios.create({
@@ -86,7 +87,15 @@ api.interceptors.response.use(
          * hodnota jen předává.
          */
         const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
-        const safe = safeReturnPath(returnPath, '')
+        /*
+         * Na zamčené zákaznické doméně smí návratová adresa být JEN jedna
+         * z auditovaných klientských rout — jinak by se přes `return_to`
+         * rozšířila klientská plocha o cestu, která do ní nepatří. Mimo
+         * ni stačí, že je to vlastní cesta v aplikaci.
+         */
+        const safe = domainSupplierLock !== null && isClientDomainAuthenticatedPath(returnPath)
+          ? returnPath
+          : (domainSupplierLock !== null ? '' : safeReturnPath(returnPath, ''))
         window.location.href = safe === ''
           ? '/login'
           : `/login?return_to=${encodeURIComponent(safe)}`

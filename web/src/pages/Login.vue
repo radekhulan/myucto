@@ -205,9 +205,17 @@ function requestedDomainReturnPath(): string {
   return isClientDomainAuthenticatedPath(candidate) ? candidate : '/portal'
 }
 
-/** Kam se vrátit po přihlášení; kontrolu dělá {@link safeReturnPath}. */
+/**
+ * Kam se vrátit po přihlášení.
+ *
+ * Na zamčené zákaznické doméně rozhoduje auditovaný seznam klientských rout,
+ * ne obecná kontrola cesty: `return_to` nesmí být cesta, kterou klientská
+ * plocha neobsahuje.
+ */
 function requestedReturnPath(fallback: string): string {
-  return safeReturnPath(route.query.return_to, fallback)
+  return auth.domainContext?.locked
+    ? requestedDomainReturnPath()
+    : safeReturnPath(route.query.return_to, fallback)
 }
 
 function requestedDomainHandoffPath(): string | null {
