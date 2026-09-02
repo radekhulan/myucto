@@ -28,6 +28,13 @@ const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 
 interface DispatchState {
   busy: 'isds' | 'vrep' | null
+  /**
+   * Kanál, na který se čeká potvrzení. Odeslání na VREP i do datové schránky
+   * je nevratné — zpráva odejde úřadu a zpátky ji nikdo nevezme. Dřív obojí
+   * odletělo prvním kliknutím; u datovky to zamaskoval dotaz na jméno a heslo,
+   * u VREPu se podepisuje certifikátem, takže se nezeptalo nic.
+   */
+  confirming: 'isds' | 'vrep' | null
   error: string
   isds: PayrollJmhzIsdsEnqueueResult | null
   vrep: PayrollJmhzTransportPoll | null
@@ -44,12 +51,22 @@ function key(preview: PayrollJmhzPvpojPreview): string {
 function state(preview: PayrollJmhzPvpojPreview): DispatchState {
   return states.value[key(preview)] ?? {
     busy: null,
+    confirming: null,
     error: '',
     isds: null,
     vrep: null,
     gateway: null,
     mobileKeySent: false,
   }
+}
+
+function askConfirm(preview: PayrollJmhzPvpojPreview, channel: 'isds' | 'vrep') {
+  if (!canWrite.value || unavailableReason(preview)) return
+  setState(preview, { ...state(preview), confirming: channel, error: '' })
+}
+
+function cancelConfirm(preview: PayrollJmhzPvpojPreview) {
+  setState(preview, { ...state(preview), confirming: null })
 }
 
 function mobileKeySent(preview: PayrollJmhzPvpojPreview) {
@@ -113,7 +130,7 @@ async function submissionId(preview: PayrollJmhzPvpojPreview): Promise<number> {
 async function dispatch(preview: PayrollJmhzPvpojPreview, channel: 'isds' | 'vrep') {
   if (!canWrite.value || unavailableReason(preview)) return
   const current = state(preview)
-  setState(preview, { ...current, busy: channel, error: '', gateway: null })
+  setState(preview, { ...current, busy: channel, confirming: null, error: '', gateway: null })
 
   try {
     const id = await submissionId(preview)
@@ -209,7 +226,7 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
                 || state(preview).isds !== null || state(preview).vrep !== null
                 || unavailableReason(preview) !== null"
               :data-test="`jmhz-dispatch-isds-${key(preview)}`"
-              @click="dispatch(preview, 'isds')"
+              @click="askConfirm(preview, 'isds')"
             >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path :d="ICONS.send" />
@@ -225,7 +242,7 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
                 || state(preview).isds !== null || state(preview).vrep !== null
                 || unavailableReason(preview) !== null"
               :data-test="`jmhz-dispatch-vrep-${key(preview)}`"
-              @click="dispatch(preview, 'vrep')"
+              @click="askConfirm(preview, 'vrep')"
             >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path :d="ICONS.send" />
@@ -233,6 +250,48 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
               {{ state(preview).busy === 'vrep'
                 ? t('common.loading')
                 : t('payroll.submissions.overview.jmhz_dispatch_vrep') }}
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-if="state(preview).confirming !== null"
+          class="mt-3 rounded-lg border border-warning-300 bg-warning-50 p-4"
+          :data-test="`jmhz-dispatch-confirm-${key(preview)}`"
+        >
+          <p class="text-sm font-medium text-warning-900">
+            {{ t('payroll.submissions.overview.jmhz_dispatch_confirm_title') }}
+          </p>
+          <p class="mt-1 text-sm text-warning-800">
+            {{ t(state(preview).confirming === 'vrep'
+              ? 'payroll.submissions.overview.jmhz_dispatch_confirm_vrep'
+              : 'payroll.submissions.overview.jmhz_dispatch_confirm_isds', {
+              period: preview.period,
+              symbol: preview.office.variable_symbol,
+              environment: t(environment === 'production'
+                ? 'payroll.submissions.overview.jmhz_dispatch_confirm_production'
+                : 'payroll.submissions.overview.jmhz_dispatch_confirm_test'),
+            }) }}
+          </p>
+          <p class="mt-1 text-xs text-warning-700">
+            {{ t('payroll.submissions.overview.jmhz_dispatch_confirm_irreversible') }}
+          </p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              :class="btnFilled('warning')"
+              :data-test="`jmhz-dispatch-confirm-yes-${key(preview)}`"
+              @click="dispatch(preview, state(preview).confirming ?? 'vrep')"
+            >
+              {{ t('payroll.submissions.overview.jmhz_dispatch_confirm_send') }}
+            </button>
+            <button
+              type="button"
+              :class="btnOutline('neutral')"
+              :data-test="`jmhz-dispatch-confirm-no-${key(preview)}`"
+              @click="cancelConfirm(preview)"
+            >
+              {{ t('common.cancel') }}
             </button>
           </div>
         </div>

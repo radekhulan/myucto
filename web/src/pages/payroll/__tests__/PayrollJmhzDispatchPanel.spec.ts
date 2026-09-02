@@ -122,6 +122,7 @@ describe('PayrollJmhzDispatchPanel', () => {
     })
 
     await wrapper.get('[data-test="jmhz-dispatch-isds-7:3"]').trigger('click')
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-yes-7:3"]').trigger('click')
     await flushPromises()
 
     expect(m.freezePreparation).toHaveBeenCalledWith(7, expect.any(String), 'production')
@@ -178,6 +179,7 @@ describe('PayrollJmhzDispatchPanel', () => {
     const button = wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]')
     expect((button.element as HTMLButtonElement).disabled).toBe(false)
     await button.trigger('click')
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-yes-7:3"]').trigger('click')
     await flushPromises()
 
     expect(m.freezePreparation).toHaveBeenCalledWith(7, expect.any(String), 'test')
@@ -215,10 +217,37 @@ describe('PayrollJmhzDispatchPanel', () => {
     })
 
     await wrapper.get('[data-test="jmhz-dispatch-isds-7:3"]').trigger('click')
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-yes-7:3"]').trigger('click')
     await flushPromises()
 
     expect(m.freezePreparation).not.toHaveBeenCalled()
     expect(m.freezeSubmission).not.toHaveBeenCalled()
     expect(m.enqueueIsds).toHaveBeenCalledWith(88, 'test')
+  })
+
+  it('bez potvrzení neodešle nic a zrušení potvrzení odeslání zahodí', async () => {
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: {
+        environment: 'production',
+        previews: [preview],
+        obligations: [obligation()],
+      },
+    })
+
+    await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    await flushPromises()
+
+    // Samotné kliknutí na „Odeslat" nesmí nic poslat: odeslání na VREP je
+    // nevratné a dřív odletělo bez jediného dotazu, protože se podepisuje
+    // certifikátem, ne heslem.
+    expect(m.sendTransport).not.toHaveBeenCalled()
+    expect(m.freezePreparation).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="jmhz-dispatch-confirm-7:3"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-no-7:3"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="jmhz-dispatch-confirm-7:3"]').exists()).toBe(false)
+    expect(m.sendTransport).not.toHaveBeenCalled()
   })
 })
