@@ -16,6 +16,8 @@ const saving = ref(false)
 const profile = ref<PayrollRegzelProfile | null>(null)
 const workplaceSuggestion = ref<string | null>(null)
 const error = ref('')
+/** Chybějící a vadná pole formuláře — všechna, ne jen první nalezené. */
+const errors = ref<string[]>([])
 const success = ref('')
 const taxOfficeCodes = new Set([
   '2000', '2100', '2200', '2300', '2400', '2500', '2600', '2700',
@@ -66,6 +68,7 @@ function apiMessage(exception: unknown, fallback: string): string {
 async function load() {
   loading.value = true
   error.value = ''
+  errors.value = []
   success.value = ''
   try {
     const response = await payrollApi.regzelProfile()
@@ -78,40 +81,52 @@ async function load() {
   }
 }
 
-async function save() {
-  error.value = ''
-  success.value = ''
-  if (!form.evidence_confirmed) {
-    error.value = t('payroll.regzel.profile.confirmation_required')
-    return
-  }
-  if (!taxOfficeCodes.has(form.tax_office_code.trim())) {
-    error.value = t('payroll.regzel.profile.tax_office_code_invalid')
-    return
-  }
-  if (workplaceRequired.value && form.tax_office_workplace_code.trim() === '') {
-    error.value = t('payroll.regzel.profile.tax_office_workplace_code_required')
-    return
-  }
+/**
+ * VŠECHNO, co brání uložení, najednou.
+ *
+ * Do teď se kontroly vracely postupně `return`em, takže formulář prozradil vždy
+ * jen první vadu: účetní opravila kód úřadu, uložila, dozvěděla se o pracovišti,
+ * uložila, dozvěděla se o referenčním čísle. Tři kola za jeden formulář.
+ */
+const problems = computed<string[]>(() => {
+  const list: string[] = []
   const workplaceCode = form.tax_office_workplace_code.trim()
-  if (workplaceCode !== '' && !/^\d{4}$/.test(workplaceCode)) {
-    error.value = t('payroll.regzel.profile.tax_office_workplace_code_invalid')
-    return
-  }
-  if (!workplaceRequired.value && workplaceCode !== '') {
-    error.value = t('payroll.regzel.profile.tax_office_workplace_code_forbidden')
-    return
-  }
-  if (workplaceRequired.value
+  // Kód FÚ (kodFU) povinný JE: bez něj REGZEL neví, kterému úřadu podání patří,
+  // a stejnou podmínku drží i server (RegzelTaxOfficeCode::required).
+  if (!taxOfficeCodes.has(form.tax_office_code.trim())) {
+    list.push(t('payroll.regzel.profile.tax_office_code_invalid'))
+  } else if (workplaceRequired.value && workplaceCode === '') {
+    list.push(t('payroll.regzel.profile.tax_office_workplace_code_required'))
+  } else if (!workplaceRequired.value && workplaceCode !== '') {
+    list.push(t('payroll.regzel.profile.tax_office_workplace_code_forbidden'))
+  } else if (workplaceCode !== '' && !/^\d{4}$/.test(workplaceCode)) {
+    list.push(t('payroll.regzel.profile.tax_office_workplace_code_invalid'))
+  } else if (workplaceRequired.value
     && workplaceCode.slice(0, 2) !== form.tax_office_code.trim().slice(0, 2)) {
-    error.value = t('payroll.regzel.profile.tax_office_workplace_code_mismatch')
-    return
+    list.push(t('payroll.regzel.profile.tax_office_workplace_code_mismatch'))
   }
   if (form.payer_reference_number.trim() !== ''
     && !/^6\d{8}$/.test(form.payer_reference_number.trim())) {
-    error.value = t('payroll.regzel.profile.payer_reference_number_invalid')
+    list.push(t('payroll.regzel.profile.payer_reference_number_invalid'))
+  }
+  // Potvrzení zůstává povinné: uložením se razítkuje `evidence_confirmed_at`,
+  // datum, kterým se REGZEL podání prokazuje. Bez zaškrtnutí by znamenalo
+  // „naposledy uloženo", ne „zaměstnavatel si za údaji stojí".
+  if (!form.evidence_confirmed) {
+    list.push(t('payroll.regzel.profile.confirmation_required'))
+  }
+  return list
+})
+
+async function save() {
+  error.value = ''
+  success.value = ''
+  if (problems.value.length > 0) {
+    errors.value = problems.value
     return
   }
+  errors.value = []
+  const workplaceCode = form.tax_office_workplace_code.trim()
   saving.value = true
   try {
     fill(await payrollApi.saveRegzelProfile({
@@ -165,6 +180,17 @@ onMounted(load)
         {{ error }}
       </div>
       <div
+        v-if="errors.length > 0"
+        class="mt-5 rounded-lg border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
+        role="alert"
+        data-test="regzel-profile-validation"
+      >
+        <p class="font-medium">{{ t('payroll.regzel.profile.validation_title') }}</p>
+        <ul class="mt-2 list-disc space-y-1 pl-5">
+          <li v-for="problem in errors" :key="problem">{{ problem }}</li>
+        </ul>
+      </div>
+      <div
         v-if="success"
         class="mt-5 rounded-lg border border-success-500/30 bg-success-50 p-4 text-sm text-success-700"
         role="status"
@@ -178,8 +204,11 @@ onMounted(load)
         </legend>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <label class="block">
+            <!-- Hvězdička u kódu úřadu chyběla, přestože se bez něj neuloží nic:
+                 povinné pole se poznalo až podle hlášky po kliknutí na Uložit. -->
             <span class="mb-1 block text-sm font-medium text-neutral-700">
               {{ t('payroll.regzel.profile.tax_office_code') }}
+              <span class="text-danger-600" aria-hidden="true">*</span>
             </span>
             <input
               v-model="form.tax_office_code"

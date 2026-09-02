@@ -44,6 +44,11 @@ const form = reactive({
 })
 
 const current = computed(() => rates.value[0] ?? null)
+/**
+ * Kód pojišťovny zůstává povinný: úrazové pojištění se platí právě jedné ze
+ * dvou zákonných pojišťoven (§ 205d zák. č. 65/1965 Sb. v přechodném režimu) a
+ * bez jejího kódu neví aplikace, komu má odvod poslat.
+ */
 const institutionCodeValid = computed(() => /^[A-Z0-9][A-Z0-9._-]{0,31}$/.test(form.institution_code.trim().toUpperCase()))
 const rateValid = computed(() => {
   const value = form.rate_per_mille.trim().replace(',', '.')
@@ -51,6 +56,25 @@ const rateValid = computed(() => {
 })
 const dateValid = computed(() => form.effective_from !== '')
 const formValid = computed(() => institutionCodeValid.value && rateValid.value && dateValid.value)
+
+/**
+ * Co brání přidání sazby. Do teď se tlačítko dalo zmáčknout a NESTALO SE NIC —
+ * jediná stopa po odmítnutí bylo `aria-invalid`, které vidí čtečka obrazovky
+ * a nikdo jiný.
+ */
+const problems = computed<string[]>(() => {
+  const list: string[] = []
+  if (!institutionCodeValid.value) {
+    list.push(t('payroll.employer.accident_insurance.validation.institution_code'))
+  }
+  if (!rateValid.value) {
+    list.push(t('payroll.employer.accident_insurance.validation.rate_per_mille'))
+  }
+  if (!dateValid.value) {
+    list.push(t('payroll.employer.accident_insurance.validation.effective_from'))
+  }
+  return list
+})
 
 /**
  * Sazba je platné číslo, ale žádná ze sazeb přílohy č. 2. Není to chyba —
@@ -164,7 +188,12 @@ onMounted(load)
             :aria-invalid="showValidation && !institutionCodeValid"
             class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
           >
-          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.accident_insurance.institution_code_hint') }}</span>
+          <span
+            v-if="showValidation && !institutionCodeValid"
+            class="mt-1 block text-xs text-danger-600"
+            data-testid="accident-institution-code-error"
+          >{{ t('payroll.employer.accident_insurance.validation.institution_code') }}</span>
+          <span v-else class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.accident_insurance.institution_code_hint') }}</span>
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.accident_insurance.rate_per_mille') }}</span>
@@ -177,7 +206,12 @@ onMounted(load)
             class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
           >
           <span
-            v-if="rateOutsideAnnex"
+            v-if="showValidation && !rateValid"
+            class="mt-1 block text-xs text-danger-600"
+            data-testid="accident-rate-error"
+          >{{ t('payroll.employer.accident_insurance.validation.rate_per_mille') }}</span>
+          <span
+            v-else-if="rateOutsideAnnex"
             class="mt-1 block text-xs text-warning-700"
             data-testid="accident-rate-outside-annex"
           >{{ t('payroll.employer.accident_insurance.rate_outside_annex') }}</span>
@@ -191,6 +225,17 @@ onMounted(load)
           >
         </label>
         <div class="sm:col-span-3">
+          <div
+            v-if="showValidation && problems.length > 0"
+            class="mb-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+            role="alert"
+            data-testid="accident-validation"
+          >
+            <p class="font-medium">{{ t('payroll.employer.accident_insurance.validation.title') }}</p>
+            <ul class="mt-2 list-disc space-y-1 pl-5">
+              <li v-for="problem in problems" :key="problem">{{ problem }}</li>
+            </ul>
+          </div>
           <button type="button" :class="btnFilled('primary')" :disabled="saving" @click="addRate">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
             {{ saving ? t('common.saving') : t('payroll.employer.accident_insurance.add_rate') }}

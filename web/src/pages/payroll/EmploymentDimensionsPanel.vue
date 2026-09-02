@@ -58,13 +58,36 @@ const dimensionOptions = computed(() => dimensions.value
 const selectedDimensionOption = computed(() => dimensionOptions.value
   .find(option => option.value === form.value.dimension_id) ?? null)
 
-const valid = computed(() => {
-  if (!form.value.dimension_id || form.value.dimension_id <= 0) return false
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(form.value.valid_from)) return false
+/*
+ * Dimenze i datum účinnosti drží NÁŠ kód, ne zákon: jde o vnitřní členění
+ * (středisko, zakázka) pro rozúčtování mzdových nákladů. Povinné zůstávají
+ * proto, že bez nich přiřazení nic neznamená — ale musí být vidět, které
+ * z nich chybí. Dřív se kliknutí na Uložit u špatného data neprojevilo NIJAK.
+ */
+const dimensionValid = computed(() =>
+  Boolean(form.value.dimension_id) && form.value.dimension_id > 0)
+const validFromValid = computed(() => /^\d{4}-\d{2}-\d{2}$/.test(form.value.valid_from))
+const validToValid = computed(() => {
   const validTo = nullable(form.value.valid_to)
-  if (validTo !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(validTo) || validTo < form.value.valid_from)) return false
-  return true
+  if (validTo === null) return true
+  return /^\d{4}-\d{2}-\d{2}$/.test(validTo) && validTo >= form.value.valid_from
 })
+const valid = computed(() =>
+  dimensionValid.value && validFromValid.value && validToValid.value)
+
+const invalidReason = computed(() => {
+  if (!dimensionValid.value) return t('payroll.people.dimensions.dimension_required')
+  if (!validFromValid.value) return t('payroll.people.dimensions.valid_from_required')
+  if (!validToValid.value) return t('payroll.people.dimensions.valid_to_invalid')
+  return ''
+})
+
+/*
+ * Prázdný číselník je slepá ulička: nabídka nemá co ukázat a z panelu nevede
+ * ven žádná akce. Odkaz míří rovnou na záložku, kde se dimenze zakládají.
+ */
+const noDimensionsAvailable = computed(() =>
+  !loading.value && dimensionOptions.value.length === 0)
 
 function nullable(value: string | null): string | null {
   const normalized = value?.trim() ?? ''
@@ -188,6 +211,18 @@ onMounted(load)
       {{ loadError }}
     </div>
 
+    <p
+      v-if="noDimensionsAvailable"
+      class="mt-2 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
+      data-test="dimensions-none-available"
+    >
+      {{ t('payroll.people.dimensions.none_available') }}
+      <RouterLink
+        :to="{ name: 'payroll-settings', query: { tab: 'dimensions' } }"
+        class="font-medium text-payroll-700 underline"
+      >{{ t('payroll.people.dimensions.open_settings') }}</RouterLink>
+    </p>
+
     <p v-if="!loading && assignments.length === 0" class="mt-2 text-xs text-neutral-500">
       {{ t('payroll.people.dimensions.empty') }}
     </p>
@@ -252,6 +287,19 @@ onMounted(load)
           <input v-model="form.valid_to" type="date" :disabled="!canWrite" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
         </label>
       </div>
+
+      <!--
+        Bez téhle věty kliknutí na Uložit u prázdné dimenze nebo obráceného
+        intervalu neudělalo nic a nic neřeklo.
+      -->
+      <p
+        v-if="showValidation && invalidReason"
+        class="mt-3 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
+        role="alert"
+        data-test="dimensions-invalid-reason"
+      >
+        {{ invalidReason }}
+      </p>
 
       <div class="mt-3 flex flex-wrap justify-end gap-2">
         <button type="button" :class="btnOutlineSm('neutral')" @click="editorOpen = false">

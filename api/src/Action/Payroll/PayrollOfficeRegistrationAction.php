@@ -40,9 +40,12 @@ final class PayrollOfficeRegistrationAction
         $source = trim((string) ($body['source_reference'] ?? ''));
         $parsedDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
         $dateIsValid = $parsedDate !== false && $parsedDate->format('Y-m-d') === $date;
-        if (!$dateIsValid || !preg_match('/^\\d{10}$/', $symbol)
-            || $source === '' || mb_strlen($source) > 500) {
-            return Json::error($response, 'validation_failed', 'Registrace vyžaduje datum účinnosti, desetimístný VS a zdroj.', 422);
+        // Zdroj (odkaz na výměr) je nepovinný: byla to naše poznámka do evidence,
+        // ne požadavek ČSSZ, a přesto kvůli ní nešlo uložit VS opsaný z papíru.
+        // VS povinný zůstává — ČSSZ ho přiděluje jako identifikátor plátce
+        // pojistného a jde na každý platební příkaz i do podání.
+        if (!$dateIsValid || !preg_match('/^\\d{10}$/', $symbol) || mb_strlen($source) > 500) {
+            return Json::error($response, 'validation_failed', 'Registrace vyžaduje datum účinnosti a desetimístný variabilní symbol ČSSZ.', 422);
         }
         try {
             $registration = $this->registrations->add($this->currentSupplierId($request), (int) $args['officeId'], $date, $symbol, $source, $this->userId($request));

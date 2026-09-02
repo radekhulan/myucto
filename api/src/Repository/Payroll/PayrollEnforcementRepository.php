@@ -2157,9 +2157,16 @@ final class PayrollEnforcementRepository implements
         ClaimCategory $category,
         ?int $weight,
     ): void {
+        /*
+         * ZŮSTÁVÁ POVINNÉ. Měsíční výše výživného je poměr, kterým se mezi
+         * pohledávky výživného dělí první třetina podle § 279 odst. 2 o. s. ř.
+         * Bez ní by se dvě výživné rozdělila rovným dílem — tedy jinak, než
+         * ukládá zákon.
+         */
         if ($category->requiresMaintenanceWeight() && $weight === null) {
             throw new \InvalidArgumentException(
-                'Pohledávka výživného vyžaduje kladnou měsíční výši.',
+                'U pohledávky výživného doplňte měsíční výši — podle ní se dělí '
+                . 'první třetina mezi jednotlivá výživná (§ 279 odst. 2 o. s. ř.).',
             );
         }
     }
@@ -2403,8 +2410,16 @@ final class PayrollEnforcementRepository implements
 
         $delivery = self::nullableDate($data, 'first_payer_delivered_on');
         if ($delivery === null) {
+            /*
+             * ZŮSTÁVÁ POVINNÉ. Den doručení exekučního příkazu prvnímu plátci mzdy
+             * je podle § 280 odst. 3 o. s. ř. jediné kritérium pořadí nepřednostních
+             * pohledávek a aplikace z něj `priority_date` přímo odvozuje. Bez něj
+             * by pohledávka do fronty vstoupila s neznámým pořadím a rozdělení
+             * srážky by bylo nesprávné vůči ostatním oprávněným.
+             */
             throw new \InvalidArgumentException(
-                'Pole first_payer_delivered_on je pro zákonnou pohledávku povinné.',
+                'Doplňte, kdy byl exekuční příkaz doručen prvnímu plátci mzdy — '
+                . 'z toho dne se odvozuje pořadí pohledávky (§ 280 odst. 3 o. s. ř.).',
             );
         }
         return [$delivery, $delivery];
@@ -2945,12 +2960,64 @@ final class PayrollEnforcementRepository implements
         return $row;
     }
 
+    /**
+     * Lidský název pole pro chybové hlášky.
+     *
+     * Zpráva ze serveru končí v toastu na obrazovce exekucí — účetní tam čte
+     * "Pole first_payer_delivered_on musí být datum YYYY-MM-DD" a nemá jak
+     * poznat, které políčko formuláře to je. Chybí-li klíč v mapě, zůstane
+     * technický název: lepší nepřesný než žádný.
+     */
+    private const FIELD_LABELS = [
+        'legal_basis' => 'Právní titul',
+        'category' => 'Kategorie pohledávky',
+        'outstanding_minor_units' => 'Zůstatek pohledávky',
+        'maintenance_weight_minor_units' => 'Měsíční výše výživného',
+        'priority_date' => 'Datum pořadí',
+        'first_payer_delivered_on' => 'Doručeno prvnímu plátci',
+        'order_issued_on' => 'Datum vydání příkazu',
+        'same_order_as_claim_id' => 'Stejný exekuční příkaz jako',
+        'legal_title_verified' => 'Ověřený exekuční titul',
+        'order_or_notice_delivered' => 'Doručený příkaz nebo vyrozumění',
+        'priority_classification_verified' => 'Ověřené zařazení do pořadí',
+        'agreement_verified' => 'Ověřená dohoda',
+        'due_monetary_claim_verified' => 'Ověřená splatná peněžitá pohledávka',
+        'case_kind' => 'Právní titul případu',
+        'effective_from' => 'Účinnost od',
+        'employee_id' => 'Zaměstnanec',
+        'row_version' => 'Verze záznamu',
+        'dependant_kind' => 'Druh vyživované osoby',
+        'valid_from' => 'Platí od',
+        'valid_to' => 'Platí do',
+        'eligibility_verified' => 'Ověřený nárok',
+        'excluded_for_maintenance' => 'Vyloučeno pro výživné',
+        'pension_evidence' => 'Doložení důchodu',
+        'insolvency_mode' => 'Režim oddlužení',
+        'has_multiple_payers' => 'Více plátců mzdy',
+        'protected_amount_override_minor_units' => 'Ručně zadaná nezabavitelná částka',
+        'protected_amount_override_verified' => 'Ověřená nezabavitelná částka',
+        'court_determined_amount_minor_units' => 'Částka určená soudem',
+        'claim_register_evidence_complete' => 'Doložený rejstřík pohledávek',
+        'dependants_evidence_complete' => 'Doložené vyživované osoby',
+        'spouse_evidence_complete' => 'Doložený manžel/partner',
+        'insolvency_decision_verified' => 'Ověřené rozhodnutí o oddlužení',
+        'insolvency_recipient_verified' => 'Ověřený příjemce oddlužení',
+        'insolvency_payment_instruction_id' => 'Platební pokyn oddlužení',
+    ];
+
+    private static function label(string $key): string
+    {
+        return self::FIELD_LABELS[$key] ?? $key;
+    }
+
     /** @param array<string,mixed> $data */
     private static function requiredString(array $data, string $key): string
     {
         $value = $data[$key] ?? null;
         if (!is_string($value) || trim($value) === '') {
-            throw new \InvalidArgumentException("Pole {$key} je povinné.");
+            throw new \InvalidArgumentException(
+                'Vyplňte pole ' . self::label($key) . '.',
+            );
         }
         return trim($value);
     }
@@ -2962,7 +3029,9 @@ final class PayrollEnforcementRepository implements
             'options' => ['min_range' => 0],
         ]);
         if (!is_int($value)) {
-            throw new \InvalidArgumentException("Pole {$key} musí být nezáporné celé číslo.");
+            throw new \InvalidArgumentException(
+                self::label($key) . ' musí být nezáporné číslo.',
+            );
         }
         return $value;
     }
@@ -2978,7 +3047,9 @@ final class PayrollEnforcementRepository implements
             'options' => ['min_range' => 1],
         ]);
         if (!is_int($value)) {
-            throw new \InvalidArgumentException("Pole {$key} musí být kladné celé číslo.");
+            throw new \InvalidArgumentException(
+                self::label($key) . ' musí být kladné číslo.',
+            );
         }
         return $value;
     }
@@ -2995,7 +3066,7 @@ final class PayrollEnforcementRepository implements
         ]);
         if (!is_int($value)) {
             throw new \InvalidArgumentException(
-                "Pole {$key} musí být nezáporné celé číslo.",
+                self::label($key) . ' musí být nezáporné číslo.',
             );
         }
         return $value;
@@ -3006,7 +3077,9 @@ final class PayrollEnforcementRepository implements
     {
         $value = $data[$key] ?? false;
         if (!is_bool($value) && $value !== 0 && $value !== 1 && $value !== '0' && $value !== '1') {
-            throw new \InvalidArgumentException("Pole {$key} musí být boolean.");
+            throw new \InvalidArgumentException(
+                self::label($key) . ' musí být zaškrtnuté, nebo nezaškrtnuté.',
+            );
         }
         return (int) (bool) $value;
     }
@@ -3056,7 +3129,9 @@ final class PayrollEnforcementRepository implements
             return null;
         }
         if (!is_string($value)) {
-            throw new \InvalidArgumentException("Pole {$key} musí být datum YYYY-MM-DD.");
+            throw new \InvalidArgumentException(
+                self::label($key) . ' musí být datum ve tvaru RRRR-MM-DD.',
+            );
         }
         self::assertDate($value, $key);
         return $value;
@@ -3066,7 +3141,9 @@ final class PayrollEnforcementRepository implements
     {
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
         if ($date === false || $date->format('Y-m-d') !== $value) {
-            throw new \InvalidArgumentException("Pole {$key} musí být datum YYYY-MM-DD.");
+            throw new \InvalidArgumentException(
+                self::label($key) . ' musí být datum ve tvaru RRRR-MM-DD.',
+            );
         }
     }
 

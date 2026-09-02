@@ -131,7 +131,16 @@ final readonly class PayrollRegistrationIdentityService
         });
     }
 
-    /** @return array<string,mixed>|null */
+    /**
+     * Poslední OVĚŘENÁ verze profilu.
+     *
+     * Detekce změn z ní zakládá povinnosti s běžící lhůtou, takže se nesmí
+     * dívat na rozpracovanou verzi: nedopsaný koncept vypadá jako hromada
+     * změn proti podanému stavu a účetní by dostala lhůty na změny, které
+     * nikdo neudělal.
+     *
+     * @return array<string,mixed>|null
+     */
     public function a1Profile(
         int $supplierId,
         int $employmentId,
@@ -154,6 +163,8 @@ final readonly class PayrollRegistrationIdentityService
                 $supplierId,
                 $employment['employee_id'],
                 $employmentId,
+                false,
+                true,
             );
 
             return $stored === null ? null : $this->publicA1Profile(
@@ -165,6 +176,14 @@ final readonly class PayrollRegistrationIdentityService
     }
 
     /**
+     * Uloží profil VŽDY, i neúplný.
+     *
+     * Formulář A1 má přes stovku polí a část se dopisuje jinde na kartě osoby.
+     * Dokud jedno prázdné pole odmítalo celý zápis, účetní odcházela údaj
+     * doplnit a hodinu práce nechala v prohlížeči. Úplnost se proto vynucuje
+     * až tam, kde z profilu vzniká podání (`preview`/`prepare` staví přísný
+     * snímek), a tady se jen řekne, co ještě chybí.
+     *
      * @param array<string,mixed> $input
      * @return array<string,mixed>
      */
@@ -247,12 +266,27 @@ final readonly class PayrollRegistrationIdentityService
                 'reference_hash' => str_repeat('0', 64),
                 ...$scope,
             ]]);
-            $snapshot = (new PayrollRegistrationA1SnapshotBuilder())->build(
-                $provisional,
-                $identity,
-                $scope,
-            );
-            $profile = $this->a1ProfileData($snapshot);
+            $builder = new PayrollRegistrationA1SnapshotBuilder();
+            $problems = [];
+            try {
+                $profile = $this->a1ProfileData($builder->build(
+                    $provisional,
+                    $identity,
+                    $scope,
+                ));
+                $status = 'verified';
+            } catch (PayrollRegistrationIdentitySnapshotException $exception) {
+                $problems = $builder->problems($provisional, $identity, $scope);
+                if ($problems === []) {
+                    $problems = [[
+                        'field' => null,
+                        'code' => $exception->validationCode,
+                        'message' => $exception->getMessage(),
+                    ]];
+                }
+                $profile = $this->a1DraftData($input);
+                $status = 'draft';
+            }
             $canonical = CanonicalJson::encode($profile);
             $referenceHash = $this->sensitiveData->keyedFingerprint(
                 $canonical,
@@ -262,7 +296,12 @@ final readonly class PayrollRegistrationIdentityService
             if ($current !== null
                 && hash_equals($current['reference_hash'], $referenceHash)
             ) {
-                return $this->publicA1Profile($current, $profile, false);
+                return $this->publicA1Profile(
+                    $current,
+                    $profile,
+                    false,
+                    $problems,
+                );
             }
             $sealed = $this->sensitiveData->seal(
                 $canonical,
@@ -281,6 +320,7 @@ final readonly class PayrollRegistrationIdentityService
                 $referenceHash,
                 $rowVersion,
                 $createdBy,
+                $status,
             );
             $stored = [
                 'id' => $id,
@@ -288,12 +328,101 @@ final readonly class PayrollRegistrationIdentityService
                 'employee_id' => $employeeId,
                 'employment_id' => $employmentId,
                 'effective_on' => $effectiveOn,
+                'status' => $status,
                 'reference_hash' => $referenceHash,
                 'row_version' => $rowVersion,
                 'created_at' => gmdate('Y-m-d H:i:s'),
             ];
 
-            return $this->publicA1Profile($stored, $profile, true);
+            return $this->publicA1Profile($stored, $profile, true, $problems);
+        });
+    }
+
+    /**
+     * Co by přísnému sestavení A1 vadilo. Nic neukládá a nic neodmítá — je to
+     * podklad pro tlačítko „Kontrola", které vadná pole označí ve formuláři.
+     *
+     * @param array<string,mixed> $input
+     * @return array{
+     *   complete:bool,
+     *   problems:list<array{field:?string,code:string,message:string}>
+     * }
+     */
+    public function checkA1Profile(
+        int $supplierId,
+        int $employmentId,
+        array $input,
+    ): array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $input,
+        ): array {
+            $employment = $this->repository->lockEmployment(
+                $supplierId,
+                $employmentId,
+            );
+            if ($employment === null) {
+                throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen.');
+            }
+            $employeeId = $employment['employee_id'];
+            $effectiveOn = $employment['actual_start_date']
+                ?? $employment['start_date'];
+            if ($effectiveOn === null) {
+                throw new \InvalidArgumentException(
+                    'Pracovní vztah nemá doplněné datum nástupu, ke kterému '
+                    . 'se profil REGZEC A1 zmrazuje.',
+                );
+            }
+            unset(
+                $input['row_version'],
+                $input['created_at'],
+                $input['reference_hash'],
+            );
+            /*
+             * Kontrola musí padat na TÝCHŽ polích jako podání, takže se
+             * pouští nad stejným provizorním zdrojem jako uložení. Chybějící
+             * identita osoby není důvod mlčet — ohlásí se jako první vada.
+             */
+            try {
+                $identity = $this->sensitiveIdentityAtInternal(
+                    $supplierId,
+                    $employeeId,
+                    $effectiveOn,
+                    true,
+                )['identity'];
+            } catch (\DomainException $exception) {
+                return [
+                    'complete' => false,
+                    'problems' => [[
+                        'field' => 'identity',
+                        'code' => 'registration_regzec_a1_identity_missing',
+                        'message' => $exception->getMessage(),
+                    ]],
+                ];
+            }
+            $scope = [
+                'supplier_id' => $supplierId,
+                'employee_id' => $employeeId,
+                'employment_id' => $employmentId,
+                'effective_on' => $effectiveOn,
+            ];
+            $problems = (new PayrollRegistrationA1SnapshotBuilder())->problems(
+                array_merge($input, ['source' => [
+                    'source_key' => 'payroll_registration_a1_profile',
+                    'source_id' => 1,
+                    'row_version' => 1,
+                    'reference_hash' => str_repeat('0', 64),
+                    ...$scope,
+                ]]),
+                $identity,
+                $scope,
+            );
+
+            return ['complete' => $problems === [], 'problems' => $problems];
         });
     }
 
@@ -1708,6 +1837,192 @@ final readonly class PayrollRegistrationIdentityService
         return $profile;
     }
 
+    /**
+     * Kostra rozpracovaného profilu.
+     *
+     * Koncept se neověřuje, ale ani se neukládá cokoliv: zapíše se jen tenhle
+     * výčet klíčů, aby se do zapečetěného blobu nedostal cizí obsah a aby měl
+     * koncept stejný tvar jako ověřený snímek. Chybějící hodnota je `null`,
+     * ne dohadovaná náhrada.
+     *
+     * @var array<string,string>
+     */
+    private const A1_DRAFT_ADDRESS = [
+        'street' => 'text:255',
+        'house_number' => 'text:12',
+        'orientation_number' => 'text:12',
+        'city' => 'text:255',
+        'postal_code' => 'text:12',
+        'country_code' => 'text:2',
+        'ruian_point' => 'text:20',
+    ];
+
+    /** @var array<string,string|array<string,string>> */
+    private const A1_DRAFT_SHAPE = [
+        'permanent_address' => self::A1_DRAFT_ADDRESS,
+        'czech_residence_address' => self::A1_DRAFT_ADDRESS,
+        'contact_address' => self::A1_DRAFT_ADDRESS,
+        'health_insurance_code' => 'text:3',
+        'tax_residency' => [
+            'country_code' => 'text:2',
+            'identifier_type' => 'text:3',
+            'identifier' => 'text:64',
+        ],
+        'employment' => [
+            'activity_code' => 'text:3',
+            'relationship_detail_code' => 'text:1',
+            'actual_start_on' => 'text:10',
+            'contract_start_on' => 'text:10',
+            'small_scale' => 'bool',
+            'employment_status_code' => 'text:2',
+            'work_mode_code' => 'text:2',
+            'continuous_operation' => 'bool',
+            'prevailing_workplace_code' => 'text:2',
+            'expected_workplaces' => 'text:255',
+            'contract_workplace' => 'text:255',
+            'workplace_city' => 'text:255',
+            'workplace_municipality_code' => 'text:12',
+            'profession_code' => 'text:12',
+            'required_education_code' => 'text:4',
+            'position_name' => 'text:255',
+            'leadership' => 'bool',
+        ],
+        'pension' => [
+            'type_code' => 'text:3',
+            'received_from' => 'text:10',
+            'early_retirement' => 'bool',
+            'reduced_retirement_age' => 'bool',
+        ],
+        'facts' => [
+            'highest_education_code' => 'text:4',
+            'disability_card' => 'bool',
+        ],
+        'foreign_legislation' => [
+            'applies' => 'bool',
+            'country_code' => 'text:2',
+        ],
+        'proof_identity' => [
+            'type_code' => 'text:3',
+            'number' => 'text:64',
+            'foreign_issuer' => 'text:255',
+            'country_code' => 'text:2',
+        ],
+        'foreign_worker' => [
+            'free_access' => 'bool',
+            'free_access_reason_code' => 'text:4',
+            'permit_type_code' => 'text:4',
+            'issuing_labour_office_code' => 'text:8',
+            'permit_identifier' => 'text:64',
+            'permit_from' => 'text:10',
+            'permit_to' => 'text:10',
+        ],
+    ];
+
+    /** @var array<string,string> */
+    private const A1_DRAFT_RESTRICTION = [
+        'type_code' => 'text:3',
+        'from' => 'text:10',
+        'to' => 'text:10',
+    ];
+
+    /** @var array<string,string> */
+    private const A1_DRAFT_ATTACHMENT = [
+        'name' => 'text:255',
+        'description' => 'text:255',
+        'data_base64' => 'text:20000000',
+    ];
+
+    /**
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    private function a1DraftData(array $input): array
+    {
+        $draft = [];
+        foreach (self::A1_DRAFT_SHAPE as $key => $shape) {
+            $draft[$key] = $this->a1DraftValue($input[$key] ?? null, $shape);
+        }
+        // Trvalý pobyt je v ověřeném snímku vždy objekt; koncept drží stejnou
+        // kostru, ať se rozpracovaný a ověřený profil čtou stejným kódem.
+        $draft['permanent_address'] ??= $this->a1DraftValue(
+            [],
+            self::A1_DRAFT_ADDRESS,
+        );
+        if (is_array($draft['facts'])) {
+            $draft['facts']['health_restrictions'] = $this->a1DraftList(
+                is_array($input['facts'] ?? null)
+                    ? ($input['facts']['health_restrictions'] ?? null)
+                    : null,
+                self::A1_DRAFT_RESTRICTION,
+                20,
+            );
+        }
+        $draft['tax_residency'] = is_array($draft['tax_residency'])
+            ? $draft['tax_residency'] + ['residence_address' => $this->a1DraftValue(
+                is_array($input['tax_residency'] ?? null)
+                    ? ($input['tax_residency']['residence_address'] ?? null)
+                    : null,
+                self::A1_DRAFT_ADDRESS,
+            )]
+            : null;
+        $draft['attachments'] = $this->a1DraftList(
+            $input['attachments'] ?? null,
+            self::A1_DRAFT_ATTACHMENT,
+            9,
+        );
+
+        return $draft;
+    }
+
+    /**
+     * @param string|array<string,string> $shape
+     */
+    private function a1DraftValue(mixed $value, string|array $shape): mixed
+    {
+        if (is_array($shape)) {
+            if (!is_array($value) || array_is_list($value)) {
+                return null;
+            }
+            $result = [];
+            foreach ($shape as $key => $child) {
+                $result[$key] = $this->a1DraftValue($value[$key] ?? null, $child);
+            }
+
+            return $result;
+        }
+        if ($shape === 'bool') {
+            return is_bool($value) ? $value : null;
+        }
+        if (!is_string($value)) {
+            return null;
+        }
+        $trimmed = trim($value);
+
+        return $trimmed === ''
+            ? null
+            : mb_substr($trimmed, 0, (int) substr($shape, strlen('text:')));
+    }
+
+    /**
+     * @param array<string,string> $shape
+     * @return list<array<string,mixed>>
+     */
+    private function a1DraftList(mixed $value, array $shape, int $limit): array
+    {
+        if (!is_array($value) || !array_is_list($value)) {
+            return [];
+        }
+        $result = [];
+        foreach (array_slice($value, 0, $limit) as $item) {
+            $row = $this->a1DraftValue($item, $shape);
+            if (is_array($row)) {
+                $result[] = $row;
+            }
+        }
+
+        return $result;
+    }
+
     /** @return array<string,mixed> */
     private function a1ProfileData(PayrollRegistrationA1Snapshot $snapshot): array
     {
@@ -1748,19 +2063,23 @@ final readonly class PayrollRegistrationIdentityService
     /**
      * @param array<string,mixed> $stored
      * @param array<string,mixed> $profile
+     * @param list<array{field:?string,code:string,message:string}> $problems
      * @return array<string,mixed>
      */
     private function publicA1Profile(
         array $stored,
         array $profile,
         bool $created,
+        array $problems = [],
     ): array {
         return array_merge($profile, [
             'effective_on' => (string) $stored['effective_on'],
             'row_version' => (int) $stored['row_version'],
+            'status' => (string) ($stored['status'] ?? 'verified'),
             'reference_hash' => (string) $stored['reference_hash'],
             'created_at' => (string) $stored['created_at'],
             'created' => $created,
+            'problems' => $problems,
         ]);
     }
 

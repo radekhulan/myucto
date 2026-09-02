@@ -260,6 +260,50 @@ final class PayrollEmployerPolicyApiTest extends TestCase
         self::assertNotContains('jmhz_certificate', $blockers);
     }
 
+    /**
+     * Datum ověření doručovacího kanálu je NEPOVINNÉ.
+     *
+     * Vyžadovat ho k uložení politiky byla naše podmínka: pojistkou proti
+     * odeslání výplatnice nepotvrzeným kanálem je
+     * {@see \MyInvoice\Service\Payroll\Document\Delivery\PayrollSecureDeliveryPolicy},
+     * která bez data neodešle nic. Do teď se kvůli němu neuložil ani výplatní
+     * den, jakmile si účetní vybrala způsob předávání.
+     *
+     * Opačná souhlasnost platí dál: vypnutý kanál datum nést nesmí.
+     */
+    public function testDeliveryChannelSavesWithoutVerificationDate(): void
+    {
+        $created = $this->action->create(
+            $this->request('POST', $this->supplierId)->withParsedBody(
+                $this->payload([
+                    'delivery_channel' => 'employee_portal',
+                    'delivery_verified_on' => null,
+                ]),
+            ),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode());
+        $policy = $this->row($this->json($created)['policy'] ?? null);
+        self::assertSame('employee_portal', $policy['delivery_channel']);
+        self::assertNull($policy['delivery_verified_on']);
+
+        $contradictory = $this->action->create(
+            $this->request('POST', $this->supplierId)->withParsedBody(
+                $this->payload([
+                    'valid_from' => '2027-01-01',
+                    'delivery_channel' => 'disabled',
+                    'delivery_verified_on' => '2027-01-01',
+                ]),
+            ),
+            new Response(),
+        );
+        self::assertSame(422, $contradictory->getStatusCode());
+        self::assertSame(
+            'validation_failed',
+            $this->row($this->json($contradictory)['error'] ?? null)['code'],
+        );
+    }
+
     public function testValidationSessionPermissionAndDisabledModuleErrors(): void
     {
         $invalid = $this->action->create(

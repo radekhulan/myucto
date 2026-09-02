@@ -691,8 +691,9 @@ export interface PayrollPersonProfile {
 export interface PayrollPersonIdentityPayload {
   id?: number
   full_name: string
-  first_name: string
-  last_name: string
+  /** `null` u starších verzí, kde jméno nikdo nerozdělil — server je přijímá. */
+  first_name: string | null
+  last_name: string | null
   title_prefix?: string | null
   title_suffix?: string | null
   birth_surname?: string | null
@@ -3262,10 +3263,25 @@ export interface PayrollRegistrationA1ProfilePayload {
   attachments: PayrollRegistrationA1Attachment[]
 }
 
+/** Vada, na které by přísné sestavení A1 padlo, i s cestou k poli. */
+export interface PayrollRegistrationA1Problem {
+  field: string | null
+  code: string
+  message: string
+}
+
 export interface PayrollRegistrationA1Profile extends PayrollRegistrationA1ProfilePayload {
   reference_hash: string
   created_at: string
   created: boolean
+  /** `draft` = uloženo rozpracované, `verified` = prošlo přísnou kontrolou. */
+  status: 'draft' | 'verified'
+  problems: PayrollRegistrationA1Problem[]
+}
+
+export interface PayrollRegistrationA1Check {
+  complete: boolean
+  problems: PayrollRegistrationA1Problem[]
 }
 
 /** Chybějící údaj, který se z kmenových dat odvodit nedá. */
@@ -5987,6 +6003,18 @@ export const payrollApi = {
     `/payroll/submissions/registration/${employmentId}/a1-profile`,
     payload,
   ).then(response => response.data.profile),
+  /**
+   * Kontrola úplnosti profilu A1. Nic neukládá — vrací seznam vadných polí,
+   * aby je formulář označil tam, kde se vyplňují. Pravidla drží server, jinak
+   * by se kontrola ve formuláři rozešla s tou, na které padá podání.
+   */
+  checkEmploymentRegistrationA1Profile: (
+    employmentId: number,
+    payload: PayrollRegistrationA1ProfilePayload,
+  ) => api.post<PayrollRegistrationA1Check>(
+    `/payroll/submissions/registration/${employmentId}/a1-profile/check`,
+    payload,
+  ).then(response => response.data),
   /**
    * Přepočet detekce změn hlásitelných do registru pojištěnců.
    *

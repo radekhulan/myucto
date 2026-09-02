@@ -16,6 +16,8 @@ const reportYear = ref(Math.max(2026, new Date().getFullYear()))
 const view = ref<PayrollJmhzEmployerAnnualEvidenceView | null>(null)
 const loading = ref(false)
 const saving = ref(false)
+const loadFailed = ref(false)
+const showValidation = ref(false)
 const collectiveTypes = ref<string[]>([])
 const ownershipForm = ref('')
 const averageHeadcount = ref('')
@@ -23,10 +25,34 @@ const averageDisabledHeadcount = ref('')
 const officeId = ref<number | null>(null)
 const evidenceReference = ref('')
 
-const valid = computed(() => collectiveTypes.value.length > 0
-  && ownershipForm.value !== ''
-  && /^\d{1,7}(?:[.,]\d{1,2})?$/.test(averageHeadcount.value.trim())
-  && /^\d{1,7}(?:[.,]\d{1,2})?$/.test(averageDisabledHeadcount.value.trim()))
+const HEADCOUNT_PATTERN = /^\d{1,7}(?:[.,]\d{1,2})?$/
+
+/**
+ * Chybějící údaje pojmenované po polích, ne jedním „zkontrolujte formulář".
+ *
+ * Všechny čtyři vyžaduje ČSSZ: jsou to přímo atributy roční evidence
+ * zaměstnavatele (JMHZ, roční věta) a bez nich se hlášení nesestaví. Tlačítko
+ * proto zůstává KLIKATELNÉ a chybějící pole vypíše — zašedlé tlačítko bez věty
+ * byla slepá ulička, ze které účetní neviděla, co doplnit.
+ */
+const problems = computed<string[]>(() => {
+  const list: string[] = []
+  if (collectiveTypes.value.length === 0) {
+    list.push(t('payroll.employer.jmhz_annual.validation.collective_types'))
+  }
+  if (ownershipForm.value === '') {
+    list.push(t('payroll.employer.jmhz_annual.validation.ownership'))
+  }
+  if (!HEADCOUNT_PATTERN.test(averageHeadcount.value.trim())) {
+    list.push(t('payroll.employer.jmhz_annual.validation.average_headcount'))
+  }
+  if (!HEADCOUNT_PATTERN.test(averageDisabledHeadcount.value.trim())) {
+    list.push(t('payroll.employer.jmhz_annual.validation.average_disabled_headcount'))
+  }
+  return list
+})
+
+const valid = computed(() => problems.value.length === 0)
 
 function decimal(hundredths: number): string {
   return (hundredths / 100).toFixed(2)
@@ -47,9 +73,14 @@ function fill(response: PayrollJmhzEmployerAnnualEvidenceView): void {
 
 async function load(): Promise<void> {
   loading.value = true
+  showValidation.value = false
   try {
     fill(await payrollApi.jmhzEmployerAnnualEvidence(reportYear.value))
+    loadFailed.value = false
   } catch (error) {
+    // Bez tohohle příznaku zůstala po selhání jen prázdná sekce a toast, který
+    // za pár vteřin zmizel — obrazovka pak vypadala, že za rok není co evidovat.
+    loadFailed.value = true
     toast.error(apiErrorMessage(error, t('payroll.employer.jmhz_annual.load_failed')))
   } finally {
     loading.value = false
@@ -67,6 +98,7 @@ function toggleCollective(code: string): void {
 }
 
 async function save(): Promise<void> {
+  showValidation.value = true
   if (!props.canWrite || !valid.value || saving.value) return
   saving.value = true
   try {
@@ -132,6 +164,22 @@ onMounted(load)
     </div>
 
     <div v-if="loading" class="mt-4 text-sm text-neutral-500">…</div>
+
+    <div
+      v-else-if="loadFailed && !view"
+      class="mt-4 rounded-md border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+      role="alert"
+      data-test="jmhz-annual-load-failed"
+    >
+      <p>{{ t('payroll.employer.jmhz_annual.load_failed') }}</p>
+      <button type="button" :class="[btnOutline('danger'), 'mt-3']" @click="load">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path :d="ICONS.cycle" />
+        </svg>
+        {{ t('payroll.employer.jmhz_annual.load') }}
+      </button>
+    </div>
+
     <template v-else-if="view">
       <div
         v-if="view.evidence"
@@ -242,11 +290,27 @@ onMounted(load)
         </label>
       </div>
 
+      <!--
+        Souhrn chybějících polí. Vypíše se až po pokusu o uložení, aby
+        nezpochybňoval formulář, do kterého uživatel teprve začal psát.
+      -->
+      <div
+        v-if="showValidation && problems.length > 0"
+        class="mt-4 rounded-md border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+        role="alert"
+        data-test="jmhz-annual-validation"
+      >
+        <p class="font-medium">{{ t('payroll.employer.jmhz_annual.validation.title') }}</p>
+        <ul class="mt-2 list-disc space-y-1 pl-5">
+          <li v-for="problem in problems" :key="problem">{{ problem }}</li>
+        </ul>
+      </div>
+
       <div class="mt-4 flex flex-wrap justify-end gap-2">
         <button
           type="button"
           :class="btnFilled('primary')"
-          :disabled="!canWrite || !valid || saving"
+          :disabled="!canWrite || saving"
           data-test="jmhz-employer-annual-save"
           @click="save"
         >

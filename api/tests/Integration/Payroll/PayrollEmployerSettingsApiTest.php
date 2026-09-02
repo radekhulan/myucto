@@ -231,6 +231,50 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         self::assertSame('session_required', $this->json($bearer)['error']['code']);
     }
 
+    /**
+     * Zdroj registrace (odkaz na výměr) je poznámka do naší evidence, ne
+     * požadavek ČSSZ — a přesto kvůli němu nešel uložit variabilní symbol
+     * opsaný z papíru. Povinný zůstává jen VS: přiděluje ho ČSSZ jako
+     * identifikátor plátce pojistného a jde na každý platební příkaz i do
+     * podání.
+     */
+    public function testOfficeRegistrationSavesWithoutSourceButNeedsVariableSymbol(): void
+    {
+        if (!$this->db->hasTable('payroll_office_registration_versions')) {
+            self::markTestSkipped('Migrace 1595 neproběhla.');
+        }
+        $created = $this->put($this->supplierId, $this->payload('MAIN', 'Mzdová účtárna'));
+        self::assertSame(200, $created->getStatusCode());
+        $officeId = (int) $this->json($created)['settings']['offices'][0]['id'];
+
+        $withoutSource = $this->registrationAction->create(
+            $this->request('POST', $this->supplierId)->withParsedBody([
+                'effective_from' => '2026-01-01',
+                'social_security_variable_symbol' => '0012345678',
+            ]),
+            new Response(),
+            ['officeId' => (string) $officeId],
+        );
+        self::assertSame(201, $withoutSource->getStatusCode());
+        self::assertSame(
+            '0012345678',
+            $this->json($withoutSource)['registration']['social_security_variable_symbol'],
+        );
+        self::assertSame('', $this->json($withoutSource)['registration']['source_reference']);
+
+        $withoutSymbol = $this->registrationAction->create(
+            $this->request('POST', $this->supplierId)->withParsedBody([
+                'effective_from' => '2027-01-01',
+                'social_security_variable_symbol' => '12345',
+                'source_reference' => 'synthetic:cssz-confirmation',
+            ]),
+            new Response(),
+            ['officeId' => (string) $officeId],
+        );
+        self::assertSame(422, $withoutSymbol->getStatusCode());
+        self::assertSame('validation_failed', $this->json($withoutSymbol)['error']['code']);
+    }
+
     public function testCompositeForeignKeyRejectsOfficeFromAnotherTenant(): void
     {
         self::assertSame(

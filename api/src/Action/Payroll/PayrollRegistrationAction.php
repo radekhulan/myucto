@@ -281,6 +281,33 @@ final class PayrollRegistrationAction
     }
 
     /**
+     * Kontrola úplnosti profilu A1. Nic neukládá — vrací seznam vadných polí,
+     * aby je formulář uměl označit tam, kde se vyplňují.
+     *
+     * Oprávnění je stejné jako u uložení: kontrola se pouští z rozepsaného
+     * formuláře, který smí otevřít jen ten, kdo profil zapisuje.
+     *
+     * @param array<string,string> $args
+     */
+    public function checkA1Profile(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, fn (): array =>
+            $this->identities->checkA1Profile(
+                $this->currentSupplierId($request),
+                $this->employmentId($args),
+                (array) ($request->getParsedBody() ?? []),
+            ));
+    }
+
+    /**
      * @param callable():array<string,mixed> $work
      */
     private function run(

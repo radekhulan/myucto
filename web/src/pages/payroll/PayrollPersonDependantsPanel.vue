@@ -126,6 +126,19 @@ const detailColspan = computed(() => COLUMNS.filter(column => tbl.isVisible(colu
 onMounted(load)
 watch(() => props.personId, load)
 
+/*
+ * Dítě je vyživované ode dne narození — vypisovat totéž datum podruhé je jen
+ * práce navíc a další pole, na kterém se dá zaseknout. Přednastaví se jen
+ * u nového záznamu a jen dokud je pole prázdné; uživatel ho přepíše (u dítěte
+ * převzatého do péče je začátek jiný).
+ */
+watch(() => dependantForm.birth_date, (birthDate) => {
+  if (editingDependantId.value !== null) return
+  if (birthDate !== '' && dependantForm.existence_from === '') {
+    dependantForm.existence_from = birthDate
+  }
+})
+
 async function load(): Promise<void> {
   loading.value = true
   errorMessage.value = ''

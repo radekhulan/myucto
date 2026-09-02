@@ -93,6 +93,7 @@ const newEmployment = ref<PayrollEmploymentCreatePayload | null>(null)
 const newEmploymentMonthlyGross = ref<number | null>(null)
 const newEmploymentError = ref('')
 const advancedProfileOpen = ref(false)
+const personProfilePanel = ref<InstanceType<typeof PayrollPersonProfilePanel> | null>(null)
 const deletingPerson = ref(false)
 const canCreatePerson = computed(() => auth.canWrite('payroll.person.write'))
 const canQuickEditPerson = computed(() =>
@@ -949,9 +950,24 @@ async function openFromQuery() {
  * scroll na panel vzápětí zase smázl skokem na začátek stránky. Proto ho
  * `scrollBehavior` u odebrání povelu `?panel=` vynechává (viz router).
  */
+const FOCUSABLE_PANELS = [
+  'statutory_evidence',
+  'dependants',
+  'registration_identity',
+  'addresses',
+  'foreign_permit',
+] as const
+
 async function focusPanel(panel: string) {
-  if (panel !== 'statutory_evidence' && panel !== 'dependants') return
-  if (panel === 'dependants') advancedProfileOpen.value = true
+  if (!(FOCUSABLE_PANELS as readonly string[]).includes(panel)) return
+  // Všechno kromě zákonné evidence sedí pod sbaleným „Další údaje".
+  if (panel !== 'statutory_evidence') advancedProfileOpen.value = true
+  // Historie jména i adres jsou na záložce Identita karty osoby; bez přepnutí
+  // by povel doskočil na prázdno, protože jiná záložka je nevykresluje.
+  if (panel === 'registration_identity' || panel === 'addresses') {
+    await nextTick()
+    personProfilePanel.value?.focusSection(panel)
+  }
   const query = { ...route.query }
   delete query.panel
   await router.replace({ query })
@@ -1362,6 +1378,7 @@ onMounted(async () => {
         </summary>
         <div v-if="advancedProfileOpen" class="space-y-4 border-t border-neutral-200 p-3 sm:p-4">
           <PayrollPersonProfilePanel
+            ref="personProfilePanel"
             :person-id="expandedId"
             :can-write="auth.canWrite('payroll.person.write')"
             :relation-types="details[expandedId].relation_types"
@@ -1373,11 +1390,13 @@ onMounted(async () => {
               :can-write="auth.canWrite('payroll.person.write')"
             />
           </div>
-          <PayrollPersonForeignPermitPanel
-            :person-id="expandedId"
-            :can-write="auth.canWrite('payroll.person.write') && auth.canRead('documents')"
-            :can-read-documents="auth.canRead('documents')"
-          />
+          <div data-panel-anchor="foreign_permit" class="scroll-mt-24">
+            <PayrollPersonForeignPermitPanel
+              :person-id="expandedId"
+              :can-write="auth.canWrite('payroll.person.write') && auth.canRead('documents')"
+              :can-read-documents="auth.canRead('documents')"
+            />
+          </div>
         </div>
       </details>
 

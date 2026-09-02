@@ -183,6 +183,19 @@ const labelClass = 'block text-xs font-medium text-neutral-600'
 const cardClass = 'rounded-lg border border-neutral-200 bg-surface p-3 sm:p-4'
 
 const tabs: Tab[] = ['identity', 'contacts', 'payout']
+
+/**
+ * Doskočení na sekci z jiné obrazovky (profil REGZEC A1 odkazuje na místa,
+ * kde se chybějící údaj zadává). Obě sekce žijí na záložce Identita, takže
+ * bez přepnutí by odkaz doručil na prázdno; samotné odrolování řeší seznam
+ * osob, který povel `?panel=` zpracovává.
+ */
+function focusSection(section: 'registration_identity' | 'addresses'): void {
+  void section
+  tab.value = 'identity'
+}
+
+defineExpose({ focusSection })
 // „Převzatá evidence" (`legacy`) si uživatel vybrat nemůže: je to značka
 // jednorázového převodu ze starší agendy, ne stav, do kterého se dá přepnout.
 // U profilů, které tu hodnotu v databázi mají, ji ale ukázat musíme — jinak by
@@ -950,7 +963,7 @@ onMounted(load)
       </nav>
 
       <div v-if="tab === 'identity'" class="space-y-6">
-        <section>
+        <section data-panel-anchor="registration_identity" class="scroll-mt-24">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.identity_title') }}</h3>
@@ -1055,7 +1068,7 @@ onMounted(load)
           </div>
         </section>
 
-        <section>
+        <section data-panel-anchor="addresses" class="scroll-mt-24">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.addresses_title') }}</h3>
             <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addAddress">

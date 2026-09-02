@@ -251,18 +251,37 @@ final class PayrollPersonProfileValidatorTest extends TestCase
         self::assertNull($normalized['identity_history'][0]['birth_surname']);
     }
 
-    public function testRejectsIdentityWithoutStructuredFirstOrLastName(): void
+    /**
+     * Sloupce jsou nullable od migrace 1272 a starší verze identity strukturované
+     * jméno nemají. Tvrdá povinnost tady odmítala uložit celou kartu kvůli řádku
+     * z historie; zobrazované `full_name` povinné zůstává.
+     */
+    public function testAcceptsHistoricalIdentityWithoutStructuredFirstOrLastName(): void
     {
         foreach (['first_name', 'last_name'] as $missing) {
             $identity = [
-                'full_name' => 'Jana Testovací',
+                'full_name' => 'Historické Víceslovné Jméno',
                 'first_name' => 'Jana',
                 'last_name' => 'Testovací',
                 'effective_from' => '2026-01-01',
             ];
             unset($identity[$missing]);
-            $this->expectInvalid(['identity_history' => [$identity]]);
+            $normalized = $this->validator->validate($this->payload([
+                'identity_history' => [$identity],
+            ]))['identity_history'][0];
+
+            self::assertSame('Historické Víceslovné Jméno', $normalized['full_name']);
+            self::assertNull($normalized[$missing]);
         }
+    }
+
+    public function testStillRejectsIdentityWithoutDisplayName(): void
+    {
+        $this->expectInvalid(['identity_history' => [[
+            'first_name' => 'Jana',
+            'last_name' => 'Testovací',
+            'effective_from' => '2026-01-01',
+        ]]]);
     }
 
     public function testNormalizesRegistrationIdentityFactsAndRejectsInvalidValues(): void

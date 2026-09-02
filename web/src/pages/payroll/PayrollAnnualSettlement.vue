@@ -33,7 +33,7 @@ import {
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -175,12 +175,22 @@ const annualBonusEligible = computed(() =>
     ?? annualBonusEligibilityReason.value === 'eligible',
 )
 
+/**
+ * Proč je „Provést" zašedlé. Věta musí odpovídat TÉŽE podmínce, která tlačítko
+ * vypnula — do teď chybějící oprávnění hlásilo „zaměstnanec o zúčtování
+ * nepožádal", což je věc, kterou účetní marně hledala v podkladech.
+ *
+ * Poslední větev pokrývá `performed === false` bez jediné překážky: náhled
+ * zúčtování neprovedl, ale důvod neposlal. Bez ní zůstalo tlačítko zašedlé
+ * úplně mlčky.
+ */
 const settleDisabledReason = computed(() => {
-  if (!canSettle.value) return t('payroll.annual_settlement.blocker.not_requested')
+  if (!canSettle.value) return t('payroll.annual_settlement.settle_read_only')
   if (preview.value === null) return t('payroll.annual_settlement.select_employee')
   if (blockers.value.length > 0) {
     return t(`payroll.annual_settlement.blocker.${blockers.value[0]}`)
   }
+  if (!performed.value) return t('payroll.annual_settlement.settle_unavailable')
   return undefined
 })
 
@@ -984,12 +994,20 @@ onMounted(async () => {
               </label>
             </div>
 
-            <div class="mt-4 flex flex-wrap justify-end gap-2">
+            <div class="mt-4 flex flex-wrap items-center justify-end gap-2">
+              <p
+                v-if="!canWrite"
+                :class="BTN_DISABLED_NOTE"
+                data-test="annual-settlement-save-request-blocked"
+              >
+                {{ t('payroll.annual_settlement.save_request_read_only') }}
+              </p>
               <button
                 type="button"
                 data-test="annual-settlement-save-request"
                 :class="btnOutline('primary')"
                 :disabled="!canWrite || saving"
+                :title="disabledTitle(!canWrite, t('payroll.annual_settlement.save_request_read_only'))"
                 @click="saveRequest"
               >
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

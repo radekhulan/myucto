@@ -47,16 +47,35 @@ const complete = computed(() => status.value !== null
   && status.value.person_external_identifier !== null
   && status.value.employment_external_identifier !== null)
 const canWrite = computed(() => props.canWriteEmployment && props.canWritePerson)
+/*
+ * Stačí JEDEN z identifikátorů: OIČ osoby a ID PPV vztahu chodí z ČSSZ zvlášť
+ * a účetní je typicky dostane po částech. Povinné je jen to, co uživatel právě
+ * zadává, plus potvrzení podkladu — obojí drží ČSSZ, ne náš kód.
+ */
+const hasIdentifierToSave = computed(() =>
+  (status.value?.person_external_identifier === null
+    && personIdentifier.value.trim() !== '')
+  || (status.value?.employment_external_identifier === null
+    && employmentIdentifier.value.trim() !== ''))
 const canSave = computed(() => canWrite.value
   && !saving.value
   && evidenceConfirmed.value
   && validFrom.value !== ''
-  && (
-    (status.value?.person_external_identifier === null
-      && personIdentifier.value.trim() !== '')
-    || (status.value?.employment_external_identifier === null
-      && employmentIdentifier.value.trim() !== '')
-  ))
+  && hasIdentifierToSave.value)
+
+/*
+ * Zašedlé tlačítko bez důvodu je slepá ulička — uživatel nevidí, jestli mu
+ * chybí hodnota, datum, nebo zaškrtnutí.
+ */
+const saveDisabledReason = computed(() => {
+  if (!canWrite.value || saving.value) return ''
+  if (!hasIdentifierToSave.value) {
+    return t('payroll.people.jmhz_identity.identifier_required')
+  }
+  if (validFrom.value === '') return t('payroll.people.jmhz_identity.valid_from_required')
+  if (!evidenceConfirmed.value) return t('payroll.people.jmhz_identity.confirm_required')
+  return ''
+})
 
 async function load(): Promise<void> {
   loaded.value = true
@@ -322,9 +341,16 @@ watch(() => [props.startDate, props.endDate], () => {
             <span>{{ t('payroll.people.jmhz_identity.confirm') }}</span>
           </label>
 
-          <div class="flex flex-wrap justify-end gap-2">
+          <div class="flex flex-wrap items-center justify-end gap-2">
             <p v-if="!canWrite" class="mr-auto text-xs text-neutral-500">
               {{ t('payroll.people.jmhz_identity.permission_required') }}
+            </p>
+            <p
+              v-else-if="saveDisabledReason"
+              class="mr-auto text-xs text-neutral-500"
+              data-test="jmhz-identity-save-reason"
+            >
+              {{ saveDisabledReason }}
             </p>
             <button
               type="submit"

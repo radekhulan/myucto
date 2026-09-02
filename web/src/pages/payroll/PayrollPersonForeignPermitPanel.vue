@@ -10,6 +10,7 @@ import {
   type PayrollForeignPermitView,
 } from '@/api/payroll'
 import { useToast } from '@/composables/useToast'
+import CountrySelect from '@/components/ui/CountrySelect.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { addDaysIso } from '@/utils/date'
 import { todayIso } from './employmentLifecycleUi'
@@ -206,10 +207,21 @@ onMounted(() => { void load() })
             {{ t('payroll.people.foreign_permits.label') }}
             <input v-model="form.permit_label" required maxlength="128" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm" data-test="foreign-permit-label">
           </label>
-          <label class="text-xs text-neutral-600">
+          <!--
+            Stát z číselníku, ne dvě písmena z hlavy. Ručně psaný kód vracel
+            „Stát vydání musí mít dvoupísmenný kód země." až po odeslání
+            a zbytek formuláře držel jako rukojmí.
+          -->
+          <div class="text-xs text-neutral-600">
             {{ t('payroll.people.foreign_permits.country') }}
-            <input v-model="form.issuing_country_code" required maxlength="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm uppercase" data-test="foreign-permit-country">
-          </label>
+            <CountrySelect
+              v-model="form.issuing_country_code"
+              class="mt-1"
+              accent="payroll"
+              :clearable="false"
+              data-test="foreign-permit-country"
+            />
+          </div>
           <label class="text-xs text-neutral-600">
             {{ t('payroll.people.foreign_permits.effective_from') }}
             <input v-model="form.effective_from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm" data-test="foreign-permit-effective-from">
@@ -231,7 +243,20 @@ onMounted(() => { void load() })
               <button type="button" class="cursor-pointer text-neutral-600 underline hover:text-neutral-900" @click="clearDocument">{{ t('payroll.people.foreign_permits.document_clear') }}</button>
             </span>
           </label>
-          <p class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-3">{{ t('payroll.people.foreign_permits.document_hint') }}</p>
+          <!--
+            Doklad je povinný (§ 102 odst. 3 zákona o zaměstnanosti — kopii je
+            zaměstnavatel povinen uchovávat), ale vyhledávání nikam nevedlo,
+            když v DMS ještě nic není. Odkaz je ta chybějící cesta ven.
+          -->
+          <p class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-3">
+            {{ t('payroll.people.foreign_permits.document_hint') }}
+            <RouterLink
+              v-if="canReadDocuments"
+              :to="{ name: 'documents' }"
+              class="font-medium text-primary-600 underline hover:text-primary-700"
+              data-test="foreign-permit-open-documents"
+            >{{ t('payroll.people.foreign_permits.document_open_dms') }}</RouterLink>
+          </p>
           <p v-if="saveError" class="rounded-md border border-danger-500/30 bg-danger-50 p-2 text-xs text-danger-700 sm:col-span-2 lg:col-span-3" role="alert" data-test="foreign-permit-error">{{ saveError }}</p>
           <div class="flex justify-end sm:col-span-2 lg:col-span-3">
             <button type="submit" :class="btnFilled('primary')" :disabled="saving" data-test="foreign-permit-save">

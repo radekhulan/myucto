@@ -250,6 +250,27 @@ describe('PayrollPersonProfilePanel', () => {
     expect(wrapper.find('[data-test="profile-country-code"] input').exists()).toBe(true)
   })
 
+  /**
+   * Profil REGZEC A1 odkazuje na místa, kde se chybějící údaj zadává. Obě
+   * sekce žijí na záložce Identita, takže bez přepnutí by odkaz doskočil na
+   * prázdno — a bez kotev by neměl kam.
+   */
+  it('umí zaostřit na sekce, na které odkazuje profil REGZEC A1', async () => {
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+    expect(wrapper.find('[data-panel-anchor="addresses"]').exists()).toBe(false)
+
+    wrapper.vm.focusSection('addresses')
+    await flushPromises()
+
+    expect(wrapper.find('[data-panel-anchor="addresses"]').exists()).toBe(true)
+    expect(wrapper.find('[data-panel-anchor="registration_identity"]').exists()).toBe(true)
+    expect(
+      wrapper.get('[data-panel-anchor="registration_identity"]')
+        .find('[data-test="registration-identity-details"]').exists(),
+    ).toBe(true)
+  })
+
   it('zpřístupní registrační identitu v rozbalitelné části a odešle ji s historií', async () => {
     const loaded = profile()
     Object.assign(loaded.identity_history[0], {

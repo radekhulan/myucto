@@ -163,19 +163,27 @@ final class PayrollEmployerPolicyService
         }
         $result['automatic_posting_enabled'] = $input['automatic_posting_enabled'];
 
+        /*
+         * Datum ověření doručovacího kanálu je NEPOVINNÉ.
+         *
+         * Vyžadovalo se k uložení politiky, jenže tím jediné, čeho se dosáhlo,
+         * bylo, že se s vybraným kanálem neuložil ani výplatní den nebo
+         * zaokrouhlení — a povinnost to není ničí, jen naše. Pojistka proti
+         * odeslání výplatnice nepotvrzeným kanálem sedí jinde a drží
+         * nezávisle: {@see PayrollSecureDeliveryPolicy::assertEmployerReady()}
+         * bez `delivery_verified_on` neodešle nic, ani z fronty. Stejně tak
+         * {@see PayrollSetupCheckService} hlásí kanál jako neověřený.
+         *
+         * Zůstává jen souhlasnost obou polí: vypnutý kanál nesmí nést datum
+         * ověření, protože takový záznam neříká nic, co by se dalo přečíst.
+         */
         $deliveryVerifiedOn = $this->nullableDate(
             $input['delivery_verified_on'] ?? null,
             'delivery_verified_on',
         );
-        if ($result['delivery_channel'] === 'disabled') {
-            if ($deliveryVerifiedOn !== null) {
-                throw new \InvalidArgumentException(
-                    'Vypnutý kanál doručení nesmí nést datum ověření.',
-                );
-            }
-        } elseif ($deliveryVerifiedOn === null) {
+        if ($result['delivery_channel'] === 'disabled' && $deliveryVerifiedOn !== null) {
             throw new \InvalidArgumentException(
-                'Bezpečný kanál doručení musí mít datum ověření.',
+                'Vypnutý kanál doručení nesmí nést datum ověření.',
             );
         }
         $result['delivery_verified_on'] = $deliveryVerifiedOn;

@@ -124,7 +124,8 @@ final class PayrollDependantValidatorTest extends TestCase
         $input = $this->claim(['evidence_reference' => 'doklad s mezerou']);
 
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('kanonická reference');
+        // Hláška smí jmenovat jen POLE Z FORMULÁŘE, ne klíč payloadu.
+        $this->expectExceptionMessage('„Odkaz na doklad“');
         $this->validator->validateClaim($input);
     }
 

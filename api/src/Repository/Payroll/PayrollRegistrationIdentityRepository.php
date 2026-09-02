@@ -244,16 +244,18 @@ final class PayrollRegistrationIdentityRepository
         int $employeeId,
         int $employmentId,
         bool $forUpdate = false,
+        bool $verifiedOnly = false,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, employee_id, employment_id, effective_on,
-                    profile_ciphertext, profile_hash, reference_hash,
+                    status, profile_ciphertext, profile_hash, reference_hash,
                     row_version, created_at
                FROM payroll_registration_a1_profiles
               WHERE supplier_id = ?
                 AND employee_id = ?
-                AND employment_id = ?
-              ORDER BY row_version DESC, id DESC
+                AND employment_id = ?'
+            . ($verifiedOnly ? " AND status = 'verified'" : '')
+            . ' ORDER BY row_version DESC, id DESC
               LIMIT 1'
             . ($forUpdate ? ' FOR UPDATE' : '')
         );
@@ -270,6 +272,7 @@ final class PayrollRegistrationIdentityRepository
             'employee_id' => $this->positiveInt($row, 'employee_id'),
             'employment_id' => $this->positiveInt($row, 'employment_id'),
             'effective_on' => $this->string($row, 'effective_on'),
+            'status' => $this->string($row, 'status'),
             'profile_ciphertext' => $this->string($row, 'profile_ciphertext'),
             'profile_hash' => $this->string($row, 'profile_hash'),
             'reference_hash' => $this->string($row, 'reference_hash'),
@@ -288,19 +291,21 @@ final class PayrollRegistrationIdentityRepository
         string $referenceHash,
         int $rowVersion,
         ?int $createdBy,
+        string $status = 'verified',
     ): int {
         $statement = $this->db->pdo()->prepare(
             'INSERT INTO payroll_registration_a1_profiles
-                (supplier_id, employee_id, employment_id, effective_on,
+                (supplier_id, employee_id, employment_id, effective_on, status,
                  profile_ciphertext, profile_hash, reference_hash,
                  row_version, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $statement->execute([
             $supplierId,
             $employeeId,
             $employmentId,
             $effectiveOn,
+            $status,
             $ciphertext,
             $profileHash,
             $referenceHash,

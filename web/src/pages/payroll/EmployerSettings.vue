@@ -14,7 +14,7 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnIconSm, btnOutline, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import Modal from '@/components/ui/Modal.vue'
@@ -305,9 +305,19 @@ function closeRegistration() {
   registrationOffice.value = null
 }
 
+/**
+ * Uložit jde s desetimístným VS. Ten je povinný, protože ho ČSSZ přiděluje jako
+ * identifikátor plátce pojistného a jde na každý platební příkaz i do podání —
+ * bez něj by registrace nebyla k ničemu.
+ *
+ * Zdroj (odkaz na výměr) povinný NENÍ. Byla to naše poznámka do evidence, ne
+ * cizí požadavek, a přesto kvůli ní nešlo uložit VS opsaný z papíru na stole.
+ */
+const registrationVsValid = computed(() =>
+  /^\d{10}$/.test(registrationForm.social_security_variable_symbol))
+
 async function saveRegistration() {
-  if (!registrationOffice.value || !/^\d{10}$/.test(registrationForm.social_security_variable_symbol)
-    || registrationForm.source_reference.trim() === '') return
+  if (!registrationOffice.value || !registrationVsValid.value) return
   registrationSaving.value = true
   try {
     const saved = await payrollApi.createOfficeRegistration(registrationOffice.value.id, {
@@ -570,6 +580,9 @@ onMounted(async () => {
         <ul class="mt-2 list-disc space-y-1 pl-5">
           <li v-if="!officesValid">{{ t('payroll.employer.validation.offices') }}</li>
           <li v-if="!socialSecurityOfficeCodeValid">{{ t('payroll.employer.validation.social_security_office_code') }}</li>
+          <!-- Bez téhle položky uměl souhrn vyskočit s prázdným seznamem: `isValid`
+               na pojišťovnu kouká, výčet důvodů ji ale nezmiňoval. -->
+          <li v-if="!healthInsurerValid">{{ t('payroll.employer.validation.default_health_insurer_code') }}</li>
           <li v-if="!emailValid">{{ t('payroll.employer.validation.email') }}</li>
           <li v-if="!accountsValid">{{ t('payroll.employer.validation.accounts') }}</li>
         </ul>
@@ -954,12 +967,18 @@ onMounted(async () => {
           <input v-model="registrationForm.effective_from" type="date" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
         </label>
         <label class="block">
-          <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.office_social_security_variable_symbol') }}</span>
-          <input v-model="registrationForm.social_security_variable_symbol" data-registration-vs type="text" inputmode="numeric" maxlength="10" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm">
+          <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.office_social_security_variable_symbol') }}<RequiredMark /></span>
+          <input v-model="registrationForm.social_security_variable_symbol" data-registration-vs type="text" inputmode="numeric" maxlength="10" :aria-invalid="!registrationVsValid" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm">
+          <span
+            v-if="!registrationVsValid"
+            class="mt-1 block text-xs text-danger-600"
+            data-registration-vs-error
+          >{{ t('payroll.employer.validation.registration_variable_symbol') }}</span>
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.registration_source_reference') }}</span>
           <input v-model="registrationForm.source_reference" data-registration-source type="text" maxlength="500" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.registration_source_reference_hint') }}</span>
         </label>
         <p v-if="registrationHistory.length === 0" class="text-sm text-warning-700">{{ t('payroll.employer.registration_history_empty') }}</p>
         <ul v-else class="divide-y divide-neutral-200 rounded-md border border-neutral-200 text-sm">
@@ -972,7 +991,13 @@ onMounted(async () => {
       <template #footer>
         <div class="flex flex-wrap justify-end gap-2">
           <button type="button" :class="btnOutline('neutral')" @click="closeRegistration">{{ t('common.cancel') }}</button>
-          <button type="button" :class="btnFilled('primary')" :disabled="registrationSaving || !/^\d{10}$/.test(registrationForm.social_security_variable_symbol) || registrationForm.source_reference.trim() === ''" @click="saveRegistration">
+          <button
+            type="button"
+            :class="btnFilled('primary')"
+            :disabled="registrationSaving || !registrationVsValid"
+            :title="disabledTitle(!registrationVsValid, t('payroll.employer.validation.registration_variable_symbol'))"
+            @click="saveRegistration"
+          >
             {{ registrationSaving ? t('common.saving') : t('common.save') }}
           </button>
         </div>

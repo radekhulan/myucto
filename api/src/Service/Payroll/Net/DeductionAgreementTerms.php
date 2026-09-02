@@ -67,6 +67,13 @@ final readonly class DeductionAgreementTerms
         $reference = self::optionalText($body['agreement_reference'] ?? null, 'agreement_reference', 96)
             ?? $current?->agreementReference
             ?? self::generateReference();
+        /*
+         * ZŮSTÁVÁ POVINNÉ. Název je popiskem řádku srážky na výplatním lístku
+         * (`PayslipDocumentSnapshotMapper::…`), a § 142 odst. 5 zákoníku práce
+         * ukládá zaměstnavateli vydat zaměstnanci písemný doklad o jednotlivých
+         * složkách mzdy a o PROVEDENÝCH SRÁŽKÁCH. Nepojmenovaná srážka tuhle
+         * povinnost nesplní a generování pásky by na ní později spadlo.
+         */
         $title = self::requiredText($body['title'] ?? null, 'title', 190);
         $kind = self::requiredText($body['deduction_kind'] ?? null, 'deduction_kind', 32);
         if (!in_array($kind, self::KINDS, true)) {
@@ -151,17 +158,47 @@ final readonly class DeductionAgreementTerms
         return 'srazka-' . bin2hex(random_bytes(8));
     }
 
+    /**
+     * Lidský název pole pro chybové hlášky.
+     *
+     * Text výjimky projde beze změny až do formuláře dohody o srážkách; "Pole
+     * basis_amount_minor musí být celé číslo" účetní neřekne, do kterého
+     * políčka sáhnout. Neznámý klíč zůstává tak, jak je.
+     */
+    private const FIELD_LABELS = [
+        'agreement_reference' => 'Reference dohody',
+        'title' => 'Název dohody',
+        'deduction_kind' => 'Titul srážky',
+        'priority_no' => 'Pořadí',
+        'requested_minor' => 'Požadovaná srážka',
+        'basis_points' => 'Procento',
+        'basis_amount_minor' => 'Základ pro procentní srážku',
+        'total_limit_minor' => 'Celkový limit dohody',
+        'valid_from' => 'Účinnost od',
+        'valid_to' => 'Účinnost do',
+        'delivered_on' => 'Doručeno plátci mzdy',
+        'recipient_reference' => 'Příjemce',
+        'note' => 'Poznámka',
+    ];
+
+    private static function label(string $field): string
+    {
+        return self::FIELD_LABELS[$field] ?? $field;
+    }
+
     private static function requiredText(mixed $value, string $field, int $max): string
     {
         if (!is_string($value)) {
-            throw new \InvalidArgumentException("Pole {$field} musí být text.");
+            throw new \InvalidArgumentException(self::label($field) . ' musí být text.');
         }
         $trimmed = trim($value);
         if ($trimmed === '') {
-            throw new \InvalidArgumentException("Pole {$field} nesmí být prázdné.");
+            throw new \InvalidArgumentException('Vyplňte pole ' . self::label($field) . '.');
         }
         if (mb_strlen($trimmed, 'UTF-8') > $max) {
-            throw new \InvalidArgumentException("Pole {$field} může mít nejvýše {$max} znaků.");
+            throw new \InvalidArgumentException(
+                self::label($field) . " může mít nejvýše {$max} znaků.",
+            );
         }
 
         return $trimmed;
@@ -185,7 +222,7 @@ final readonly class DeductionAgreementTerms
             return (int) $value;
         }
 
-        throw new \InvalidArgumentException("Pole {$field} musí být celé číslo.");
+        throw new \InvalidArgumentException(self::label($field) . ' musí být číslo.');
     }
 
     private static function optionalInteger(mixed $value, string $field): ?int
@@ -198,11 +235,13 @@ final readonly class DeductionAgreementTerms
         if (!is_string($value)
             || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value) !== 1
         ) {
-            throw new \InvalidArgumentException("Pole {$field} musí být datum ve tvaru RRRR-MM-DD.");
+            throw new \InvalidArgumentException(
+                self::label($field) . ' musí být datum ve tvaru RRRR-MM-DD.',
+            );
         }
         [$year, $month, $day] = array_map('intval', explode('-', $value));
         if (!checkdate($month, $day, $year)) {
-            throw new \InvalidArgumentException("Pole {$field} není platné datum.");
+            throw new \InvalidArgumentException(self::label($field) . ' není platné datum.');
         }
 
         return $value;

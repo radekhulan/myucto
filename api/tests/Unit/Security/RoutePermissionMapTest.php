@@ -129,6 +129,7 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/payroll/submissions/eldp/42/manual-completion', 'payroll.submissions', AccessLevel::WRITE],
             ['GET', '/api/payroll/submissions/registration/42/a1-profile', 'payroll.submissions', AccessLevel::READ],
             ['PUT', '/api/payroll/submissions/registration/42/a1-profile', 'payroll.submissions', AccessLevel::WRITE],
+            ['POST', '/api/payroll/submissions/registration/42/a1-profile/check', 'payroll.submissions', AccessLevel::WRITE],
             ['GET', '/api/payroll/submissions/registration/42/a2-evidence-candidates', 'payroll.submissions', AccessLevel::READ],
             ['GET', '/api/payroll/submissions/42/jmhz-content-correction', 'payroll.submissions', AccessLevel::WRITE],
             ['GET', '/api/payroll/submissions/42/jmhz-content-correction-preparations', 'payroll.submissions', AccessLevel::WRITE],
