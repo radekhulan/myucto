@@ -197,6 +197,10 @@ final class PayrollInvariantService
      *
      * CHECK z migrace 1621 hlídá jen `superseded_at`; nástupce nehlídá nikdo,
      * protože sloupec je nullable (u historických řádků být musí).
+     *
+     * Od migrace 1715 platí totéž o `abandoned` — zahozené revizi, kterou
+     * nahradila novější. Nese stejnou stopu a doložený nástupce se u ní
+     * vyžaduje ze stejného důvodu.
      */
     private function m4EachRunHasSingleCurrentApprovedRevision(): array
     {
@@ -220,14 +224,14 @@ final class PayrollInvariantService
               UNION ALL
              SELECT CONCAT('revize ', revision.id, ' (firma ', revision.supplier_id,
                            ', běh ', revision.run_id,
-                           ') je superseded, ale nástupce ',
+                           ') je ', revision.status, ', ale nástupce ',
                            COALESCE(CAST(revision.superseded_by_revision_id AS CHAR), 'chybí'),
                            ' není platná novější revize téhož běhu') AS violation
                FROM payroll_run_revisions revision
           LEFT JOIN payroll_run_revisions successor
                  ON successor.supplier_id = revision.supplier_id
                 AND successor.id = revision.superseded_by_revision_id
-              WHERE revision.status = 'superseded'
+              WHERE revision.status IN ('superseded', 'abandoned')
                 AND (successor.id IS NULL
                   OR successor.run_id <> revision.run_id
                   OR successor.revision_no <= revision.revision_no)

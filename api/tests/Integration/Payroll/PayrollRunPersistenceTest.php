@@ -261,6 +261,128 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
+    /**
+     * Běh má právě jednu živou revizi — tu, na kterou ukazuje
+     * `current_revision_no`. Starší revize, která se nikdy neschválila, je
+     * mrtvá: dokončit ani zrušit ji nejde. Do migrace 1715 přesto zůstávala ve
+     * stavu `calculated`, a u opravné revize tím držela uzávěrku roku
+     * neuzavíratelnou napořád.
+     */
+    public function testNewRevisionAbandonsUnapprovedPredecessor(): void
+    {
+        $role = $this->payrollRole();
+        $created = $this->json($this->action->create(
+            $this->apiRequest('POST', '/api/payroll/runs', $role)
+                ->withParsedBody([
+                    'period_start' => '2026-06-01',
+                    'payment_date' => '2026-07-15',
+                ]),
+            new Response(),
+        ))['run'];
+        $runId = (int) $created['id'];
+
+        $run = $this->command($role, $runId, 'lock_inputs', (int) $created['row_version']);
+        $run = $this->command(
+            $role,
+            $runId,
+            'cancel',
+            (int) $run['row_version'],
+            ['reason' => 'Špatné období, zakládá se znovu.'],
+        );
+        $this->command(
+            $role,
+            $runId,
+            'reopen',
+            (int) $run['row_version'],
+            ['reason' => 'Znovuotevření po zrušení.'],
+        );
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT revision_no, status, superseded_by_revision_id
+               FROM payroll_run_revisions
+              WHERE supplier_id = ? AND run_id = ?
+              ORDER BY revision_no',
+        );
+        $statement->execute([$this->supplierId, $runId]);
+        $revisions = $statement->fetchAll(\PDO::FETCH_ASSOC);
+
+        self::assertCount(2, $revisions);
+        self::assertSame('abandoned', $revisions[0]['status']);
+        self::assertNotNull($revisions[0]['superseded_by_revision_id']);
+        self::assertSame('snapshot', $revisions[1]['status']);
+    }
+
+    /**
+     * Zakládací formulář dřív nabízel natvrdo patnáctého následujícího měsíce
+     * a sjednanou mzdovou politiku ignoroval. Návrh počítá server, protože
+     * posun na pracovní den musí znát státní svátky.
+     */
+    public function testRunListSuggestsPaymentDateFromEmployerPolicy(): void
+    {
+        $response = $this->action->list(
+            $this->apiRequest(
+                'GET',
+                '/api/payroll/runs?period=2026-09',
+                $this->payrollRole(),
+            )->withQueryParams(['period' => '2026-09']),
+            new Response(),
+        );
+        self::assertSame(200, $response->getStatusCode());
+        $suggested = $this->json($response)['suggested_payment_date'];
+        self::assertIsString($suggested);
+        self::assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}$/', $suggested);
+    }
+
+    private function payrollRole(): EffectiveRole
+    {
+        return new EffectiveRole(
+            90,
+            'Syntetická mzdová účetní',
+            'staff',
+            true,
+            [
+                'payroll' => AccessLevel::READ->value,
+                'payroll.inputs.write' => AccessLevel::WRITE->value,
+                'payroll.calculate' => AccessLevel::WRITE->value,
+                'payroll.review' => AccessLevel::WRITE->value,
+                'payroll.approve' => AccessLevel::WRITE->value,
+                'payroll.reopen' => AccessLevel::WRITE->value,
+            ],
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $body
+     * @return array<string,mixed>
+     */
+    private function command(
+        EffectiveRole $role,
+        int $runId,
+        string $command,
+        int $rowVersion,
+        array $body = [],
+    ): array {
+        $response = $this->action->command(
+            $this->apiRequest(
+                'POST',
+                "/api/payroll/runs/{$runId}/commands/{$command}",
+                $role,
+            )->withHeader(
+                'Idempotency-Key',
+                "abandon-revision-{$command}-{$runId}",
+            )->withParsedBody(['row_version' => $rowVersion, ...$body]),
+            new Response(),
+            ['id' => (string) $runId, 'command' => $command],
+        );
+        self::assertSame(
+            200,
+            $response->getStatusCode(),
+            $command . ': ' . (string) $response->getBody(),
+        );
+
+        return $this->json($response)['run'];
+    }
+
     public function testCreateReturnsConflictWhenLegacyPayrollOwnsPeriod(): void
     {
         $role = new EffectiveRole(

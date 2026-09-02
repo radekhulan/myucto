@@ -1283,6 +1283,78 @@ final class GarnishmentCalculatorTest extends TestCase
         self::assertSame(0, $result->totalWithheldMinorUnits);
     }
 
+    /**
+     * Prosincová mzda se podle § 141 odst. 1 zákoníku práce běžně vyplácí až
+     * v lednu, takže KAŽDÝ prosincový běh sahá po sadě příštího roku — a ta
+     * v době zpracování legitimně existovat nemusí. Zaměstnanci bez jediné
+     * exekuce to nesmí zastavit mzdu: nezabavitelná částka je vstupem jediného
+     * výpočtu (kolik se smí srazit) a kde se nesráží nic, nemá co ovlivnit.
+     */
+    public function testMissingNextYearRulesetDoesNotBlockPersonWithoutEnforcement(): void
+    {
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate($this->input(
+            4_000_000,
+            [],
+            period: '2026-12',
+            paymentDate: '2027-01-08',
+        ));
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertSame([], $result->issues);
+        self::assertSame(0, $result->totalWithheldMinorUnits);
+        self::assertSame(4_000_000, $result->employeePaymentMinorUnits);
+    }
+
+    /**
+     * Dohoda o srážkách ze mzdy se podle § 148 odst. 2 zákoníku práce odvozuje
+     * z TÉŽE nezabavitelné částky, takže bez sady se nedá provést a měsíc jde
+     * na ruční posouzení stejně jako s exekucí.
+     */
+    public function testMissingNextYearRulesetStillBlocksVoluntaryAgreement(): void
+    {
+        $input = $this->input(
+            4_000_000,
+            [],
+            period: '2026-12',
+            paymentDate: '2027-01-08',
+        );
+        $withAgreement = new GarnishmentInput(
+            $input->period,
+            $input->paymentDate,
+            $input->income,
+            $input->claims,
+            $input->eligibleDependants,
+            $input->dependantsEvidenceComplete,
+            $input->eligibleSpouse,
+            $input->spouseEvidenceComplete,
+            $input->pensionEvidence,
+            $input->hasMultiplePayers,
+            $input->protectedAmountOverrideMinorUnits,
+            $input->insolvency,
+            $input->protectedAmountOverrideVerified,
+            $input->claimRegisterEvidenceComplete,
+            $input->spousePensionEvidence,
+            [new DeductionClaim(
+                'agreement-1',
+                DeductionLegalBasis::VoluntaryAgreement,
+                ClaimCategory::NonPriority,
+                100_000,
+                '2026-01-15',
+                legalTitleVerified: false,
+                orderOrNoticeDelivered: true,
+                orderIssuedOn: null,
+                priorityClassificationVerified: true,
+                agreementVerified: true,
+            )],
+        );
+
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))
+            ->calculate($withAgreement);
+
+        self::assertSame(GarnishmentStatus::ManualReview, $result->status);
+        self::assertContains('payment_date_outside_ruleset_2026', $result->issues);
+    }
+
     public function testEverySupportedResultBalancesToGarnishableIncome(): void
     {
         foreach ([0, 1_410_100, 1_410_200, 1_700_000, 4_000_000, 6_000_000] as $income) {

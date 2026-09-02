@@ -12,6 +12,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
+use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\PayrollYearCloseBlockedException;
@@ -35,6 +36,7 @@ final class PayrollYearCloseTest extends TestCase
     private PayrollAbsenceRepository $absences;
     private PayrollEnforcementRepository $enforcement;
     private PayrollRunCommandService $runs;
+    private PayrollRunRepository $runRepository;
     private PayrollSubmissionRepository $submissions;
     private int $supplierId;
     private int $otherSupplierId;
@@ -56,6 +58,7 @@ final class PayrollYearCloseTest extends TestCase
             $this->absences = $container->get(PayrollAbsenceRepository::class);
             $this->enforcement = $container->get(PayrollEnforcementRepository::class);
             $this->runs = $container->get(PayrollRunCommandService::class);
+            $this->runRepository = $container->get(PayrollRunRepository::class);
             $this->submissions = $container->get(PayrollSubmissionRepository::class);
         } catch (\Throwable $exception) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $exception->getMessage());
@@ -394,6 +397,43 @@ final class PayrollYearCloseTest extends TestCase
                 (supplier_id, employment_id, absence_type, date_from, date_to, status)
              VALUES (?, ?, 'vacation', '2026-12-20', '2026-12-24', 'requested')",
         )->execute([$this->supplierId, $employmentId]);
+
+        $blockers = array_column($this->service->status($this->supplierId, 2026)['blockers'], null, 'code');
+        self::assertSame(1, $blockers['open_leave']['count'] ?? null);
+    }
+
+    /**
+     * `correction_pending` se rozsvítí, když se zruší absence, která už byla
+     * ve schváleném běhu, a do opravy se NIKDE nezhasínal. Zrušená absence se
+     * přitom nedá znovu rozhodnout, takže rok zůstal neuzavíratelný napořád.
+     * Schválení revize za období ho nově uzavírá.
+     */
+    public function testApprovedPeriodClearsAbsenceCorrectionPending(): void
+    {
+        $this->seedClosedMonths($this->supplierId, 2026);
+        [, $employmentId] = $this->seedEmployment($this->supplierId);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_absences
+                (supplier_id, employment_id, absence_type, date_from, date_to,
+                 status, correction_pending)
+             VALUES (?, ?, 'vacation', '2026-12-07', '2026-12-11', 'cancelled', 1)",
+        )->execute([$this->supplierId, $employmentId]);
+        // Absence přes přelom měsíce: prosinec sám o sobě ji vyřídit nemůže.
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_absences
+                (supplier_id, employment_id, absence_type, date_from, date_to,
+                 status, correction_pending)
+             VALUES (?, ?, 'vacation', '2026-12-28', '2027-01-05', 'cancelled', 1)",
+        )->execute([$this->supplierId, $employmentId]);
+
+        $blockers = array_column($this->service->status($this->supplierId, 2026)['blockers'], null, 'code');
+        self::assertSame(2, $blockers['open_leave']['count'] ?? null);
+
+        $cleared = $this->runRepository->clearAbsenceCorrectionPending(
+            $this->supplierId,
+            '2026-12-01',
+        );
+        self::assertSame(1, $cleared);
 
         $blockers = array_column($this->service->status($this->supplierId, 2026)['blockers'], null, 'code');
         self::assertSame(1, $blockers['open_leave']['count'] ?? null);

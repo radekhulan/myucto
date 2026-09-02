@@ -4888,6 +4888,13 @@ export interface PayrollRunsPage {
   total: number
   limit: number
   offset: number
+  /**
+   * Návrh data výplaty pro dotázané období podle sjednané mzdové politiky
+   * (den, posun měsíce, posun na pracovní den včetně státních svátků).
+   * `null`, když se seznam ptal bez období. Počítá ho server — vzorec musí
+   * dát TOTÉŽ datum, ze kterého pak visí splatnost odvodů a lhůty hlášení.
+   */
+  suggested_payment_date: string | null
 }
 
 export interface PayrollRunCommandResponse {

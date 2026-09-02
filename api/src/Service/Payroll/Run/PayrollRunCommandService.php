@@ -715,6 +715,13 @@ final class PayrollRunCommandService
                     (int) $revision['id'],
                     $actorUserId,
                 );
+                // Absence, kvůli které se běh opravoval, je tímhle vyřízená.
+                // Bez toho zůstal příznak `correction_pending` viset navždy
+                // a držel rok neuzavíratelný — viz repozitář.
+                $this->runs->clearAbsenceCorrectionPending(
+                    $supplierId,
+                    (string) $run['period_start'],
+                );
                 $this->controlTotals?->forApprovedRevision(
                     $supplierId,
                     (int) $revision['id'],

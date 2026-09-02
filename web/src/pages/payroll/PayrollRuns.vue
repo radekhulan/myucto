@@ -50,7 +50,15 @@ const saving = ref(false)
  * zmizel, a měsíc se musí pokaždé přepínat ručně.
  */
 const period = ref(payrollQueryPeriod(route.query))
-const paymentDate = ref(defaultPaymentDate(period.value))
+const paymentDate = ref(fallbackPaymentDate(period.value))
+/**
+ * Návrh výplatního termínu ze sjednané mzdové politiky, jak ho spočítal server
+ * (zná státní svátky, prohlížeč ne). Do prvního načtení je `null` a platí
+ * nouzový termín.
+ */
+const suggestedPaymentDate = ref<string | null>(null)
+/** Ručně přepsané datum se návrhem ze serveru nepřepisuje zpátky. */
+const paymentDateTouched = ref(false)
 const runs = ref<PayrollRun[]>([])
 const personNames = ref<Record<number, string>>({})
 /**
@@ -257,7 +265,16 @@ function overrideAuthorLabel(validation: PayrollRunValidation): string {
   })
 }
 
-function defaultPaymentDate(value: string): string {
+/*
+ * Nouzový termín, dokud server nepošle návrh ze sjednané mzdové politiky.
+ *
+ * Do W-fixu bylo tohle jediné, co formulář uměl: patnáctého následujícího
+ * měsíce, natvrdo, bez ohledu na `payroll_employer_policies`. Firma se
+ * sjednanou desátou výplatou tak zakládala běhy s termínem, který u ní
+ * neplatí — a datum výplaty není kosmetika, visí na něm splatnost odvodů,
+ * lhůty hlášení i mez podle § 141 odst. 1 zákoníku práce.
+ */
+function fallbackPaymentDate(value: string): string {
   const [year, month] = value.split('-').map(Number)
   const date = new Date(Date.UTC(year, month, 15))
   return date.toISOString().slice(0, 10)
@@ -396,6 +413,17 @@ async function load() {
     ])
     runs.value = page.runs
     total.value = page.total
+    suggestedPaymentDate.value = page.suggested_payment_date ?? null
+    // Termín ze sjednané politiky se do formuláře propíše, jen dokud za období
+    // žádný běh není a uživatel datum sám nepřepsal — existující běh si svoje
+    // datum drží (viz `watch(periodRun)`).
+    if (
+      suggestedPaymentDate.value !== null
+      && page.runs.length === 0
+      && !paymentDateTouched.value
+    ) {
+      paymentDate.value = suggestedPaymentDate.value
+    }
     // Rozpad patří ke konkrétní revizi; po přenačtení seznamu už nemusí platit.
     breakdowns.value = {}
     histories.value = {}
@@ -787,7 +815,10 @@ async function deleteRun() {
 }
 
 function changePeriod() {
-  paymentDate.value = defaultPaymentDate(period.value)
+  // Jiné období = jiný termín; ruční přepsání se váže na období, které se
+  // opouští, takže padá s ním. Přesnější návrh dorazí z `load()`.
+  paymentDateTouched.value = false
+  paymentDate.value = fallbackPaymentDate(period.value)
   void router.replace({ query: { ...route.query, period: period.value } })
   // Jiné období = jiná množina běhů; zůstat na třetí stránce by ukázalo prázdno.
   offset.value = 0
@@ -820,6 +851,7 @@ onMounted(load)
             v-model="paymentDate"
             type="date"
             class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+            @input="paymentDateTouched = true"
           >
         </label>
         <RouterLink

@@ -17,6 +17,7 @@ const m = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   total: vi.fn(),
+  suggestedPaymentDate: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
 }))
@@ -38,6 +39,9 @@ vi.mock('@/api/payroll', () => ({
         total: m.total() ?? runs.length,
         limit: page?.limit ?? 12,
         offset: page?.offset ?? 0,
+        // Návrh výplatního termínu ze mzdové politiky posílá server;
+        // scénáře, které ho neřeší, dostanou `null` a platí nouzový termín.
+        suggested_payment_date: m.suggestedPaymentDate?.() ?? null,
       })),
     run: m.runDetail,
     runHistory: m.runHistory,
@@ -111,6 +115,7 @@ describe('PayrollRuns', () => {
     m.canWrite.mockReturnValue(true)
     m.runs.mockResolvedValue([run()])
     m.total.mockReturnValue(undefined)
+    m.suggestedPaymentDate.mockReturnValue(null)
     m.runDetail.mockResolvedValue(run())
     m.runHistory.mockResolvedValue({ run_id: 15, revisions: [], events: [] })
     m.peopleOptions.mockResolvedValue([])
@@ -1073,6 +1078,41 @@ describe('PayrollRuns', () => {
 
     const paymentDate = wrapper.findAll('input[type="date"]')[0]!
     expect((paymentDate.element as HTMLInputElement).value).toBe('2026-09-20')
+
+    wrapper.unmount()
+  })
+
+  /*
+   * Termín výplaty má firma sjednaný v mzdové politice a server ho spočítá
+   * včetně posunu na pracovní den. Formulář dřív nabízel natvrdo patnáctého
+   * následujícího měsíce, takže se běhy zakládaly s termínem, který u firmy
+   * neplatí — a na datu výplaty visí splatnost odvodů i lhůty hlášení.
+   */
+  it('předvyplní datum výplaty návrhem ze mzdové politiky', async () => {
+    m.runs.mockResolvedValue([])
+    m.suggestedPaymentDate.mockReturnValue('2026-10-09')
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const paymentDate = wrapper.findAll('input[type="date"]')[0]!
+    expect((paymentDate.element as HTMLInputElement).value).toBe('2026-10-09')
+
+    wrapper.unmount()
+  })
+
+  it('ručně přepsané datum výplaty návrh ze serveru nepřepíše', async () => {
+    m.runs.mockResolvedValue([])
+    m.suggestedPaymentDate.mockReturnValue('2026-10-09')
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const paymentDate = wrapper.findAll('input[type="date"]')[0]!
+    await paymentDate.setValue('2026-10-20')
+    await flushPromises()
+
+    expect((paymentDate.element as HTMLInputElement).value).toBe('2026-10-20')
 
     wrapper.unmount()
   })
