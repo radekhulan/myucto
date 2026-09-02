@@ -3199,6 +3199,8 @@
           "partner_settlement": "Set off against shareholder account"
         },
         "identity_title": "Name history",
+        "save_card": "Save card",
+        "save_scope": "Saves every section of this card at once.",
         "addresses_title": "Address history",
         "contacts_title": "Contacts",
         "identifiers_title": "Personal identifiers",
@@ -4125,7 +4127,8 @@
           "draft_discard": "Discard the unsaved version",
           "draft_restored": "The unsaved profile is back in the form. It reaches the server only once you save.",
           "variant": "Variant A1-{variant} per the ČSSZ business matrix.",
-          "missing_title": "What the application does not track",
+          "missing_title": "Fill in manually from the HR file ({count})",
+          "missing_hint": "The application does not keep these, so it cannot prefill them. They do not block submission - what does is shown in red below. Fill them in as you go so the snapshot is complete.",
           "diverged_title": "The snapshot has drifted from master data",
           "diverged_hint": "The snapshot never updates itself — it evidences the state as of the registration date. Save a new version only when it should replace that evidence.",
           "diverged_pair": "snapshot {stored}, master data {suggested}",

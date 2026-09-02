@@ -1184,6 +1184,38 @@ describe('EmploymentRegistrationPanel', () => {
     expect(routerPush).not.toHaveBeenCalled()
   })
 
+  /**
+   * Seznam „doplňte ručně" vzniká při sestavení návrhu a mluví o tom, co se
+   * NEDÁ předvyplnit z kmenových dat. Vypisoval se ale dál i potom, co
+   * uživatel ta pole vyplnil — takže vedle sebe svítilo jedenáct „chybí"
+   * a zelené „Kontrola prošla, 0 položek brání podání". Obojí byla pravda
+   * o něčem jiném a dohromady to nedávalo smysl.
+   */
+  it('vypustí ze seznamu položky, které už jsou ve formuláři vyplněné', async () => {
+    m.a1Profile.mockResolvedValue(a1View({
+      missing: [
+        { field: 'employment.position_name', message: 'Aplikace nevede název pozice.' },
+        { field: 'employment.workplace_city', message: 'Aplikace nevede obec pracoviště.' },
+      ],
+    }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    expect(wrapper.get('[data-test="registration-a1-missing"]').text())
+      .toContain('employment.position_name')
+
+    await wrapper.get('[data-test="a1-employment-position-name"]').setValue('Jednatel')
+    await flushPromises()
+
+    const box = wrapper.get('[data-test="registration-a1-missing"]')
+    expect(box.text()).not.toContain('employment.position_name')
+    expect(box.text()).toContain('employment.workplace_city')
+    expect(wrapper.find(
+      '[data-test="registration-a1-gap-link-employment.position_name"]',
+    ).exists()).toBe(false)
+  })
+
   /** „Adresa pobytu v ČR" má stát předvyplněný, trvalý pobyt naopak ne. */
   it('prefills Czechia only for the Czech residence address', async () => {
     const wrapper = mountPanel()

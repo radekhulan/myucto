@@ -183,6 +183,15 @@ const inputClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface 
 const labelClass = 'block text-xs font-medium text-neutral-600'
 const cardClass = 'rounded-lg border border-neutral-200 bg-surface p-3 sm:p-4'
 
+/*
+ * Rám kolem celé sekce. Bez něj splývalo, co k sobě patří: nadpis a „Přidat"
+ * visely ve vzduchu nad řádky a jediné „Uložit" nahoře vypadalo, že patří
+ * k té sekci, u které zrovna stojíte. Rám ukazuje hranici skupiny, plné
+ * tlačítko zůstává v celé kartě jen jedno — to ukládající.
+ */
+const sectionBoxClass = 'scroll-mt-24 rounded-lg border border-neutral-200'
+  + ' bg-neutral-50/60 p-3 sm:p-4'
+
 const tabs: Tab[] = ['identity', 'contacts', 'payout']
 
 /**
@@ -947,19 +956,28 @@ onMounted(load)
         <h2 class="text-base font-semibold text-neutral-900">{{ t('payroll.people.profile.title') }}</h2>
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.people.profile.subtitle') }}</p>
       </div>
-      <button
-        v-if="canWrite && !loading && profile"
-        type="button"
-        :class="btnFilled('primary')"
-        :disabled="saving"
-        data-test="save-profile"
-        @click="save"
-      >
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path :d="ICONS.check" />
-        </svg>
-        {{ t('common.save') }}
-      </button>
+      <!--
+        Jediné ukládací tlačítko na kartě. Popisek říká ROZSAH, ne jen akci:
+        „Uložit" u hlavičky vypadalo, že patří k sekci, u které zrovna
+        stojíte, a „Přidat jméno" hned pod ním mělo stejnou barvu, takže se
+        obojí četlo jako rovnocenná volba. Plné tlačítko je proto na kartě
+        jen tohle, přidávání je obrysové a rozsah je napsaný pod ním.
+      -->
+      <div v-if="canWrite && !loading && profile" class="text-right">
+        <button
+          type="button"
+          :class="btnFilled('primary')"
+          :disabled="saving"
+          data-test="save-profile"
+          @click="save"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.check" />
+          </svg>
+          {{ t('payroll.people.profile.save_card') }}
+        </button>
+        <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.people.profile.save_scope') }}</p>
+      </div>
     </header>
 
     <div v-if="loading" class="space-y-3 p-4 sm:p-6">
@@ -1012,13 +1030,13 @@ onMounted(load)
       </nav>
 
       <div v-if="tab === 'identity'" class="space-y-6">
-        <section data-panel-anchor="registration_identity" class="scroll-mt-24">
+        <section data-panel-anchor="registration_identity" :class="sectionBoxClass">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.identity_title') }}</h3>
               <p class="text-xs text-neutral-500">{{ t('payroll.people.profile.mask_hint') }}</p>
             </div>
-            <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addIdentity">
+            <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="addIdentity">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
               {{ t('payroll.people.profile.add_identity') }}
             </button>
@@ -1118,10 +1136,10 @@ onMounted(load)
           </div>
         </section>
 
-        <section data-panel-anchor="addresses" class="scroll-mt-24">
+        <section data-panel-anchor="addresses" :class="sectionBoxClass">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.addresses_title') }}</h3>
-            <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addAddress">
+            <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="addAddress">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
               {{ t('payroll.people.profile.add_address') }}
             </button>
@@ -1158,10 +1176,10 @@ onMounted(load)
       </div>
 
       <div v-else-if="tab === 'contacts'" class="space-y-6">
-        <section>
+        <section :class="sectionBoxClass">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.contacts_title') }}</h3>
-            <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addContact"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_contact') }}</button>
+            <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="addContact"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_contact') }}</button>
           </div>
           <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <article v-for="(row, index) in form.contacts" :key="row.id ?? `new-contact-${index}`" :class="cardClass">
@@ -1177,10 +1195,10 @@ onMounted(load)
           </div>
         </section>
 
-        <section>
+        <section :class="sectionBoxClass">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.identifiers_title') }}</h3>
-            <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addIdentifier"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_identifier') }}</button>
+            <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="addIdentifier"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_identifier') }}</button>
           </div>
           <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <article v-for="(row, index) in form.identifiers" :key="row.id ?? `new-identifier-${index}`" :class="cardClass">
@@ -1209,10 +1227,10 @@ onMounted(load)
         </section>
         <p v-else-if="!partnerSettlementAvailable" class="text-xs text-neutral-500">{{ t('payroll.people.profile.partner_settlement_unavailable') }}</p>
 
-        <section>
+        <section :class="sectionBoxClass">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div><h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.accounts_title') }}</h3><p class="text-xs text-neutral-500">{{ t('payroll.people.profile.account_hint') }}</p></div>
-            <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addAccount"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_account') }}</button>
+            <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="addAccount"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_account') }}</button>
           </div>
           <div class="space-y-3">
             <article
@@ -1261,13 +1279,13 @@ onMounted(load)
           </div>
         </section>
 
-        <section data-test="payout-rules">
+        <section data-test="payout-rules" :class="sectionBoxClass">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.payout_rules.title') }}</h3>
               <p class="text-xs text-neutral-500">{{ t('payroll.people.profile.payout_rules.hint') }}</p>
             </div>
-            <button v-if="canWrite" type="button" :class="btnFilled('primary')" data-test="add-payout-rule" @click="addPayoutRule">
+            <button v-if="canWrite" type="button" :class="btnOutline('primary')" data-test="add-payout-rule" @click="addPayoutRule">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
               {{ t('payroll.people.profile.payout_rules.add') }}
             </button>

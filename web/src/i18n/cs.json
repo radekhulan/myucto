@@ -3199,6 +3199,8 @@
           "partner_settlement": "Zápočtem na účet společníka"
         },
         "identity_title": "Historie jména",
+        "save_card": "Uložit kartu",
+        "save_scope": "Uloží všechny sekce této karty najednou.",
         "addresses_title": "Historie adres",
         "contacts_title": "Kontakty",
         "identifiers_title": "Osobní identifikátory",
@@ -4125,7 +4127,8 @@
           "draft_discard": "Zahodit rozpracované",
           "draft_restored": "Rozpracovaný profil je zpátky ve formuláři. Na server se dostane až uložením.",
           "variant": "Varianta A1-{variant} podle business matice ČSSZ.",
-          "missing_title": "Co aplikace o osobě nevede",
+          "missing_title": "Doplňte ručně z personálního podkladu ({count})",
+          "missing_hint": "Tyhle údaje aplikace o osobě nevede, takže je neumí předvyplnit. Podání neblokují — co mu brání, je červeně níž. Vyplňujte je průběžně, ať je snímek úplný.",
           "diverged_title": "Snímek se rozešel s kmenovými daty",
           "diverged_hint": "Snímek se sám neaktualizuje — je dokladem stavu k datu registrace. Novou verzi založte jen tehdy, když má nahradit podklad.",
           "diverged_pair": "ve snímku {stored}, v kmenových datech {suggested}",
