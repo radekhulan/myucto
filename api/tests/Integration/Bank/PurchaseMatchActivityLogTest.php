@@ -407,7 +407,21 @@ final class PurchaseMatchActivityLogTest extends TestCase
               WHERE supplier_id = {$this->supplierId} AND account_code LIKE '365%'
               ORDER BY id LIMIT 1"
         )->fetchColumn() ?: 0);
-        self::assertGreaterThan(0, $accountId, 'Test vyžaduje účet 365.');
+        if ($accountId === 0) {
+            /*
+             * Účet 365 seedovaná osnova mít nemusí. Vyžadovat ho znamená test,
+             * který projde lokálně nad ostrou osnovou a spadne v CI nad čistou —
+             * a to není nález v aplikaci, jen v testu. Založíme si ho proto sami;
+             * je to jediná věc, kterou z osnovy potřebujeme.
+             */
+            $this->db->pdo()->prepare(
+                'INSERT INTO chart_of_accounts
+                    (supplier_id, account_code, name, account_type, normal_side, is_synthetic)
+                 VALUES (?, "365", "Ostatní závazky", "liability", "credit", 1)
+                 ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)'
+            )->execute([$this->supplierId]);
+            $accountId = (int) $this->db->pdo()->lastInsertId();
+        }
         $pdo->prepare(
             "INSERT INTO invoice_settlements
                 (supplier_id, doc_type, doc_id, settled_on, amount, account_id, status, created_by)
