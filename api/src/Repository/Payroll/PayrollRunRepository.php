@@ -1658,8 +1658,21 @@ final class PayrollRunRepository
                     $revisionId,
                     (int) $employment['employment_id'],
                 ]);
-                if ($employmentUpdate->rowCount() !== 1) {
-                    throw new \RuntimeException('Výsledek vztahu se nepodařilo uložit.');
+                /*
+                 * `rowCount()` u MySQL vrací ZMĚNĚNÉ řádky, ne nalezené
+                 * (`PDO::MYSQL_ATTR_FOUND_ROWS` se nezapíná — přepnout ho
+                 * globálně by změnilo sémantiku každého UPDATE v aplikaci).
+                 * Přepočet, který dá tentýž výsledek, tedy nezmění nic a vrátí
+                 * nulu — a to je NORMÁLNÍ stav: `calculate` běží nad zmrazeným
+                 * snímkem, takže opakované spuštění beze změny vstupů má stejný
+                 * výsledek vyjít. Hláška „výsledek se nepodařilo uložit" na to
+                 * posílala účetní hledat chybu, která žádná nebyla.
+                 *
+                 * Chyba je až víc než jeden dotčený řádek: to by znamenalo, že
+                 * klíč nerozlišuje revizi a vztah.
+                 */
+                if ($employmentUpdate->rowCount() > 1) {
+                    throw new \RuntimeException('Výsledek vztahu se uložil víc než jednou.');
                 }
             }
             $personJson = CanonicalJson::encode($person);
@@ -1670,8 +1683,9 @@ final class PayrollRunRepository
                 $revisionId,
                 (int) $person['employee_id'],
             ]);
-            if ($personUpdate->rowCount() !== 1) {
-                throw new \RuntimeException('Výsledek osoby se nepodařilo uložit.');
+            // Totéž co u vztahu výš: nula znamená „shodný výsledek", ne chybu.
+            if ($personUpdate->rowCount() > 1) {
+                throw new \RuntimeException('Výsledek osoby se uložil víc než jednou.');
             }
         }
     }
