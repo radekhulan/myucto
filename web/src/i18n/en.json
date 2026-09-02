@@ -1767,7 +1767,8 @@
         "people_hint": "Starters, leavers, tax declarations and personal records.",
         "checklist_hide": "Hide levy overview",
         "checklist_show": "Show levy overview"
-      }
+      },
+      "create_blocked_exists": "A payroll run already exists for this period ({status}). Open it below, or switch the period."
     },
     "quick_inputs": {
       "title": "Quick monthly payroll input",

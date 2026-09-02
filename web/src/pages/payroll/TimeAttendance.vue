@@ -2500,10 +2500,15 @@ onMounted(() => {
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.standard_fund') }}</span>
             <input v-model="approvalStandardFund" data-test="jmhz-standard-fund" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            <!-- Nápovědy k oběma fondům v překladech existovaly, jen je tenhle
+                 dialog nevykresloval — účetní tak u dvou povinných čísel neměla
+                 kde zjistit, co se do nich píše. -->
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.time.jmhz.standard_fund_hint') }}</span>
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.agreed_fund') }}</span>
             <input v-model="approvalAgreedFund" data-test="jmhz-agreed-fund" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.time.jmhz.agreed_fund_hint') }}</span>
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.weekly_work') }}</span>
