@@ -1,6 +1,6 @@
 import axios from 'axios'
-import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 import { readStorageQuotaHeaders } from '@/api/storageQuota'
+import { safeReturnPath } from '@/utils/returnPath'
 
 export const api = axios.create({
   baseURL: '/api',
@@ -75,10 +75,21 @@ api.interceptors.response.use(
     ].includes(code)) {
       const path = window.location.pathname
       if (!path.startsWith('/login') && !path.startsWith('/setup')) {
+        /*
+         * Adresa, na které relace vypršela, jde do přihlášení VŽDY, ne jen na
+         * klientské doméně. Tudy odchází většina lidí, kteří se ocitnou na
+         * přihlášení: nekliknou na odkaz bez relace, ale relace jim vyprší
+         * pod rukama. Bez `return_to` je přihlášení vrátí na přehled a
+         * rozdělanou obrazovku si musí najít znovu.
+         *
+         * Bezpečnost řeší `safeReturnPath` na straně přihlášení; tady se
+         * hodnota jen předává.
+         */
         const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
-        window.location.href = domainSupplierLock !== null && isClientDomainAuthenticatedPath(returnPath)
-          ? `/login?return_to=${encodeURIComponent(returnPath)}`
-          : '/login'
+        const safe = safeReturnPath(returnPath, '')
+        window.location.href = safe === ''
+          ? '/login'
+          : `/login?return_to=${encodeURIComponent(safe)}`
       }
     }
     if (status === 423 && code === 'session_locked') {
