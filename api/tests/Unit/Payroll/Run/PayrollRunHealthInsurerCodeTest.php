@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Run;
 
-use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
+use MyInvoice\Service\Payroll\Run\PayrollSnapshotHealthInsurers;
 use PHPUnit\Framework\TestCase;
-use ReflectionMethod;
 
 /**
  * Kód zdravotní pojišťovny musí zůstat řetězcem.
@@ -75,14 +74,6 @@ final class PayrollRunHealthInsurerCodeTest extends TestCase
      */
     private static function codes(array $snapshotData): array
     {
-        $method = new ReflectionMethod(
-            PayrollRunReadinessService::class,
-            'healthInsurerCodes',
-        );
-
-        /** @var list<string> $codes */
-        $codes = $method->invoke(null, $snapshotData);
-
-        return $codes;
+        return PayrollSnapshotHealthInsurers::fromSnapshot($snapshotData);
     }
 }
