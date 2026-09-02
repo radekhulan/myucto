@@ -1889,7 +1889,8 @@
         "surcharge_managed_elsewhere": "Another monthly or recurring input manages the statutory surcharge.",
         "partial_month_base_required": "The employment covers only part of the month. Enter the confirmed base pay manually.",
         "suspended_month_base_required": "The employment was suspended during the month. Enter the confirmed base or income manually.",
-        "employment_state_base_required": "The employment status requires a manually confirmed base or income."
+        "employment_state_base_required": "The employment status requires a manually confirmed base or income.",
+        "base_managed_elsewhere_link": "Open pay components"
       },
       "load_failed_hint": "Payroll inputs for this period did not load. Do not re-enter them — try loading again first, so you do not create duplicates.",
       "save_blocked_loading": "Wait for the inputs for the selected period to load.",
