@@ -145,6 +145,15 @@ final class PayrollPersonCreateValidator
         [$activityCode, $relationshipDetailCode] =
             PayrollEmploymentJmhzActivityFamily::firstRelationDefaults($relationType);
 
+        $apzStatus = $this->verifiedState($input, 'jmhz_apz_contribution_status');
+        $apzInstrumentCode = trim($this->string($input['jmhz_apz_instrument_code'] ?? null));
+        $apzInstrumentCode = $apzInstrumentCode === '' ? null : $apzInstrumentCode;
+        if ($apzStatus !== 'yes' && $apzInstrumentCode !== null) {
+            throw new \InvalidArgumentException(
+                'Bez příspěvku APZ nesmí být kód nástroje APZ vyplněn.',
+            );
+        }
+
         $employment = $this->employmentValidator->create([
             'code' => 'ZAM-PENDING',
             'relation_type' => $relationType,
@@ -169,10 +178,24 @@ final class PayrollPersonCreateValidator
                 'regular_workplace' => null,
                 'jmhz_workplace_municipality_code' => null,
                 'jmhz_workplace_country_code' => null,
-                'jmhz_apz_contribution_status' => 'unverified',
-                'jmhz_apz_instrument_code' => null,
-                'jmhz_functional_benefits_status' => 'unverified',
-                'jmhz_temporary_assignment_status' => 'unverified',
+                /*
+                 * Tři tri-state údaje pro ČSSZ se ptají rovnou při zakládání,
+                 * s předvybraným „ne" — příspěvek APZ, funkční požitky ani
+                 * dočasné přidělení drtivá většina firem nemá. Když je klient
+                 * nepošle (starší API, token), zůstane `unverified`: měsíční
+                 * hlášení to vyloží jako „ne", ale v evidenci je poznat, že to
+                 * nikdo výslovně nepotvrdil.
+                 */
+                'jmhz_apz_contribution_status' => $apzStatus,
+                'jmhz_apz_instrument_code' => $apzInstrumentCode,
+                'jmhz_functional_benefits_status' => $this->verifiedState(
+                    $input,
+                    'jmhz_functional_benefits_status',
+                ),
+                'jmhz_temporary_assignment_status' => $this->verifiedState(
+                    $input,
+                    'jmhz_temporary_assignment_status',
+                ),
                 'cz_isco_code' => null,
                 'activity_code' => $activityCode,
                 'jmhz_relationship_detail_code' => $relationshipDetailCode,
@@ -264,6 +287,30 @@ final class PayrollPersonCreateValidator
             return '';
         }
         throw new \InvalidArgumentException('Textové pole má neplatný typ.');
+    }
+
+    /**
+     * Tri-state pro ČSSZ ze zakládacího formuláře. Nevyplnění NENÍ chyba:
+     * chybí-li pole úplně, zůstane `unverified` — přesně jako dřív — a měsíční
+     * hlášení si ho vyloží jako „ne". Formulář posílá vybranou hodnotu, takže
+     * co účetní odklikla, se uloží jako její odpověď.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function verifiedState(array $input, string $key): string
+    {
+        if (!array_key_exists($key, $input) || $input[$key] === null) {
+            return 'unverified';
+        }
+        $value = $this->string($input[$key]);
+        if ($value === '') {
+            return 'unverified';
+        }
+        if (!in_array($value, ['unverified', 'no', 'yes'], true)) {
+            throw new \InvalidArgumentException("Pole {$key} má neplatný stav ověření.");
+        }
+
+        return $value;
     }
 
     /**

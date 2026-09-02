@@ -110,6 +110,20 @@ function person(
     employment_refs: [],
     setup_gaps: needsSetup ? ['residence'] : [],
     needs_setup: needsSetup,
+    /*
+     * Server posílá mezery seřazené a s adresou místa, kde se údaj vyplňuje.
+     * Náhrada je schválně věrná: obrazovka z nich kreslí značku i výčet na
+     * kartě a nesmí si pořadí ani cíl domýšlet.
+     */
+    data_gaps: needsSetup
+      ? [{
+          key: 'residence' as const,
+          severity: 'blocking' as const,
+          panel: 'addresses',
+          field: null,
+        }]
+      : [],
+    data_gap_counts: { blocking: needsSetup ? 1 : 0, advisory: 0 },
     can_delete: true,
     delete_blocker: null,
     delete_cascade: { employments: 0, profile: 1 },
@@ -137,6 +151,9 @@ function serveRoster(params: PageParams) {
     const passesFilter = filter === 'all'
       || (filter === 'active' && item.is_active)
       || (filter === 'needs_setup' && item.needs_setup)
+      || (filter === 'needs_data' && item.data_gaps.length > 0)
+      || (filter === 'blocking_data'
+        && item.data_gaps.some(gap => gap.severity === 'blocking'))
     return passesFilter && (needle === '' || item.full_name.toLowerCase().includes(needle))
   })
 
@@ -300,12 +317,12 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(wrapper.text()).toContain('Beta Neaktivní')
 
     await filter.get('input').trigger('focus')
-    const needsSetupOption = filter.findAll('[role="option"]')
-      .find(option => option.text() === 'payroll.people.filters.needs_setup')
-    expect(needsSetupOption).toBeDefined()
-    await needsSetupOption!.trigger('click')
+    const needsDataOption = filter.findAll('[role="option"]')
+      .find(option => option.text() === 'payroll.people.filters.needs_data')
+    expect(needsDataOption).toBeDefined()
+    await needsDataOption!.trigger('click')
     await flushPromises()
-    expect(m.peoplePage).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'needs_setup' }))
+    expect(m.peoplePage).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'needs_data' }))
     expect(wrapper.text()).toContain('Gama K doplnění')
     expect(wrapper.text()).not.toContain('Alfa Aktivní')
     expect(wrapper.text()).not.toContain('Beta Neaktivní')
@@ -514,7 +531,15 @@ describe('PeopleList toolbar and shared employee creation', () => {
       .toEqual({ name: 'payroll-dashboard' })
     expect(wrapper.get('[data-test="person-header-employments"]').text())
       .toContain('payroll.people.header_employments')
-    expect(wrapper.text()).toContain('payroll.people.needs_setup')
+    /*
+     * Karta musí sama říct, CO chybí — na to si uživatel stěžoval. Souhrn
+     * jmenuje údaj lidským názvem a nabízí tlačítko, které na něj doskočí.
+     */
+    expect(wrapper.find('[data-test="person-data-gap-summary"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="person-data-gap-blocking"]').text())
+      .toContain('payroll.people.data_gap.residence')
+    expect(wrapper.find('[data-test="person-data-gap-open-residence"]').exists())
+      .toBe(true)
   })
 
   it('hides the list while editing so no other person stays in view', async () => {
@@ -666,6 +691,12 @@ describe('PeopleList toolbar and shared employee creation', () => {
       // Úvazek jde nově rovnou ze zakládacího formuláře, ne až z nové verze podmínek.
       weekly_hours: '40.00',
       health_insurer_code: null,
+      // Tři otázky pro ČSSZ jdou rovnou ze zakládacího formuláře s předvybraným
+      // „ne" — jinak by je účetní potkala až u zmrazení měsíčního hlášení.
+      jmhz_apz_contribution_status: 'no',
+      jmhz_apz_instrument_code: null,
+      jmhz_functional_benefits_status: 'no',
+      jmhz_temporary_assignment_status: 'no',
     })
     // Nová osoba musí být vidět i tehdy, když ji předchozí zúžení schovalo.
     expect(m.peoplePage).toHaveBeenLastCalledWith({

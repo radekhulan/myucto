@@ -17,11 +17,28 @@ final class PayrollYearCloseService
         'missing_months',
         'open_corrections',
         'open_submissions',
-        'open_liabilities',
         'open_leave',
         'open_enforcement',
         'reconciliation_differences',
     ];
+
+    /**
+     * Nálezy, které se účetní UKÁŽOU, ale rok nedrží.
+     *
+     * `open_liabilities` = mzdový závazek bez doloženého bankovního pohybu
+     * nebo pokladního dokladu. Není to chyba účetnictví: platební příkaz
+     * odchází v den výplaty, ABO výpis dorazí o týdny později a spáruje se
+     * až při jeho importu. Jako blokátor to znamenalo, že se rok nedal
+     * zavřít kvůli papíru, který ještě nedošel, a jediná cesta ven vedla
+     * přes ruční párování. Rozhodnutí zavřít rok patří účetní — tohle je
+     * podklad k němu, ne závora.
+     */
+    public const WARNING_CODES = [
+        'open_liabilities',
+    ];
+
+    /** Kolik nedoložených závazků se vypíše jmenovitě. */
+    private const WARNING_SAMPLE_LIMIT = 20;
 
     private const REQUIRED_TABLES = [
         'payroll_year_closures', 'payroll_module_state', 'payroll_runs', 'payroll_run_revisions',
@@ -49,16 +66,24 @@ final class PayrollYearCloseService
                     'code' => 'schema_unavailable',
                     'tables' => ['payroll_year_closures'],
                 ]],
+                'warnings' => [],
             ];
         }
         $closure = $this->repository->find($supplierId, $year);
         if ($closure !== null) {
-            return ['closure' => $closure, 'blockers' => $closure['status'] === 'open' ? $this->blockers($supplierId, $year) : []];
+            $open = $closure['status'] === 'open';
+
+            return [
+                'closure' => $closure,
+                'blockers' => $open ? $this->blockers($supplierId, $year) : [],
+                'warnings' => $open ? $this->warnings($supplierId, $year) : [],
+            ];
         }
 
         return [
             'closure' => $this->openState($supplierId, $year),
             'blockers' => $this->blockers($supplierId, $year),
+            'warnings' => $this->warnings($supplierId, $year),
         ];
     }
 
@@ -211,7 +236,6 @@ final class PayrollYearCloseService
         foreach ([
             'open_corrections' => $this->repository->openCorrectionCount($supplierId, $year),
             'open_submissions' => $this->repository->openSubmissionCount($supplierId, $year),
-            'open_liabilities' => $this->repository->openLiabilityCount($supplierId, $year),
             'open_leave' => $this->repository->openLeaveCount($supplierId, $year),
             'open_enforcement' => $this->repository->unresolvedEnforcementCount($supplierId, $year),
             'reconciliation_differences' => $this->reconciliationDifferenceCount($supplierId, $year),
@@ -221,6 +245,40 @@ final class PayrollYearCloseService
             }
         }
         return $blockers;
+    }
+
+    /**
+     * Nálezy k prohlédnutí, ne k blokování. Vrací i JMENNÝ seznam — samotné
+     * číslo („5 nedoložených závazků") účetní nikam neposune, potřebuje
+     * vidět, o která období a které odvody jde.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function warnings(int $supplierId, int $year): array
+    {
+        $missingTables = array_values(array_filter(
+            self::REQUIRED_TABLES,
+            fn (string $table): bool => !$this->db->hasTable($table),
+        ));
+        if ($missingTables !== []) {
+            return [];
+        }
+        $count = $this->repository->openLiabilityCount($supplierId, $year);
+        if ($count <= 0) {
+            return [];
+        }
+        $items = $this->repository->openLiabilities(
+            $supplierId,
+            $year,
+            self::WARNING_SAMPLE_LIMIT,
+        );
+
+        return [[
+            'code' => 'open_liabilities',
+            'count' => $count,
+            'items' => $items,
+            'truncated' => $count > count($items),
+        ]];
     }
 
     private function reconciliationDifferenceCount(int $supplierId, int $year): int

@@ -202,9 +202,17 @@ watch(() => [props.startDate, props.endDate], () => {
 </script>
 
 <template>
+  <!--
+    Kotva a `data-a1-field` níž jsou tu kvůli doskoku z nálezů: hláška „chybí
+    OIČ / IK MPSV osoby" má mít tlačítko, které sem doveze, ne popis cesty.
+    Povel `?person=&employment=&panel=jmhz_identity&field=…` zpracuje
+    `PeopleList.focusPanel()` a `revealField()` blok cestou rozbalí — sbalený
+    blok, na který nic neukazuje, je prakticky totéž jako žádný.
+  -->
   <details
-    class="group mt-4 overflow-hidden rounded-lg border border-neutral-200 bg-surface"
+    class="group mt-4 scroll-mt-24 overflow-hidden rounded-lg border border-neutral-200 bg-surface"
     data-test="jmhz-identity-panel"
+    data-panel-anchor="jmhz_identity"
     @toggle="openPanel"
   >
     <!--
@@ -293,7 +301,10 @@ watch(() => [props.startDate, props.endDate], () => {
 
       <template v-if="status && !loading">
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+          <div
+            class="scroll-mt-24 rounded-lg border border-neutral-200 bg-neutral-50 p-3"
+            data-a1-field="jmhz.person_external_identifier"
+          >
             <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
               {{ t('payroll.people.jmhz_identity.person_identifier') }}
             </p>
@@ -317,7 +328,10 @@ watch(() => [props.startDate, props.endDate], () => {
               {{ t('payroll.people.jmhz_identity.correct') }}
             </button>
           </div>
-          <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+          <div
+            class="scroll-mt-24 rounded-lg border border-neutral-200 bg-neutral-50 p-3"
+            data-a1-field="jmhz.employment_external_identifier"
+          >
             <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
               {{ t('payroll.people.jmhz_identity.employment_identifier') }}
             </p>

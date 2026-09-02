@@ -984,7 +984,7 @@
     "load_failed": "Mzdový modul se nepodařilo načíst.",
     "year_close": {
       "title": "Roční uzávěrka mezd",
-      "description": "Uzavřete rok až po dokončení všech dvanácti mzdových období, oprav, podání a platebních závazků.",
+      "description": "Uzavřete rok až po dokončení všech dvanácti mzdových období, oprav a podání. Odvody, ke kterým ještě nedorazil výpis, uzavření nebrání — jen se vypíšou.",
       "year": "Rok",
       "status": {
         "open": "Otevřený",
@@ -1003,6 +1003,12 @@
         "open_enforcement": "Zůstává {count} nevyřešených exekučních případů nebo pohledávek.",
         "reconciliation_differences": "Zůstává {count} mzdových období s nevysvětleným rozdílem proti účetnictví nebo platbám."
       },
+      "warnings_title": "Na co upozornit (uzavření to nebrání)",
+      "warning": {
+        "unknown": "Zůstává {count} nálezů, které tahle verze aplikace neumí pojmenovat.",
+        "open_liabilities": "Zůstává {count} mzdových závazků bez doloženého bankovního pohybu. Doloží se samy, až dorazí a spáruje se výpis."
+      },
+      "warning_truncated": "a další ({count})",
       "close": "Uzavřít mzdový rok",
       "close_confirm": "Opravdu uzavřít mzdový rok {year}? Znovuotevření vyžaduje auditní důvod.",
       "blocked_hint": "Nejdřív vyřešte všechny uvedené překážky.",
@@ -1747,6 +1753,11 @@
         "payments_not_applicable": "Není co platit — celá čistá mzda je vypořádaná zápočtem. Běh postoupil dál.",
         "payments_settled": "Všechny závazky běhu jsou pokryté platbami."
       },
+      "coverage": {
+        "settled": "Úhrady doložené výpisem: všech {count} závazků.",
+        "waiting": "Úhrady doložené výpisem: {settled} z {total} závazků. Zbývá {amount} — doloží se samo, až dorazí a spáruje se výpis.",
+        "open_payments": "Zobrazit platby"
+      },
       "status": {
         "draft": "Koncept",
         "inputs_locked": "Vstupy uzamčeny",
@@ -1794,7 +1805,26 @@
         "close": "Uzavře běh za období. Uzavřený běh jde otevřít jen vyžádáním opravy.",
         "reopen": "Otevře novou revizi nad opravenými vstupy. Původní revize zůstává v historii i s vydanými doklady."
       },
+      "next_steps": {
+        "title": "Co následuje",
+        "subtitle": "Mzdy jsou spočítané a zaúčtované — teď se podává. U každé povinnosti je vidět lhůta, stav a odkaz tam, kde se podává; co je hotové, je označené jako hotové."
+      },
       "readiness": {
+        "affected": "Týká se: {names}",
+        "impact": {
+          "blocking": "Bez tohohle se nedá počítat",
+          "revision": "Pozdější oprava znamená opravnou revizi",
+          "anytime": "Doplní se kdykoli, běh to nezdrží"
+        },
+        "impact_hint": {
+          "blocking": "Výpočet nemá z čeho vyjít. Tohle je potřeba vyřešit dřív než cokoli dalšího.",
+          "revision": "Zahájit běh jde i teď, ale tenhle údaj vstupuje do zmrazeného snímku — po zamknutí vstupů se opraví jen novou revizí.",
+          "anytime": "Na mzdový výpočet to nemá vliv. Stačí doplnit, než se bude podávat."
+        },
+        "scope": {
+          "setup": "Nastavení firmy — jednorázové, pak je pokoj.",
+          "monthly": "Měsíční práce."
+        },
         "title": "Kontrola před zahájením",
         "subtitle": "Tohle uvidíte i po zahájení běhu — ukazujeme to teď, dokud jdou vstupy ještě opravit. Nic z toho mzdový běh neblokuje: spočítat se dá i s těmito nálezy.",
         "clear": "Kontrola před zahájením nenašla nic, co by bránilo spočítat mzdy za tohle období.",
@@ -2953,7 +2983,9 @@
       "filters": {
         "active": "Aktivní",
         "all": "Všichni",
-        "needs_setup": "K doplnění"
+        "needs_setup": "K doplnění",
+        "needs_data": "Mám doplnit údaje",
+        "blocking_data": "Brání podání"
       },
       "create": {
         "action": "Přidat zaměstnance",
@@ -3001,19 +3033,71 @@
         "identifier": "rodné číslo (nebo EČP či VČP)",
         "employment": "pracovní vztah"
       },
+      "data_gap": {
+        "jmhz_person_identifier": "OIČ / IK MPSV osoby (přiděluje ČSSZ)",
+        "jmhz_employment_identifier": "ID PPV pracovního vztahu (přiděluje ČSSZ)",
+        "jmhz_activity_code": "druh činnosti pro ČSSZ",
+        "employment": "pracovní vztah",
+        "name": "jméno a příjmení",
+        "identifier": "rodné číslo (nebo EČP či VČP)",
+        "residence": "adresa trvalého pobytu",
+        "health_insurance": "zdravotní pojišťovna",
+        "tax_residence": "daňová rezidence",
+        "payout_account": "ověřený výplatní účet",
+        "contact": "e-mail nebo telefon",
+        "citizenship": "státní občanství",
+        "birth_date": "datum narození",
+        "tax_declaration": "prohlášení poplatníka"
+      },
+      "data_gap_where": {
+        "employment": "založte ho dole na kartě, v sekci Pracovní vztahy",
+        "name": "Další údaje → Identita → Historie jména",
+        "identifier": "Další údaje → Kontakty → Identifikátory",
+        "residence": "Další údaje → Identita → Adresy, typ bydliště",
+        "health_insurance": "Zákonná evidence → Zdravotní pojištění, stav musí být ověřeno",
+        "tax_residence": "Zákonná evidence → Daňová rezidence",
+        "payout_account": "Další údaje → Výplata → Výplatní účty; účet musí být i ověřený",
+        "contact": "Další údaje → Kontakty, jeden označte jako hlavní",
+        "citizenship": "Další údaje → Identita → Údaje pro registraci zaměstnance",
+        "birth_date": "Další údaje → Identita → Údaje pro registraci zaměstnance",
+        "tax_declaration": "Zákonná evidence → Prohlášení poplatníka"
+      },
+      "data_gap_badge": {
+        "blocking": "nic nechybí | 1 údaj brání podání | {count} údaje brání podání | {count} údajů brání podání",
+        "advisory": "nic nechybí | 1 údaj doplnit | {count} údaje doplnit | {count} údajů doplnit"
+      },
+      "data_gap_summary": {
+        "blocking_title": "Nic nechybí | Chybí 1 údaj, bez kterého měsíc neprojde | Chybí {count} údaje, bez kterých měsíc neprojde | Chybí {count} údajů, bez kterých měsíc neprojde",
+        "blocking_hint": "Bez nich se nedá podat hlášení ani spočítat odvody. Kartu ale uložíte i tak a doplnit je můžete kdykoli.",
+        "advisory_title": "Nic nechybí | Zbývá doplnit 1 údaj | Zbývají doplnit {count} údaje | Zbývá doplnit {count} údajů",
+        "advisory_hint": "Nic z toho měsíc nezastaví. Doplňte je, až bude čas.",
+        "open": "Doplnit →"
+      },
       "next_step": {
         "name": "Další krok: doplňte jméno a příjmení.",
-        "residence": "Další krok: doplňte bydliště.",
+        "residence": "Další krok: doplňte adresu trvalého pobytu.",
         "contact": "Další krok: doplňte e-mail nebo telefon.",
         "identifier": "Další krok: doplňte rodné číslo, EČP nebo VČP.",
         "employment": "Další krok: založte pracovní vztah.",
+        "health_insurance": "Další krok: doplňte ověřenou zdravotní pojišťovnu.",
+        "tax_residence": "Další krok: doplňte daňovou rezidenci.",
+        "payout_account": "Další krok: doplňte a ověřte výplatní účet.",
+        "citizenship": "Další krok: doplňte státní občanství.",
+        "birth_date": "Další krok: doplňte datum narození.",
+        "tax_declaration": "Další krok: rozhodněte prohlášení poplatníka.",
         "ready": "Karta je připravená.",
         "action": {
           "name": "Doplnit jméno",
-          "residence": "Doplnit bydliště",
+          "residence": "Doplnit adresu",
           "contact": "Doplnit kontakt",
           "identifier": "Doplnit identifikátor",
           "employment": "Přidat pracovní vztah",
+          "health_insurance": "Doplnit pojišťovnu",
+          "tax_residence": "Doplnit rezidenci",
+          "payout_account": "Doplnit výplatní účet",
+          "citizenship": "Doplnit občanství",
+          "birth_date": "Doplnit datum narození",
+          "tax_declaration": "Doplnit prohlášení",
           "ready": "Otevřít kartu"
         }
       },
@@ -3426,10 +3510,10 @@
         "municipality_name": "Obec pracoviště",
         "municipality_code": "Kód obce (CISOB)",
         "country_code": "Kód státu",
-        "apz_status": "Příspěvek APZ",
-        "apz_instrument": "Nástroj APZ",
-        "functional_benefits": "Funkční požitky",
-        "temporary_assignment": "Dočasné přidělení",
+        "apz_status": "Příspěvek od úřadu práce (aktivní politika zaměstnanosti)",
+        "apz_instrument": "Nástroj aktivní politiky zaměstnanosti",
+        "functional_benefits": "Funkční požitky podle § 6 odst. 10 zákona o daních z příjmů",
+        "temporary_assignment": "Dočasné přidělení k jinému zaměstnavateli",
         "relationship_detail": "Bližší určení pracovněprávního vztahu",
         "select_apz": "Vyberte nástroj",
         "options_failed": "Připnuté číselníky JMHZ se nepodařilo načíst. Uložení ověřovaných údajů je zablokované.",
@@ -3439,10 +3523,20 @@
         "external_codebook_verified": "Obec a stát se ověřují proti připnutým číselníkům platným nejpozději k {date}.",
         "temporary_assignment_blocker": "Dočasné přidělení ano vyžaduje ještě identitu alespoň jednoho uživatele. Dokud nebude doplněna, JMHZ nelze připravit.",
         "state": {
-          "unverified": "Neověřeno",
+          "unverified": "Nevyplněno (bere se jako ne)",
           "no": "Ne",
           "yes": "Ano"
-        }
+        },
+        "default_no_hint": "Nevyplněné odpovědi se v měsíčním hlášení pro ČSSZ berou jako „ne“ a podání neblokují. V evidenci zůstanou nevyplněné, aby bylo poznat, že je nikdo výslovně nepotvrdil; podání si k nim poznamená, že hodnota vznikla výkladem výchozího stavu."
+      },
+      "jmhz_questions": {
+        "title": "Otázky pro měsíční hlášení ČSSZ",
+        "hint": "U drtivé většiny zaměstnanců je odpověď třikrát ne. Nemusíte tuhle část otevírat.",
+        "apz": "Dostáváte na tohle pracovní místo příspěvek od úřadu práce (aktivní politika zaměstnanosti)?",
+        "apz_instrument": "Který nástroj aktivní politiky zaměstnanosti to je?",
+        "functional_benefits": "Jde o funkční požitky podle § 6 odst. 10 zákona o daních z příjmů?",
+        "temporary_assignment": "Je zaměstnanec dočasně přidělen k jinému zaměstnavateli?",
+        "default_no_hint": "Odpovědi se dají kdykoli změnit na kartě pracovního vztahu. Nevyplnění je v pořádku: měsíční hlášení pro ČSSZ si ho vyloží jako „ne“."
       },
       "jmhz_ordinary_profile": {
         "title": "JMHZ – neobvyklé situace",
@@ -5025,6 +5119,16 @@
         "jmhz_dry_run_technical_detail": "Technické údaje pro podporu",
         "jmhz_dry_run_attribute_ids": "Pole ČSSZ: {ids}",
         "jmhz_dry_run_entity_ids": "Interní záznamy: {ids}",
+        "jmhz_dry_run_affected": "Týká se: {names}",
+        "jmhz_attribute_glossary": {
+          "10051": "OIČ / IK MPSV osoby — osobní identifikační číslo, přiděluje ČSSZ",
+          "10053": "příjmení zaměstnance",
+          "10054": "jméno zaměstnance",
+          "10056": "datum narození",
+          "10223": "datum nástupu do zaměstnání",
+          "10228": "ID PPV pracovního vztahu — identifikátor zaměstnání, přiděluje ČSSZ",
+          "10239": "druh činnosti"
+        },
         "jmhz_dry_run_actions": {
           "employment": "Doplnit pracovní vztah",
           "person": "Doplnit zaměstnance",
@@ -5039,6 +5143,11 @@
           "record": "Otevřít záznam {number}"
         },
         "jmhz_dry_run_action_codes": {
+          "jmhz_identity_incomplete": "Doplnit identifikátory ČSSZ",
+          "jmhz_identity_oic_missing": "Doplnit OIČ / IK MPSV osoby",
+          "jmhz_identity_id_ppv_missing": "Doplnit ID PPV pracovního vztahu",
+          "jmhz_identity_unresolved": "Dokončit úkol identity",
+          "component_jmhz_mapping_missing": "Doplnit zařazení složky",
           "jmhz_attribute_10116_unresolved": "Potvrdit právní skutečnosti",
           "jmhz_attribute_10546_unresolved": "Potvrdit právní skutečnosti",
           "jmhz_interaction_in13_unresolved": "Potvrdit právní skutečnosti",
@@ -5084,14 +5193,16 @@
         "jmhz_gateway_continue": "Přihlásit se a schválit v ISDS",
         "jmhz_gateway_start_failed": "Datová zpráva je ve frontě, ale přihlášení do ISDS se nepodařilo zahájit. Pokračujte z odchozí fronty ISDS.",
         "jmhz_dry_run_blockers": {
+          "jmhz_identity_id_ppv_missing": "Chybí „ID PPV pracovního vztahu\" — identifikátor zaměstnání, který přiděluje ČSSZ při registraci. Opište ho z protokolu o přijetí přihlášky nebo z ePortálu ČSSZ; vyplňuje se na kartě pracovního vztahu v části „Identifikátory přidělené ČSSZ pro JMHZ\".",
+          "jmhz_identity_unresolved": "Pracovní vztah má nedokončený úkol identity vůči ČSSZ. Dokončete ho na kartě pracovního vztahu; do té doby se hlášení nesestaví.",
           "unknown": "Chybí některý zákonný údaj potřebný pro JMHZ. Otevřete kartu pracovního vztahu a doplňte zvýrazněné údaje.",
           "effective_term_missing": "Pro daný měsíc chybí účinné podmínky pracovního vztahu.",
-          "component_jmhz_mapping_missing": "Mzdová složka nemá určené zařazení do JMHZ.",
+          "component_jmhz_mapping_missing": "Mzdová složka použitá v tomhle období nemá určené zařazení do měsíčního hlášení. Doplňte ho v Mzdy → Mzdové složky. Složky, které se v období nepoužily, hlášení nijak nebrání.",
           "component_jmhz_manual_review": "Zařazení mzdové složky do JMHZ vyžaduje ruční kontrolu.",
           "component_jmhz_treatment_invalid": "Mzdová složka má neplatné nastavení pro JMHZ.",
           "jmhz_average_hourly_earning_missing": "Chybí ověřený průměrný hodinový výdělek.",
-          "jmhz_identity_incomplete": "Chybí některý povinný identifikační údaj zaměstnance.",
-          "jmhz_identity_oic_missing": "Chybí ověřený identifikátor pojištěnce pro ČSSZ.",
+          "jmhz_identity_incomplete": "Pracovní vztah nemá uložené „OIČ / IK MPSV osoby\" ani „ID PPV pracovního vztahu\". Obě čísla přiděluje ČSSZ při registraci zaměstnance — aplikace je vymyslet nemůže. Když zaměstnanec u ČSSZ registrovaný ještě není, podejte nejdřív přihlášku (PREZEC/REGZEC A1); čísla přijdou v protokolu. Když registrovaný je, opište je z protokolu ČSSZ nebo z ePortálu. Vyplňují se na kartě pracovního vztahu v části „Identifikátory přidělené ČSSZ pro JMHZ\".",
+          "jmhz_identity_oic_missing": "Chybí „OIČ / IK MPSV osoby\" — osobní identifikační číslo, které zaměstnanci přiděluje ČSSZ při registraci. Opište ho z protokolu o přijetí přihlášky nebo z ePortálu ČSSZ; vyplňuje se na kartě pracovního vztahu v části „Identifikátory přidělené ČSSZ pro JMHZ\". Když zaměstnanec u ČSSZ registrovaný ještě není, podejte nejdřív přihlášku (PREZEC/REGZEC A1) a číslo se doplní z protokolu.",
           "jmhz_scenario_activity_code_missing": "Chybí kód druhu činnosti pro JMHZ.",
           "jmhz_verified_boolean_missing": "Chybí potvrzení některé povinné volby ano/ne.",
           "jmhz_work_month_not_approved": "Pracovní doba za měsíc není schválená.",

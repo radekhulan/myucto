@@ -109,4 +109,48 @@ final class PayrollJmhzPreparationSnapshotMigrationTest extends TestCase
         self::assertStringContainsString("'jmhz-preparation-source.v11'", $sql);
         self::assertStringNotContainsString('UPDATE ', $sql);
     }
+
+    /**
+     * Výklad nevyplněného „ano/ne" jako „ne" přidal do snímku
+     * `jmhz_default_interpretations`, tedy nový tvar — v12. Starší snímky
+     * zůstávají a čtou se dál, migrace jen rozšiřuje výčet verzí.
+     */
+    public function testDefaultTristateInterpretationOnlyWidensBuilderVersions(): void
+    {
+        $sql = file_get_contents(
+            dirname(__DIR__, 4)
+            . '/db/migrations/1880_payroll_jmhz_default_tristate_interpretation.sql',
+        );
+        self::assertIsString($sql);
+        self::assertStringContainsString("'jmhz-preparation-source.v11'", $sql);
+        self::assertStringContainsString("'jmhz-preparation-source.v12'", $sql);
+        self::assertStringContainsString(
+            'DROP CONSTRAINT IF EXISTS chk_payroll_jmhz_preparation_builder',
+            $sql,
+        );
+        self::assertStringNotContainsString('UPDATE ', $sql);
+        self::assertStringNotContainsString('DELETE ', $sql);
+    }
+
+    /**
+     * Jmenná větev `identifikaceType` dovolila snímku nést `null` místo OIČ a
+     * ID PPV, tedy nový tvar — v13. Migrace zase jen rozšiřuje výčet verzí,
+     * uložené snímky nepřepisuje.
+     */
+    public function testIdentityNameBranchOnlyWidensBuilderVersions(): void
+    {
+        $sql = file_get_contents(
+            dirname(__DIR__, 4)
+            . '/db/migrations/1940_payroll_jmhz_identity_name_branch.sql',
+        );
+        self::assertIsString($sql);
+        self::assertStringContainsString("'jmhz-preparation-source.v12'", $sql);
+        self::assertStringContainsString("'jmhz-preparation-source.v13'", $sql);
+        self::assertStringContainsString(
+            'DROP CONSTRAINT IF EXISTS chk_payroll_jmhz_preparation_builder',
+            $sql,
+        );
+        self::assertStringNotContainsString('UPDATE ', $sql);
+        self::assertStringNotContainsString('DELETE ', $sql);
+    }
 }

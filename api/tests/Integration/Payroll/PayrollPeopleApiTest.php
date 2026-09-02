@@ -253,6 +253,82 @@ final class PayrollPeopleApiTest extends TestCase
         self::assertTrue($byId[$employeeWithoutProfileId]['needs_setup']);
     }
 
+    /**
+     * Chybějící údaje jdou ven ROVNOU se seznamem, rozlišené na dvě úrovně.
+     *
+     * Bez toho se účetní o chybějícím údaji dozví až u podání nebo u plateb —
+     * přesně to, na co si stěžuje. Osoba bez pracovního vztahu je zároveň
+     * důkaz, že se nehlásí povinnosti, které vztahem teprve VZNIKAJÍ
+     * (pojišťovna, daňová rezidence, prohlášení).
+     */
+    public function testListReportsMissingStatutoryDataWithSeverityAndTarget(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, ?, ?, ?, 0, 0, 0, NULL, 0, 1)'
+        )->execute([$this->supplierId, 'Prázdná Osoba', 'employee', 'dpp']);
+        $bareId = (int) $this->db->pdo()->lastInsertId();
+
+        $items = $this->json($this->action->list(
+            $this->request('GET', '/api/payroll/people', 'accountant'),
+            new Response(),
+        ))['items'];
+        $bare = array_column($items, null, 'id')[$bareId];
+
+        $gaps = array_column($bare['data_gaps'], 'severity', 'key');
+        self::assertSame('blocking', $gaps['employment']);
+        self::assertSame('blocking', $gaps['name']);
+        self::assertSame('advisory', $gaps['contact']);
+        // Vztah není → tyhle povinnosti ještě nevznikly a hlásit se nesmí.
+        self::assertArrayNotHasKey('health_insurance', $gaps);
+        self::assertArrayNotHasKey('tax_residence', $gaps);
+        self::assertArrayNotHasKey('tax_declaration', $gaps);
+        // Hotovostní výplata je výchozí, takže chybějící účet mezera není.
+        self::assertArrayNotHasKey('payout_account', $gaps);
+
+        self::assertSame(
+            count(array_filter($bare['data_gaps'], static fn (array $gap): bool
+                => $gap['severity'] === 'blocking')),
+            $bare['data_gap_counts']['blocking'],
+        );
+
+        // Adresa místa, kde se údaj vyplňuje. Bez ní je štítek jen konstatování.
+        $byKey = array_column($bare['data_gaps'], null, 'key');
+        self::assertSame('registration_identity', $byKey['name']['panel']);
+        self::assertSame('identity.last_name', $byKey['name']['field']);
+        self::assertNull($byKey['employment']['panel']);
+    }
+
+    /**
+     * Zúžení dělá SERVER. Kdyby filtroval prohlížeč, hledal by jen v načtené
+     * stránce a o člověku z další stránky by tvrdil, že žádné údaje nechybí.
+     */
+    public function testNeedsDataFilterNarrowsOnTheServer(): void
+    {
+        $narrowed = $this->json($this->action->list(
+            $this->request('GET', '/api/payroll/people', 'accountant')
+                ->withQueryParams(['filter' => 'blocking_data']),
+            new Response(),
+        ));
+        foreach ($narrowed['items'] as $item) {
+            self::assertNotSame([], array_filter(
+                $item['data_gaps'],
+                static fn (array $gap): bool => $gap['severity'] === 'blocking',
+            ));
+        }
+        self::assertSame(count($narrowed['items']), $narrowed['total']);
+
+        $unknown = $this->action->list(
+            $this->request('GET', '/api/payroll/people', 'accountant')
+                ->withQueryParams(['filter' => 'nonsense']),
+            new Response(),
+        );
+        self::assertSame(422, $unknown->getStatusCode());
+    }
+
     public function testEndpointAllowsAuthorizedBearerAndRejectsClientAndDisabledPayroll(): void
     {
         $clientResponse = $this->action->list(

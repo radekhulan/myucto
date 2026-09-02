@@ -716,32 +716,128 @@ final class JmhzScenario1XmlSerializer
         return $node;
     }
 
-    /** @param array<string,mixed> $employment */
+    /**
+     * `identifikaceType` je `xs:choice` a staví se OBĚ jeho větve.
+     *
+     * ── Větev A: OIČ (10051) + ID PPV (10228) ───────────────────────────────
+     * Jakmile ČSSZ obě čísla přidělí, je jejich uvádění ve všech dalších
+     * hlášeních povinné, a jmenná větev se už nepoužije.
+     *
+     * ── Větev B: příjmení (10053) + jméno (10054) + datum narození (10056)
+     *    + datum nástupu (10223) + druh činnosti (10239) ────────────────────
+     * Obě čísla přiděluje ČSSZ sama až protokolem o přijetí registrace, takže
+     * PRVNÍ hlášení za nově registrovaného zaměstnance je nemá odkud vzít.
+     * Přesně na to má XSD jmennou větev: zaměstnanec se ohlásí jménem, ČSSZ v
+     * protokolu OIČ i ID PPV přidělí a další hlášení už jede větví A. Odmítat
+     * podání kvůli chybějícímu OIČ znamenalo požadovat po účetní číslo, které
+     * vzniká až tímhle podáním.
+     *
+     * Pořadí elementů obou větví odpovídá `xs:sequence` v `formCommonTypes.xsd`
+     * — `xs:choice` sice vybírá větev, uvnitř větve je ale pořadí závazné.
+     *
+     * @param array<string,mixed> $employment
+     */
     private function identification(
         DOMDocument $dom,
         array $employment,
     ): DOMElement {
-        // `identifikaceType` je `xs:choice`. Po doručení OIČ a ID zaměstnání je
-        // povinné je uvádět ve všech dalších hlášeních, takže se používá jen
-        // identifikátorová větev; jmenná se záměrně nestaví vůbec.
         $identity = $this->object($employment['identity'] ?? null);
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:identifikace');
-        $this->text(
-            $dom,
-            $node,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:ikMpsv',
-            $this->string($identity['person_external_identifier'] ?? null, '10051'),
-        );
-        $this->text(
-            $dom,
-            $node,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:idPpv',
-            $this->string($identity['employment_external_identifier'] ?? null, '10228'),
-        );
+        $person = $identity['person_external_identifier'] ?? null;
+        $employmentIdentifier = $identity['employment_external_identifier'] ?? null;
+        if ($person !== null || $employmentIdentifier !== null) {
+            // Půlka dvojice není větev A: `$this->string()` chybějící protějšek
+            // ohlásí jako nedoložený atribut a podání se nepostaví.
+            $this->text(
+                $dom,
+                $node,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:ikMpsv',
+                $this->string($person, '10051'),
+            );
+            $this->text(
+                $dom,
+                $node,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:idPpv',
+                $this->string($employmentIdentifier, '10228'),
+            );
+
+            return $node;
+        }
+
+        $selector = $this->object($employment['selector'] ?? null);
+        foreach ([
+            'form:prijmeni' => $this->identityName($identity['family_name'] ?? null, '10053'),
+            'form:jmeno' => $this->identityName($identity['given_name'] ?? null, '10054'),
+            'form:datumNarozeni' => $this->identityDate($identity['birth_date'] ?? null, '10056'),
+            'form:datumNastupu' => $this->identityDate(
+                $identity['employment_start_date'] ?? null,
+                '10223',
+            ),
+            'form:druhCinnosti' => $this->identityActivity(
+                $selector['activity_code'] ?? null,
+                '10239',
+            ),
+        ] as $element => $value) {
+            $this->text($dom, $node, JmhzSchemaCatalog::NS_FORM, $element, $value);
+        }
 
         return $node;
+    }
+
+    /** Povinný textový údaj jmenné větve `identifikaceType`. */
+    private function identityName(mixed $value, string $attributeId): string
+    {
+        if (!is_string($value) || trim($value) === '') {
+            $this->identityUnresolved($attributeId);
+        }
+
+        return $value;
+    }
+
+    /** Povinné datum jmenné větve `identifikaceType` (`xs:date`). */
+    private function identityDate(mixed $value, string $attributeId): string
+    {
+        $text = $this->identityName($value, $attributeId);
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $text);
+        if (!$date instanceof \DateTimeImmutable
+            || $date->format('Y-m-d') !== $text
+        ) {
+            $this->identityUnresolved($attributeId);
+        }
+
+        return $text;
+    }
+
+    /**
+     * Druh činnosti jmenné větve. `druhCinnostiType` připouští jednu až dvě
+     * číslice 1–99 nebo jedno až dvě velká písmena; cokoli jiného by spadlo až
+     * na XSD, a to je pro účetní nečitelná hláška.
+     */
+    private function identityActivity(mixed $value, string $attributeId): string
+    {
+        $text = $this->identityName($value, $attributeId);
+        if (preg_match('/^([1-9][0-9]?|[A-Z]{1,2})$/D', $text) !== 1) {
+            $this->identityUnresolved($attributeId);
+        }
+
+        return $text;
+    }
+
+    /**
+     * Blokátor jmenné větve. Kód je VLASTNÍ, ne identifikátorový: chybí-li
+     * jméno, datum nástupu nebo druh činnosti, je vadou přesně ten údaj —
+     * poslat účetní shánět OIČ, které stejně přiděluje až ČSSZ, by ji poslalo
+     * za prací, kterou udělat nemůže.
+     */
+    private function identityUnresolved(string $attributeId): never
+    {
+        $this->invalid(
+            'jmhz_xml_identity_name_incomplete',
+            "Zaměstnanec nemá od ČSSZ přidělené OIČ ani ID PPV, hlásí se proto "
+                . "jménem — a k tomu chybí doložený atribut {$attributeId}.",
+        );
     }
 
     /** @param array<string,mixed> $summary */
@@ -1356,7 +1452,7 @@ final class JmhzScenario1XmlSerializer
         );
         $node->appendChild($place);
 
-        $apz = $this->tristate($term['jmhz_apz_contribution_status'] ?? null, '10232');
+        $apz = $this->tristate($employment, $term, 'jmhz_apz_contribution_status', '10232');
         $this->text(
             $dom,
             $node,
@@ -1378,12 +1474,14 @@ final class JmhzScenario1XmlSerializer
             $node,
             JmhzSchemaCatalog::NS_FORM,
             'form:funkcniPozitky',
-            $this->tristate($term['jmhz_functional_benefits_status'] ?? null, '10247')
+            $this->tristate($employment, $term, 'jmhz_functional_benefits_status', '10247')
                 ? 'true'
                 : 'false',
         );
         $assignment = $this->tristate(
-            $term['jmhz_temporary_assignment_status'] ?? null,
+            $employment,
+            $term,
+            'jmhz_temporary_assignment_status',
             '10251',
         );
         if ($assignment) {
@@ -1762,18 +1860,70 @@ final class JmhzScenario1XmlSerializer
     }
 
     /**
-     * Ověřený tri-state z účinného termu. `unverified` NENÍ `no` — bez
-     * doloženého rozhodnutí se formulář nestaví.
+     * Tri-state z účinného termu.
+     *
+     * `unverified` se vykládá jako `no` — příspěvek APZ, funkční požitky ani
+     * dočasné přidělení drtivá většina firem nemá a nevyplnění je legitimní
+     * odpověď „ne". Do formuláře se tak dostane `false`, ale JEN tehdy, když to
+     * zmrazený snímek u vztahu doloží záznamem v `jmhz_default_interpretations`
+     * (viz {@see JmhzPreparationSnapshotBuilder::DEFAULTED_TRISTATES}). Bez
+     * něj by podání tvrdilo za účetní něco, co nikde není zapsané, a proto se
+     * radši nepostaví.
+     *
+     * @param array<string,mixed> $employment zmrazený vztah ze snímku
+     * @param array<string,mixed> $term účinné podmínky vztahu
      */
-    private function tristate(mixed $value, string $attributeId): bool
-    {
+    private function tristate(
+        array $employment,
+        array $term,
+        string $field,
+        string $attributeId,
+    ): bool {
+        $value = $term[$field] ?? null;
         if ($value === 'yes') {
             return true;
         }
         if ($value === 'no') {
             return false;
         }
+        if ($value === 'unverified'
+            && $this->defaultInterpretation($employment, $field, $attributeId)
+        ) {
+            return false;
+        }
         $this->unresolved($attributeId);
+    }
+
+    /**
+     * Nese zmrazený snímek doklad, že se u tohoto vztahu nevyplněná hodnota
+     * vyložila jako „ne"? Starší snímky (do v11) ho nemají — u těch se nic
+     * nedomýšlí.
+     *
+     * @param array<string,mixed> $employment
+     */
+    private function defaultInterpretation(
+        array $employment,
+        string $field,
+        string $attributeId,
+    ): bool {
+        $records = $employment['jmhz_default_interpretations'] ?? null;
+        if (!is_array($records) || !array_is_list($records)) {
+            return false;
+        }
+        foreach ($records as $record) {
+            if (is_array($record)
+                && ($record['field'] ?? null) === $field
+                && ($record['attribute_id'] ?? null) === $attributeId
+                && ($record['stored_value'] ?? null) === 'unverified'
+                && ($record['applied_value'] ?? null) === 'no'
+                && ($record['basis'] ?? null)
+                    === JmhzPreparationSnapshotBuilder::DEFAULT_TRISTATE_BASIS
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function date(mixed $value, string $attributeId): string

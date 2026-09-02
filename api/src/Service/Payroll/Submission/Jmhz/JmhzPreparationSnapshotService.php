@@ -24,7 +24,9 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V8_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v8';
     private const PREVIOUS_V9_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v9';
     private const PREVIOUS_V10_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v10';
-    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v11';
+    private const PREVIOUS_V11_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v11';
+    private const PREVIOUS_V12_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v12';
+    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v13';
     private const LEGACY_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v1';
     private const PREVIOUS_V2_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
     private const PREVIOUS_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v3';
@@ -35,7 +37,9 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V8_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v8';
     private const PREVIOUS_V9_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v9';
     private const PREVIOUS_V10_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v10';
-    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v11';
+    private const PREVIOUS_V11_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v11';
+    private const PREVIOUS_V12_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v12';
+    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v13';
 
     public function __construct(
         private JmhzPreparationSnapshotRepository $repository,
@@ -415,35 +419,17 @@ final readonly class JmhzPreparationSnapshotService
                             ],
                         ];
                     }
-                    try {
-                        $identity = $this->identities->sensitiveSnapshotSourceAt(
-                            $supplierId,
-                            $employeeId,
-                            $employmentId,
-                            $environment,
-                            $periodEnd,
-                        );
-                        $jmhz = $this->identities->sensitiveJmhzIdentityAt(
-                            $supplierId,
-                            $employeeId,
-                            $employmentId,
-                            $environment,
-                            $periodEnd,
-                        );
-                        $identities[$employmentId] = $identity + [
-                            'jmhz_environment' => $jmhz['environment'],
-                            'person_external_identifier' => $jmhz['person_external_identifier'],
-                            'jmhz_employment_external_identifier' => $jmhz['employment_external_identifier'],
-                        ];
-                    } catch (\DomainException $exception) {
-                        $issues[] = [
-                            'code' => $exception instanceof PayrollRegistrationIdentitySnapshotException
-                                ? $exception->validationCode
-                                : 'jmhz_identity_incomplete',
-                            'entity_type' => 'employment',
-                            'entity_id' => $employmentId,
-                            'attribute_ids' => ['10051', '10228'],
-                        ];
+                    $identity = $this->identitySupplement(
+                        $supplierId,
+                        $employeeId,
+                        $employmentId,
+                        $environment,
+                        $periodEnd,
+                    );
+                    if (is_string($identity)) {
+                        $issues[] = self::identityIssue($employmentId, $identity);
+                    } else {
+                        $identities[$employmentId] = $identity;
                     }
                 }
                 $inputRows = $entry['inputs'] ?? [];
@@ -459,9 +445,9 @@ final readonly class JmhzPreparationSnapshotService
                         continue;
                     }
                     $componentId = $component['component_id'];
-                    try {
-                        $mappings[$componentId] = $this->mappings->snapshot($supplierId, $componentId);
-                    } catch (\DomainException) {
+                    $mapping = $this->mappingSupplement($supplierId, $componentId);
+                    if ($mapping !== null) {
+                        $mappings[$componentId] = $mapping;
                     }
                 }
             }
@@ -470,6 +456,223 @@ final readonly class JmhzPreparationSnapshotService
         ksort($mappings, SORT_NUMERIC);
         ksort($eldpSources, SORT_NUMERIC);
         return [$identities, $mappings, $issues, $eldpSources];
+    }
+
+    /**
+     * Nálezy JMHZ nad NEZMRAZENÝM snímkem vstupů — nasucho a bez zápisu.
+     *
+     * ── Proč to tady je ─────────────────────────────────────────────────────
+     * Chybějící zařazení mzdové složky a chybějící identifikátory od ČSSZ se
+     * účetní dosud ozvaly až u zmrazení hlášení, tedy po zamknutí vstupů,
+     * výpočtu, schválení i zaúčtování. Přitom se obojí dá doplnit kdykoli
+     * předtím. Kontrola před zahájením běhu
+     * ({@see \MyInvoice\Service\Payroll\Run\PayrollRunReadinessService}) se sem
+     * proto ptá TÝMIŽ pravidly, jen nad snímkem postaveným nasucho.
+     *
+     * Vynechává se ELDP: jeho příprava zapisuje, a čtecí kontrola nesmí nic
+     * uložit. Zařazení složek se ptá jen na složky, které v období OPRAVDU mají
+     * vstup — nezařazená složka bez pohybu není nález.
+     *
+     * `$skipIdentity` vypíná ověření identity. Stojí na KAŽDÝ vztah dvě
+     * transakce se zámkem a dešifrování uloženého identifikátoru — u firmy
+     * s pěti sty lidmi by z obyčejného GETu na seznam běhů bylo tisíc zámků.
+     * Volající si tu hranici hlídá sám a nad ní odkáže na seznam osob, který
+     * totéž zvládne jedním dotazem přes celou firmu.
+     *
+     * @param array<string,mixed> $input snímek vstupů (`payroll-run-input.v2`)
+     * @return list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>
+     */
+    public function probeIssues(
+        int $supplierId,
+        string $environment,
+        string $periodEnd,
+        array $input,
+        bool $skipIdentity = false,
+    ): array {
+        $issues = [];
+        $checkedComponents = [];
+        $people = $input['people'] ?? [];
+        if (!is_array($people) || !array_is_list($people)) {
+            return [];
+        }
+        foreach ($people as $person) {
+            if (!is_array($person) || array_is_list($person)) {
+                continue;
+            }
+            $employee = $person['employee'] ?? null;
+            $employeeId = is_array($employee) && is_int($employee['id'] ?? null)
+                ? $employee['id']
+                : 0;
+            $employments = $person['employments'] ?? [];
+            if (!is_array($employments) || !array_is_list($employments)) {
+                continue;
+            }
+            foreach ($employments as $entry) {
+                if (!is_array($entry) || array_is_list($entry)) {
+                    continue;
+                }
+                $employment = $entry['employment'] ?? null;
+                $employmentId = is_array($employment) && is_int($employment['id'] ?? null)
+                    ? $employment['id']
+                    : 0;
+                if (!$skipIdentity && $employeeId > 0 && $employmentId > 0) {
+                    $identity = $this->identitySupplement(
+                        $supplierId,
+                        $employeeId,
+                        $employmentId,
+                        $environment,
+                        $periodEnd,
+                    );
+                    if (is_string($identity)) {
+                        $issues[] = self::identityIssue($employmentId, $identity);
+                    }
+                }
+                $inputRows = $entry['inputs'] ?? [];
+                if (!is_array($inputRows) || !array_is_list($inputRows)) {
+                    continue;
+                }
+                foreach ($inputRows as $inputRow) {
+                    $component = is_array($inputRow) ? ($inputRow['component'] ?? null) : null;
+                    if (!is_array($component) || !is_int($component['component_id'] ?? null)) {
+                        continue;
+                    }
+                    $componentId = $component['component_id'];
+                    if (isset($checkedComponents[$componentId])) {
+                        continue;
+                    }
+                    $checkedComponents[$componentId] = true;
+                    $treatment = $component['jmhz_treatment'] ?? null;
+                    $code = JmhzComponentSourceRule::issueCode(
+                        $treatment,
+                        $treatment === 'included'
+                            ? $this->mappingSupplement($supplierId, $componentId)
+                            : null,
+                    );
+                    if ($code !== null) {
+                        $issues[] = [
+                            'code' => $code,
+                            'entity_type' => 'component',
+                            'entity_id' => $componentId,
+                            'attribute_ids' => [],
+                        ];
+                    }
+                }
+            }
+        }
+
+        return $issues;
+    }
+
+    /**
+     * Nepřidělené identifikátory od ČSSZ. NENÍ to vada vstupu.
+     *
+     * `identifikaceType` v JMHZ 1.4.3.4 je `xs:choice`: buď dvojice OIČ (10051)
+     * + ID PPV (10228), nebo jmenná větev příjmení / jméno / datum narození /
+     * datum nástupu / druh činnosti. ČSSZ obě čísla přiděluje sama až
+     * protokolem o přijetí registrace, takže první hlášení za nově
+     * registrovaného zaměstnance se PODÁVÁ JMÉNEM a čísla se doplní až z
+     * protokolu. Chybějící číslo proto nesmí zahodit celý snímek identity —
+     * bez jmen by nešla postavit ani jmenná větev.
+     *
+     * @var list<string>
+     */
+    private const IDENTIFIERS_NOT_ASSIGNED_YET = [
+        'jmhz_identity_oic_missing',
+        'jmhz_identity_id_ppv_missing',
+    ];
+
+    /**
+     * Snímek identity pro JMHZ, nebo KÓD nálezu, proč nejde postavit.
+     *
+     * Nálezem zůstávají jen důvody, u kterých je snímek doopravdy nepoužitelný
+     * — cizí vztah, rozhodné datum mimo trvání vztahu, nedokončený úkol
+     * identity (`jmhz_identity_unresolved`). Nepřidělené OIČ / ID PPV nálezem
+     * NENÍ: identita se vrátí celá, jen s `null` místo obou identifikátorů, a
+     * hlášení se za takového zaměstnance postaví jmennou větví.
+     *
+     * @return array<string,mixed>|string
+     */
+    private function identitySupplement(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $environment,
+        string $periodEnd,
+    ): array|string {
+        try {
+            $identity = $this->identities->sensitiveSnapshotSourceAt(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                $environment,
+                $periodEnd,
+            );
+        } catch (\DomainException $exception) {
+            return $exception instanceof PayrollRegistrationIdentitySnapshotException
+                ? $exception->validationCode
+                : 'jmhz_identity_incomplete';
+        }
+
+        try {
+            $jmhz = $this->identities->sensitiveJmhzIdentityAt(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                $environment,
+                $periodEnd,
+            );
+        } catch (PayrollRegistrationIdentitySnapshotException $exception) {
+            if (!in_array(
+                $exception->validationCode,
+                self::IDENTIFIERS_NOT_ASSIGNED_YET,
+                true,
+            )) {
+                return $exception->validationCode;
+            }
+
+            /*
+             * Do podání se identifikátory dostávají jen jako DVOJICE, a proto
+             * se i vynechávají jako dvojice: kdyby snímek nesl jen ID PPV (OIČ
+             * ČSSZ nepřidělila), byla by to polovina větve A, kterou XSD nezná.
+             * Registrační čtení `employment_external_identifier` zůstává tak,
+             * jak je v evidenci — nese provenienci pro `source_versions`, do
+             * podání se ale samo o sobě nepromítne.
+             */
+            return $identity + [
+                'jmhz_environment' => $environment,
+                'person_external_identifier' => null,
+                'jmhz_employment_external_identifier' => null,
+            ];
+        } catch (\DomainException) {
+            return 'jmhz_identity_incomplete';
+        }
+
+        return $identity + [
+            'jmhz_environment' => $jmhz['environment'],
+            'person_external_identifier' => $jmhz['person_external_identifier'],
+            'jmhz_employment_external_identifier' => $jmhz['employment_external_identifier'],
+        ];
+    }
+
+    /** @return array<string,mixed>|null */
+    private function mappingSupplement(int $supplierId, int $componentId): ?array
+    {
+        try {
+            return $this->mappings->snapshot($supplierId, $componentId);
+        } catch (\DomainException) {
+            return null;
+        }
+    }
+
+    /** @return array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>} */
+    private static function identityIssue(int $employmentId, string $code): array
+    {
+        return [
+            'code' => $code,
+            'entity_type' => 'employment',
+            'entity_id' => $employmentId,
+            'attribute_ids' => ['10051', '10228'],
+        ];
     }
 
     /** @param array<string,mixed> $stored */
@@ -719,6 +922,16 @@ final readonly class JmhzPreparationSnapshotService
                 'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V10_SCHEMA_REFERENCE,
                 'manifest_schema' => self::PREVIOUS_V10_MANIFEST_SCHEMA,
                 'request_schema' => self::PREVIOUS_V10_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V11_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V11_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_V11_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_V11_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V12_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V12_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_V12_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_V12_REQUEST_SCHEMA,
             ],
             JmhzPreparationSnapshotBuilder::BUILDER_VERSION => [
                 'snapshot_schema' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,

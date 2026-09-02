@@ -1267,6 +1267,13 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
           <!-- 2. Evidence pro ČSSZ -->
           <fieldset :class="GROUP" data-test="jmhz-evidence">
             <legend :class="GROUP_TITLE">{{ t('payroll.people.jmhz_evidence.title') }}</legend>
+            <!--
+              Nevyplněno neblokuje: měsíční hlášení si ho vyloží jako „ne" a do
+              zmrazeného snímku podání zapíše, že hodnota vznikla výkladem
+              výchozího stavu, ne prohlášením. V evidenci proto „nevyplněno"
+              zůstává — jinak by nešlo poznat, co účetní vědomě odklikla.
+            -->
+            <p class="mb-2 text-xs text-neutral-500" data-test="jmhz-default-no-hint">{{ t('payroll.people.jmhz_evidence.default_no_hint') }}</p>
             <div :class="GRID">
               <label :class="FIELD">
                 {{ t('payroll.people.jmhz_evidence.apz_status') }}

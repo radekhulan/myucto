@@ -45,6 +45,17 @@ const emit = defineEmits<{
 }>()
 
 type Tab = 'identity' | 'contacts' | 'payout'
+/**
+ * Sekce, na kterou umí karta doskočit zvenčí. Jméno je TOTÉŽ, jaké nese
+ * `data-panel-anchor` v šabloně a `panel` v katalogu chybějících údajů
+ * (`PayrollPersonDataGapCatalog`) — jinak by povel mířil do prázdna.
+ */
+type ProfileSection =
+  | 'registration_identity'
+  | 'addresses'
+  | 'contacts'
+  | 'identifiers'
+  | 'accounts'
 type SelectOption<T extends string> = { value: T; label: string }
 
 interface IdentityFormRow {
@@ -246,20 +257,59 @@ async function untilLoaded(): Promise<void> {
  *    údaj doplňuje právě tady. Řádek se proto založí za uživatele — prázdný
  *    formulář k vyplnění je přesně to, co po něm hláška chce.
  */
+/**
+ * Sekce karty a záložka, na které leží. Bez téhle mapy by povel „doplňte
+ * výplatní účet" doručil na záložku Identita a doskok by tiše selhal —
+ * neaktivní záložka svoje pole vůbec nevykresluje.
+ */
+const SECTION_TABS: Record<ProfileSection, Tab> = {
+  registration_identity: 'identity',
+  addresses: 'identity',
+  contacts: 'contacts',
+  identifiers: 'contacts',
+  accounts: 'payout',
+}
+
+/**
+ * Prázdná sekce = nadpis a tlačítko Přidat, žádné pole. Hláška přitom tvrdí, že
+ * se údaj vyplňuje právě tady, tak se řádek založí za uživatele.
+ */
+const SECTION_STARTERS: Partial<Record<ProfileSection, () => void>> = {
+  registration_identity: () => addIdentity(),
+  addresses: () => addAddress(),
+  contacts: () => addContact(),
+  identifiers: () => addIdentifier(),
+  accounts: () => addAccount(),
+}
+
+/** Kolekce formuláře, podle které se pozná, že je sekce prázdná. */
+function sectionRows(section: ProfileSection): unknown[] {
+  switch (section) {
+    case 'registration_identity':
+      return form.identity_history
+    case 'addresses':
+      return form.addresses
+    case 'contacts':
+      return form.contacts
+    case 'identifiers':
+      return form.identifiers
+    case 'accounts':
+      return form.accounts
+  }
+}
+
 async function focusSection(
-  section: 'registration_identity' | 'addresses',
+  section: ProfileSection,
   field?: string,
 ): Promise<void> {
-  tab.value = 'identity'
+  tab.value = SECTION_TABS[section]
   // Povel přichází z adresy, tedy DŘÍV, než doběhne načtení karty. Bez čekání
   // by se skákalo na kostru bez polí, doskok by tiše selhal a uživatel by
   // podruhé viděl přesně to, na co si stěžoval: hlášku, která ho nikam
   // nedovede. Strop je tu proto, aby zaseknuté načítání nedrželo příslib.
   await untilLoaded()
-  if (section === 'registration_identity' && form.identity_history.length === 0
-    && props.canWrite
-  ) {
-    addIdentity()
+  if (sectionRows(section).length === 0 && props.canWrite) {
+    SECTION_STARTERS[section]?.()
   }
   await nextTick()
   if (field !== undefined && field !== '') {
@@ -1184,7 +1234,7 @@ onMounted(load)
             <article v-for="(row, index) in form.identity_history" :key="row.id ?? `new-identity-${index}`" :class="cardClass">
               <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                 <label :class="labelClass">{{ t('payroll.people.profile.first_name') }} <RequiredMark /><input v-model="row.first_name" required autocomplete="given-name" :disabled="!canWrite" :class="inputClass"></label>
-                <label :class="labelClass">{{ t('payroll.people.profile.last_name') }} <RequiredMark /><input v-model="row.last_name" required autocomplete="family-name" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.last_name') }} <RequiredMark /><input v-model="row.last_name" required autocomplete="family-name" :disabled="!canWrite" :class="inputClass" :data-a1-field="index === 0 ? 'identity.last_name' : undefined"></label>
                 <label :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.full_name') }} <RequiredMark /><input v-model="row.full_name" required autocomplete="name" :disabled="!canWrite" :class="inputClass"></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><input v-model="row.effective_from" required type="date" :disabled="!canWrite" :class="inputClass"></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<input v-model="row.effective_to" type="date" :disabled="!canWrite" :class="inputClass"></label>
@@ -1224,7 +1274,7 @@ onMounted(load)
                   </label>
                   <label :class="labelClass">
                     {{ t('payroll.people.profile.birth_date') }}
-                    <input v-model="row.birth_date" type="date" :max="todayIso()" :disabled="!canWrite" :class="inputClass" data-test="identity-birth-date">
+                    <input v-model="row.birth_date" type="date" :max="todayIso()" :disabled="!canWrite" :class="inputClass" data-test="identity-birth-date" :data-a1-field="index === 0 ? 'identity.birth_date' : undefined">
                   </label>
                   <label :class="labelClass">
                     {{ t('payroll.people.profile.sex_label') }}
@@ -1317,7 +1367,7 @@ onMounted(load)
       </div>
 
       <div v-else-if="tab === 'contacts'" class="space-y-6">
-        <section :class="sectionBoxClass">
+        <section data-panel-anchor="contacts" :class="sectionBoxClass">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.contacts_title') }}</h3>
             <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="addContact"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_contact') }}</button>
@@ -1327,7 +1377,7 @@ onMounted(load)
               <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label :class="labelClass">{{ t('payroll.people.profile.contact_type_label') }}<SearchableSelect v-model="row.contact_type" class="mt-1" :options="contactTypeOptions" :clearable="false" :disabled="!canWrite || Boolean(row.id)" accent="payroll" /></label>
                 <div v-if="row.value_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.value_masked }}</p></div>
-                <label v-if="canWrite" :class="[labelClass, 'sm:col-span-2']">{{ t('payroll.people.profile.new_value') }} <RequiredMark v-if="!row.id" /><input v-model="row.value" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : ''"></label>
+                <label v-if="canWrite" :class="[labelClass, 'sm:col-span-2']">{{ t('payroll.people.profile.new_value') }} <RequiredMark v-if="!row.id" /><input v-model="row.value" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : ''" :data-a1-field="index === 0 ? 'contact.value' : undefined"></label>
                 <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_primary" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.primary_contact') }}</label>
                 <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_active" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.active') }}</label>
               </div>
@@ -1336,7 +1386,7 @@ onMounted(load)
           </div>
         </section>
 
-        <section :class="sectionBoxClass">
+        <section data-panel-anchor="identifiers" :class="sectionBoxClass">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.identifiers_title') }}</h3>
             <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="addIdentifier"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_identifier') }}</button>
@@ -1346,7 +1396,7 @@ onMounted(load)
               <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label :class="labelClass">{{ t('payroll.people.profile.identifier_type_label') }}<SearchableSelect v-model="row.identifier_type" class="mt-1" :options="identifierTypeOptions" :clearable="false" :disabled="!canWrite || Boolean(row.id)" accent="payroll" /></label>
                 <div v-if="row.value_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.value_masked }}</p></div>
-                <label v-if="canWrite" :class="[labelClass, 'sm:col-span-2']">{{ t('payroll.people.profile.new_value') }} <RequiredMark v-if="!row.id" /><input v-model="row.value" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : ''"></label>
+                <label v-if="canWrite" :class="[labelClass, 'sm:col-span-2']">{{ t('payroll.people.profile.new_value') }} <RequiredMark v-if="!row.id" /><input v-model="row.value" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : ''" :data-a1-field="index === 0 ? 'identifier.value' : undefined"></label>
               </div>
               <div v-if="canWrite" class="mt-3 flex items-center justify-end gap-2"><span v-if="row.deleted" class="text-xs text-danger-600">{{ t('common.deleted') }}</span><button v-if="row.deleted" type="button" :class="btnOutlineSm('neutral')" @click="restoreRow(form.identifiers, index)">{{ t('common.undo') }}</button><button v-else type="button" :class="btnOutlineSm('danger')" @click="removeRow(form.identifiers, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
             </article>
@@ -1379,7 +1429,7 @@ onMounted(load)
         </section>
         <p v-else-if="!partnerSettlementAvailable" class="text-xs text-neutral-500">{{ t('payroll.people.profile.partner_settlement_unavailable') }}</p>
 
-        <section :class="sectionBoxClass">
+        <section data-panel-anchor="accounts" :class="sectionBoxClass">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div><h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.accounts_title') }}</h3><p class="text-xs text-neutral-500">{{ t('payroll.people.profile.account_hint') }}</p></div>
             <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="addAccount"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_account') }}</button>
@@ -1397,7 +1447,7 @@ onMounted(load)
                 <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><input v-model="row.effective_from" required type="date" :disabled="!canWrite" :class="inputClass"></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<input v-model="row.effective_to" type="date" :disabled="!canWrite" :class="inputClass"></label>
                 <div v-if="row.bank_account_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.bank_account_masked }}</p></div>
-                <label v-if="canWrite" :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.new_bank_account') }} <RequiredMark v-if="!row.id" /><input v-model="row.bank_account" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : t('payroll.people.profile.bank_account_placeholder')" data-test="bank-account-plaintext"></label>
+                <label v-if="canWrite" :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.new_bank_account') }} <RequiredMark v-if="!row.id" /><input v-model="row.bank_account" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : t('payroll.people.profile.bank_account_placeholder')" data-test="bank-account-plaintext" :data-a1-field="index === 0 ? 'payout.bank_account' : undefined"></label>
                 <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_active" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.active') }}</label>
               </div>
 

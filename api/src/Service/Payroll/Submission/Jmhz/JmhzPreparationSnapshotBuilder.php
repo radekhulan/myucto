@@ -19,7 +19,33 @@ final class JmhzPreparationSnapshotBuilder
     public const PREVIOUS_V8_BUILDER_VERSION = 'jmhz-preparation-source.v8';
     public const PREVIOUS_V9_BUILDER_VERSION = 'jmhz-preparation-source.v9';
     public const PREVIOUS_V10_BUILDER_VERSION = 'jmhz-preparation-source.v10';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v11';
+    public const PREVIOUS_V11_BUILDER_VERSION = 'jmhz-preparation-source.v11';
+    public const PREVIOUS_V12_BUILDER_VERSION = 'jmhz-preparation-source.v12';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v13';
+
+    /**
+     * Tri-state údaje vykonávané pozice, u kterých se NEVYPLNĚNÍ vykládá jako
+     * „ne".
+     *
+     * Výchozí stav sloupců je `unverified` a nic na ně účetní neupozorní —
+     * poznala je až u zmrazení hlášení, kde jí dvanáct nálezů (tři údaje krát
+     * čtyři zaměstnanci) nepustilo podání. Příspěvek APZ, funkční požitky ani
+     * dočasné přidělení přitom drtivá většina firem nemá, takže se nevyplnění
+     * bere jako „ne" a nálezem není.
+     *
+     * ULOŽENÁ HODNOTA SE NEPŘEPISUJE. V evidenci zůstane `unverified`, aby
+     * zpětně bylo poznat, že to nikdo výslovně nepotvrdil — na rozdíl od
+     * vědomého „ne". Že hodnota v podání vznikla výkladem, nese zmrazený
+     * snímek v `jmhz_default_interpretations` u každého vztahu.
+     */
+    private const DEFAULTED_TRISTATES = [
+        'jmhz_apz_contribution_status' => '10232',
+        'jmhz_functional_benefits_status' => '10247',
+        'jmhz_temporary_assignment_status' => '10251',
+    ];
+
+    /** Původ hodnoty v podání: výklad výchozího stavu, ne prohlášení účetní. */
+    public const DEFAULT_TRISTATE_BASIS = 'unverified_default_read_as_no';
 
     private readonly JmhzOrdinaryEvidenceApplicability $ordinaryEvidenceApplicability;
     private ?JmhzScenarioSelectorResolver $scenarioSelector = null;
@@ -183,10 +209,11 @@ final class JmhzPreparationSnapshotBuilder
                 $term = $entry['term'] ?? null;
                 $scenarioResolution = null;
                 $scenarioKey = null;
+                $defaultInterpretations = [];
                 if (!is_array($term) || array_is_list($term)) {
                     $issues[] = $this->issue('effective_term_missing', 'employment', $employmentId);
                 } else {
-                    $this->inspectTerm($term, $employmentId, $issues);
+                    $defaultInterpretations = $this->inspectTerm($term, $employmentId, $issues);
                     $selection = $this->scenarioSelector()->resolve(
                         is_string($term['activity_code'] ?? null)
                             ? $term['activity_code']
@@ -319,40 +346,44 @@ final class JmhzPreparationSnapshotBuilder
                         );
                     }
                     $treatment = $component['jmhz_treatment'] ?? null;
-                    if ($treatment === 'manual_review') {
-                        $issues[] = $this->issue('component_jmhz_manual_review', 'component', $componentId);
-                    } elseif ($treatment === 'included') {
-                        $mapping = $mappingSources[$componentId] ?? null;
-                        if (!is_array($mapping)) {
-                            $issues[] = $this->issue('component_jmhz_mapping_missing', 'component', $componentId);
+                    /*
+                     * Rozhodnutí „co je se zařazením špatně" drží
+                     * {@see JmhzComponentSourceRule}, ne tenhle builder — kouká
+                     * do něj i kontrola před zahájením běhu, aby se zmrazení
+                     * a předběžná kontrola nemohly rozejít v tom, co vadí.
+                     */
+                    $mapping = $mappingSources[$componentId] ?? null;
+                    $componentIssue = JmhzComponentSourceRule::issueCode(
+                        $treatment,
+                        is_array($mapping) ? $mapping : null,
+                    );
+                    if ($componentIssue !== null) {
+                        $issues[] = $this->issue($componentIssue, 'component', $componentId);
+                    } elseif ($treatment === 'included' && is_array($mapping)) {
+                        $this->assertMapping($mapping, $componentId);
+                        $componentMappings[] = $mapping;
+                        $amount = $inputRow['amount_minor'] ?? null;
+                        if (!is_int($amount) || $amount < 0) {
+                            $issues[] = $this->issue(
+                                'jmhz_negative_or_deferred_income_unsupported',
+                                'component',
+                                $componentId,
+                            );
                         } else {
-                            $this->assertMapping($mapping, $componentId);
-                            $componentMappings[] = $mapping;
-                            $amount = $inputRow['amount_minor'] ?? null;
-                            if (!is_int($amount) || $amount < 0) {
-                                $issues[] = $this->issue(
-                                    'jmhz_negative_or_deferred_income_unsupported',
-                                    'component',
-                                    $componentId,
+                            $targets = [
+                                (string) $mapping['target_attribute_id'],
+                                ...$this->stringList(
+                                    $mapping['ancestor_attribute_ids'] ?? null,
+                                    'mapping.ancestor_attribute_ids',
+                                ),
+                            ];
+                            foreach (array_values(array_unique($targets)) as $target) {
+                                $earnings[$target] = $this->checkedAdd(
+                                    $earnings[$target] ?? 0,
+                                    $amount,
                                 );
-                            } else {
-                                $targets = [
-                                    (string) $mapping['target_attribute_id'],
-                                    ...$this->stringList(
-                                        $mapping['ancestor_attribute_ids'] ?? null,
-                                        'mapping.ancestor_attribute_ids',
-                                    ),
-                                ];
-                                foreach (array_values(array_unique($targets)) as $target) {
-                                    $earnings[$target] = $this->checkedAdd(
-                                        $earnings[$target] ?? 0,
-                                        $amount,
-                                    );
-                                }
                             }
                         }
-                    } elseif ($treatment !== 'excluded') {
-                        $issues[] = $this->issue('component_jmhz_treatment_invalid', 'component', $componentId);
                     }
                 }
                 usort(
@@ -363,7 +394,17 @@ final class JmhzPreparationSnapshotBuilder
                 );
                 $identity = $identitySources[$employmentId] ?? null;
                 if (!is_array($identity)) {
-                    $issues[] = $this->issue('jmhz_identity_incomplete', 'employment', $employmentId, ['10051', '10228']);
+                    /*
+                     * Jedna příčina = jeden nález. Chybějící snímek identity je
+                     * DŮSLEDEK toho, co už zjistil sběr zdrojů (chybí OIČ, chybí
+                     * ID PPV, neuzavřený úkol identity…) — a ten nález je
+                     * konkrétní. Přisadit k němu obecné „chybí povinný
+                     * identifikační údaj" znamená dva řádky se stejným
+                     * tlačítkem, které vypadají jako dva úkoly.
+                     */
+                    if (!self::hasIdentityIssue($issues, $employmentId)) {
+                        $issues[] = $this->issue('jmhz_identity_incomplete', 'employment', $employmentId, ['10051', '10228']);
+                    }
                     $identity = null;
                 } else {
                     $this->assertIdentity(
@@ -391,6 +432,11 @@ final class JmhzPreparationSnapshotBuilder
                     'identity' => $identity,
                     'employment' => $employment,
                     'term' => $term,
+                    // Term zůstává PŘESNĚ takový, jaký je v evidenci —
+                    // `unverified` se nepřepisuje. Tady vedle je záznam, které
+                    // z těch hodnot se do podání promítly výkladem výchozího
+                    // stavu, aby nikdo netvrdil za účetní něco, co neřekla.
+                    'jmhz_default_interpretations' => $defaultInterpretations,
                     'scenario_resolution' => $scenarioResolution,
                     'eldp' => is_array($eldp) ? $eldp['payload'] : null,
                     'ordinary_evidence' => is_array($ordinary) ? $ordinary['payload'] : null,
@@ -1246,7 +1292,22 @@ final class JmhzPreparationSnapshotBuilder
         }
     }
 
-    /** @param array<string,mixed> $identity */
+    /**
+     * Patří citlivá identita opravdu téhle osobě, vztahu a prostředí?
+     *
+     * Identifikátory od ČSSZ (OIČ 10051 a ID PPV 10228) SMĚJÍ CHYBĚT. ČSSZ je
+     * přiděluje sama až protokolem o přijetí registrace, takže první hlášení
+     * za nově registrovaného zaměstnance se podává jmennou větví
+     * `identifikaceType` (viz {@see JmhzScenario1XmlSerializer::identification()}).
+     * Historie jména a datumů chybět nesmí nikdy — bez ní nejde postavit ani
+     * jmenná větev.
+     *
+     * Když identifikátory jsou, platí VŠECHNY dosavadní kontroly beze změny.
+     * Do podání se přitom dostávají jen jako dvojice, takže se i ověřuje jako
+     * dvojice: polovina větve A je stejná chyba jako cizí identifikátor.
+     *
+     * @param array<string,mixed> $identity
+     */
     private function assertIdentity(
         array $identity,
         string $environment,
@@ -1257,15 +1318,34 @@ final class JmhzPreparationSnapshotBuilder
         $employment = $identity['employment_external_identifier'] ?? null;
         $jmhzEmployment = $identity['jmhz_employment_external_identifier'] ?? null;
         $history = $identity['identity'] ?? null;
-        if (!is_array($person) || !is_array($employment)
-            || !is_array($jmhzEmployment) || !is_array($history)
-            || ($person['identifier_type'] ?? null) !== 'ik_mpsv'
+        if (!is_array($history)
             || ($identity['jmhz_environment'] ?? null) !== $environment
-            || ($employment['identifier_type'] ?? null) !== 'id_ppv'
             || ($history['employee_id'] ?? null) !== $employeeId
-            || ($employment['environment'] ?? null) !== $environment
-            || ($employment['employment_id'] ?? null) !== $employmentId
-            || ($employment['employee_id'] ?? null) !== $employeeId
+        ) {
+            $this->invalid(
+                'jmhz_identity_scope_mismatch',
+                'Citliva identita JMHZ neodpovida osobe, vztahu nebo prostredi.',
+            );
+        }
+        // Registrační čtení ID PPV zůstává ve snímku i tehdy, když ho JMHZ
+        // čtení nevrátilo (ČSSZ nepřidělila OIČ). Nese provenienci, a proto se
+        // kontroluje samo o sobě — do podání se bez OIČ nepromítne.
+        if (is_array($employment)
+            && (($employment['identifier_type'] ?? null) !== 'id_ppv'
+                || ($employment['environment'] ?? null) !== $environment
+                || ($employment['employment_id'] ?? null) !== $employmentId
+                || ($employment['employee_id'] ?? null) !== $employeeId)
+        ) {
+            $this->invalid(
+                'jmhz_identity_scope_mismatch',
+                'Citliva identita JMHZ neodpovida osobe, vztahu nebo prostredi.',
+            );
+        }
+        if ($person === null && $jmhzEmployment === null) {
+            return;
+        }
+        if (!is_array($person) || !is_array($employment) || !is_array($jmhzEmployment)
+            || ($person['identifier_type'] ?? null) !== 'ik_mpsv'
             || ($jmhzEmployment['id'] ?? null) !== ($employment['id'] ?? null)
             || ($jmhzEmployment['value'] ?? null) !== ($employment['value'] ?? null)
         ) {
@@ -1280,18 +1360,32 @@ final class JmhzPreparationSnapshotBuilder
      * @param array<string,mixed> $term
      * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
      * @param-out list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
+     * @return list<array{field:string,attribute_id:string,stored_value:string,applied_value:string,basis:string}>
+     *         výklady výchozího stavu, které se zapíšou do zmrazeného snímku
      */
-    private function inspectTerm(array $term, int $employmentId, array &$issues): void
+    private function inspectTerm(array $term, int $employmentId, array &$issues): array
     {
         if (($term['jmhz_external_codebooks_verified_for_period'] ?? null) !== true) {
             $issues[] = $this->issue('jmhz_workplace_codebooks_unverified', 'employment', $employmentId, ['10229', '10230', '10231']);
         }
-        foreach ([
-            'jmhz_apz_contribution_status' => '10232',
-            'jmhz_functional_benefits_status' => '10247',
-            'jmhz_temporary_assignment_status' => '10251',
-        ] as $field => $attributeId) {
-            if (!in_array($term[$field] ?? null, ['yes', 'no'], true)) {
+        $defaultInterpretations = [];
+        foreach (self::DEFAULTED_TRISTATES as $field => $attributeId) {
+            $value = $term[$field] ?? null;
+            if ($value === 'unverified') {
+                // Nevyplněno = „ne". Neblokuje, ale v podání musí být poznat,
+                // že hodnota vznikla výkladem, ne prohlášením účetní.
+                $defaultInterpretations[] = [
+                    'field' => $field,
+                    'attribute_id' => $attributeId,
+                    'stored_value' => 'unverified',
+                    'applied_value' => 'no',
+                    'basis' => self::DEFAULT_TRISTATE_BASIS,
+                ];
+                continue;
+            }
+            if (!in_array($value, ['yes', 'no'], true)) {
+                // Sem spadne jen poškozený nebo chybějící údaj — enum sloupce
+                // jiné hodnoty než unverified/no/yes nepřipouští.
                 $issues[] = $this->issue('jmhz_verified_boolean_missing', 'employment', $employmentId, [$attributeId]);
             }
         }
@@ -1306,6 +1400,8 @@ final class JmhzPreparationSnapshotBuilder
         if (($term['risky_work'] ?? null) === true) {
             $issues[] = $this->issue('jmhz_risky_work_unsupported', 'employment', $employmentId, ['10273', '10274']);
         }
+
+        return $defaultInterpretations;
     }
 
     /**
@@ -1327,6 +1423,29 @@ final class JmhzPreparationSnapshotBuilder
         ) {
             $issues[] = $this->issue('jmhz_work_summary_v2_missing', 'employment', $employmentId, ['10259', '10260', '10261', '10265', '10268']);
         }
+    }
+
+    /**
+     * Má ten vztah už KONKRÉTNÍ nález k identitě pro ČSSZ?
+     *
+     * Sběr zdrojů ({@see JmhzPreparationSnapshotService::supplements()}) hlásí
+     * přesnou příčinu (`jmhz_identity_oic_missing`, `jmhz_identity_id_ppv_missing`,
+     * `jmhz_identity_unresolved`, …). Obecný nález se pak už nepřidává.
+     *
+     * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
+     */
+    private static function hasIdentityIssue(array $issues, int $employmentId): bool
+    {
+        foreach ($issues as $issue) {
+            if ($issue['entity_type'] === 'employment'
+                && $issue['entity_id'] === $employmentId
+                && str_starts_with($issue['code'], 'jmhz_identity_')
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -94,6 +94,8 @@ function person(
     employment_refs: refs,
     setup_gaps: [],
     needs_setup: false,
+    data_gaps: [],
+    data_gap_counts: { blocking: 0, advisory: 0 },
     can_delete: true,
     delete_blocker: null,
     delete_cascade: {},

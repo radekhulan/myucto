@@ -331,6 +331,18 @@ final class Bootstrap
                         \MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService::class,
                     ),
                 ),
+            // Překlopení běhu do `paid` ze skutečnosti v platebním ledgeru.
+            // Volitelné parametry výš PHP-DI neautowiruje, tady je jen
+            // explicitní bind kvůli konzistenci s okolím.
+            \MyInvoice\Service\Payroll\Run\PayrollRunAutoSettlementService::class =>
+                fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunAutoSettlementService(
+                    $c->get(Connection::class),
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollRunRepository::class),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Run\PayrollRunPaymentSettlementService::class,
+                    ),
+                    $c->get(\MyInvoice\Service\Payroll\Run\PayrollRunCommandService::class),
+                ),
             // Identifikace software jde do datové věty JMHZ a ČSSZ ji porovnává
             // s obálkou. Verze se čte ze souboru VERSION, aby v protokolu
             // seděla se skutečně nasazeným buildem — natvrdo zapsaná verze
@@ -354,6 +366,19 @@ final class Bootstrap
                     $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
                     $c->get(ClockInterface::class),
                     $c->get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationReceiptIdentityService::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReceiptIdentityService::class),
+                ),
+            // Zmrazená datová věta se čte až v okamžiku, kdy protokol opravdu
+            // nese identitu. Přímá závislost by byla kruhová: čtečka artefaktu
+            // si bere PayrollSubmissionService, který si bere tuhle službu.
+            \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReceiptIdentityService::class
+                => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReceiptIdentityService(
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionRepository::class),
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService::class),
+                    $c->get(\MyInvoice\Service\Payroll\Security\PayrollSensitiveData::class),
+                    static fn (): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader
+                        => $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader::class),
                 ),
             \MyInvoice\Service\Epo\EpoDirectResponseParser::class => function () use ($config, $rootDir): \MyInvoice\Service\Epo\EpoDirectResponseParser {
                 $caBundle = trim((string) $config->get('epo.ca_bundle_path', ''));

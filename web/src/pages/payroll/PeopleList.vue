@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
@@ -11,6 +11,7 @@ import {
   type PayrollPeopleFilter,
   type PayrollEmploymentStatus,
   type PayrollPerson,
+  type PayrollPersonDataGap,
   type PayrollPersonCreatePayload,
   type PayrollPersonEmploymentRef,
   type PayrollPersonListItem,
@@ -18,6 +19,7 @@ import {
   type PayrollPersonSetupGap,
   type PayrollPersonQuickEditResponse,
   type PayrollRelationType,
+  type PayrollVerifiedTriState,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import Modal from '@/components/ui/Modal.vue'
@@ -34,11 +36,14 @@ import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import EmploymentCard from './EmploymentCard.vue'
+import JmhzRelationQuestions from './JmhzRelationQuestions.vue'
 import PayrollPersonQuickEdit from './PayrollPersonQuickEdit.vue'
 import PayrollPersonProfilePanel from './PayrollPersonProfilePanel.vue'
 import PayrollPersonDependantsPanel from './PayrollPersonDependantsPanel.vue'
 import PayrollPersonStatutoryEvidencePanel from './PayrollPersonStatutoryEvidencePanel.vue'
 import PayrollPersonForeignPermitPanel from './PayrollPersonForeignPermitPanel.vue'
+import PersonDataGapBadge from './PersonDataGapBadge.vue'
+import PersonDataGapSummary from './PersonDataGapSummary.vue'
 import { todayIso } from './employmentLifecycleUi'
 import {
   payrollAgendaLabelKey,
@@ -109,10 +114,20 @@ const relationTypes: PayrollRelationType[] = [
   'partner_dependent',
   'statutory_body',
 ]
+/*
+ * Zúžení dělá SERVER (viz `payrollApi.people`). Filtrovat v prohlížeči by
+ * znamenalo hledat jen v načtené stránce — a účetní, která si chce vypsat
+ * všechny lidi s chybějícími údaji, by o těch z druhé stránky nevěděla.
+ *
+ * „Vyžaduje doplnění" (`needs_setup`) z nabídky zmizelo: byl to užší pohled
+ * nad pěticí podmínek uložení profilu, který o chybějící pojišťovně nebo
+ * daňové rezidenci mlčel. Server ho pořád přijímá kvůli starším odkazům.
+ */
 const filterOptions = computed(() => [
   { value: 'active' as const, label: t('payroll.people.filters.active') },
   { value: 'all' as const, label: t('payroll.people.filters.all') },
-  { value: 'needs_setup' as const, label: t('payroll.people.filters.needs_setup') },
+  { value: 'needs_data' as const, label: t('payroll.people.filters.needs_data') },
+  { value: 'blocking_data' as const, label: t('payroll.people.filters.blocking_data') },
 ])
 const relationOptions = computed(() => relationTypes.map(type => ({
   value: type,
@@ -169,6 +184,15 @@ const employeeForm = reactive({
   weekly_hours: '40.00',
   office_id: null as number | null,
   health_insurer_code: '',
+  /*
+   * Tři otázky pro měsíční hlášení ČSSZ. Předvybrané „ne" je pravda u drtivé
+   * většiny firem — a hlavně: ptáme se TEĎ, ne až u zmrazení hlášení, kde to
+   * účetní nepustilo dál a nebylo poznat, kde se to vyplňuje.
+   */
+  jmhz_apz_contribution_status: 'no' as PayrollVerifiedTriState,
+  jmhz_apz_instrument_code: null as string | null,
+  jmhz_functional_benefits_status: 'no' as PayrollVerifiedTriState,
+  jmhz_temporary_assignment_status: 'no' as PayrollVerifiedTriState,
 })
 const insurerOptions = healthInsurerOptions()
 /** Celé jméno vzniká spojením zadaných částí, nikdy naopak — viz komentář výš. */
@@ -465,6 +489,10 @@ function resetEmployeeForm() {
   employeeForm.weekly_hours = '40.00'
   employeeForm.office_id = null
   employeeForm.health_insurer_code = ''
+  employeeForm.jmhz_apz_contribution_status = 'no'
+  employeeForm.jmhz_apz_instrument_code = null
+  employeeForm.jmhz_functional_benefits_status = 'no'
+  employeeForm.jmhz_temporary_assignment_status = 'no'
   employeeError.value = ''
 }
 
@@ -530,20 +558,28 @@ function personLink(person: PayrollPersonListItem) {
 }
 
 /**
- * Jeden další krok místo obecného „Chybí". Pořadí kopíruje skutečný pracovní
- * postup: bez vztahu není co zpracovat, potom se doplní zákonná identita,
- * bydliště a nakonec kontakt. Server zůstává autoritou pro samotné mezery.
+ * Jeden další krok místo obecného „Chybí".
+ *
+ * Pořadí NEURČUJE prohlížeč: server posílá mezery už seřazené podle skutečného
+ * pracovního postupu (katalog `PayrollPersonDataGapCatalog`). Druhý seznam
+ * priorit tady by se s ním dřív nebo později rozešel a dvě obrazovky by
+ * doporučovaly začít něčím jiným.
+ *
+ * Blokující mezery mají přednost před radami — „doplňte kontakt" nemá stát
+ * nad „bez rodného čísla neprojde podání".
  */
-const setupGapPriority: PayrollPersonSetupGap[] = [
-  'employment',
-  'name',
-  'identifier',
-  'residence',
-  'contact',
-]
+function personGaps(person: PayrollPersonListItem): PayrollPersonDataGap[] {
+  return person.data_gaps ?? []
+}
 
-function personNextStep(person: PayrollPersonListItem): PayrollPersonSetupGap | 'ready' {
-  return setupGapPriority.find(gap => person.setup_gaps.includes(gap)) ?? 'ready'
+function personNextGap(person: PayrollPersonListItem): PayrollPersonDataGap | null {
+  const gaps = personGaps(person)
+
+  return gaps.find(gap => gap.severity === 'blocking') ?? gaps[0] ?? null
+}
+
+function personNextStep(person: PayrollPersonListItem): string {
+  return personNextGap(person)?.key ?? 'ready'
 }
 
 function nextStepLabel(person: PayrollPersonListItem): string {
@@ -704,10 +740,12 @@ function employmentDraft(
       regular_workplace: null,
       jmhz_workplace_municipality_code: null,
       jmhz_workplace_country_code: null,
-      jmhz_apz_contribution_status: 'unverified',
+      // Předvybrané „ne" — na otázky se formulář ptá rovnou, viz
+      // JmhzRelationQuestions.vue.
+      jmhz_apz_contribution_status: 'no',
       jmhz_apz_instrument_code: null,
-      jmhz_functional_benefits_status: 'unverified',
-      jmhz_temporary_assignment_status: 'unverified',
+      jmhz_functional_benefits_status: 'no',
+      jmhz_temporary_assignment_status: 'no',
       cz_isco_code: null,
       activity_code: null,
       jmhz_relationship_detail_code: null,
@@ -743,10 +781,16 @@ async function saveNew(personId: number) {
       if (!listItem.relation_types.includes(employment.relation_type)) {
         listItem.relation_types.push(employment.relation_type)
       }
-      // Vztah zaplnil právě jednu mezeru; ostatní čtyři zná jen server.
+      // Vztah zaplnil právě jednu mezeru; ostatní zná jen server.
       listItem.setup_gaps = listItem.setup_gaps.filter(gap => gap !== 'employment')
       listItem.needs_setup = listItem.setup_gaps.length > 0
     }
+    /*
+     * Vztahem naopak některé povinnosti VZNIKAJÍ (pojišťovna, daňová rezidence,
+     * prohlášení) — katalog je u osoby bez vztahu záměrně mlčí. Přepočítat to
+     * v prohlížeči nejde, tak si to řekne server.
+     */
+    void refreshDataGaps(personId)
     creatingForId.value = null
     newEmployment.value = null
     toast.success(t('payroll.people.employment_created'))
@@ -799,6 +843,10 @@ async function createEmployee() {
      * po svém selhání nechalo osobu bez zákonem vyžadované evidence.
      */
     health_insurer_code: employeeForm.health_insurer_code.trim() || null,
+    jmhz_apz_contribution_status: employeeForm.jmhz_apz_contribution_status,
+    jmhz_apz_instrument_code: employeeForm.jmhz_apz_instrument_code,
+    jmhz_functional_benefits_status: employeeForm.jmhz_functional_benefits_status,
+    jmhz_temporary_assignment_status: employeeForm.jmhz_temporary_assignment_status,
   }
   try {
     const created = await payrollApi.createPerson(payload)
@@ -875,6 +923,38 @@ function updatePersonProfile(updated: PayrollPersonProfile) {
     detail.profile_status = updated.profile_status
     detail.setup_gaps = gaps
     detail.needs_setup = gaps.length > 0
+  }
+  void refreshDataGaps(updated.employee_id)
+}
+
+/**
+ * Doplněný údaj musí zhasnout značku — ale rozhodnout o tom smí jen SERVER.
+ *
+ * Katalog mezer sahá i tam, kam osobní karta nevidí (zákonná evidence, ověření
+ * výplatního účtu, pracovní vztahy), takže dopočítat ho v prohlížeči by
+ * znamenalo opsat si pravidla podruhé — a ta kopie by se rozešla. Místo toho se
+ * po uložení dotáhne osoba znovu; je to jeden levný požadavek a odpověď je
+ * autoritativní.
+ *
+ * Selhání se schválně přechází mlčky: údaj je uložený, jen štítek počká na
+ * další načtení seznamu. Chybová hláška by tvrdila, že se něco nepovedlo.
+ */
+async function refreshDataGaps(personId: number) {
+  let fresh: PayrollPerson
+  try {
+    fresh = await payrollApi.person(personId)
+  } catch {
+    return
+  }
+  for (const target of [
+    people.value.find(item => item.id === personId),
+    details.value[personId],
+  ]) {
+    if (!target) continue
+    target.data_gaps = fresh.data_gaps
+    target.data_gap_counts = fresh.data_gap_counts
+    target.setup_gaps = fresh.setup_gaps
+    target.needs_setup = fresh.needs_setup
   }
 }
 
@@ -957,7 +1037,30 @@ const FOCUSABLE_PANELS = [
   'registration_identity',
   'addresses',
   'foreign_permit',
+  // Sekce osobní karty na jiných záložkách než Identita. Panel si přepnutí
+  // záložky řídí sám (`focusSection`), sem stačí povel.
+  'contacts',
+  'identifiers',
+  'accounts',
+  /*
+   * Identifikátory přidělené ČSSZ (OIČ / IK MPSV, ID PPV) NEleží na kartě
+   * osoby, ale na kartě pracovního vztahu (`EmploymentJmhzIdentityPanel`).
+   * Doskok se trefí, jen když je karta vztahu na stránce; sbalený `<details>`
+   * si `revealField()` otevře sám.
+   */
+  'jmhz_identity',
 ] as const
+
+/** Sekce, které umí otevřít `PayrollPersonProfilePanel.focusSection()`. */
+const PROFILE_PANEL_SECTIONS = [
+  'registration_identity',
+  'addresses',
+  'contacts',
+  'identifiers',
+  'accounts',
+] as const
+
+type ProfilePanelSection = typeof PROFILE_PANEL_SECTIONS[number]
 
 async function focusPanel(panel: string) {
   if (!(FOCUSABLE_PANELS as readonly string[]).includes(panel)) return
@@ -976,9 +1079,12 @@ async function focusPanel(panel: string) {
   // by povel doskočil na prázdno, protože jiná záložka je nevykresluje.
   // Panel si doskok i vysvícení řídí sám — zná svoje pole i to, kdy je seznam
   // prázdný a musí se řádek nejdřív založit.
-  if (panel === 'registration_identity' || panel === 'addresses') {
+  if ((PROFILE_PANEL_SECTIONS as readonly string[]).includes(panel)) {
     await nextTick()
-    await personProfilePanel.value?.focusSection(panel, field)
+    await personProfilePanel.value?.focusSection(
+      panel as ProfilePanelSection,
+      field,
+    )
 
     return
   }
@@ -1005,6 +1111,46 @@ async function focusPanel(panel: string) {
   window.setTimeout(() => {
     if (window.scrollY === before) target.scrollIntoView({ block: 'start' })
   }, 300)
+}
+
+/**
+ * Kliknutí na chybějící údaj — ze značky v seznamu i z výčtu na kartě.
+ *
+ * Vede TÍMŽ povelem `?person=&panel=&field=`, jaký už používají chybové hlášky
+ * jinde v aplikaci; druhý mechanismus doskoku by se s tímhle rozešel. Hlídač
+ * nad `route.query` si povel převezme a `focusPanel()` doskočí — funguje to
+ * tedy stejně, ať je karta zavřená (nejdřív se otevře) nebo už otevřená.
+ *
+ * Chybějící pracovní vztah panel nemá: není to pole na kartě, je to celý
+ * záznam, který se musí založit. Otevře se proto rovnou formulář nového vztahu.
+ */
+async function openDataGap(personId: number, gap: PayrollPersonDataGap) {
+  if (gap.panel === null) {
+    const listed = people.value.find(item => item.id === personId)
+    if (expandedId.value !== personId) {
+      if (listed) {
+        await toggleDetail(listed)
+      } else {
+        await router.push({ query: { ...route.query, person: String(personId) } })
+      }
+    }
+    await nextTick()
+    startCreate(personId)
+
+    return
+  }
+
+  const query: LocationQueryRaw = {
+    ...route.query,
+    person: String(personId),
+    panel: gap.panel,
+  }
+  if (gap.field !== null) {
+    query.field = gap.field
+  } else {
+    delete query.field
+  }
+  await router.push({ query })
 }
 
 /**
@@ -1221,6 +1367,18 @@ onMounted(async () => {
           </label>
         </div>
       </details>
+      <!--
+        Tři otázky pro ČSSZ. Sbalené a s předvybraným „ne": u drtivé většiny
+        firem je odpověď třikrát ne a nikdo je nemusí otevírat. Kdyby se
+        neptaly tady, poznala by je účetní až u zmrazení měsíčního hlášení.
+      -->
+      <JmhzRelationQuestions
+        v-model:apz-status="employeeForm.jmhz_apz_contribution_status"
+        v-model:apz-instrument-code="employeeForm.jmhz_apz_instrument_code"
+        v-model:functional-benefits="employeeForm.jmhz_functional_benefits_status"
+        v-model:temporary-assignment="employeeForm.jmhz_temporary_assignment_status"
+        :disabled="savingEmployee"
+      />
       <p v-if="employeeError" class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert" data-test="new-employee-error">
         {{ employeeError }}
       </p>
@@ -1329,18 +1487,17 @@ onMounted(async () => {
                 :class="selectedSummary.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'"
               >{{ statusLabel(selectedSummary.is_active) }}</span>
               <!--
-                Štítek JMENUJE, co chybí. Dřív svítil prázdný „Vyžaduje doplnění"
-                a uživatel to hledal po celé kartě — často u profilu, kterému
-                nechybělo nic a jen měl neaktualizovaný ruční stav.
+                V hlavičce je jen POČET; co přesně chybí, vypisuje souhrn hned
+                pod ní. Dřív se do štítku vešel výčet názvů a hlavička se pak na
+                notebooku zalomila do tří řádků, takže jméno osoby uteklo z očí.
               -->
-              <span
-                v-if="selectedSummary?.needs_setup"
-                class="rounded-full bg-warning-50 px-2 py-1 font-medium text-warning-700"
-                data-test="person-setup-gaps"
-              >
-                {{ t('payroll.people.needs_setup') }}:
-                {{ (selectedSummary.setup_gaps ?? []).map(gap => t(`payroll.people.setup_gap.${gap}`)).join(', ') }}
-              </span>
+              <PersonDataGapBadge
+                v-if="selectedSummary"
+                :gaps="selectedSummary.data_gaps ?? []"
+                :counts="selectedSummary.data_gap_counts ?? null"
+                test-id="person-header-data-gap"
+                @open="gap => openDataGap(selectedSummary!.id, gap)"
+              />
               <span class="text-neutral-500" data-test="person-header-employments">
                 {{ t('payroll.people.header_employments', { count: selectedEmploymentCount }, selectedEmploymentCount) }}
               </span>
@@ -1355,6 +1512,17 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+
+      <!--
+        „Co u téhle osoby chybí" patří NAHORU, nad formuláře. Účetní si stěžuje,
+        že neví, co má dělat — odpověď tedy nesmí být schovaná pod třemi panely.
+        Nic z toho neblokuje uložení; každá položka jen doskočí tam, kde se
+        vyplňuje.
+      -->
+      <PersonDataGapSummary
+        :gaps="selectedSummary?.data_gaps ?? []"
+        @open="gap => openDataGap(expandedId!, gap)"
+      />
 
       <PayrollPersonQuickEdit
         :person-id="expandedId"
@@ -1449,6 +1617,16 @@ onMounted(async () => {
           <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="newEmployment.terms.weekly_hours" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
           <label class="text-xs text-neutral-600">{{ t('payroll.people.create.monthly_gross') }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="1" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
           <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="newEmployment.terms.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
+          <!-- Tytéž tři otázky pro ČSSZ jako u zakládání zaměstnance. -->
+          <div class="sm:col-span-2 lg:col-span-4">
+            <JmhzRelationQuestions
+              v-model:apz-status="newEmployment.terms.jmhz_apz_contribution_status"
+              v-model:apz-instrument-code="newEmployment.terms.jmhz_apz_instrument_code"
+              v-model:functional-benefits="newEmployment.terms.jmhz_functional_benefits_status"
+              v-model:temporary-assignment="newEmployment.terms.jmhz_temporary_assignment_status"
+              :disabled="savingNew"
+            />
+          </div>
           <p v-if="newEmploymentError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2 lg:col-span-4" role="alert">{{ newEmploymentError }}</p>
           <div class="flex flex-wrap items-end justify-end gap-2 sm:col-span-2 lg:col-span-4">
             <button type="button" :class="btnOutline('neutral')" @click="creatingForId = null"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
@@ -1562,7 +1740,7 @@ onMounted(async () => {
                       </span>
                     </span>
                     <p
-                      v-if="person.needs_setup"
+                      v-if="personNextGap(person) !== null"
                       class="relative z-10 mt-1 max-w-sm text-xs leading-snug text-warning-700"
                       :data-test="`person-next-step-${person.id}`"
                     >{{ nextStepLabel(person) }}</p>
@@ -1570,7 +1748,18 @@ onMounted(async () => {
                   <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                     <div class="flex flex-wrap gap-1.5">
                       <span class="rounded-full px-2 py-1 text-xs font-medium" :class="person.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ statusLabel(person.is_active) }}</span>
-                      <span v-if="person.needs_setup" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">{{ t('payroll.people.needs_setup') }}</span>
+                      <!--
+                        Značka je klikací a vede na to místo na kartě, ne jen
+                        na kartu. Odkaz „někam sem" je pro uživatele totéž jako
+                        žádný odkaz — pořád musí hledat.
+                      -->
+                      <PersonDataGapBadge
+                        class="relative z-10"
+                        :gaps="personGaps(person)"
+                        :counts="person.data_gap_counts ?? null"
+                        :test-id="`person-data-gap-${person.id}`"
+                        @open="gap => openDataGap(person.id, gap)"
+                      />
                     </div>
                   </td>
                   <td v-if="tbl.isVisible('relations')" class="px-4 py-3 text-neutral-600">{{ person.relation_types.map(relationLabel).join(', ') }}</td>
@@ -1585,9 +1774,9 @@ onMounted(async () => {
                   -->
                   <td v-if="tbl.isVisible('detail')" class="relative z-10 px-4 py-3">
                     <div class="flex flex-wrap items-center justify-end gap-2">
-                      <button :class="btnOutline(person.needs_setup ? 'warning' : 'neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
+                      <button :class="btnOutline(personNextGap(person) !== null ? 'warning' : 'neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
                         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                          <path :d="person.needs_setup ? ICONS.edit : ICONS.user" />
+                          <path :d="personNextGap(person) !== null ? ICONS.edit : ICONS.user" />
                         </svg>
                         {{ nextStepActionLabel(person) }}
                       </button>
@@ -1627,7 +1816,12 @@ onMounted(async () => {
               </h2>
               <div class="flex flex-wrap gap-1.5">
                 <span class="rounded-full px-2 py-1 text-xs font-medium" :class="person.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ statusLabel(person.is_active) }}</span>
-                <span v-if="person.needs_setup" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">{{ t('payroll.people.needs_setup') }}</span>
+                <PersonDataGapBadge
+                  :gaps="personGaps(person)"
+                  :counts="person.data_gap_counts ?? null"
+                  :test-id="`person-data-gap-mobile-${person.id}`"
+                  @open="gap => openDataGap(person.id, gap)"
+                />
               </div>
             </div>
             <dl class="mt-3 space-y-2 text-sm">
@@ -1635,7 +1829,7 @@ onMounted(async () => {
               <div><dt class="text-xs text-neutral-500">{{ t('payroll.people.columns.count') }}</dt><dd class="mt-0.5 text-neutral-800">{{ person.employment_count }}</dd></div>
             </dl>
             <p
-              v-if="person.needs_setup"
+              v-if="personNextGap(person) !== null"
               class="mt-3 rounded-md bg-warning-50 px-3 py-2 text-xs leading-snug text-warning-700"
               :data-test="`person-next-step-${person.id}`"
             >{{ nextStepLabel(person) }}</p>
@@ -1646,9 +1840,9 @@ onMounted(async () => {
               obrazovku vedle „Otevřít kartu".
             -->
             <div class="mt-4 flex flex-wrap items-center gap-2">
-              <button :class="btnOutline(person.needs_setup ? 'warning' : 'neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
+              <button :class="btnOutline(personNextGap(person) !== null ? 'warning' : 'neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path :d="person.needs_setup ? ICONS.edit : ICONS.user" />
+                  <path :d="personNextGap(person) !== null ? ICONS.edit : ICONS.user" />
                 </svg>
                 {{ nextStepActionLabel(person) }}
               </button>

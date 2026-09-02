@@ -35,6 +35,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterialize
 use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\Payroll\Run\PayrollRunAutoSettlementService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -69,6 +70,14 @@ final class PayrollPaymentAction
         // Po ověření účtu odvodí výplatní pravidlo, plyne-li z karty
         // jednoznačně — viz konec verifyPersonAccount().
         private readonly \MyInvoice\Service\Payroll\Net\PayrollPayoutRuleDefaultsService $payoutDefaults,
+        /*
+         * Stav běhu plyne ze skutečnosti v platebním ledgeru, ne z kliknutí.
+         * Po každém spárování se zkusí, jestli už je pokrytí úplné — pokud
+         * ano, běh se překlopí do `paid` sám. Běží AŽ PO commitu párovací
+         * transakce: úhrada je platební fakt a nesmí ji shodit to, že se
+         * přechod stavu nepovede.
+         */
+        private readonly PayrollRunAutoSettlementService $autoSettlement,
     ) {}
 
     /** @param array<string,string> $args */
@@ -461,9 +470,18 @@ final class PayrollPaymentAction
             );
         }
 
+        $settlement = $this->autoSettlement->settleForAllocation(
+            $this->currentSupplierId($request),
+            $allocationId,
+            $userId,
+        );
+
         return Json::ok(
             $response,
-            ['event' => $this->reconciliationResult($result)],
+            [
+                'event' => $this->reconciliationResult($result),
+                'run_settlement' => $settlement->toArray(),
+            ],
             201,
         )->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
@@ -570,9 +588,18 @@ final class PayrollPaymentAction
             return $this->reconciliationConflict($response, $exception);
         }
 
+        $settlement = $this->autoSettlement->settleForLiability(
+            $this->currentSupplierId($request),
+            $result->liabilityId,
+            $userId,
+        );
+
         return Json::ok(
             $response,
-            ['event' => $this->incomingRefundResult($result)],
+            [
+                'event' => $this->incomingRefundResult($result),
+                'run_settlement' => $settlement->toArray(),
+            ],
             201,
         )->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');

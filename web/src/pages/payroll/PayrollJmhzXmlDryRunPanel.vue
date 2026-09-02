@@ -42,6 +42,13 @@ const states = ref<Record<number, DryRunState>>({})
 const offices = ref<Record<number, PayrollJmhzPvpojOffice[]>>({})
 const selectedOffice = ref<Record<number, number | null>>({})
 const remediationEmployments = ref<PayrollAbsenceEmployment[]>([])
+/**
+ * Mzdové složky se načítají kvůli JEDINÉ věci: aby nález uměl složku
+ * pojmenovat. „Mzdová složka nemá určené zařazení do JMHZ" bez názvu posílá
+ * účetní hádat mezi patnácti definicemi — a když se u jiné složky v seznamu
+ * zařazení ukazuje, vypadá to, že aplikace lže.
+ */
+const remediationComponents = ref<Record<number, string>>({})
 const remediationContextRequested = ref(false)
 
 watch(() => props.runs, async runs => {
@@ -95,7 +102,16 @@ async function ensureOffices(revision: number): Promise<void> {
 async function ensureRemediationContext(): Promise<void> {
   if (remediationContextRequested.value) return
   remediationContextRequested.value = true
-  remediationEmployments.value = await payrollAbsenceApi.context().catch(() => [])
+  const [employments, components] = await Promise.all([
+    payrollAbsenceApi.context().catch(() => []),
+    payrollApi.components().catch(() => []),
+  ])
+  remediationEmployments.value = employments
+  const named: Record<number, string> = {}
+  for (const component of components) {
+    named[component.id] = `${component.name} (${component.code})`
+  }
+  remediationComponents.value = named
 }
 
 function state(run: PayrollRun): DryRunState | null {
@@ -191,10 +207,52 @@ function groupedBlockers(blockers: PayrollJmhzXmlDryRunBlocker[]): BlockerGroup[
   return [...groups.values()]
 }
 
+/**
+ * Nálezy, které se řeší v panelu „Identifikátory přidělené ČSSZ pro JMHZ".
+ *
+ * Obecný doskok na pracovní vztah mířil do sjednaných podmínek, kde tahle dvě
+ * pole nejsou — účetní tam přišla a nenašla nic. Povel `?panel=&field=`
+ * doskočí přímo na vstup (viz `web/src/utils/revealField.ts`).
+ */
+const JMHZ_IDENTITY_CODES = [
+  'jmhz_identity_incomplete',
+  'jmhz_identity_oic_missing',
+  'jmhz_identity_id_ppv_missing',
+] as const
+
+function identityTarget(
+  blocker: PayrollJmhzXmlDryRunBlocker,
+  entityId: number | null,
+): RouteLocationRaw | null {
+  if (!(JMHZ_IDENTITY_CODES as readonly string[]).includes(blocker.code)) {
+    return null
+  }
+  const employment = entityId === null
+    ? undefined
+    : remediationEmployments.value.find(item => item.id === entityId)
+  const field = blocker.code === 'jmhz_identity_id_ppv_missing'
+    ? 'jmhz.employment_external_identifier'
+    : 'jmhz.person_external_identifier'
+
+  return {
+    name: 'payroll-people',
+    query: {
+      ...(entityId === null ? {} : { employment: String(entityId) }),
+      ...(employment === undefined
+        ? {}
+        : { person: String(employment.employee_id) }),
+      panel: 'jmhz_identity',
+      field,
+    },
+  }
+}
+
 function blockerTarget(
   blocker: PayrollJmhzXmlDryRunBlocker,
   entityId: number | null = blocker.entity_id,
 ): RouteLocationRaw | null {
+  const identity = identityTarget(blocker, entityId)
+  if (identity !== null) return identity
   if ([
     'jmhz_attribute_10116_unresolved',
     'jmhz_attribute_10546_unresolved',
@@ -277,6 +335,34 @@ function blockerGroupTarget(group: BlockerGroup): RouteLocationRaw | null {
     : blockerTarget(group.blocker)
 }
 
+/**
+ * Jména dotčených záznamů — JMENOVITĚ, i když je dotčený jediný.
+ *
+ * Nález, který nejmenuje konkrétní věc, je k nepoužití: „Mzdová složka nemá
+ * zařazení" pošle účetní na seznam patnácti složek hádat, která to je, a
+ * „Chybí identifikační údaj" neřekne, o kterého zaměstnance jde. Dřív se jména
+ * ukazovala jen u skupin s víc než jedním záznamem, a to je přesně naopak, než
+ * jak to člověk potřebuje.
+ */
+function groupLabels(group: BlockerGroup): string[] {
+  return group.entityIds
+    .slice(0, 10)
+    .map((entityId, index) => remediationLabel(group.blocker, entityId, index))
+}
+
+/**
+ * Lidský popis čísla pole ČSSZ, když ho známe.
+ *
+ * Klíč `payroll.submissions.overview.jmhz_attribute_glossary.<id>`; co v něm
+ * není, zůstane holým číslem — vymyslet popis by bylo horší než ho nemít.
+ */
+function attributeGloss(attributeId: string): string {
+  const key = `payroll.submissions.overview.jmhz_attribute_glossary.${attributeId}`
+  const translated = t(key)
+
+  return translated === key ? '' : translated
+}
+
 function entityIdPreview(entityIds: number[]): string {
   const visible = entityIds.slice(0, 10).join(', ')
   return entityIds.length > 10 ? `${visible}, …` : visible
@@ -287,6 +373,12 @@ function remediationLabel(
   entityId: number,
   index: number,
 ): string {
+  if (blocker.entity_type === 'component') {
+    return remediationComponents.value[entityId]
+      ?? t('payroll.submissions.overview.jmhz_dry_run_actions.record', {
+        number: index + 1,
+      })
+  }
   const employment = blocker.entity_type === 'employment'
     ? remediationEmployments.value.find(item => item.id === entityId)
     : ['person', 'employee'].includes(blocker.entity_type)
@@ -622,6 +714,15 @@ async function copyXml(payrollRun: PayrollRun) {
                 <div class="flex flex-wrap items-start justify-between gap-2">
                   <div class="min-w-0 flex-1">
                     <p class="font-medium">{{ blockerLabel(group.blocker.code) }}</p>
+                    <p
+                      v-if="groupLabels(group).length"
+                      class="mt-1 text-xs font-semibold"
+                      data-test="jmhz-dry-run-affected"
+                    >
+                      {{ t('payroll.submissions.overview.jmhz_dry_run_affected', {
+                        names: groupLabels(group).join(', '),
+                      }) }}<span v-if="group.entityIds.length > 10">, …</span>
+                    </p>
                     <p v-if="group.count > 1" class="mt-1 text-xs opacity-80">
                       {{ t('payroll.submissions.overview.jmhz_dry_run_blocker_occurrences', {
                         count: group.count,
@@ -676,11 +777,20 @@ async function copyXml(payrollRun: PayrollRun) {
                   <summary class="cursor-pointer">
                     {{ t('payroll.submissions.overview.jmhz_dry_run_technical_detail') }}
                   </summary>
-                  <p v-if="group.blocker.attribute_ids.length" class="mt-1 font-mono">
-                    {{ t('payroll.submissions.overview.jmhz_dry_run_attribute_ids', {
-                      ids: group.blocker.attribute_ids.join(', '),
-                    }) }}
-                  </p>
+                  <!--
+                    Syrové číslo atributu je pro podporu, ne pro účetní — ale
+                    když už tu je, ať u něj stojí, co znamená. „10051, 10228"
+                    samo o sobě nikomu nic neřekne.
+                  -->
+                  <ul v-if="group.blocker.attribute_ids.length" class="mt-1 space-y-0.5">
+                    <li
+                      v-for="attributeId in group.blocker.attribute_ids"
+                      :key="attributeId"
+                      class="font-mono"
+                    >
+                      {{ attributeId }}<template v-if="attributeGloss(attributeId)"> — {{ attributeGloss(attributeId) }}</template>
+                    </li>
+                  </ul>
                   <p v-if="group.entityIds.length" class="mt-1 font-mono">
                     {{ t('payroll.submissions.overview.jmhz_dry_run_entity_ids', {
                       ids: entityIdPreview(group.entityIds),

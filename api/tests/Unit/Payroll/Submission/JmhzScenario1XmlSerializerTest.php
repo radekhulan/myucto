@@ -502,7 +502,12 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         );
     }
 
-    public function testUnverifiedTristateIsNotTreatedAsNo(): void
+    /**
+     * Nevyplněno se vykládá jako „ne", ale JEN když to snímek doloží. Bez
+     * záznamu o výkladu (starší snímek do v11) by podání tvrdilo něco, co
+     * nikde není zapsané — a proto se nepostaví.
+     */
+    public function testUnverifiedTristateWithoutRecordedInterpretationBlocks(): void
     {
         $payload = $this->payload();
         $payload['people'][0]['employments'][0]['term']
@@ -513,11 +518,198 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                 $this->resolutionFor($payload),
                 $this->envelope(),
             );
-            self::fail('Neověřený tri-state musel podání zablokovat.');
+            self::fail('Nedoložený výklad nevyplněného tri-state musel podání zablokovat.');
         } catch (JmhzXmlException $exception) {
             self::assertSame('jmhz_xml_attribute_unresolved', $exception->validationCode);
             self::assertStringContainsString('10247', $exception->getMessage());
         }
+    }
+
+    /**
+     * Doložený výklad výchozího stavu se do formuláře promítne jako `false` —
+     * tedy stejně, jako kdyby účetní klikla „ne". Rozdíl zůstává v evidenci
+     * a ve zmrazeném snímku, ne ve výsledném XML.
+     */
+    public function testUnverifiedTristateWithRecordedInterpretationSerializesAsFalse(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['term']
+            ['jmhz_functional_benefits_status'] = 'unverified';
+        $payload['people'][0]['employments'][0]['jmhz_default_interpretations'] = [[
+            'field' => 'jmhz_functional_benefits_status',
+            'attribute_id' => '10247',
+            'stored_value' => 'unverified',
+            'applied_value' => 'no',
+            'basis' => JmhzPreparationSnapshotBuilder::DEFAULT_TRISTATE_BASIS,
+        ]];
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:funkcniPozitky>false</form:funkcniPozitky>',
+            $result['xml'],
+        );
+    }
+
+    /**
+     * Přidělené identifikátory = větev A, a jmenné údaje se do podání nepletou.
+     *
+     * Po doručení OIČ a ID PPV je jejich uvádění povinné; kdyby se vedle nich
+     * objevila i jmenná větev, `xs:choice` by podání odmítl.
+     */
+    public function testAssignedIdentifiersKeepTheIdentifierBranch(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolution(),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:ikMpsv>1000000001</form:ikMpsv>',
+            $result['xml'],
+        );
+        self::assertStringContainsString(
+            '<form:idPpv>2000000000000000000001</form:idPpv>',
+            $result['xml'],
+        );
+        self::assertStringNotContainsString('<form:prijmeni>', $result['xml']);
+        self::assertStringNotContainsString('<form:druhCinnosti>', $result['xml']);
+    }
+
+    /**
+     * Bez přiděleného OIČ se zaměstnanec hlásí JMÉNEM, ne blokací.
+     *
+     * OIČ i ID PPV přiděluje ČSSZ až protokolem o přijetí registrace, takže
+     * první hlášení za nově registrovaného zaměstnance je nemá odkud vzít.
+     * `identifikaceType` na to má druhou větev `xs:choice` a její pořadí
+     * elementů je závazné — proto se ověřuje celý blok najednou i to, že
+     * výsledek projde připnutým XSD.
+     */
+    public function testEmployeeWithoutCsszIdentifiersIsReportedByName(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($this->payloadWithoutCsszIdentifiers()),
+            $this->envelope(),
+        );
+
+        self::assertStringNotContainsString('<form:ikMpsv>', $result['xml']);
+        self::assertStringNotContainsString('<form:idPpv>', $result['xml']);
+        self::assertStringContainsString(
+            '<form:identifikace>'
+                . '<form:prijmeni>Nováková</form:prijmeni>'
+                . '<form:jmeno>Jana</form:jmeno>'
+                . '<form:datumNarozeni>1990-04-12</form:datumNarozeni>'
+                . '<form:datumNastupu>2026-03-01</form:datumNastupu>'
+                . '<form:druhCinnosti>1</form:druhCinnosti>'
+                . '</form:identifikace>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+    }
+
+    /**
+     * Skutečný den nástupu má přednost před sjednaným — 10223 se ptá na den,
+     * kdy zaměstnanec do zaměstnání nastoupil, ne na den podpisu smlouvy.
+     */
+    public function testNameBranchPrefersActualStartDate(): void
+    {
+        $payload = $this->payloadWithoutCsszIdentifiers();
+        $payload['people'][0]['employments'][0]['employment']['actual_start_date']
+            = '2026-03-16';
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:datumNastupu>2026-03-16</form:datumNastupu>',
+            $result['xml'],
+        );
+    }
+
+    /**
+     * Teprve chybějící údaj JMENNÉ větve je skutečný blokátor — a hlásí se
+     * jmenovitě on, ne chybějící OIČ.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('incompleteNameBranchProvider')]
+    public function testIncompleteNameBranchBlocksNamingTheMissingAttribute(
+        string $path,
+        string $attributeId,
+    ): void {
+        $payload = $this->payloadWithoutCsszIdentifiers();
+        $employment = &$payload['people'][0]['employments'][0];
+        match ($path) {
+            'family_name' => $employment['identity']['identity']['last_name'] = null,
+            'given_name' => $employment['identity']['identity']['first_name'] = null,
+            'birth_date' => $employment['identity']['identity']['birth_date'] = null,
+            'start_date' => $employment['employment'] = ['is_primary' => true],
+            'activity_code' => $employment['scenario_resolution'] = [
+                'scenario_key' => 'scenario_1',
+            ],
+        };
+        unset($employment);
+
+        try {
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            );
+            self::fail('Neúplná jmenná větev musela podání zablokovat.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame(
+                'jmhz_xml_identity_name_incomplete',
+                $exception->validationCode,
+            );
+            self::assertStringContainsString($attributeId, $exception->getMessage());
+        }
+    }
+
+    /** @return iterable<string,array{string,string}> */
+    public static function incompleteNameBranchProvider(): iterable
+    {
+        yield 'prijmeni' => ['family_name', '10053'];
+        yield 'jmeno' => ['given_name', '10054'];
+        yield 'datum narozeni' => ['birth_date', '10056'];
+        yield 'datum nastupu' => ['start_date', '10223'];
+        yield 'druh cinnosti' => ['activity_code', '10239'];
+    }
+
+    /**
+     * Půlka větve A není větev A: kdyby se OIČ uvedlo bez ID PPV, `xs:choice`
+     * by takový blok neznal. Hlásí se proto nedoložený protějšek, ne tichý
+     * přeskok na jmennou větev.
+     */
+    public function testHalfOfTheIdentifierBranchIsRefused(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['identity']
+            ['jmhz_employment_external_identifier'] = null;
+
+        try {
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            );
+            self::fail('Neúplná dvojice identifikátorů musela podání zablokovat.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_xml_attribute_unresolved', $exception->validationCode);
+            self::assertStringContainsString('10228', $exception->getMessage());
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function payloadWithoutCsszIdentifiers(): array
+    {
+        $payload = $this->payload();
+        $identity = &$payload['people'][0]['employments'][0]['identity'];
+        $identity['person_external_identifier'] = null;
+        $identity['jmhz_employment_external_identifier'] = null;
+        unset($identity);
+
+        return $payload;
     }
 
     public function testMissingFrozenAttributeIsNeverFilledWithZero(): void
@@ -1064,8 +1256,19 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                         'jmhz_employment_external_identifier' => [
                             'value' => '2000000000000000000001',
                         ],
+                        // Zdroj jmenné větve `identifikaceType` — zmrazená
+                        // historie identity osoby k rozhodnému dni.
+                        'identity' => [
+                            'first_name' => 'Jana',
+                            'last_name' => 'Nováková',
+                            'birth_date' => '1990-04-12',
+                        ],
                     ],
-                    'employment' => ['is_primary' => true],
+                    'employment' => [
+                        'is_primary' => true,
+                        'start_date' => '2026-03-01',
+                        'actual_start_date' => null,
+                    ],
                     'term' => [
                         'activity_code' => '1',
                         'jmhz_relationship_detail_code' => '1',
@@ -1077,7 +1280,13 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                         'jmhz_functional_benefits_status' => 'no',
                         'jmhz_temporary_assignment_status' => 'no',
                     ],
-                    'scenario_resolution' => ['scenario_key' => 'scenario_1'],
+                    'scenario_resolution' => [
+                        'scenario_key' => 'scenario_1',
+                        // 10239 nese jmenná větev `identifikaceType`, takže
+                        // zmrazený výběr scénáře musí druh činnosti doložit.
+                        'activity_code' => '1',
+                        'relationship_detail_code' => '1',
+                    ],
                     'eldp' => [
                         'confirmation' => ['in03_active' => false, 'in04_active' => false],
                         'insurance_interval' => [

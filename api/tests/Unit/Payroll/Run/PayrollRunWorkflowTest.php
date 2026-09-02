@@ -158,10 +158,11 @@ final class PayrollRunWorkflowTest extends TestCase
             PayrollRunStatus::PAID,
             PayrollRunCommand::MARK_PAID,
         ];
-        yield 'uzavření před úhradou' => [
-            PayrollRunStatus::PAYMENT_READY,
-            PayrollRunCommand::CLOSE,
-        ];
+        // `uzavření před úhradou` tu VĚDOMĚ není: platební příkaz odchází
+        // v den výplaty, ABO výpis dorazí o týdny později. Kdyby šlo zavřít
+        // jen běh v `PAID`, měsíc bez doloženého výpisu by se nezavřel nikdy
+        // a s ním ani mzdový rok. Doložení sleduje platební ledger dál —
+        // viz {@see PayrollRunAutoSettlementService}.
         yield 'zaúčtování zrušeného běhu' => [
             PayrollRunStatus::CANCELLED,
             PayrollRunCommand::POST,

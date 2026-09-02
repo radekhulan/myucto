@@ -830,6 +830,58 @@ final class PayrollRegistrationIdentityRepository
     }
 
     /**
+     * Pracovní vztah, kterému kdy patřilo dané ID PPV — bez ohledu na to,
+     * jestli je záznam pořád platný.
+     *
+     * ── Proč se hledá i v uzavřených záznamech ──────────────────────────────
+     * Slouží k tomu, aby se odpověď ČSSZ dala přiřadit k pracovnímu vztahu
+     * podle toho, co jsme ve zmrazeném hlášení ODESLALI. Kdyby se hledalo jen
+     * mezi platnými, rozpadlo by se to přesně v situaci, kvůli které tahle
+     * cesta existuje: ČSSZ vrátí JINÉ číslo, než jsme poslali, evidence se
+     * mezitím uzavřela převodem pod jiný variabilní symbol — a nález by se
+     * neměl na čem založit.
+     *
+     * Jednoznačnost drží klíč `uq_payroll_employment_external_id_value`
+     * (supplier_id, environment, identifier_type, value_hash): jedno číslo
+     * v jedné firmě a jednom prostředí patří právě jednomu záznamu.
+     *
+     * @return array{id:int,employee_id:int,employment_id:int}|null
+     */
+    public function employmentByExternalIdValueHash(
+        int $supplierId,
+        string $environment,
+        string $identifierType,
+        string $valueHash,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, employee_id, employment_id
+               FROM payroll_employment_external_ids
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND identifier_type = ?
+                AND value_hash = ?
+              LIMIT 1'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $identifierType,
+            $valueHash,
+        ]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'id' => $this->positiveInt($row, 'id'),
+            'employee_id' => $this->positiveInt($row, 'employee_id'),
+            'employment_id' => $this->positiveInt($row, 'employment_id'),
+        ];
+    }
+
+    /**
      * Zahodí ručně opsaný identifikátor, aby šel přepsat správnou hodnotou.
      *
      * Číslo od ČSSZ se opisuje z protokolu ručně, takže překlep je běžný.

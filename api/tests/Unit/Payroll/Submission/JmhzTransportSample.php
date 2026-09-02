@@ -48,7 +48,15 @@ final class JmhzTransportSample
             . '</jmhz>';
     }
 
-    /** @param list<array{guid:string,result:string,errMsg?:string,errNum?:string}> $forms */
+    /**
+     * `identifier` lze u formuláře přebít, aby šlo popsat i protokol, který
+     * vrací JINÉ OIČ / ID PPV, než jsme odeslali.
+     *
+     * @param list<array{
+     *   guid:string,result:string,errMsg?:string,errNum?:string,
+     *   identifier?:string
+     * }> $forms
+     */
     public static function partialProtocol(
         string $result = 'OK',
         array $forms = [],
@@ -65,7 +73,9 @@ final class JmhzTransportSample
             . '<Item sqnr="" identifier="" subtype="PVPOJ" period="" result="OK" errMsg="" errNum="" />';
         foreach ($forms as $form) {
             $items .= '<Item sqnr="' . $form['guid']
-                . '" identifier="1632728141;4002787754995" subtype="FORM" period="" result="'
+                . '" identifier="'
+                . ($form['identifier'] ?? '1632728141;4002787754995')
+                . '" subtype="FORM" period="" result="'
                 . $form['result'] . '" errMsg="'
                 . htmlspecialchars($form['errMsg'] ?? '', ENT_QUOTES | ENT_XML1)
                 . '" errNum="' . ($form['errNum'] ?? '') . '" />';

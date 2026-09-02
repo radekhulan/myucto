@@ -2574,17 +2574,33 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('2026-06-01', $readiness['period_start']);
         self::assertIsBool($readiness['ready']);
         self::assertIsArray($readiness['findings']);
+        self::assertIsBool($readiness['has_findings']);
         foreach ($readiness['findings'] as $finding) {
             self::assertSame([
                 'code',
                 'severity',
+                // Zařazení podle jediné otázky, která účetní zajímá: dá se to
+                // opravit potom? A jestli jde o jednorázové nastavení firmy,
+                // nebo o práci, která se opakuje každý měsíc.
+                'impact',
+                'scope',
                 'message',
                 'remediation_path',
                 'count',
                 'entities',
             ], array_keys($finding));
-            self::assertContains($finding['severity'], ['blocker', 'warning']);
+            self::assertContains($finding['severity'], ['blocker', 'warning', 'info']);
+            self::assertContains(
+                $finding['impact'],
+                ['blocking', 'revision', 'anytime'],
+            );
+            self::assertContains($finding['scope'], ['setup', 'monthly']);
             self::assertNotSame('', trim((string) $finding['message']));
+            foreach ($finding['entities'] as $entity) {
+                // Nález MUSÍ umět jmenovat konkrétní věc; `label` je pro to
+                // místo, i když ho zrovna tenhle nález nezná.
+                self::assertArrayHasKey('label', $entity);
+            }
         }
         self::assertSame($runsBefore, $countRuns());
         self::assertSame($revisionsBefore, $countRevisions());
