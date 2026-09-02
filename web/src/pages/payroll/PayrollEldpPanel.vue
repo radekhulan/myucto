@@ -33,6 +33,7 @@ import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchS
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { formatDate } from '@/composables/useFormat'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -136,6 +137,50 @@ const canPrepare = computed(() =>
   && note.value.trim().length >= 5
   && note.value.trim().length <= 500)
 
+/**
+ * Co ještě chybí, aby šlo připravit.
+ *
+ * Tlačítko viselo zhasnuté nad formulářem o šesti polích a neřeklo které.
+ * Přípustnost (`standaloneAllowed`) tady schválně není — ta má vlastní panel
+ * nad formulářem a opakovat ji u tlačítka by znamenalo říct dvakrát totéž.
+ *
+ * Poznámka je NAŠE podmínka, ne požadavek ČSSZ (vynucuje ji
+ * `EldpAnnualStatementBuilder`, 5-500 znaků). Zůstává, protože samostatný
+ * evidenční list je od roku 2026 výjimka a zápis o tom, PROČ se vyhotovil,
+ * je jediné, co po letech odliší doloženou výjimku od omylu.
+ */
+const prepareBlockers = computed<string[]>(() => {
+  if (!canWrite.value) return [t('payroll.eldp.blockers.readOnly')]
+  const missing: string[] = []
+  if (employmentId.value === null) missing.push(t('payroll.eldp.blockers.employment'))
+  if (!excludedDaysConfirmed.value) missing.push(t('payroll.eldp.blockers.excluded'))
+  if (!deductedDaysNone.value) missing.push(t('payroll.eldp.blockers.deducted'))
+  if (requestedByAuthority.value && authorityRequestReceivedOn.value === '') {
+    missing.push(t('payroll.eldp.blockers.authorityDate'))
+  }
+  const length = note.value.trim().length
+  if (length < 5) missing.push(t('payroll.eldp.blockers.note'))
+  else if (length > 500) missing.push(t('payroll.eldp.blockers.noteTooLong'))
+  return missing
+})
+
+/** Totéž pro doložení výsledku — i tam viselo tlačítko zhasnuté beze slova. */
+const completeBlockers = computed<string[]>(() => {
+  if (!canWrite.value || !canReadDocuments.value) {
+    return [t('payroll.eldp.manual.permissionRequired')]
+  }
+  const missing: string[] = []
+  if (confirmationDocument.value === null) missing.push(t('payroll.eldp.blockers.document'))
+  const reference = authorityReference.value.trim()
+  if (reference === '') missing.push(t('payroll.eldp.blockers.reference'))
+  else if (reference.length > 190) missing.push(t('payroll.eldp.blockers.referenceTooLong'))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(confirmedOn.value)) {
+    missing.push(t('payroll.eldp.blockers.confirmedOn'))
+  }
+  if (hasSelectedStatusEvidence.value) missing.push(t('payroll.eldp.blockers.alreadyRecorded'))
+  return missing
+})
+
 async function loadEmployments(id: number): Promise<void> {
   employments.value = []
   employmentId.value = null
@@ -153,6 +198,7 @@ async function loadEmployments(id: number): Promise<void> {
 async function loadStatement(): Promise<void> {
   statement.value = null
   eligibility.value = null
+  error.value = ''
   if (employmentId.value === null) {
     return
   }
@@ -167,10 +213,18 @@ async function loadStatement(): Promise<void> {
     // nenabízí, protože bychom nevěděli, jestli povinnost vůbec vznikla.
     eligibility.value = response.eligibility ?? null
     manualCompletion.value = response.manual_completion
-  } catch {
+  } catch (exception) {
+    // Fail-closed ANO, ale ne mlčky. Dokud se chyba zahazovala, obrazovka po
+    // výběru vztahu jen zhasla: žádný přehled, tlačítko Připravit zhasnuté,
+    // nikde ani slovo proč. Účetní z toho četla „za tenhle rok nic není",
+    // což je u nedoručeného evidenčního listu nejdražší možný omyl.
     statement.value = null
     eligibility.value = null
     manualCompletion.value = null
+    error.value = isAxiosError(exception)
+      && typeof exception.response?.data?.error?.message === 'string'
+      ? exception.response.data.error.message
+      : t('payroll.eldp.errors.statementLoadFailed')
   }
 }
 
@@ -511,7 +565,7 @@ watch(requestedByAuthority, value => {
         <dl class="grid gap-2 sm:grid-cols-3">
           <div>
             <dt class="text-xs text-neutral-500">{{ t('payroll.eldp.summary.period') }}</dt>
-            <dd class="font-medium">{{ statement.period_from }} – {{ statement.period_to }}</dd>
+            <dd class="font-medium">{{ formatDate(statement.period_from) }} – {{ formatDate(statement.period_to) }}</dd>
           </div>
           <div>
             <dt class="text-xs text-neutral-500">{{ t('payroll.eldp.summary.insuranceDays') }}</dt>
@@ -529,7 +583,7 @@ watch(requestedByAuthority, value => {
           </div>
           <div>
             <dt class="text-xs text-neutral-500">{{ t('payroll.eldp.summary.dueOn') }}</dt>
-            <dd class="font-medium">{{ statement.due_on }}</dd>
+            <dd class="font-medium">{{ formatDate(statement.due_on) }}</dd>
           </div>
           <div>
             <dt class="text-xs text-neutral-500">{{ t('payroll.eldp.summary.sections') }}</dt>
@@ -593,7 +647,7 @@ watch(requestedByAuthority, value => {
               >
                 {{ t(`payroll.eldp.manual.status.${evidence.authority_status}`) }}
               </span>
-              <span>{{ evidence.confirmed_on }}</span>
+              <span>{{ formatDate(evidence.confirmed_on) }}</span>
             </div>
             <p class="mt-2 font-medium text-neutral-900">{{ evidence.authority_reference }}</p>
             <a
@@ -724,7 +778,14 @@ watch(requestedByAuthority, value => {
           <p v-if="completionSuccess" class="text-sm text-success-700" role="status" data-test="eldp-completion-success">
             {{ completionSuccess }}
           </p>
-          <div class="flex flex-wrap justify-end gap-2">
+          <div class="flex flex-wrap items-center justify-end gap-3">
+            <p
+              v-if="completeBlockers.length"
+              class="flex-1 text-sm text-neutral-600"
+              data-test="eldp-complete-blockers"
+            >
+              {{ t('payroll.eldp.blockers.title', { list: completeBlockers.join(', ') }) }}
+            </p>
             <button
               type="button"
               :class="btnFilled(authorityStatus === 'accepted' ? 'success' : 'primary')"
@@ -745,7 +806,14 @@ watch(requestedByAuthority, value => {
         </p>
       </section>
 
-      <div class="flex justify-end border-t border-neutral-200 pt-4">
+      <div class="flex flex-wrap items-center justify-end gap-3 border-t border-neutral-200 pt-4">
+        <p
+          v-if="prepareBlockers.length && standaloneAllowed"
+          class="flex-1 text-sm text-neutral-600"
+          data-test="eldp-prepare-blockers"
+        >
+          {{ t('payroll.eldp.blockers.title', { list: prepareBlockers.join(', ') }) }}
+        </p>
         <button
           type="button"
           :class="btnFilled('primary')"

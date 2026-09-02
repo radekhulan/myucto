@@ -538,5 +538,63 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
       .toBe('payroll.submissions.overview.issue_remediation.xsd')
     expect(detail.get('[data-test="submission-issue-technical"]').text())
       .toContain('zp_xsd_validation_failed')
+    // Časy a období v lidském tvaru, ne v ISO ze serveru.
+    expect(detail.text()).toContain('26. 08. 2026 09:00')
+    expect(detail.text()).not.toContain('2026-08-26 09:00:00')
+    expect(detail.text()).toContain('01. 08. 2026')
+  })
+
+  /**
+   * Povinnost bez připraveného podání byla slepá ulička: řádek hlásil blížící
+   * se lhůtu a ve sloupci akcí měl pomlčku. Musí z něj vést cesta k tomu, kde
+   * se úkon reálně dělá.
+   */
+  it('u povinnosti bez podání nabídne cestu dál, ne pomlčku', async () => {
+    m.submissionOverview.mockResolvedValue({
+      items: [{
+        id: 7,
+        environment: 'test',
+        agenda_code: 'SYNTH',
+        agenda_group: 'other',
+        subject_type: 'employer',
+        subject_reference: 'Syntetický zaměstnavatel',
+        subject_label: 'Syntetický zaměstnavatel',
+        period_start: '2026-08-01',
+        period_end: '2026-08-31',
+        obligation_kind: 'monthly',
+        preferred_channel: 'isds',
+        status: 'open',
+        row_version: 1,
+        earliest_submission_on: '2026-08-01',
+        due_on: '2026-09-20',
+        calendar_basis: 'calendar_days',
+        deadline: {
+          phase: 'due_soon',
+          days_to_due: 5,
+          is_action_required: false,
+          is_overdue: false,
+        },
+        latest_submission: null,
+      }],
+      total: 1,
+      deadline_summary: {
+        not_open: 0,
+        open: 0,
+        due_soon: 1,
+        due_today: 0,
+        overdue: 0,
+        awaiting_result: 0,
+        fulfilled: 0,
+        action_required: 0,
+        cancelled: 0,
+      },
+    })
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'other' } })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="submission-not-prepared"]').length).toBeGreaterThan(0)
+    expect(wrapper.get('[data-test="submission-not-prepared"]').text())
+      .toContain('payroll.submissions.overview.not_prepared_action')
   })
 })

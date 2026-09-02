@@ -30,7 +30,7 @@ import PayrollJmhzXmlDryRunPanel from './PayrollJmhzXmlDryRunPanel.vue'
 import PayrollJmhzDispatchPanel from './PayrollJmhzDispatchPanel.vue'
 import { btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDate } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatPeriod } from '@/composables/useFormat'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -707,7 +707,25 @@ onMounted(load)
                       </svg>
                       {{ t('payroll.submissions.overview.detail_action') }}
                     </button>
-                    <span v-else class="text-xs text-neutral-400">—</span>
+                    <!--
+                      Povinnost bez podání je otevřený úkol, ne prázdné pole.
+                      Pomlčka tu byla slepá ulička: řádek říkal „něco se blíží"
+                      a nenabízel žádnou cestu dál. Příprava se dělá jinde
+                      (JMHZ náhledy, karta zaměstnance, ELDP…), takže sem
+                      patří odkaz na měsíční přehled — ten u KAŽDÉ povinnosti
+                      ukazuje, kde se úkon reálně provádí.
+                    -->
+                    <RouterLink
+                      v-else
+                      :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' } }"
+                      :class="btnOutlineSm('neutral')"
+                      data-test="submission-not-prepared"
+                    >
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="ICONS.clipboardCheck" />
+                      </svg>
+                      {{ t('payroll.submissions.overview.not_prepared_action') }}
+                    </RouterLink>
                   </td>
                 </tr>
               </tbody>
@@ -757,6 +775,18 @@ onMounted(load)
               </svg>
               {{ t('payroll.submissions.overview.detail_action') }}
             </button>
+            <RouterLink
+              v-else
+              :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' } }"
+              class="mt-4"
+              :class="btnOutline('neutral')"
+              data-test="submission-not-prepared"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.clipboardCheck" />
+              </svg>
+              {{ t('payroll.submissions.overview.not_prepared_action') }}
+            </RouterLink>
           </article>
         </div>
 
@@ -801,7 +831,7 @@ onMounted(load)
             </div>
             <p class="mt-1 text-sm text-neutral-500">
               <template v-if="detail.submission.subject_label">{{ detail.submission.subject_label }} · </template>
-              {{ detail.submission.period_start }}–{{ detail.submission.period_end }}
+              {{ formatDate(detail.submission.period_start) }} – {{ formatDate(detail.submission.period_end) }}
             </p>
           </div>
           <button type="button" :class="btnOutline('neutral')" @click="detail = null">
@@ -823,7 +853,7 @@ onMounted(load)
           </div>
           <div>
             <dt class="text-neutral-500">{{ t('payroll.submissions.overview.detail_created') }}</dt>
-            <dd class="mt-1 font-medium text-neutral-900">{{ detail.submission.created_at }}</dd>
+            <dd class="mt-1 font-medium text-neutral-900">{{ formatDateTime(detail.submission.created_at) }}</dd>
           </div>
           <div>
             <dt class="text-neutral-500">{{ t('payroll.submissions.overview.detail_correlation') }}</dt>
@@ -844,7 +874,9 @@ onMounted(load)
             <ul v-else class="mt-3 divide-y divide-neutral-100">
               <li v-for="part in detail.parts" :key="part.id" class="py-3 first:pt-0 last:pb-0">
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                  <span class="font-medium text-neutral-900">{{ part.agenda_code }} · {{ part.part_reference }}</span>
+                  <!-- Lidský název agendy, ne `agenda_code`: „JMHZ25" účetní
+                       nikam nezařadí a stejný kód je o řádek výš přeložený. -->
+                  <span class="font-medium text-neutral-900">{{ submissionAgendaLabel(part.agenda_code) }} · {{ part.part_reference }}</span>
                   <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="statusClass(part.status)">
                     {{ submissionStatusLabel(part.status) }}
                   </span>
@@ -1022,7 +1054,7 @@ onMounted(load)
               <div>
                 <h3 class="font-semibold text-neutral-900">
                   {{ t('payroll.submissions.overview.jmhz_preview_card', {
-                    period: preview.period,
+                    period: formatPeriod(preview.period),
                   }) }}
                 </h3>
                 <p class="mt-1 text-xs text-neutral-500">
@@ -1205,7 +1237,7 @@ onMounted(load)
                   </h3>
                   <p class="mt-1 text-xs text-neutral-500">
                     {{ t('payroll.submissions.overview.health_insurer_code', { code: overview.insurer.code }) }} ·
-                    {{ overview.period }} ·
+                    {{ formatPeriod(overview.period) }} ·
                     {{ t('payroll.submissions.overview.health_people', { count: overview.totals.person_count }) }} ·
                     {{ t('payroll.submissions.overview.health_run_revision', {
                       run: overview.run_id,

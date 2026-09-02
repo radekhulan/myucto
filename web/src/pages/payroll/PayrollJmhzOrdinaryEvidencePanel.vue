@@ -8,7 +8,8 @@ import {
   type PayrollJmhzOrdinaryEvidenceScope,
   type PayrollRun,
 } from '@/api/payroll'
-import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { formatPeriod } from '@/composables/useFormat'
 
 const props = defineProps<{ runs: PayrollRun[] }>()
 const { t } = useI18n()
@@ -82,6 +83,22 @@ function attentionActionKey(scope: PayrollJmhzOrdinaryEvidenceScope): string {
     : 'payroll.submissions.overview.jmhz_evidence_attention_employment_action'
 }
 
+async function loadRun(run: PayrollRun) {
+  const id = revisionId(run)
+  if (id === null) return
+  states.value[id] = { loading: true, error: '', scopes: [] }
+  try {
+    states.value[id].scopes = (await payrollApi.jmhzOrdinaryEvidence(id)).scopes
+  } catch (exception) {
+    states.value[id].error = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.jmhz_evidence_load_failed'),
+    )
+  } finally {
+    states.value[id].loading = false
+  }
+}
+
 async function load() {
   const next: Record<number, EvidenceState> = {}
   for (const run of props.runs) {
@@ -89,20 +106,7 @@ async function load() {
     if (id !== null) next[id] = { loading: true, error: '', scopes: [] }
   }
   states.value = next
-  await Promise.all(props.runs.map(async run => {
-    const id = revisionId(run)
-    if (id === null) return
-    try {
-      states.value[id].scopes = (await payrollApi.jmhzOrdinaryEvidence(id)).scopes
-    } catch (exception) {
-      states.value[id].error = apiErrorMessage(
-        exception,
-        t('payroll.submissions.overview.jmhz_evidence_load_failed'),
-      )
-    } finally {
-      states.value[id].loading = false
-    }
-  }))
+  await Promise.all(props.runs.map(loadRun))
 }
 
 const hasRuns = computed(() => props.runs.length > 0)
@@ -134,7 +138,7 @@ watch(() => props.runs, load, { immediate: true, deep: true })
       >
         <h3 class="font-semibold text-neutral-900">
           {{ t('payroll.submissions.overview.jmhz_evidence_card', {
-            period: run.period_start.slice(0, 7),
+            period: formatPeriod(run.period_start.slice(0, 7)),
             revision: run.revision_no,
           }) }}
         </h3>
@@ -195,13 +199,30 @@ watch(() => props.runs, load, { immediate: true, deep: true })
             {{ t('payroll.submissions.overview.jmhz_evidence_all_resolved') }}
           </p>
         </template>
-        <p
+        <!--
+          Chyba načtení bez tlačítka byla slepá ulička: karta se načítá sama
+          při otevření záložky, takže po výpadku neexistoval žádný způsob, jak
+          si ji vyžádat znovu — kromě reloadu celé stránky.
+        -->
+        <div
           v-if="state(run)?.error"
           class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
           role="alert"
         >
-          {{ state(run)?.error }}
-        </p>
+          <p>{{ state(run)?.error }}</p>
+          <button
+            type="button"
+            :class="[btnOutline('danger'), 'mt-3']"
+            :disabled="state(run)?.loading"
+            :data-test="`jmhz-ordinary-evidence-retry-${run.revision_id}`"
+            @click="loadRun(run)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.cycle" />
+            </svg>
+            {{ t('common.retry') }}
+          </button>
+        </div>
       </article>
     </div>
   </section>

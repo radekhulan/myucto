@@ -229,6 +229,14 @@ onMounted(load)
 
     <div class="mt-4">
       <ActionBar :actions="actions" />
+      <!--
+        Bez práva na export zmizí obě tlačítka a zůstala prázdná lišta nad
+        tabulkou plnou čísel. Účetní z toho četla, že XML nejde sestavit —
+        přitom jen nesmí stahovat.
+      -->
+      <p v-if="!canExport" class="text-sm text-neutral-500" data-test="tax-statement-read-only">
+        {{ t('payroll.tax_statement.export_not_allowed') }}
+      </p>
     </div>
 
     <p class="mt-3 text-xs text-neutral-500">{{ t('payroll.tax_statement.deadlines') }}</p>

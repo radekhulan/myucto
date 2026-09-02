@@ -43,7 +43,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
-import { formatDate } from '@/composables/useFormat'
+import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import { appIsoDate } from '@/utils/date'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
@@ -157,7 +157,7 @@ const approvedRunOptions = computed(() =>
     .map(run => ({
       value: run.revision_id as number,
       label: t('payroll.health_notifications.prepare.run_option', {
-        period: run.period_start.slice(0, 7),
+        period: formatPeriod(run.period_start.slice(0, 7)),
         revision: run.revision_no,
       }),
     })),
@@ -919,10 +919,13 @@ onMounted(() => {
                 <td v-if="tbl.isVisible('duty')" class="px-4 py-3 text-neutral-700">
                   {{ t(`payroll.health_notifications.kind.${item.kind}`) }}
                 </td>
+                <!-- Nadpis buňky je NÁZEV pojišťovny, kód pod ním. „111"
+                     účetní s pojišťovnou nespojí; obráceně to bylo jen na
+                     mobilu, kde se druhý řádek vůbec neukazoval. -->
                 <td v-if="tbl.isVisible('insurer')" class="px-4 py-3 text-neutral-700">
-                  {{ item.insurer_code }}
+                  {{ item.channel.insurer_name ?? item.insurer_code }}
                   <span v-if="item.channel.insurer_name" class="block text-xs text-neutral-500">
-                    {{ item.channel.insurer_name }}
+                    {{ item.insurer_code }}
                   </span>
                 </td>
                 <td v-if="tbl.isVisible('occurred_on')" class="px-4 py-3 text-neutral-700">
@@ -999,7 +1002,7 @@ onMounted(() => {
                 <dt class="text-neutral-500">
                   {{ t('payroll.health_notifications.table.insurer') }}
                 </dt>
-                <dd class="mt-0.5 text-neutral-800">{{ item.insurer_code }}</dd>
+                <dd class="mt-0.5 text-neutral-800">{{ item.channel.insurer_name ?? item.insurer_code }}</dd>
               </div>
               <div>
                 <dt class="text-neutral-500">
@@ -1125,7 +1128,7 @@ onMounted(() => {
           </div>
           <div>
             <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.period') }}</dt>
-            <dd class="mt-0.5 font-medium text-neutral-900">{{ prepared.period }}</dd>
+            <dd class="mt-0.5 font-medium text-neutral-900">{{ formatPeriod(prepared.period) }}</dd>
           </div>
           <div>
             <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.due_on') }}</dt>

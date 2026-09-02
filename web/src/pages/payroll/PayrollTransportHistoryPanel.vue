@@ -48,6 +48,10 @@ import { useAuthStore } from '@/stores/auth'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+// Ledger vrací syrové ISO tvary („2026-07-31", „2026-07-31 09:12:04"). Účetní
+// čte přehled vedle dokladů, kde je všude „31.07.2026" — dvojí tvar na jedné
+// stránce se čte jako dvě různá data.
+import { formatDate, formatDateTime, formatPeriod } from '@/composables/useFormat'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -76,6 +80,8 @@ const success = ref('')
 const pollingId = ref<number | null>(null)
 const closingId = ref<number | null>(null)
 const copiedId = ref<number | null>(null)
+/** Pokus, u kterého schránka odmítla zápis — tlačítko o tom musí říct nahlas. */
+const copyFailedId = ref<number | null>(null)
 /** Podání, u kterého uživatel právě potvrzuje storno. Storno je nevratné. */
 const cancellingId = ref<number | null>(null)
 const cancelPendingId = ref<number | null>(null)
@@ -277,10 +283,10 @@ const correctionPreparationOptions = computed(() => correctionPreparations.value
   value: preparation.id,
   label: t('payroll.submissions.transport.correction.preparation_option', {
     revision: preparation.revision_no,
-    created: preparation.created_at,
+    created: formatDateTime(preparation.created_at),
   }),
   secondary: t('payroll.submissions.transport.correction.preparation_period', {
-    period: preparation.period_start,
+    period: formatPeriod(preparation.period_start.slice(0, 7)),
   }),
 })))
 
@@ -430,8 +436,8 @@ function periodLabel(group: AttemptGroup): string {
     return t('payroll.submissions.transport.group.period_unknown')
   }
   return t('payroll.submissions.transport.group.period', {
-    start: group.periodStart,
-    end: group.periodEnd,
+    start: formatDate(group.periodStart),
+    end: formatDate(group.periodEnd),
   })
 }
 
@@ -452,12 +458,17 @@ function errorLocation(error: PayrollJmhzProtocolError): string[] {
 async function copyCorrelation(attempt: PayrollJmhzTransportAttempt) {
   const value = attempt.correlation_reference
   if (!value) return
+  copyFailedId.value = null
   try {
     await navigator.clipboard.writeText(value)
     copiedId.value = attempt.id
   } catch {
-    // Schránka může být zakázaná politikou prohlížeče; text je vidět i tak.
+    // Schránka může být zakázaná politikou prohlížeče. Tlačítko, po kterém se
+    // mlčky nic nestane, vypadá jako rozbitá aplikace — a uživatel pak vloží
+    // do dotazu na ČSSZ to, co měl ve schránce předtím. Proto se řekne nahlas,
+    // že se nezkopírovalo a že jde text označit ručně.
     copiedId.value = null
+    copyFailedId.value = attempt.id
   }
 }
 
@@ -783,8 +794,8 @@ async function confirmCancel(submissionId: number) {
 
 function readyPeriodLabel(submission: PayrollJmhzReadySubmission): string {
   return t('payroll.submissions.transport.group.period', {
-    start: submission.period_start,
-    end: submission.period_end,
+    start: formatDate(submission.period_start),
+    end: formatDate(submission.period_end),
   })
 }
 
@@ -1549,7 +1560,7 @@ onMounted(loadVariableSymbols)
                   </span>
                   <span class="text-xs text-neutral-500">
                     {{ attempt.sent_at
-                      ? t('payroll.submissions.transport.sent_at', { at: attempt.sent_at })
+                      ? t('payroll.submissions.transport.sent_at', { at: formatDateTime(attempt.sent_at) })
                       : t('payroll.submissions.transport.not_sent_yet') }}
                   </span>
                 </div>
@@ -1627,7 +1638,7 @@ onMounted(loadVariableSymbols)
                   <li v-if="attempt.status === 'awaiting_protocol'">
                     {{ attempt.next_retry_at
                       ? t('payroll.submissions.transport.automation.next_poll', {
-                        at: attempt.next_retry_at,
+                        at: formatDateTime(attempt.next_retry_at),
                       })
                       : t('payroll.submissions.transport.automation.next_poll_unknown') }}
                   </li>
@@ -1637,13 +1648,13 @@ onMounted(loadVariableSymbols)
                     }) }}
                     <template v-if="attempt.last_polled_at">
                       {{ t('payroll.submissions.transport.automation.last_polled', {
-                        at: attempt.last_polled_at,
+                        at: formatDateTime(attempt.last_polled_at),
                       }) }}
                     </template>
                   </li>
                   <li v-if="attempt.closed_at" :data-test="`transport-closed-${attempt.id}`">
                     {{ t('payroll.submissions.transport.automation.closed', {
-                      at: attempt.closed_at,
+                      at: formatDateTime(attempt.closed_at),
                     }) }}
                   </li>
                   <li v-else-if="attempt.status === 'completed'">
@@ -1709,6 +1720,14 @@ onMounted(loadVariableSymbols)
                         ? t('payroll.submissions.transport.copied')
                         : t('payroll.submissions.transport.copy') }}
                     </button>
+                    <span
+                      v-if="copyFailedId === attempt.id"
+                      class="text-xs text-warning-700"
+                      :data-test="`transport-copy-failed-${attempt.id}`"
+                      role="status"
+                    >
+                      {{ t('payroll.submissions.transport.copy_failed') }}
+                    </span>
                   </dd>
                 </div>
                 <div>
@@ -1723,7 +1742,7 @@ onMounted(loadVariableSymbols)
                   <dt class="text-xs uppercase tracking-wide text-neutral-500">
                     {{ t('payroll.submissions.transport.completed_at') }}
                   </dt>
-                  <dd class="mt-0.5 text-neutral-800">{{ attempt.completed_at ?? '—' }}</dd>
+                  <dd class="mt-0.5 text-neutral-800">{{ formatDateTime(attempt.completed_at) }}</dd>
                 </div>
               </dl>
 
@@ -1898,7 +1917,7 @@ onMounted(loadVariableSymbols)
                   {{ t('payroll.submissions.transport.imported.protocol_dated_at') }}
                 </dt>
                 <dd class="mt-0.5 text-neutral-800">
-                  {{ entry.protocol.protocol_dated_at ?? '—' }}
+                  {{ formatDateTime(entry.protocol.protocol_dated_at) }}
                 </dd>
               </div>
               <div>
@@ -1906,7 +1925,7 @@ onMounted(loadVariableSymbols)
                   {{ t('payroll.submissions.transport.imported.submitted_at') }}
                 </dt>
                 <dd class="mt-0.5 text-neutral-800">
-                  {{ entry.protocol.submitted_at ?? '—' }}
+                  {{ formatDateTime(entry.protocol.submitted_at) }}
                 </dd>
               </div>
               <div>

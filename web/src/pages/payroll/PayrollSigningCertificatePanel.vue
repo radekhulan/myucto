@@ -25,6 +25,8 @@ import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+// Platnost certifikátu čte účetní vedle termínů podání — stejný tvar data.
+import { formatDate, formatDateTime } from '@/composables/useFormat'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -90,19 +92,19 @@ const certificateOptions = computed(() => certificates.value.map(certificate => 
 function optionSecondary(certificate: PayrollSigningCertificate): string {
   if (certificate.expired) {
     return t('payroll.submissions.signing.picker.option_expired', {
-      date: certificate.valid_to ?? '',
+      date: formatDate(certificate.valid_to),
     })
   }
   if (certificate.not_yet_valid) {
     return t('payroll.submissions.signing.picker.option_not_yet_valid', {
-      date: certificate.valid_from ?? '',
+      date: formatDate(certificate.valid_from),
     })
   }
   if (!certificate.enabled_for_supplier) {
     return t('payroll.submissions.signing.picker.option_not_enabled')
   }
   return t('payroll.submissions.signing.picker.option_valid_until', {
-    date: certificate.valid_to ?? '',
+    date: formatDate(certificate.valid_to),
   })
 }
 
@@ -121,14 +123,14 @@ function certificateBadges(certificate: PayrollSigningCertificate): Badge[] {
   if (certificate.expired) {
     badges.push({
       key: 'expired',
-      label: t('payroll.submissions.signing.badge.expired', { date: certificate.valid_to ?? '' }),
+      label: t('payroll.submissions.signing.badge.expired', { date: formatDate(certificate.valid_to) }),
       tone: 'bg-danger-100 text-danger-700',
     })
   } else if (certificate.not_yet_valid) {
     badges.push({
       key: 'not_yet_valid',
       label: t('payroll.submissions.signing.badge.not_yet_valid', {
-        date: certificate.valid_from ?? '',
+        date: formatDate(certificate.valid_from),
       }),
       tone: 'bg-warning-100 text-warning-800',
     })
@@ -478,7 +480,7 @@ onMounted(load)
             }) }}
           </p>
           <p v-if="profile.updated_at" class="text-xs text-neutral-500">
-            {{ t('payroll.submissions.signing.current.updated_at', { at: profile.updated_at }) }}
+            {{ t('payroll.submissions.signing.current.updated_at', { at: formatDateTime(profile.updated_at) }) }}
           </p>
         </div>
       </section>
@@ -558,7 +560,7 @@ onMounted(load)
                   {{ t('payroll.submissions.signing.certificate.validity') }}
                 </dt>
                 <dd class="mt-0.5 text-neutral-800">
-                  {{ selectedCertificate.valid_from ?? '—' }} — {{ selectedCertificate.valid_to ?? '—' }}
+                  {{ formatDate(selectedCertificate.valid_from) }} — {{ formatDate(selectedCertificate.valid_to) }}
                 </dd>
               </div>
               <div>

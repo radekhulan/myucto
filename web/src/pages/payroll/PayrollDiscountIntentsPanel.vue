@@ -33,6 +33,8 @@ import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchS
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { formatDate } from '@/composables/useFormat'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -223,6 +225,19 @@ async function confirmEnd(item: PayrollDiscountIntent): Promise<void> {
   busyId.value = null
 }
 
+/**
+ * Proč je akce zhasnutá — podle SKUTEČNÉ příčiny.
+ *
+ * Dřív měla každá akce jedinou pevnou větu („vyplňte datum přijetí"), a tu
+ * ukazovala i čtenáři bez práva zápisu. Ten pak datum vyplnil, tlačítko
+ * zůstalo zhasnuté a hláška pod ním dál tvrdila totéž — obrazovka lhala
+ * o tom, co se po uživateli chce.
+ */
+function blockedReason(missingFieldKey: string, missing: boolean): string | undefined {
+  if (!canWrite.value) return t('payroll.discountIntents.hints.readOnly')
+  return missing && missingFieldKey !== '' ? t(missingFieldKey) : undefined
+}
+
 function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
   const busy = busyId.value === item.id
   return [
@@ -244,6 +259,7 @@ function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
       variant: 'primary',
       loading: busy,
       disabled: !canWrite,
+      disabledReason: blockedReason('', false),
       show: item.status === 'draft',
       run: () => void prepare(item, 'start'),
     },
@@ -255,7 +271,10 @@ function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
       variant: 'success',
       loading: busy,
       disabled: !canWrite || !(acceptedOn.value[item.id] ?? ''),
-      disabledReason: t('payroll.discountIntents.hints.acceptedOnRequired'),
+      disabledReason: blockedReason(
+        'payroll.discountIntents.hints.acceptedOnRequired',
+        !(acceptedOn.value[item.id] ?? ''),
+      ),
       show: item.status === 'submitted',
       run: () => void accept(item),
     },
@@ -267,7 +286,10 @@ function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
       variant: 'danger',
       loading: busy,
       disabled: !canWrite || !(rejectionReason.value[item.id] ?? ''),
-      disabledReason: t('payroll.discountIntents.hints.rejectionReasonRequired'),
+      disabledReason: blockedReason(
+        'payroll.discountIntents.hints.rejectionReasonRequired',
+        !(rejectionReason.value[item.id] ?? ''),
+      ),
       show: item.status === 'submitted',
       run: () => void reject(item),
     },
@@ -279,7 +301,10 @@ function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
       variant: 'neutral',
       loading: busy,
       disabled: !canWrite || !(endOn.value[item.id] ?? ''),
-      disabledReason: t('payroll.discountIntents.hints.endOnRequired'),
+      disabledReason: blockedReason(
+        'payroll.discountIntents.hints.endOnRequired',
+        !(endOn.value[item.id] ?? ''),
+      ),
       show: item.status === 'accepted' && item.intent_to === null,
       run: () => void requestEnd(item),
     },
@@ -291,6 +316,7 @@ function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
       variant: 'primary',
       loading: busy,
       disabled: !canWrite,
+      disabledReason: blockedReason('', false),
       show: item.status === 'accepted' && item.intent_to !== null,
       run: () => void prepare(item, 'end'),
     },
@@ -302,7 +328,10 @@ function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
       variant: 'success',
       loading: busy,
       disabled: !canWrite || !(acceptedOn.value[item.id] ?? ''),
-      disabledReason: t('payroll.discountIntents.hints.acceptedOnRequired'),
+      disabledReason: blockedReason(
+        'payroll.discountIntents.hints.acceptedOnRequired',
+        !(acceptedOn.value[item.id] ?? ''),
+      ),
       show: item.status === 'accepted' && item.intent_to !== null,
       run: () => void confirmEnd(item),
     },
@@ -314,6 +343,7 @@ function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
       variant: 'danger',
       loading: busy,
       disabled: !canWrite,
+      disabledReason: blockedReason('', false),
       show: item.status === 'submitted' || item.status === 'accepted',
       run: () => void prepare(item, 'cancellation'),
     },
@@ -375,7 +405,7 @@ onMounted(async () => {
       {{ t('payroll.discountIntents.transitionalWarning') }}
       <ul class="mt-2 list-disc space-y-1 pl-5">
         <li v-for="item in transitionalItems" :key="item.id">
-          {{ item.employee_name }} — {{ item.intent_from }}
+          {{ item.employee_name }} — {{ formatDate(item.intent_from) }}
         </li>
       </ul>
     </div>
@@ -445,7 +475,9 @@ onMounted(async () => {
           variant: 'primary',
           loading: creating,
           disabled: !canCreate,
-          disabledReason: t('payroll.discountIntents.hints.createRequirements'),
+          disabledReason: canWrite
+            ? t('payroll.discountIntents.hints.createRequirements')
+            : t('payroll.discountIntents.hints.readOnly'),
           run: () => void create(),
         }]"
       />
@@ -485,19 +517,19 @@ onMounted(async () => {
         <dl class="mt-3 grid gap-2 sm:grid-cols-4">
           <div>
             <dt class="text-xs text-neutral-500">{{ t('payroll.discountIntents.intentFrom') }}</dt>
-            <dd class="font-medium">{{ item.intent_from }}</dd>
+            <dd class="font-medium">{{ formatDate(item.intent_from) }}</dd>
           </div>
           <div>
             <dt class="text-xs text-neutral-500">{{ t('payroll.discountIntents.intentTo') }}</dt>
-            <dd class="font-medium">{{ item.intent_to ?? '—' }}</dd>
+            <dd class="font-medium">{{ formatDate(item.intent_to) }}</dd>
           </div>
           <div>
             <dt class="text-xs text-neutral-500">{{ t('payroll.discountIntents.acceptedOn') }}</dt>
-            <dd class="font-medium">{{ item.accepted_on ?? '—' }}</dd>
+            <dd class="font-medium">{{ formatDate(item.accepted_on) }}</dd>
           </div>
           <div>
             <dt class="text-xs text-neutral-500">{{ t('payroll.discountIntents.dueOn') }}</dt>
-            <dd class="font-medium">{{ item.notification_due_on }}</dd>
+            <dd class="font-medium">{{ formatDate(item.notification_due_on) }}</dd>
           </div>
         </dl>
 
@@ -554,11 +586,30 @@ onMounted(async () => {
 
         <ActionBar class="mt-3" :actions="actionsFor(item)" />
 
-        <pre
-          v-if="previewXml && previewXml.id === item.id"
-          class="mt-3 max-h-72 overflow-auto rounded-lg bg-neutral-900 p-3 text-xs text-neutral-100"
-          :data-test="`discount-intent-preview-${item.id}`"
-        >{{ previewXml.xml }}</pre>
+        <!--
+          Náhled musí jít zavřít. Dokud tu zavírací tlačítko nebylo, zůstalo
+          rozbalené XML na obrazovce až do přenačtení seznamu a překrývalo
+          zbytek karty — přitom je to jen kontrolní pohled, ne pracovní krok.
+        -->
+        <div v-if="previewXml && previewXml.id === item.id" class="mt-3">
+          <div class="flex justify-end">
+            <button
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              :data-test="`discount-intent-preview-close-${item.id}`"
+              @click="previewXml = null"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.x" />
+              </svg>
+              {{ t('common.close') }}
+            </button>
+          </div>
+          <pre
+            class="mt-2 max-h-72 overflow-auto rounded-lg bg-neutral-900 p-3 text-xs text-neutral-100"
+            :data-test="`discount-intent-preview-${item.id}`"
+          >{{ previewXml.xml }}</pre>
+        </div>
       </li>
     </ul>
   </div>

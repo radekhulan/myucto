@@ -191,8 +191,11 @@ describe('PayrollSigningCertificatePanel', () => {
     expect(warnings.text()).toContain('Není vyplněné sériové číslo.')
     expect(warnings.findAll('p')[0]!.classes().join(' ')).toContain('danger')
     expect(warnings.findAll('p')[1]!.classes().join(' ')).toContain('warning')
-    expect(wrapper.get('[data-test="signing-certificate-detail"]').text())
-      .toContain('payroll.submissions.signing.badge.expired')
+    const detail = wrapper.get('[data-test="signing-certificate-detail"]')
+    expect(detail.text()).toContain('payroll.submissions.signing.badge.expired')
+    // Platnost čte účetní vedle termínů podání — stejný tvar data, ne ISO.
+    expect(detail.text()).toContain('01. 02. 2026')
+    expect(detail.text()).not.toContain('2026-02-01 00:00:00')
   })
 
   it('přepnutí prostředí načte volbu znovu — testovací certifikát bývá jiný', async () => {
