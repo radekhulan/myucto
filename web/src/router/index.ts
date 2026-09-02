@@ -371,9 +371,18 @@ export async function authorizationGuard(
     await auth.refresh()
     if (!auth.isAuthenticated) {
       recordLoginBounce()
-      return auth.domainContext?.locked && isClientDomainAuthenticatedPath(to.fullPath)
-        ? { name: 'login', query: { return_to: to.fullPath } }
-        : { name: 'login' }
+      if (auth.domainContext?.locked && isClientDomainAuthenticatedPath(to.fullPath)) {
+        return { name: 'login', query: { return_to: to.fullPath } }
+      }
+      /*
+       * Adresa, na kterou uživatel mířil, se nese do přihlášení.
+       *
+       * Bez toho skončil každý, kdo dostal odkaz do aplikace bez živé relace,
+       * na přehledu a hledanou stránku si musel najít znovu. Přihlášení ho na
+       * ni po ověření vrátí; kontrolu, že jde o vlastní cestu, dělá `Login`,
+       * protože ta hodnota může přijít i z ručně upravené adresy.
+       */
+      return { name: 'login', query: { return_to: to.fullPath } }
     }
   }
 
