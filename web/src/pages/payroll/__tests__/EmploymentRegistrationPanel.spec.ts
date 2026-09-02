@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   approveEvent: vi.fn(),
   a1Profile: vi.fn(),
   saveA1Profile: vi.fn(),
+  checkA1Profile: vi.fn(),
   jmhzOptions: vi.fn(),
   searchMunicipalities: vi.fn(),
   searchCzIsco: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('@/api/payroll', () => ({
     approveEmploymentRegistrationEvent: m.approveEvent,
     employmentRegistrationA1Profile: m.a1Profile,
     saveEmploymentRegistrationA1Profile: m.saveA1Profile,
+    checkEmploymentRegistrationA1Profile: m.checkA1Profile,
     employmentJmhzEvidenceOptions: m.jmhzOptions,
     searchJmhzMunicipalities: m.searchMunicipalities,
     searchCzIsco: m.searchCzIsco,
@@ -1032,5 +1034,140 @@ describe('EmploymentRegistrationPanel', () => {
       setItem.mockRestore()
       getItem.mockRestore()
     }
+  })
+
+  /**
+   * Jádro celé věci: uložení projde i s prázdným povinným polem. Formulář má
+   * přes stovku polí a část se dopisuje na kartě osoby — odmítnutý zápis by
+   * hodinu práce nechal jen v prohlížeči.
+   */
+  it('stores an incomplete profile and marks the offending fields red', async () => {
+    m.saveA1Profile.mockResolvedValue({
+      ...a1Suggested(),
+      row_version: 1,
+      reference_hash: 'a'.repeat(64),
+      created_at: '2026-08-14 10:00:00',
+      created: true,
+      status: 'draft',
+      problems: [
+        {
+          field: 'facts.highest_education_code',
+          code: 'registration_regzec_a1_required_field_missing',
+          message: 'Pro REGZEC A1 chybí nejvyšší dosažené vzdělání.',
+        },
+      ],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveA1Profile).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="registration-a1-error"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="registration-a1-saved"]').text())
+      .toContain('saved_draft')
+    expect(wrapper.get('[data-test="registration-a1-problems"]').text())
+      .toContain('facts.highest_education_code')
+    expect(wrapper.get('[data-test="a1-facts-highest-education-code"]').classes())
+      .toContain('border-danger-500')
+  })
+
+  /** Kontrola označí pole, ale nic neuloží. */
+  it('checks the profile without saving it', async () => {
+    m.checkA1Profile.mockResolvedValue({
+      complete: false,
+      problems: [
+        {
+          field: 'employment.position_name',
+          code: 'registration_regzec_a1_required_field_missing',
+          message: 'Pro REGZEC A1 chybí název pracovní pozice.',
+        },
+      ],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-check"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveA1Profile).not.toHaveBeenCalled()
+    expect(m.checkA1Profile).toHaveBeenCalledWith(5, expect.objectContaining({
+      row_version: 0,
+    }))
+    expect(wrapper.get('[data-test="registration-a1-problems"]').text())
+      .toContain('employment.position_name')
+    expect(wrapper.get('[data-test="a1-employment-position-name"]').classes())
+      .toContain('border-danger-500')
+    expect(wrapper.get('[data-test="a1-permanent-city"]').classes())
+      .not.toContain('border-danger-500')
+  })
+
+  /**
+   * Žlutý seznam „Co aplikace o osobě nevede" musí navigovat: u údajů, které
+   * se doplňují jinde, odkazem, u zbytku aspoň značkou, že se zadávají tady.
+   */
+  it('links every gap to the place where it is entered', async () => {
+    m.a1Profile.mockResolvedValue(a1View({
+      missing: [
+        {
+          field: 'identity.citizenship_country_code',
+          message: 'Osoba nemá k rozhodnému dni státní občanství.',
+        },
+        {
+          field: 'permanent_address.city',
+          message: 'Osoba nemá evidovanou adresu trvalého pobytu.',
+        },
+        {
+          field: 'health_insurance_code',
+          message: 'Zdravotní pojišťovna osoby není ověřená.',
+        },
+        {
+          field: 'permanent_address.house_number',
+          message: 'Aplikace vede adresu jedním řádkem včetně čísla.',
+        },
+      ],
+    }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    const target = (field: string) => JSON.parse(
+      wrapper.get(`[data-test="registration-a1-gap-link-${field}"]`).attributes('data-to') ?? '{}',
+    )
+    expect(target('identity.citizenship_country_code')).toEqual({
+      name: 'payroll-people',
+      query: { employment: '5', panel: 'registration_identity', person: '9' },
+    })
+    expect(target('permanent_address.city').query.panel).toBe('addresses')
+    expect(target('health_insurance_code').query.panel).toBe('statutory_evidence')
+    // Číslo popisné aplikace nevede vůbec — odkaz jinam by vedl na prázdno.
+    expect(wrapper.find(
+      '[data-test="registration-a1-gap-link-permanent_address.house_number"]',
+    ).exists()).toBe(false)
+    expect(wrapper.find(
+      '[data-test="registration-a1-gap-here-permanent_address.house_number"]',
+    ).exists()).toBe(true)
+  })
+
+  /** „Adresa pobytu v ČR" má stát předvyplněný, trvalý pobyt naopak ne. */
+  it('prefills Czechia only for the Czech residence address', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="a1-czech-residence-toggle"]').setValue(true)
+    await wrapper.get('[data-test="a1-contact-toggle"]').setValue(true)
+    await flushPromises()
+
+    const country = (test: string) => wrapper
+      .get(`[data-test="${test}"]`)
+      .get('input[role="combobox"]')
+      .element as HTMLInputElement
+    expect(country('a1-czech-residence-country_code').value).toContain('Česko')
+    expect(country('a1-contact-country_code').value).toBe('')
+    expect(wrapper.get('[data-test="a1-czech-residence-hint"]').text())
+      .toContain('czech_residence_hint')
+    expect(wrapper.get('[data-test="a1-contact-hint"]').text())
+      .toContain('contact_address_hint')
   })
 })

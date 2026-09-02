@@ -104,6 +104,23 @@ function mountPanel(canWrite = true) {
   })
 }
 
+/** ActionBar, jehož tlačítka opravdu volají `run` — jinak se editor neotevře. */
+function mountWithActions() {
+  return mount(PayrollPersonDependantsPanel, {
+    props: { personId: 21, canWrite: true },
+    global: {
+      stubs: {
+        SearchableSelect: true,
+        ActionBar: {
+          props: ['actions'],
+          template: '<div><button v-for="a in actions" :key="a.key"'
+            + ' :data-test="a.key" type="button" @click="a.run()" /></div>',
+        },
+      },
+    },
+  })
+}
+
 describe('PayrollPersonDependantsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -176,6 +193,42 @@ describe('PayrollPersonDependantsPanel', () => {
     expect(mocks.createPersonDependantClaim).toHaveBeenCalledWith(21, 7, expect.objectContaining({
       evidence_status: 'verified',
       evidence_reference: null,
+    }))
+  })
+
+  it('u nové vyživované osoby předvyplní „vyživovaná od" datem narození', async () => {
+    mocks.createPersonDependant.mockResolvedValue(response())
+    const wrapper = mountWithActions()
+    await flushPromises()
+    await wrapper.find('[data-test="add-dependant"]').trigger('click')
+
+    const dates = wrapper.findAll('[data-test="dependant-editor"] input[type="date"]')
+    await dates[0].setValue('2020-03-14')
+    await wrapper.find('[data-test="dependant-full-name"]').setValue('Adam Testovací')
+    await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.createPersonDependant).toHaveBeenCalledWith(21, expect.objectContaining({
+      birth_date: '2020-03-14',
+      existence_from: '2020-03-14',
+    }))
+  })
+
+  it('předvyplněné „vyživovaná od" nepřebije to, co uživatel zadal sám', async () => {
+    mocks.createPersonDependant.mockResolvedValue(response())
+    const wrapper = mountWithActions()
+    await flushPromises()
+    await wrapper.find('[data-test="add-dependant"]').trigger('click')
+
+    const dates = wrapper.findAll('[data-test="dependant-editor"] input[type="date"]')
+    await dates[1].setValue('2024-09-01')
+    await dates[0].setValue('2020-03-14')
+    await wrapper.find('[data-test="dependant-full-name"]').setValue('Adam Testovací')
+    await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.createPersonDependant).toHaveBeenCalledWith(21, expect.objectContaining({
+      existence_from: '2024-09-01',
     }))
   })
 

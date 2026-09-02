@@ -708,8 +708,11 @@ async function transition(target: PayrollEmploymentStatus) {
     })
     emit('updated', updated)
     toast.success(t('payroll.people.transition_saved'))
-  } catch {
-    toast.error(t('payroll.people.mutation_failed'))
+  } catch (error) {
+    // Server jmenuje překážku („ukončení nesmí předcházet nástupu", „období je
+    // už zúčtované"). Obecné „nepovedlo se" ji zakrylo a uživatel neměl podle
+    // čeho jednat — zkoušel totéž tlačítko znovu se stejným výsledkem.
+    toast.error(apiErrorMessage(error, t('payroll.people.mutation_failed')))
   } finally {
     busy.value = false
   }
@@ -724,8 +727,8 @@ async function setChecklist(itemKey: string, rowVersion: number, status: Payroll
       status,
     })
     emit('updated', updated)
-  } catch {
-    toast.error(t('payroll.people.mutation_failed'))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.mutation_failed')))
   } finally {
     busy.value = false
   }

@@ -586,6 +586,46 @@ describe('Roční zúčtování', () => {
     )
   })
 
+  /**
+   * Zašedlé „Provést" musí říct TÝŽ důvod, který ho vypnul. Chybějící
+   * oprávnění hlásilo „zaměstnanec o zúčtování nepožádal" — podklad, který
+   * účetní marně hledala.
+   */
+  it('bez práva schvalovat nehlásí chybějící žádost, ale chybějící oprávnění', async () => {
+    m.canWrite = false
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    const settle = wrapper.get('[data-action="settle"]')
+    expect(settle.attributes('disabled')).toBeDefined()
+    expect(settle.attributes('data-reason'))
+      .toBe('payroll.annual_settlement.settle_read_only')
+
+    expect(wrapper.get('[data-test="annual-settlement-save-request-blocked"]').text())
+      .toBe('payroll.annual_settlement.save_request_read_only')
+  })
+
+  /**
+   * `performed === false` bez jediné překážky nechávalo tlačítko zašedlé úplně
+   * mlčky: `:disabled` na `performed` koukalo, věta pod ním ne.
+   */
+  it('náhled bez provedení a bez překážek dostane vlastní důvod, ne ticho', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      result: result({ performed: false, blockers: [] }),
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    const settle = wrapper.get('[data-action="settle"]')
+    expect(settle.attributes('disabled')).toBeDefined()
+    expect(settle.attributes('data-reason'))
+      .toBe('payroll.annual_settlement.settle_unavailable')
+  })
+
   it('read-only uživateli uzamkne celou evidenci jiné osoby uplatňující dítě', async () => {
     m.canWrite = false
     m.previewAnnualSettlement.mockResolvedValue(previewResponse({

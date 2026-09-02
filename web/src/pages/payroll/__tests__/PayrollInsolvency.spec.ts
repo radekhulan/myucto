@@ -172,6 +172,51 @@ describe('PayrollInsolvency', () => {
     )
   })
 
+  /*
+   * Uložit se u schváleného oddlužení zašedne, dokud nejsou pracovní vztah, účet
+   * správce a rozhodnutí pohromadě. Bez věty pod tlačítkem to byla mrtvá plocha:
+   * účetní neměla jak zjistit, KTERÝ z těch tří údajů chybí.
+   */
+  it('names the missing piece of the approved instruction under the disabled save', async () => {
+    m.insolvencyEvidence.mockResolvedValue(evidence({
+      insolvency_payment_instruction_id: null,
+      insolvency_decision_document_id: null,
+    }))
+    const wrapper = mount(PayrollInsolvency)
+    await flushPromises()
+
+    const save = wrapper.get('[data-test="insolvency-save"]')
+    expect(save.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="insolvency-save-blocked"]').text())
+      .toBe('payroll.insolvency.blocked.document')
+  })
+
+  /*
+   * Částka určená soudem je nepovinná — režim se stejně počítá ručně, takže
+   * zápis nesmí čekat na číslo, které účetní při zaevidování usnesení nemá.
+   */
+  it('saves the court-determined mode without an amount', async () => {
+    m.insolvencyEvidence.mockResolvedValue(evidence({
+      insolvency_mode: 'court_determined_amount',
+      insolvency_payment_instruction_id: null,
+      court_determined_amount_minor_units: null,
+    }))
+    const wrapper = mount(PayrollInsolvency)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="insolvency-court-amount"]').attributes('required'))
+      .toBeUndefined()
+    expect(wrapper.get('[data-test="insolvency-save"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-test="insolvency-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveInsolvencyEvidence).toHaveBeenCalledWith(
+      3,
+      '2026-06',
+      expect.objectContaining({ court_determined_amount_minor_units: null }),
+    )
+  })
+
   it('reloads evidence and options after a row-version conflict', async () => {
     m.saveInsolvencyEvidence.mockRejectedValueOnce({
       response: { data: { error: { code: 'row_version_conflict' } } },

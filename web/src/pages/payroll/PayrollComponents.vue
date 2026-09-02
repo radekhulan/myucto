@@ -727,28 +727,36 @@ async function editComponent(component: PayrollComponent) {
   componentEditorOpen.value = true
 }
 
+/**
+ * Které pole editor katalogu drží — klíč do `payroll.components.fields.*`.
+ *
+ * Editor má přes dvacet polí ve čtyřech sloupcích. Hláška „Zkontrolujte povinná
+ * pole" v něm znamenala projít je všechny očima; pojmenované pole je jedno
+ * hledání. Pořadí odpovídá tomu, co uživatel vyplňuje dřív.
+ */
+const componentMissingField = computed<string | null>(() => {
+  const form = componentForm.value
+  if (!form.code.trim()) return 'code'
+  if (!form.name.trim()) return 'name'
+  const limit = form.annual_limit === '' ? null : parsePayrollAmountToMinor(form.annual_limit)
+  if (form.annual_limit !== '' && (limit === null || limit <= 0)) return 'annual_limit'
+  // Osvobození bez uvedeného podkladu neprojde mzdovým během — ať to uživatel
+  // zjistí tady, ne až při uzávěrce měsíce.
+  if (form.tax_treatment === 'exempt' && form.exemption_basis === null) return 'exemption_basis'
+  // Podklad, který stojí na zmrazeném rozpadu koše, bez zařazení do koše nedává
+  // smysl — a backend by ho stejně odmítl.
+  if (['benefit_basket', 'periodic_benefit_limit'].includes(form.exemption_basis ?? '')
+    && form.exemption_basket === null) {
+    return 'exemption_basket'
+  }
+  return null
+})
+
 function componentPayload(): PayrollComponentPayload | null {
+  if (componentMissingField.value !== null) return null
   const limit = componentForm.value.annual_limit === ''
     ? null
     : parsePayrollAmountToMinor(componentForm.value.annual_limit)
-  // Osvobození bez uvedeného podkladu neprojde mzdovým během — ať to uživatel
-  // zjistí tady, ne až při uzávěrce měsíce.
-  const basisMissing = componentForm.value.tax_treatment === 'exempt'
-    && componentForm.value.exemption_basis === null
-  // Podklad, který stojí na zmrazeném rozpadu koše, bez zařazení do koše nedává
-  // smysl — a backend by ho stejně odmítl.
-  const basketMissing = ['benefit_basket', 'periodic_benefit_limit']
-    .includes(componentForm.value.exemption_basis ?? '')
-    && componentForm.value.exemption_basket === null
-  if (
-    !componentForm.value.code.trim()
-    || !componentForm.value.name.trim()
-    || componentForm.value.annual_limit !== '' && (limit === null || limit <= 0)
-    || basisMissing
-    || basketMissing
-  ) {
-    return null
-  }
   return {
     code: componentForm.value.code.trim().toUpperCase(),
     name: componentForm.value.name.trim(),
@@ -782,7 +790,12 @@ function componentPayload(): PayrollComponentPayload | null {
 async function saveComponent() {
   const payload = componentPayload()
   if (!payload) {
-    componentError.value = t('payroll.components.validation_failed')
+    const missing = componentMissingField.value
+    componentError.value = missing === null
+      ? t('payroll.components.validation_failed')
+      : t('payroll.components.validation_field', {
+        field: t(`payroll.components.fields.${missing}`),
+      })
     return
   }
   componentError.value = ''

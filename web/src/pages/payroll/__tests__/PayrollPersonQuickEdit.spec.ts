@@ -662,9 +662,40 @@ describe('PayrollPersonQuickEdit', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(mocks.savePersonQuickEdit).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-test="quick-edit-error"]').text())
-      .toContain('payroll.people.quick_edit.structured_history_required')
+    expect(mocks.savePersonQuickEdit).toHaveBeenCalledTimes(1)
+    const payload = mocks.savePersonQuickEdit.mock.calls[0][1]
+    expect(payload.profile.identity_history[0]).toEqual(expect.objectContaining({
+      id: 50,
+      full_name: 'Historické Víceslovné Jméno',
+      first_name: null,
+      last_name: null,
+    }))
+  })
+
+  it('uloží kartu i se starší verzí identity bez rozděleného jména', async () => {
+    mocks.personProfile.mockResolvedValueOnce({
+      ...profile(),
+      identity_history: [
+        {
+          ...profile().identity_history[0],
+          id: 50,
+          full_name: 'Historické Víceslovné Jméno',
+          first_name: null,
+          last_name: null,
+          effective_from: '2025-01-01',
+          effective_to: '2025-12-31',
+        },
+        profile().identity_history[0],
+      ],
+    })
+    const wrapper = await mountedEditor()
+
+    await wrapper.get('[data-test="phone"]').setValue('+420111222333')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.savePersonQuickEdit).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="quick-edit-error"]').exists()).toBe(false)
   })
 
   it('ponechá při chybě celý formulář beze změny a ukáže přesnou atomickou chybu inline', async () => {

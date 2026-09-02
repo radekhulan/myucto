@@ -373,7 +373,11 @@ describe('PayrollRetention', () => {
     await flushPromises()
 
     expect(m.placeHold).not.toHaveBeenCalled()
-    expect(m.toastError).toHaveBeenCalledWith('payroll.retention.hold_description_required')
+    // Hláška stojí U POLE, ne v toastu: ten se vykresloval nad modálem a po pár
+    // vteřinách zmizel, takže dialog jen mlčky zůstal otevřený.
+    expect(wrapper.get('[data-test="retention-hold-description-error"]').text())
+      .toBe('payroll.retention.hold_description_required')
+    expect(m.toastError).not.toHaveBeenCalled()
 
     await wrapper.get('[id$="-hold-description"]').setValue('Exekuce sp. zn. TEST-1')
     await wrapper.get('[data-test="retention-hold-save"]').trigger('click')

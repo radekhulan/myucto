@@ -234,8 +234,21 @@ const missingAverage = computed(() =>
   needsAverage.value && absenceForm.average_snapshot_id === null)
 const noAverageAvailable = computed(() =>
   missingAverage.value && averageOptions.value.length === 0)
+/*
+ * Spočítaný průměr čekající na schválení není totéž co žádný průměr.
+ *
+ * Nabídka bere jen schválené, takže hláška tvrdila „pro tento vztah není
+ * spočítaný žádný průměrný výdělek" i nad průměrem, který na Průměrech leží
+ * v ručním posouzení. Účetní ho pak počítala znovu a založila duplicitu místo
+ * toho, aby ten existující schválila.
+ */
+const unapprovedAverageWaiting = computed(() =>
+  noAverageAvailable.value && averages.value.some(item => item.status === 'manual_review'))
 const absenceBlockedReason = computed<string | null>(() => {
   if (!missingAverage.value) return null
+  if (unapprovedAverageWaiting.value) {
+    return t('payroll_absence.absences.average_awaiting_approval')
+  }
   return noAverageAvailable.value
     ? t('payroll_absence.absences.average_missing_for_relation')
     : t('payroll_absence.absences.average_required_hint')

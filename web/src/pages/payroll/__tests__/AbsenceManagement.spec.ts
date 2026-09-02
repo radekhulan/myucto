@@ -241,6 +241,34 @@ describe('AbsenceManagement', () => {
     expect(wrapper.text()).toContain('payroll_absence.averages.create')
   })
 
+  /*
+   * Nabídka bere jen schválené průměry, takže průměr čekající na schválení
+   * vypadal jako žádný. Hláška „není spočítaný žádný" pak účetní posílala
+   * počítat ho znovu — a založila duplicitu místo schválení toho, co už je.
+   */
+  it('rozliší průměr čekající na schválení od průměru, který neexistuje', async () => {
+    m.averages.mockResolvedValue([{
+      id: 8,
+      employment_id: 12,
+      applicable_year: 2026,
+      applicable_quarter: 2,
+      source_kind: 'actual',
+      average_hourly_minor: 50_000,
+      rationale: null,
+      support_status: 'manual_review',
+      status: 'manual_review',
+      row_version: 2,
+    }])
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="absence-create-blocked"]').text())
+      .toBe('payroll_absence.absences.average_awaiting_approval')
+    // Cesta na Průměry zůstává — právě tam se ten čekající průměr schvaluje.
+    expect(wrapper.find('[data-test="go-to-averages"]').exists()).toBe(true)
+  })
+
   it('asks for a pick when an average exists but none is selected', async () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()

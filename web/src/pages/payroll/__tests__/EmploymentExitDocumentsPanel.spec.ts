@@ -145,6 +145,27 @@ describe('EmploymentExitDocumentsPanel', () => {
     expect(wrapper.text()).not.toContain('payroll.people.exit_documents.generate')
   })
 
+  it('names the first missing field instead of only greying out Generate', async () => {
+    const wrapper = mount(EmploymentExitDocumentsPanel, {
+      props: { employment: employment(), canWrite: true },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-test="open-employment-certificate-form"]').trigger('click')
+    const reason = () => wrapper.get('[data-test="employment-certificate-block-reason"]').text()
+    expect(reason()).toBe('payroll.people.exit_documents.blocked.work_description')
+
+    const textareas = wrapper.findAll('textarea')
+    await textareas[0].setValue('Synthetic work')
+    expect(reason()).toBe('payroll.people.exit_documents.blocked.qualification')
+
+    await textareas[1].setValue('Synthetic qualification')
+    expect(reason()).toBe('payroll.people.exit_documents.blocked.exposure')
+
+    expect(wrapper.get('[data-test="generate-employment-certificate"]').attributes('disabled'))
+      .toBeDefined()
+  })
+
   it('submits complete legal evidence for the exact closed-ledger claim', async () => {
     const wrapper = mount(EmploymentExitDocumentsPanel, {
       props: { employment: employment(), canWrite: true },

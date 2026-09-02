@@ -139,4 +139,51 @@ describe('PayrollEnforcementCooperation', () => {
     expect(wrapper.find('[data-test="xmlzam-enqueue"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('payroll.enforcement_cooperation.recipient_missing')
   })
+
+  /*
+   * Zmrazená odpověď bez spárovaného příjemce byla slepá ulička — tlačítko
+   * k odeslání se nevykreslí a na obrazovce nezůstalo nic, podle čeho jednat.
+   */
+  it('says what to do when a frozen response has nowhere to be sent', async () => {
+    m.requestDetail.mockResolvedValue({ ...detail, recipient_match_status: 'missing', recipient: null })
+    const wrapper = mount(PayrollEnforcementCooperation)
+    await flushPromises()
+
+    await wrapper.get('[data-test="xmlzam-import"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="xmlzam-period"]').setValue('2026-07')
+    await wrapper.get('[data-test="xmlzam-add-period"]').trigger('click')
+    await wrapper.get('[data-test="xmlzam-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="xmlzam-freeze"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="xmlzam-dispatch-blocked"]').text())
+      .toContain('payroll.enforcement_cooperation.dispatch_blocked')
+  })
+
+  /*
+   * U osoby s víc exekucemi zhaslo tlačítko Náhled bez jediného slova: hlášky
+   * pod ním pokrývaly jen „žádný případ" a „chybí období".
+   */
+  it('explains the disabled preview when no case is picked', async () => {
+    m.casesPage.mockResolvedValue({
+      cases: [
+        { id: 67, employee_id: 3, full_name: 'Syntetická osoba', case_kind: 'enforcement', status: 'remit', effective_from: '2026-01-01', effective_to: null, evidence_complete: true, recipient_verified: true, row_version: 2, claim_count: 1, outstanding_minor_units: 10000, created_at: '', updated_at: '' },
+        { id: 68, employee_id: 3, full_name: 'Syntetická osoba', case_kind: 'enforcement', status: 'remit', effective_from: '2026-02-01', effective_to: null, evidence_complete: true, recipient_verified: true, row_version: 2, claim_count: 1, outstanding_minor_units: 20000, created_at: '', updated_at: '' },
+      ],
+      total: 2,
+      limit: 100,
+      offset: 0,
+    })
+    const wrapper = mount(PayrollEnforcementCooperation)
+    await flushPromises()
+
+    await wrapper.get('[data-test="xmlzam-import"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="xmlzam-preview"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="xmlzam-preview-blocked"]').text())
+      .toBe('payroll.enforcement_cooperation.case_required')
+  })
 })

@@ -1490,8 +1490,22 @@ onMounted(() => {
                 </p>
               </div>
             </div>
+            <!--
+              Odkaz „kde se to mění" musí být i tady. Na mobilu blokátor
+              zůstával bez cesty dál, takže účetní věděla, CO brání zápisu, ale
+              hledala předpis mzdy ručně — a to je přesně to místo, kde se
+              průchod měsícem zasekne.
+            -->
             <p v-for="blocker in row.blockers" :key="blocker" class="mt-2 text-xs text-warning-700">
               {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
+              <RouterLink
+                v-if="blocker === 'base_managed_elsewhere'"
+                :to="{ name: 'payroll-components', query: { employment: String(row.employment_id) } }"
+                class="underline decoration-dotted underline-offset-2 hover:text-warning-900"
+                :data-test="`quick-base-managed-link-mobile-${row.employment_id}`"
+              >
+                {{ t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') }}
+              </RouterLink>
             </p>
             <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label class="block">

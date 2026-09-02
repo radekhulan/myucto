@@ -1270,6 +1270,7 @@
       },
       "materialize_blocked": "Závazky vzniknou až ze schválené revize mzdového běhu. Nejdřív schvalte revizi za toto období v Mzdových bězích.",
       "materialize_blocked_unknown": "Nevíme, jestli je co připravit — mzdové běhy se pro toto období nenačetly. Zkuste načtení zopakovat.",
+      "materialize_blocked_link": "Otevřít mzdové běhy",
       "load_failed_hint": "Závazky za toto období se nenačetly, takže seznam níže může být neúplný nebo zastaralý. Zkuste to prosím znovu."
     },
     "posting_reconciliation": {
@@ -1432,7 +1433,9 @@
         "open_remediation": "Otevřít místo k opravě",
         "draft_inputs_approve_all": "Schválit vše",
         "draft_inputs_approved": "Schváleno {count} mzdových vstupů.",
-        "draft_inputs_approve_partial": "Schváleno {approved} vstupů, {failed} ne. První důvod: {reason}",
+        "draft_inputs_approve_partial": "Schváleno {approved} vstupů, {failed} ne. Důvody jsou vypsané u běhu.",
+        "draft_inputs_failed_title": "Tyhle vstupy dávka neschválila:",
+        "draft_inputs_failed_row": "{count}× {reason}",
         "draft_inputs_approve_failed": "Mzdové vstupy se nepodařilo hromadně schválit."
       },
       "override": {
@@ -1955,6 +1958,7 @@
       "load_failed": "Mzdové složky a vstupy se nepodařilo načíst.",
       "save_failed": "Změnu se nepodařilo uložit.",
       "validation_failed": "Zkontrolujte povinná pole a formát částek.",
+      "validation_field": "Zkontrolujte pole „{field}“. Bez něj mzdovou složku uložit nejde.",
       "no_results": "Žádná odpovídající položka",
       "account_placeholder": "Vyberte účet podle čísla nebo názvu",
       "active": "Aktivní",
@@ -2351,6 +2355,7 @@
       "tax_certificate_hint": "Potvrzení vznikne jen z podporovaného formuláře, schválených mezd, úplné zákonné evidence a skutečných úhrad doložených nejpozději do 31. ledna následujícího roku.",
       "correction_title": "Opravné daňové potvrzení",
       "correction_hint": "Nové potvrzení opraví dokument č. {document} vytvořený {created}. Původní PDF zůstane archivováno a důvod opravy se vytiskne v příloze.",
+      "correction_hint_unnumbered": "Nové potvrzení opraví poslední vydané potvrzení z {created}. Původní PDF zůstane archivováno a důvod opravy se vytiskne v příloze.",
       "correction_reason": "Konkrétní důvod opravy",
       "correction_reason_placeholder": "Popište, který údaj byl chybný a proč se potvrzení opravuje…",
       "correction_reason_required": "Před vystavením opravného potvrzení uveďte konkrétní důvod opravy.",
@@ -2371,6 +2376,7 @@
       "document_revision": "Revize dokumentu",
       "approved_revisions": "Schválené revize období: {count}",
       "revision_unavailable": "Za období zatím není schválená revize.",
+      "revision_unavailable_link": "Otevřít mzdové běhy",
       "employee": "Zaměstnanec",
       "office": "Mzdová účtárna",
       "document": "Dokument",
@@ -2611,7 +2617,10 @@
         "ruleset_year_not_covered": "Pro tento rok nemáme účinná daňová pravidla na celý rok, takže roční částky nelze odvodit.",
         "tax_year_not_finished": "Zdaňovací období ještě neskončilo. Roční zúčtování jde provést až od 1. ledna následujícího roku.",
         "taxpayer_credit_evidence_missing": "Zaměstnanec má podepsané prohlášení k dani, ale v evidenci nároků mu chybí sleva na poplatníka. Doplňte ji v kartě zaměstnance — bez ní by zúčtování spočítalo daň bez roční slevy."
-      }
+      },
+      "settle_read_only": "Provést zúčtování může jen uživatel s právem schvalovat mzdy.",
+      "settle_unavailable": "Náhled zúčtování zatím neprošel. Načtěte ho znovu, nebo zkontrolujte podklady zaměstnance.",
+      "save_request_read_only": "Evidenci podkladů může měnit jen uživatel s právem zapisovat mzdové doklady."
     },
     "time": {
       "title": "Docházka a směny",
@@ -2632,6 +2641,7 @@
       "reopen_reason": "Důvod opravy schváleného měsíce",
       "reopened": "Měsíc byl auditovaně znovu otevřen.",
       "reopen_failed": "Měsíc se nepodařilo znovu otevřít.",
+      "reopen_reason_required": "Vyplňte důvod opravy. Zapíše se do auditní stopy měsíce.",
       "jmhz": {
         "title": "Potvrzení pracovního souhrnu JMHZ",
         "hint": "Čísla jsou předvyplněná z evidence. Zkontrolujte je a potvrďte — aplikace je sama nezaokrouhluje ani nedopočítává.",
@@ -2655,6 +2665,7 @@
         "employer_obstacle": "Překážky na straně zaměstnavatele",
         "required_missing": "Vyplňte „{field}“ — bez toho souhrn pracovní doby nevznikne.",
         "conditional_missing": "Odpovězte na obě otázky výše.",
+        "issues_blocked": "Nejdřív vyřešte nálezy vypsané výše. S nimi souhrn pracovní doby neuložíme.",
         "as_agreed": "Odpracoval přesně předepsaný fond",
         "as_agreed_hint": "Nesledujete u tohoto vztahu docházku? Tlačítko doplní odpracované hodiny ve výši sjednaného úvazku a odpoví „ne“ na obě otázky níže.",
         "unworked_question": "Byly v měsíci neodpracované hodiny?",
@@ -3135,7 +3146,6 @@
         "advanced_hint": "Všechny adresy, kontakty, identifikátory (RČ, EČP, VCP, zahraniční), výplatní účty a historické verze.",
         "change_reason_default": "Rychlá editace běžných údajů",
         "name_required": "Zadejte jméno i příjmení zaměstnance.",
-        "structured_history_required": "Starší historie obsahuje nerozlišené celé jméno. Doplňte ji ručně v úplné osobní evidenci; systém ji nebude automaticky rozdělovat.",
         "address_complete_required": "Při změně bydliště vyplňte ulici, obec, PSČ i stát.",
         "gross_invalid": "Pravidelná hrubá mzda musí být nezáporná částka nejvýše na dvě desetinná místa.",
         "employment_unavailable": "Zaměstnanec nemá aktivní primární pracovní vztah, jehož pracovní údaje lze upravit.",
@@ -3485,7 +3495,10 @@
         "saved": "Identifikátory JMHZ jsou bezpečně uložené.",
         "load_failed": "Identifikátory JMHZ se nepodařilo načíst.",
         "save_failed": "Identifikátory JMHZ se nepodařilo uložit.",
-        "start_date_missing": "Nejdřív doplňte datum nástupu pracovního vztahu.",
+        "start_date_missing": "Nejdřív doplňte datum nástupu pracovního vztahu — najdete ho výš na této kartě v podmínkách vztahu.",
+        "identifier_required": "Zadejte OIČ osoby nebo ID PPV vztahu. Stačí ten, který už máte z ČSSZ.",
+        "valid_from_required": "Vyplňte datum, od kterého identifikátor platí.",
+        "confirm_required": "Zaškrtněte potvrzení, že hodnoty odpovídají podkladu ČSSZ.",
         "permission_required": "K uložení potřebujete oprávnění měnit osobu i pracovní vztah."
       },
       "openings": {
@@ -3723,6 +3736,7 @@
         "document_search_placeholder": "Hledat podle názvu dokumentu…",
         "document_clear": "Změnit",
         "document_hint": "Vyhledejte aktivní firemní dokument v Dokumentech. Osobní, cizí nebo smazaný dokument server odmítne.",
+        "document_open_dms": "Otevřít Dokumenty",
         "document_required": "Vyberte aktivní firemní DMS dokument.",
         "document_search_failed": "Dokumenty se nepodařilo vyhledat.",
         "open_document": "Otevřít podklad",
@@ -3917,6 +3931,18 @@
         "pension_insurance_periods": "Doby důchodového pojištění",
         "pension_insurance_hint": "Uveďte doby důchodového pojištění v rámci tohoto vztahu. Pokud žádné nejsou, řádek nepřidávejte.",
         "requested_purpose": "Účel, pro který zaměstnanec potvrzení žádá",
+        "blocked": {
+          "work_description": "Doplňte druh konaných prací — je to náležitost potvrzení podle § 313 odst. 1 písm. b) zákoníku práce.",
+          "qualification": "Doplňte dosaženou kvalifikaci — je to náležitost potvrzení podle § 313 odst. 1 písm. b) zákoníku práce.",
+          "exposure": "Potvrďte, že jste posoudili práci v rizikových faktorech.",
+          "deduction_evidence": "U každé srážky vyplňte oprávněného, orgán, který ji nařídil, i číslo rozhodnutí.",
+          "deduction": "Potvrďte, že jste srážky ze mzdy posoudili.",
+          "pension_periods": "U každé doby vyplňte začátek i konec a konec nesmí předcházet začátku.",
+          "pension_category": "Potvrďte, že jste posoudili pracovní kategorie před rokem 1993.",
+          "termination": "Potvrďte, že jste posoudili způsob skončení vztahu.",
+          "requested_purpose": "Uveďte účel, pro který zaměstnanec potvrzení žádá.",
+          "correction_reason": "Doklad už jednou vznikl. Napište důvod opravy, ať je v revizi dohledatelný."
+        },
         "termination_reasons": {
           "none": "Vztah neskončil žádným ze zvláštních důvodů",
           "gross_breach": "Zvlášť hrubé porušení povinností zaměstnancem",
@@ -4064,13 +4090,21 @@
           "show": "Doplnit profil",
           "hide": "Zavřít profil",
           "warning": "Předvyplněné hodnoty pocházejí z kmenových dat osoby a pracovního vztahu; u každé je uvedeno, odkud. Uložení zakládá novou verzi snímku a kartu osoby ani pracovního vztahu nemění.",
-          "save": "Uložit ověřenou verzi",
+          "save": "Uložit",
+          "saved_draft": "Verze {version} je uložená jako rozpracovaná. Ještě {count} položek brání podání — jsou červeně u polí i v souhrnu nahoře.",
+          "check": "Kontrola",
+          "check_complete": "Kontrola prošla — profil je úplný a je z čeho podat.",
+          "check_incomplete": "Kontrola našla {count} položek. Jsou označené červeně u polí, souhrn je nahoře.",
+          "check_failed": "Kontrolu se nepodařilo spustit.",
+          "problems_title": "Co brání podání ({count})",
+          "problems_hint": "Uložit můžete i takhle — rozpracovaný profil zůstane na serveru. Podat půjde, až tenhle seznam zmizí.",
+          "gap_open": "Otevřít místo, kde se to doplňuje →",
+          "gap_here": "vyplňuje se zde",
           "saved": "Verze {version} byla uložena a je připravena pro nový náhled A1.",
           "load_failed": "Profil REGZEC A1 se nepodařilo načíst.",
           "save_failed": "Profil REGZEC A1 se nepodařilo uložit.",
           "error_title": "Uložení neproběhlo, na serveru se nezměnilo nic",
           "error_kept": "Vyplněné hodnoty zůstávají ve formuláři a máme je zálohované i v tomto prohlížeči, takže o ně nepřijdete ani po zavření karty nebo obnovení stránky.",
-          "error_person_hint": "Chybějící údaj se na tomhle formuláři nezadává, bere se z osobní evidence. Doplňte ho na kartě osoby v sekcích „Údaje pro registraci zaměstnance“ a „Historie adres“ a pak se sem vraťte.",
           "error_person_link": "Otevřít kartu osoby",
           "error_above": "Uložení neproběhlo. Co chybí a kde to doplnit, je v červeném rámečku nahoře.",
           "draft_title": "Máte tu rozpracovaný profil",
@@ -4083,6 +4117,9 @@
           "diverged_title": "Snímek se rozešel s kmenovými daty",
           "diverged_hint": "Snímek se sám neaktualizuje — je dokladem stavu k datu registrace. Novou verzi založte jen tehdy, když má nahradit podklad.",
           "diverged_pair": "ve snímku {stored}, v kmenových datech {suggested}",
+          "permanent_address_hint": "Povinná adresa. Bere se z karty osoby (Historie adres); číslo popisné aplikace nevede, opište je z podkladu.",
+          "czech_residence_hint": "Nepovinná — vyplňte, jen když se pobyt v ČR liší od trvalého pobytu. Povinná je u osoby s trvalým pobytem mimo ČR, nejde-li o přeshraničního pracovníka (AT, DE, PL, SK). Stát se předvyplní na Česko.",
+          "contact_address_hint": "Nepovinná — vyplňte, jen když se liší od trvalého pobytu.",
           "unset": "— nevyplněno —",
           "reset": "Vrátit návrh z kmenových dat",
           "stored_version": "Uložená verze {version}.",
@@ -4119,7 +4156,8 @@
             "country_code": "Stát daňové rezidence",
             "identifier_type": "Typ daňového identifikátoru",
             "identifier": "Daňový identifikátor",
-            "residence_address": "Uvést adresu bydliště ve státě rezidence"
+            "residence_address": "Uvést adresu bydliště ve státě rezidence",
+            "residence_address_hint": "Nepovinná u českého rezidenta. U daňového rezidenta jiného státu je povinná — vyplňte adresu bydliště v tom státě, ne pobyt v ČR."
           },
           "employment": {
             "activity_code": "Druh činnosti",
@@ -4297,7 +4335,12 @@
         "conflict_title": "Přiřazení mezitím změnil někdo jiný",
         "reload_current": "Načíst aktuální stav",
         "new_title": "Nové přiřazení dimenze",
-        "edit_title": "Upravit přiřazení dimenze"
+        "edit_title": "Upravit přiřazení dimenze",
+        "dimension_required": "Vyberte dimenzi, kterou chcete vztahu přiřadit.",
+        "valid_from_required": "Vyplňte datum, od kterého přiřazení platí.",
+        "valid_to_invalid": "Konec platnosti nesmí předcházet jejímu začátku.",
+        "none_available": "Firma zatím nemá žádnou účinnou mzdovou dimenzi.",
+        "open_settings": "Založit dimenze v nastavení mezd"
       },
       "surcharge_policy": {
         "title": "Zásady zákonných příplatků (§ 114–118)",
@@ -5309,7 +5352,8 @@
         "confirmation_required": "Před uložením potvrďte správnost celé evidence REGZEL.",
         "confirmed_at": "Naposledy potvrzeno",
         "version": "Verze evidence",
-        "read_only": "REGZEL profil je pouze pro čtení."
+        "read_only": "REGZEL profil je pouze pro čtení.",
+        "validation_title": "Před uložením opravte:"
       },
       "prepare": {
         "title": "Připravit doplňující údaje",
@@ -5415,7 +5459,14 @@
         "office": "Mzdová účtárna pro OZP souhrn",
         "all_offices": "Všechny registrované mzdové účtárny",
         "office_hint": "Bez výběru vytvoří prosincové JMHZ OZP část za všechny registrované účtárny; výběrem ji omezíte na jednu.",
-        "reference": "Reference schváleného ročního podkladu (volitelné)"
+        "reference": "Reference schváleného ročního podkladu (volitelné)",
+        "validation": {
+          "title": "Před uložením doplňte:",
+          "collective_types": "Vyberte alespoň jeden druh kolektivní smlouvy.",
+          "ownership": "Vyberte formu vlastnictví.",
+          "average_headcount": "Zadejte průměrný přepočtený počet zaměstnanců, například 12,50.",
+          "average_disabled_headcount": "Zadejte průměrný přepočtený počet zaměstnanců se zdravotním postižením. Nemáte-li žádné, zadejte 0."
+        }
       },
       "policies": {
         "title": "Zaměstnavatelské politiky",
@@ -5529,7 +5580,16 @@
             "ok": "Tenantový zdroj aktivace JMHZ je ověřený.",
             "blocked": "Chybí ověřitelný tenantový zdroj aktivace JMHZ."
           }
-        }
+        },
+        "validation_fields": {
+          "valid_from": "Zadejte datum, od kterého politika platí.",
+          "valid_to": "Konec platnosti musí být stejný nebo pozdější než začátek.",
+          "payday_day": "Výplatní den musí být číslo od 1 do 31.",
+          "leave_entitlement_weeks": "Výměra dovolené musí být 4 až 12 týdnů; čtyři týdny jsou zákonné minimum.",
+          "source_reference": "Reference zdroje smí mít nejvýše 255 znaků.",
+          "delivery_verified_on": "Datum ověření doručovacího kanálu není platné datum."
+        },
+        "delivery_verified_on_hint": "Nepovinné. Dokud datum nedoplníte, politika se uloží, ale výplatnice se tímto kanálem neodešlou."
       },
       "health_accounts": {
         "title": "Platební účty institucí",
@@ -5628,6 +5688,12 @@
           "retry": "Zkusit znovu",
           "provenance": "{annex} vyhlášky č. {decree}; sazby ve znění {rates_source} od {rates_effective_from}. Minimální pojistné za kalendářní čtvrtletí je {minimum} Kč.",
           "source_link": "Úplné znění vyhlášky"
+        },
+        "validation": {
+          "title": "Sazbu zatím nelze přidat:",
+          "institution_code": "Zadejte kód pojišťovny, u které je úrazové pojištění sjednané.",
+          "rate_per_mille": "Zadejte sazbu v promile jako číslo větší než nula, například 5,6.",
+          "effective_from": "Zadejte datum, od kterého sazba platí."
         }
       },
       "accounting_title": "Automatické účtování",
@@ -5675,7 +5741,8 @@
         "account_invalid_format": "Kód účtu nemá platný formát.",
         "account_not_found": "Účet není v účtové osnově.",
         "account_inactive": "Účet je neaktivní.",
-        "account_wrong_type": "Vyberte {type}."
+        "account_wrong_type": "Vyberte {type}.",
+        "registration_variable_symbol": "Variabilní symbol ČSSZ musí mít přesně deset číslic."
       },
       "read_only": "Nastavení máš pouze pro čtení. K úpravě je potřeba oprávnění Nastavení mezd.",
       "discard": "Zahodit změny",
@@ -5743,7 +5810,8 @@
         "non_deductible_benefit": "Osvobozená část nepeněžního benefitu (rekreace, sport, kultura, zdraví, tištěné knihy). Podle § 25 odst. 1 písm. h) ZDP je nedaňová právě ta OSVOBOZENÁ část; nadlimitní část se zaměstnanci zdaní a nákladem zůstává. Účet 528 se sám propíše do nedaňových nákladů v přiznání k dani z příjmů.",
         "travel_expense": "Cestovní náhrada je náhrada výdaje podle části sedmé zákoníku práce, ne odměna za práci — do mzdových nákladů nepatří. Protiúčtem zůstává závazkový účet pracovního vztahu, protože se náhrada vyplácí spolu se mzdou.",
         "enforcement_deductions": "Srážky nařízené soudem, exekutorem nebo insolvenčním správcem. Oddělené od ostatních srážek proto, že se u nich vede pořadí pohledávek a posílají se jinému příjemci než dobrovolné srážky — na společném účtu se saldo obou skupin slije a nejde dohledat."
-      }
+      },
+      "registration_source_reference_hint": "Nepovinné. Odkaz na výměr nebo rozhodnutí, ze kterého jste variabilní symbol opsali."
     },
     "status": {
       "disabled": "Neaktivní",
@@ -6114,7 +6182,9 @@
       "validation": {
         "amount": "Zadej částku v Kč, nejvýše na dvě desetinná místa.",
         "percent": "Zadej procento mezi 0 a 100.",
-        "employee": "Vyber zaměstnance, kterému dohoda patří."
+        "employee": "Vyber zaměstnance, kterému dohoda patří.",
+        "title": "Doplň název dohody — pod ním se srážka objeví na výplatním lístku.",
+        "read_only": "Na mzdové vstupy máš jen právo ke čtení, dohodu uložit nemůžeš."
       },
       "kinds": {
         "advance": "Záloha",
@@ -6181,6 +6251,13 @@
       "document_permission": "Výběr rozhodnutí vyžaduje právo číst Dokumenty.",
       "document_search_failed": "Rozhodnutí v Dokumentech se nepodařilo vyhledat.",
       "court_amount": "Částka určená soudem (Kč)",
+      "court_amount_hint": "Nepovinné — můžete doplnit později. Tenhle režim se stejně počítá ručně.",
+      "blocked": {
+        "read_only": "Na oddlužení máte jen právo ke čtení, uložit ho nemůžete.",
+        "employment": "Vyberte pracovní vztah, ze kterého se má srážet — bez něj nelze platební pokyn oddlužení vytvořit.",
+        "account": "Vyberte ověřený CZK účet insolvenčního správce. Doplníte ho v Nastavení mezd.",
+        "document": "Najděte v Dokumentech rozhodnutí o schválení oddlužení; platební pokyn je bez něj nedoložitelný."
+      },
       "instruction_bound": "Evidence je svázaná s neměnným platebním pokynem #{id}.",
       "explicit_cancel_required": "Schválený pokyn nelze zrušit změnou režimu. Použijte samostatné tlačítko Zrušit schválené oddlužení.",
       "cancel": "Zrušit schválené oddlužení",
@@ -6233,6 +6310,8 @@
       "add_period": "Přidat období",
       "preview": "Připravit náhled odpovědi",
       "no_case": "Zaměstnanec nemá exekuční případ, ze kterého lze bezpečně určit pořadí.",
+      "case_required": "Vyberte, kterého exekučního případu se dotaz týká — osoba jich má víc a pořadí se u každého liší.",
+      "dispatch_blocked": "XML je zmrazené, ale odesílatele dotazu se nepodařilo spárovat s datovou schránkou. Doplňte schránku exekutora a načtěte dotaz znovu; zmrazená odpověď zůstává uložená.",
       "period_required": "Přidejte alespoň jedno období se schválenou neměnnou mzdovou revizí.",
       "preview_failed": "Náhled odpovědi XMLZAM se nepodařilo vytvořit.",
       "review_title": "Zkontrolujte přesně zveřejňované údaje",
@@ -6343,7 +6422,16 @@
         "entered_total": "Zadaný součet",
         "required_total": "Požadovaný součet",
         "change_reason": "Důvod nové revize",
-        "total_mismatch": "Součet složek musí přesně odpovídat evidované částce pohledávky."
+        "zero_placeholder": "0 — nevyplněné se počítá jako nula",
+        "total_mismatch": "Součet složek musí přesně odpovídat evidované částce pohledávky.",
+        "blocked": {
+          "party_name": "Doplňte název nebo jméno strany.",
+          "effective_from": "Doplňte datum, od kterého údaj platí.",
+          "document": "Vyberte zdrojový dokument — bez rozhodnutí v Dokumentech se revize nedá doložit.",
+          "recipient_party": "Vyberte exekutora nebo oprávněného, kterému se má platit.",
+          "recipient_account": "Vyberte ověřený účet příjemce platný k zadanému dni.",
+          "breakdown_amount": "Složky rozpadu musí být částky v korunách; prázdné pole se počítá jako nula."
+        }
       },
       "insolvency_workspace_title": "Oddlužení je samostatná agenda",
       "insolvency_workspace_hint": "Schválené oddlužení, pracovní vztah, účet správce a rozhodnutí spravujte bez zakládání exekučního případu.",
@@ -6440,6 +6528,7 @@
       "no_ledger": "Pohyby vzniknou po výpočtu mzdového období.",
       "month_evidence_title": "Měsíční podklady výpočtu",
       "month_evidence_hint": "Podklady jsou verzované po zaměstnanci a období; bez úplného ověření výpočet skončí ruční kontrolou.",
+      "month_evidence_read_only": "Měsíční podklady si můžete prohlédnout, ale uložit je nejde — chybí právo zápisu do exekucí. Požádejte o něj správce.",
       "monthly_routine_title": "Běžná měsíční kontrola",
       "monthly_routine_hint": "Potvrďte jen položky, které se v tomto měsíci skutečně uplatní. Co není relevantní, aplikace sama vypne a vysvětlí.",
       "monthly_exceptions": {
@@ -18840,6 +18929,7 @@
       "correction_pending": "Navazující mzdový běh vyžaduje kontrolu opravy.",
       "average_required_hint": "Vyberte průměrný výdělek, ze kterého se náhrada spočítá — bez něj nepřítomnost založit nejde.",
       "average_missing_for_relation": "Pro tento vztah není spočítaný žádný průměrný výdělek. Spočítejte ho na záložce Průměry a vraťte se sem.",
+      "average_awaiting_approval": "Průměrný výdělek pro tento vztah spočítaný je, ale čeká na schválení. Schvalte ho na záložce Průměry a vraťte se sem.",
       "go_to_averages": "Přejít na Průměry"
     },
     "dpn": {

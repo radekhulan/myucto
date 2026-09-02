@@ -236,6 +236,44 @@ describe('EmployerSettings — účtová osnova', () => {
     wrapper.unmount()
   })
 
+  /**
+   * Zdroj registrace (odkaz na výměr) je naše poznámka do evidence, ne
+   * požadavek ČSSZ — a přesto kvůli němu nešel uložit variabilní symbol
+   * opsaný z papíru na stole. VS povinný zůstává: přiděluje ho ČSSZ a jde na
+   * každý platební příkaz.
+   */
+  it('uloží registraci i bez zdroje, ale bez desetimístného VS ne', async () => {
+    const wrapper = await mountPage()
+    const open = wrapper.findAll('button').find(button => button.text().includes('manage_registration'))
+    await open!.trigger('click')
+    await flushPromises()
+
+    const save = () => Array.from(document.querySelectorAll('[role="dialog"] button'))
+      .find(button => button.textContent === 'common.save') as HTMLButtonElement
+
+    // Neúplný VS: tlačítko zašedlé A pod polem stojí věta proč.
+    const variableSymbol = document.querySelector<HTMLInputElement>('[data-registration-vs]')!
+    variableSymbol.value = '12345'
+    variableSymbol.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    expect(save().disabled).toBe(true)
+    expect(document.querySelector('[data-registration-vs-error]')?.textContent)
+      .toBe('payroll.employer.validation.registration_variable_symbol')
+
+    variableSymbol.value = '0012345678'
+    variableSymbol.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    expect(save().disabled).toBe(false)
+
+    await save().click()
+    await flushPromises()
+    expect(m.createOfficeRegistration).toHaveBeenCalledWith(1, expect.objectContaining({
+      social_security_variable_symbol: '0012345678',
+      source_reference: '',
+    }))
+    wrapper.unmount()
+  })
+
   it('otevře záložku podání podle query vedlejšího routeru', async () => {
     m.routeQuery = { tab: 'submissions' }
 
