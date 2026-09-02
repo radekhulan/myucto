@@ -1477,4 +1477,28 @@ describe('PayrollPayments', () => {
     // kód se ukáže tak, jak přišel, místo aby zmizel.
     expect(wrapper.text()).toContain('cash_document_not_posted')
   })
+  /*
+   * Dávka bez souboru pro banku je půl kroku — účetní ji zakládá právě proto,
+   * aby soubor dostala. U čtyř skupin odvodů s různým dnem splatnosti to bylo
+   * čtyřikrát totéž kliknutí navíc.
+   */
+  it('vygeneruje bankovní soubor rovnou po založení dávky', async () => {
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    const desktop = wrapper.get('[data-layout="desktop"]')
+    await desktop.findAll('input[type="checkbox"]')[1].setValue(true)
+    await flushPromises()
+
+    m.generateExport.mockClear()
+    const createButton = wrapper.findAll('button')
+      .find(button => button.text().includes('payroll.payments.batch.create'))
+    await createButton!.trigger('click')
+    await flushPromises()
+
+    expect(m.createBatch).toHaveBeenCalledOnce()
+    expect(m.generateExport).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
+  })
 })
