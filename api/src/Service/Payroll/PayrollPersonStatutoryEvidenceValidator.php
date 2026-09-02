@@ -779,7 +779,12 @@ final class PayrollPersonStatutoryEvidenceValidator
     {
         $value = $this->string($row, $key);
         if (!in_array($value, $allowed, true)) {
-            throw new InvalidArgumentException("Pole {$key} má nepovolenou hodnotu.");
+            // Hláška vypisuje, co JDE poslat. Bez toho zbývá hádání, což je
+            // u evidence s deseti výčty ta nejdražší forma zdržení.
+            throw new InvalidArgumentException(
+                "Pole {$key} má nepovolenou hodnotu „{$value}“. Přípustné hodnoty: "
+                . implode(', ', $allowed) . '.',
+            );
         }
 
         return $value;
@@ -792,7 +797,13 @@ final class PayrollPersonStatutoryEvidenceValidator
         if (strlen($value) > 500
             || preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D', $value) !== 1
         ) {
-            throw new InvalidArgumentException("Pole {$key} není kanonická reference.");
+            // „Není kanonická reference" nikomu neřekne, co s tím. Tahle věta
+            // je shodná s tou, kterou ukazuje formulář (`reference_invalid`).
+            throw new InvalidArgumentException(
+                "Označení dokladu u pole {$key} smí obsahovat jen písmena bez diakritiky,"
+                . ' číslice a znaky . : / _ - , musí začínat písmenem nebo číslicí'
+                . ' a být nejvýše 500 znaků dlouhé (např. „declaration:38k-signed“).',
+            );
         }
 
         return $value;

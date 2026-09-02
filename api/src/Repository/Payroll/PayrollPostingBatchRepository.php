@@ -12,7 +12,12 @@ final class PayrollPostingBatchRepository
 {
     private int $savepointSequence = 0;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        // Zakládá chybějící účetní období stejnou cestou jako ostatní
+        // zaúčtovací služby — viz openMissingAccountingPeriod().
+        private readonly \MyInvoice\Repository\AccountingPeriodRepository $accountingPeriods,
+    ) {}
 
     /**
      * @template T
@@ -214,9 +219,30 @@ final class PayrollPostingBatchRepository
         $statement->execute([$supplierId, $minimumDate, $minimumDate]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {
-            throw new \DomainException(
-                'Pro mzdový předpis není dostupné otevřené účetní období.',
-            );
+            /*
+             * Chybějící účetní období se ZALOŽÍ, stejně jako u ostatních
+             * zaúčtovacích cest.
+             *
+             * Nová firma žádné období nemá a bankovní zápis, majetek i doklady
+             * si ho doplní samy ({@see AccountingPeriodRepository::ensureOpenPeriodFor()}).
+             * Mzdy jediné místo toho spadly na „není dostupné otevřené účetní
+             * období" na příkazu Schválit — tedy až po zamčení vstupů,
+             * a hláška neřekla ani který rok, ani kde se období zakládá.
+             *
+             * ⚠️ Zakládá se jen rok, který v evidenci VŮBEC NENÍ. Uzavřený rok
+             * se neotevírá — to je rozhodnutí účetní, ne vedlejší účinek
+             * mzdového běhu.
+             */
+            $row = $this->openMissingAccountingPeriod($supplierId, $minimum);
+        }
+        if (!is_array($row)) {
+            $year = (int) $minimum->format('Y');
+            throw new \DomainException(sprintf(
+                'Účetní období roku %d je uzavřené, takže do něj mzdový předpis nejde zaúčtovat.'
+                . ' Otevřete období v Účetnictví → Účetní období, nebo mzdu zaúčtujte'
+                . ' do následujícího otevřeného roku.',
+                $year,
+            ));
         }
         $startsOn = self::databaseString(
             $row['starts_on'] ?? null,
@@ -237,6 +263,58 @@ final class PayrollPostingBatchRepository
         );
 
         return $entryDate;
+    }
+
+    /**
+     * Založí chybějící účetní období roku, do kterého mzda věcně patří.
+     *
+     * Zakládá se JEN rok, pro který v evidenci žádné období není. Existující
+     * (a tedy uzavřený nebo zamčený) rok se neotevírá — o tom rozhoduje účetní,
+     * ne mzdový běh. Vrací tentýž tvar řádku jako hlavní dotaz, nebo `null`,
+     * když založit nelze.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function openMissingAccountingPeriod(
+        int $supplierId,
+        \DateTimeImmutable $minimum,
+    ): ?array {
+        $year = (int) $minimum->format('Y');
+        $pdo = $this->db->pdo();
+
+        $existing = $pdo->prepare(
+            'SELECT 1 FROM accounting_periods WHERE supplier_id = ? AND fiscal_year = ?'
+        );
+        $existing->execute([$supplierId, $year]);
+        if ($existing->fetchColumn() !== false) {
+            return null;
+        }
+
+        $this->accountingPeriods->create(
+            $supplierId,
+            $year,
+            sprintf('%04d-01-01', $year),
+            sprintf('%04d-12-31', $year),
+        );
+
+        $reload = $pdo->prepare(
+            'SELECT starts_on, ends_on, fiscal_year
+               FROM accounting_periods
+              WHERE supplier_id = ?
+                AND status = "open"
+                AND ends_on >= ?
+              ORDER BY
+                CASE WHEN ? BETWEEN starts_on AND ends_on THEN 0 ELSE 1 END,
+                starts_on,
+                id
+              LIMIT 1
+              FOR UPDATE'
+        );
+        $minimumDate = $minimum->format('Y-m-d');
+        $reload->execute([$supplierId, $minimumDate, $minimumDate]);
+        $row = $reload->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
     }
 
     /**

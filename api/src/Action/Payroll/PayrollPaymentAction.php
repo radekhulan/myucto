@@ -66,6 +66,9 @@ final class PayrollPaymentAction
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
+        // Po ověření účtu odvodí výplatní pravidlo, plyne-li z karty
+        // jednoznačně — viz konec verifyPersonAccount().
+        private readonly \MyInvoice\Service\Payroll\Net\PayrollPayoutRuleDefaultsService $payoutDefaults,
     ) {}
 
     /** @param array<string,string> $args */
@@ -1601,6 +1604,26 @@ final class PayrollPaymentAction
                 'Zaměstnanecký účet nebyl nalezen nebo jej nelze ověřit.',
                 404,
             );
+        }
+
+        /*
+         * Ověřením účtu teprve vzniká výplatní pravidlo, plyne-li z karty
+         * jednoznačně.
+         *
+         * Do té chvíle karta říká „bankou" a zná číslo účtu, ale sada
+         * v `payroll_payout_rules` je prázdná — a chybějící pravidlo se ozvalo
+         * až u příkazu Připravit platby, tedy PO zaúčtování mzdy, s nápravou
+         * přes vyžádání opravy a novou revizi běhu.
+         *
+         * ⚠️ Nic se nehádá: {@see PayrollPayoutRuleDefaultsService} zapíše jen
+         * tehdy, když osoba žádné aktivní pravidlo nemá a z karty plyne jediný
+         * ověřený cíl. Rozdělená výplata i více účtů zůstávají na ručním zadání.
+         */
+        try {
+            $this->payoutDefaults->applyDefaults($supplierId, (int) $args['employeeId']);
+        } catch (\Throwable) {
+            // Nejednoznačná karta = pravidlo se nezaloží a zůstane ruční cesta.
+            // Ověření účtu to nesmí shodit.
         }
 
         return Json::ok($response, ['account' => $account]);

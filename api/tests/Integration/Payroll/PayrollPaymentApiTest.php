@@ -573,6 +573,9 @@ final class PayrollPaymentApiTest extends TestCase
             $failingLogger,
             $this->container->get(IpMatcher::class),
             $this->db,
+            $this->container->get(
+                \MyInvoice\Service\Payroll\Net\PayrollPayoutRuleDefaultsService::class,
+            ),
         );
 
         try {

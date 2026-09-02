@@ -17,6 +17,29 @@ final class PayrollEmploymentJmhzActivityFamily
         );
     }
 
+    /**
+     * Druh činnosti pro ČSSZ u PRVNÍHO vztahu daného druhu u zaměstnavatele.
+     *
+     * Zakládaný zaměstnanec u firmy žádný jiný vztah nemá, takže „první
+     * pracovní poměr" (1), „dohoda o pracovní činnosti" (A), „dohoda o
+     * provedení práce" (T) i „člen statutárního orgánu" (S) jsou jednoznačné.
+     * Dřív pole zůstalo prázdné a chybějící kód se poznal až na obrazovce
+     * registrace nebo při sestavování měsíčního hlášení — tedy ve chvíli, kdy
+     * už běží lhůta. Je to NÁVRH při založení, účetní ho může přepsat.
+     *
+     * @return array{0:?string,1:?string} [activity_code, relationship_detail_code]
+     */
+    public static function firstRelationDefaults(string $relationType): array
+    {
+        return match ($relationType) {
+            'employment', 'small_scale_employment' => ['1', '1'],
+            'dpc' => ['A', null],
+            'dpp' => ['T', null],
+            'partner_dependent', 'statutory_body' => ['S', '1'],
+            default => [null, null],
+        };
+    }
+
     public static function matches(
         string $relationType,
         string $activityCode,

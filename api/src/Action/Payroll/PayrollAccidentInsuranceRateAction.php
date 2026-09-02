@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollAccidentInsuranceRateRepository;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\AccidentInsuranceRateAdvisor;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -28,6 +29,10 @@ final class PayrollAccidentInsuranceRateAction
         private readonly PayrollAccidentInsuranceRateRepository $rates,
         private readonly PayrollModuleAccess $access,
         private readonly AccidentInsuranceRateAdvisor $advisor,
+        // Kód pojistitele je odkaz do registru institucí, ne popisek. Bez téhle
+        // kontroly se překlep pozná až při čtvrtletním předpisu pojistného,
+        // tedy v měsíci, kdy už na opravu není čas.
+        private readonly PayrollInstitutionAccountRepository $institutionAccounts,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -75,11 +80,21 @@ final class PayrollAccidentInsuranceRateAction
         $rateRaw = trim((string) ($body['rate_per_mille'] ?? ''));
         $effectiveFrom = trim((string) ($body['effective_from'] ?? ''));
 
+        if ($institutionCode === '') {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Vyplňte kód pojistitele — je to kód platebního účtu typu Zákonné pojištění'
+                . ' z Mzdy → Nastavení mezd → Účty institucí.',
+                422,
+            );
+        }
         if (preg_match('/^[A-Z0-9][A-Z0-9._-]{0,31}$/D', $institutionCode) !== 1) {
             return Json::error(
                 $response,
                 'validation_failed',
-                'Kód pojistitele musí odpovídat účtu vedenému v nastavení institucí.',
+                'Kód pojistitele smí obsahovat jen písmena, číslice, tečku, podtržítko a pomlčku'
+                . ' (nejvýše 32 znaků).',
                 422,
             );
         }
@@ -111,6 +126,13 @@ final class PayrollAccidentInsuranceRateAction
         }
 
         $supplierId = $this->currentSupplierId($request);
+        if (($mismatch = $this->rejectUnknownInsurerCode(
+            $response,
+            $supplierId,
+            $institutionCode,
+        )) !== null) {
+            return $mismatch;
+        }
         try {
             $id = $this->rates->insert(
                 $supplierId,
@@ -138,6 +160,60 @@ final class PayrollAccidentInsuranceRateAction
         ))[0] ?? null;
 
         return Json::ok($response, ['rate' => $created], 201);
+    }
+
+    /**
+     * Kód pojistitele NENÍ popisek — předpis pojistného pod ním hledá platební
+     * účet typu „Zákonné pojištění". Když se nenajde, spadne až čtvrtletní
+     * příprava plateb, tedy o tři měsíce později. Proto se to ověřuje tady,
+     * před uložením, a hláška rovnou vypíše kódy, které firma vede.
+     *
+     * Záměrně se neomezuje na účet účinný k datu sazby: sazba se běžně zapisuje
+     * dřív, než se doplní platební účet na další období. Chytá se to, co je
+     * skutečná past — kód, který v registru institucí není vůbec.
+     */
+    private function rejectUnknownInsurerCode(
+        Response $response,
+        int $supplierId,
+        string $institutionCode,
+    ): ?Response {
+        $known = [];
+        foreach ($this->institutionAccounts->list($supplierId) as $account) {
+            if (($account['institution_type'] ?? null) !== 'statutory_insurance') {
+                continue;
+            }
+            $code = strtoupper(trim((string) ($account['institution_code'] ?? '')));
+            if ($code !== '') {
+                $known[$code] = true;
+            }
+        }
+        if (isset($known[$institutionCode])) {
+            return null;
+        }
+        if ($known === []) {
+            return Json::error(
+                $response,
+                'accident_insurance_institution_missing',
+                'Firma zatím nemá žádný platební účet typu Zákonné pojištění, takže se sazba'
+                . ' nemá k čemu navázat. Založte účet pojistitele v Mzdy → Nastavení mezd →'
+                . ' Účty institucí a pak sazbu uložte se stejným kódem instituce.',
+                422,
+            );
+        }
+
+        $codes = array_keys($known);
+        sort($codes);
+
+        return Json::error(
+            $response,
+            'accident_insurance_institution_mismatch',
+            'Kód pojistitele „' . $institutionCode . '“ neodpovídá žádnému platebnímu účtu typu'
+            . ' Zákonné pojištění. Firma vede tyto kódy: ' . implode(', ', $codes)
+            . '. Vyberte jeden z nich, nebo účet s novým kódem nejdřív založte'
+            . ' v Mzdy → Nastavení mezd → Účty institucí.',
+            422,
+            ['known_institution_codes' => $codes],
+        );
     }
 
     private function guard(Request $request, Response $response, AccessLevel $level): ?Response

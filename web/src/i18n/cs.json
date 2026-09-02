@@ -1736,7 +1736,8 @@
         "reopen": "Otevřít opravu",
         "reopen_cancelled": "Začít z opravených vstupů",
         "cancel": "Zrušit běh",
-        "close": "Uzavřít"
+        "close": "Uzavřít",
+        "lock_and_calculate": "Spočítat mzdy"
       },
       "outcome": {
         "posted": "Mzdy jsou zaúčtované.",
@@ -1782,7 +1783,28 @@
         "checklist_hide": "Skrýt přehled odvodů",
         "checklist_show": "Zobrazit přehled odvodů"
       },
-      "create_blocked_exists": "Za tohle období už mzdový běh existuje ({status}). Otevřete ho níž, nebo přepněte období."
+      "create_blocked_exists": "Za tohle období už mzdový běh existuje ({status}). Otevřete ho níž, nebo přepněte období.",
+      "command_hint": {
+        "lock_and_calculate": "Zamkne vstupy za období a rovnou spočítá mzdy. Zámek zmrazí snímek vstupů — co zapíšete potom, se do výpočtu ani do hlášení nedostane, dokud běh znovu neotevřete. Než se cokoli zmrazí, uvidíte, co našla předběžná kontrola.",
+        "calculate": "Přepočítá mzdy ze zmrazeného snímku vstupů. Snímek se tím nemění, takže přepočítat můžete kolikrát chcete.",
+        "approve": "Schválí spočítané mzdy: uloží výsledek jako závazný, založí výplatní pásky a zapíše kontrolu i schválení do historie běhu. Po schválení už se čísla mění jen opravnou revizí.",
+        "post": "Zaúčtuje schválené mzdy do hlavní knihy. U firmy v daňové evidenci se účetní zápis nedělá a běh jen postoupí dál.",
+        "prepare_payments": "Připraví platební závazky (výplaty, odvody, daň) a otevře platby. Tady se pozná, jestli má každá instituce ověřený účet.",
+        "mark_paid": "Označí odvody i výplaty za uhrazené. Jde to až tehdy, když jsou všechny závazky pokryté spárovanou platbou.",
+        "close": "Uzavře běh za období. Uzavřený běh jde otevřít jen vyžádáním opravy.",
+        "reopen": "Otevře novou revizi nad opravenými vstupy. Původní revize zůstává v historii i s vydanými doklady."
+      },
+      "readiness": {
+        "title": "Kontrola před zahájením",
+        "subtitle": "Tohle uvidíte i po zahájení běhu — ukazujeme to teď, dokud jdou vstupy ještě opravit. Nic z toho mzdový běh neblokuje: spočítat se dá i s těmito nálezy.",
+        "clear": "Kontrola před zahájením nenašla nic, co by bránilo spočítat mzdy za tohle období.",
+        "all_clear": "Kontrola už nic nenašla, můžete mzdy spočítat.",
+        "confirm_title": "Opravdu zahájit mzdový běh?",
+        "confirm_intro": "Předběžná kontrola tohle našla dřív, než se cokoli zmrazí. Nic z toho běh neblokuje — rozhodněte se, jestli chcete pokračovat, nebo to nejdřív opravit.",
+        "confirm_note": "Zahájením se zamknou vstupy a rovnou se spočítají mzdy. Co zapíšete potom, se do výpočtu nedostane, dokud běh znovu neotevřete.",
+        "recheck": "Zkontrolovat znovu",
+        "start_anyway": "Přesto zahájit"
+      }
     },
     "quick_inputs": {
       "title": "Rychlý měsíční vstup mezd",
@@ -5718,15 +5740,23 @@
         "create_title": "Nový historický účet",
         "create_hint": "Při změně bankovního účtu založte nový řádek s novou účinností. Původní účet zůstane v historii.",
         "edit_title": "Upravit údaje účtu",
-        "edit_hint": "Bankovní účet, typ a kód instituce, měna a počátek účinnosti jsou neměnné. Jejich změnu založte jako nový historický řádek.",
+        "edit_hint": "Bankovní účet, typ instituce, měna a počátek účinnosti jsou neměnné — jejich změnu založte jako nový historický řádek. Kód instituce opravit lze, dokud na účet neodkazuje závazek čekající na platbu.",
         "institution_type": "Typ instituce",
         "institution": "Instituce",
         "institution_code": "Kód instituce",
-        "institution_code_hint": "Předvyplní se z názvu, můžete ho přepsat. Pod tímhle kódem se účet hledá při přípravě plateb: u ČSSZ musí odpovídat kódu správy sociálního zabezpečení z Nastavení mezd (např. 444), u finančního úřadu druhu daně (ADVANCE_TAX pro zálohovou daň, WITHHOLDING_TAX pro srážkovou). Zkratka úřadu se nenajde.",
+        "institution_code_hint": "Předvyplní se z názvu, můžete ho přepsat. Pod tímhle kódem se účet hledá při přípravě plateb.",
         "insurer": "Zdravotní pojišťovna",
         "select_insurer": "Vyberte pojišťovnu ze seznamu",
-        "insurer_hint": "Výběrem se doplní kód i název pojišťovny.",
+        "insurer_hint": "Výběrem se doplní kód i název instituce.",
         "insurer_manual": "Zadat kód a název ručně",
+        "institution_code_editable_hint": "Podle kódu hledá příprava plateb účet. Vyberte ho ze seznamu, ať se trefíte.",
+        "tax_kind": "Druh daně",
+        "social_office": "Pracoviště správy sociálního zabezpečení",
+        "social_office_name": "Správa sociálního zabezpečení – pracoviště {code}",
+        "tax_office_codes": {
+          "ADVANCE_TAX": "Zálohová daň ze závislé činnosti",
+          "WITHHOLDING_TAX": "Daň vybíraná srážkou"
+        },
         "institution_name": "Název instituce",
         "account": "Bankovní účet",
         "bank_account": "Bankovní účet instituce",

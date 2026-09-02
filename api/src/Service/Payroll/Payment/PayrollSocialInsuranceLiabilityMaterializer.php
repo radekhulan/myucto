@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Payment;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
@@ -20,7 +19,7 @@ final class PayrollSocialInsuranceLiabilityMaterializer
     public function __construct(
         private readonly PayrollPaymentLiabilityRepository $liabilities,
         private readonly PayrollStatutoryResultRepository $statutoryResults,
-        private readonly PayrollInstitutionAccountRepository $institutions,
+        private readonly PayrollInstitutionPaymentTargetResolver $targets,
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly Connection $db,
         private readonly PayrollLevyDeadlinePolicy $deadlines,
@@ -478,40 +477,38 @@ final class PayrollSocialInsuranceLiabilityMaterializer
                 'Mzdová účtárna nemá platný zaměstnavatelský VS.',
             );
         }
-        $institutionCode = $this->string(
+        $officeCode = $this->string(
             $office,
             'social_security_office_code',
         );
         if (preg_match(
             '/^[A-Z0-9][A-Z0-9._-]{0,31}$/D',
-            $institutionCode,
+            $officeCode,
         ) !== 1) {
             throw new \DomainException(
                 'Kód správy sociálního zabezpečení není platný.',
             );
         }
-        $accounts = $this->institutions->lockEffectivePaymentTargets(
+        // Kód pracoviště OSSZ z nastavení zaměstnavatele (např. „444") a kód,
+        // pod kterým je v Účtech institucí založený účet ČSSZ (např. „CSSZ"),
+        // spolu nemají důvod souviset — ČSSZ je jedna a kód je jen značka.
+        // Dřív tu byla vyžadovaná přesná shoda, takže zaúčtovaný běh se
+        // nedal zaplatit a hláška posílala účetní opravovat nastavení, které
+        // bylo v pořádku. Resolver proto při neshodě sáhne po jednoznačném
+        // ověřeném účtu ČSSZ; nejednoznačnost zůstává fail-closed.
+        $resolved = $this->targets->resolve(
             $supplierId,
             'social_security',
-            $institutionCode,
+            $officeCode,
             'CZK',
             $dueOn,
+            'Správa sociálního zabezpečení',
+            'Nastavení mezd → Zaměstnavatel a účtárny, kód správy sociálního'
+                . ' zabezpečení',
+            PayrollInstitutionFallbackPolicy::UNIQUE_VERIFIED_ACCOUNT,
         );
-        if (count($accounts) !== 1) {
-            // Účet se hledá pod KÓDEM PRACOVIŠTĚ ČSSZ z nastavení zaměstnavatele,
-            // ne pod libovolným názvem. Bez uvedení kódu hlásila aplikace „účet
-            // chybí" i tehdy, když se účetní dívala na obrazovku s ověřeným účtem
-            // ČSSZ — jen zadaný pod jiným kódem, což z hlášky nešlo poznat.
-            throw new \DomainException(count($accounts) === 0
-                ? "Správa sociálního zabezpečení nemá k {$dueOn} účinný ověřený"
-                    . " účet pod kódem pracoviště {$institutionCode}."
-                    . ' Kód účtu instituce v Nastavení mezd → Účty institucí musí'
-                    . ' souhlasit s kódem správy sociálního zabezpečení'
-                    . ' v Nastavení mezd → Zaměstnavatel a účtárny.'
-                : "Správa sociálního zabezpečení má pod kódem pracoviště"
-                    . " {$institutionCode} k {$dueOn} víc než jeden účinný účet.");
-        }
-        $account = $accounts[0];
+        $account = $resolved['account'];
+        $institutionCode = $resolved['institution_code'];
         $this->assertVerifiedAccount($supplierId, $dueOn, $account);
         $verificationHash = hash(
             'sha256',
@@ -556,6 +553,13 @@ final class PayrollSocialInsuranceLiabilityMaterializer
                     $this->integer($office, 'office_row_version'),
                 'employer_settings_row_version' =>
                     $this->integer($office, 'settings_row_version'),
+                // Kód pracoviště OSSZ z nastavení zaměstnavatele se zmrazuje
+                // zvlášť od kódu účtu: od chvíle, kdy se účet smí dohledat
+                // i pod jiným kódem, to nejsou tytéž hodnoty a sestavení
+                // dávky musí každou porovnávat s tím, co jí odpovídá.
+                // Starší závazky klíč nemají a tam obě hodnoty splývají —
+                // {@see PayrollPaymentBatchBuilder::institutionSymbols()}.
+                'social_security_office_code' => $officeCode,
                 'variable_symbol' => $variableSymbol,
                 'specific_symbol' => $account['specific_symbol'],
                 'constant_symbol' => $account['constant_symbol'],
@@ -686,12 +690,18 @@ final class PayrollSocialInsuranceLiabilityMaterializer
                 'payroll_office_code',
                 'payroll_office_row_version',
                 'employer_settings_row_version',
+                'social_security_office_code',
                 'variable_symbol',
                 'specific_symbol',
                 'constant_symbol',
             ] as $field) {
                 $target[$field] = $source[$field] ?? null;
             }
+            // Starší závazky klíč `social_security_office_code` nemají — tehdy
+            // se kód účtu a kód pracoviště musely rovnat, takže se doplní
+            // z kódu instituce a zmrazený obraz zůstane úplný.
+            $target['social_security_office_code'] ??=
+                $target['institution_code'];
             if (!isset($state[$reference])) {
                 $state[$reference] = [
                     'recipient_reference' => $row['recipient_reference'],

@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
+use MyInvoice\Service\Payroll\Payment\PayrollInstitutionPaymentTargetResolver;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
@@ -112,7 +113,7 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
         $this->materializer = new PayrollIncomeTaxLiabilityMaterializer(
             new PayrollPaymentLiabilityRepository($connection),
             new PayrollStatutoryResultRepository($connection),
-            $institutions,
+            new PayrollInstitutionPaymentTargetResolver($institutions),
             $sensitive,
             new PayrollLevyDeadlinePolicy(),
         );

@@ -266,6 +266,48 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
         self::assertSame('validation_failed', $this->json($immutable)['error']['code']);
     }
 
+    /**
+     * Kód instituce je klasifikace platebního cíle, ne obsah dokladu. Kdo
+     * napsal „FUPLZEN" místo druhu daně, byl zablokovaný napořád: formulář
+     * ho měl mezi neměnnými poli a nový řádek se stejnou platností spadl na
+     * překryv. Opravit ho musí jít, dokud se o účet neopírá závazek čekající
+     * na platbu.
+     */
+    public function testInstitutionCodeCanBeCorrectedOnExistingAccount(): void
+    {
+        $payload = $this->payload();
+        $payload['institution_type'] = 'tax_office';
+        $payload['institution_code'] = 'FUPLZEN';
+        $payload['institution_name'] = 'Finanční úřad — zálohová daň';
+        $created = $this->json($this->create($this->supplierId, $payload))['account'];
+
+        $rename = $this->updatePayload(1);
+        $rename['institution_code'] = 'advance_tax';
+        $updated = $this->action->update(
+            $this->request('PUT', $this->supplierId)->withParsedBody($rename),
+            new Response(),
+            ['id' => (string) $created['id']],
+        );
+        self::assertSame(200, $updated->getStatusCode());
+        $account = $this->json($updated)['account'];
+        self::assertSame('ADVANCE_TAX', $account['institution_code']);
+        // Číslo účtu ani typ instituce se přejmenováním nehnuly.
+        self::assertSame('tax_office', $account['institution_type']);
+        self::assertSame('1000000005/0100', $account['bank_account']);
+
+        // Druhý druh daně má vlastní předčíslí, tedy vlastní účet. Dvě různé
+        // instituce z pohledu platby nejsou překryv a smí existovat vedle sebe.
+        $second = $this->payload();
+        $second['institution_type'] = 'tax_office';
+        $second['institution_code'] = 'WITHHOLDING_TAX';
+        $second['institution_name'] = 'Finanční úřad — srážková daň';
+        $second['bank_account'] = '7720-1000000005/0710';
+        self::assertSame(
+            201,
+            $this->create($this->supplierId, $second)->getStatusCode(),
+        );
+    }
+
     public function testBearerInsufficientRoleAndDisabledPayrollAreRejected(): void
     {
         $bearer = $this->action->list(

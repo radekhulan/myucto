@@ -1150,9 +1150,18 @@ final class PayrollPaymentBatchBuilder
             $supplierId,
             $officeId,
         );
+        // `$context['institution_code']` je kód PRACOVIŠTĚ OSSZ z nastavení
+        // zaměstnavatele, `$institutionCode` kód ÚČTU. Dokud se musely rovnat,
+        // stačilo porovnat jedno s druhým. Od chvíle, kdy se účet ČSSZ smí
+        // dohledat i pod jiným kódem, se každá hodnota porovnává s tou svou:
+        // kód pracoviště proti zmrazenému kódu pracoviště. Závazky zmrazené
+        // dřív klíč nemají a tam obě hodnoty splývají, takže starší dávky
+        // projdou beze změny.
+        $frozenOfficeCode = $source['social_security_office_code']
+            ?? $institutionCode;
         if ($context === null
             || !$context['is_active']
-            || $context['institution_code'] !== $institutionCode
+            || $context['institution_code'] !== $frozenOfficeCode
             || $context['code'] !== ($source['payroll_office_code'] ?? null)
             || $context['office_row_version']
                 !== ($source['payroll_office_row_version'] ?? null)

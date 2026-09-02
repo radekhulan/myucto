@@ -6,7 +6,6 @@ namespace MyInvoice\Service\Payroll\Payment;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAccidentInsuranceRateRepository;
-use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
@@ -64,7 +63,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
         private readonly PayrollPaymentLiabilityRepository $liabilities,
         private readonly PayrollStatutoryResultRepository $statutoryResults,
         private readonly PayrollAccidentInsuranceRateRepository $rates,
-        private readonly PayrollInstitutionAccountRepository $institutions,
+        private readonly PayrollInstitutionPaymentTargetResolver $targets,
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly Connection $db,
         private readonly PayrollLevyDeadlinePolicy $deadlines,
@@ -435,27 +434,28 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
      */
     private function target(
         int $supplierId,
-        string $institutionCode,
+        string $rateInstitutionCode,
         string $dueOn,
     ): array {
-        $accounts = $this->institutions->lockEffectivePaymentTargets(
+        // Kód pojistitele je u zákonného pojištění odpovědnosti jen značka
+        // uvedená u sazby (Nastavení mezd → sazba pojištění odpovědnosti),
+        // zatímco účet je vedený pod svým vlastním kódem v Účtech institucí.
+        // Obě obrazovky vyplňuje účetní zvlášť a nic jí nenapoví, že se ty dva
+        // kódy musí trefit — proto se při neshodě použije jednoznačný ověřený
+        // účet pojistitele. Víc ověřených účtů = fail-closed.
+        $resolved = $this->targets->resolve(
             $supplierId,
             'statutory_insurance',
-            $institutionCode,
+            $rateInstitutionCode,
             'CZK',
             $dueOn,
+            'Pojistitel zákonného pojištění odpovědnosti',
+            'Nastavení mezd → sazba zákonného pojištění odpovědnosti, kód'
+                . ' pojistitele',
+            PayrollInstitutionFallbackPolicy::UNIQUE_VERIFIED_ACCOUNT,
         );
-        if (count($accounts) !== 1) {
-            throw new \DomainException(
-                count($accounts) === 0
-                    ? 'Pojistitel zákonného pojištění odpovědnosti nemá '
-                        . 'účinný ověřený účet. Doplňte ho v Nastavení mezd '
-                        . '(Instituce).'
-                    : 'Pojistitel zákonného pojištění odpovědnosti má '
-                        . 'nejednoznačný účet.',
-            );
-        }
-        $account = $accounts[0];
+        $account = $resolved['account'];
+        $institutionCode = $resolved['institution_code'];
         $this->assertVerifiedAccount($supplierId, $dueOn, $account);
         $verificationHash = hash(
             'sha256',

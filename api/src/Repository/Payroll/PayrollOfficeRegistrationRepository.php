@@ -62,6 +62,7 @@ final class PayrollOfficeRegistrationRepository
             );
             $insert->execute([$supplierId, $officeId, $effectiveFrom, $symbol, $sourceReference, $actorUserId]);
             $id = (int) $pdo->lastInsertId();
+            $this->syncOfficeSymbol($supplierId, $officeId);
             if ($ownsTransaction) {
                 $pdo->commit();
             }
@@ -119,6 +120,7 @@ final class PayrollOfficeRegistrationRepository
                   WHERE supplier_id = ? AND office_id = ? AND id = ?',
             );
             $delete->execute([$supplierId, $officeId, $registrationId]);
+            $this->syncOfficeSymbol($supplierId, $officeId);
             if ($ownsTransaction) {
                 $pdo->commit();
             }
@@ -130,6 +132,36 @@ final class PayrollOfficeRegistrationRepository
         }
 
         return true;
+    }
+
+    /**
+     * Promítne nejnovější registrovaný VS do `payroll_offices`.
+     *
+     * Variabilní symbol ČSSZ žije na DVOU místech: v historii registrace
+     * účtárny (tady) a ve sloupci `payroll_offices.social_security_variable_symbol`.
+     * Zapisovala se ale jen historie — a předpis sociálního pojištění, měsíční
+     * hlášení JMHZ i přehled PVPOJ čtou ten sloupec. Účetní tedy VS řádně
+     * zaregistrovala, obrazovka ho ukazovala, a příprava plateb přesto spadla
+     * na „social_security_variable_symbol není neprázdný text"; sloupec navíc
+     * hromadné uložení nastavení účtárny nepřepíše, takže z aplikace nebylo
+     * kudy ho doplnit.
+     *
+     * Historie zůstává zdrojem pravdy, sloupec je jen její poslední hodnota.
+     */
+    private function syncOfficeSymbol(int $supplierId, int $officeId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices office
+                SET office.social_security_variable_symbol = (
+                    SELECT version.social_security_variable_symbol
+                      FROM payroll_office_registration_versions version
+                     WHERE version.supplier_id = office.supplier_id
+                       AND version.office_id = office.id
+                     ORDER BY version.effective_from DESC, version.id DESC
+                     LIMIT 1
+                )
+              WHERE office.supplier_id = ? AND office.id = ?'
+        )->execute([$supplierId, $officeId]);
     }
 
     /** @return array<string,mixed>|null */

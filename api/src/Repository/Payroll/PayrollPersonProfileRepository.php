@@ -6,6 +6,7 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
 use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -454,6 +455,22 @@ final class PayrollPersonProfileRepository
         ?string $birthNumber,
         string $effectiveFrom,
     ): void {
+        /*
+         * Datum narození a pohlaví se z rodného čísla ODVODÍ.
+         *
+         * Registrace zaměstnance u ČSSZ obojí vyžaduje a rodné číslo obojí
+         * jednoznačně nese, přesto to po účetní chtěla aplikace vypsat znovu
+         * ručně — a že to chybí, se poznalo až na obrazovce podání, tedy v den,
+         * kdy už běží osmidenní lhůta. Zadané hodnoty mají přednost; odvozuje
+         * se jen to, co uživatel nevyplnil.
+         */
+        if ($birthNumber !== null) {
+            $birthDate ??= CzechBirthNumber::birthDate($birthNumber);
+            $sex = CzechBirthNumber::sex($birthNumber);
+        } else {
+            $sex = null;
+        }
+
         try {
             $this->saveIdentityHistory($supplierId, $employeeId, [[
                 'id' => null,
@@ -476,8 +493,8 @@ final class PayrollPersonProfileRepository
                 'birth_country_code' => null,
                 'citizenship_country_code_present' => false,
                 'citizenship_country_code' => null,
-                'sex_present' => false,
-                'sex' => null,
+                'sex_present' => $sex !== null,
+                'sex' => $sex,
                 'effective_from' => min($effectiveFrom, date('Y-m-d')),
                 'effective_to' => null,
             ]]);

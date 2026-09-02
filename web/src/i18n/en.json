@@ -1736,7 +1736,8 @@
         "reopen": "Open correction",
         "reopen_cancelled": "Start from corrected inputs",
         "cancel": "Cancel run",
-        "close": "Close"
+        "close": "Close",
+        "lock_and_calculate": "Calculate payroll"
       },
       "outcome": {
         "posted": "Payroll has been posted to accounting.",
@@ -1782,7 +1783,28 @@
         "checklist_hide": "Hide levy overview",
         "checklist_show": "Show levy overview"
       },
-      "create_blocked_exists": "A payroll run already exists for this period ({status}). Open it below, or switch the period."
+      "create_blocked_exists": "A payroll run already exists for this period ({status}). Open it below, or switch the period.",
+      "command_hint": {
+        "lock_and_calculate": "Locks the period inputs and calculates payroll right away. The lock freezes the input snapshot — anything entered afterwards stays out of the calculation and out of filings until the run is reopened. You see the pre-flight findings before anything is frozen.",
+        "calculate": "Recalculates payroll from the frozen input snapshot. The snapshot does not change, so you can recalculate as often as you need.",
+        "approve": "Approves the calculated payroll: stores the result as binding, creates payslips and records both the review and the approval in the run history. After approval the figures change only through a correction revision.",
+        "post": "Posts the approved payroll to the general ledger. A company on tax evidence gets no journal entry and the run simply moves on.",
+        "prepare_payments": "Prepares the payment liabilities (net pay, contributions, tax) and opens payments. This is where a missing verified institution account shows up.",
+        "mark_paid": "Marks contributions and net pay as settled. Only possible once every liability is covered by a matched payment.",
+        "close": "Closes the run for the period. A closed run can only be reopened by requesting a correction.",
+        "reopen": "Opens a new revision over corrected inputs. The original revision stays in the history together with the documents already issued."
+      },
+      "readiness": {
+        "title": "Pre-flight check",
+        "subtitle": "You would see these after starting the run anyway — we show them now, while the inputs can still be fixed. None of it blocks the run: payroll can be calculated with these findings.",
+        "clear": "The pre-flight check found nothing that would stop you from calculating payroll for this period.",
+        "all_clear": "The check came back clean, you can calculate payroll.",
+        "confirm_title": "Really start the payroll run?",
+        "confirm_intro": "The pre-flight check found the following before anything gets frozen. None of it blocks the run — decide whether to continue or fix it first.",
+        "confirm_note": "Starting locks the inputs and calculates payroll right away. Anything entered afterwards stays out of the calculation until the run is reopened.",
+        "recheck": "Check again",
+        "start_anyway": "Start anyway"
+      }
     },
     "quick_inputs": {
       "title": "Quick monthly payroll input",
@@ -5718,15 +5740,23 @@
         "create_title": "New historical account",
         "create_hint": "When the bank account changes, create a new row with a new effective date. The original account remains in history.",
         "edit_title": "Edit account details",
-        "edit_hint": "The bank account, institution type and code, currency and effective start are immutable. Create a new historical row to change them.",
+        "edit_hint": "The bank account, institution type, currency and effective start are immutable — create a new historical row to change them. The institution code can still be corrected while no liability awaiting payment points at the account.",
         "institution_type": "Institution type",
         "institution": "Institution",
         "institution_code": "Institution code",
-        "institution_code_hint": "Prefilled from the name; you can override it. Payment preparation looks the account up by this code: for the social security administration it must match the office code from payroll settings (e.g. 444), for the tax office it must be the tax kind (ADVANCE_TAX for advance tax, WITHHOLDING_TAX for withholding tax). An office abbreviation will not be found.",
+        "institution_code_hint": "Prefilled from the name; you can override it. Payment preparation looks the account up by this code.",
         "insurer": "Health insurer",
         "select_insurer": "Select an insurer from the list",
-        "insurer_hint": "Selecting an insurer fills in both the code and the name.",
+        "insurer_hint": "Selecting fills in both the code and the name of the institution.",
         "insurer_manual": "Enter the code and name manually",
+        "institution_code_editable_hint": "Payment preparation looks the account up by this code. Pick it from the list so it matches.",
+        "tax_kind": "Tax kind",
+        "social_office": "Social security administration branch",
+        "social_office_name": "Social security administration – branch {code}",
+        "tax_office_codes": {
+          "ADVANCE_TAX": "Advance tax on employment income",
+          "WITHHOLDING_TAX": "Withholding tax"
+        },
         "institution_name": "Institution name",
         "account": "Bank account",
         "bank_account": "Institution bank account",

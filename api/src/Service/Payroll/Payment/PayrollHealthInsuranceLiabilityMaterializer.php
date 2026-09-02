@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Payment;
 
-use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Codebook\HealthInsurers;
@@ -19,7 +18,7 @@ final class PayrollHealthInsuranceLiabilityMaterializer
     public function __construct(
         private readonly PayrollPaymentLiabilityRepository $liabilities,
         private readonly PayrollStatutoryResultRepository $statutoryResults,
-        private readonly PayrollInstitutionAccountRepository $institutions,
+        private readonly PayrollInstitutionPaymentTargetResolver $targets,
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly PayrollLevyDeadlinePolicy $deadlines,
     ) {}
@@ -311,21 +310,29 @@ final class PayrollHealthInsuranceLiabilityMaterializer
                     'Výsledek obsahuje zdravotní pojišťovnu vícekrát.',
                 );
             }
-            $accounts = $this->institutions->lockEffectivePaymentTargets(
+            // U zdravotní pojišťovny kód instituce NENÍ jen značka — říká,
+            // které pojišťovně se platí. Účet vedený pod „111" a účet pod
+            // „205" jsou dvě různé pojišťovny, takže se tu nesmí sáhnout po
+            // jiném účtu ani tehdy, když je jediný: odvod za pojištěnce VZP
+            // poslaný ČPZP je horší než zastavená příprava plateb. Zlepšuje
+            // se proto jen hláška — pojmenuje pojišťovnu, oba kódy i účty,
+            // které aplikace našla.
+            $resolved = $this->targets->resolve(
                 $supplierId,
                 'health_insurer',
                 $code,
                 'CZK',
                 $dueOn,
+                sprintf(
+                    'Zdravotní pojišťovna %s (%s)',
+                    $code,
+                    HealthInsurers::abbreviation($code) ?? $code,
+                ),
+                'kód pojišťovny z výsledku mzdového běhu',
+                PayrollInstitutionFallbackPolicy::NEVER,
+                '/^[0-9]{3}$/D',
             );
-            if (count($accounts) !== 1) {
-                throw new \DomainException(
-                    count($accounts) === 0
-                        ? "Pojišťovna {$code} nemá k datu splatnosti ověřený účet."
-                        : "Pojišťovna {$code} má k datu splatnosti nejednoznačný účet.",
-                );
-            }
-            $account = $accounts[0];
+            $account = $resolved['account'];
             $this->assertVerifiedAccount($supplierId, $dueOn, $account);
             $accountId = $account['id'];
             $verificationHash = hash(

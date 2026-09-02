@@ -14,6 +14,7 @@ use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
+use MyInvoice\Service\Payroll\Payment\PayrollInstitutionPaymentTargetResolver;
 use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceCalculator;
 use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
@@ -95,12 +96,14 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
             new PayrollPaymentLiabilityRepository($connection),
             new PayrollStatutoryResultRepository($connection),
             $this->rates,
-            new PayrollInstitutionAccountRepository(
-                $connection,
-                $sensitiveData,
-                new PayrollInstitutionAccountDeletionRepository(
+            new PayrollInstitutionPaymentTargetResolver(
+                new PayrollInstitutionAccountRepository(
                     $connection,
-                    new ActivityLogger($connection),
+                    $sensitiveData,
+                    new PayrollInstitutionAccountDeletionRepository(
+                        $connection,
+                        new ActivityLogger($connection),
+                    ),
                 ),
             ),
             $sensitiveData,

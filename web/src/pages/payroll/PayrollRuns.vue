@@ -10,6 +10,8 @@ import {
   type PayrollRunHistoryEvent,
   type PayrollRunHistoryTotalDiff,
   type PayrollRunHistoryTotalKey,
+  type PayrollRunReadiness,
+  type PayrollRunReadinessFinding,
   type PayrollRunRevisionHistory,
   type PayrollRunResultPerson,
   type PayrollRunValidation,
@@ -90,6 +92,17 @@ const draftInputFailures = ref<Record<number, DraftInputFailure[]>>({})
 const pendingOverride = ref<{ run: PayrollRun, validation: PayrollRunValidation } | null>(null)
 const overrideReason = ref('')
 const overrideError = ref('')
+/**
+ * KONTROLA PŘED ZAHÁJENÍM. Server ji počítá nasucho k období — nic nezmrazí,
+ * nic neuloží, jen řekne, co uvidí, až se běh spustí. `null` = období není
+ * zvolené, běh je už za zámkem (tam nálezy visí na revizi), nebo se kontrola
+ * nepovedla; v žádném z těch případů se nesmí nic zablokovat.
+ */
+const readiness = ref<PayrollRunReadiness | null>(null)
+/** Běh a příkaz čekající na potvrzení „opravdu zahájit?" po předběžné kontrole. */
+const pendingStart = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
+
+const readinessFindings = computed(() => readiness.value?.findings ?? [])
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 const checklistEnvironment = ref<PayrollRegzelEnvironment>('production')
@@ -299,12 +312,18 @@ function statusClass(status: PayrollRun['status']): string {
 /**
  * Jediná plná (primární) akce podle stavu — zbytek běhu je odbočka, ne
  * rovnocenná volba. Uživatel má v každém stavu vidět jedno „co teď".
+ *
+ * Cesta je záměrně čtyřkroková: Spočítat mzdy → (podívá se na čísla) →
+ * Schválit → Zaúčtovat → Připravit platby. „Uzamknout vstupy" zmizelo do
+ * prvního kroku (mezi zámkem a výpočtem se nic lidského nedělo) a
+ * „Zkontrolovat" zmizelo do schválení — u jedné účetní to byl druhý podpis
+ * téhož člověka. Oba příkazy na serveru dál existují.
  */
 const PRIMARY_COMMAND: Partial<Record<PayrollRun['status'], PayrollRunCommand>> = {
-  draft: 'lock_inputs',
+  draft: 'lock_and_calculate',
   inputs_locked: 'calculate',
   reopened: 'calculate',
-  calculated: 'review',
+  calculated: 'approve',
   reviewed: 'approve',
   approved: 'post',
   posted: 'prepare_payments',
@@ -314,10 +333,15 @@ const PRIMARY_COMMAND: Partial<Record<PayrollRun['status'], PayrollRunCommand>> 
   cancelled: 'reopen',
 }
 
+/**
+ * Příkazy, které obrazovka umí nabídnout. `review` tu schválně NENÍ: stav
+ * `reviewed` i příkaz zůstávají v datech a v API, jen se nenabízejí jako
+ * samostatné tlačítko.
+ */
 const KNOWN_COMMANDS: PayrollRunCommand[] = [
+  'lock_and_calculate',
   'lock_inputs',
   'calculate',
-  'review',
   'approve',
   'post',
   'prepare_payments',
@@ -348,7 +372,7 @@ function commandClass(run: PayrollRun, command: PayrollRunCommand): string {
 
 function commandIcon(command: PayrollRunCommand): string {
   if (command === 'lock_inputs') return ICONS.lock
-  if (command === 'calculate') return ICONS.cycle
+  if (command === 'calculate' || command === 'lock_and_calculate') return ICONS.cycle
   if (command === 'post') return ICONS.doc
   if (command === 'prepare_payments') return ICONS.coin
   if (command === 'mark_paid') return ICONS.checkCircle
@@ -359,13 +383,41 @@ function commandIcon(command: PayrollRunCommand): string {
   return ICONS.uturn
 }
 
+/**
+ * Věta „co se teď stane" k primární akci. Dřív visela VEDLE tlačítek a řádek
+ * s akcemi kvůli ní přetékal; patří pod ně, kde ji jde přečíst.
+ */
+const COMMAND_HINTS: PayrollRunCommand[] = [
+  'lock_and_calculate',
+  'calculate',
+  'approve',
+  'post',
+  'prepare_payments',
+  'mark_paid',
+  'close',
+  'reopen',
+]
+
+function commandHint(run: PayrollRun): string {
+  const primary = PRIMARY_COMMAND[run.status]
+  if (!primary || !COMMAND_HINTS.includes(primary)) return ''
+  if (!visibleCommands(run).includes(primary)) return ''
+  return t(`payroll.runs.command_hint.${primary}`)
+}
+
 function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
+  // Sloučený krok a samostatné „Uzamknout vstupy" jsou tatáž práce. Nabízet
+  // obojí vedle sebe by účetní jen postavilo před volbu, kterou nemá jak
+  // rozhodnout — samostatný zámek zůstává v API pro opravné revize.
+  const combined = run.available_commands.includes('lock_and_calculate')
   return run.available_commands.filter(command => {
     if (!KNOWN_COMMANDS.includes(command)) return false
-    if (command === 'calculate') return auth.canWrite('payroll.calculate')
-    if (command === 'review' || command === 'request_correction') {
-      return auth.canWrite('payroll.review')
+    if (combined && command === 'lock_inputs') return false
+    if (command === 'lock_and_calculate') {
+      return canWrite.value && auth.canWrite('payroll.calculate')
     }
+    if (command === 'calculate') return auth.canWrite('payroll.calculate')
+    if (command === 'request_correction') return auth.canWrite('payroll.review')
     if (command === 'approve') return auth.canWrite('payroll.approve')
     if (command === 'reopen') return auth.canWrite('payroll.reopen')
     if (command === 'post') return auth.canWrite('payroll.post')
@@ -373,7 +425,14 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
       return auth.canWrite('payroll.payments')
     }
     return canWrite.value
-  })
+  }).sort((a, b) => commandWeight(run, a) - commandWeight(run, b))
+}
+
+/** Primární akce vlevo, zrušení běhu vždy až úplně vpravo. */
+function commandWeight(run: PayrollRun, command: PayrollRunCommand): number {
+  if (PRIMARY_COMMAND[run.status] === command) return 0
+  if (command === 'cancel') return 2
+  return 1
 }
 
 /*
@@ -417,6 +476,7 @@ async function load() {
     runs.value = page.runs
     total.value = page.total
     suggestedPaymentDate.value = page.suggested_payment_date ?? null
+    readiness.value = page.readiness ?? null
     // Termín ze sjednané politiky se do formuláře propíše, jen dokud za období
     // žádný běh není a uživatel datum sám nepřepsal — existující běh si svoje
     // datum drží (viz `watch(periodRun)`).
@@ -440,6 +500,7 @@ async function load() {
   } catch {
     // Seznam běhů se nechává být: „za období nebyl spuštěn žádný běh" je
     // závěr, na který po výpadku sítě nemáme právo.
+    readiness.value = null
     loadFailed.value = true
     toast.error(t('payroll.runs.load_failed'))
   } finally {
@@ -572,7 +633,67 @@ async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
     commandError.value = ''
     return
   }
+  /*
+   * Kontrola PŘED zahájením. Zámek vstupů je jediný nevratný krok, po kterém
+   * se zmrazí snímek — právě tam má účetní vidět, co kontrola našla, a teprve
+   * pak se rozhodnout. NEBLOKUJEME: dialog má tlačítko „Přesto zahájit",
+   * protože nálezy jsou často věci, o kterých se ví a přesto se počítá.
+   * Prázdný nález = žádný dialog, klik projde rovnou.
+   */
+  if (startsTheRun(command) && readinessFindings.value.length > 0) {
+    pendingStart.value = { run, command }
+    return
+  }
   await submitCommand(run, command)
+}
+
+/** Kroky, po kterých se snímek vstupů zmrazí — jen před nimi má kontrola smysl. */
+function startsTheRun(command: PayrollRunCommand): boolean {
+  return command === 'lock_and_calculate' || command === 'lock_inputs'
+}
+
+async function confirmStart() {
+  const pending = pendingStart.value
+  if (pending === null) return
+  pendingStart.value = null
+  await submitCommand(pending.run, pending.command)
+}
+
+/**
+ * Znovu se zeptat serveru, jestli nálezy pořád platí. Účetní typicky odejde
+ * vadu opravit do jiné agendy a vrátí se; bez tohohle by musela přenačíst
+ * celou stránku, aby se dialog přestal ptát na něco, co už vyřešila.
+ */
+async function recheckReadiness() {
+  const pending = pendingStart.value
+  await load()
+  if (pending === null) return
+  if (readinessFindings.value.length === 0) {
+    pendingStart.value = null
+    toast.success(t('payroll.runs.readiness.all_clear'))
+    return
+  }
+  const fresh = reloadedRun(pending.run)
+  pendingStart.value = fresh === null ? null : { run: fresh, command: pending.command }
+}
+
+/**
+ * Jména osob k nálezu — server posílá ID, obrazovka má číselník po ruce.
+ * Jen u `employee`: ID pracovního vztahu do číselníku osob nepatří a náhodná
+ * shoda čísel by k nálezu přilepila cizí jméno.
+ */
+function findingEntityLabels(finding: PayrollRunReadinessFinding): string[] {
+  return Array.from(new Set(finding.entities.flatMap((entity) => {
+    if (entity.entity_type !== 'employee' || entity.entity_id === null) return []
+    const name = personNames.value[entity.entity_id]
+    return name ? [name] : []
+  })))
+}
+
+function findingClass(finding: PayrollRunReadinessFinding): string {
+  return finding.severity === 'blocker'
+    ? 'border-danger-500/30 bg-danger-50 text-danger-700'
+    : 'border-warning-200 bg-warning-50 text-warning-800'
 }
 
 async function submitCommand(
@@ -979,6 +1100,58 @@ onMounted(load)
       </p>
 
       <!--
+        KONTROLA PŘED ZAHÁJENÍM. Tytéž kontroly, které běh hlásil až po
+        zamknutí, jen puštěné nasucho a předem. Nic tím není zablokované —
+        je to seznam k prohlédnutí, ne brána.
+      -->
+      <div v-if="readiness" class="mt-4" data-test="run-readiness">
+        <div
+          v-if="readinessFindings.length === 0"
+          class="flex items-start gap-2 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-700"
+          data-test="run-readiness-clear"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.checkCircle" />
+          </svg>
+          <span>{{ t('payroll.runs.readiness.clear') }}</span>
+        </div>
+        <template v-else>
+          <h3 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.runs.readiness.title') }}
+          </h3>
+          <p class="mt-1 max-w-3xl text-sm text-neutral-600">
+            {{ t('payroll.runs.readiness.subtitle') }}
+          </p>
+          <ul class="mt-3 space-y-2">
+            <li
+              v-for="finding in readinessFindings"
+              :key="finding.code"
+              class="rounded-lg border p-3 text-sm"
+              :class="findingClass(finding)"
+              :data-testid="`run-readiness-${finding.code}`"
+            >
+              <p>
+                <span v-if="finding.count > 1" class="font-semibold">{{ finding.count }}× </span>{{ finding.message }}
+              </p>
+              <p v-if="findingEntityLabels(finding).length" class="mt-1 text-xs opacity-80">
+                {{ entityLabelSummary(findingEntityLabels(finding)) }}
+              </p>
+              <a
+                v-if="finding.remediation_path"
+                :href="finding.remediation_path"
+                :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.link" />
+                </svg>
+                {{ t('payroll.runs.validation.open_remediation') }}
+              </a>
+            </li>
+          </ul>
+        </template>
+      </div>
+
+      <!--
         Přehled toho, co se za měsíc odvede a odešle. Je to TÝŽ panel jako
         v Podáních, jen řízený obdobím téhle stránky — druhá kopie by se s ním
         dřív nebo později rozešla.
@@ -1046,8 +1219,8 @@ onMounted(load)
             </p>
           </div>
           <div
-            v-if="visibleCommands(run).length || (canWrite && (run.can_delete || run.delete_blocker))"
-            class="flex flex-wrap justify-end gap-2"
+            v-if="visibleCommands(run).length || (canWrite && run.can_delete)"
+            class="flex flex-wrap items-center justify-end gap-2"
           >
             <button
               v-for="command in visibleCommands(run)"
@@ -1075,20 +1248,32 @@ onMounted(load)
               </svg>
               {{ t('payroll.runs.delete') }}
             </button>
-            <!--
-              Když smazat nejde, tlačítko dřív jen zmizelo a účetní nevěděla
-              proč. Důvod rozhodnutí zná, tak ho ukaž — i kdyby to mělo být
-              jen „běh má účetní stopu".
-            -->
-            <p
-              v-else-if="canWrite && run.delete_blocker"
-              :data-testid="`payroll-run-${run.id}-delete-blocker`"
-              class="self-center text-xs text-neutral-500"
-            >
-              {{ run.delete_blocker }}
-            </p>
           </div>
         </div>
+
+        <!--
+          Vysvětlení patří POD tlačítka, ne vedle nich. Vedle nich přetékalo
+          přes celou šířku karty a řádek s akcemi se kvůli němu nedal přečíst.
+        -->
+        <p
+          v-if="commandHint(run)"
+          :data-testid="`payroll-run-${run.id}-hint`"
+          class="mt-3 max-w-3xl text-sm text-neutral-600"
+        >
+          {{ commandHint(run) }}
+        </p>
+        <!--
+          Když smazat nejde, tlačítko dřív jen zmizelo a účetní nevěděla
+          proč. Důvod rozhodnutí zná, tak ho ukaž — i kdyby to mělo být
+          jen „běh má účetní stopu".
+        -->
+        <p
+          v-if="canWrite && !run.can_delete && run.delete_blocker"
+          :data-testid="`payroll-run-${run.id}-delete-blocker`"
+          class="mt-2 max-w-3xl text-xs text-neutral-500"
+        >
+          {{ run.delete_blocker }}
+        </p>
 
         <div
           v-if="commandBlockers[run.id]"
@@ -1480,6 +1665,71 @@ onMounted(load)
         @update:page="goToPage"
       />
     </section>
+
+    <!--
+      „Opravdu zahájit?" — poslední místo, kde jde couvnout, než se snímek
+      vstupů zmrazí. Dialog NENÍ brána: nálezy jsou často věci, o kterých
+      účetní ví a přesto chce počítat, tak má „Přesto zahájit" jako plnou
+      akci. „Zkontrolovat znovu" je tu pro případ, že mezitím vadu opravila.
+    -->
+    <Modal
+      v-if="pendingStart"
+      :title="t('payroll.runs.readiness.confirm_title')"
+      width-class="max-w-2xl"
+      @close="pendingStart = null"
+    >
+      <div class="space-y-4" data-test="run-readiness-dialog">
+        <p class="text-sm text-neutral-700">
+          {{ t('payroll.runs.readiness.confirm_intro') }}
+        </p>
+        <ul class="space-y-2">
+          <li
+            v-for="finding in readinessFindings"
+            :key="finding.code"
+            class="rounded-lg border p-3 text-sm"
+            :class="findingClass(finding)"
+          >
+            <p>
+              <span v-if="finding.count > 1" class="font-semibold">{{ finding.count }}× </span>{{ finding.message }}
+            </p>
+            <p v-if="findingEntityLabels(finding).length" class="mt-1 text-xs opacity-80">
+              {{ entityLabelSummary(findingEntityLabels(finding)) }}
+            </p>
+          </li>
+        </ul>
+        <p class="text-sm text-neutral-500">
+          {{ t('payroll.runs.readiness.confirm_note') }}
+        </p>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" @click="pendingStart = null">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="button"
+            class="cursor-pointer"
+            :class="btnOutline('neutral')"
+            :disabled="saving || loading"
+            data-test="run-readiness-recheck"
+            @click="recheckReadiness()"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+            {{ t('payroll.runs.readiness.recheck') }}
+          </button>
+          <button
+            type="button"
+            class="cursor-pointer"
+            :class="btnFilled('primary')"
+            :disabled="saving"
+            data-test="confirm-run-readiness"
+            @click="confirmStart()"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+            {{ t('payroll.runs.readiness.start_anyway') }}
+          </button>
+        </div>
+      </div>
+    </Modal>
 
     <Modal
       v-if="pendingCommand"

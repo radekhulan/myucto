@@ -2536,6 +2536,143 @@ final class PayrollRunPersistenceTest extends TestCase
         return (int) $pdo->lastInsertId();
     }
 
+    /**
+     * KONTROLA PŘED ZAHÁJENÍM. Čtecí volání seznamu vrátí nálezy k prohlédnutí
+     * a samo NIC neudělá — žádný běh, žádnou revizi, žádný zmrazený snímek.
+     * Vzor je `GET /payroll/year-close/{year}` s jeho `blockers`.
+     */
+    public function testRunListReportsReadinessWithoutTouchingAnything(): void
+    {
+        $role = new EffectiveRole(
+            90,
+            'Syntetická mzdová účetní',
+            'staff',
+            true,
+            [
+                'payroll' => AccessLevel::READ->value,
+                'payroll.inputs.write' => AccessLevel::WRITE->value,
+                'payroll.calculate' => AccessLevel::WRITE->value,
+            ],
+        );
+        $pdo = $this->db->pdo();
+        $countRuns = static fn (): int => (int) $pdo
+            ->query('SELECT COUNT(*) FROM payroll_runs')->fetchColumn();
+        $countRevisions = static fn (): int => (int) $pdo
+            ->query('SELECT COUNT(*) FROM payroll_run_revisions')->fetchColumn();
+        $runsBefore = $countRuns();
+        $revisionsBefore = $countRevisions();
+
+        $response = $this->action->list(
+            $this->apiRequest('GET', '/api/payroll/runs?period=2026-06', $role)
+                ->withQueryParams(['period' => '2026-06']),
+            new Response(),
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $readiness = $this->json($response)['readiness'];
+        self::assertIsArray($readiness);
+        self::assertSame('2026-06-01', $readiness['period_start']);
+        self::assertIsBool($readiness['ready']);
+        self::assertIsArray($readiness['findings']);
+        foreach ($readiness['findings'] as $finding) {
+            self::assertSame([
+                'code',
+                'severity',
+                'message',
+                'remediation_path',
+                'count',
+                'entities',
+            ], array_keys($finding));
+            self::assertContains($finding['severity'], ['blocker', 'warning']);
+            self::assertNotSame('', trim((string) $finding['message']));
+        }
+        self::assertSame($runsBefore, $countRuns());
+        self::assertSame($revisionsBefore, $countRevisions());
+    }
+
+    /**
+     * Sloučený krok „Spočítat mzdy" musí být jedno kliknutí, ale DVĚ auditní
+     * události. Mezi zámkem a výpočtem se nic lidského nedělo, takže druhé
+     * kliknutí byla jen ceremonie — stopa po obou příkazech ale zůstat musí.
+     */
+    public function testLockAndCalculateIsOneStepWithBothAuditEvents(): void
+    {
+        $run = $this->createRun();
+        $result = $this->service->lockAndCalculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'combined-lock-and-calculate',
+            $this->actors[0],
+        );
+
+        self::assertSame('draft', $result->from->value);
+        self::assertSame('calculated', $result->to->value);
+        self::assertSame('calculated', (string) $result->run['status']);
+        self::assertNotNull($result->revision);
+        self::assertNotNull($result->revision['result_snapshot_json']);
+
+        $history = $this->runs->history($this->supplierId, (int) $run['id']);
+        $events = array_map(
+            static fn (array $event): string => (string) $event['event_type'],
+            $history['events'],
+        );
+        self::assertContains('lock_inputs', $events);
+        self::assertContains('calculate', $events);
+
+        // Opakování s týmž klíčem nesmí spočítat znovu ani přidat druhé
+        // události — obě poloviny se vrátí z potvrzenky.
+        $replay = $this->service->lockAndCalculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'combined-lock-and-calculate',
+            $this->actors[0],
+        );
+        self::assertTrue($replay->idempotentReplay);
+        self::assertSame(
+            count($history['events']),
+            count($this->runs->history($this->supplierId, (int) $run['id'])['events']),
+        );
+    }
+
+    /**
+     * Schválení jde rovnou ze `calculated` — samostatná kontrola je u jedné
+     * účetní druhý podpis téhož člověka. Stopa po ní ale zůstává: revize
+     * dostane `reviewed_by` a do historie jde vlastní událost `review`.
+     */
+    public function testApproveFromCalculatedRecordsImplicitReview(): void
+    {
+        $run = $this->createRun();
+        $calculated = $this->service->lockAndCalculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'combined-before-approve',
+            $this->actors[0],
+        );
+        self::assertSame('calculated', $calculated->to->value);
+
+        $approved = $this->service->approve(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $calculated->run['row_version'],
+            'approve-without-separate-review',
+            $this->actors[2],
+        );
+
+        self::assertSame('calculated', $approved->from->value);
+        self::assertSame('approved', $approved->to->value);
+        self::assertNotNull($approved->revision['reviewed_by']);
+
+        $events = array_map(
+            static fn (array $event): string => (string) $event['event_type'],
+            $this->runs->history($this->supplierId, (int) $run['id'])['events'],
+        );
+        self::assertContains('review', $events);
+        self::assertContains('approve', $events);
+    }
+
     private function createRun(): array
     {
         return $this->service->createRun(

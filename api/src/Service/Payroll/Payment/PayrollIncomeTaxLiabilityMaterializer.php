@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Payment;
 
-use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
@@ -23,7 +22,7 @@ final class PayrollIncomeTaxLiabilityMaterializer
     public function __construct(
         private readonly PayrollPaymentLiabilityRepository $liabilities,
         private readonly PayrollStatutoryResultRepository $statutoryResults,
-        private readonly PayrollInstitutionAccountRepository $institutions,
+        private readonly PayrollInstitutionPaymentTargetResolver $targets,
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly PayrollLevyDeadlinePolicy $deadlines,
     ) {}
@@ -542,28 +541,24 @@ final class PayrollIncomeTaxLiabilityMaterializer
         string $dueOn,
         int $amount,
     ): array {
-        $accounts = $this->institutions->lockEffectivePaymentTargets(
+        // Kód instituce u finančního úřadu není značka úřadu, ale DRUH DANĚ:
+        // zálohová daň ze závislé činnosti a daň vybíraná srážkou mají u FÚ
+        // různá předčíslí účtu. Sáhnout při neshodě po „tom druhém" účtu FÚ by
+        // znamenalo poslat srážkovou daň na zálohový účet, proto tu žádná
+        // náhrada není. Hláška ale musí říct oba kódy a co aplikace našla.
+        $label = self::KIND_LABELS[$kind] ?? $kind;
+        $resolved = $this->targets->resolve(
             $supplierId,
             'tax_office',
             $kind,
             'CZK',
             $dueOn,
+            "Finanční úřad (účet pro {$label})",
+            'druh daně; u finančního úřadu je kódem účtu právě druh daně,'
+                . ' protože každý má vlastní předčíslí',
+            PayrollInstitutionFallbackPolicy::NEVER,
         );
-        if (count($accounts) !== 1) {
-            // Účet finančního úřadu se hledá pod kódem instituce, který je
-            // shodný s druhem daně — ne pod názvem či zkratkou úřadu. Bez toho
-            // hláška posílala účetní hledat „ověřený účet" u řádku, který
-            // ověřený byl, jen zadaný pod jiným kódem. Do věty se navíc dostával
-            // holý strojový kód (advance_tax), který uživateli nic neříká.
-            $label = self::KIND_LABELS[$kind] ?? $kind;
-            throw new \DomainException(count($accounts) === 0
-                ? "Finanční úřad nemá k {$dueOn} ověřený účet pro {$label}."
-                    . " Účet musí být v Nastavení mezd → Účty institucí zadaný"
-                    . " s typem Finanční úřad a kódem instituce „{$kind}“."
-                : "Finanční úřad má k {$dueOn} víc než jeden účinný účet pro"
-                    . " {$label} (kód instituce „{$kind}“).");
-        }
-        $account = $accounts[0];
+        $account = $resolved['account'];
         $this->assertVerifiedAccount($supplierId, $dueOn, $account);
         $this->assertSymbols($account);
         $verificationHash = hash(
