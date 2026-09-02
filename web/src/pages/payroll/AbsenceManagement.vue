@@ -10,6 +10,7 @@ import { formatDate, formatMoneyMinor as money } from '@/composables/useFormat'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import Modal from '@/components/ui/Modal.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { apiErrorMessage } from '@/api/errors'
 import { localPayrollPeriod, payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
@@ -79,6 +80,7 @@ const leaveCandidatePageSize = 25
 const leaveCandidateLoading = ref(false)
 const leaveCandidateError = ref('')
 const selectedLeaveCandidates = ref<number[]>([])
+const selectedAbsenceIds = ref<number[]>([])
 const selectedEmployeeId = ref<number | null>(null)
 const selectedEmploymentId = ref<number | null>(null)
 const filterFrom = ref(monthStart)
@@ -158,6 +160,13 @@ const approvedAverages = computed(() => averages.value.filter(item => item.statu
  * ovládacích prvků se vykreslí rozcestník do evidence osob.
  */
 const hasNoEmployments = computed(() => !loading.value && !loadFailed.value && employments.value.length === 0)
+/*
+ * Firemní přehled. Bez vybraného vztahu se seznam nepřítomností načte za celou
+ * firmu — u pěti set zaměstnanců je proklikat po jednom jediný způsob, jak
+ * zjistit, co čeká na rozhodnutí, a to není přehled. Průměry a kniha dovolené
+ * se ale vedou k jednomu vztahu, takže ty v tomhle režimu nemají co ukázat.
+ */
+const allEmployees = computed(() => selectedEmploymentId.value === null)
 const personOptions = computed(() => Array.from(
   new Map(employments.value.map(item => [item.employee_id, {
     value: item.employee_id,
@@ -322,7 +331,7 @@ async function loadContext() {
 }
 
 async function loadData() {
-  if (selectedEmploymentId.value === null) {
+  if (employments.value.length === 0) {
     // Bez pracovního vztahu není co načítat — ale `loading` se musí shodit,
     // jinak na stránce natrvalo zůstanou skeletony a vypadá to jako zaseknuté
     // načítání. Firma bez zaměstnanců je legitimní stav, ne chyba.
@@ -333,16 +342,24 @@ async function loadData() {
   loadFailed.value = false
   try {
     const employmentId = selectedEmploymentId.value
+    // `employment_id` je na serveru nepovinné; bez něj vrátí stránku napříč
+    // firmou a řádek nese jméno i kód vztahu, takže se nedohledává druhým dotazem.
     const [absencePage, averageData, leaveData] = await Promise.all([
-      payrollAbsenceApi.absencesPage(filterFrom.value, filterTo.value, employmentId, {
+      payrollAbsenceApi.absencesPage(filterFrom.value, filterTo.value, employmentId ?? undefined, {
         limit: absencePageSize,
         offset: absenceOffset.value,
       }),
-      payrollAbsenceApi.averages(employmentId),
-      payrollAbsenceApi.leaveLedger(employmentId, leaveYear.value),
+      employmentId === null
+        ? Promise.resolve<AverageSnapshot[]>([])
+        : payrollAbsenceApi.averages(employmentId),
+      employmentId === null
+        ? Promise.resolve(null)
+        : payrollAbsenceApi.leaveLedger(employmentId, leaveYear.value),
     ])
     absences.value = absencePage.absences
     absenceTotal.value = absencePage.total
+    selectedAbsenceIds.value = selectedAbsenceIds.value.filter(id =>
+      absencePage.absences.some(item => item.id === id && item.status === 'requested'))
     for (const item of absencePage.absences) {
       if (['dpn', 'quarantine'].includes(item.absence_type) && !dpnReviews[item.id]) {
         dpnReviews[item.id] = {
@@ -353,12 +370,14 @@ async function loadData() {
       }
     }
     averages.value = averageData
-    leaveEntries.value = leaveData.entries
-    leaveBalance.value = leaveData.balance_minutes
-    absenceForm.employment_id = employmentId
-    averageForm.employment_id = employmentId
-    entitlementForm.employment_id = employmentId
-    entryForm.employment_id = employmentId
+    leaveEntries.value = leaveData?.entries ?? []
+    leaveBalance.value = leaveData?.balance_minutes ?? 0
+    if (employmentId !== null) {
+      absenceForm.employment_id = employmentId
+      averageForm.employment_id = employmentId
+      entitlementForm.employment_id = employmentId
+      entryForm.employment_id = employmentId
+    }
   } catch (error: any) {
     // Nepřítomnosti, průměry ani nárok se nemažou. Prázdný seznam by tu byl
     // obzvlášť zrádný: „žádná dovolená" a „nevíme" vedou k opačnému jednání.
@@ -370,9 +389,19 @@ async function loadData() {
 }
 
 // Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+// Platí i pro firemní přehled — strop drží server, `total` je jediné, z čeho se
+// pozná, že další nepřítomnosti existují.
 function goToAbsencePage(nextPage: number) {
   absenceOffset.value = Math.max(0, (nextPage - 1) * absencePageSize)
+  // Výběr se vztahuje k řádkům na stránce; jinak by dávka schválila i to,
+  // co uživatel na obrazovce nevidí.
+  selectedAbsenceIds.value = []
   void loadData()
+}
+
+function showAllEmployees() {
+  selectedEmployeeId.value = null
+  selectedEmploymentId.value = null
 }
 
 async function createAbsence() {
@@ -464,6 +493,110 @@ async function decide(
   } finally {
     saving.value = false
   }
+}
+
+/**
+ * Hromadné schválení nad vybranými řádky.
+ *
+ * Why: rozhodnout několik set žádostí po jedné kartě je práce na celý den.
+ * Dávka ale nesmí rozhodnout nic, co rozhodnutí teprve vyžaduje: u DPN
+ * a karantény server schválení odmítne, dokud není potvrzena účast na pojištění
+ * a vyloučen souběh dávky, a to je posouzení konkrétního případu. Takové řádky
+ * se z dávky vyřadí — ale NEZAHODÍ: vypíšou se jménem i důvodem, ať je vidět,
+ * koho zbývá odbavit ručně.
+ */
+type BulkExclusion = { absenceId: number; name: string; reason: string }
+type ApproveFailure = { absenceId: number; name: string; message: string }
+
+const bulkApprovalOpen = ref(false)
+const approveFailures = ref<ApproveFailure[]>([])
+
+const selectableAbsences = computed(() =>
+  absences.value.filter(item => item.status === 'requested'))
+const bulkSelectedItems = computed(() =>
+  selectableAbsences.value.filter(item => selectedAbsenceIds.value.includes(item.id)))
+const allRequestedSelected = computed(() => selectableAbsences.value.length > 0
+  && selectableAbsences.value.every(item => selectedAbsenceIds.value.includes(item.id)))
+
+function bulkExclusionReason(item: PayrollAbsence): string | null {
+  if (['dpn', 'quarantine'].includes(item.absence_type)) {
+    return t('payroll_absence.bulk.excluded.sickness_checklist')
+  }
+  return null
+}
+
+const bulkCandidates = computed(() =>
+  bulkSelectedItems.value.filter(item => bulkExclusionReason(item) === null))
+const bulkExclusions = computed<BulkExclusion[]>(() => bulkSelectedItems.value
+  .map(item => ({ item, reason: bulkExclusionReason(item) }))
+  .filter((row): row is { item: PayrollAbsence; reason: string } => row.reason !== null)
+  .map(row => ({
+    absenceId: row.item.id,
+    name: row.item.full_name,
+    reason: row.reason,
+  })))
+const bulkBlockedReason = computed<string | null>(() => bulkCandidates.value.length === 0
+  ? t('payroll_absence.bulk.blocked_no_candidates')
+  : null)
+
+function toggleAbsenceSelection(id: number) {
+  selectedAbsenceIds.value = selectedAbsenceIds.value.includes(id)
+    ? selectedAbsenceIds.value.filter(selected => selected !== id)
+    : [...selectedAbsenceIds.value, id]
+}
+
+function toggleAllRequested() {
+  selectedAbsenceIds.value = allRequestedSelected.value
+    ? []
+    : selectableAbsences.value.map(item => item.id)
+}
+
+function openBulkApproval() {
+  if (bulkSelectedItems.value.length === 0) return
+  approveFailures.value = []
+  bulkApprovalOpen.value = true
+}
+
+function closeBulkApproval() {
+  bulkApprovalOpen.value = false
+}
+
+async function approveSelected() {
+  const items = bulkCandidates.value
+  if (items.length === 0) return
+  saving.value = true
+  // Nesbírá se PRVNÍ chyba, ale VŠECHNY: „nepodařilo se schválit 3 žádosti"
+  // znamená otevřít tři karty a hádat, která na čem spadla. Přečerpaná dovolená
+  // sem dopadne jako chyba se serverovou větou — potvrdit ji smí jen člověk,
+  // který vidí konkrétní čísla, ne dávka.
+  const failures: ApproveFailure[] = []
+  let approved = 0
+  for (const item of items) {
+    try {
+      await payrollAbsenceApi.decide(item.id, {
+        row_version: item.row_version,
+        decision: 'approved',
+      })
+      approved += 1
+    } catch (error: any) {
+      failures.push({
+        absenceId: item.id,
+        name: item.full_name,
+        message: error?.response?.data?.error?.message
+          ?? t('payroll_absence.messages.save_failed'),
+      })
+    }
+  }
+  approveFailures.value = failures
+  if (approved > 0) toast.success(t('payroll_absence.bulk.approved', { count: approved }))
+  bulkApprovalOpen.value = false
+  selectedAbsenceIds.value = []
+  await loadData()
+  saving.value = false
+}
+
+function clearApproveFailures() {
+  approveFailures.value = []
 }
 
 /**
@@ -660,6 +793,8 @@ watch(selectedEmploymentId, () => {
   entryError.value = ''
   // Jiný vztah = jiná množina nepřítomností; třetí stránka by ukázala prázdno.
   absenceOffset.value = 0
+  selectedAbsenceIds.value = []
+  approveFailures.value = []
   void loadData()
 })
 // Rozsah dat se načítá až tlačítkem Načíst znovu, ale zúžený filtr nesmí
@@ -732,12 +867,16 @@ onMounted(async () => {
       <div class="grid gap-4 md:grid-cols-4">
         <div>
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.employee') }}</span>
+          <!--
+            Zrušený výběr = firemní přehled. Bez něj se nepřítomnosti daly číst
+            jen po jednom člověku, což u větší firmy znamená proklikat všechny.
+          -->
           <PayrollPersonSearchSelect
             v-model="selectedEmployeeId"
             data-test="absence-person"
             :candidates="personOptions"
             :label="t('payroll_absence.employee')"
-            :clearable="false"
+            :placeholder="t('payroll_absence.all_employees')"
           />
         </div>
         <div>
@@ -746,6 +885,7 @@ onMounted(async () => {
             v-model="selectedEmploymentId"
             :options="employmentOptions"
             :clearable="false"
+            :placeholder="t('payroll_absence.all_employees')"
             accent="payroll"
             data-test="absence-employment"
             :aria-label="t('payroll_absence.employment')"
@@ -760,7 +900,19 @@ onMounted(async () => {
           <input v-model="filterTo" type="date" :class="fieldClass">
         </label>
       </div>
-      <div class="mt-3 flex flex-wrap justify-end">
+      <div class="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <button
+          type="button"
+          :class="btnOutline(allEmployees ? 'primary' : 'neutral')"
+          data-test="absence-all-employees"
+          :disabled="loading || allEmployees"
+          @click="showAllEmployees"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path :d="ICONS.user" />
+          </svg>
+          {{ t('payroll_absence.all_employees') }}
+        </button>
         <button :class="btnOutline('neutral')" :disabled="loading" @click="loadData">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path :d="ICONS.cycle" />
@@ -800,7 +952,14 @@ onMounted(async () => {
     />
 
     <template v-else-if="tab === 'absences'">
-      <section v-if="canWrite" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
+      <p
+        v-if="canWrite && allEmployees"
+        data-test="absence-create-needs-person"
+        class="rounded-xl border border-dashed border-neutral-300 p-4 text-sm text-neutral-600"
+      >
+        {{ t('payroll_absence.absences.new_needs_person') }}
+      </p>
+      <section v-if="canWrite && !allEmployees" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll_absence.absences.new') }}</h2>
         <form data-test="absence-form" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createAbsence">
           <div>
@@ -903,16 +1062,81 @@ onMounted(async () => {
       </section>
 
       <section>
-        <h2 class="mb-3 text-lg font-semibold text-neutral-900">{{ t('payroll_absence.absences.list') }}</h2>
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll_absence.absences.list') }}</h2>
+          <div v-if="canWrite && selectableAbsences.length > 0" class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              :class="btnOutline('neutral')"
+              data-test="absence-select-all"
+              @click="toggleAllRequested"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+              {{ t(allRequestedSelected ? 'payroll_absence.bulk.clear_selection' : 'payroll_absence.bulk.select_all') }}
+            </button>
+            <button
+              v-if="selectedAbsenceIds.length > 0"
+              type="button"
+              :class="btnFilled('success')"
+              data-test="bulk-approve-open"
+              :disabled="saving"
+              @click="openBulkApproval"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll_absence.bulk.approve', { count: selectedAbsenceIds.length }) }}
+            </button>
+          </div>
+        </div>
+
+        <!--
+          Neúspěch dávky patří na obrazovku, ne do toastu, který za pár vteřin
+          zmizí: účetní musí vidět KOHO se to týká a PROČ to neprošlo.
+        -->
+        <section
+          v-if="approveFailures.length"
+          data-test="absence-approve-error"
+          class="mb-4 rounded-xl border border-danger-500/40 bg-danger-50 p-4 text-sm text-danger-700"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <p class="font-semibold">{{ t('payroll_absence.bulk.failed', { count: approveFailures.length }) }}</p>
+            <button :class="btnOutline('neutral')" @click="clearApproveFailures">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('common.close') }}
+            </button>
+          </div>
+          <ul class="mt-2 space-y-2">
+            <li
+              v-for="failure in approveFailures"
+              :key="failure.absenceId"
+              data-test="absence-approve-error-row"
+              class="border-t border-danger-500/20 pt-2 first:border-t-0 first:pt-0"
+            >
+              <p class="font-medium">{{ failure.name }}</p>
+              <p class="mt-0.5 max-w-prose leading-snug">{{ failure.message }}</p>
+            </li>
+          </ul>
+        </section>
+
         <p v-if="absences.length === 0" class="rounded-xl border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500">
           {{ t('payroll_absence.absences.empty') }}
         </p>
         <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <article v-for="item in absences" :key="item.id" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
             <div class="flex items-start justify-between gap-3">
-              <div>
-                <h3 class="font-semibold text-neutral-900">{{ t(`payroll_absence.types.${item.absence_type}`) }}</h3>
-                <p class="mt-0.5 text-sm text-neutral-500">{{ item.full_name }} · {{ item.employment_code }}</p>
+              <div class="flex items-start gap-3">
+                <input
+                  v-if="canWrite && item.status === 'requested'"
+                  type="checkbox"
+                  class="mt-1 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500"
+                  data-test="absence-select"
+                  :checked="selectedAbsenceIds.includes(item.id)"
+                  :aria-label="t('payroll_absence.bulk.select', { name: item.full_name })"
+                  @change="toggleAbsenceSelection(item.id)"
+                >
+                <div>
+                  <h3 class="font-semibold text-neutral-900">{{ t(`payroll_absence.types.${item.absence_type}`) }}</h3>
+                  <p class="mt-0.5 text-sm text-neutral-500">{{ item.full_name }} · {{ item.employment_code }}</p>
+                </div>
               </div>
               <span class="rounded-full px-2 py-1 text-xs font-medium" :class="{
                 'bg-warning-50 text-warning-700': item.status === 'requested',
@@ -933,6 +1157,7 @@ onMounted(async () => {
             </div>
             <div
               v-if="item.status === 'requested' && ['dpn', 'quarantine'].includes(item.absence_type)"
+              data-test="dpn-review"
               class="mt-4 space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-3 text-xs text-warning-900"
             >
               <label class="flex gap-2"><input v-model="dpnReviews[item.id].insuranceConfirmed" type="checkbox"> {{ t('payroll_absence.dpn.insurance') }}</label>
@@ -987,6 +1212,34 @@ onMounted(async () => {
           @update:page="goToAbsencePage"
         />
       </section>
+    </template>
+
+    <!--
+      Průměrný výdělek se počítá z rozhodného období JEDNOHO vztahu, kniha
+      dovolené vede zůstatek JEDNOHO vztahu. Ve firemním přehledu proto nejde
+      ukázat prázdný seznam — vypadal by jako „nic tu není", i když správná
+      odpověď je „vyberte osobu".
+    -->
+    <template v-else-if="tab === 'averages' && allEmployees">
+      <EmptyState
+        boxed
+        icon="user"
+        accent="accent"
+        data-test="averages-person-required"
+        :title="t('payroll_absence.person_required.title')"
+        :message="t('payroll_absence.person_required.averages')"
+      />
+    </template>
+
+    <template v-else-if="tab === 'leave' && allEmployees">
+      <EmptyState
+        boxed
+        icon="user"
+        accent="accent"
+        data-test="leave-person-required"
+        :title="t('payroll_absence.person_required.title')"
+        :message="t('payroll_absence.person_required.leave')"
+      />
     </template>
 
     <template v-else-if="tab === 'averages'">
@@ -1118,5 +1371,51 @@ onMounted(async () => {
       </section>
     </template>
     </template>
+
+    <Modal
+      v-if="bulkApprovalOpen"
+      :title="t('payroll_absence.bulk.title')"
+      width-class="max-w-xl"
+      @close="closeBulkApproval"
+    >
+      <form data-test="bulk-approve-form" class="space-y-4" @submit.prevent="approveSelected">
+        <p class="max-w-prose text-sm text-neutral-600">
+          {{ t('payroll_absence.bulk.hint', { count: bulkCandidates.length }) }}
+        </p>
+
+        <section
+          v-if="bulkExclusions.length"
+          data-test="bulk-approve-excluded"
+          class="rounded-lg border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-700"
+        >
+          <p class="font-medium">{{ t('payroll_absence.bulk.excluded.title', { count: bulkExclusions.length }) }}</p>
+          <ul class="mt-2 space-y-1">
+            <li v-for="row in bulkExclusions" :key="row.absenceId" data-test="bulk-approve-excluded-row">
+              <span class="font-medium">{{ row.name }}</span> — {{ row.reason }}
+            </li>
+          </ul>
+        </section>
+
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeBulkApproval">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="submit"
+            data-test="bulk-approve-confirm"
+            :class="btnFilled('success')"
+            :disabled="saving || Boolean(bulkBlockedReason)"
+            :title="disabledTitle(Boolean(bulkBlockedReason), bulkBlockedReason)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
+            {{ t('payroll_absence.bulk.confirm', { count: bulkCandidates.length }) }}
+          </button>
+        </div>
+        <p v-if="bulkBlockedReason" :class="BTN_DISABLED_NOTE" data-test="bulk-approve-blocked">
+          {{ bulkBlockedReason }}
+        </p>
+      </form>
+    </Modal>
   </div>
 </template>

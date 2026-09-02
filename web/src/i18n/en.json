@@ -18765,11 +18765,33 @@
     },
     "employee": "Employee",
     "employment": "Employment",
+    "all_employees": "All employees",
     "from": "From",
     "to": "To",
     "period": "Period",
     "note": "Note",
     "select": "Select…",
+    "person_required": {
+      "title": "Pick an employee",
+      "averages": "Average earnings are calculated from the decisive period of a single employment, so there is nothing to show company-wide. Pick an employee above.",
+      "leave": "The leave ledger tracks the entitlement and balance of a single employment, so there is nothing to show company-wide. Pick an employee above."
+    },
+    "bulk": {
+      "title": "Bulk absence approval",
+      "hint": "{count} absences will be approved. Annual leave is also recorded in the leave ledger.",
+      "select": "Select absence — {name}",
+      "select_all": "Select all pending",
+      "clear_selection": "Clear selection",
+      "approve": "Approve selected ({count})",
+      "confirm": "Approve {count}",
+      "approved": "{count} absences approved.",
+      "failed": "{count} absences could not be approved.",
+      "blocked_no_candidates": "None of the selected rows can be approved in bulk.",
+      "excluded": {
+        "title": "{count} rows cannot be approved in bulk",
+        "sickness_checklist": "Sickness and quarantine are approved only after confirming insurance participation and ruling out a conflicting benefit — review them individually on the card."
+      }
+    },
     "tabs": {
       "label": "Absence records",
       "absences": "Absences",
@@ -18805,6 +18827,7 @@
     },
     "absences": {
       "new": "New absence",
+      "new_needs_person": "A new absence can only be created for a specific employee — it is tied to an employment.",
       "list": "Recorded absences",
       "empty": "No absences in the selected period.",
       "type": "Absence type",
@@ -19323,7 +19346,21 @@
       "deleteCredential": "Delete access",
       "deleteCredentialConfirm": "Really delete the stored access to data box {box}? The uploaded certificate will be removed and you will have to set it up again.",
       "credentialDeleted": "The data box access was deleted.",
-      "credentialDeleteFailed": "The data box access could not be deleted."
+      "credentialDeleteFailed": "The data box access could not be deleted.",
+      "certificateSource": "Where to take the certificate from",
+      "certificateSourceHint": "Certificates live in one place (System → Electronic signatures). Picking from the vault means the same key is not uploaded twice and its expiry is tracked in a single place.",
+      "certificateFromVault": "Pick from the shared vault",
+      "certificateFromFile": "Upload a file",
+      "sharedCertificate": "Certificate from the shared vault",
+      "sharedCertificatePlaceholder": "— select a certificate —",
+      "sharedCertificateOption": "{label} · valid until {validTo}",
+      "sharedCertificateExpiredOption": "{label} · EXPIRED {validTo}",
+      "sharedCertificateEmpty": "No certificate in the vault is enabled for this company yet. Upload one in System → Electronic signatures, or upload a file here.",
+      "sharedCertificateSubject": "Subject",
+      "sharedCertificateFingerprint": "Fingerprint",
+      "sharedCertificateExpired": "expired",
+      "sharedCertificateInUse": "Certificate from the shared vault: {label}",
+      "sharedCertificateMissing": "The selected certificate is no longer in the shared vault. Pick another one or sending will fail."
     },
     "polling": {
       "title": "On-demand collection only",
@@ -19567,7 +19604,8 @@
       "taxOfficeHint": "All seven health insurers are pre-filled from the official VZP codebook. A company can override a default value. Tax offices are not pre-filled; add the locally competent recipient from the tax administration list."
     },
     "errors": {
-      "certificateRequired": "Please upload the system certificate file (PFX or P12)."
+      "certificateRequired": "Please upload the system certificate file (PFX or P12).",
+      "certificateSelectionRequired": "Select a certificate from the shared vault."
     },
     "delivery": {
       "column": "Effective delivery",

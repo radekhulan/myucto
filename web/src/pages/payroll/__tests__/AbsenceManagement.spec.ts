@@ -228,7 +228,7 @@ describe('AbsenceManagement', () => {
 
     expect(wrapper.text()).toContain('payroll_absence.types.dpn')
     expect(wrapper.text()).toContain('Syntetická osoba')
-    const checks = wrapper.findAll('input[type="checkbox"]')
+    const checks = wrapper.findAll('[data-test="dpn-review"] input[type="checkbox"]')
     expect(checks).toHaveLength(3)
     await checks[0].setValue(true)
     await checks[1].setValue(true)
@@ -640,6 +640,188 @@ describe('AbsenceManagement', () => {
       const wrapper = await approveVacation()
 
       expect(wrapper.find('[data-test="leave-overdraw-prompt"]').exists()).toBe(false)
+      wrapper.unmount()
+    })
+  })
+
+  /*
+   * Firemní přehled. Nepřítomnosti šly číst jen po jednom člověku — u firmy
+   * s pěti sty zaměstnanci to znamená proklikat pět set karet, aby účetní
+   * zjistila, co čeká na rozhodnutí.
+   */
+  describe('firemní přehled', () => {
+    // Modal hromadného schválení se teleportuje do `document.body`; bez stubu
+    // by ho `wrapper.get()` minul.
+    const MOUNT = { global: { stubs: { teleport: true } } }
+
+    function twoPeoplePage() {
+      return absencesPage([
+        absence({
+          id: 1,
+          employment_id: 12,
+          absence_type: 'vacation',
+          full_name: 'Syntetická osoba',
+          employment_code: 'SYNTH-HPP',
+        }),
+        absence({
+          id: 2,
+          employment_id: 13,
+          absence_type: 'vacation',
+          full_name: 'Druhá syntetická osoba',
+          employment_code: 'SYNTH-DPC',
+        }),
+      ])
+    }
+
+    async function mountAllEmployees(page = twoPeoplePage()) {
+      const wrapper = mount(AbsenceManagement, MOUNT)
+      await flushPromises()
+      m.absencesPage.mockResolvedValue(page)
+      await wrapper.get('[data-test="absence-all-employees"]').trigger('click')
+      await flushPromises()
+      return wrapper
+    }
+
+    it('načte seznam bez employment_id a nechá průměry i knihu dovolené být', async () => {
+      const wrapper = mount(AbsenceManagement, MOUNT)
+      await flushPromises()
+      m.absencesPage.mockResolvedValue(twoPeoplePage())
+      const averagesBefore = m.averages.mock.calls.length
+      const ledgerBefore = m.leaveLedger.mock.calls.length
+
+      await wrapper.get('[data-test="absence-all-employees"]').trigger('click')
+      await flushPromises()
+
+      const call = m.absencesPage.mock.calls.at(-1)!
+      expect(call[2]).toBeUndefined()
+      expect(call[3]).toEqual({ limit: 12, offset: 0 })
+      // Průměr i kniha dovolené se vedou k jednomu vztahu — dotazovat se na ně
+      // bez něj by skončilo serverovou validační chybou.
+      expect(m.averages.mock.calls).toHaveLength(averagesBefore)
+      expect(m.leaveLedger.mock.calls).toHaveLength(ledgerBefore)
+      wrapper.unmount()
+    })
+
+    it('u každého řádku ukáže, o koho jde', async () => {
+      const wrapper = await mountAllEmployees()
+
+      expect(wrapper.text()).toContain('Syntetická osoba')
+      expect(wrapper.text()).toContain('SYNTH-HPP')
+      expect(wrapper.text()).toContain('Druhá syntetická osoba')
+      expect(wrapper.text()).toContain('SYNTH-DPC')
+      wrapper.unmount()
+    })
+
+    it('průměry i kniha dovolené si řeknou o osobu, místo aby vypadaly prázdně', async () => {
+      const wrapper = await mountAllEmployees()
+
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      expect(wrapper.find('[data-test="averages-person-required"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('payroll_absence.person_required.averages')
+
+      await wrapper.get('[data-test="tab-leave"]').trigger('click')
+      expect(wrapper.find('[data-test="leave-person-required"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('payroll_absence.person_required.leave')
+      wrapper.unmount()
+    })
+
+    it('stránkuje i bez vybraného vztahu — strop drží server', async () => {
+      const wrapper = await mountAllEmployees(absencesPage(
+        Array.from({ length: 12 }, (_, index) =>
+          absence({ id: index + 1, absence_type: 'vacation' })),
+        30,
+      ))
+
+      wrapper.findComponent({ name: 'PaginationBar' }).vm.$emit('update:page', 3)
+      await flushPromises()
+
+      const call = m.absencesPage.mock.calls.at(-1)!
+      expect(call[2]).toBeUndefined()
+      expect(call[3]).toEqual({ limit: 12, offset: 24 })
+      wrapper.unmount()
+    })
+
+    it('novou nepřítomnost bez vybrané osoby nenabízí, ale řekne proč', async () => {
+      const wrapper = await mountAllEmployees()
+
+      expect(wrapper.find('[data-test="absence-form"]').exists()).toBe(false)
+      expect(wrapper.get('[data-test="absence-create-needs-person"]').text())
+        .toBe('payroll_absence.absences.new_needs_person')
+      wrapper.unmount()
+    })
+
+    it('hromadně schválí vybrané a vyřazené řádky vypíše jménem i důvodem', async () => {
+      const wrapper = await mountAllEmployees(absencesPage([
+        absence({ id: 1, absence_type: 'vacation', full_name: 'Syntetická osoba' }),
+        absence({ id: 2, absence_type: 'dpn', full_name: 'Druhá syntetická osoba' }),
+      ]))
+
+      await wrapper.get('[data-test="absence-select-all"]').trigger('click')
+      await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+      await flushPromises()
+
+      const excluded = wrapper.get('[data-test="bulk-approve-excluded"]')
+      expect(excluded.text()).toContain('Druhá syntetická osoba')
+      expect(excluded.text()).toContain('payroll_absence.bulk.excluded.sickness_checklist')
+      expect(wrapper.findAll('[data-test="bulk-approve-excluded-row"]')).toHaveLength(1)
+
+      await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+      await flushPromises()
+
+      // DPN vyžaduje posouzení na kartě, takže do dávky nepatří.
+      expect(m.decide).toHaveBeenCalledTimes(1)
+      expect(m.decide).toHaveBeenCalledWith(1, { row_version: 1, decision: 'approved' })
+      expect(m.toastSuccess).toHaveBeenCalledWith('payroll_absence.bulk.approved')
+      wrapper.unmount()
+    })
+
+    it('nic neschválí, když ve výběru zůstala jen nezpůsobilá nepřítomnost', async () => {
+      const wrapper = await mountAllEmployees(absencesPage([
+        absence({ id: 2, absence_type: 'dpn', full_name: 'Druhá syntetická osoba' }),
+      ]))
+
+      await wrapper.get('[data-test="absence-select-all"]').trigger('click')
+      await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.get('[data-test="bulk-approve-confirm"]').attributes('disabled'))
+        .toBeDefined()
+      expect(wrapper.get('[data-test="bulk-approve-blocked"]').text())
+        .toBe('payroll_absence.bulk.blocked_no_candidates')
+      await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+      await flushPromises()
+
+      expect(m.decide).not.toHaveBeenCalled()
+      wrapper.unmount()
+    })
+
+    it('neúspěch dávky vypíše jménem a serverovou větou, ne jedním toastem', async () => {
+      const wrapper = await mountAllEmployees(absencesPage([
+        absence({ id: 1, absence_type: 'vacation', full_name: 'Syntetická osoba' }),
+        absence({ id: 2, absence_type: 'vacation', full_name: 'Druhá syntetická osoba', employment_id: 13 }),
+      ]))
+      m.decide.mockRejectedValueOnce({
+        response: {
+          data: {
+            error: {
+              code: 'leave_overdraw_confirmation_required',
+              message: 'Čerpání 960 minut přesahuje zůstatek dovolené 480 minut.',
+            },
+          },
+        },
+      })
+
+      await wrapper.get('[data-test="absence-select-all"]').trigger('click')
+      await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+      await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+      await flushPromises()
+
+      const rows = wrapper.findAll('[data-test="absence-approve-error-row"]')
+      expect(rows).toHaveLength(1)
+      expect(rows[0].text()).toContain('Syntetická osoba')
+      expect(rows[0].text()).toContain('Čerpání 960 minut přesahuje zůstatek dovolené 480 minut.')
+      // Druhá žádost prošla — dávka se na první chybě nezastavuje.
+      expect(m.decide).toHaveBeenCalledTimes(2)
       wrapper.unmount()
     })
   })

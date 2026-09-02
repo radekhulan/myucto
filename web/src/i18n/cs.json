@@ -18765,11 +18765,33 @@
     },
     "employee": "Zaměstnanec",
     "employment": "Pracovní vztah",
+    "all_employees": "Všichni zaměstnanci",
     "from": "Od",
     "to": "Do",
     "period": "Období",
     "note": "Poznámka",
     "select": "Vyberte…",
+    "person_required": {
+      "title": "Vyberte zaměstnance",
+      "averages": "Průměrný výdělek se počítá z rozhodného období jednoho pracovního vztahu, takže za celou firmu ho zobrazit nelze. Vyberte nahoře konkrétního zaměstnance.",
+      "leave": "Kniha dovolené vede nárok a zůstatek jednoho pracovního vztahu, takže za celou firmu ji zobrazit nelze. Vyberte nahoře konkrétního zaměstnance."
+    },
+    "bulk": {
+      "title": "Hromadné schválení nepřítomností",
+      "hint": "Schválí se {count} nepřítomností. U dovolené se zároveň zapíše čerpání do knihy dovolené.",
+      "select": "Vybrat nepřítomnost — {name}",
+      "select_all": "Vybrat vše ke schválení",
+      "clear_selection": "Zrušit výběr",
+      "approve": "Hromadně schválit ({count})",
+      "confirm": "Schválit {count}",
+      "approved": "Schváleno {count} nepřítomností.",
+      "failed": "Nepodařilo se schválit {count} nepřítomností.",
+      "blocked_no_candidates": "Žádný z vybraných řádků nelze schválit hromadně.",
+      "excluded": {
+        "title": "Hromadně schválit nelze {count} řádků",
+        "sickness_checklist": "Nemoc a karanténa se schvalují až po potvrzení účasti na pojištění a vyloučení souběžné dávky — posuďte je na kartě jednotlivě."
+      }
+    },
     "tabs": {
       "label": "Agendy nepřítomností",
       "absences": "Absence",
@@ -18805,6 +18827,7 @@
     },
     "absences": {
       "new": "Nová absence",
+      "new_needs_person": "Novou nepřítomnost lze založit až po výběru konkrétního zaměstnance — váže se k pracovnímu vztahu.",
       "list": "Evidované absence",
       "empty": "Ve zvoleném období nejsou žádné absence.",
       "type": "Druh absence",
@@ -19323,7 +19346,21 @@
       "deleteCredential": "Smazat přístup",
       "deleteCredentialConfirm": "Opravdu smazat uložený přístup k datové schránce {box}? Nahraný certifikát se odstraní a budete ho muset nastavit znovu.",
       "credentialDeleted": "Přístup k datové schránce byl smazán.",
-      "credentialDeleteFailed": "Přístup k datové schránce se nepodařilo smazat."
+      "credentialDeleteFailed": "Přístup k datové schránce se nepodařilo smazat.",
+      "certificateSource": "Odkud vzít certifikát",
+      "certificateSourceHint": "Certifikáty má aplikace na jednom místě (Systém → Elektronické podpisy). Vybrat z trezoru znamená, že se stejný klíč nenahrává podruhé a jeho platnost hlídáte jen na jednom místě.",
+      "certificateFromVault": "Vybrat ze sdíleného trezoru",
+      "certificateFromFile": "Nahrát soubor",
+      "sharedCertificate": "Certifikát ze sdíleného trezoru",
+      "sharedCertificatePlaceholder": "— vyberte certifikát —",
+      "sharedCertificateOption": "{label} · platí do {validTo}",
+      "sharedCertificateExpiredOption": "{label} · PROŠLÝ {validTo}",
+      "sharedCertificateEmpty": "V trezoru zatím není žádný certifikát povolený pro tuto firmu. Nahrajte ho v Systém → Elektronické podpisy, nebo použijte nahrání souboru.",
+      "sharedCertificateSubject": "Subjekt",
+      "sharedCertificateFingerprint": "Otisk",
+      "sharedCertificateExpired": "platnost vypršela",
+      "sharedCertificateInUse": "Certifikát ze sdíleného trezoru: {label}",
+      "sharedCertificateMissing": "Vybraný certifikát už ve sdíleném trezoru není. Vyberte jiný, jinak odeslání selže."
     },
     "polling": {
       "title": "Vybírání pouze na vyžádání",
@@ -19567,7 +19604,8 @@
       "taxOfficeHint": "Všech sedm zdravotních pojišťoven je předvyplněno z oficiálního číselníku VZP. Výchozí hodnotu lze pro tuto firmu překrýt. Finanční úřady předvyplněné nejsou — jejich adresáta doplňte ze seznamu Finanční správy podle místní příslušnosti."
     },
     "errors": {
-      "certificateRequired": "Nahrajte prosím soubor systémového certifikátu (PFX nebo P12)."
+      "certificateRequired": "Nahrajte prosím soubor systémového certifikátu (PFX nebo P12).",
+      "certificateSelectionRequired": "Vyberte certifikát ze sdíleného trezoru."
     },
     "delivery": {
       "column": "Rozhodné doručení",
