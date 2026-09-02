@@ -1106,6 +1106,16 @@ describe('EmploymentRegistrationPanel', () => {
       .toContain('border-danger-500')
     expect(wrapper.get('[data-test="a1-permanent-city"]').classes())
       .not.toContain('border-danger-500')
+
+    // Červený rám u pole nestačí, když je pole o dvě obrazovky níž — nález
+    // z Kontroly musí umět doskočit stejně jako chybějící kmenový údaj.
+    routerPush.mockClear()
+    await wrapper
+      .get('[data-test="registration-a1-problem-link-employment.position_name"]')
+      .trigger('click')
+    await flushPromises()
+    expect(routerPush).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-a1-field="employment.position_name"]').exists()).toBe(true)
   })
 
   /**
