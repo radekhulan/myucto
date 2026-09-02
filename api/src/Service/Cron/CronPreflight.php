@@ -86,6 +86,24 @@ final class CronPreflight
         ");
     }
 
+    /**
+     * Má tahle instalace vůbec nějakou firmu se mzdami?
+     *
+     * Permisivní protějšek
+     * {@see \MyInvoice\Repository\Payroll\PayrollModuleStateRepository::payrollEnabledSupplierIds()}
+     * — bez podmínky na stav plného modulu. Instalace, kde mzdy nikdo nezapnul
+     * (drtivá většina), tak noční detekci registračních změn odbaví jedním
+     * dotazem, aniž by kvůli tomu stavěla DI kontejner.
+     */
+    public static function hasPayrollSuppliers(PDO $pdo): bool
+    {
+        return self::probe($pdo, '
+            SELECT 1 FROM supplier
+             WHERE payroll_enabled = 1
+             LIMIT 1
+        ');
+    }
+
     private static function probe(PDO $pdo, string $sql): bool
     {
         try {

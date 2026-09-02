@@ -94,6 +94,29 @@ final class CronJobGateRelevanceTest extends TestCase
     }
 
     /**
+     * Instalace bez mezd nemá co hlásit do registru pojištěnců — noční detekce
+     * registračních změn by tam jen stárla a vyráběla falešný poplach.
+     */
+    public function testRegistrationChangeDetectionIsInactiveWithoutPayroll(): void
+    {
+        $gate = new CronJobGate(new Config([]), $this->pdoReturning(false));
+
+        self::assertSame(
+            CronJobGate::INACTIVE_FEATURE_OFF,
+            $gate->inactiveReason($this->job('cron-payroll-registration-changes')),
+        );
+    }
+
+    public function testRegistrationChangeDetectionIsRelevantWithPayroll(): void
+    {
+        $gate = new CronJobGate(new Config([]), $this->pdoReturning('1'));
+
+        self::assertNull(
+            $gate->inactiveReason($this->job('cron-payroll-registration-changes')),
+        );
+    }
+
+    /**
      * Fail-open: nečitelná databáze nesmí úlohu umlčet. Falešné „neaktivní"
      * schová výpadek natrvalo, kdežto falešný poplach si někdo přečte.
      */

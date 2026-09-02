@@ -2508,6 +2508,8 @@ export interface PayrollChangeSweepResult {
   changed: number
   /** Kolik se nepodařilo přečíst; zkusí se znovu při příštím běhu. */
   skipped: number
+  /** Kolik návrhů opravdu nově vzniklo (opakovaná kontrola vrací 0). */
+  created: number
   /** `true` = strop porce byl vyčerpán, další vztahy čekají. */
   has_more: boolean
 }
