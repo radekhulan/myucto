@@ -69,7 +69,10 @@ final class GoPayService
                 'fee_account_id' => null,
                 'clearing_account_id' => null,
                 'destination_bank_account_id' => null,
-                'payout_account_number' => '115-1391640287',
+                // Bez předvyplněného čísla: konkrétní účet ve výchozí
+                // hodnotě by každé instalaci nabídl cizí účet jako svůj
+                // a párování výplat by pak hádalo proti cizí protistraně.
+                'payout_account_number' => '',
                 'payout_bank_code' => '0100',
                 'payout_date_tolerance_days' => 3,
             ] : $this->normalizeSettings($row),

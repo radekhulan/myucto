@@ -15,7 +15,10 @@ CREATE TABLE IF NOT EXISTS gopay_settings (
   fee_account_id             BIGINT UNSIGNED NOT NULL,
   clearing_account_id        BIGINT UNSIGNED NOT NULL,
   destination_bank_account_id BIGINT UNSIGNED NOT NULL,
-  payout_account_number      VARCHAR(40) NOT NULL DEFAULT '115-1391640287',
+  -- Bez konkrétního čísla účtu: výchozí hodnota se propíše každé nové
+  -- instalaci, takže by cizí účet vypadal jako vlastní a párování výplat
+  -- by hádalo proti protistraně, která s firmou nemá nic společného.
+  payout_account_number      VARCHAR(40) NOT NULL DEFAULT '',
   payout_bank_code           CHAR(4) NOT NULL DEFAULT '0100',
   payout_date_tolerance_days TINYINT UNSIGNED NOT NULL DEFAULT 3,
   updated_by                 BIGINT UNSIGNED NULL,
