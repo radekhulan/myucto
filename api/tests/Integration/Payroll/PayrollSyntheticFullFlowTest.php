@@ -1322,6 +1322,10 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                     'effective_from' => '2026-01-01',
                     'effective_to' => null,
                 ]],
+                // Slevy podle § 35ba mají vlastní scénář
+                // (PayrollPersonStatutoryEvidenceApiTest); tady by jen posunuly
+                // očekávané částky daně.
+                'tax_credit_claims' => [],
                 'social_jurisdictions' => [[
                     'jurisdiction' => 'czech_regime_verified',
                     'foreign_country_code' => null,

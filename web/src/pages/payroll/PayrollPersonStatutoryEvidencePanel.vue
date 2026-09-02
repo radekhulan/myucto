@@ -19,6 +19,7 @@ import { healthInsurerOptions } from '@/utils/healthInsurers'
 import {
   applyFieldChange,
   currentRow,
+  currentRows,
   CUSTOM_REASON,
   defaultRow,
   evidenceDetailFields,
@@ -44,6 +45,12 @@ import {
  * posouzení. Panel proto neukazuje obecnou nápovědu, ale konkrétní seznam
  * toho, co k danému měsíci chybí — a pojmenovává to stejnými důvody, jaké
  * hlásí výpočet.
+ *
+ * Slevy na dani (§ 35ba) jsou jediná sekce, která výpočet neblokuje, a přesto
+ * je peněžní: bez zaevidované slevy na poplatníka odvede zaměstnanec
+ * s podepsaným prohlášením o 2 570 Kč měsíčně víc. Vede se po druzích slevy,
+ * takže na rozdíl od ostatních sekcí má víc souběžných řad a prázdno v ní
+ * není chybějící údaj.
  *
  * Hodnoty jako `czech_regime_verified` nebo `insurer_status = verified` jsou
  * PRÁVNÍ SKUTEČNOSTI, ne přepínače. Ke každé se proto váže doklad; lidské
@@ -203,15 +210,20 @@ function isFrozen(section: StatutorySectionSpec, row: PayrollStatutoryEvidenceRo
     && start <= frozenThrough.value
 }
 
-/** Řádek platný k vybranému měsíci — ten, o kterém mluví přehled nahoře. */
-function effectiveRow(section: StatutorySectionSpec): PayrollStatutoryEvidenceRow | null {
-  return currentRow(section, rowsOf(section), effectiveOn.value)
+/**
+ * Řádky platné k vybranému měsíci — ty, o kterých mluví přehled nahoře.
+ * U slev na dani jich může být víc (jedna od každého druhu).
+ */
+function effectiveRows(section: StatutorySectionSpec): PayrollStatutoryEvidenceRow[] {
+  return currentRows(section, rowsOf(section), effectiveOn.value)
 }
 
 /**
  * Řádek, na kterém má smysl nabídnout „Změnit od …": platí k hranici zmrazení
  * a nic novějšího za ním ještě nestojí. Nabízet to u každého zamčeného řádku
- * by znamenalo šest stejných tlačítek, z nichž pět dělá totéž.
+ * by znamenalo šest stejných tlačítek, z nichž pět dělá totéž. U souběžných
+ * řad (slevy po druzích) se to posuzuje uvnitř druhu — jinak by novou verzi
+ * nabídla jen jedna sleva ze dvou.
  */
 function offersNewVersion(
   section: StatutorySectionSpec,
@@ -219,45 +231,66 @@ function offersNewVersion(
 ): boolean {
   const boundary = frozenThrough.value
   if (boundary === null || section.kind !== 'interval') return false
-  if (currentRow(section, rowsOf(section), boundary) !== row) return false
-  return !rowsOf(section).some(other => statutoryText(other, 'effective_from') > boundary)
+  const peers = scopePeers(section, row)
+  if (currentRow(section, peers, boundary) !== row) return false
+  return !peers.some(other => statutoryText(other, 'effective_from') > boundary)
 }
 
-function summaryValue(section: StatutorySectionSpec): string {
-  const row = effectiveRow(section)
-  return row === null ? '' : statutoryText(row, section.summaryKey)
+/** Řádky téže souběžné řady; u nescopované sekce celá sekce. */
+function scopePeers(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+): PayrollStatutoryEvidenceRow[] {
+  const scopeKey = section.scopeKey
+  if (scopeKey === undefined) return rowsOf(section)
+  const scope = statutoryText(row, scopeKey)
+  return rowsOf(section).filter(other => statutoryText(other, scopeKey) === scope)
 }
 
 function summaryLabel(section: StatutorySectionSpec): string {
-  const value = summaryValue(section)
-  return value === ''
-    ? t('payroll.people.statutory_evidence.current_missing')
-    : t(`payroll.people.statutory_evidence.option.${section.summaryKey}.${value}`)
+  const rows = effectiveRows(section)
+  if (rows.length === 0) {
+    return t(section.optional === true
+      ? 'payroll.people.statutory_evidence.current_none_claimed'
+      : 'payroll.people.statutory_evidence.current_missing')
+  }
+  return rows
+    .map(row => t(
+      `payroll.people.statutory_evidence.option.${section.summaryKey}.`
+      + statutoryText(row, section.summaryKey),
+    ))
+    .join(', ')
 }
 
 /** Doplněk přehledu — u zdravotního pojištění pojišťovna, jinak nic. */
 function summaryDetail(section: StatutorySectionSpec): string {
   const key = section.summaryDetailKey
-  const row = effectiveRow(section)
-  if (key === undefined || row === null) return ''
+  const row = effectiveRows(section)[0]
+  if (key === undefined || row === undefined) return ''
   const code = statutoryText(row, key)
   if (code === '') return ''
   return insurerOptions.find(option => option.value === code)?.label ?? code
 }
 
 function summaryFrom(section: StatutorySectionSpec): string {
-  const row = effectiveRow(section)
-  if (row === null) return ''
-  const from = section.kind === 'month'
-    ? statutoryText(row, 'period_start')
-    : statutoryText(row, 'effective_from')
-  return from === '' ? '' : formatDate(from)
+  const key = section.kind === 'month' ? 'period_start' : 'effective_from'
+  const from = effectiveRows(section)
+    .map(row => statutoryText(row, key))
+    .filter(value => value !== '')
+    .sort()[0]
+  return from === undefined ? '' : formatDate(from)
 }
 
-/** Neověřeno i nevyplněno shodí zákonný výpočet — v přehledu vypadají stejně. */
+/**
+ * Neověřeno i nevyplněno shodí zákonný výpočet — v přehledu vypadají stejně.
+ * U nepovinné sekce (slevy) je prázdno naopak legitimní stav: kdo žádnou
+ * neuplatňuje, nemá co doplnit a varování by ho jen posílalo hledat chybu.
+ */
 function summaryIsBlocking(section: StatutorySectionSpec): boolean {
-  const value = summaryValue(section)
-  return value === '' || value === 'unverified'
+  const rows = effectiveRows(section)
+  if (rows.length === 0) return section.optional !== true
+  const key = section.verificationKey ?? section.summaryKey
+  return rows.some(row => statutoryText(row, key) === 'unverified')
 }
 
 /**
@@ -425,12 +458,17 @@ function addRow(section: StatutorySectionSpec) {
  * musel dosud udělat sám: panel jen napsal, že je historie uzavřená, a nechal
  * pole zašedlá.
  */
-function changeFromNextPeriod(section: StatutorySectionSpec) {
+function changeFromNextPeriod(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+) {
   const boundary = frozenThrough.value
   const from = unlockDay.value
   if (boundary === null || from === null || section.kind !== 'interval') return
   const rows = rowsOf(section)
-  const source = currentRow(section, rows, boundary)
+  // Zdroj je řádek, u kterého uživatel klikl — u souběžných řad (slevy po
+  // druzích) je jen v něm vidět, které z nich se má nová verze týkat.
+  const source = currentRow(section, scopePeers(section, row), boundary)
   const next: PayrollStatutoryEvidenceRow = source === null
     ? defaultRow(section, from, {
       effectiveOn: effectiveOn.value,
@@ -954,7 +992,7 @@ onMounted(() => {
                         :class="btnOutlineSm('accent')"
                         :disabled="saving"
                         :data-test="`change-from-${section.key}`"
-                        @click="changeFromNextPeriod(section)"
+                        @click="changeFromNextPeriod(section, row)"
                       >{{ t('payroll.people.statutory_evidence.change_from', { day: formatDate(unlockDay ?? '') }) }}</button>
                       <button
                         v-if="canWrite && isFrozen(section, row) && correctableRuns.length > 0"
@@ -1010,7 +1048,7 @@ onMounted(() => {
         >{{ saveError }}</p>
 
         <!--
-          Jedno společné Uložit pro všech šest sekcí, přilepené dole: server
+          Jedno společné Uložit pro všechny sekce, přilepené dole: server
           bere celý cílový stav jedním zápisem, takže tlačítko u každé sekce by
           slibovalo dílčí uložení, které neexistuje.
         -->

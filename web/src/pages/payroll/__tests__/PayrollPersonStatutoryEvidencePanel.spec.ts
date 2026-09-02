@@ -117,6 +117,15 @@ function validatorRejection(
       return 'Česká sociální jurisdikce musí mít A1 označený jako nepoužitelný.'
     }
   }
+  if (section === 'tax_credit_claims') {
+    const kind = value('credit_kind')
+    if (kind === null
+      || !['taxpayer', 'disability-basic', 'disability-extended', 'ztp-p'].includes(kind)) {
+      return 'Druh slevy musí být z číselníku.'
+    }
+    const verified = value('evidence_status') === 'verified'
+    if (!verified && value('evidence_reference') !== null) return 'Neověřená evidence nesmí nést důkaz.'
+  }
   if (section === 'social_discount_claims') {
     const verified = value('status') === 'verified'
     if (!verified && value('evidence_reference') !== null) return 'Neověřená evidence nesmí nést důkaz.'
@@ -176,6 +185,7 @@ function emptyEvidence(overrides: Partial<PayrollStatutoryEvidence> = {}): Payro
     sections: {
       tax_declarations: [],
       tax_residences: [],
+      tax_credit_claims: [],
       social_jurisdictions: [],
       social_discount_claims: [],
       health_coverages: [],
@@ -208,6 +218,7 @@ function filledEvidence(): PayrollStatutoryEvidence {
         effective_to: null,
       }],
       tax_residences: [],
+      tax_credit_claims: [],
       social_jurisdictions: [],
       social_discount_claims: [],
       health_coverages: [],
@@ -365,6 +376,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     for (const section of [
       'tax_declarations',
       'tax_residences',
+      'tax_credit_claims',
       'social_jurisdictions',
       'social_discount_claims',
       'health_coverages',
@@ -423,6 +435,63 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       insurer_code: '205',
       insurer_evidence_reference: null,
     })
+  })
+
+  /**
+   * Peněžní regrese: bez zaevidované slevy na poplatníka platí zaměstnanec
+   * s podepsaným prohlášením o 2 570 Kč měsíčně vyšší zálohu. „Přidat záznam"
+   * proto musí nabídnout rovnou slevu na poplatníka jako doloženou.
+   */
+  it('nová sleva je rovnou sleva na poplatníka a odejde na server doložená', async () => {
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-tax_credit_claims"]').trigger('click')
+
+    expect(wrapper.findAll('[data-test^="issues-tax_credit_claims"]')).toHaveLength(0)
+
+    await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
+    await flushPromises()
+
+    const row = savedRow('tax_credit_claims')
+    expect(row).toMatchObject({
+      credit_kind: 'taxpayer',
+      evidence_status: 'verified',
+      evidence_reference: null,
+    })
+    expect(validatorRejection('tax_credit_claims', row)).toBeNull()
+  })
+
+  /**
+   * Slevy jsou souběžné řady po druzích: sleva na poplatníka i na ZTP/P běží
+   * současně a otevřené jsou obě právem. Pravidlo „jen jeden otevřený záznam"
+   * proto nesmí platit přes celou sekci, jinak by souběh nešlo uložit.
+   */
+  it('dvě slevy různého druhu můžou platit současně', async () => {
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-tax_credit_claims"]').trigger('click')
+    await wrapper.get('[data-test="add-tax_credit_claims"]').trigger('click')
+
+    // Táž dvojice ve stejném druhu je chyba — tu pravidlo dál hlídá.
+    expect(wrapper.get('[data-test="issues-tax_credit_claims"]').text())
+      .toContain('payroll.people.statutory_evidence.issue.multiple_open_rows')
+
+    await wrapper.get('[data-test="tax_credit_claims-1-credit_kind"]').setValue('ztp-p')
+    expect(wrapper.find('[data-test="issues-tax_credit_claims"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.saveStatutoryEvidence).toHaveBeenCalledTimes(1)
+    expect(savedRow('tax_credit_claims', 0)).toMatchObject({ credit_kind: 'taxpayer' })
+    expect(savedRow('tax_credit_claims', 1)).toMatchObject({ credit_kind: 'ztp-p' })
+  })
+
+  it('nevyplněné slevy nehlásí chybějící údaj — neuplatnit žádnou je běžný stav', async () => {
+    const wrapper = await mounted()
+
+    expect(wrapper.get('[data-test="current-tax_credit_claims"]').text())
+      .toContain('payroll.people.statutory_evidence.current_none_claimed')
+    expect(wrapper.get('[data-test="history-tax_credit_claims"]').attributes('open'))
+      .toBeUndefined()
   })
 
   it('pojišťovnu vezme přednostně z historie osoby, ne z nastavení zaměstnavatele', async () => {
