@@ -17,6 +17,8 @@ const router = useRouter()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const isAdmin = computed(() => auth.isSuperadmin)
+const canReadBankSettings = computed(() => auth.isDemo || auth.canRead('settings.bank_accounts'))
+const canWriteBankSettings = computed(() => auth.isDemo || auth.canWrite('settings.bank_accounts'))
 const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 
 // Sjednocená stránka „Bankovní účty" (Finance): výpisy + účetní automatika + admin záložky.
@@ -26,14 +28,13 @@ type Tab = 'statements' | 'all_movements' | 'posting' | 'analytics' | 'accounts'
 // „Všechny pohyby" = samostatný top-level tab hned za Výpisy (ne pod K zaúčtování).
 // „Kontace účtů" = metadata vlastních účtů pro analytiku 221.xxx (audit UI mezer 2026-07).
 const ACCOUNTING_TABS: Tab[] = ['all_movements', 'posting', 'analytics']
-const ADMIN_TABS: Tab[] = ['accounts', 'balances', 'email']
-// V ukázce jsou vidět i účty a stavy (jinak by nešlo předvést zakládání účtu),
-// ale ne „E-mailová hlášení" — ta konfigurují doručování, což demo nepředvádí.
-const DEMO_TABS: Tab[] = ['accounts', 'balances']
+const ADMIN_TABS: Tab[] = ['email']
 const visibleTabs = computed<Tab[]>(() => [
   'statements',
   ...(isDoubleEntry.value ? ACCOUNTING_TABS : []),
-  ...(isAdmin.value ? ADMIN_TABS : auth.isDemo ? DEMO_TABS : []),
+  ...(canReadBankSettings.value ? ['accounts'] as Tab[] : []),
+  'balances',
+  ...(isAdmin.value ? ADMIN_TABS : []),
 ])
 
 function tabFromQuery(q: unknown): Tab {
@@ -44,7 +45,7 @@ const tab = ref<Tab>(tabFromQuery(route.query.tab))
 const postingView = ref<'unposted' | 'history'>('unposted')
 watch(() => route.query.tab, (q) => { tab.value = tabFromQuery(q) })
 // Role/režim se může doresolvit až po mountu (session check) — přehodnoť deep-link ?tab=.
-watch([isAdmin, isDoubleEntry], () => { tab.value = tabFromQuery(route.query.tab) })
+watch([isAdmin, isDoubleEntry, canReadBankSettings], () => { tab.value = tabFromQuery(route.query.tab) })
 
 function switchTab(v: Tab) {
   if (tab.value === v) return
@@ -119,6 +120,6 @@ function tabLabel(v: Tab): string {
       <PostingSuggestions v-else @counts-changed="loadPendingCount" />
     </div>
     <BankAccountAnalytics v-else-if="tab === 'analytics'" />
-    <BankAccounts v-else embedded />
+    <BankAccounts v-else embedded :can-manage-accounts="canWriteBankSettings" />
   </div>
 </template>

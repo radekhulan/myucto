@@ -34,6 +34,7 @@ import { usesClientNavigation } from '@/security/clientRoutePolicy'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { manualChapter } from '@/config/manualChapters'
+import { shouldUseAutomaticSideNavigation } from '@/utils/navigationLayout'
 
 const { t, locale } = useI18n()
 
@@ -389,10 +390,9 @@ const navSections = computed<NavSection[]>(() => {
         // AI import vydané faktury — prodejní zrcadlo Nákup → AI import. Nahrát PDF/ISDOC →
         // draft vydané faktury. Permission invoices.create zrcadlí BE AiExtractPdfIssuedAction.
         { to: '/invoices/ai-import', label: t('nav.ai_import'),  icon: ICONS.ai, permission: 'invoices.create' },
-        // Export/Import vydaných (reorg UX 2026-07, vytažené z Nástrojů) — Import je jen
-        // pro superadmina, zrcadlí dřívější gating tabu v DataExchange.vue.
+        // Export/Import vydaných (reorg UX 2026-07, vytažené z Nástrojů).
         { to: '/invoices/export',  label: t('nav.export'),     icon: ICONS.exports },
-        ...(isAdmin ? [{ to: '/invoices/import', label: t('nav.import'), icon: ICONS.imports }] : []),
+        { to: '/invoices/import', label: t('nav.import'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' },
         ...(isAdmin ? [{ to: '/admin/approvals',          label: t('nav.approvals'),         icon: ICONS.approvals }] : []),
       ],
     },
@@ -411,10 +411,9 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/purchase-invoices/payment-orders', label: t('nav.payment_orders'), icon: ICONS.payment_orders },
         // Pravidla zaúčtování nákladů se přesunula pod Šablony (záložka „Pravidla nákladů" na
         // /templates?section=expense) — patří k šablonám, ne do fronty přijatých faktur.
-        // Export/Import přijatých (reorg UX 2026-07, vytažené z Nástrojů) — Import jen pro
-        // superadmina, zrcadlí dřívější gating tabu v DataExchange.vue.
+        // Export/Import přijatých (reorg UX 2026-07, vytažené z Nástrojů).
         { to: '/purchase-invoices/export',   label: t('nav.export'),             icon: ICONS.exports },
-        ...(isAdmin ? [{ to: '/purchase-invoices/import', label: t('nav.import'), icon: ICONS.imports }] : []),
+        { to: '/purchase-invoices/import', label: t('nav.import'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' },
         // Majetek patří logicky k nákupu — pořizuje se přijatou fakturou. Zůstává
         // ale účetní funkcí (odpisy, 042/02x), takže se ukazuje jen firmám s aktivním
         // účetnictvím; stejná podmínka jako u sekce Účetnictví níž.
@@ -436,7 +435,7 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         { to: '/bank',           label: t('nav.bank_accounts'),  icon: ICONS.bank },
         ...((isDoubleEntry || isTaxEvidence) ? [{ to: '/accounting/cash', label: t('nav.accounting_cash'), icon: ICONS.cash, newTo: '/accounting/cash/new' }] : []),
-        ...(isDoubleEntry && auth.hasCommercialFeatures ? [{ to: '/gopay', label: t('nav.gopay'), icon: ICONS.payment_orders }] : []),
+        ...(isDoubleEntry && auth.hasCommercialFeatures ? [{ to: '/gopay', label: t('nav.gopay'), icon: ICONS.payment_orders, permission: 'bank' as PermissionKey }] : []),
       ],
     },
     {
@@ -542,7 +541,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/templates', label: t('nav.section_templates'), icon: ICONS.documents, permission: 'accounting.templates' },
         { to: '/accounting/accounts',       label: t('nav.accounting_accounts'), icon: ICONS.codebooks },
         { to: '/accounting/offsets',          label: t('nav.accounting_offsets'),          icon: ICONS.coin },
-        ...(isAdmin ? [{ to: '/admin/accounting-activation', label: t('nav.accounting_activation'), icon: ICONS.updates }] : []),
+        { to: '/admin/accounting-activation', label: t('nav.accounting_activation'), icon: ICONS.updates, permission: 'accounting.periods.manage' as PermissionKey, access: 'write' },
         { to: '/accounting/balance-inventory', label: t('nav.accounting_balance_inventory'), icon: ICONS.reports },
         { to: '/accounting/section18-statements', label: t('nav.accounting_section18'), icon: ICONS.reports },
         { to: '/reports/related-parties', label: t('nav.reports_related_parties'), icon: ICONS.clients },
@@ -575,7 +574,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/tax-evidence/receivables-payables', label: t('nav.de_receivables_payables'), icon: ICONS.crm },
         // Přechodový můstek § 7b → § 24 — jen u firem na DE (chystaný/probíhající přechod);
         // firmě, co už podvojné vede, se v menu neukazuje (stránka zůstává na URL).
-        { to: '/accounting/transition-report', label: t('nav.accounting_transition_report'), icon: ICONS.reports },
+        { to: '/accounting/transition-report', label: t('nav.accounting_transition_report'), icon: ICONS.reports, permission: 'tax_evidence' as PermissionKey },
         // Číselné řady: pokladní doklady se v daňové evidenci číslují z týchž řad jako
         // v podvojném, takže prefix a tvar čísla musí jít nastavit i tady. Bez odkazu
         // si firma vlastní řadu pokladny zapnula, ale opravit ji neměla kde — a hláška
@@ -651,32 +650,34 @@ const navSections = computed<NavSection[]>(() => {
     } as NavSection)
   }
 
+  // Firma se sestaví pro každou interní roli. Jednotlivé odkazy následně projdou
+  // permission filtrem, takže staff účet dostane přesně ty firemní agendy, které
+  // má v roli, a sekce sama zmizí jen tehdy, když v ní nezůstane nic.
+  sections.push({
+    key: 'company',
+    title: t('nav.section_company'),
+    accent: 'warning',
+    items: auth.isDemo ? [
+      { to: '/admin/settings', label: t('nav.settings'), icon: ICONS.settings },
+      { to: '/admin/branding', label: t('nav.branding'), icon: ICONS.branding, permission: 'settings.branding' as PermissionKey },
+      { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'), icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
+      // MCP server je v demu záměrně vidět: stránka jen čte (návod, přehled nástrojů,
+      // log volání) a je to jedna z věcí, kvůli kterým si zájemce demo pouští.
+      // Vydat token v demu nejde, mutace zastaví DemoReadOnlyMiddleware.
+      { to: '/profile/mcp-server', label: t('nav.mcp_server'), icon: ICONS.mcp, permission: 'profile.tokens' as PermissionKey },
+    ] : [
+      { to: '/admin/settings',              label: t('nav.settings'),        icon: ICONS.settings },
+      { to: '/admin/integrations',          label: t('nav.integrations'),    icon: ICONS.api_tokens },
+      { to: '/admin/integrations?tab=ai',   label: t('nav.ai_settings'),     icon: ICONS.ai },
+      { to: '/admin/branding',              label: t('nav.branding'),        icon: ICONS.branding },
+      { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'),     icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
+      { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens },
+      { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
+      { to: '/document-requests',           label: t('nav.document_requests'), icon: ICONS.requestDoc },
+    ],
+  })
+
   if (isAdmin || auth.isDemo) {
-    // Firma — nastavení JEDNOHO konkrétního dodavatele (aktuální firmy): fakturační
-    // údaje, napojení na iDoklad/Fakturoid/AI, číselníky dodavatelů/kategorií, API tokeny.
-    sections.push({
-      key: 'company',
-      title: t('nav.section_company'),
-      accent: 'warning',
-      items: auth.isDemo ? [
-        { to: '/admin/settings', label: t('nav.settings'), icon: ICONS.settings },
-        { to: '/admin/branding', label: t('nav.branding'), icon: ICONS.branding, permission: 'settings.branding' as PermissionKey },
-        { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'), icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
-        // MCP server je v demu záměrně vidět: stránka jen čte (návod, přehled nástrojů,
-        // log volání) a je to jedna z věcí, kvůli kterým si zájemce demo pouští.
-        // Vydat token v demu nejde — mutace zastaví DemoReadOnlyMiddleware.
-        { to: '/profile/mcp-server', label: t('nav.mcp_server'), icon: ICONS.mcp, permission: 'profile.tokens' as PermissionKey },
-      ] : [
-        { to: '/admin/settings',              label: t('nav.settings'),        icon: ICONS.settings },
-        { to: '/admin/integrations',          label: t('nav.integrations'),    icon: ICONS.api_tokens },
-        { to: '/admin/integrations?tab=ai',   label: t('nav.ai_settings'),     icon: ICONS.ai },
-        { to: '/admin/branding',              label: t('nav.branding'),        icon: ICONS.branding },
-        { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'),     icon: ICONS.codebooks },
-        { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens },
-        { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
-        { to: '/document-requests',           label: t('nav.document_requests'), icon: ICONS.requestDoc },
-      ],
-    })
     // Systém — globální nastavení a licenční agenda v jednom menu.
     sections.push({
       key: 'system_global',
@@ -728,15 +729,10 @@ const navSections = computed<NavSection[]>(() => {
   }
 
   if (!isAdmin && !auth.isDemo) {
-    // Non-admin role (accountant/readonly) nemá žádnou jinou cestu k vlastním API
-    // tokenům — route /profile/api-tokens nemá adminOnly, ale dřív byl jediný
-    // sidebar link uvnitř isAdmin bloku výše, takže k němu vedla jen přímá URL.
     const nonAdminSystemItems: NavItem[] = []
     if (auth.canRead('settings.signing') && accountantSigningProfilesEnabled.value) {
       nonAdminSystemItems.push({ to: '/admin/electronic-signatures', label: t('nav.electronic_signatures'), icon: ICONS.approvals })
     }
-    nonAdminSystemItems.push({ to: '/profile/api-tokens', label: t('nav.api_tokens'), icon: ICONS.api_tokens })
-    nonAdminSystemItems.push({ to: '/profile/mcp-server', label: t('nav.mcp_server'), icon: ICONS.mcp })
     nonAdminSystemItems.push({ to: '/manual', label: t('nav.manual'), icon: ICONS.documents, external: true })
     sections.push({
       key: 'system_signing',
@@ -770,7 +766,8 @@ function accountantFirst(sections: NavSection[]): NavSection[] {
 function navPermission(item: NavItem): PermissionKey | null {
   if (item.permission) return item.permission
   const path = item.to.split('?')[0]
-  if (path === '/' || path === '/stats' || path === '/purchase-stats' || path === '/crm') return 'dashboard'
+  if (path === '/' || path === '/stats' || path === '/purchase-stats') return 'dashboard'
+  if (path === '/crm') return 'dashboard.portfolio'
   if (path === '/portal') return 'profile'
   if (path === '/portfolio') return 'dashboard.portfolio'
   if (path.startsWith('/invoices')) return 'invoices'
@@ -859,9 +856,6 @@ const sideSupplierHost = ref<HTMLElement | null>(null)
 const autoSideNavigation = ref(false)
 const NAV_LAYOUT_COOKIE = 'myinvoice_nav_layout'
 
-/** Rezerva v px, o kterou horní lišta přeskočí na levé menu dřív, než dojde místo. */
-const NAV_FIT_RESERVE = 12
-
 function readCookie(name: string): string | null {
   const prefix = `${encodeURIComponent(name)}=`
   const match = document.cookie.split('; ').find(row => row.startsWith(prefix))
@@ -878,6 +872,7 @@ const preferSideNavigation = ref(readCookie(NAV_LAYOUT_COOKIE) === 'side')
 const sideNavigation = computed(() => isDesktop.value && (preferSideNavigation.value || autoSideNavigation.value))
 const topNavigation = computed(() => isDesktop.value && !sideNavigation.value)
 let navResizeObserver: ResizeObserver | null = null
+let navFitFrame: number | null = null
 
 function evaluateDesktopNavFit(): void {
   const host = desktopNavHost.value
@@ -892,15 +887,25 @@ function evaluateDesktopNavFit(): void {
   const reclaimableSideControls = sideSupplierHost.value
     ? sideSupplierHost.value.offsetWidth + 4
     : 0
-  // Rezerva místo dřívější 2px tolerance přetečení: lišta se překlopí na levé menu
-  // ještě než na ni položky přestanou stačit. Do NAV_FIT_RESERVE se vejde poslední
-  // padding sekce, takže se nikdy neukáže napůl oříznutý popisek.
-  autoSideNavigation.value = requiredWidth > host.clientWidth + reclaimableSideControls - NAV_FIT_RESERVE
+  const useSideNavigation = shouldUseAutomaticSideNavigation(
+    requiredWidth,
+    host.clientWidth + reclaimableSideControls,
+    autoSideNavigation.value,
+  )
+  if (useSideNavigation !== autoSideNavigation.value) autoSideNavigation.value = useSideNavigation
+}
+
+function scheduleDesktopNavFit(): void {
+  if (navFitFrame !== null) return
+  navFitFrame = requestAnimationFrame(() => {
+    navFitFrame = null
+    evaluateDesktopNavFit()
+  })
 }
 
 function onDesktopChange(e: MediaQueryListEvent): void {
   isDesktop.value = e.matches
-  void nextTick(evaluateDesktopNavFit)
+  void nextTick(scheduleDesktopNavFit)
 }
 
 function toggleNavigationLayout(): void {
@@ -908,7 +913,7 @@ function toggleNavigationLayout(): void {
     preferSideNavigation.value = false
     saveNavigationPreference(false)
     autoSideNavigation.value = false
-    void nextTick(evaluateDesktopNavFit)
+    void nextTick(scheduleDesktopNavFit)
     return
   }
   if (autoSideNavigation.value) return
@@ -916,8 +921,7 @@ function toggleNavigationLayout(): void {
   saveNavigationPreference(true)
 }
 
-watch([orderedNav, locale], () => { void nextTick(evaluateDesktopNavFit) })
-watch(sideNavigation, () => { void nextTick(evaluateDesktopNavFit) })
+watch([orderedNav, locale], () => { void nextTick(scheduleDesktopNavFit) })
 
 function onResetNavOrder(): void {
   if (confirm(t('common.nav_reset_order_confirm'))) nav.reset()
@@ -1283,9 +1287,9 @@ onMounted(async () => {
   desktopMql = window.matchMedia('(min-width: 1024px)')
   isDesktop.value = desktopMql.matches
   desktopMql.addEventListener('change', onDesktopChange)
-  navResizeObserver = new ResizeObserver(evaluateDesktopNavFit)
+  navResizeObserver = new ResizeObserver(scheduleDesktopNavFit)
   if (desktopNavHost.value) navResizeObserver.observe(desktopNavHost.value)
-  void nextTick(evaluateDesktopNavFit)
+  void nextTick(scheduleDesktopNavFit)
   // Bez zapnutého účetnictví nemá smysl ani polling automatu — jeho badge visí
   // u položky, která v menu není.
   if (!clientExperience.value
@@ -1300,6 +1304,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalShortcut)
   desktopMql?.removeEventListener('change', onDesktopChange)
   navResizeObserver?.disconnect()
+  if (navFitFrame !== null) cancelAnimationFrame(navFitFrame)
 })
 </script>
 
@@ -1536,7 +1541,7 @@ onBeforeUnmount(() => {
           supplierStore.hasMultiple && supplierStore.currentSupplier
             ? 'top-[calc(var(--instance-alert-h,0px)+5.125rem)] h-[calc(100vh-5.125rem-var(--instance-alert-h,0px))]'
             : 'top-[calc(var(--instance-alert-h,0px)+3rem)] h-[calc(100vh-3rem-var(--instance-alert-h,0px))]',
-          'w-full lg:w-60 shrink-0',
+          'w-[calc(100vw-3rem)] max-w-80 lg:w-60 shrink-0',
           'nav-inverted bg-surface border-r border-neutral-200 shadow-lg lg:shadow-none',
           'flex flex-col',
           'transition-transform duration-200 ease-in-out',

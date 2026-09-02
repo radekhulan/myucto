@@ -58,7 +58,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isAccountantRole = computed(() => user.value?.role?.system_key === 'accountant')
 
   function can(permission: PermissionKey, level: AccessLevel = 'read'): boolean {
-    if (permissionsLoading.value) return false
+    if (permissionsLoading.value && !profileHydrated.value) return false
     if (isSuperadmin.value) return true
     return (permissions.value[permission] ?? 0) >= accessLevelValue[level]
   }
@@ -102,7 +102,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function refresh() {
     permissionsLoading.value = true
-    clearPermissions()
     try {
       await fetchDomainContext()
       const data = await authApi.me()
@@ -134,6 +133,7 @@ export const useAuthStore = defineStore('auth', () => {
             setSessionCsrfToken(session.csrf_token)
             lockedSession.value = session
             profileHydrated.value = false
+            clearPermissions()
             return true
           }
         } catch {
@@ -142,6 +142,7 @@ export const useAuthStore = defineStore('auth', () => {
       }
       if (!error?.response && user.value !== null) return false
       user.value = null
+      clearPermissions()
       setSessionCsrfToken('')
       setMfaPolicy(false, [])
       license.value = null

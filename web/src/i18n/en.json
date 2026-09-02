@@ -15768,7 +15768,7 @@
   "codebooks": {
     "title": "Codebooks",
     "subtitle": "Currencies + bank accounts, VAT rates, countries, units. Admin only.",
-    "subtitle_company": "Cost and revenue categories for CRM breakdown. Admin only.",
+    "subtitle_company": "Cost and revenue categories for CRM breakdown.",
     "subtitle_global": "VAT rates, VAT classification, countries and units. Admin only.",
     "subtitle_tax_constants": "Annual rates, limits and statutory values shared across the system. Admin only.",
     "tab_currencies": "Currencies",

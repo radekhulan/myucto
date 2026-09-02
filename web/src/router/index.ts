@@ -147,7 +147,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   logbook: ['logbook'], stats: ['dashboard'], 'purchase-stats': ['dashboard'], 'bank-statements': ['bank'], 'bank-detail': ['bank'], gopay: ['bank'],
   'admin-electronic-signatures': ['settings.signing', 'write'], 'admin-databox': ['settings.signing', 'write'], templates: ['accounting.templates'], tools: ['utilities'], 'crm-dashboard': ['dashboard.portfolio'], 'portfolio-overview': ['dashboard.portfolio'],
   'automation-cockpit': ['accounting'],
-  'admin-settings': ['settings.company.write', 'write'], 'admin-branding': ['settings.branding', 'write'], 'admin-integrations': ['settings.company.write', 'write'],
+  'admin-settings': ['settings.company.write', 'write'], 'admin-branding': ['settings.branding', 'write'], 'admin-integrations': ['settings.company.write', 'write'], 'admin-codebooks': ['settings.company'], 'admin-support': ['profile'],
   'admin-price-list': ['settings.company.write', 'write'], 'admin-price-list-new': ['settings.company.write', 'write'], 'admin-price-list-edit': ['settings.company.write', 'write'],
   'accounting-activation': ['accounting.periods.manage', 'write'],
   'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
@@ -157,11 +157,11 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
 
 const superadminRouteNames = new Set([
   'activity-log', 'sent-emails', 'cron-jobs', 'admin-users', 'admin-roles', 'admin-suppliers',
-  'admin-codebooks', 'admin-tax-constants', 'admin-bank-rule-templates', 'admin-email-templates', 'admin-emails', 'admin-approvals', 'admin-update',
+  'admin-tax-constants', 'admin-bank-rule-templates', 'admin-email-templates', 'admin-emails', 'admin-approvals', 'admin-update',
   'admin-isds-gateway',
   'admin-price-list', 'admin-price-list-new', 'admin-price-list-edit',
   'activation-license', 'activation-terms', 'activation-purchase',
-  'admin-diagnostics', 'admin-support',
+  'admin-diagnostics',
   // Obojí čte administrátorské endpointy (/api/admin/*, /api/license/status),
   // takže sem patří ze stejného důvodu jako aktivace a diagnostika:
   // deny-by-default guard by je jinak tiše přesměroval na homepage.

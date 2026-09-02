@@ -10,6 +10,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PriceListItemRepository;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\PriceListItemResolver;
 use MyInvoice\Service\Invoice\PriceListResolutionException;
@@ -436,8 +437,7 @@ final class PriceListItemAction
 
     private function isAdmin(Request $request): bool
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        return !empty($user['is_superadmin']) || ($user['role'] ?? '') === 'admin';
+        return RequestAuthorization::isSuperadmin($request);
     }
 
     private function unavailableForStock(int $supplierId, Response $response): ?Response

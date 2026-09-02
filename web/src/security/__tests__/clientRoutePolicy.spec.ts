@@ -286,8 +286,8 @@ function clientRouteParityErrors(manifestRoutes: readonly ManifestRoute[]): stri
 
 describe('sdílená klientská plocha vlastní domény', () => {
   it('obsahuje auditovanou klientskou plochu včetně nastavení firmy a legacy aliasů', () => {
-    expect(clientDomainRoutes).toHaveLength(37)
-    expect(new Set(clientDomainRoutes.map(route => route.name)).size).toBe(37)
+    expect(clientDomainRoutes).toHaveLength(39)
+    expect(new Set(clientDomainRoutes.map(route => route.name)).size).toBe(39)
     expect(clientDomainRoutes.slice(-3).map(route => route.name))
       .toEqual(['data-exchange', 'admin-export', 'admin-import'])
   })
@@ -309,7 +309,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       if (route!.path.includes(':')) parameterized.push(definition.name)
     }
 
-    expect(rendered).toHaveLength(29)
+    expect(rendered).toHaveLength(31)
     expect(redirects).toEqual([
       'profile-totp',
       'profile-shortcuts',
@@ -337,7 +337,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
     }
     expect(Object.fromEntries(kindCounts)).toEqual({
       client_redirect: 3,
-      permission: 23,
+      permission: 25,
       router_redirect: 8,
       self_service: 3,
     })
@@ -517,6 +517,8 @@ describe('sdílená klientská plocha vlastní domény', () => {
   it('povolí zástupce každé klientské rodiny a odmítne interní i veřejné routy', () => {
     for (const path of [
       '/portal/document-requests',
+      '/admin/codebooks?scope=company',
+      '/admin/support',
       '/clients/42/edit',
       '/invoices/new?type=proforma',
       '/purchase-invoices/42',
