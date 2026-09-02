@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -360,7 +360,27 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
 const createBlockedReason = computed<string | null>(() => {
   if (!period.value) return t('payroll.runs.create_blocked_period')
   if (!paymentDate.value) return t('payroll.runs.create_blocked_payment_date')
+  /*
+   * Za období smí být jeden běh. Server to hlídá (`createOrGet`), ale s JINÝM
+   * datem výplaty vrátí 422 do toastu — a obrazovka přitom existující běh zná
+   * a jeho datum má po ruce. Tlačítko tedy říká rovnou, že běh už je, místo aby
+   * poslalo požadavek, o kterém se ví, že neprojde.
+   */
+  if (periodRun.value !== null) {
+    return t('payroll.runs.create_blocked_exists', {
+      status: t(`payroll.runs.status.${periodRun.value.status}`),
+    })
+  }
   return null
+})
+
+/*
+ * Datum výplaty se drží běhu, který za období existuje. Bez toho ukazovalo
+ * výchozí patnáctého, i když běh měl jiné, a účetní z pole četla něco, co
+ * neplatí.
+ */
+watch(periodRun, (run) => {
+  if (run !== null) paymentDate.value = run.payment_date
 })
 
 async function load() {
@@ -750,7 +770,7 @@ onMounted(load)
         <div v-if="canWrite" class="flex flex-col items-start gap-1.5">
           <button
             :class="btnFilled('primary')"
-            :disabled="saving || !period || !paymentDate"
+            :disabled="saving || createBlockedReason !== null"
             :title="disabledTitle(createBlockedReason !== null, createBlockedReason)"
             data-test="run-create"
             @click="createRun"

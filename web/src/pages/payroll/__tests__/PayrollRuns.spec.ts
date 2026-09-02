@@ -968,4 +968,36 @@ describe('PayrollRuns', () => {
 
     wrapper.unmount()
   })
+  /*
+   * Za období smí být jeden běh. Server to hlídá, ale s jiným datem výplaty
+   * vrátí 422 do toastu — a obrazovka existující běh zná, takže požadavek,
+   * o kterém se ví, že neprojde, nemá co odesílat.
+   */
+  it('nenabídne založit běh, který za období už existuje, a převezme jeho datum výplaty', async () => {
+    m.runs.mockResolvedValue([run({ status: 'calculated', payment_date: '2026-09-20' })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="run-create"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="run-create-blocked"]').text())
+      .toContain('payroll.runs.create_blocked_exists')
+
+    const paymentDate = wrapper.findAll('input[type="date"]')[0]!
+    expect((paymentDate.element as HTMLInputElement).value).toBe('2026-09-20')
+
+    wrapper.unmount()
+  })
+
+  it('bez běhu za období tlačítko nabídne', async () => {
+    m.runs.mockResolvedValue([])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="run-create"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-test="run-create-blocked"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
 })

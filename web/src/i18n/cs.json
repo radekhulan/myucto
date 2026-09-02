@@ -1767,7 +1767,8 @@
         "people_hint": "Nástupy, výstupy, prohlášení k dani a osobní evidence.",
         "checklist_hide": "Skrýt přehled odvodů",
         "checklist_show": "Zobrazit přehled odvodů"
-      }
+      },
+      "create_blocked_exists": "Za tohle období už mzdový běh existuje ({status}). Otevřete ho níž, nebo přepněte období."
     },
     "quick_inputs": {
       "title": "Rychlý měsíční vstup mezd",
