@@ -317,8 +317,25 @@ final class CashJournalService
         return $warnings;
     }
 
-    /** @return array<int,float> Měsíční kasové příjmy pro limity paušálního režimu (§ 7a ZDP). */
-    public function monthlyIncomeForFlatTax(int $supplierId, int $year): array
+    /**
+     * Měsíční kasové ZDANITELNÉ příjmy [1..12] => CZK — kasový protějšek
+     * {@see \MyInvoice\Repository\TaxProfileRepository::monthlyIncome()} pro daňovou evidenci.
+     * Slouží k projekci běžícího roku (odhad daně a pojistného) i ke sledování limitů
+     * paušálního režimu; u plátce DPH je to částka BEZ DPH (prorata už proběhla v classify()).
+     *
+     * Osvobozené příjmy (§ 4 ZDP, bucket income_exempt) sem ZÁMĚRNĚ nepatří — ani do jedné
+     * z těch dvou rolí (#52):
+     *  - do základu daně a vyměřovacích základů pojistného osvobozený příjem nevstupuje,
+     *  - do rozhodných příjmů pro pásmo paušálního režimu taky ne: rozhodnými příjmy jsou
+     *    podle § 2a odst. 5 ZDP „příjmy ze samostatné činnosti do výše …" a § 7a odst. 1
+     *    písm. b) bod 1 uvádí příjmy od daně osvobozené jako kategorii, kterou poplatník smí
+     *    mít VEDLE rozhodných příjmů — tedy mimo ně.
+     * Dřív (pod názvem monthlyIncomeForFlatTax) se oba kbelíky sčítaly, takže osvobozená
+     * faktura nafoukla projekci i teploměr limitu 2 M.
+     *
+     * @return array<int,float>
+     */
+    public function monthlyTaxableIncome(int $supplierId, int $year): array
     {
         $from = sprintf('%04d-01-01', $year);
         $to = sprintf('%04d-12-31', $year);
@@ -334,8 +351,7 @@ final class CashJournalService
                 $supplierId,
                 $year,
             );
-            $income = (float) ($classified['alloc']['income_taxable'] ?? 0)
-                + (float) ($classified['alloc']['income_exempt'] ?? 0);
+            $income = (float) ($classified['alloc']['income_taxable'] ?? 0);
             if ($income == 0.0) {
                 continue;
             }
@@ -462,7 +478,26 @@ final class CashJournalService
         $sign = $direction === 'in' ? 1.0 : -1.0;
 
         if ((int) ($r['inv_exempt'] ?? 0) === 1) {
-            return $this->single('income_exempt', round($sign * $amount, 2), 'income_exempt');
+            // #52: osvobozená noha se u plátce DPH dělí na základ a DPH stejně jako zdanitelná
+            // níž — DPH z osvobozené faktury je průběžná položka státu, ne příjem poplatníka.
+            // Bez toho by „z toho vyloučeno" bylo brutto, kdežto TaxProfileRepository
+            // ::annualExemptIncome() vedle toho hlásí netto.
+            $exemptBase = $this->prorateBase($amount, $r['inv_without_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
+            $exemptVat  = round($amount - $exemptBase, 2);
+            $alloc = ['income_exempt' => round($sign * $exemptBase, 2)];
+            if ($exemptVat != 0.0) {
+                $alloc['income_nontax'] = round($sign * $exemptVat, 2);
+            }
+            return [
+                'alloc'        => $alloc,
+                'bucket'       => 'income_exempt',
+                // `base` = DAŇOVÝ základ (§7), ten je u osvobozené faktury nulový — shodně
+                // s bankIncomeAlloc(), kde do base jde jen income_taxable.
+                'base'         => 0.0,
+                'vat'          => round($sign * $exemptVat, 2),
+                'unclassified' => false,
+                'blocking'     => false,
+            ];
         }
 
         $base = $this->prorateBase($amount, $r['inv_without_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
@@ -530,8 +565,9 @@ final class CashJournalService
 
     /**
      * Bankovní PŘÍJEM z předpočítané agregace (repo, CZK): jeden bankovní pohyb může
-     * settlovat N vydaných faktur (sloučená úhrada #89). base + exempt jsou už sečtené
-     * per-faktura s R7 proratou a R9 osvobozením; DPH složka = amount − base − exempt.
+     * settlovat N vydaných faktur (sloučená úhrada #89). base i exempt jsou už sečtené
+     * per-faktura s R7 proratou (od #52 se prorata dělá i na osvobozené noze, tj. obě jsou
+     * u plátce DPH bez DPH); DPH složka = amount − base − exempt → income_nontax.
      * Znaménko dle směru (out = dobropis/vratka snižuje příjem, R11).
      *
      * @param array<string,mixed> $r

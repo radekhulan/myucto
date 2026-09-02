@@ -76,7 +76,16 @@ final class TaxEvidenceReconciliationTest extends CashJournalTestCase
         self::assertEqualsWithDelta(0.0, (float) $row['actual_expenses'], 0.01, 'actual_expenses NESMÍ být přepsán.');
     }
 
-    public function testCurrentYearForecastUsesCashIncomeIncludingExemptReceipts(): void
+    /**
+     * #52: projekce běžícího roku stojí na KASOVÉM, ale ZDANITELNÉM příjmu. Dřív tenhle
+     * test pinoval opačné chování (osvobozený příjem se do ytd_income sčítal) — bylo to
+     * ale jen zafixované chování kódu, ne záměr: osvobozený příjem nepatří ani do základu
+     * daně a pojistného, ani do rozhodných příjmů pro pásmo paušálního režimu (§ 2a odst. 5
+     * ZDP definuje rozhodné příjmy jako příjmy ze samostatné činnosti, § 7a odst. 1 písm. b)
+     * bod 1 uvádí příjmy od daně osvobozené jako kategorii VEDLE rozhodných příjmů).
+     * Fakturační větev (TaxProfileRepository::monthlyIncome) je vylučovala odjakživa.
+     */
+    public function testCurrentYearForecastExcludesExemptCashReceipts(): void
     {
         $year = (int) date('Y');
         $paidOn = sprintf('%04d-01-15', $year);
@@ -98,7 +107,18 @@ final class TaxEvidenceReconciliationTest extends CashJournalTestCase
         $body = $this->callAnalysis($this->container->get(TaxAction::class), $this->supplierId, $year, false);
 
         self::assertSame('forecast', $body['mode']);
-        self::assertEqualsWithDelta(15000.0, (float) $body['ytd_income'], 0.01);
+        self::assertEqualsWithDelta(
+            10000.0,
+            (float) $body['ytd_income'],
+            0.01,
+            'Do projekce vstupuje jen zdanitelný příjem, osvobozený ne (#52).',
+        );
+        self::assertEqualsWithDelta(
+            5000.0,
+            (float) $body['exempt_income'],
+            0.01,
+            'Osvobozený příjem se ukazuje jen jako „z toho vyloučeno".',
+        );
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

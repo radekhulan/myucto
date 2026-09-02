@@ -246,6 +246,12 @@ U takové faktury zaškrtni v editoru **„Osvobozeno od daně z příjmů"** (v
 Příznak **nezahrne částku do základu daně z příjmů** (výkaz i optimalizátor; osvobozená část
 se ukáže odděleně) a **nedotkne se DPH** — doklad zůstává v přiznání DPH i v obratu beze změny.
 
+Osvobozený příjem nevstupuje ani do **rozhodných příjmů pro pásmo paušálního režimu** —
+rozhodnými příjmy jsou podle § 2a odst. 5 ZDP příjmy ze samostatné činnosti a § 7a odst. 1
+písm. b) bod 1 ZDP uvádí příjmy od daně osvobozené jako kategorii, kterou poplatník smí mít
+*vedle* rozhodných příjmů. Na teploměru limitu 2 mil. Kč v Optimalizátoru se proto neobjeví.
+U plátce DPH se počítá **částka bez DPH**, stejně jako u zdanitelného příjmu.
+
 ### 38.7.1 Souvislost se sociálním a zdravotním pojištěním (OSVČ)
 
 U OSVČ se **vyměřovací základ** pojistného odvozuje z **daňového základu § 7**. Když částka
