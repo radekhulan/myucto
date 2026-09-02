@@ -385,7 +385,7 @@ final class PayrollRunReadinessService
             $missing[] = 'Finanční úřad (záloha na daň ze závislé činnosti)';
         }
 
-        $insurerCodes = self::healthInsurerCodes($snapshotData);
+        $insurerCodes = PayrollSnapshotHealthInsurers::fromSnapshot($snapshotData);
         $knownInsurers = $verified['health_insurer'] ?? [];
         foreach ($insurerCodes as $code) {
             // U zdravotní pojišťovny kód NENÍ značka, ale identita příjemce —
@@ -462,47 +462,4 @@ final class PayrollRunReadinessService
         return $result;
     }
 
-    /**
-     * Kódy zdravotních pojišťoven, na které se za období bude odvádět.
-     *
-     * Berou se ze zákonné evidence osob ve snímku — tedy z týchž dat, ze
-     * kterých pak vyjde odvod.
-     *
-     * @param array<string,mixed> $snapshotData
-     * @return list<string>
-     */
-    private static function healthInsurerCodes(array $snapshotData): array
-    {
-        $people = $snapshotData['people'] ?? [];
-        if (!is_array($people)) {
-            return [];
-        }
-        $codes = [];
-        foreach ($people as $person) {
-            if (!is_array($person)) {
-                continue;
-            }
-            $evidence = $person['statutory_evidence'] ?? null;
-            if (!is_array($evidence)) {
-                continue;
-            }
-            $health = $evidence['health'] ?? null;
-            if (!is_array($health)) {
-                continue;
-            }
-            $coverage = $health['coverage'] ?? null;
-            if (!is_array($coverage)) {
-                continue;
-            }
-            $code = $coverage['insurer_code'] ?? null;
-            if (is_string($code) && preg_match('/^[0-9]{3}$/D', $code) === 1) {
-                // Hodnota, ne `true`: číselný řetězcový klíč se v PHP změní na
-                // int, takže `array_keys()` by vrátilo 111 místo '111' a
-                // striktní porovnání s ověřenými kódy by nesedlo nikdy.
-                $codes[$code] = $code;
-            }
-        }
-
-        return array_values($codes);
-    }
 }
