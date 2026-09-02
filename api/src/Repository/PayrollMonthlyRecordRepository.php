@@ -15,7 +15,7 @@ use PDO;
  * Idempotence shodná s journal_entries: opakované zaúčtování téhož měsíce řádek přepíše
  * (`ON DUPLICATE KEY UPDATE`), nezaloží druhý (unikát `uq_pmr_employee_period`, 1105).
  *
- * ── Odložený řádek (`retired_at`, migrace 1718) ─────────────────────────────
+ * ── Odložený řádek (`retired_at`, migrace 1719) ─────────────────────────────
  * Měsíc, který od ruční rekapitulace PŘEVZAL modul Mzdy, se tady nemaže — smazat
  * evidenci podle § 38j ZDP nejde — ale přestane platit. Všechna ČTENÍ proto
  * odložené řádky vynechávají: jinak by mzdový list ukazoval měsíc dvakrát

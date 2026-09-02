@@ -243,7 +243,7 @@ final class PayrollPeriodOwnershipService
             ];
         }
 
-        // Odložený řádek (`retired_at`, migrace 1718) se nepočítá: to je přesně
+        // Odložený řádek (`retired_at`, migrace 1719) se nepočítá: to je přesně
         // ten stav „mzdový list po legacy větvi zůstal jako doklad, ale už
         // neplatí, protože měsíc přebírá modul". Kdyby blokoval dál, nezbývalo
         // by než ho z databáze smazat — a mazat evidenci podle § 38j ZDP nejde.
