@@ -683,9 +683,12 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             'Syntetický plátce s.r.o.',
             'Praha 1',
             '1234567800',
-            '11000',
-            '10000',
-            '1350',
+            // PSČ i částky se na tiskopis tisknou v podobě, jakou dává portál
+            // pojišťovny — s mezerou. Slepené `11000` a `10000` by jejich
+            // čtečka vidět neměla.
+            '110 00',
+            '10 000',
+            '1 350',
             '06/2026',
         ] as $expected) {
             self::assertStringContainsString($expected, $printed);
