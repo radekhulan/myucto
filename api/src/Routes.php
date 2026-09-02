@@ -1749,6 +1749,8 @@ final class Routes
             $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);
             $g->get('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'list']);
             $g->post('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'create']);
+            // Vzít zpět špatně datovanou registraci; pustí jen tu poslední.
+            $g->delete('/settings/offices/{officeId:[0-9]+}/registrations/{registrationId:[0-9]+}', [PayrollOfficeRegistrationAction::class, 'delete']);
             $g->get('/settings/accident-insurance-rates', [PayrollAccidentInsuranceRateAction::class, 'list']);
             $g->post('/settings/accident-insurance-rates', [PayrollAccidentInsuranceRateAction::class, 'create']);
             $g->get('/settings/accident-insurance-rate-schedule', [PayrollAccidentInsuranceRateAction::class, 'schedule']);
