@@ -17,7 +17,7 @@ vi.mock('@/composables/useToast', () => ({
 }))
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs-CZ' } }),
+  useI18n: () => ({ t: (key: string) => key, te: () => true, locale: { value: 'cs-CZ' } }),
 }))
 
 import PayrollAnnualReportPanel from '@/pages/payroll/PayrollAnnualReportPanel.vue'
@@ -49,7 +49,8 @@ describe('PayrollAnnualReportPanel', () => {
     expect(m.annualReport).toHaveBeenCalledWith(2026)
     expect(wrapper.get('[data-test="payroll-annual-report"]').text())
       .toContain('payroll.annual_report.title')
-    expect(wrapper.text()).toContain('2026-01')
+    // Období se ukazuje jako „leden 2026", ne jako strojové „2026-01".
+    expect(wrapper.text()).toContain('leden 2026')
     expect(wrapper.text()).not.toContain('employee_id')
     expect(wrapper.get('[data-test="annual-report-mobile-months"]').classes()).toContain('md:hidden')
     expect(wrapper.get('[data-test="annual-report-desktop-table"]').classes()).toContain('md:block')

@@ -39,7 +39,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { appIsoDate } from '@/utils/date'
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const pageId = useId()
@@ -230,6 +230,35 @@ const impact = computed<{ identity: number; residue: number }>(() => {
 function counts(record: Record<string, number> | undefined): Array<[string, number]> {
   return Object.entries(record ?? {}).filter(([, n]) => n > 0)
 }
+
+/**
+ * Co se pod tím klíčem skrývá, česky.
+ *
+ * Why: rozpis dopadu vypisoval klíče tak, jak přijdou z API — u zbytků jsou to
+ * rovnou NÁZVY DATABÁZOVÝCH TABULEK (`payroll_jmhz_eldp_evidence_snapshots`).
+ * U nevratného úkonu je to ta nejhorší možná forma: schvalující má potvrdit
+ * rozsah, kterému nerozumí. Neznámý klíč se dál ukáže tak, jak je — pořád je
+ * to lepší než prázdno, a nový klíč tak nezmizí bez povšimnutí.
+ */
+function cascadeLabel(key: string): string {
+  const path = `payroll.erasure.cascade.${key}`
+  return te(path) ? t(path) : key
+}
+
+/**
+ * Co chybí k provedení. Tlačítko je vypnuté ze dvou nezávislých důvodů
+ * (zaškrtnutí, opsané číslo) a dřív o žádném z nich neřeklo ani slovo —
+ * u kroku, který se nedá vzít zpět, je to nejhorší místo na hádanku.
+ */
+const executeBlockedReason = computed<string | null>(() => {
+  if (!confirmExecute.acknowledged) return t('payroll.erasure.confirm_missing_ack')
+  if (selectedId.value === null) return t('payroll.erasure.confirm_missing_id')
+  if (confirmExecute.typedId.trim() === '') return t('payroll.erasure.confirm_missing_id')
+  if (confirmExecute.typedId.trim() !== String(selectedId.value)) {
+    return t('payroll.erasure.confirm_wrong_id', { id: selectedId.value })
+  }
+  return null
+})
 
 function fmtDate(iso: string | null): string {
   if (!iso) return '—'
@@ -477,7 +506,7 @@ onMounted(load)
                   <div v-if="counts(item.cascade_counts?.identity).length === 0" class="text-neutral-400">—</div>
                   <div v-else class="space-y-0.5">
                     <div v-for="[key, n] in counts(item.cascade_counts?.identity)" :key="key">
-                      <span class="font-mono">{{ n }}×</span> {{ key }}
+                      <span class="font-mono">{{ n }}×</span> {{ cascadeLabel(key) }}
                     </div>
                   </div>
                   <div
@@ -487,7 +516,7 @@ onMounted(load)
                   >
                     {{ t('payroll.erasure.residue_label') }}:
                     <span v-for="[key, n] in counts(item.cascade_counts?.residue)" :key="key" class="mr-1">
-                      <span class="font-mono">{{ n }}×</span> {{ key }}
+                      <span class="font-mono">{{ n }}×</span> {{ cascadeLabel(key) }}
                     </span>
                   </div>
                 </td>
@@ -558,6 +587,14 @@ onMounted(load)
           />
         </div>
 
+        <!-- Vypnuté tlačítko musí říct, CO mu chybí. Pojistky zůstávají obě,
+             jen se přestaly tvářit jako rozbité tlačítko. -->
+        <p
+          v-if="executeBlockedReason"
+          class="text-xs text-neutral-600"
+          data-test="erasure-confirm-blocked"
+        >{{ executeBlockedReason }}</p>
+
         <div class="flex justify-end gap-2 pt-2 flex-wrap">
           <button
             type="button"
@@ -569,6 +606,7 @@ onMounted(load)
             data-test="erasure-confirm-run"
             class="cursor-pointer h-9 px-4 bg-danger-600 hover:bg-danger-700 text-white rounded-md text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             :disabled="!executeReady || busy"
+            :title="executeBlockedReason ?? undefined"
             @click="execute"
           >{{ busy ? t('common.saving') : t('payroll.erasure.action_execute') }}</button>
         </div>

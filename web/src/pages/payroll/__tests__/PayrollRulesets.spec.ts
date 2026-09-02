@@ -508,4 +508,58 @@ describe('PayrollRulesets', () => {
     expect(wrapper.find('[data-test="ruleset-year-outlook-domains-2028"]').exists()).toBe(false)
   })
 
+  /**
+   * Přehled se nenačetl: dřív zbyl jen nadpis a toast, který za pár vteřin
+   * zmizel. Stránka bez jediné viditelné akce ven.
+   */
+  it('z nenačteného přehledu vede tlačítko, ne jen mizící toast', async () => {
+    m.overview.mockRejectedValueOnce(new Error('500'))
+    const wrapper = mount(PayrollRulesets, {
+      global: { stubs: { Modal: { template: '<div><slot /></div>' } } },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="ruleset-load-failed"]').text())
+      .toContain('payroll.rulesets.load_failed')
+
+    m.overview.mockResolvedValueOnce({
+      domains: [group()],
+      override_storage_available: true,
+      degraded_reason: null,
+      generated_at: '2026-08-15 10:00:00',
+    })
+    await wrapper.get('[data-test="ruleset-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="ruleset-load-failed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="ruleset-domain-income_tax"]').exists()).toBe(true)
+  })
+
+  /**
+   * „Uložit" viselo jen na tom, jestli se něco změnilo — povinný důvod se
+   * ozval až varováním PO kliknutí. Tlačítko a hláška pod ním teď mluví
+   * o týchž podmínkách.
+   */
+  it('„Uložit" a hláška pod ním mluví o týchž podmínkách', async () => {
+    m.isSuperadmin.value = true
+    m.detail.mockResolvedValue(detail([parameter()], { next_command: null }))
+    const wrapper = await mountPage([group()])
+    await wrapper.get('section table tbody button').trigger('click')
+    await flushPromises()
+
+    const save = () => wrapper.get('[data-test="ruleset-save"]')
+    expect(save().attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="ruleset-save-blocked"]').text())
+      .toContain('payroll.rulesets.nothing_changed')
+
+    await wrapper.get('table input[type="number"]').setValue('14')
+    expect(save().attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="ruleset-save-blocked"]').text())
+      .toContain('payroll.rulesets.reason_required')
+
+    await wrapper.get('[data-test="ruleset-reason"]').setValue('Oprava sazby podle sdělení.')
+    expect(save().attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-test="ruleset-save-blocked"]').exists()).toBe(false)
+  })
+
 })

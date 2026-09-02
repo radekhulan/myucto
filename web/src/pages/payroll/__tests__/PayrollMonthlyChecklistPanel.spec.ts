@@ -13,6 +13,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, parameters?: Record<string, string | number>) =>
       parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
+    te: () => true,
   }),
 }))
 
@@ -373,6 +374,27 @@ describe('PayrollMonthlyChecklistPanel', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="monthly-checklist-error"]').text()).toBeTruthy()
+  })
+
+  /**
+   * Vložený panel (příprava mzdového běhu) nemá hlavičku s Obnovit, takže po
+   * výpadku zbývala jen červená věta bez jakékoli cesty ven.
+   */
+  it('po neúspěšném načtení nabídne opakování i ve vloženém režimu', async () => {
+    m.monthlyChecklist.mockRejectedValue(new Error('network down'))
+    const wrapper = mount(PayrollMonthlyChecklistPanel, {
+      props: { environment: 'production', period: '2026-08' },
+      global: {
+        stubs: { RouterLink: { props: ['to'], template: '<a :data-to="to"><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    m.monthlyChecklist.mockResolvedValue(baseResponse())
+    await wrapper.get('[data-test="monthly-checklist-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="monthly-checklist-error"]').exists()).toBe(false)
   })
 
   it('změna měsíce nebo prostředí přehled znovu načte', async () => {

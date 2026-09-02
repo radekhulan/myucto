@@ -34,6 +34,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, parameters?: Record<string, string | number>) =>
       parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
+    te: () => true,
   }),
 }))
 
@@ -221,6 +222,41 @@ describe('PayrollSubmissionInboxPanel', () => {
     await wrapper.get('[data-test="inbox-detail-toggle"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-test="inbox-detail"]').exists()).toBe(false)
+  })
+
+  /**
+   * Server přijme jen budoucí termín. Bez `min` šlo vybrat včerejšek, kliknout
+   * na Odložit a dostat chybu odněkud z hloubky služby.
+   */
+  it('odložení do minulosti zastaví hned a nechodí na server', async () => {
+    m.submissionInbox.mockResolvedValue(baseResponse([inboxItem()]))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="inbox-snooze"]').trigger('click')
+
+    const until = wrapper.get('[data-test="snooze-until-input"]')
+    expect(until.attributes('min')).toBeTruthy()
+
+    await until.setValue('2020-01-01T10:00')
+    await wrapper.get('[data-test="snooze-reason-input"]').setValue('Čeká se na protokol.')
+    await wrapper.get('[data-test="snooze-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(m.snoozeSubmissionInboxItem).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('payroll.submissions.inbox.snooze_until_past')
+  })
+
+  /** Neznámý druh problému nesmí skončit vypsaným překladovým klíčem. */
+  it('neznámý druh problému pojmenuje větou, ne klíčem', async () => {
+    m.submissionInbox.mockResolvedValue(baseResponse([
+      inboxItem({ problem_kind: 'brand_new_kind' }),
+    ]))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const problem = wrapper.get('[data-test="inbox-problem"]').text()
+    expect(problem).toContain('payroll.submissions.inbox.problem_unknown')
+    expect(problem).not.toContain('problem.brand_new_kind')
   })
 
   it('chybu při načtení detailu ukáže, ne že appka mlčí', async () => {

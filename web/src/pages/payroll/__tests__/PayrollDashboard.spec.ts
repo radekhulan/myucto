@@ -250,6 +250,67 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(panel.text()).toContain('Chybí účet pojišťovny.')
     expect(panel.text()).not.toContain('Politika je nastavena.')
     expect(panel.get('a').attributes('data-to')).toBe('{"name":"payroll-settings"}')
+    // Neznámý kód nesmí zůstat bez prokliku — spadne na obecné nastavení.
+    expect(panel.get('[data-test="setup-blocker-link-health_insurer_account"]').attributes('data-to'))
+      .toBe('{"name":"payroll-settings"}')
+  })
+
+  /**
+   * Hláška ze serveru říká, KAM jít („Mzdy → Podání → Certifikát"), ale
+   * proklik tam dosud nevedl: nabízel se jediný odkaz na kořen nastavení
+   * a zbytek si musel uživatel najít mezi šesti (resp. dvanácti) záložkami.
+   */
+  it('každý nesplněný krok vede rovnou na místo, kde se plní', async () => {
+    m.payrollSetupCheck.mockResolvedValue({
+      ready: false,
+      effective_on: '2026-08-01',
+      policy_id: null,
+      checks: [
+        { code: 'employer_settings', status: 'blocked', message: 'Chybí profil zaměstnavatele.' },
+        { code: 'effective_policy', status: 'blocked', message: 'Chybí účinná politika.' },
+        { code: 'jmhz_certificate', status: 'blocked', message: 'Chybí podpisový certifikát.' },
+      ],
+      blockers: ['employer_settings', 'effective_policy', 'jmhz_certificate'],
+    })
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const target = (code: string) => JSON.parse(
+      wrapper.get(`[data-test="setup-blocker-link-${code}"]`).attributes('data-to') ?? 'null',
+    )
+
+    expect(target('employer_settings')).toEqual({
+      name: 'payroll-settings',
+      query: { tab: 'employer' },
+      hash: '#payroll-employer-offices',
+    })
+    expect(target('effective_policy')).toEqual({
+      name: 'payroll-settings',
+      query: { tab: 'policies' },
+    })
+    expect(target('jmhz_certificate')).toEqual({
+      name: 'payroll-submissions-tab',
+      params: { tab: 'certificate' },
+    })
+  })
+
+  /**
+   * Selhalo načtení stavu modulu: dřív zbyl jen nadpis a toast, který za pár
+   * vteřin zmizel — stránka bez jediné akce ven.
+   */
+  it('z nenačteného přehledu vede tlačítko, ne jen mizící toast', async () => {
+    m.capabilities.mockRejectedValueOnce(new Error('500'))
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="payroll-dashboard-failed"]').text())
+      .toContain('payroll.load_failed')
+
+    await wrapper.get('[data-test="payroll-dashboard-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payroll-dashboard-failed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
   })
 
   it('keeps the overview usable when the optional month calls fail', async () => {

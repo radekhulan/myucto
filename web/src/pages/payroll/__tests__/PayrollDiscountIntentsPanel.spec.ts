@@ -9,6 +9,7 @@ const m = vi.hoisted(() => ({
   requestEnd: vi.fn(),
   recordReceipt: vi.fn(),
   person: vi.fn(),
+  canWrite: vi.fn(() => true),
 }))
 
 vi.mock('@/api/payrollDiscountIntents', () => ({
@@ -38,15 +39,15 @@ vi.mock('@/components/payroll/PayrollPersonSearchSelect.vue', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({
-    canWrite: (permission: string) => permission === 'payroll.submissions',
-  }),
+  useAuthStore: () => ({ canWrite: m.canWrite }),
 }))
 
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, parameters?: Record<string, string | number>) =>
+      parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
+    te: () => true,
     locale: { value: 'cs' },
   }),
 }))
@@ -85,6 +86,7 @@ function intent(overrides: IntentOverrides = {}): Record<string, unknown> {
 describe('PayrollDiscountIntentsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.canWrite.mockReturnValue(true)
     m.person.mockResolvedValue({ employments: [] })
     m.list.mockResolvedValue([])
   })
@@ -190,5 +192,52 @@ describe('PayrollDiscountIntentsPanel', () => {
       outcome: 'accepted',
       accepted_on: '2026-08-20',
     })
+  })
+
+  /**
+   * Čtenář bez práva zápisu dostával „Nejdřív opište den doručení z protokolu
+   * ČSSZ" — vyplnil datum, tlačítko zůstalo zhasnuté a hláška tvrdila totéž.
+   * Důvod musí popisovat SKUTEČNOU příčinu.
+   */
+  it('bez práva zápisu neříká, že chybí datum, ale že chybí oprávnění', async () => {
+    m.canWrite.mockReturnValue(false)
+    m.list.mockResolvedValue([intent()])
+
+    const wrapper = mount(PayrollDiscountIntentsPanel)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('payroll.discountIntents.hints.readOnly')
+    expect(wrapper.text()).not.toContain('payroll.discountIntents.hints.acceptedOnRequired')
+  })
+
+  /** Datumy z evidence patří do stejného tvaru jako všude jinde v appce. */
+  it('datumy záměru ukáže česky, ne v ISO', async () => {
+    m.list.mockResolvedValue([intent()])
+
+    const wrapper = mount(PayrollDiscountIntentsPanel)
+    await flushPromises()
+
+    const card = wrapper.get('[data-test="discount-intent-1"]').text()
+    expect(card).toContain('01. 09. 2026')
+    expect(card).toContain('20. 10. 2026')
+    expect(card).not.toContain('2026-09-01')
+  })
+
+  /** Rozbalené XML se nedalo zavřít a překrývalo zbytek karty. */
+  it('náhled XML jde zavřít', async () => {
+    m.list.mockResolvedValue([intent()])
+    m.preview.mockResolvedValue({ xml: '<ozuspoj/>' })
+
+    const wrapper = mount(PayrollDiscountIntentsPanel)
+    await flushPromises()
+
+    const preview = wrapper.findAll('button')
+      .find(button => button.text().includes('payroll.discountIntents.actions.preview'))
+    await preview?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="discount-intent-preview-1"]').exists()).toBe(true)
+    await wrapper.get('[data-test="discount-intent-preview-close-1"]').trigger('click')
+    expect(wrapper.find('[data-test="discount-intent-preview-1"]').exists()).toBe(false)
   })
 })

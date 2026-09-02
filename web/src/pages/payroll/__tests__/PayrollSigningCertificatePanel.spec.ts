@@ -34,10 +34,14 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: m.canWrite, user: m.user }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, parameters?: Record<string, string | number>) =>
       parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
+    te: () => true,
     locale: { value: 'cs' },
   }),
 }))

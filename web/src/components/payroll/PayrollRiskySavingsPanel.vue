@@ -90,10 +90,61 @@ const formValid = computed(() =>
   && rightClaimedOn.value !== ''
   && productReference.value.trim() !== '')
 
+/**
+ * Co ještě chybí, aby šlo uložit — pojmenovaná POLE, ne jen šedé tlačítko.
+ *
+ * Why: obě tlačítka visela na `formValid`, ale pod nimi nebylo ani slovo o
+ * tom, který ze čtyř údajů schází. Formulář má patnáct polí ve čtyřech
+ * sloupcích, takže „ono to nejde" znamenalo hledat naslepo.
+ *
+ * Proč zrovna tahle čtyři jsou povinná (ostatní pole zůstávají nepovinná):
+ * vztah a cílový účet určují, KOMU a KAM se příspěvek pošle, datum uplatnění
+ * je zákonný začátek nároku (§ 15a zákona o pojistném) a označení produktu je
+ * to jediné, podle čeho penzijní společnost platbu spáruje se smlouvou.
+ */
+const missingFields = computed<string[]>(() => {
+  const missing: string[] = []
+  if (employmentId.value === null) missing.push(t('payroll.risky_savings.employment'))
+  if (institutionAccountId.value === null) missing.push(t('payroll.risky_savings.payment_target'))
+  if (rightClaimedOn.value === '') missing.push(t('payroll.risky_savings.claimed_on'))
+  if (productReference.value.trim() === '') missing.push(t('payroll.risky_savings.product_reference'))
+  return missing
+})
+
+/** Píše se do rozdělaného záznamu, nebo se zakládá nový? */
+const isEditing = computed(() => sourceEvidenceId.value !== null)
+
 function selectEmployee(value: number | null): void {
   employeeId.value = value
   employmentId.value = props.employments.find(item =>
     item.employee_id === value)?.employment_id ?? null
+}
+
+/**
+ * Zpátky na prázdný formulář.
+ *
+ * Why: po kliknutí na „Upravit" se panel zamkl do editace konkrétního záznamu
+ * (`sourceEvidenceId` + `row_version`) a NIC z toho nevedlo ven — další
+ * uložení by přepsalo cizí záznam. Jediné východisko bylo znovu načíst
+ * stránku, čímž se rozepsané ztratilo.
+ */
+function startNew(): void {
+  sourceEvidenceId.value = null
+  rowVersion.value = null
+  employeeId.value = null
+  employmentId.value = null
+  riskFactor.value = 'vibration'
+  fullEightHourShifts.value = 0
+  otherShiftStartedHours.value = 0
+  rightClaimedOn.value = ''
+  employeeInformedOn.value = ''
+  pensionCompany.value = ''
+  institutionAccountId.value = null
+  productReference.value = ''
+  variableSymbol.value = ''
+  specificSymbol.value = ''
+  paymentMessage.value = ''
+  evidenceReference.value = ''
 }
 
 function edit(item: PayrollRiskySavingsItem): void {
@@ -161,9 +212,22 @@ async function load(): Promise<void> {
   }
 }
 
+/*
+ * Poslední den vykazovaného měsíce — podle něj se vybírají účinné účty
+ * institucí.
+ *
+ * `Date.UTC` bere měsíc od NULY, ale `month` sem přichází od jedničky
+ * (`2026-08` → 8). S `month + 1` proto vycházel poslední den měsíce
+ * NÁSLEDUJÍCÍHO: za srpen 30. 9. místo 31. 8. Nabídka pak mohla obsahovat
+ * účet, který v daném období ještě neplatil, nebo naopak zamlčet ten, který
+ * uprostřed měsíce skončil — a vybraný účet jde do evidence jako cíl platby.
+ *
+ * Nultý den měsíce `month` je poslední den měsíce `month - 1` v nulovém
+ * indexování, tedy poslední den toho našeho.
+ */
 function paymentTargetEffectiveOn(): string {
   const [year, month] = props.period.split('-').map(Number)
-  return new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10)
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10)
 }
 
 function selectPaymentTarget(value: string | number | null): void {
@@ -304,21 +368,55 @@ onMounted(load)
       </label>
     </div>
     <p class="mt-2 text-xs text-neutral-500">{{ t('payroll.risky_savings.shift_help', { eighths: qualifyingEighths }) }}</p>
+    <!-- Vypnuté tlačítko musí říct, CO mu chybí — jinak je to hádanka nad
+         patnácti poli. -->
+    <p
+      v-if="(canWrite || canApprove) && missingFields.length > 0"
+      class="mt-2 text-xs text-warning-700"
+      data-testid="risky-missing-fields"
+    >
+      {{ t('payroll.risky_savings.missing_fields', { fields: missingFields.join(', ') }) }}
+    </p>
     <div class="mt-4 flex flex-wrap justify-end gap-2">
-      <button v-if="canWrite" :class="btnFilled('neutral')" :disabled="saving || !formValid" @click="save(false)">
+      <button
+        v-if="(canWrite || canApprove) && isEditing"
+        :class="btnOutlineSm('neutral')"
+        :disabled="saving"
+        data-testid="risky-new"
+        @click="startNew"
+      >
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>
+        {{ t('payroll.risky_savings.new_entry') }}
+      </button>
+      <button v-if="canWrite" :class="btnFilled('neutral')" :disabled="saving || !formValid" :title="missingFields.length ? t('payroll.risky_savings.missing_fields', { fields: missingFields.join(', ') }) : undefined" @click="save(false)">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
         {{ t('payroll.risky_savings.save_draft') }}
       </button>
-      <button v-if="canApprove" data-testid="risky-approve" :class="btnFilled('success')" :disabled="saving || !formValid" @click="save(true)">
+      <button v-if="canApprove" data-testid="risky-approve" :class="btnFilled('success')" :disabled="saving || !formValid" :title="missingFields.length ? t('payroll.risky_savings.missing_fields', { fields: missingFields.join(', ') }) : undefined" @click="save(true)">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
         {{ t('payroll.risky_savings.save_approve') }}
       </button>
     </div>
 
-    <p v-if="failed" class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700">
-      {{ t('payroll.risky_savings.load_failed') }}
+    <!-- Selhalo načtení: o evidenci nevíme nic, takže jediná akce je opakovat.
+         Dřív tu zůstala jen věta a toast, který za pár vteřin zmizel. -->
+    <div v-if="failed" class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert">
+      <p>{{ t('payroll.risky_savings.load_failed') }}</p>
+      <button type="button" :class="[btnOutlineSm('danger'), 'mt-2']" data-testid="risky-retry" @click="load">
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
+        {{ t('common.empty_state.retry') }}
+      </button>
+    </div>
+    <!-- Prázdná evidence měsíce nebyla dřív vidět NIJAK: panel prostě skončil
+         formulářem a nedalo se poznat, jestli je prázdno, nebo se to nenačetlo. -->
+    <p
+      v-else-if="!loading && items.length === 0"
+      class="mt-6 rounded-lg border border-dashed border-neutral-300 px-4 py-6 text-center text-sm text-neutral-500"
+      data-testid="risky-empty"
+    >
+      {{ t('payroll.risky_savings.empty') }}
     </p>
-    <div v-else-if="!loading && items.length" class="mt-6 overflow-x-auto rounded-lg border border-neutral-200">
+    <div v-else-if="!loading" class="mt-6 overflow-x-auto rounded-lg border border-neutral-200">
       <table class="min-w-full divide-y divide-neutral-200 text-sm">
         <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.risky_savings.employee') }}</th><th class="px-4 py-3">{{ t('payroll.risky_savings.shifts') }}</th><th class="px-4 py-3">{{ t('payroll.risky_savings.contribution') }}</th><th class="px-4 py-3">{{ t('payroll.risky_savings.status_label') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.risky_savings.actions') }}</th></tr></thead>
         <tbody class="divide-y divide-neutral-100">

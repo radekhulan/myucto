@@ -51,10 +51,14 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: m.canWrite }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, parameters?: Record<string, string | number>) =>
       parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
+    te: () => true,
     locale: { value: 'cs' },
   }),
 }))
@@ -203,7 +207,8 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(m.jmhzTransportHistory).toHaveBeenCalledWith('production', { limit: 25, offset: 0 })
     const group = wrapper.get('[data-test="transport-group-70"]')
     expect(group.text()).toContain('payroll.submissions.transport.group.attempts 2')
-    expect(group.text()).toContain('2026-07-01')
+    // Období se ukazuje v lidském tvaru, ne v ISO — hledá se proto „01. 07. 2026".
+    expect(group.text()).toContain('01. 07. 2026')
     const numbers = group.findAll('[data-test^="transport-attempt-"]')
       .map(node => node.attributes('data-test'))
     expect(numbers).toEqual(['transport-attempt-3', 'transport-attempt-2'])
@@ -623,9 +628,9 @@ describe('PayrollTransportHistoryPanel', () => {
 
     expect(m.submissionDetail).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="transport-group-70"]').text())
-      .toContain('payroll.submissions.transport.group.period 2026-07-01 2026-07-31')
+      .toContain('payroll.submissions.transport.group.period 01. 07. 2026 31. 07. 2026')
     expect(wrapper.get('[data-test="transport-group-71"]').text())
-      .toContain('payroll.submissions.transport.group.period 2026-06-01 2026-06-30')
+      .toContain('payroll.submissions.transport.group.period 01. 06. 2026 30. 06. 2026')
     expect(m.jmhzTransportHistory).toHaveBeenCalledTimes(1)
   })
 
@@ -647,7 +652,7 @@ describe('PayrollTransportHistoryPanel', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="transport-group-70"]').text())
-      .toContain('payroll.submissions.transport.group.period 2026-07-01 2026-07-31')
+      .toContain('payroll.submissions.transport.group.period 01. 07. 2026 31. 07. 2026')
     expect(m.submissionDetail).not.toHaveBeenCalled()
   })
 
@@ -864,7 +869,7 @@ describe('PayrollTransportHistoryPanel', () => {
     await flushPromises()
 
     const automation = wrapper.get('[data-test="transport-automation-12"]')
-    expect(automation.text()).toContain('payroll.submissions.transport.automation.next_poll 2026-08-11 10:00:00')
+    expect(automation.text()).toContain('payroll.submissions.transport.automation.next_poll 11. 08. 2026 10:00')
     expect(automation.text()).toContain('payroll.submissions.transport.automation.polls 3')
     expect(wrapper.get('[data-test="transport-poll-error-12"]').text())
       .toContain('Brána VREP neodpověděla.')
@@ -892,7 +897,7 @@ describe('PayrollTransportHistoryPanel', () => {
 
     expect(wrapper.find('[data-test="transport-close-13"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="transport-closed-13"]').text())
-      .toContain('payroll.submissions.transport.automation.closed 2026-08-11 10:05:00')
+      .toContain('payroll.submissions.transport.automation.closed 11. 08. 2026 10:05')
   })
 
   /**

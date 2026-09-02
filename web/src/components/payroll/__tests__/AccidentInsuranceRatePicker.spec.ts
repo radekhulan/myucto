@@ -178,6 +178,22 @@ describe('AccidentInsuranceRatePicker', () => {
     expect(wrapper.findAll('tbody tr')).toHaveLength(1)
   })
 
+  /**
+   * Prázdný výsledek hledání není prázdný sazebník — řádky tu jsou, jen je
+   * schoval filtr. Bez tlačítka se z toho stavu dalo dostat jen tím, že si
+   * uživatel domyslel, že má vymazat pole.
+   */
+  it('z prázdného výsledku filtru vede tlačítko zpět na celý sazebník', async () => {
+    const wrapper = await open()
+    const rows = wrapper.findAll('tbody tr').length
+
+    await wrapper.find('input[type="search"]').setValue('naprosto-nic-takoveho')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(1)
+
+    await wrapper.get('[data-testid="accident-rate-clear-filter"]').trigger('click')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(rows)
+  })
+
   it('bez práva zápisu sazbu nenabízí k převzetí', async () => {
     const wrapper = await open({ canWrite: false })
 

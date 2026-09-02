@@ -132,6 +132,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
       parameters
         ? `${key} ${Object.values(parameters).join(' ')}`
         : key,
+    te: () => true,
     locale: { value: 'cs' },
   }),
 }))

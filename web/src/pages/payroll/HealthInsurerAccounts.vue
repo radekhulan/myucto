@@ -212,6 +212,70 @@ const createValid = computed(() =>
   && commonValid(createForm),
 )
 
+/**
+ * Která POLE brání uložení — ne jen „zkontrolujte údaje".
+ *
+ * Why: formulář má patnáct polí ve třech sloupcích a jediná hláška pod ním
+ * říkala „Zkontrolujte vyplněná pole." Vadné pole se přitom nijak nezvýrazní
+ * (`aria-invalid` je pro čtečku, ne pro oko), takže uživatel hledal naslepo.
+ *
+ * Povinná pole jsou jen ta, bez kterých se z účtu nedá zaplatit: instituce
+ * (kód + název), číslo účtu a začátek platnosti. Druh zdroje a datum ověření
+ * jsou předvyplněné, takže nic neblokují — hlídá se u nich jen tvar.
+ */
+function commonProblems(form: {
+  institution_name: string
+  variable_symbol: string | null
+  specific_symbol: string | null
+  constant_symbol: string | null
+  valid_to: string | null
+  source_reference: string
+  verified_on: string
+}): string[] {
+  const problems: string[] = []
+  const name = form.institution_name.trim()
+  if (name === '') problems.push(t('payroll.employer.health_accounts.institution_name'))
+  else if (name.length > 190) problems.push(t('payroll.employer.health_accounts.institution_name'))
+  if (!symbolValid(form.variable_symbol, 10)) problems.push(t('payroll.employer.health_accounts.variable_symbol'))
+  if (!symbolValid(form.specific_symbol, 10)) problems.push(t('payroll.employer.health_accounts.specific_symbol'))
+  if (!symbolValid(form.constant_symbol, 4, true)) problems.push(t('payroll.employer.health_accounts.constant_symbol'))
+  if (!validDate(form.valid_to, false)) problems.push(t('payroll.employer.health_accounts.valid_to'))
+  if (form.source_reference.trim().length > 500) problems.push(t('payroll.employer.health_accounts.source_reference'))
+  if (!validDate(form.verified_on) || form.verified_on > localToday()) {
+    problems.push(t('payroll.employer.health_accounts.verified_on'))
+  }
+  return problems
+}
+
+const createProblems = computed<string[]>(() => {
+  const problems: string[] = []
+  if (!/^[A-Z0-9][A-Z0-9._/-]{0,31}$/.test(createForm.institution_code.trim().toUpperCase())) {
+    problems.push(insurerPickerActive.value
+      ? t('payroll.employer.health_accounts.insurer')
+      : t('payroll.employer.health_accounts.institution_code'))
+  }
+  if (createForm.bank_account.trim() === '') problems.push(t('payroll.employer.health_accounts.bank_account'))
+  if (!validDate(createForm.valid_from)) problems.push(t('payroll.employer.health_accounts.valid_from'))
+  else if (createForm.valid_to !== null && createForm.valid_to !== ''
+    && validDate(createForm.valid_to) && createForm.valid_to < createForm.valid_from) {
+    problems.push(t('payroll.employer.health_accounts.valid_to'))
+  }
+  return [...new Set([...problems, ...commonProblems(createForm)])]
+})
+
+const editProblems = computed<string[]>(() => {
+  const original = accounts.value.find(account => account.id === editingId.value)
+  const problems: string[] = []
+  if (original !== undefined
+    && editForm.valid_to !== null
+    && editForm.valid_to !== ''
+    && validDate(editForm.valid_to)
+    && editForm.valid_to < original.valid_from) {
+    problems.push(t('payroll.employer.health_accounts.valid_to'))
+  }
+  return [...new Set([...problems, ...commonProblems(editForm)])]
+})
+
 const editValid = computed(() => {
   const original = accounts.value.find(account => account.id === editingId.value)
   return original !== undefined
@@ -433,6 +497,16 @@ function setCreateInsurer(value: string | null) {
 function enableManualInsurerCode() {
   manualInsurerCode.value = true
   manualCodeTouched.value = createForm.institution_code.trim() !== ''
+}
+
+/**
+ * Zpátky k výběru ze seznamu. Přepnutí do ruční větve bylo jednosměrné —
+ * kdo na odkaz klikl omylem, musel zrušit celý rozdělaný formulář, aby se
+ * dostal k nabídce pojišťoven zpátky.
+ */
+function disableManualInsurerCode() {
+  manualInsurerCode.value = false
+  manualCodeTouched.value = false
 }
 
 /** true = uživatel do kódu instituce sáhl ručně, přestaň ho odvozovat z názvu. */
@@ -658,7 +732,18 @@ onMounted(async () => {
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_code') }}<RequiredMark /></span>
               <input v-model="createForm.institution_code" data-testid="health-create-code" type="text" maxlength="32" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" @input="onManualInstitutionCode">
-              <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.health_accounts.institution_code_hint') }}</span>
+              <span class="mt-1 block text-xs text-neutral-500">
+                {{ t('payroll.employer.health_accounts.institution_code_hint') }}
+                <button
+                  v-if="manualInsurerCode && createForm.institution_type === 'health_insurer'"
+                  type="button"
+                  class="cursor-pointer font-medium text-payroll-700 underline"
+                  data-testid="health-create-back-to-picker"
+                  @click="disableManualInsurerCode"
+                >
+                  {{ t('payroll.employer.health_accounts.insurer_back_to_list') }}
+                </button>
+              </span>
             </label>
           </template>
           <label class="block">
@@ -707,7 +792,11 @@ onMounted(async () => {
             <input v-model="createForm.verified_on" type="date" :max="localToday()" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
           </label>
         </div>
-        <p v-if="showValidation && !createValid" class="mt-3 text-sm text-danger-600" role="alert">{{ t('payroll.employer.health_accounts.validation') }}</p>
+        <p v-if="showValidation && !createValid" class="mt-3 text-sm text-danger-600" role="alert" data-testid="health-create-validation">
+          {{ createProblems.length > 0
+            ? t('payroll.employer.health_accounts.validation_fields', { fields: createProblems.join(', ') })
+            : t('payroll.employer.health_accounts.validation') }}
+        </p>
         <div class="mt-4 flex flex-wrap justify-end gap-2">
           <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="cancelCreate">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
@@ -775,7 +864,11 @@ onMounted(async () => {
             <input v-model="editForm.verified_on" type="date" :max="localToday()" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
           </label>
         </div>
-        <p v-if="showValidation && !editValid" class="mt-3 text-sm text-danger-600" role="alert">{{ t('payroll.employer.health_accounts.validation') }}</p>
+        <p v-if="showValidation && !editValid" class="mt-3 text-sm text-danger-600" role="alert" data-testid="health-edit-validation">
+          {{ editProblems.length > 0
+            ? t('payroll.employer.health_accounts.validation_fields', { fields: editProblems.join(', ') })
+            : t('payroll.employer.health_accounts.validation') }}
+        </p>
         <div class="mt-4 flex flex-wrap justify-end gap-2">
           <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="cancelEdit">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
