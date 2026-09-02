@@ -8,7 +8,61 @@ Agenda připravuje vybraná mzdová hlášení, provádí formální kontroly a 
 
 Je nutné oprávnění `payroll.submissions`, způsobilý uzavřený běh nebo schválená revize, úplné identifikátory a správně oddělené TEST/produkční prostředí. Pro ČSSZ TEST použijte pouze testovací profil a certifikát v určeném bezpečném úložišti. ISDS musí být nastaveno pro správnou firmu a prostředí.
 
-## 68.3 Krokový postup
+## 68.3 Fronta „K odeslání"
+
+Záložka **K odeslání** ukazuje na jednom místě všechna připravená podání, která
+ještě neodešla — napříč agendami i zaměstnanci a bez ohledu na období. Podání se
+do fronty dostane samo tím, že vznikne; nikam se kvůli tomu nepřepíná.
+
+Řádky jsou seřazené podle lhůty a to, co je po lhůtě, je zvýrazněné. Seznam lze
+filtrovat podle agendy a přeřadit podle agendy — při větším počtu zaměstnanců
+tak jdou všechny registrace vyřídit najednou. U každého řádku je vidět, čeho se
+týká, koho se týká (u registrací jméno zaměstnance), do kdy se má podat a v jakém
+je stavu.
+
+### Hromadné odeslání
+
+Zaškrtávacím políčkem vyberte položky, nebo použijte políčko v hlavičce tabulky
+a vyberte všechno, co lze odeslat. Tlačítkem **Odeslat vybrané** odejde celý
+výběr jedním úkonem. Vybrat lze jen položky, které odeslat jde; u ostatních je
+políčko nedostupné a důvod stojí u řádku.
+
+Během odesílání je vidět průběh („Odesílám… 50 ze 120“). Dávka se odesílá po
+částech, takže dlouhé odesílání nezablokuje prohlížeč ani nespadne na časovém
+limitu. **Jedna chyba dávku nezastaví**: co selže, zůstane ve frontě i s důvodem
+a dá se poslat znovu. Po dokončení se ukáže souhrn („Odesláno 37, selhalo 3.“)
+a jmenovitý seznam toho, co neprošlo, i s důvodem.
+
+Jednotlivé podání jde poslat i samostatně tlačítkem **Odeslat** na řádku.
+
+Potvrzení o převzetí není potvrzení o přijetí — výsledek zpracování se dotahuje
+samostatně a najdete ho ve **Stavu odeslání**.
+
+### Kontrola změn u všech zaměstnanců
+
+Tlačítko **Zkontrolovat změny u všech zaměstnanců** projde pracovní vztahy celé
+firmy a založí povinnost u těch, kde se od minulé kontroly změnil hlásitelný
+údaj. Bez něj se změna zjistí jen tehdy, když někdo otevře kartu konkrétního
+zaměstnance — a osmidenní lhůta by mezitím mohla uplynout, aniž by o ní kdokoli
+věděl.
+
+Kontrola se dá pouštět opakovaně: porovnávají se jen vztahy, u kterých se zdroj
+opravdu pohnul, takže se povinnosti nezakládají dvakrát. Když je vztahů hodně,
+hlásí kontrola, že další čekají — spusťte ji v tom případě ještě jednou.
+
+Fronta ukazuje i podání, která odeslat nejde, a u každého uvádí důvod: typicky
+že podání ještě není zmrazené, že už bylo odesláno, že už čeká v odchozí frontě
+datové schránky, že má neopravené chyby, nebo že pro danou agendu aplikace
+odesílací kanál nemá. Které agendy aplikace odesílá sama, popisuje § 68.8 a dál.
+
+Fronta je druhá cesta k témuž: odesílací tlačítka na kartě pracovního vztahu,
+ve **Stavu odeslání**, na kartě nemocenského případu i ve zdravotním panelu
+fungují dál a odesílají stejnou cestou.
+
+Přehledy zdravotním pojišťovnám mají datové schránky doložené jen pro ostré
+prostředí, takže se v testovacím prostředí ve frontě zobrazí jako neodeslatelné.
+
+## 68.3.1 Krokový postup
 
 1. Otevřete **Mzdy → Podání a hlášení**, vyberte typ, období a schválenou revizi.
 2. Spusťte náhled nebo kontrolní přípravu a odstraňte blokující chyby. Řádné JMHZ vzniká ze způsobilé běžné revize. Opravu nebo storno již připraveného JMHZ založte z jeho historie řízenou akcí; nejde o ruční nepodporovaný scénář.

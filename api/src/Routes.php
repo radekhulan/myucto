@@ -151,6 +151,7 @@ use MyInvoice\Action\Payroll\PayrollSubmissionArtifactDownloadAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionDetailAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionInboxAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionOverviewAction;
+use MyInvoice\Action\Payroll\PayrollSubmissionQueueAction;
 use MyInvoice\Action\Payroll\PayrollStatutoryObligationAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Action\Payroll\PayrollTravelAction;
@@ -1006,6 +1007,18 @@ final class Routes
                 '/periods/{period:[0-9]{4}-[0-9]{2}}/ownership/release-legacy',
                 [PayrollRunsAction::class, 'releaseLegacyPeriod'],
             );
+            // Převzetí měsíce od ruční rekapitulace: storno zápisu, odložení
+            // mzdového listu a uvolnění rezervace v jednom kroku. `release-legacy`
+            // je fail-closed a sama o sobě z toho ven nevede — mzdový list dřív
+            // nešlo odstranit odnikud než ruční editací databáze.
+            $g->get(
+                '/periods/{period:[0-9]{4}-[0-9]{2}}/legacy-recapitulation',
+                [PayrollRunsAction::class, 'legacyRecapitulation'],
+            );
+            $g->post(
+                '/periods/{period:[0-9]{4}-[0-9]{2}}/legacy-recapitulation/hand-over',
+                [PayrollRunsAction::class, 'handOverLegacyRecapitulation'],
+            );
             // MZ-01-W07 — chybějící půlka override: varování vyžadující schválení
             // dosud zastavilo `approve` a nešlo ho odklidit žádnou routou.
             $g->post(
@@ -1309,6 +1322,32 @@ final class Routes
                 '/submissions/overview',
                 PayrollSubmissionOverviewAction::class,
             );
+            // Fronta odchozích podání: jedno místo pro všechno připravené
+            // a neodeslané napříč agendami. Odesílá přes TYTÉŽ služby jako
+            // původní tlačítka u jednotlivých agend — je to druhá cesta
+            // k témuž, ne náhrada, takže `jmhz-transport`
+            // i `registration-transport` zůstávají.
+            $g->get(
+                '/submissions/queue',
+                [PayrollSubmissionQueueAction::class, 'list'],
+            );
+            $g->post(
+                '/submissions/queue/{submissionId:[0-9]+}/dispatch',
+                [PayrollSubmissionQueueAction::class, 'dispatch'],
+            );
+            // Hromadné odeslání. Cesta je bez ID, protože předmětem je DÁVKA;
+            // klient ji posílá po porcích, aby žádný požadavek neběžel minuty.
+            $g->post(
+                '/submissions/queue/dispatch',
+                [PayrollSubmissionQueueAction::class, 'dispatchBatch'],
+            );
+            // Detekce hlásitelných změn za CELOU firmu. Metoda je POST, ne
+            // GET: zakládá povinnosti s běžící osmidenní lhůtou, a to není
+            // bezpečná operace, kterou by směl zopakovat prefetch prohlížeče.
+            $g->post(
+                '/submissions/queue/detect-changes',
+                [PayrollSubmissionQueueAction::class, 'detectChanges'],
+            );
             $g->get(
                 '/submissions/monthly-checklist',
                 PayrollMonthlyChecklistAction::class,
@@ -1423,6 +1462,13 @@ final class Routes
             $g->post(
                 '/submissions/registration/{employmentId:[0-9]+}/a1-profile/check',
                 [PayrollRegistrationAction::class, 'checkA1Profile'],
+            );
+            // Opačný směr než „Vrátit návrh z kmenových dat": hodnota
+            // z formuláře se zapíše zpátky do evidence osoby a vztahu.
+            // Právo je proto `payroll.person.write`, ne `payroll.submissions`.
+            $g->post(
+                '/submissions/registration/{employmentId:[0-9]+}/a1-profile/master-data',
+                [PayrollRegistrationAction::class, 'writeA1MasterData'],
             );
             $g->get(
                 '/submissions/registration/{employmentId:[0-9]+}/events',

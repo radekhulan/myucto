@@ -87,8 +87,10 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
             );
         }
         $byField = array_column($problems, 'message', 'field');
-        self::assertStringContainsString(
-            'nejvyšší dosažené vzdělání',
+        // Věta musí ZAČÍNAT lidským názvem údaje. Účetní čte první dvě slova;
+        // když tam stojí název sloupce, hláška je pro ni k ničemu.
+        self::assertStringStartsWith(
+            'Nejvyšší dosažené vzdělání',
             $byField['facts.highest_education_code'],
         );
         self::assertStringContainsString(
@@ -99,6 +101,82 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
             'Historie adres',
             $byField['permanent_address.city'],
         );
+        // Technická cesta se veze v `field`, ne na začátku věty.
+        foreach ($problems as $problem) {
+            self::assertIsString($problem['field']);
+            self::assertStringStartsNotWith(
+                (string) $problem['field'],
+                $problem['message'],
+            );
+        }
+    }
+
+    /**
+     * Vyplněná, ale vadná hodnota nesmí hlásit „chybí".
+     *
+     * Účetní by koukala na vyplněné pole a hledala prázdné. Hláška musí říct,
+     * JAK má hodnota vypadat — jinak se dá jen hádat.
+     */
+    public function testFilledButUnusableValuesSayWhatShapeIsExpected(): void
+    {
+        $source = self::source('1', '1');
+        $source['permanent_address']['country_code'] = 'CZE';
+        $source['health_insurance_code'] = '11';
+        $source['employment']['actual_start_on'] = '2026-13-45';
+        $source['employment']['position_name'] = str_repeat('a', 300);
+
+        $problems = (new PayrollRegistrationA1SnapshotBuilder())->problems(
+            $source,
+            self::identity(),
+            self::scope(),
+        );
+
+        $byField = array_column($problems, 'message', 'field');
+        $codes = array_column($problems, 'code', 'field');
+        foreach ([
+            'permanent_address.country_code' => 'dvoupísmenná zkratka státu',
+            'health_insurance_code' => 'přesně 3 číslicích',
+            'employment.actual_start_on' => 'RRRR-MM-DD',
+            'employment.position_name' => '255 znaků',
+        ] as $field => $expected) {
+            self::assertArrayHasKey($field, $byField, $field);
+            self::assertStringContainsString($expected, $byField[$field], $field);
+            self::assertStringNotContainsString(' chybí', $byField[$field], $field);
+            self::assertSame(
+                'registration_regzec_a1_field_value_invalid',
+                $codes[$field],
+                $field,
+            );
+        }
+        self::assertStringStartsWith(
+            'Stát trvalého pobytu',
+            $byField['permanent_address.country_code'],
+        );
+    }
+
+    /** Přísný režim nemá kam dát `field`, takže cesta jde do závorky. */
+    public function testStrictModeKeepsTheTechnicalPathInBrackets(): void
+    {
+        $source = self::source('1', '1');
+        $source['facts']['highest_education_code'] = null;
+
+        try {
+            (new PayrollRegistrationA1SnapshotBuilder())->build(
+                $source,
+                self::identity(),
+                self::scope(),
+            );
+            self::fail('Očekávána chyba chybějícího pole.');
+        } catch (PayrollRegistrationIdentitySnapshotException $exception) {
+            self::assertStringStartsWith(
+                'Nejvyšší dosažené vzdělání',
+                $exception->getMessage(),
+            );
+            self::assertStringEndsWith(
+                ' (facts.highest_education_code)',
+                $exception->getMessage(),
+            );
+        }
     }
 
     /** Úplný snímek nemá co hlásit. */

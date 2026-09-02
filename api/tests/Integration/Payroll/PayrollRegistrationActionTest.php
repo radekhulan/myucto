@@ -9,9 +9,18 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
+use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
+use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationA1MasterDataWriter;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
@@ -410,6 +419,18 @@ final class PayrollRegistrationActionTest extends TestCase
             'registration_a2_jmhz_corrections_incomplete',
             $this->json($response)['error']['code'],
         );
+        // Věta začíná lidským názvem podání, ne kódem „REGZEC A2", a jmenuje
+        // konkrétní blokující období. Zkratka JMHZ zůstává rozepsaná.
+        $message = (string) $this->json($response)['error']['message'];
+        self::assertStringStartsWith(
+            'Oznámení o skončení pracovního vztahu (REGZEC A2)',
+            $message,
+        );
+        self::assertStringContainsString(
+            'jednotná měsíční hlášení zaměstnavatele (JMHZ)',
+            $message,
+        );
+        self::assertStringContainsString('2026-06-01, 2026-07-01', $message);
         $ledger = $this->db->pdo()->prepare(
             'SELECT COUNT(*) FROM payroll_registration_a2_evidence_ledger
               WHERE supplier_id = ?',
@@ -1254,6 +1275,12 @@ final class PayrollRegistrationActionTest extends TestCase
             'registration_a3_effective_date_mismatch',
             $this->json($response)['error']['code'],
         );
+        // Účetní musí z hlášky vidět OBĚ data, jinak neví, které opravit.
+        $message = (string) $this->json($response)['error']['message'];
+        self::assertStringStartsWith('Datum změny daňové rezidence', $message);
+        self::assertStringContainsString('2026-03-29', $message);
+        self::assertStringContainsString('2026-03-30', $message);
+        self::assertStringEndsWith('(tax_residency.changed_on)', $message);
     }
 
     public function testA3RelationshipChangeFailsClosedWithoutExplanationAttachment(): void
@@ -1283,6 +1310,19 @@ final class PayrollRegistrationActionTest extends TestCase
             'registration_a3_activity_explanation_attachment_required',
             $this->json($response)['error']['code'],
         );
+        // Hláška musí říct, CO nejde ohlásit, PROČ a co s tím — ne jen že
+        // „podání zůstává uzavřené".
+        $message = (string) $this->json($response)['error']['message'];
+        self::assertStringStartsWith(
+            'Bližší určení pracovněprávního vztahu',
+            $message,
+        );
+        self::assertStringContainsString(
+            'Oznámení o změně údajů zaměstnance (REGZEC A3)',
+            $message,
+        );
+        self::assertStringContainsString('mimo aplikaci', $message);
+        self::assertStringEndsWith('(relationship_detail_code)', $message);
     }
 
     public function testA5ToA8RejectActivity10BeforeEventFreeze(): void
@@ -1453,6 +1493,16 @@ final class PayrollRegistrationActionTest extends TestCase
             'registration_a4_original_filing_date_mismatch',
             $this->json($wrongDate)['error']['code'],
         );
+        // Místo „atributu dat původního přijatého podání" musí být vidět obě
+        // konkrétní data.
+        $wrongDateMessage = (string) $this->json($wrongDate)['error']['message'];
+        self::assertStringStartsWith(
+            'Datum původního opravovaného podání',
+            $wrongDateMessage,
+        );
+        self::assertStringContainsString('2026-08-18', $wrongDateMessage);
+        self::assertStringContainsString(self::TODAY, $wrongDateMessage);
+        self::assertStringEndsWith('(effective_on)', $wrongDateMessage);
 
         $accepted = ($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
@@ -1764,8 +1814,16 @@ final class PayrollRegistrationActionTest extends TestCase
             'registration_employer_variable_symbol_missing',
             $error['code'],
         );
-        self::assertStringContainsString('variabilní symbol', $error['message']);
-        self::assertStringContainsString('Nastavení mezd', $error['message']);
+        // Věta musí začínat lidským názvem údaje, jmenovat konkrétní
+        // obrazovku a technický název nechat až v závorce na konci.
+        self::assertSame(
+            'Variabilní symbol zaměstnavatele u ČSSZ chybí u mzdové účtárny, '
+            . 'pod kterou pracovní vztah patří, a bez něj ČSSZ neví, komu '
+            . 'zaměstnance přihlásit. Údaj doplňte na Mzdy → Nastavení mezd '
+            . '→ Zaměstnavatel a účtárny — v tomhle formuláři se nezadává. '
+            . 'Potom registraci připravte znovu (employer_variable_symbol).',
+            $error['message'],
+        );
         self::assertSame(0, $this->countSubmissions());
     }
 
@@ -1782,10 +1840,91 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(422, $response->getStatusCode());
         $error = $this->json($response)['error'];
         self::assertSame('registration_start_date_missing', $error['code']);
-        self::assertStringContainsString(
-            'datum nástupu',
+        self::assertSame(
+            'Datum nástupu u pracovního vztahu chybí, takže nejde spočítat '
+            . 'lhůta pro přihlášku ani přihlášku podat. Údaj doplňte na '
+            . 'kartě pracovního vztahu — v tomhle formuláři se nezadává. '
+            . 'Registraci potom připravte znovu (start_date).',
             $error['message'],
         );
+    }
+
+    /**
+     * Povinnost přihlásit ZAMĚSTNAVATELE je povinnost někoho jiného, vedená
+     * jen při té příležitosti. Když ji registr povinností odmítne, nesmí tím
+     * spadnout přihláška ZAMĚSTNANCE, u které běží zákonná lhůta — nedostatek
+     * se vypíše v `problems` a podání se dokončí.
+     */
+    public function testRejectedEmployerObligationDoesNotBlockTheEmployeeRegistration(): void
+    {
+        $sourceHash = hash('sha256', CanonicalJson::encode([
+            'schema_reference' => 'payroll-employer-registration-obligation.v1',
+            'first_employment_id' => $this->employmentId,
+            'expected_start_on' => self::START_ON,
+        ]));
+        // Tentýž idempotentní klíč, ale jiný otisk vstupů: registr povinností
+        // to odmítne s `\DomainException`. Lhůta k povinnosti patří, protože
+        // bez ní registr existující záznam vůbec nenajde.
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_obligations
+                (supplier_id, environment, agenda_code, subject_type,
+                 subject_reference, period_start, period_end, obligation_kind,
+                 preferred_channel, status, source_event_type,
+                 source_event_reference, source_event_hash, request_fingerprint,
+                 idempotency_key_hash)
+             VALUES (?, "test", "REGZEL26", "employer", ?, ?, ?, "regular",
+                     "other", "open", "seed", "seed:1", ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            'payroll_employer:' . $this->supplierId,
+            self::START_ON,
+            self::START_ON,
+            str_repeat('a', 64),
+            str_repeat('f', 64),
+            hash('sha256', 'employer-registration:test:' . $sourceHash, true),
+        ]);
+        $pdo->prepare(
+            'INSERT INTO payroll_submission_deadlines
+                (supplier_id, environment, obligation_id, deadline_kind,
+                 earliest_submission_on, due_on, calendar_basis, ruleset_id,
+                 ruleset_hash, trigger_event_hash)
+             VALUES (?, "test", ?, "regular", ?, ?, "business_days", "seed",
+                     ?, ?)',
+        )->execute([
+            $this->supplierId,
+            (int) $pdo->lastInsertId(),
+            self::START_ON,
+            self::START_ON,
+            str_repeat('a', 64),
+            str_repeat('a', 64),
+        ]);
+
+        $response = $this->post();
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame('ready', $body['status']);
+        self::assertTrue($body['created']);
+        self::assertSame(1, $this->countSubmissions());
+        self::assertCount(1, $body['problems']);
+        self::assertSame(
+            'registration_employer_obligation_not_recorded',
+            $body['problems'][0]['code'],
+        );
+        self::assertSame('employer_registration', $body['problems'][0]['field']);
+        self::assertStringContainsString(
+            'Přihlášku zaměstnance to nezastavilo',
+            $body['problems'][0]['message'],
+        );
+    }
+
+    /** Když všechno sedne, seznam nedostatků je prázdný, ne chybějící. */
+    public function testSuccessfulRegistrationReportsNoProblems(): void
+    {
+        $body = $this->json($this->post());
+
+        self::assertSame([], $body['problems']);
     }
 
     /** Nácvik ukáže XML, ale nesmí po sobě nechat podání ani povinnost. */
@@ -1925,7 +2064,13 @@ final class PayrollRegistrationActionTest extends TestCase
         $statement->execute([$this->supplierId, $this->employmentId]);
         self::assertSame(1, (int) $statement->fetchColumn());
 
-        // Druhé uložení zakládá další verzi a kmenová data zůstávají netknutá.
+        /*
+         * Druhé uložení PŘEPÍŠE pracovní řádek, nezakládá verzi: dokud
+         * registrace neodešla, není profil evidence, ale rozepsaná práce.
+         * `row_version` běží dál jen jako optimistický zámek. Kmenová data
+         * zůstávají netknutá i tak — zapisuje se do nich výhradně samostatnou
+         * akcí `writeA1MasterData`.
+         */
         $second = $this->completeA1Payload();
         $second['row_version'] = 1;
         $second['employment']['position_name'] = 'Vedoucí účtárny';
@@ -1939,7 +2084,7 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(2, $this->json($response)['profile']['row_version']);
         self::assertSame($before, $this->masterDataFingerprint());
         $statement->execute([$this->supplierId, $this->employmentId]);
-        self::assertSame(2, (int) $statement->fetchColumn());
+        self::assertSame(1, (int) $statement->fetchColumn());
     }
 
     public function testA1DraftPrefillsFromMasterDataAndNamesTheGaps(): void
@@ -2056,6 +2201,80 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame([], $this->json($complete)['problems']);
     }
 
+    /**
+     * Chybějící evidence identity nesmí shodit uložení. Dokud tahle výjimka
+     * létala ven, přišla účetní o všechno, co ve formuláři napsala, protože
+     * identitu dopisuje jinde na kartě osoby.
+     */
+    public function testMissingIdentityHistorySavesA1ProfileAsDraftInstead(): void
+    {
+        $this->seedA1MasterData();
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ?'
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        $response = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($this->completeA1Payload()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $profile = $this->json($response)['profile'];
+        self::assertSame('draft', $profile['status']);
+        self::assertSame([[
+            'field' => 'identity',
+            'code' => 'registration_regzec_a1_identity_missing',
+            'message' => 'Evidence identity osoby k rozhodnému dni chybí, '
+                . 'takže registrace nemá odkud vzít jméno ani údaje '
+                . 'o narození. Údaj doplňte na kartě osoby → Identita '
+                . 'a adresy → Historie jména — v tomhle formuláři '
+                . 'se nezadává.',
+        ]], $profile['problems']);
+
+        // Rozepsaná práce se opravdu uložila, ne jen „přijala".
+        $stored = $this->json(($this->action)->a1Profile(
+            $this->request('GET'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ))['profile'];
+        self::assertSame('draft', $stored['status']);
+        self::assertSame('Účetní', $stored['employment']['position_name']);
+    }
+
+    /**
+     * Kontrola musí vypsat i chybějící datum nástupu jako vadu. Výjimka
+     * shodila celé tlačítko a účetní neuviděla ani jednu z ostatních vad.
+     */
+    public function testMissingStartDateIsListedByA1CheckInsteadOfFailing(): void
+    {
+        $this->seedA1MasterData();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = NULL, actual_start_date = NULL
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $response = ($this->action)->checkA1Profile(
+            $this->request('POST')->withParsedBody($this->completeA1Payload()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertFalse($body['complete']);
+        self::assertSame([[
+            'field' => 'employment.actual_start_on',
+            'code' => 'registration_regzec_a1_start_date_missing',
+            'message' => 'Skutečné datum nástupu chybí. Registrace se '
+                . 'zmrazuje právě k tomuhle dni, takže bez data nástupu '
+                . 'kontrolu dokončit nejde. Údaj doplňte na kartě pracovního '
+                . 'vztahu — v tomhle formuláři se nezadává.',
+        ]], $body['problems']);
+    }
+
     /** Úplnost se vynucuje až tam, kde z profilu vzniká podání. */
     public function testPreparingSubmissionRefusesADraftProfile(): void
     {
@@ -2089,10 +2308,11 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
-     * Koncept ověřenou verzi nepřepíše — ta zůstane na svém řádku i se svým
-     * otiskem, protože z ní se podává.
+     * Dokud registrace NEODEŠLA, je profil rozepsaná práce, ne evidence —
+     * uložení proto pracovní řádek PŘEPÍŠE. `status = 'verified'` na tom nic
+     * nemění: znamená jen „prošlo přísnou kontrolou", ne „odesláno".
      */
-    public function testDraftDoesNotReplaceTheVerifiedVersion(): void
+    public function testUnsubmittedProfileIsReplacedInsteadOfVersioned(): void
     {
         $this->seedA1MasterData();
         $verified = $this->json(($this->action)->saveA1Profile(
@@ -2111,8 +2331,136 @@ final class PayrollRegistrationActionTest extends TestCase
             ['employmentId' => (string) $this->employmentId],
         ))['profile'];
         self::assertSame('draft', $draft['status']);
+        // Číslo běží dál jen jako optimistický zámek, ne jako verze historie.
         self::assertSame(2, $draft['row_version']);
 
+        $rows = $this->storedA1Rows();
+        self::assertCount(1, $rows);
+        self::assertSame('draft', $rows[0]['status']);
+        self::assertNotSame($verified['reference_hash'], $rows[0]['reference_hash']);
+    }
+
+    /**
+     * Jakmile registrace odešla, podklad se drží: řádek, ze kterého mohl
+     * vzniknout odeslaný snímek, se nesmaže a nová práce vzniká nad ním.
+     */
+    public function testSubmittedRegistrationKeepsItsProfileRow(): void
+    {
+        $this->seedA1MasterData();
+        self::assertSame(201, $this->post()->getStatusCode());
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_submissions
+                SET status = "submitted", submitted_at = ?
+              WHERE supplier_id = ?',
+        )->execute([self::todayAtNoon(), $this->supplierId]);
+
+        $first = $this->json(($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($this->completeA1Payload()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ))['profile'];
+        self::assertSame(1, $first['row_version']);
+
+        $second = $this->completeA1Payload();
+        $second['row_version'] = 1;
+        $second['employment']['position_name'] = 'Vedoucí účtárny';
+        ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($second),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        $rows = $this->storedA1Rows();
+        self::assertCount(2, $rows);
+        self::assertSame($first['reference_hash'], $rows[0]['reference_hash']);
+    }
+
+    /**
+     * Opačný směr než „Vrátit návrh z kmenových dat": hodnota z formuláře jde
+     * zpátky do evidence osoby a vztahu. Historizovaná evidence se přitom
+     * nepřepisuje — vzniká nová verze účinná od rozhodného dne registrace.
+     */
+    public function testMasterDataWriteBackVersionsTheAddressAndCorrectsTheTerms(): void
+    {
+        $this->seedA1MasterData();
+        $payload = $this->completeA1Payload();
+        $payload['permanent_address']['city'] = 'Brno';
+        $payload['employment']['contract_workplace'] = 'Hlavní město Praha';
+        ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($payload),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        $response = ($this->action)->writeA1MasterData(
+            $this->request('POST')->withParsedBody(['fields' => [
+                'permanent_address.city',
+                'employment.contract_workplace',
+                // Kmen tenhle údaj nevede jako samostatný sloupec.
+                'employment.small_scale',
+                // Shodná hodnota — idempotence, nic se nezapisuje.
+                'employment.activity_code',
+            ]]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame(
+            ['employment.contract_workplace', 'permanent_address.city'],
+            array_column($body['written'], 'field'),
+        );
+        self::assertSame(
+            ['employment.activity_code', 'employment.small_scale'],
+            array_column($body['skipped'], 'field'),
+        );
+        foreach ($body['skipped'] as $item) {
+            self::assertNotSame('', trim((string) $item['reason']));
+        }
+        self::assertSame(
+            'Obec trvalého pobytu',
+            $body['written'][1]['label'],
+        );
+
+        // Adresa: stará verze uzavřená dnem před nástupem, nová od nástupu.
+        $statement = $this->db->pdo()->prepare(
+            'SELECT city, street_line, effective_from, effective_to
+               FROM payroll_person_addresses
+              WHERE supplier_id = ? AND employee_id = ?
+                AND address_type = "residence"
+              ORDER BY effective_from'
+        );
+        $statement->execute([$this->supplierId, $this->employeeId]);
+        $addresses = $statement->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(2, $addresses);
+        self::assertSame('Praha', $addresses[0]['city']);
+        self::assertSame('2026-08-21', $addresses[0]['effective_to']);
+        self::assertSame('Brno', $addresses[1]['city']);
+        self::assertSame(self::START_ON, $addresses[1]['effective_from']);
+        // Nezvolená část adresy zůstává tak, jak ji vedou kmenová data.
+        self::assertSame('Dlouhá 12', $addresses[1]['street_line']);
+
+        // Podmínky: OPRAVA platné verze, ne nová verze podmínek.
+        $statement = $this->db->pdo()->prepare(
+            'SELECT work_place FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?'
+        );
+        $statement->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(
+            ['Hlavní město Praha'],
+            $statement->fetchAll(PDO::FETCH_COLUMN),
+        );
+
+        // Přepočítaný seznam už zapsané údaje nenabízí.
+        $remaining = array_column($body['view']['draft']['writeback'], 'field');
+        self::assertNotContains('permanent_address.city', $remaining);
+        self::assertNotContains('employment.contract_workplace', $remaining);
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function storedA1Rows(): array
+    {
         $statement = $this->db->pdo()->prepare(
             'SELECT row_version, status, reference_hash
                FROM payroll_registration_a1_profiles
@@ -2120,11 +2468,8 @@ final class PayrollRegistrationActionTest extends TestCase
               ORDER BY row_version'
         );
         $statement->execute([$this->supplierId, $this->employmentId]);
-        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
-        self::assertCount(2, $rows);
-        self::assertSame('verified', $rows[0]['status']);
-        self::assertSame($verified['reference_hash'], $rows[0]['reference_hash']);
-        self::assertSame('draft', $rows[1]['status']);
+
+        return $statement->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /** Kmenové tabulky osoby a pracovního vztahu, do kterých se nesmí zapsat. */
@@ -2342,7 +2687,17 @@ final class PayrollRegistrationActionTest extends TestCase
             $service,
             $this->identities,
             $changes,
+            new PayrollRegistrationA1MasterDataWriter(
+                $this->identities,
+                new PayrollRegistrationIdentityRepository($this->db),
+                $container->get(PayrollPersonProfileRepository::class),
+                $container->get(PayrollPersonProfileValidator::class),
+                $container->get(PayrollPersonStatutoryEvidenceRepository::class),
+                $container->get(PayrollEmploymentRepository::class),
+                $container->get(PayrollEmploymentValidator::class),
+            ),
             $access,
+            new IpMatcher(),
         );
     }
 

@@ -416,7 +416,11 @@ final class PayrollEmploymentValidatorTest extends TestCase
             $this->validator()->terms($invalidDirect);
             self::fail('Přímý druh činnosti nesmí mít bližší určení.');
         } catch (\InvalidArgumentException $exception) {
-            self::assertStringContainsString('zakazuje bližší určení', $exception->getMessage());
+            // Hláška musí říct, že se pole MAŽE — ne poslat uživatele
+            // někam ho vyplnit. Obojí v jedné větě si protiřečí.
+            self::assertStringContainsString('nevyplňuje', $exception->getMessage());
+            self::assertStringContainsString('Vymažte', $exception->getMessage());
+            self::assertStringNotContainsString('doplňte', $exception->getMessage());
         }
 
         $activityTen = $valid;

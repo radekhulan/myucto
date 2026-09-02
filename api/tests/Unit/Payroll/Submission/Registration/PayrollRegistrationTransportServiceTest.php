@@ -108,7 +108,14 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('jinému prostředí');
+        // Hláška musí říct, CO je špatně (záměna testovacího a ostrého
+        // prostředí) i CO s tím dělat. „Patří jinému prostředí" neřeklo ani
+        // jedno.
+        $this->expectExceptionMessage(
+            'Registrační podání bylo připraveno pro jiné prostředí '
+            . '(testovací × ostré), než ze kterého se teď odesílá. '
+            . 'Přepněte prostředí zpět na to, ve kterém podání vzniklo.',
+        );
 
         $service->send(
             self::SUPPLIER,
@@ -138,7 +145,11 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('stejné firmě');
+        $this->expectExceptionMessage(
+            'Registrační podání pod tímhle číslem u téhle firmy neexistuje. '
+            . 'Otevřete kartu zaměstnance znovu a odeslání spusťte ze '
+            . 'seznamu jejích podání.',
+        );
 
         $service->send(
             self::SUPPLIER,
@@ -165,13 +176,134 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('podporovanou akci');
+        // Kód akce sám o sobě účetní nic neříká, takže hláška musí druh
+        // podání pojmenovat lidsky ze sdíleného slovníku.
+        $this->expectExceptionMessage(
+            'Druh registračního podání není podporovaný pro odeslání '
+            . 'na ČSSZ (Podání REGZEC25 s kódem akce 9).',
+        );
 
         $service->send(
             self::SUPPLIER,
             'test',
             self::SUBMISSION,
             'unsupported-a2',
+            7,
+        );
+    }
+
+    /**
+     * Variabilní symbol je jediné, čím ČSSZ pozná zaměstnavatele. Když
+     * v podání není, musí hláška ten údaj pojmenovat lidsky a poslat účetní
+     * na konkrétní obrazovku — technický název smí být jen v závorce.
+     */
+    public function testMissingEmployerVariableSymbolNamesTheFieldAndThePlaceToFixIt(): void
+    {
+        $xml = '<PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026"><employees>'
+            . '<employee act="9"><comp/></employee></employees></PREZEC>';
+        $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
+        $frozen->method('bytes')->willReturn($xml);
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::never())->method('send');
+        $service = new PayrollRegistrationTransportService(
+            $this->repository('PREZEC26'),
+            $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+            $frozen,
+            $dispatch,
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage(
+            'Variabilní symbol zaměstnavatele u ČSSZ musí být v celém podání '
+            . 'jediný, ale připravené podání jich obsahuje víc, nebo žádný. '
+            . 'Údaj doplňte na Mzdy → Nastavení mezd → Zaměstnavatel '
+            . 'a účtárny — v tomhle formuláři se nezadává. Potom registraci '
+            . 'připravte znovu (employer_variable_symbol).',
+        );
+
+        $service->send(
+            self::SUPPLIER,
+            'test',
+            self::SUBMISSION,
+            'missing-vs',
+            7,
+        );
+    }
+
+    /** Špatný tvar musí říct, jaký tvar se čeká, a ukázat, co v podání je. */
+    public function testMalformedEmployerVariableSymbolShowsTheExpectedShape(): void
+    {
+        $xml = '<PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026"><employees>'
+            . '<employee act="9"><comp vs="12345"/></employee></employees></PREZEC>';
+        $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
+        $frozen->method('bytes')->willReturn($xml);
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::never())->method('send');
+        $service = new PayrollRegistrationTransportService(
+            $this->repository('PREZEC26'),
+            $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+            $frozen,
+            $dispatch,
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage(
+            'Variabilní symbol zaměstnavatele u ČSSZ musí mít přesně deset '
+            . 'číslic, ale v připraveném podání je „12345". Údaj doplňte na '
+            . 'Mzdy → Nastavení mezd → Zaměstnavatel a účtárny — v tomhle '
+            . 'formuláři se nezadává. Potom registraci připravte znovu '
+            . '(employer_variable_symbol).',
+        );
+
+        $service->send(
+            self::SUPPLIER,
+            'test',
+            self::SUBMISSION,
+            'short-vs',
+            7,
+        );
+    }
+
+    /**
+     * Podání, které patří do jiné agendy, se nesmí odeslat registrační
+     * cestou — a účetní musí z hlášky poznat, kam s ním jít.
+     */
+    public function testNonRegistrationSubmissionIsRejectedWithARoute(): void
+    {
+        $repository = $this->createStub(PayrollSubmissionRepository::class);
+        $repository->method('findSubmission')->willReturn([
+            'id' => self::SUBMISSION,
+            'status' => 'ready',
+            'environment' => 'test',
+        ]);
+        $repository->method('findObligationOfSubmission')->willReturn([
+            'agenda_code' => 'JMHZ25',
+            'subject_type' => 'employer',
+            'subject_reference' => 'payroll_employer:11',
+        ]);
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::never())->method('send');
+        $frozen = $this->createMock(JmhzFrozenPayloadReader::class);
+        $frozen->expects(self::never())->method('bytes');
+        $service = new PayrollRegistrationTransportService(
+            $repository,
+            $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+            $frozen,
+            $dispatch,
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage(
+            'Tohle podání není přihláška ani odhláška zaměstnance u ČSSZ, '
+            . 'takže se touhle cestou odeslat nedá. Odešlete podání '
+            . 'z obrazovky Mzdy → Podání a hlášení, kde vzniklo.',
+        );
+
+        $service->send(
+            self::SUPPLIER,
+            'test',
+            self::SUBMISSION,
+            'foreign-agenda',
             7,
         );
     }
@@ -192,7 +324,11 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('chybí povinný druh činnosti');
+        // Hláška musí pojmenovat CHYBĚJÍCÍ ÚDAJ lidsky a poslat účetní na
+        // místo, kde se zadává — ne jen konstatovat, že podklad není úplný.
+        $this->expectExceptionMessage(
+            'Druh činnosti pro ČSSZ chybí',
+        );
 
         $service->send(
             self::SUPPLIER,
@@ -314,7 +450,11 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
 
         $this->expectException(JmhzTransportException::class);
-        $this->expectExceptionMessage('čeká na protokol');
+        $this->expectExceptionMessage(
+            'Odpověď ČSSZ se dá zjistit jen u odeslání, které na ni teprve '
+            . 'čeká. Tohle odeslání už je uzavřené — jak dopadlo, najdete '
+            . 'v historii odeslání.',
+        );
 
         $service->poll(self::SUPPLIER, 'test', 5);
     }
@@ -335,7 +475,11 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('už bylo odesláno');
+        $this->expectExceptionMessage(
+            'Registrační podání na ČSSZ už bylo odesláno, takže se podruhé '
+            . 'neodesílá. Jak podání ČSSZ vyřídila, zjistíte v historii '
+            . 'odeslání u téhož podání.',
+        );
 
         $service->send(
             self::SUPPLIER,

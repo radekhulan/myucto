@@ -32,8 +32,14 @@ final readonly class PayrollRegistrationReceiptIdentityService
             return false;
         }
         if (count($outcomes) !== 1) {
+            // Výjimka zůstává: doručenka je odpověď ČSSZ, ne uživatelský
+            // vstup. Kdyby se z ní vzal „některý" výsledek, přiřadilo by se
+            // ID PPV náhodnému pracovnímu vztahu.
             throw new \DomainException(
-                'Doručenka převodu variabilního symbolu nemá právě jeden přijatý výsledek.',
+                'Odpověď ČSSZ na převod pod jiný variabilní symbol se '
+                    . 'nepodařilo přiřadit k jednomu pracovnímu vztahu, takže '
+                    . 'se z ní nový identifikátor nenačte. Ověřte výsledek '
+                    . 'na portálu ČSSZ a ozvěte se podpoře.',
             );
         }
         $outcome = $outcomes[0];
@@ -55,13 +61,20 @@ final readonly class PayrollRegistrationReceiptIdentityService
         );
         if ($active === null) {
             throw new \DomainException(
-                'Převod variabilního symbolu nemá původní aktivní ID PPV.',
+                'Identifikátor pracovního vztahu od ČSSZ (ID PPV) u tohoto '
+                    . 'vztahu chybí, takže není co převádět. Nejdřív načtěte '
+                    . 'odpověď ČSSZ na původní přihlášení zaměstnance.',
             );
         }
         $effectiveOn = new \DateTimeImmutable((string) $outcome['effective_on']);
         if ($effectiveOn->format('Y-m-d') <= (string) $active['valid_from']) {
+            // Výjimka zůstává: opačné pořadí platnosti by v evidenci
+            // nechalo dvě současně platná ID PPV pro jeden vztah.
             throw new \DomainException(
-                'Nové ID PPV musí začít platit po vzniku původního ID PPV.',
+                'Nový identifikátor pracovního vztahu od ČSSZ (ID PPV) by '
+                    . 'začal platit dřív než ten původní, takže by se oba '
+                    . 'překrývaly. Zkontrolujte den účinnosti převodu na '
+                    . 'portálu ČSSZ.',
             );
         }
         $this->identities->closeExternalId(

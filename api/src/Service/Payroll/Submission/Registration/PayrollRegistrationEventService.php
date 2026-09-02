@@ -17,6 +17,23 @@ use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use Psr\Clock\ClockInterface;
 
+/**
+ * Schválení registrační události A2–A8 a čtení už schválených podkladů.
+ *
+ * PROČ TU VÝJIMKY ZŮSTÁVAJÍ. Zásada „uložit musí jít cokoliv, validace patří
+ * k podání" na tuhle třídu nedopadá: žádná cesta tudy nic rozpracovaného
+ * neukládá. `approve()` je sám o sobě akt zmrazení podkladu — vytvoří
+ * zašifrovaný, otiskem chráněný a dál needitovatelný záznam, ze kterého se
+ * pak sestaví datová věta pro ČSSZ. Rozpracovaná data účetní ukládá jinde
+ * (karta osoby, karta pracovního vztahu, profil A1) a tam ji nic neblokuje.
+ * Uložit sem „napůl schválenou" událost by znamenalo mít v evidenci podklad,
+ * který vypadá jako závazný a přitom není.
+ *
+ * Co se tedy dá udělat pro průchodnost, je hlášky: každá musí začínat lidským
+ * názvem údaje nebo podání, říct KONKRÉTNĚ co chybí a KAM jít. Názvy a místa
+ * drží {@see PayrollRegistrationFieldVocabulary}; technická cesta k poli patří
+ * jen do závorky na konci věty.
+ */
 final readonly class PayrollRegistrationEventService
 {
     public const SCHEMA_REFERENCE = 'payroll-registration-event-snapshot.v1';
@@ -57,8 +74,13 @@ final readonly class PayrollRegistrationEventService
             $input,
             $approvedBy,
         ): array {
+            // Výjimka zůstává: chybějící firma je porušená bezpečnostní
+            // hranice (cizí nebo smazaný rozsah), ne nevyplněný údaj.
             if (!$this->a2Evidence->lockSupplier($supplierId)) {
-                throw new \OutOfBoundsException('Firma REGZEC nebyla nalezena.');
+                throw new \OutOfBoundsException(
+                    'Firma, ke které pracovní vztah patří, nebyla nalezena.'
+                        . ' Otevřete kartu pracovního vztahu znovu a akci zopakujte.',
+                );
             }
             return $this->approveLocked(
                 $supplierId,
@@ -78,25 +100,50 @@ final readonly class PayrollRegistrationEventService
         array $input,
         int $approvedBy,
     ): array {
+        // Výjimka zůstává: identita firmy, vztahu a přihlášeného uživatele
+        // nepochází z formuláře, ale z relace a routy. Prázdná hodnota tady
+        // znamená rozbitý kontext, ne nevyplněné pole.
         if ($supplierId <= 0 || $employmentId <= 0 || $approvedBy <= 0) {
-            throw new \InvalidArgumentException('Rozsah zdroje REGZEC není platný.');
+            throw new \InvalidArgumentException(
+                'Registrační událost nelze schválit: chybí údaj o firmě,'
+                    . ' pracovním vztahu nebo přihlášeném uživateli.'
+                    . ' Otevřete kartu pracovního vztahu znovu a akci zopakujte.',
+            );
         }
         if (!in_array($environment, ['test', 'production'], true)) {
-            throw new \InvalidArgumentException('Prostředí musí být test nebo production.');
+            throw new \InvalidArgumentException($this->note(
+                'environment',
+                'musí být zkušební provoz (test), nebo ostrý provoz'
+                    . ' (production). Přepněte prostředí v registračním panelu.',
+            ));
         }
-        $interaction = $this->requiredCode($input, 'interaction', 48);
+        $interaction = $this->requiredCode($input, 'interaction', 48, 'interaction');
         $definition = self::DEFINITIONS[$interaction] ?? null;
         if ($definition === null) {
-            throw new \InvalidArgumentException('Interakce REGZEC musí být A2 až A8.');
+            throw new \InvalidArgumentException($this->note(
+                'interaction',
+                'není podporovaný. Vyberte jednu z událostí A2 až A8: skončení'
+                    . ' pracovního vztahu, změnu údajů zaměstnance, opravu'
+                    . ' dříve oznámených údajů, převod pod jiný variabilní'
+                    . ' symbol zaměstnavatele, vznik nebo skončení'
+                    . ' příslušnosti k českým předpisům, anebo storno'
+                    . ' přihlášení nenastoupeného zaměstnance.',
+            ));
         }
-        $effectiveOn = $this->date($input['effective_on'] ?? null, 'Datum účinnosti');
+        $effectiveOn = $this->date($input['effective_on'] ?? null, 'effective_on');
         $context = $this->events->employmentSourceAt(
             $supplierId,
             $employmentId,
             $effectiveOn,
         );
+        // Výjimka zůstává: chybějící vztah je chybějící entita v rozsahu
+        // firmy, ne nevyplněný údaj formuláře.
         if ($context === null) {
-            throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen ve stejné firmě.');
+            throw new \OutOfBoundsException(
+                'Pracovní vztah k tomuto dni v této firmě neexistuje.'
+                    . ' Zkontrolujte den, ke kterému se změna hlásí, nebo'
+                    . ' vztah otevřete znovu z jeho karty.',
+            );
         }
         PayrollRegistrationBusinessMatrix::requireActionVariant(
             $definition[0],
@@ -124,11 +171,11 @@ final readonly class PayrollRegistrationEventService
         );
         $personExternal = $this->object(
             $identity['person_external_identifier'] ?? null,
-            'OIČ / IK MPSV',
+            'person_external_identifier',
         );
         $employmentExternal = $this->object(
             $identity['employment_external_identifier'] ?? null,
-            'ID PPV',
+            'employment_external_identifier',
         );
         $data = $this->data(
             $supplierId,
@@ -152,7 +199,10 @@ final readonly class PayrollRegistrationEventService
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_event_in_future',
-                'Registrační událost nelze schválit před dnem, kdy skutečně nastala.',
+                $this->actionName($definition[0])
+                    . " nelze schválit dopředu: rozhodný den {$notificationTriggerOn}"
+                    . ' teprve nastane. Schvalte událost až v den, kdy skutečně'
+                    . ' nastane, nebo opravte datum ve formuláři.',
             );
         }
         $snapshot = [
@@ -171,18 +221,18 @@ final readonly class PayrollRegistrationEventService
             'employer' => [
                 'variable_symbol' => $this->requiredDigits(
                     $context['social_security_variable_symbol'] ?? null,
-                    'Variabilní symbol ČSSZ',
+                    'employer_variable_symbol',
                     8,
                     10,
                 ),
                 'name' => $this->requiredText(
                     $context['company_name'] ?? null,
-                    'Název zaměstnavatele',
+                    'employer_name',
                     150,
                 ),
                 'workplace_code' => $this->requiredDigits(
                     $context['social_security_office_code'] ?? null,
-                    'Kód pracoviště ČSSZ',
+                    'cssz_workplace_code',
                     3,
                     3,
                 ),
@@ -278,8 +328,14 @@ final readonly class PayrollRegistrationEventService
         int $eventId,
     ): array {
         $stored = $this->events->find($supplierId, $environment, $eventId);
+        // Výjimka zůstává: chybějící záznam v rozsahu firmy, vztahu
+        // a prostředí je bezpečnostní hranice, ne nevyplněný údaj.
         if ($stored === null || (int) ($stored['employment_id'] ?? 0) !== $employmentId) {
-            throw new \OutOfBoundsException('Zdroj REGZEC nebyl nalezen ve stejném vztahu a prostředí.');
+            throw new \OutOfBoundsException(
+                'Schválená registrační událost k tomuto pracovnímu vztahu'
+                    . ' a prostředí neexistuje. Vyberte událost znovu ze'
+                    . ' seznamu schválených podkladů.',
+            );
         }
         $manifestHash = (string) ($stored['source_manifest_hash'] ?? '');
         $json = $this->encryption->decryptFor(
@@ -291,12 +347,23 @@ final readonly class PayrollRegistrationEventService
             'registration-event-snapshot-v1',
             $supplierId,
         );
+        // Obě výjimky zůstávají: jde o kontrolu neporušenosti uloženého
+        // podkladu (otisk a tvar). Podat něco, co se po schválení změnilo,
+        // je horší než akci odmítnout — a účetní to nijak nevyplní.
         if (!hash_equals((string) ($stored['snapshot_fingerprint'] ?? ''), $expected)) {
-            throw new \DomainException('Otisk neměnného zdroje REGZEC nesouhlasí.');
+            throw new \DomainException(
+                'Uložená registrační událost neodpovídá svému kontrolnímu'
+                    . ' otisku, takže s ní aplikace dál nepracuje. Schvalte'
+                    . ' událost znovu; pokud hláška zůstane, jde o poškozený'
+                    . ' záznam a je potřeba zásah podpory.',
+            );
         }
         $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
         if (!is_array($decoded) || array_is_list($decoded)) {
-            throw new \DomainException('Neměnný zdroj REGZEC nemá platný tvar.');
+            throw new \DomainException(
+                'Uložená registrační událost je poškozená a nejde přečíst.'
+                    . ' Schvalte událost znovu.',
+            );
         }
         $this->assertSnapshot($decoded, $stored);
 
@@ -329,17 +396,22 @@ final readonly class PayrollRegistrationEventService
         int $employmentId,
         string $effectiveOn,
     ): array {
-        $effectiveOn = $this->date($effectiveOn, 'Datum skončení');
+        $effectiveOn = $this->date($effectiveOn, 'end_on');
         $context = $this->events->employmentSourceAt($supplierId, $employmentId, $effectiveOn);
+        // Výjimka zůstává: chybějící vztah je chybějící entita v rozsahu firmy.
         if ($context === null) {
-            throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen ve stejné firmě.');
+            throw new \OutOfBoundsException(
+                'Pracovní vztah k tomuto dni v této firmě neexistuje.'
+                    . ' Zkontrolujte datum skončení, nebo vztah otevřete'
+                    . ' znovu z jeho karty.',
+            );
         }
         if (!in_array($context['status'] ?? null, ['ended', 'archived'], true)
             || ($context['end_date'] ?? null) !== $effectiveOn
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a2_end_source_mismatch',
-                'REGZEC A2 vyžaduje skutečně ukončený vztah se shodným datem skončení.',
+                $this->endSourceMismatchMessage($effectiveOn, $context),
             );
         }
         $identity = $this->identities->sensitiveJmhzIdentityAt(
@@ -352,9 +424,13 @@ final readonly class PayrollRegistrationEventService
         );
         $external = $this->object(
             $identity['employment_external_identifier'] ?? null,
-            'ID PPV',
+            'employment_external_identifier',
         );
-        $value = $this->requiredText($external['value'] ?? null, 'ID PPV', 128);
+        $value = $this->requiredText(
+            $external['value'] ?? null,
+            'employment_external_identifier',
+            128,
+        );
 
         return $this->a2Plan(
             $supplierId,
@@ -385,7 +461,11 @@ final readonly class PayrollRegistrationEventService
         if ($stored === null || !is_string($external) || $external === '') {
             throw new PayrollRegistrationXmlException(
                 'registration_a2_jmhz_evidence_missing',
-                'Neměnná událost REGZEC A2 nemá úplný důkaz opravného JMHZ.',
+                $this->actionName(2)
+                    . ' nemá u sebe uložený doklad o tom, že jsou opravná'
+                    . ' jednotná měsíční hlášení zaměstnavatele (JMHZ)'
+                    . ' uzavřená. Schvalte událost znovu — doklad si uloží'
+                    . ' teprve nově schválená událost.',
             );
         }
         $current = $this->a2Plan(
@@ -402,7 +482,10 @@ final readonly class PayrollRegistrationEventService
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a2_jmhz_evidence_changed',
-                'Důkazy opravných JMHZ se od schválení REGZEC A2 změnily; načtěte kandidáty a schvalte novou událost.',
+                $this->actionName(2)
+                    . ' se opírá o jednotná měsíční hlášení zaměstnavatele'
+                    . ' (JMHZ), která se od schválení změnila. Načtěte měsíce'
+                    . ' k opravě znovu a schvalte novou událost.',
             );
         }
         $ledger = $this->a2Evidence->findForEvent($supplierId, $environment, $eventId);
@@ -411,9 +494,33 @@ final readonly class PayrollRegistrationEventService
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a2_jmhz_evidence_missing',
-                'K události REGZEC A2 chybí neměnný evidenční ledger opravných JMHZ.',
+                $this->actionName(2)
+                    . ' nemá v evidenci uzavřený záznam o opravných jednotných'
+                    . ' měsíčních hlášeních zaměstnavatele (JMHZ). Schvalte'
+                    . ' událost znovu.',
             );
         }
+    }
+
+    /**
+     * Věta pro A2 tam, kde vztah ještě není ukončený nebo mu nesedí datum.
+     * Účetní musí vidět obě strany rozporu, ne jen že „něco nesedí".
+     *
+     * @param array<string,mixed> $context
+     */
+    private function endSourceMismatchMessage(string $effectiveOn, array $context): string
+    {
+        $endDate = $context['end_date'] ?? null;
+        $recorded = is_string($endDate) && $endDate !== ''
+            ? "v evidenci má vztah datum skončení {$endDate}"
+            : 'v evidenci vztah zatím žádné datum skončení nemá';
+
+        return $this->actionName(2)
+            . ' jde schválit až tehdy, když je pracovní vztah v evidenci'
+            . " opravdu ukončený a jeho datum skončení se shoduje s datem"
+            . " ve formuláři. Ve formuláři je {$effectiveOn}, {$recorded}."
+            . ' Datum skončení nastavte na kartě pracovního vztahu.'
+            . PayrollRegistrationFieldVocabulary::reference('end_on');
     }
 
     /** @param array<string,mixed> $context @param array<string,mixed> $input @return array<string,mixed> */
@@ -450,7 +557,7 @@ final readonly class PayrollRegistrationEventService
             'variable_symbol_transfer' => [
                 'new_variable_symbol' => $this->requiredDigits(
                     $input['new_variable_symbol'] ?? null,
-                    'Nový variabilní symbol',
+                    'new_variable_symbol',
                     8,
                     10,
                 ),
@@ -469,7 +576,12 @@ final readonly class PayrollRegistrationEventService
                 $context,
                 $input,
             ),
-            default => throw new \LogicException('Neznámá interakce REGZEC.'),
+            // Interní kontrakt: klíč už prošel self::DEFINITIONS, sem se
+            // uživatelský vstup nedostane. Zůstává technická, protože ji
+            // akce nechytá a je to hlášení o chybě programu.
+            default => throw new \LogicException(
+                'Neznámá interakce REGZEC: ' . $interaction,
+            ),
         };
 
         return $data + $this->relationIdentity($context);
@@ -490,12 +602,12 @@ final readonly class PayrollRegistrationEventService
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a2_end_source_mismatch',
-                'REGZEC A2 vyžaduje skutečně ukončený vztah se shodným datem skončení.',
+                $this->endSourceMismatchMessage($effectiveOn, $context),
             );
         }
         $activityCode = $this->requiredCodeValue(
             $context['activity_code'] ?? null,
-            'Druh výdělečné činnosti',
+            'activity_code',
             2,
         );
         $detail = $context['jmhz_relationship_detail_code'] ?? null;
@@ -515,14 +627,17 @@ final readonly class PayrollRegistrationEventService
         if ($scenario === 'OST') {
             $endedByDeath = $this->bool(
                 $input['ended_by_death'] ?? null,
-                'Ukončení úmrtím',
+                'ended_by_death',
             );
         } elseif (array_key_exists('ended_by_death', $input)
             && $input['ended_by_death'] !== null
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a2_end_by_death_forbidden',
-                'Pro variantu REGZEC A2-10/A2-SPEC se příznak ukončení úmrtím neposílá.',
+                'Ukončení pracovního vztahu úmrtím se u tohoto druhu činnosti'
+                    . " (varianta A2-{$scenario}) neoznamuje. Nechte přepínač"
+                    . ' ve formuláři prázdný.'
+                    . PayrollRegistrationFieldVocabulary::reference('ended_by_death'),
             );
         }
 
@@ -537,8 +652,11 @@ final readonly class PayrollRegistrationEventService
         if ($evidence->decision() !== 'accepted') {
             throw new PayrollRegistrationXmlException(
                 'registration_a2_jmhz_corrections_incomplete',
-                'REGZEC A2 blokují neuzavřená opravná JMHZ za období '
-                    . implode(', ', $evidence->blockedPeriods()) . '.',
+                $this->actionName(2)
+                    . ' nejde schválit, dokud nejsou uzavřená opravná jednotná'
+                    . ' měsíční hlášení zaměstnavatele (JMHZ) za období '
+                    . implode(', ', $evidence->blockedPeriods())
+                    . '. Hlášení za tato období dokončete a schválení zopakujte.',
             );
         }
 
@@ -595,7 +713,11 @@ final readonly class PayrollRegistrationEventService
             if ($value !== null) {
                 throw new PayrollRegistrationXmlException(
                     'registration_a2_unemployment_forbidden',
-                    'Podklady pro podporu se pro tuto variantu REGZEC A2 neposílají.',
+                    'Podklady pro podporu v nezaměstnanosti se u tohoto'
+                        . ' skončení neposílají — jde o přímou variantu 10,'
+                        . ' nebo o skončení úmrtím. Ve formuláři zvolte'
+                        . ' možnost bez podkladů.'
+                        . PayrollRegistrationFieldVocabulary::reference('unemployment'),
                 );
             }
             return null;
@@ -604,18 +726,28 @@ final readonly class PayrollRegistrationEventService
             if ($value === null) {
                 return null;
             }
-            $input = $this->object($value, 'Předčasné ukončení A2-SPEC');
-            $this->onlyKeys($input, ['early_termination_reason'], 'Podklady A2-SPEC');
+            $input = $this->object($value, 'unemployment');
+            $this->onlyKeys(
+                $input,
+                ['early_termination_reason'],
+                'unemployment.',
+                'u varianty A2-SPEC',
+            );
             return [
                 'early_termination_reason' => $this->earlyTerminationReason(
                     $input['early_termination_reason'] ?? null,
                 ),
             ];
         }
-        $input = $this->object($value, 'Podklady pro podporu v nezaměstnanosti');
-        $mode = $this->requiredCode($input, 'mode', 32);
+        $input = $this->object($value, 'unemployment');
+        $mode = $this->requiredCode($input, 'mode', 32, 'unemployment.mode');
         if ($mode === 'not_provided_2') {
-            $this->onlyKeys($input, ['mode'], 'Podklady A2 rsn=2');
+            $this->onlyKeys(
+                $input,
+                ['mode'],
+                'unemployment.',
+                'u podkladů s důvodem neposkytnutí 2',
+            );
             return ['reason_not_provided' => 2];
         }
         $periods = $this->pensionPeriods(
@@ -625,13 +757,14 @@ final readonly class PayrollRegistrationEventService
         );
         $average = $this->requiredAmount(
             $input['average_net_earnings'] ?? null,
-            'Průměrný čistý měsíční výdělek',
+            'unemployment.average_net_earnings',
         );
         if ($mode === 'not_provided_3') {
             $this->onlyKeys(
                 $input,
                 ['mode', 'average_net_earnings', 'pension_periods'],
-                'Podklady A2 rsn=3',
+                'unemployment.',
+                'u podkladů s důvodem neposkytnutí 3',
             );
             return [
                 'reason_not_provided' => 3,
@@ -640,7 +773,13 @@ final readonly class PayrollRegistrationEventService
             ];
         }
         if ($mode !== 'provided') {
-            throw new \InvalidArgumentException('Režim podkladů A2 není podporovaný.');
+            throw new \InvalidArgumentException($this->note(
+                'unemployment.mode',
+                'není podporovaný. Vyberte jednu z nabízených možností:'
+                    . ' podklady nebudou poskytnuty (důvod 2), částečné'
+                    . ' podklady (důvod 3), nebo úplné podklady.'
+                    . " Teď je zadáno „{$mode}“.",
+            ));
         }
         $result = [
             'average_net_earnings' => $average,
@@ -650,18 +789,23 @@ final readonly class PayrollRegistrationEventService
             $this->onlyKeys(
                 $input,
                 ['mode', 'average_net_earnings', 'pension_periods'],
-                'Podklady A2 bez druhu zaměstnání',
+                'unemployment.',
+                "u druhu činnosti „{$activityCode}“",
             );
             return $result;
         }
         $type = $this->requiredDigits(
             $input['employment_type'] ?? null,
-            'Druh zaměstnání',
+            'unemployment.employment_type',
             1,
             3,
         );
         if (!in_array($type, ['1', '2'], true)) {
-            throw new \InvalidArgumentException('Druh zaměstnání pro podklady A2 musí být 1 nebo 2.');
+            throw new \InvalidArgumentException($this->say(
+                'unemployment.employment_type',
+                "musí být 1 (pracovní vztah), nebo 2 (služební poměr),"
+                    . " teď je „{$type}“.",
+            ));
         }
         $result['employment_type'] = $type;
         if ($type === '1') {
@@ -669,7 +813,7 @@ final readonly class PayrollRegistrationEventService
                 'mode', 'average_net_earnings', 'pension_periods',
                 'employment_type', 'termination_reason', 'entitlement',
                 'paid_in_full', 'replacement', 'golden_handshake',
-            ], 'Podklady A2 pracovního vztahu');
+            ], 'unemployment.', 'u podkladů za pracovní vztah');
             $reason = $this->employmentTerminationReason(
                 $input['termination_reason'] ?? null,
             );
@@ -685,7 +829,7 @@ final readonly class PayrollRegistrationEventService
                 'mode', 'average_net_earnings', 'pension_periods',
                 'employment_type', 'service_termination_reason', 'entitlement',
                 'paid_in_full', 'severance_pay', 'disposal',
-            ], 'Podklady A2 služebního poměru');
+            ], 'unemployment.', 'u podkladů za služební poměr');
             $reason = $this->serviceTerminationReason(
                 $input['service_termination_reason'] ?? null,
             );
@@ -715,39 +859,67 @@ final readonly class PayrollRegistrationEventService
         ));
         if (!in_array($reason, ['4', '5'], true)) {
             if ($hasEntitlement || $hasFullPay || $providedAmounts !== []) {
+                $sent = array_values(array_merge(
+                    $hasEntitlement ? ['entitlement'] : [],
+                    $hasFullPay ? ['paid_in_full'] : [],
+                    $providedAmounts,
+                ));
                 throw new PayrollRegistrationXmlException(
                     'registration_a2_settlement_forbidden',
-                    'Údaje odstupného lze poslat jen pro odpovídající důvod ukončení 4 nebo 5.',
+                    $this->names('unemployment.', $sent)
+                        . (count($sent) === 1 ? ' se posílá' : ' se posílají')
+                        . ' jen u důvodu skončení 4 nebo 5, teď je zvolený'
+                        . " důvod {$reason}. "
+                        . (count($sent) === 1
+                            ? 'Nechte příslušné pole ve formuláři prázdné'
+                            : 'Nechte příslušná pole ve formuláři prázdná')
+                        . ', nebo změňte důvod skončení.'
+                        . $this->references('unemployment.', $sent),
                 );
             }
             return;
         }
         $entitlement = $this->bool(
             $input['entitlement'] ?? null,
-            'Nárok na odstupné',
+            'unemployment.entitlement',
         );
         $result['entitlement'] = $entitlement ? 'A' : 'N';
         if (!$entitlement) {
             if ($hasFullPay || $providedAmounts !== []) {
+                $sent = array_values(array_merge(
+                    $hasFullPay ? ['paid_in_full'] : [],
+                    $providedAmounts,
+                ));
                 throw new PayrollRegistrationXmlException(
                     'registration_a2_settlement_payment_forbidden',
-                    'Bez nároku na odstupné se neposílá úplná výplata ani částka.',
+                    $this->names('unemployment.', $sent)
+                        . (count($sent) === 1 ? ' se posílá' : ' se posílají')
+                        . ' jen tehdy, když nárok na odstupné vznikl. '
+                        . (count($sent) === 1
+                            ? 'Nechte příslušné pole ve formuláři prázdné'
+                            : 'Nechte příslušná pole ve formuláři prázdná')
+                        . ', nebo nárok na odstupné zaškrtněte.'
+                        . $this->references('unemployment.', $sent),
                 );
             }
             return;
         }
         $result['paid_in_full'] = $this->yesNo(
             $input['paid_in_full'] ?? null,
-            'Úplná výplata odstupného',
+            'unemployment.paid_in_full',
         );
         if (count($providedAmounts) !== 1) {
             throw new PayrollRegistrationXmlException(
                 'registration_a2_settlement_amount_required',
-                'Při nároku musí být uvedena právě jedna odpovídající částka.',
+                'Částka plnění chybí, nebo je vyplněná víc než jedna. Při'
+                    . ' nároku na odstupné vyplňte právě jednu z těchto'
+                    . ' částek: '
+                    . $this->names('unemployment.', $amountKeys, false)
+                    . '.' . $this->references('unemployment.', $amountKeys),
             );
         }
         $key = $providedAmounts[0];
-        $result[$key] = $this->requiredAmount($input[$key], $key);
+        $result[$key] = $this->requiredAmount($input[$key], 'unemployment.' . $key);
     }
 
     private function a2Scenario(string $activityCode, mixed $detail): string
@@ -766,7 +938,14 @@ final readonly class PayrollRegistrationEventService
         if (array_key_exists('relationship_detail_code', $data['delta'])) {
             throw new PayrollRegistrationXmlException(
                 'registration_a3_activity_explanation_attachment_required',
-                'Změna druhu činnosti vyžaduje elektronickou přílohu s vysvětlením; bez ní zůstává podání uzavřené.',
+                'Bližší určení pracovněprávního vztahu se přes '
+                    . $this->actionName(3)
+                    . ' ohlásit nedá: ČSSZ k němu vyžaduje přílohu'
+                    . ' s vysvětlením, kterou aplikace zatím neumí přiložit.'
+                    . ' Změnu vyřiďte s ČSSZ mimo aplikaci.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'relationship_detail_code',
+                    ),
             );
         }
         $taxResidency = $data['delta']['tax_residency'] ?? null;
@@ -775,7 +954,15 @@ final readonly class PayrollRegistrationEventService
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a3_effective_date_mismatch',
-                'Všechny údaje REGZEC A3 v jednom podání musí mít stejné datum účinnosti.',
+                'Datum změny daňové rezidence ('
+                    . (string) ($taxResidency['changed_on'] ?? '')
+                    . ') se musí shodovat s dnem, ke kterému se změna hlásí ('
+                    . $effectiveOn . '). Jedno podání nese vždy jen jedno'
+                    . ' datum účinnosti — srovnejte obě data, nebo změnu'
+                    . ' rezidence ohlaste samostatně.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'tax_residency.changed_on',
+                    ),
             );
         }
 
@@ -785,34 +972,60 @@ final readonly class PayrollRegistrationEventService
     /** @param array<string,mixed> $input @return array<string,mixed> */
     private function delta(array $input, bool $correction): array
     {
-        $raw = $this->object(
-            $input[$correction ? 'corrections' : 'changes'] ?? null,
-            $correction ? 'Opravované hodnoty' : 'Měněné hodnoty',
-        );
+        $listPath = $correction ? 'corrections' : 'changes';
+        $raw = $this->object($input[$listPath] ?? null, $listPath);
         if ($correction && array_key_exists('contract_start_on', $raw)) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_explanation_attachment_required',
-                'Oprava vzniku zaměstnání vyžaduje písemné vysvětlení; tato cesta zůstává do podpory přílohy uzavřená.',
+                'Sjednaný den nástupu se přes ' . $this->actionName(4)
+                    . ' opravit nedá: ČSSZ k němu vyžaduje písemné'
+                    . ' vysvětlení, které aplikace zatím neumí přiložit.'
+                    . ' Opravu vyřiďte s ČSSZ mimo aplikaci.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'contract_start_on',
+                    ),
             );
         }
         $allowed = $correction
             ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code']
             : ['title_prefix', 'contact_address', 'tax_residency', 'relationship_detail_code', 'health_insurance_code'];
-        $this->onlyKeys($raw, $allowed, $correction ? 'REGZEC A4' : 'REGZEC A3');
+        $this->onlyKeys(
+            $raw,
+            $allowed,
+            '',
+            'v podání „' . $this->actionName($correction ? 4 : 3) . '“',
+        );
         if ($raw === []) {
-            throw new \InvalidArgumentException('REGZEC změna nebo oprava musí obsahovat alespoň jedno pole.');
+            throw new \InvalidArgumentException($this->note(
+                $listPath,
+                'je prázdný. Vyberte aspoň jeden údaj, který se má ohlásit.',
+            ));
         }
         $result = [];
         foreach ($raw as $key => $value) {
             $result[$key] = match ($key) {
-                'title_prefix' => $this->requiredText($value, 'Titul', 30),
-                'relationship_detail_code' => $this->requiredDigits($value, 'Bližší určení vztahu', 1, 1),
+                'title_prefix' => $this->requiredText($value, 'title_prefix', 30),
+                'relationship_detail_code' => $this->requiredDigits(
+                    $value,
+                    'relationship_detail_code',
+                    1,
+                    1,
+                ),
                 'health_insurance_code' => $this->healthInsuranceCode($value),
-                'contract_start_on' => $this->date($value, 'Vznik zaměstnání'),
-                'highest_education_code' => $this->requiredCodeValue($value, 'Nejvyšší vzdělání', 1),
+                'contract_start_on' => $this->date($value, 'contract_start_on'),
+                'highest_education_code' => $this->requiredCodeValue(
+                    $value,
+                    'highest_education_code',
+                    1,
+                ),
                 'tax_residency' => $this->taxResidency($value),
                 'contact_address' => $this->contactAddress($value),
-                default => throw new \LogicException('Neznámé delta pole.'),
+                // Interní kontrakt: klíče už prošly onlyKeys() výš, sem se
+                // uživatelský vstup nedostane. Zůstává technická — akce ji
+                // nechytá, protože jde o chybu programu.
+                default => throw new \LogicException(
+                    'Neznámé delta pole registrační události: ' . $key,
+                ),
             };
         }
         return ['delta' => $result];
@@ -828,7 +1041,10 @@ final readonly class PayrollRegistrationEventService
         array $input,
         string $employmentExternalIdentifier,
     ): array {
-        $submissionId = $this->positive($input['source_submission_id'] ?? null, 'Původní podání');
+        $submissionId = $this->positive(
+            $input['source_submission_id'] ?? null,
+            'source_submission_id',
+        );
         $source = $this->events->acceptedRegistration(
             $supplierId,
             $environment,
@@ -838,7 +1054,13 @@ final readonly class PayrollRegistrationEventService
         if ($source === null) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_source_submission_invalid',
-                'REGZEC A4 musí odkazovat na přijaté REGZEC stejného vztahu a prostředí.',
+                'Číslo původního přijatého podání neodpovídá žádnému podání,'
+                    . ' které ČSSZ u tohoto pracovního vztahu a v tomto'
+                    . ' prostředí přijala. Vyberte podání ze seznamu'
+                    . ' odeslaných podání.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'source_submission_id',
+                    ),
             );
         }
         $frozenSource = $this->acceptedSourceArtifact(
@@ -854,7 +1076,13 @@ final readonly class PayrollRegistrationEventService
             if (!is_string($sourceActivity) || $sourceActivity === '') {
                 throw new PayrollRegistrationXmlException(
                     'registration_a4_source_activity_missing',
-                    'Původní přijaté podání neobsahuje druh činnosti nutný pro ověření opravy.',
+                    'Druh činnosti pro ČSSZ v původním přijatém podání chybí,'
+                        . ' takže podle něj opravu ověřit nejde. Vyberte jiné'
+                        . ' původní podání, nebo opravu vyřiďte s ČSSZ mimo'
+                        . ' aplikaci.'
+                        . PayrollRegistrationFieldVocabulary::reference(
+                            'source.activity_code',
+                        ),
                 );
             }
             PayrollRegistrationBusinessMatrix::requireActivityCorrectionTransition(
@@ -862,14 +1090,21 @@ final readonly class PayrollRegistrationEventService
                 $frozenSource['relationship_detail_code'],
                 $this->requiredCodeValue(
                     $context['activity_code'] ?? null,
-                    'Druh činnosti',
+                    'activity_code',
                     2,
                 ),
                 (string) $delta['relationship_detail_code'],
             );
             throw new PayrollRegistrationXmlException(
                 'registration_a4_activity_explanation_attachment_required',
-                'Oprava druhu činnosti vyžaduje elektronickou přílohu s vysvětlením; bez ní zůstává podání uzavřené.',
+                'Bližší určení pracovněprávního vztahu se přes '
+                    . $this->actionName(4)
+                    . ' opravit nedá: ČSSZ k němu vyžaduje přílohu'
+                    . ' s vysvětlením, kterou aplikace zatím neumí přiložit.'
+                    . ' Opravu vyřiďte s ČSSZ mimo aplikaci.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'relationship_detail_code',
+                    ),
             );
         }
 
@@ -897,7 +1132,13 @@ final readonly class PayrollRegistrationEventService
         if ($artifactId <= 0) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_source_artifact_missing',
-                'Přijaté původní podání nemá archivovaný výstupní XML artefakt.',
+                'Původní přijaté podání nemá v archivu uložený odeslaný'
+                    . ' soubor, podle kterého se oprava ověřuje. Vyberte jiné'
+                    . ' původní podání, nebo opravu vyřiďte s ČSSZ mimo'
+                    . ' aplikaci.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'source_submission_id',
+                    ),
             );
         }
         $xml = $this->submissions->artifactBytes($supplierId, $artifactId);
@@ -916,7 +1157,12 @@ final readonly class PayrollRegistrationEventService
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_source_artifact_invalid',
-                'Archivovaný zdroj REGZEC A4 není platná datová věta REGZEC.',
+                'Archivovaný soubor původního podání není čitelné podání'
+                    . ' REGZEC, takže podle něj opravu ověřit nejde. Vyberte'
+                    . ' jiné původní podání.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'source_submission_id',
+                    ),
             );
         }
         $xpath = new DOMXPath($document);
@@ -927,23 +1173,38 @@ final readonly class PayrollRegistrationEventService
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_source_artifact_invalid',
-                'Archivovaný zdroj REGZEC A4 musí obsahovat právě jednoho zaměstnance.',
+                'Archivovaný soubor původního podání obsahuje jiný počet'
+                    . ' zaměstnanců než jednoho, takže podle něj opravu ověřit'
+                    . ' nejde. Vyberte podání, které se týká jen tohoto'
+                    . ' zaměstnance.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'source_submission_id',
+                    ),
             );
         }
         /** @var DOMElement $employee */
         $employee = $employees->item(0);
         $filingOn = $employee->getAttribute('dat');
-        if ($this->date($filingOn, 'Datum původního podání') !== $effectiveOn) {
+        if ($this->date($filingOn, 'source_filing_on') !== $effectiveOn) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_original_filing_date_mismatch',
-                'Datum REGZEC A4 musí přesně odpovídat atributu dat původního přijatého podání.',
+                'Datum původního opravovaného podání se musí přesně shodovat'
+                    . ' s datem v archivovaném původním podání'
+                    . " ({$filingOn}), teď je ve formuláři {$effectiveOn}."
+                    . ' Opravte datum ve formuláři.'
+                    . PayrollRegistrationFieldVocabulary::reference('effective_on'),
             );
         }
         $action = $employee->getAttribute('act');
         if (preg_match('/^[1-8]$/D', $action) !== 1) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_source_action_invalid',
-                'Původní podání REGZEC A4 nemá podporovaný kód akce.',
+                'Archivované původní podání nemá rozpoznatelný druh podání,'
+                    . ' takže podle něj opravu ověřit nejde. Vyberte jiné'
+                    . ' původní podání.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'source_submission_id',
+                    ),
             );
         }
         $jobs = $xpath->query('/r:REGZEC/r:employees/r:employee/r:job');
@@ -957,7 +1218,12 @@ final readonly class PayrollRegistrationEventService
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_source_identity_mismatch',
-                'ID PPV v původním přijatém podání neodpovídá opravovanému pracovnímu vztahu.',
+                'Identifikátor pracovního vztahu od ČSSZ (ID PPV) v původním'
+                    . ' přijatém podání patří jinému pracovnímu vztahu.'
+                    . ' Vyberte podání, které se týká opravovaného vztahu.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'employment_external_identifier',
+                    ),
             );
         }
         $sourceActivity = $job instanceof DOMElement
@@ -989,7 +1255,10 @@ final readonly class PayrollRegistrationEventService
         array $context,
         array $input,
     ): array {
-        $submissionId = $this->positive($input['source_submission_id'] ?? null, 'Původní podání');
+        $submissionId = $this->positive(
+            $input['source_submission_id'] ?? null,
+            'source_submission_id',
+        );
         if ($this->events->acceptedRegistration(
             $supplierId,
             $environment,
@@ -998,21 +1267,45 @@ final readonly class PayrollRegistrationEventService
         ) === null) {
             throw new PayrollRegistrationXmlException(
                 'registration_a8_source_submission_invalid',
-                'REGZEC A8 musí odkazovat na přijaté REGZEC stejného vztahu a prostředí.',
+                'Číslo původního přijatého podání neodpovídá žádnému podání,'
+                    . ' které ČSSZ u tohoto pracovního vztahu a v tomto'
+                    . ' prostředí přijala. Vyberte podání ze seznamu'
+                    . ' odeslaných podání.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'source_submission_id',
+                    ),
             );
         }
         if (($input['not_started'] ?? null) !== true) {
             throw new PayrollRegistrationXmlException(
                 'registration_a8_explanation_attachment_required',
-                'Storno jiného než nenastoupeného vztahu vyžaduje písemné vysvětlení; tato cesta zůstává do podpory přílohy uzavřená.',
+                $this->actionName(8)
+                    . ' aplikace připraví jen pro zaměstnance, který vůbec'
+                    . ' nenastoupil, a tuhle skutečnost je potřeba ve'
+                    . ' formuláři potvrdit. Jiné storno vyžaduje písemné'
+                    . ' vysvětlení, které aplikace zatím neumí přiložit —'
+                    . ' takové storno vyřiďte s ČSSZ mimo aplikaci.'
+                    . PayrollRegistrationFieldVocabulary::reference('not_started'),
             );
         }
         if (($context['status'] ?? null) !== 'no_show'
             || ($context['start_date'] ?? null) !== $effectiveOn
         ) {
+            $recorded = is_string($context['start_date'] ?? null)
+                && $context['start_date'] !== ''
+                    ? "v evidenci je den nástupu {$context['start_date']}"
+                    : 'v evidenci žádný den nástupu není';
             throw new PayrollRegistrationXmlException(
                 'registration_a8_no_show_source_mismatch',
-                'REGZEC A8 s nenástupem vyžaduje vztah označený jako nenastoupený a původní plánovaný den nástupu.',
+                $this->actionName(8)
+                    . ' jde schválit až tehdy, když je pracovní vztah'
+                    . ' v evidenci označený jako nenastoupený a datum ve'
+                    . " formuláři ({$effectiveOn}) se shoduje s původním"
+                    . " plánovaným dnem nástupu; {$recorded}. Stav vztahu"
+                    . ' i datum nastavte na kartě pracovního vztahu.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'planned_start_on',
+                    ),
             );
         }
         return [
@@ -1031,19 +1324,22 @@ final readonly class PayrollRegistrationEventService
         if ($interaction === 'correction') {
             $discoveredOn = $this->date(
                 $input['discovered_on'] ?? null,
-                'Datum zjištění chyby',
+                'discovered_on',
             );
             if ($discoveredOn < $effectiveOn) {
-                throw new \InvalidArgumentException(
-                    'Datum zjištění chyby nesmí předcházet opravovanému datu.',
-                );
+                throw new \InvalidArgumentException($this->note(
+                    'discovered_on',
+                    "nesmí být dřív než datum původního opravovaného podání"
+                        . " ({$effectiveOn}), teď je {$discoveredOn}."
+                        . ' Opravte jedno z obou dat.',
+                ));
             }
             return $discoveredOn;
         }
         if ($interaction === 'cancellation') {
             return $this->date(
                 $context['start_date'] ?? null,
-                'Původní plánovaný den nástupu',
+                'planned_start_on',
             );
         }
 
@@ -1053,27 +1349,58 @@ final readonly class PayrollRegistrationEventService
     /** @param array<string,mixed> $input @return array<string,string> */
     private function foreignInsurance(array $input, string $expectedCurrent): array
     {
-        $raw = $this->object($input['foreign_insurance'] ?? null, 'Zahraniční nositel pojištění');
-        $current = $this->requiredCodeValue($raw['current'] ?? null, 'Specifikace nositele', 1);
+        $raw = $this->object($input['foreign_insurance'] ?? null, 'foreign_insurance');
+        $current = $this->requiredCodeValue(
+            $raw['current'] ?? null,
+            'foreign_insurance.current',
+            1,
+        );
         if ($current !== $expectedCurrent) {
+            // P se posílá při vzniku příslušnosti k českým předpisům (A6),
+            // S při jejím skončení (A7).
             throw new PayrollRegistrationXmlException(
                 'registration_jurisdiction_direction_mismatch',
-                "Interakce vyžaduje hodnotu nositele {$expectedCurrent}.",
+                $this->note(
+                    'foreign_insurance.current',
+                    "musí být „{$expectedCurrent}“, protože se podává "
+                        . $this->actionName($expectedCurrent === 'P' ? 6 : 7)
+                        . ". Teď je zadáno „{$current}“; pro opačný směr"
+                        . ' vyberte druhou z těchto událostí.',
+                ),
             );
         }
         $result = [
             'current' => $current,
-            'name' => $this->requiredText($raw['name'] ?? null, 'Název nositele', 100),
-            'country_code' => $this->country($raw['country_code'] ?? null),
+            'name' => $this->requiredText(
+                $raw['name'] ?? null,
+                'foreign_insurance.name',
+                100,
+            ),
+            'country_code' => $this->country(
+                $raw['country_code'] ?? null,
+                'foreign_insurance.country_code',
+            ),
         ];
         if ($expectedCurrent === 'S') {
-            $result['identifier'] = $this->requiredText($raw['identifier'] ?? null, 'Číslo zahraničního pojištění', 50);
+            $result['identifier'] = $this->requiredText(
+                $raw['identifier'] ?? null,
+                'foreign_insurance.identifier',
+                50,
+            );
         } elseif (array_key_exists('identifier', $raw)) {
-            $result['identifier'] = $this->requiredText($raw['identifier'], 'Číslo zahraničního pojištění', 50);
+            $result['identifier'] = $this->requiredText(
+                $raw['identifier'],
+                'foreign_insurance.identifier',
+                50,
+            );
         }
         foreach (['street', 'house_number', 'orientation_number', 'postal_code', 'city', 'sector'] as $key) {
             if (array_key_exists($key, $raw)) {
-                $result[$key] = $this->requiredText($raw[$key], $key, 50);
+                $result[$key] = $this->requiredText(
+                    $raw[$key],
+                    'foreign_insurance.' . $key,
+                    50,
+                );
             }
         }
         return $result;
@@ -1084,7 +1411,7 @@ final readonly class PayrollRegistrationEventService
     {
         $activity = $this->requiredCodeValue(
             $context['activity_code'] ?? null,
-            'Druh výdělečné činnosti',
+            'activity_code',
             2,
         );
         if ($activity === '10') {
@@ -1098,7 +1425,7 @@ final readonly class PayrollRegistrationEventService
             'activity_code' => $activity,
             'relationship_detail_code' => $this->requiredDigits(
                 $context['jmhz_relationship_detail_code'] ?? null,
-                'Bližší určení pracovního vztahu',
+                'relationship_detail_code',
                 1,
                 1,
             ),
@@ -1108,27 +1435,56 @@ final readonly class PayrollRegistrationEventService
     /** @return array<string,string> */
     private function taxResidency(mixed $value): array
     {
-        $raw = $this->object($value, 'Daňová rezidence');
+        $raw = $this->object($value, 'tax_residency');
         return [
-            'country_code' => $this->country($raw['country_code'] ?? null),
-            'changed_on' => $this->date($raw['changed_on'] ?? null, 'Datum změny rezidence'),
+            'country_code' => $this->country(
+                $raw['country_code'] ?? null,
+                'tax_residency.country_code',
+            ),
+            'changed_on' => $this->date(
+                $raw['changed_on'] ?? null,
+                'tax_residency.changed_on',
+            ),
         ];
     }
 
     /** @return array<string,string> */
     private function contactAddress(mixed $value): array
     {
-        $raw = $this->object($value, 'Kontaktní adresa');
+        $raw = $this->object($value, 'contact_address');
         $result = [
-            'street' => $this->requiredText($raw['street'] ?? null, 'Ulice', 50),
-            'house_number' => $this->requiredText($raw['house_number'] ?? null, 'Číslo popisné', 12),
-            'postal_code' => $this->requiredText($raw['postal_code'] ?? null, 'PSČ', 11),
-            'city' => $this->requiredText($raw['city'] ?? null, 'Obec', 50),
-            'country_code' => $this->country($raw['country_code'] ?? null),
+            'street' => $this->requiredText(
+                $raw['street'] ?? null,
+                'contact_address.street',
+                50,
+            ),
+            'house_number' => $this->requiredText(
+                $raw['house_number'] ?? null,
+                'contact_address.house_number',
+                12,
+            ),
+            'postal_code' => $this->requiredText(
+                $raw['postal_code'] ?? null,
+                'contact_address.postal_code',
+                11,
+            ),
+            'city' => $this->requiredText(
+                $raw['city'] ?? null,
+                'contact_address.city',
+                50,
+            ),
+            'country_code' => $this->country(
+                $raw['country_code'] ?? null,
+                'contact_address.country_code',
+            ),
         ];
         foreach (['orientation_number', 'ruian_point'] as $key) {
             if (array_key_exists($key, $raw)) {
-                $result[$key] = $this->requiredText($raw[$key], $key, 12);
+                $result[$key] = $this->requiredText(
+                    $raw[$key],
+                    'contact_address.' . $key,
+                    12,
+                );
             }
         }
         return $result;
@@ -1138,15 +1494,31 @@ final readonly class PayrollRegistrationEventService
     private function pensionPeriods(mixed $value, string $employmentFrom, string $employmentTo): array
     {
         if (!is_array($value) || $value === [] || !array_is_list($value)) {
-            throw new \InvalidArgumentException('A2 vyžaduje alespoň jeden interval důchodového pojištění.');
+            throw new \InvalidArgumentException($this->note(
+                'unemployment.pension_periods',
+                'chybí. Vyplňte aspoň jeden interval od–do, ve kterém byl'
+                    . ' zaměstnanec důchodově pojištěný.',
+            ));
         }
         $result = [];
         foreach ($value as $row) {
-            $row = $this->object($row, 'Interval důchodového pojištění');
-            $from = $this->date($row['from'] ?? null, 'Počátek intervalu');
-            $to = $this->date($row['to'] ?? null, 'Konec intervalu');
+            $row = $this->object($row, 'unemployment.pension_periods[]');
+            $from = $this->date(
+                $row['from'] ?? null,
+                'unemployment.pension_periods[].from',
+            );
+            $to = $this->date(
+                $row['to'] ?? null,
+                'unemployment.pension_periods[].to',
+            );
             if ($from > $to || $from < $employmentFrom || $to > $employmentTo) {
-                throw new \InvalidArgumentException('Interval důchodového pojištění neleží ve vztahu.');
+                throw new \InvalidArgumentException($this->note(
+                    'unemployment.pension_periods[]',
+                    "({$from} až {$to}) musí ležet uvnitř trvání pracovního"
+                        . " vztahu ({$employmentFrom} až {$employmentTo})"
+                        . ' a jeho počátek nesmí být po konci. Opravte data'
+                        . ' intervalu.',
+                ));
             }
             $result[] = ['from' => $from, 'to' => $to];
         }
@@ -1164,7 +1536,15 @@ final readonly class PayrollRegistrationEventService
             || (int) ($snapshot['action_code'] ?? 0) !== (int) $stored['action_code']
             || ($snapshot['effective_on'] ?? null) !== $stored['effective_on']
         ) {
-            throw new \DomainException('Neměnný zdroj REGZEC neodpovídá svému databázovému rozsahu.');
+            // Výjimka zůstává: rozpor mezi zašifrovaným podkladem a jeho
+            // databázovým záznamem je porušená integrita. Účetní ho nijak
+            // nevyplní a podat rozporný podklad by bylo horší než odmítnout.
+            throw new \DomainException(
+                'Uložená registrační událost neodpovídá svému databázovému'
+                    . ' záznamu, takže s ní aplikace dál nepracuje. Schvalte'
+                    . ' událost znovu; pokud hláška zůstane, jde o poškozený'
+                    . ' záznam a je potřeba zásah podpory.',
+            );
         }
     }
 
@@ -1196,7 +1576,7 @@ final readonly class PayrollRegistrationEventService
         if ($interaction === 'termination') {
             return "employment-end:{$employmentId}:{$effectiveOn}";
         }
-        return $this->requiredText($value, 'Reference zdroje', 191);
+        return $this->requiredText($value, 'source_reference', 191);
     }
 
     private function context(int $supplierId, int $employmentId, string $manifestHash): string
@@ -1204,66 +1584,208 @@ final readonly class PayrollRegistrationEventService
         return "payroll-registration-event:{$supplierId}:{$employmentId}:{$manifestHash}";
     }
 
+    /**
+     * Jedna věta k jednomu údaji: lidský název, konkrétní vada a kam jít.
+     *
+     * Účetní musí z hlášky poznat, CO je špatně a KDE se to opraví. Technický
+     * název zůstává jen v závorce na konci — formulář podle něj skáče na
+     * správný vstup a v podpoře se podle něj pole dohledá.
+     */
+    private function say(string $path, string $problem): string
+    {
+        return PayrollRegistrationFieldVocabulary::label($path)
+            . ' ' . $problem . ' '
+            . PayrollRegistrationFieldVocabulary::describe($path)
+            . PayrollRegistrationFieldVocabulary::reference($path);
+    }
+
+    /**
+     * Totéž co {@see say()}, ale bez obecné věty „kam jít".
+     *
+     * Používá se tam, kde si hláška vlastní pokyn nese sama („Přepněte
+     * prostředí v registračním panelu."). Dvě navazující instrukce za sebou
+     * čtenáře jen zdržují a druhá tu první oslabuje.
+     */
+    private function note(string $path, string $problem): string
+    {
+        return PayrollRegistrationFieldVocabulary::label($path)
+            . ' ' . $problem
+            . PayrollRegistrationFieldVocabulary::reference($path);
+    }
+
+    /**
+     * Lidský výčet názvů polí do věty. První název začíná větu, tak se
+     * kapitalizuje; ostatní zůstávají malými.
+     *
+     * @param list<string> $keys
+     */
+    private function names(
+        string $prefix,
+        array $keys,
+        bool $startsSentence = true,
+    ): string {
+        $names = [];
+        foreach (array_values($keys) as $index => $key) {
+            $path = $prefix . $key;
+            $names[] = $index === 0 && $startsSentence
+                ? PayrollRegistrationFieldVocabulary::label($path)
+                : (PayrollRegistrationFieldVocabulary::name($path) ?? $path);
+        }
+        if (count($names) === 1) {
+            return $names[0];
+        }
+        $last = array_pop($names);
+
+        return implode(', ', $names) . ' a ' . $last;
+    }
+
+    /** @param list<string> $keys */
+    private function references(string $prefix, array $keys): string
+    {
+        return ' (' . implode(', ', array_map(
+            static fn (string $key): string => $prefix . $key,
+            array_values($keys),
+        )) . ')';
+    }
+
+    /**
+     * Skloňování „číslice" podle počtu. Bez něj hlášky psaly „3 číslic",
+     * což vypadá jako chyba aplikace a účetní pak nevěří ani zbytku věty.
+     */
+    private function digitWord(int $count): string
+    {
+        if ($count === 1) {
+            return 'číslici';
+        }
+
+        return $count >= 2 && $count <= 4 ? 'číslice' : 'číslic';
+    }
+
+    /** Lidský název registrační události podle jejího kódu akce. */
+    private function actionName(int $actionCode): string
+    {
+        return PayrollRegistrationFieldVocabulary::action('REGZEC25', $actionCode);
+    }
+
     /** @return array<string,mixed> */
-    private function object(mixed $value, string $label): array
+    private function object(mixed $value, string $path): array
     {
         if (!is_array($value) || array_is_list($value)) {
-            throw new \InvalidArgumentException("{$label} musí být objekt.");
+            // Bez zájmen a bez shody v rodě: názvy jsou mužské i ženské
+            // i množné („kód", „adresa", „podklady").
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                'chybí. Vyplňte celou skupinu údajů, ne jen jednu hodnotu.',
+            ));
         }
         return $value;
     }
 
-    /** @param array<string,mixed> $value @param list<string> $allowed */
-    private function onlyKeys(array $value, array $allowed, string $label): void
-    {
-        $extra = array_diff(array_keys($value), $allowed);
-        if ($extra !== []) {
-            throw new \InvalidArgumentException(
-                "{$label} obsahuje zakázané pole " . implode(', ', $extra) . '.',
-            );
+    /**
+     * @param array<string,mixed> $value
+     * @param list<string> $allowed
+     */
+    private function onlyKeys(
+        array $value,
+        array $allowed,
+        string $prefix,
+        string $variant,
+    ): void {
+        $extra = array_values(array_diff(array_keys($value), $allowed));
+        if ($extra === []) {
+            return;
         }
+        $single = count($extra) === 1;
+
+        throw new \InvalidArgumentException(
+            $this->names($prefix, $extra)
+                . ' se '
+                . $variant
+                . ($single ? ' neposílá.' : ' neposílají.')
+                . ($single
+                    ? ' Nechte příslušné pole ve formuláři prázdné.'
+                    : ' Nechte příslušná pole ve formuláři prázdná.')
+                . $this->references($prefix, $extra),
+        );
     }
 
-    private function date(mixed $value, string $label): string
+    private function date(mixed $value, string $path): string
     {
-        if (!is_string($value)) {
-            throw new \InvalidArgumentException("{$label} musí být datum RRRR-MM-DD.");
+        $problem = 'musí mít tvar RRRR-MM-DD, například 2026-03-31.';
+        if (!is_string($value) || $value === '') {
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                $value === '' || $value === null
+                    ? 'chybí; vyplňte datum ve tvaru RRRR-MM-DD, například 2026-03-31.'
+                    : $problem,
+            ));
         }
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
         if (!$date instanceof \DateTimeImmutable || $date->format('Y-m-d') !== $value) {
-            throw new \InvalidArgumentException("{$label} musí být datum RRRR-MM-DD.");
+            throw new \InvalidArgumentException($this->say($path, $problem));
         }
         return $value;
     }
 
     /** @param array<string,mixed> $input */
-    private function requiredCode(array $input, string $key, int $max): string
-    {
-        return $this->requiredCodeValue($input[$key] ?? null, $key, $max);
+    private function requiredCode(
+        array $input,
+        string $key,
+        int $max,
+        string $path,
+    ): string {
+        return $this->requiredCodeValue($input[$key] ?? null, $path, $max);
     }
 
-    private function requiredCodeValue(mixed $value, string $label, int $max): string
+    private function requiredCodeValue(mixed $value, string $path, int $max): string
     {
-        $value = $this->requiredText($value, $label, $max);
+        $value = $this->requiredText($value, $path, $max);
         if (preg_match('/^[A-Za-z0-9_-]+$/D', $value) !== 1) {
-            throw new \InvalidArgumentException("{$label} nemá platný kód.");
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                "smí obsahovat jen písmena bez diakritiky, číslice, pomlčku"
+                    . " a podtržítko; teď je „{$value}“.",
+            ));
         }
         return $value;
     }
 
-    private function requiredDigits(mixed $value, string $label, int $min, int $max): string
-    {
-        if (!is_string($value) || preg_match('/^[0-9]+$/D', $value) !== 1
+    private function requiredDigits(
+        mixed $value,
+        string $path,
+        int $min,
+        int $max,
+    ): string {
+        $shape = $min === $max
+            ? "musí mít přesně {$min} " . $this->digitWord($min)
+                . ' bez mezer, pomlček a lomítek.'
+            : "musí mít {$min} až {$max} " . $this->digitWord($max)
+                . ' bez mezer, pomlček a lomítek.';
+        if (!is_string($value) || $value === '') {
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                'chybí; ' . $shape,
+            ));
+        }
+        if (preg_match('/^[0-9]+$/D', $value) !== 1
             || strlen($value) < $min || strlen($value) > $max
         ) {
-            throw new \InvalidArgumentException("{$label} musí mít {$min} až {$max} číslic.");
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                $shape . " Teď je zadáno „{$value}“.",
+            ));
         }
         return $value;
     }
 
     private function earlyTerminationReason(mixed $value): string
     {
-        $code = $this->requiredDigits($value, 'Důvod předčasného ukončení', 1, 1);
+        $code = $this->requiredDigits(
+            $value,
+            'unemployment.early_termination_reason',
+            1,
+            1,
+        );
         $this->jmhzEvidence->requireEarlyTerminationReason($code);
 
         return $code;
@@ -1271,7 +1793,12 @@ final readonly class PayrollRegistrationEventService
 
     private function employmentTerminationReason(mixed $value): string
     {
-        $code = $this->requiredDigits($value, 'Důvod ukončení pracovního vztahu', 1, 3);
+        $code = $this->requiredDigits(
+            $value,
+            'unemployment.termination_reason',
+            1,
+            3,
+        );
         $this->jmhzEvidence->requireEmploymentTerminationReason($code);
 
         return $code;
@@ -1279,7 +1806,12 @@ final readonly class PayrollRegistrationEventService
 
     private function serviceTerminationReason(mixed $value): string
     {
-        $code = $this->requiredDigits($value, 'Důvod ukončení služebního poměru', 1, 3);
+        $code = $this->requiredDigits(
+            $value,
+            'unemployment.service_termination_reason',
+            1,
+            3,
+        );
         $this->jmhzEvidence->requireServiceTerminationReason($code);
 
         return $code;
@@ -1287,7 +1819,7 @@ final readonly class PayrollRegistrationEventService
 
     private function healthInsuranceCode(mixed $value): string
     {
-        $code = $this->requiredDigits($value, 'Kód zdravotní pojišťovny', 3, 3);
+        $code = $this->requiredDigits($value, 'health_insurance_code', 3, 3);
         if (!HealthInsurers::isValid($code)) {
             throw new \InvalidArgumentException(HealthInsurers::invalidCodeMessage($code));
         }
@@ -1295,64 +1827,94 @@ final readonly class PayrollRegistrationEventService
         return $code;
     }
 
-    private function requiredAmount(mixed $value, string $label): string
+    private function requiredAmount(mixed $value, string $path): string
     {
+        $shape = 'musí být částka v celých korunách — jen číslice, bez haléřů,'
+            . ' mezer a znaku Kč, nejvýš deset číslic.';
         if (!is_int($value) && !is_string($value)) {
-            throw new \InvalidArgumentException("{$label} musí být celé číslo.");
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                'chybí; ' . $shape,
+            ));
         }
         $text = (string) $value;
         if (preg_match('/^[0-9]{1,10}$/D', $text) !== 1) {
-            throw new \InvalidArgumentException("{$label} musí být nezáporné celé číslo do 10 číslic.");
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                $shape . " Teď je zadáno „{$text}“.",
+            ));
         }
         return $text;
     }
 
-    private function requiredText(mixed $value, string $label, int $max): string
+    private function requiredText(mixed $value, string $path, int $max): string
     {
         if (!is_string($value)) {
-            throw new \InvalidArgumentException("{$label} musí být text.");
+            throw new \InvalidArgumentException($this->say($path, 'chybí.'));
         }
         $value = trim($value);
-        if ($value === '' || mb_strlen($value, 'UTF-8') > $max
-            || preg_match('/[\x00-\x1F\x7F]/u', $value) === 1
-        ) {
-            throw new \InvalidArgumentException("{$label} není platný text.");
+        if ($value === '') {
+            throw new \InvalidArgumentException($this->say($path, 'chybí.'));
+        }
+        if (mb_strlen($value, 'UTF-8') > $max) {
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                "smí mít nejvýš {$max} znaků, teď má "
+                    . mb_strlen($value, 'UTF-8') . '.',
+            ));
+        }
+        if (preg_match('/[\x00-\x1F\x7F]/u', $value) === 1) {
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                'obsahuje neviditelné řídicí znaky. Text zadejte ručně,'
+                    . ' ne vložením ze schránky.',
+            ));
         }
         return $value;
     }
 
-    private function bool(mixed $value, string $label): bool
+    private function bool(mixed $value, string $path): bool
     {
         if (!is_bool($value)) {
-            throw new \InvalidArgumentException("{$label} musí být ano nebo ne.");
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                'chybí; vyberte ano, nebo ne.',
+            ));
         }
         return $value;
     }
 
-    private function yesNo(mixed $value, string $label): string
+    private function yesNo(mixed $value, string $path): string
     {
-        return $this->bool($value, $label) ? 'A' : 'N';
+        return $this->bool($value, $path) ? 'A' : 'N';
     }
 
-    private function country(mixed $value): string
+    private function country(mixed $value, string $path): string
     {
         if (!is_string($value) || preg_match('/^[A-Z]{2}$/D', $value) !== 1) {
-            throw new \InvalidArgumentException('Kód státu musí mít dvě velká písmena.');
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                'musí být dvoupísmenný kód státu velkými písmeny,'
+                    . ' například CZ nebo SK.',
+            ));
         }
         return $value;
     }
 
-    private function positive(mixed $value, string $label): int
+    private function positive(mixed $value, string $path): int
     {
         $int = filter_var($value, FILTER_VALIDATE_INT);
         if (!is_int($int) || $int <= 0) {
-            throw new \InvalidArgumentException("{$label} musí být kladné celé číslo.");
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                'musí být kladné celé číslo.',
+            ));
         }
         return $int;
     }
 
     private function nullablePositive(mixed $value): ?int
     {
-        return $value === null ? null : $this->positive($value, 'ID zdroje');
+        return $value === null ? null : $this->positive($value, 'terms_reference');
     }
 }

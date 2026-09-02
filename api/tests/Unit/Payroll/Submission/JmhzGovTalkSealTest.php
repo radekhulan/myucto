@@ -205,7 +205,11 @@ final class JmhzGovTalkSealTest extends TestCase
     ): \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzGovTalkDocument {
         $material ??= self::certificate();
 
-        return (new JmhzGovTalkEnvelope(JmhzGovTalkRequestShape::documented()))->seal(
+        // Tvar obálky se bere podle druhu podání: `documented()` je JMHZ a na
+        // PREZEC by nalepilo `eType="JMHZ25"`, což ČSSZ nemá jak zpracovat.
+        return (new JmhzGovTalkEnvelope(
+            JmhzGovTalkRequestShape::forSubmissionClass($submissionClass),
+        ))->seal(
             $payload ?? JmhzTransportSample::payload(),
             JmhzTransportSample::VARIABLE_SYMBOL,
             $submissionClass,

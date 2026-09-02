@@ -891,7 +891,20 @@ final class PayrollPaymentBatchBuilder
             || $account['effective_from'] > $plannedDate
             || ($account['effective_to'] !== null
                 && $account['effective_to'] < $plannedDate)
-            || $account['row_version'] !== $frozenVersion
+            /*
+             * Zmrazený cíl je ČÍSLO ÚČTU, ne verze řádku.
+             *
+             * Dokud se porovnávalo i `row_version`, znamenala jakákoli pozdější
+             * editace karty účtu (třeba jen doplněné ověření nebo poznámka), že
+             * schválený závazek už nikdy nešlo zaplatit: dávka ho odmítla jako
+             * „účet neodpovídá zmrazenému cíli" a opravná revize běhu nepomohla,
+             * protože materializace závazků je idempotentní a nový závazek
+             * nezaložila. Slepá ulička bez cesty ven.
+             *
+             * Otisk čísla účtu se porovnává dál a je to ta podstatná část:
+             * peníze musí odejít tam, kam se schvalovalo. Platnost účtu k datu
+             * a jeho ověření se kontroluje hned pod tím.
+             */
             || !hash_equals($account['bank_account_hash'], $frozenHash)
         ) {
             throw new \DomainException(
@@ -918,7 +931,21 @@ final class PayrollPaymentBatchBuilder
                 'Zmrazený platební cíl nemá úplné ověření.',
             );
         }
-        $verificationHash = hash(
+        /*
+         * Otisk ověření se počítá dvakrát: s AKTUÁLNÍ verzí řádku a s tou,
+         * která je zmrazená v závazku.
+         *
+         * `row_version` je optimistický zámek, ne součást platebního cíle.
+         * Dokud musel sedět i on, znamenala jakákoli pozdější editace karty
+         * účtu (doplněné ověření, poznámka), že schválený závazek už nikdy
+         * nešlo zaplatit — dávka ho odmítla a opravná revize běhu nepomohla,
+         * protože materializace zakládá nový závazek jen při ZMĚNĚ ČÁSTKY.
+         * Slepá ulička bez cesty ven.
+         *
+         * Všechno ostatní pod otiskem zůstává: číslo účtu, zdroj ověření, kdo
+         * a kdy ověřil. Změna kteréhokoli z nich dávku dál zastaví.
+         */
+        $verificationFingerprint = static fn (int $rowVersion): string => hash(
             'sha256',
             CanonicalJson::encode([
                 'schema_reference' =>
@@ -926,13 +953,15 @@ final class PayrollPaymentBatchBuilder
                 'person_id' => $employeeId,
                 'payment_target_id' => $accountId,
                 'payment_target_hash' => $account['bank_account_hash'],
-                'row_version' => $account['row_version'],
+                'row_version' => $rowVersion,
                 'verification_source' => $verificationSource,
                 'verified_on' => $verifiedOn,
                 'verified_by' => $verifiedBy,
             ]),
         );
-        if (!hash_equals($frozenVerification, $verificationHash)) {
+        if (!hash_equals($frozenVerification, $verificationFingerprint((int) $account['row_version']))
+            && !hash_equals($frozenVerification, $verificationFingerprint($frozenVersion))
+        ) {
             throw new \DomainException(
                 'Ověření účtu neodpovídá zmrazenému cíli závazku.',
             );
@@ -1353,10 +1382,14 @@ final class PayrollPaymentBatchBuilder
                 'user_verified',
             ], true)
             || $account['verified_by'] === null
+            // Táž mez jako u materializace závazku: u období, jehož splatnost
+            // už uplynula (zpětné zpracování), se ověření měří k dnešku —
+            // jinak by zpětně zpracovaný měsíc nešel zaplatit nikdy.
+            // Viz {@see PayrollInstitutionVerificationWindow}.
             || $this->date(
                 $account['verified_on'],
                 'datum ověření účtu instituce',
-            ) > $plannedDate
+            ) > PayrollInstitutionVerificationWindow::latestAcceptable($plannedDate)
         ) {
             throw new \DomainException(
                 'Aktuální účet instituce neodpovídá zmrazenému cíli.',

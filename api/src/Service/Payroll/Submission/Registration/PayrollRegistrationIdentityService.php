@@ -22,10 +22,45 @@ final readonly class PayrollRegistrationIdentityService
         'verified_manual_import',
     ];
 
+    /**
+     * Opakované věty. Účetní čte tutéž situaci na pěti obrazovkách, tak ať
+     * dostane pokaždé týž text a nehádá, jestli jde o jinou chybu.
+     */
+    private const EMPLOYMENT_NOT_FOUND =
+        'Pracovní vztah v téhle firmě neexistuje. Nejspíš došlo ke smazání '
+        . 'nebo přesunu. Vraťte se na přehled osob a otevřete vztah znovu.';
+    private const RECEIPT_UNTRUSTED =
+        'Protokol o přijetí od ČSSZ, ze kterého se identifikátor přebírá, '
+        . 'není mezi ověřenými protokoly téhle firmy. Zkontrolujte, že jste '
+        . 've stejném prostředí (ostré, nebo testovací) a že je protokol '
+        . 'načtený.';
+    private const REOPEN_FORM =
+        'Zavřete formulář a otevřete ho znovu.';
+    private const EMPLOYMENT_FOREIGN =
+        'Pracovní vztah patří jiné osobě nebo jiné firmě, než na kterou '
+        . 'registrace míří. Vraťte se na přehled osob a otevřete vztah znovu.';
+    private const DATE_OUTSIDE_EMPLOYMENT =
+        'Rozhodné datum leží mimo dobu trvání pracovního vztahu. Zvolte den '
+        . 'mezi nástupem a skončením vztahu, nebo opravte období na kartě '
+        . 'pracovního vztahu.';
+    private const UNRESOLVED_IDENTITY =
+        'Osoba má u ČSSZ rozpracované ztotožnění. Nejdřív ztotožnění '
+        . 'dokončete na kartě pracovního vztahu, teprve pak půjde podání '
+        . 'odeslat. Jinak by údaje odešly na cizí osobu.';
+
     public function __construct(
         private PayrollRegistrationIdentityRepository $repository,
         private PayrollSensitiveData $sensitiveData,
     ) {}
+
+    /*
+     * POZNÁMKA K \RuntimeException V TÉHLE TŘÍDĚ: hlášky o nesedícím otisku
+     * proti zašifrované hodnotě zůstávají technické záměrně. Akce registrace
+     * ani JMHZ je nechytají (chytají jen OutOfBounds/Domain/InvalidArgument
+     * a PayrollRegistrationIdentitySnapshotException), takže nekončí v těle
+     * odpovědi, ale jako obecná chyba serveru v logu. Formulovat je pro
+     * účetní by zamlžilo, že jde o poškozená data, ne o její vstup.
+     */
 
     /**
      * Interní citlivý snapshot; nesmí být vrácen běžným listovacím endpointem.
@@ -75,7 +110,7 @@ final readonly class PayrollRegistrationIdentityService
                 $employmentId,
             );
             if ($employment === null) {
-                throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen.');
+                throw new \OutOfBoundsException(self::EMPLOYMENT_NOT_FOUND);
             }
             $employeeId = $employment['employee_id'];
             $stored = $this->repository->latestA1Profile(
@@ -91,10 +126,16 @@ final readonly class PayrollRegistrationIdentityService
             $effectiveOn = $employment['actual_start_date']
                 ?? $employment['start_date'];
             if ($effectiveOn === null) {
-                throw new \InvalidArgumentException(
-                    'Pracovní vztah nemá doplněné datum nástupu, ke kterému '
-                    . 'se profil REGZEC A1 zmrazuje.',
-                );
+                /*
+                 * Zůstává výjimkou: bez dne nástupu není ke kterému dni
+                 * formulář sestavit ani co komu ukázat. Nic se tu neukládá,
+                 * takže se ničí práce neztrácí — jen se řekne, kam jít.
+                 */
+                throw new \InvalidArgumentException(self::fieldMessage(
+                    'employment.actual_start_on',
+                    'chybí. Registrace se zmrazuje právě k tomuhle dni, '
+                    . 'takže bez data nástupu se formulář nedá otevřít.',
+                ));
             }
             $identity = null;
             $identityError = null;
@@ -125,6 +166,18 @@ final readonly class PayrollRegistrationIdentityService
                 $effectiveOn,
                 (int) ($stored['row_version'] ?? 0),
                 $profile,
+                /*
+                 * Rozejití s kmenovými daty má smysl hlásit jedině u snímku,
+                 * který už na ČSSZ ODEŠEL — jen tam je rozdíl skutečnost
+                 * („takhle jsme to podali, dnes je to jinak"), se kterou se dá
+                 * něco udělat (změnové podání A3). Rozpracovaný profil žádnou
+                 * historii nepředstavuje a má prostě jet podle dnešních
+                 * kmenových dat, takže se u něj nehlásí nic.
+                 */
+                $this->repository->hasSubmittedRegistration(
+                    $supplierId,
+                    $employmentId,
+                ),
             );
 
             return ['profile' => $profile, 'draft' => $draft];
@@ -157,7 +210,7 @@ final readonly class PayrollRegistrationIdentityService
                 $employmentId,
             );
             if ($employment === null) {
-                throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen.');
+                throw new \OutOfBoundsException(self::EMPLOYMENT_NOT_FOUND);
             }
             $stored = $this->repository->latestA1Profile(
                 $supplierId,
@@ -195,19 +248,28 @@ final readonly class PayrollRegistrationIdentityService
     ): array {
         $this->positive($supplierId, 'Firma');
         $this->positive($employmentId, 'Pracovní vztah');
+        /*
+         * Verzi ani den zmrazení účetní nikam nepíše — formulář je posílá
+         * zpátky z toho, co si při otevření načetl. Když chybí nebo mají
+         * cizí tvar, není to nevyplněný údaj, ale rozbitý stav okna: sebrat
+         * to do `problems` by předstíralo uložení, které nemá kam zapsat.
+         */
         $expectedVersion = $input['row_version'] ?? null;
         if (!is_int($expectedVersion) || $expectedVersion < 0) {
             throw new \InvalidArgumentException(
-                'row_version profilu REGZEC A1 musí být nezáporné celé číslo.',
+                'Formulář registrace poslal poškozený údaj o verzi profilu, '
+                . 'takže se uložení nedá bezpečně provést. '
+                . self::REOPEN_FORM . ' (row_version)',
             );
         }
         $effectiveOn = $input['effective_on'] ?? null;
         if (!is_string($effectiveOn)) {
             throw new \InvalidArgumentException(
-                'Profil REGZEC A1 vyžaduje rozhodné datum.',
+                'Formulář registrace neposlal den, ke kterému se profil '
+                . 'zmrazuje. ' . self::REOPEN_FORM . ' (effective_on)',
             );
         }
-        $this->date($effectiveOn, 'Rozhodné datum profilu REGZEC A1');
+        $this->date($effectiveOn, 'Den, ke kterému se registrace zmrazuje,');
         unset($input['row_version'], $input['created_at'], $input['reference_hash']);
 
         return $this->repository->transaction(function () use (
@@ -223,15 +285,24 @@ final readonly class PayrollRegistrationIdentityService
                 $employmentId,
             );
             if ($employment === null) {
-                throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen.');
+                throw new \OutOfBoundsException(self::EMPLOYMENT_NOT_FOUND);
             }
             $employeeId = $employment['employee_id'];
             $registrationOn = $employment['actual_start_date']
                 ?? $employment['start_date'];
             if ($registrationOn !== $effectiveOn) {
+                /*
+                 * Nesbírá se do `problems`: profil se pečetí ke konkrétnímu
+                 * dni a s rozjetým datem by se uložil ke dni, kde ho podání
+                 * nenajde. Zapsat „skoro správně" je horší než nezapsat.
+                 */
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'registration_regzec_a1_source_scope_mismatch',
-                    'Rozhodné datum profilu REGZEC A1 musí odpovídat skutečnému datu nástupu pracovního vztahu.',
+                    'Datum nástupu se mezitím na kartě pracovního vztahu '
+                    . 'změnilo, takže otevřený formulář míří na jiný den, než '
+                    . 'ke kterému se registrace zmrazuje. '
+                    . self::REOPEN_FORM . ' Rozepsané změny se pak uloží '
+                    . 'ke správnému dni.',
                 );
             }
             $current = $this->repository->latestA1Profile(
@@ -242,17 +313,38 @@ final readonly class PayrollRegistrationIdentityService
             );
             $currentVersion = (int) ($current['row_version'] ?? 0);
             if ($expectedVersion !== $currentVersion) {
+                /*
+                 * Optimistický zámek zůstává výjimkou: sebrat souběžný zápis
+                 * jen jako vadu by uložení potvrdilo a starší verze by beze
+                 * stopy zmizela. Ztráta cizí práce se nesmí odbýt hláškou.
+                 */
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'registration_regzec_a1_profile_conflict',
-                    'Profil REGZEC A1 mezitím změnil jiný uživatel. Načtěte jej znovu.',
+                    'Profil registrace mezitím uložil někdo jiný. '
+                    . self::REOPEN_FORM . ' Rozepsané změny se tím ztratí, '
+                    . 'ale nepřepíšou cizí práci.',
                 );
             }
-            $identity = $this->sensitiveIdentityAtInternal(
-                $supplierId,
-                $employeeId,
-                $effectiveOn,
-                true,
-            )['identity'];
+            /*
+             * Chybějící evidence identity NESMÍ shodit uložení. Formulář má
+             * přes stovku polí a identita se dopisuje jinde na kartě osoby;
+             * dokud tahle výjimka létala ven, přišla účetní o všechno, co
+             * mezitím napsala. Bez identity se přísný snímek sestavit nedá,
+             * tak se profil uloží jako rozpracovaný a chybějící evidence se
+             * vrátí mezi vadami.
+             */
+            $identity = null;
+            $identityError = null;
+            try {
+                $identity = $this->sensitiveIdentityAtInternal(
+                    $supplierId,
+                    $employeeId,
+                    $effectiveOn,
+                    true,
+                )['identity'];
+            } catch (\DomainException $exception) {
+                $identityError = $exception->getMessage();
+            }
             $scope = [
                 'supplier_id' => $supplierId,
                 'employee_id' => $employeeId,
@@ -267,25 +359,39 @@ final readonly class PayrollRegistrationIdentityService
                 ...$scope,
             ]]);
             $builder = new PayrollRegistrationA1SnapshotBuilder();
-            $problems = [];
-            try {
-                $profile = $this->a1ProfileData($builder->build(
-                    $provisional,
-                    $identity,
-                    $scope,
-                ));
-                $status = 'verified';
-            } catch (PayrollRegistrationIdentitySnapshotException $exception) {
-                $problems = $builder->problems($provisional, $identity, $scope);
-                if ($problems === []) {
-                    $problems = [[
-                        'field' => null,
-                        'code' => $exception->validationCode,
-                        'message' => $exception->getMessage(),
-                    ]];
-                }
+            if ($identity === null) {
+                $problems = [[
+                    'field' => 'identity',
+                    'code' => 'registration_regzec_a1_identity_missing',
+                    'message' => (string) $identityError,
+                ]];
                 $profile = $this->a1DraftData($input);
                 $status = 'draft';
+            } else {
+                $problems = [];
+                try {
+                    $profile = $this->a1ProfileData($builder->build(
+                        $provisional,
+                        $identity,
+                        $scope,
+                    ));
+                    $status = 'verified';
+                } catch (PayrollRegistrationIdentitySnapshotException $exception) {
+                    $problems = $builder->problems(
+                        $provisional,
+                        $identity,
+                        $scope,
+                    );
+                    if ($problems === []) {
+                        $problems = [[
+                            'field' => null,
+                            'code' => $exception->validationCode,
+                            'message' => $exception->getMessage(),
+                        ]];
+                    }
+                    $profile = $this->a1DraftData($input);
+                    $status = 'draft';
+                }
             }
             $canonical = CanonicalJson::encode($profile);
             $referenceHash = $this->sensitiveData->keyedFingerprint(
@@ -309,6 +415,32 @@ final readonly class PayrollRegistrationIdentityService
                 $supplierId,
                 $employmentId,
             );
+            /*
+             * Dokud za vztah neodešlo podání, není profil evidence, ale
+             * rozepsaná práce — a ta se PŘEPISUJE, nezakládá historii. Nová
+             * verze při každém uložení účetní jen mátla: historie nebyla
+             * nikde v UI dosažitelná a rozdíl proti vlastnímu staršímu
+             * konceptu se hlásil jako rozejití s kmenovými daty.
+             *
+             * Nahrazení je smazání starého řádku a vložení nového (řádek se
+             * nikdy nemění na místě, viz migrace 1716), takže šifrovaný obsah
+             * a jeho otisk k sobě pořád patří. Jakmile podání odešlo, řádek
+             * zůstává a nad ním přibude novější — odeslaný podklad se nemaže.
+             *
+             * `row_version` se zvyšuje dál: je to optimistický zámek proti
+             * souběžné editaci téhož formuláře, ne číslo historické verze.
+             */
+            $replaced = $current !== null
+                && !$this->repository->hasSubmittedRegistration(
+                    $supplierId,
+                    $employmentId,
+                );
+            if ($replaced) {
+                $this->repository->deleteA1Profile(
+                    $supplierId,
+                    (int) $current['id'],
+                );
+            }
             $rowVersion = $currentVersion + 1;
             $id = $this->repository->insertA1Profile(
                 $supplierId,
@@ -366,16 +498,32 @@ final readonly class PayrollRegistrationIdentityService
                 $employmentId,
             );
             if ($employment === null) {
-                throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen.');
+                throw new \OutOfBoundsException(self::EMPLOYMENT_NOT_FOUND);
             }
             $employeeId = $employment['employee_id'];
             $effectiveOn = $employment['actual_start_date']
                 ?? $employment['start_date'];
             if ($effectiveOn === null) {
-                throw new \InvalidArgumentException(
-                    'Pracovní vztah nemá doplněné datum nástupu, ke kterému '
-                    . 'se profil REGZEC A1 zmrazuje.',
-                );
+                /*
+                 * Kontrola nesmí spadnout na první vadě: účetní mačká
+                 * „Kontrolu" právě proto, aby uviděla VŠECHNO, co podání
+                 * brání. Chybějící den nástupu je proto první položka
+                 * seznamu, ne výjimka, která celé tlačítko shodí.
+                 */
+                return [
+                    'complete' => false,
+                    'problems' => [[
+                        'field' => 'employment.actual_start_on',
+                        'code' => 'registration_regzec_a1_start_date_missing',
+                        'message' => self::fieldMessage(
+                            'employment.actual_start_on',
+                            'chybí. Registrace se zmrazuje právě k tomuhle '
+                            . 'dni, takže bez data nástupu kontrolu dokončit '
+                            . 'nejde.',
+                            false,
+                        ),
+                    ]],
+                ];
             }
             unset(
                 $input['row_version'],
@@ -476,13 +624,17 @@ final readonly class PayrollRegistrationIdentityService
             ) {
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'registration_identity_employment_scope_mismatch',
-                    'Pracovní vztah nepatří stejné firmě a osobě.',
+                    self::EMPLOYMENT_FOREIGN,
                 );
             }
             if ($employment['start_date'] === null) {
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'registration_identity_employment_scope_mismatch',
-                    'Pracovní vztah nemá doplněné datum nástupu.',
+                    self::fieldMessage(
+                        'contract_start_on',
+                        'chybí. Bez dne nástupu nejde určit, jaká podoba '
+                        . 'údajů se má na ČSSZ poslat.',
+                    ),
                 );
             }
             if ($onDate < $employment['start_date']
@@ -491,7 +643,7 @@ final readonly class PayrollRegistrationIdentityService
             ) {
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'registration_identity_employment_scope_mismatch',
-                    'Pracovní vztah není účinný k rozhodnému datu.',
+                    self::DATE_OUTSIDE_EMPLOYMENT,
                 );
             }
             $tasks = $this->repository->activeResolutionTaskKinds(
@@ -503,7 +655,7 @@ final readonly class PayrollRegistrationIdentityService
             if ($tasks !== []) {
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'registration_identity_unresolved',
-                    'Registrační identita má otevřený úkol ztotožnění.',
+                    self::UNRESOLVED_IDENTITY,
                 );
             }
             $person = $this->sensitiveIdentityAtInternal(
@@ -525,7 +677,12 @@ final readonly class PayrollRegistrationIdentityService
                 if ($storedExternal['employee_id'] !== $employeeId) {
                     throw new PayrollRegistrationIdentitySnapshotException(
                         'registration_identity_id_ppv_scope_mismatch',
-                        'ID PPV patří jiné osobě.',
+                        self::fieldNote(
+                            'employment_external_identifier',
+                            'míří u téhle firmy na jinou osobu, takže by '
+                            . 'podání odešlo na cizího zaměstnance. Opravte '
+                            . 'přiřazení na kartě pracovního vztahu.',
+                        ),
                     );
                 }
                 $plaintext = $this->sensitiveData->reveal(
@@ -639,13 +796,17 @@ final readonly class PayrollRegistrationIdentityService
             if ($employment === null || $employment['employee_id'] !== $employeeId) {
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'jmhz_identity_employment_scope_mismatch',
-                    'Pracovní vztah nepatří stejné firmě a osobě.',
+                    self::EMPLOYMENT_FOREIGN,
                 );
             }
             if ($employment['start_date'] === null) {
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'jmhz_identity_employment_scope_mismatch',
-                    'Pracovní vztah nemá doplněné datum nástupu.',
+                    self::fieldMessage(
+                        'contract_start_on',
+                        'chybí. Bez dne nástupu nejde určit, jaká podoba '
+                        . 'údajů se má na ČSSZ poslat.',
+                    ),
                 );
             }
             if ($onDate < $employment['start_date']
@@ -653,7 +814,7 @@ final readonly class PayrollRegistrationIdentityService
             ) {
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'jmhz_identity_employment_scope_mismatch',
-                    'Pracovní vztah není účinný k rozhodnému datu.',
+                    self::DATE_OUTSIDE_EMPLOYMENT,
                 );
             }
             if ($this->repository->activeResolutionTaskKinds(
@@ -664,7 +825,7 @@ final readonly class PayrollRegistrationIdentityService
             ) !== []) {
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'jmhz_identity_unresolved',
-                    'Identita JMHZ má otevřený úkol ztotožnění.',
+                    self::UNRESOLVED_IDENTITY,
                 );
             }
             $person = $this->repository->personExternalIdAt(
@@ -678,7 +839,12 @@ final readonly class PayrollRegistrationIdentityService
             if ($person === null) {
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'jmhz_identity_oic_missing',
-                    'Pro osobu chybí k rozhodnému datu OIČ / IK MPSV.',
+                    self::fieldNote(
+                        'person_external_identifier',
+                        'k rozhodnému dni chybí, a hlášení JMHZ bez něj ČSSZ '
+                        . 'nepřijme. Číslo najdete v protokolu o přijetí '
+                        . 'registrace zaměstnance.',
+                    ),
                 );
             }
             $employmentExternal = $this->repository->externalIdAt(
@@ -692,7 +858,12 @@ final readonly class PayrollRegistrationIdentityService
             if ($employmentExternal === null) {
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'jmhz_identity_id_ppv_missing',
-                    'Pro pracovní vztah chybí k rozhodnému datu ID PPV.',
+                    self::fieldNote(
+                        'employment_external_identifier',
+                        'k rozhodnému dni chybí, a hlášení JMHZ bez něj ČSSZ '
+                        . 'nepřijme. Číslo najdete v protokolu o přijetí '
+                        . 'registrace zaměstnance.',
+                    ),
                 );
             }
             $personIdentifier = $this->revealExternalIdentifier(
@@ -716,7 +887,7 @@ final readonly class PayrollRegistrationIdentityService
                     $employmentId,
                     'ik_mpsv',
                     'registration_a2_oic_provenance_invalid',
-                    'OIČ / IK MPSV',
+                    'person_external_identifier',
                 );
                 $this->assertTrustedReceiptSource(
                     $employmentIdentifier,
@@ -726,7 +897,7 @@ final readonly class PayrollRegistrationIdentityService
                     $employmentId,
                     'id_ppv',
                     'registration_a2_id_ppv_provenance_invalid',
-                    'ID PPV',
+                    'employment_external_identifier',
                 );
             }
 
@@ -753,7 +924,7 @@ final readonly class PayrollRegistrationIdentityService
         int $employmentId,
         string $identifierType,
         string $validationCode,
-        string $label,
+        string $fieldPath,
     ): void {
         $receiptId = $identifier['source_receipt_id'];
         if ($identifier['source_kind'] !== 'trusted_receipt'
@@ -771,7 +942,13 @@ final readonly class PayrollRegistrationIdentityService
         ) {
             throw new PayrollRegistrationIdentitySnapshotException(
                 $validationCode,
-                "REGZEC A2 vyžaduje {$label} z důvěryhodného protokolu stejné firmy a prostředí.",
+                self::fieldNote(
+                    $fieldPath,
+                    'pochází z ručního zápisu. Změnu REGZEC A2 přijme ČSSZ '
+                    . 'jen s číslem převzatým z protokolu o přijetí, který '
+                    . 'patří téhle firmě a témuž prostředí (ostré, nebo '
+                    . 'testovací). Načtěte protokol a číslo doplňte z něj.',
+                ),
             );
         }
     }
@@ -801,16 +978,28 @@ final readonly class PayrollRegistrationIdentityService
             $onDate,
             $forUpdate,
         );
+        /*
+         * Obě věty se dál chytají a překládají na vadu v seznamu `problems`
+         * (viz saveA1Profile a checkA1Profile), takže musí dávat smysl i samy
+         * o sobě. Technická cesta se sem nepřidává: volající ji dá do pole
+         * `field`, a v závorce by se zdvojila.
+         */
         if ($identity === null) {
-            throw new \DomainException(
-                'K rozhodnému datu chybí historická identita osoby.',
-            );
+            throw new \DomainException(self::fieldMessage(
+                'identity',
+                'k rozhodnému dni chybí, takže registrace nemá odkud vzít '
+                . 'jméno ani údaje o narození.',
+                false,
+            ));
         }
         if ($this->nullableText($identity['first_name'] ?? null) === null
             || $this->nullableText($identity['last_name'] ?? null) === null
         ) {
             throw new \DomainException(
-                'Historická identita nemá explicitní jméno a příjmení.',
+                'Jméno a příjmení v evidenci identity chybí. ČSSZ potřebuje '
+                . 'obě části zvlášť, celé jméno v jednom poli nestačí. Údaj '
+                . 'doplňte na ' . PayrollRegistrationFieldVocabulary::WHERE_NAMES
+                . '.',
             );
         }
 
@@ -828,8 +1017,15 @@ final readonly class PayrollRegistrationIdentityService
         ) as $stored) {
             $type = $stored['identifier_type'];
             if (!array_key_exists($type, $identifiers)) {
+                /*
+                 * Porušená integrita dat, ne nevyplněný vstup: v evidenci je
+                 * řádek, který sem nepatří. Sebrat to jako vadu by znamenalo
+                 * pokračovat nad daty, kterým nerozumíme.
+                 */
                 throw new \UnexpectedValueException(
-                    'Osoba obsahuje nepodporovaný typ identifikátoru.',
+                    'V evidenci osoby je uložený typ identifikátoru, který '
+                    . 'registrace na ČSSZ nezná. Jde o nesrovnalost v datech, '
+                    . 'obraťte se prosím na podporu.',
                 );
             }
             $field = $type === 'foreign_tax_identifier'
@@ -898,22 +1094,20 @@ final readonly class PayrollRegistrationIdentityService
             $employmentId,
         );
         if ($employment === null) {
-            throw new \OutOfBoundsException(
-                'Pracovní vztah nebyl nalezen ve stejné firmě.',
-            );
+            throw new \OutOfBoundsException(self::EMPLOYMENT_NOT_FOUND);
         }
         if ($employment['start_date'] === null) {
-            throw new \InvalidArgumentException(
-                'Pracovní vztah nemá doplněné datum nástupu.',
-            );
+            throw new \InvalidArgumentException(self::fieldMessage(
+                'contract_start_on',
+                'chybí. Bez dne nástupu nejde určit, do jakého období '
+                . 'identifikátory od ČSSZ patří.',
+            ));
         }
         if ($onDate < $employment['start_date']
             || ($employment['end_date'] !== null
                 && $onDate > $employment['end_date'])
         ) {
-            throw new \InvalidArgumentException(
-                'Rozhodné datum neleží v období pracovního vztahu.',
-            );
+            throw new \InvalidArgumentException(self::DATE_OUTSIDE_EMPLOYMENT);
         }
 
         $person = $this->repository->personExternalIdAt(
@@ -970,16 +1164,26 @@ final readonly class PayrollRegistrationIdentityService
         $this->environment($environment);
         $this->date($validFrom, 'Platnost identifikátorů');
         $this->optionalPositive($createdBy, 'Uživatel');
+        /*
+         * Obojí zůstává výjimkou vědomě: tenhle formulář nic nerozepisuje,
+         * je to jednorázový opis dvou čísel z protokolu ČSSZ. Uložit prázdný
+         * nebo nepotvrzený opis by do evidence zaneslo číslo bez důkazu,
+         * odkud se pak berou podání.
+         */
         if (!$evidenceConfirmed) {
             throw new \InvalidArgumentException(
-                'Potvrďte, že jste identifikátory ověřili v podkladu ČSSZ.',
+                'Potvrzení o ověření chybí. Zaškrtněte, že jste obě čísla '
+                . 'porovnali s protokolem od ČSSZ; podle nich se pak podání '
+                . 'páruje s konkrétní osobou.',
             );
         }
         $personIdentifier = $this->nullableText($personIdentifier);
         $employmentIdentifier = $this->nullableText($employmentIdentifier);
         if ($personIdentifier === null && $employmentIdentifier === null) {
             throw new \InvalidArgumentException(
-                'Doplňte OIČ / IK MPSV nebo ID PPV.',
+                'Osobní identifikační číslo od ČSSZ (OIČ / IK MPSV) ani '
+                . 'identifikátor pracovního vztahu (ID PPV) nejsou vyplněné. '
+                . 'Vyplňte aspoň jedno z čísel, druhé jde doplnit později.',
             );
         }
         $personIdentifier = $personIdentifier === null
@@ -1008,21 +1212,23 @@ final readonly class PayrollRegistrationIdentityService
                 $employmentId,
             );
             if ($employment === null) {
-                throw new \OutOfBoundsException(
-                    'Pracovní vztah nebyl nalezen ve stejné firmě.',
-                );
+                throw new \OutOfBoundsException(self::EMPLOYMENT_NOT_FOUND);
             }
             if ($employment['start_date'] === null) {
-                throw new \InvalidArgumentException(
-                    'Pracovní vztah nemá doplněné datum nástupu.',
-                );
+                throw new \InvalidArgumentException(self::fieldMessage(
+                    'contract_start_on',
+                    'chybí. Bez dne nástupu nejde určit, do jakého období '
+                    . 'identifikátory od ČSSZ patří.',
+                ));
             }
             if ($validFrom < $employment['start_date']
                 || ($employment['end_date'] !== null
                     && $validFrom > $employment['end_date'])
             ) {
                 throw new \InvalidArgumentException(
-                    'Platnost identifikátorů neleží v období pracovního vztahu.',
+                    'Platnost identifikátorů leží mimo dobu trvání '
+                    . 'pracovního vztahu. Zadejte den mezi nástupem '
+                    . 'a skončením vztahu.',
                 );
             }
 
@@ -1073,8 +1279,8 @@ final readonly class PayrollRegistrationIdentityService
     ): int {
         $this->positive($supplierId, 'Firma');
         $this->positive($employeeId, 'Osoba');
-        $this->positive($identityId, 'Historická identita');
-        $this->positive($expectedRowVersion, 'Verze identity');
+        $this->positive($identityId, 'Evidence identity osoby');
+        $this->positive($expectedRowVersion, 'Verze evidence identity');
         $normalized = [
             'title_prefix' => $this->optionalText(
                 $facts,
@@ -1136,13 +1342,24 @@ final readonly class PayrollRegistrationIdentityService
         $this->positive($supplierId, 'Firma');
         $this->positive($employeeId, 'Osoba');
         $this->environment($environment);
-        $this->date($validFrom, 'Platnost OIČ');
-        $this->allowed($sourceKind, self::SOURCE_KINDS, 'Zdroj OIČ');
-        $this->optionalPositive($sourceReceiptId, 'Protokol');
+        $this->date(
+            $validFrom,
+            'Platnost osobního identifikačního čísla od ČSSZ',
+        );
+        $this->allowed(
+            $sourceKind,
+            self::SOURCE_KINDS,
+            'Zdroj osobního identifikačního čísla od ČSSZ',
+        );
+        $this->optionalPositive($sourceReceiptId, 'Protokol o přijetí');
         $this->optionalPositive($createdBy, 'Uživatel');
         if (($sourceKind === 'trusted_receipt') !== ($sourceReceiptId !== null)) {
+            // Kontrakt volajícího, ne vstup účetní: buď je zdrojem protokol
+            // a musí být uvedený, nebo je zápis ruční a protokol tam nepatří.
             throw new \InvalidArgumentException(
-                'Trusted OIČ musí odkazovat na ověřený protokol.',
+                'Zdroj osobního identifikačního čísla od ČSSZ neodpovídá '
+                . 'doloženému původu: číslo převzaté z protokolu musí mít '
+                . 'odkaz na protokol, ručně opsané ho mít nesmí.',
             );
         }
         $normalizedValue = self::oic($value);
@@ -1164,7 +1381,11 @@ final readonly class PayrollRegistrationIdentityService
             $createdBy,
         ): array {
             if (!$this->repository->lockEmployee($supplierId, $employeeId)) {
-                throw new \DomainException('Osoba nebyla nalezena ve stejné firmě.');
+                throw new \DomainException(
+                    'Osoba v téhle firmě neexistuje. Nejspíš došlo ke smazání '
+                    . 'nebo přesunu. Vraťte se na přehled osob a otevřete '
+                    . 'kartu znovu.',
+                );
             }
             if ($sourceReceiptId !== null
                 && !$this->repository->hasTrustedReceipt(
@@ -1173,9 +1394,7 @@ final readonly class PayrollRegistrationIdentityService
                     $sourceReceiptId,
                 )
             ) {
-                throw new \DomainException(
-                    'Zdrojový protokol není důvěryhodný nebo patří jinému prostředí.',
-                );
+                throw new \DomainException(self::RECEIPT_UNTRUSTED);
             }
             $existing = $this->repository->activePersonExternalId(
                 $supplierId,
@@ -1205,16 +1424,26 @@ final readonly class PayrollRegistrationIdentityService
                     $supplierId,
                 );
                 if (!hash_equals($existing['value_hash'], $inputHash)) {
-                    throw new \DomainException('Osoba už má jiné aktivní OIČ.');
+                    throw new \DomainException(self::fieldNote(
+                        'person_external_identifier',
+                        'má u téhle osoby v evidenci jinou hodnotu. Dvě '
+                        . 'různá čísla vedle sebe systém nepovede: nejdřív '
+                        . 'ukončete platnost stávajícího záznamu, nebo '
+                        . 'opravte zadanou hodnotu.',
+                    ));
                 }
                 if ($existing['valid_from'] !== $validFrom
                     || $existing['source_kind'] !== $sourceKind
                     || $existing['source_receipt_id'] !== $sourceReceiptId
                     || !hash_equals($existing['source_reference_hash'], $sourceHash)
                 ) {
-                    throw new \DomainException(
-                        'Opakované uložení OIČ neodpovídá původnímu datu nebo důkazu.',
-                    );
+                    throw new \DomainException(self::fieldNote(
+                        'person_external_identifier',
+                        'už v evidenci je se stejnou hodnotou, ale s jiným dnem '
+                        . 'platnosti nebo jiným podkladem. Zadejte původní '
+                        . 'den a podklad, nebo nejdřív ukončete platnost '
+                        . 'stávajícího záznamu.',
+                    ));
                 }
 
                 return [
@@ -1392,15 +1621,25 @@ final readonly class PayrollRegistrationIdentityService
         $this->positive($supplierId, 'Firma');
         $this->positive($employmentId, 'Pracovní vztah');
         $this->environment($environment);
-        $this->date($validFrom, 'Platnost externího ID');
-        $this->allowed($sourceKind, self::SOURCE_KINDS, 'Zdroj externího ID');
-        $this->optionalPositive($sourceReceiptId, 'Protokol');
+        $this->date(
+            $validFrom,
+            'Platnost identifikátoru pracovního vztahu od ČSSZ',
+        );
+        $this->allowed(
+            $sourceKind,
+            self::SOURCE_KINDS,
+            'Zdroj identifikátoru pracovního vztahu od ČSSZ',
+        );
+        $this->optionalPositive($sourceReceiptId, 'Protokol o přijetí');
         $this->optionalPositive($createdBy, 'Uživatel');
         if (($sourceKind === 'trusted_receipt')
             !== ($sourceReceiptId !== null)
         ) {
+            // Kontrakt volajícího, ne vstup účetní: viz assignPersonExternalId.
             throw new \InvalidArgumentException(
-                'Trusted externí ID musí odkazovat na ověřený protokol.',
+                'Zdroj identifikátoru pracovního vztahu od ČSSZ neodpovídá '
+                . 'doloženému původu: číslo převzaté z protokolu musí mít '
+                . 'odkaz na protokol, ručně opsané ho mít nesmí.',
             );
         }
         $value = self::idPpv($value);
@@ -1426,22 +1665,24 @@ final readonly class PayrollRegistrationIdentityService
                 $employmentId,
             );
             if ($employment === null) {
-                throw new \DomainException(
-                    'Pracovní vztah nebyl nalezen ve stejné firmě.',
-                );
+                throw new \DomainException(self::EMPLOYMENT_NOT_FOUND);
             }
             if ($employment['start_date'] === null) {
-                throw new \DomainException(
-                    'Pracovní vztah nemá doplněné datum nástupu.',
-                );
+                throw new \DomainException(self::fieldMessage(
+                    'contract_start_on',
+                    'chybí. Bez dne nástupu nejde určit, do jakého období '
+                    . 'identifikátory od ČSSZ patří.',
+                ));
             }
             if ($validFrom < $employment['start_date']
                 || ($employment['end_date'] !== null
                     && $validFrom > $employment['end_date'])
             ) {
-                throw new \DomainException(
-                    'Platnost externího ID neleží v období pracovního vztahu.',
-                );
+                throw new \DomainException(self::fieldNote(
+                    'employment_external_identifier',
+                    'má platnost mimo dobu trvání pracovního vztahu. Zadejte '
+                    . 'den mezi nástupem a skončením vztahu.',
+                ));
             }
             if ($sourceReceiptId !== null
                 && !$this->repository->hasTrustedReceipt(
@@ -1450,9 +1691,7 @@ final readonly class PayrollRegistrationIdentityService
                     $sourceReceiptId,
                 )
             ) {
-                throw new \DomainException(
-                    'Zdrojový protokol není důvěryhodný nebo patří jinému prostředí.',
-                );
+                throw new \DomainException(self::RECEIPT_UNTRUSTED);
             }
             $existing = $this->repository->activeExternalId(
                 $supplierId,
@@ -1484,18 +1723,26 @@ final readonly class PayrollRegistrationIdentityService
                     $supplierId,
                 );
                 if (!hash_equals($existing['value_hash'], $inputHash)) {
-                    throw new \DomainException(
-                        'Pracovní vztah už má jiné aktivní ID PPV.',
-                    );
+                    throw new \DomainException(self::fieldNote(
+                        'employment_external_identifier',
+                        'má u tohohle vztahu v evidenci jinou hodnotu. '
+                        . 'Dvě různá čísla vedle sebe systém nepovede: '
+                        . 'nejdřív ukončete platnost stávajícího záznamu, '
+                        . 'nebo opravte zadanou hodnotu.',
+                    ));
                 }
                 if ($existing['valid_from'] !== $validFrom
                     || $existing['source_kind'] !== $sourceKind
                     || $existing['source_receipt_id'] !== $sourceReceiptId
                     || !hash_equals($existing['source_reference_hash'], $sourceHash)
                 ) {
-                    throw new \DomainException(
-                        'Opakované uložení ID PPV neodpovídá původnímu datu nebo důkazu.',
-                    );
+                    throw new \DomainException(self::fieldNote(
+                        'employment_external_identifier',
+                        'už v evidenci je se stejnou hodnotou, ale s jiným dnem '
+                        . 'platnosti nebo jiným podkladem. Zadejte původní '
+                        . 'den a podklad, nebo nejdřív ukončete platnost '
+                        . 'stávajícího záznamu.',
+                    ));
                 }
 
                 return [
@@ -1568,16 +1815,20 @@ final readonly class PayrollRegistrationIdentityService
         $this->positive($supplierId, 'Firma');
         $this->positive($employmentId, 'Pracovní vztah');
         $this->environment($environment);
-        $this->allowed($taskKind, self::TASK_KINDS, 'Druh úkolu');
-        $this->code($reasonCode, 'Důvod úkolu');
+        $this->allowed($taskKind, self::TASK_KINDS, 'Druh úkolu ke ztotožnění');
+        $this->code($reasonCode, 'Důvod úkolu ke ztotožnění');
         if ($candidateCount !== null
             && ($candidateCount < 0 || $candidateCount > 1500)
         ) {
+            // Číslo přichází z odpovědi ČSSZ, ne z ruky: mimo rozsah znamená
+            // špatně přečtenou odpověď, ne nedopsaný formulář.
             throw new \InvalidArgumentException(
-                'Počet kandidátů identity není platný.',
+                'Počet osob, které ČSSZ nabídla jako možnou shodu, musí být '
+                . 'číslo od 0 do 1500. Odpověď ČSSZ se nepodařilo přečíst, '
+                . 'obraťte se prosím na podporu.',
             );
         }
-        $this->optionalPositive($sourceReceiptId, 'Protokol');
+        $this->optionalPositive($sourceReceiptId, 'Protokol o přijetí');
         $this->optionalPositive($assignedTo, 'Řešitel');
         $this->optionalPositive($createdBy, 'Uživatel');
 
@@ -1597,9 +1848,7 @@ final readonly class PayrollRegistrationIdentityService
                 $employmentId,
             );
             if ($employment === null) {
-                throw new \DomainException(
-                    'Pracovní vztah nebyl nalezen ve stejné firmě.',
-                );
+                throw new \DomainException(self::EMPLOYMENT_NOT_FOUND);
             }
             if ($sourceReceiptId !== null
                 && !$this->repository->hasTrustedReceipt(
@@ -1608,9 +1857,7 @@ final readonly class PayrollRegistrationIdentityService
                     $sourceReceiptId,
                 )
             ) {
-                throw new \DomainException(
-                    'Zdrojový protokol není důvěryhodný nebo patří jinému prostředí.',
-                );
+                throw new \DomainException(self::RECEIPT_UNTRUSTED);
             }
 
             return $this->repository->openResolutionTask(
@@ -1638,10 +1885,13 @@ final readonly class PayrollRegistrationIdentityService
         int $resolvedBy,
     ): int {
         $this->positive($supplierId, 'Firma');
-        $this->positive($taskId, 'Resolution task');
-        $this->positive($expectedRowVersion, 'Verze úkolu');
+        $this->positive($taskId, 'Úkol ke ztotožnění osoby');
+        $this->positive($expectedRowVersion, 'Verze úkolu ke ztotožnění');
         $this->environment($environment);
-        $this->optionalPositive($externalId, 'Externí ID');
+        $this->optionalPositive(
+            $externalId,
+            'Identifikátor pracovního vztahu od ČSSZ',
+        );
         $this->positive($resolvedBy, 'Řešitel');
         $evidenceHash = $this->sensitiveData->keyedFingerprint(
             $this->evidenceReference($evidenceReference),
@@ -1665,17 +1915,28 @@ final readonly class PayrollRegistrationIdentityService
             );
             if ($task === null) {
                 throw new \DomainException(
-                    'Resolution task nebyl nalezen ve stejné firmě a prostředí.',
+                    'Úkol ke ztotožnění osoby se v téhle firmě nenašel. '
+                    . 'Nejspíš je už vyřešený, nebo patří druhému prostředí '
+                    . '(ostré, nebo testovací). Načtěte seznam úkolů znovu.',
                 );
             }
             if ($task['row_version'] !== $expectedRowVersion) {
-                throw new \DomainException('Resolution task se mezitím změnil.');
+                /*
+                 * Optimistický zámek: úkol mezitím uzavřel někdo jiný a tichý
+                 * přepis by smazal cizí doložení. Zůstává výjimkou.
+                 */
+                throw new \DomainException(
+                    'Úkol ke ztotožnění osoby mezitím změnil někdo jiný. '
+                    . 'Načtěte úkol znovu, ať se cizí zápis nepřepíše.',
+                );
             }
             if ($task['task_kind'] === 'employment_external_id') {
                 if ($externalId === null) {
-                    throw new \InvalidArgumentException(
-                        'Úkol externího ID vyžaduje vyřešené ID PPV.',
-                    );
+                    throw new \InvalidArgumentException(self::fieldNote(
+                        'employment_external_identifier',
+                        'chybí. Úkol na přiřazení pracovního vztahu jde '
+                        . 'uzavřít, jen když je číslo od ČSSZ známé.',
+                    ));
                 }
                 $resolved = $this->repository->externalIdById(
                     $supplierId,
@@ -1688,13 +1949,19 @@ final readonly class PayrollRegistrationIdentityService
                     || $resolved['employee_id']
                         !== $task['employee_id']
                 ) {
-                    throw new \DomainException(
-                        'Externí ID nepatří řešenému vztahu.',
-                    );
+                    throw new \DomainException(self::fieldNote(
+                        'employment_external_identifier',
+                        'patří jinému pracovnímu vztahu nebo jiné osobě, než '
+                        . 'jaké úkol řeší. Vyberte číslo evidované u téhle '
+                        . 'osoby.',
+                    ));
                 }
             } elseif ($externalId !== null) {
                 throw new \InvalidArgumentException(
-                    'Úkol identity osoby nesmí být vyřešen ID pracovního vztahu.',
+                    'Úkol ke ztotožnění osoby se uzavírá osobním '
+                    . 'identifikačním číslem (OIČ / IK MPSV), ne '
+                    . 'identifikátorem pracovního vztahu (ID PPV). Pole '
+                    . 's ID PPV nechte prázdné.',
                 );
             }
 
@@ -2083,24 +2350,67 @@ final readonly class PayrollRegistrationIdentityService
         ]);
     }
 
+    /**
+     * Věta o konkrétním údaji: lidský název, co je s ním konkrétně za potíž,
+     * a kam se pro něj jde. Slovník je společný pro celý registrační řetězec,
+     * viz {@see PayrollRegistrationFieldVocabulary}.
+     *
+     * Technická cesta patří na konec do závorky jen tam, kde ji nemá kam dát
+     * struktura `problems`. Kde se plní pole `field`, se `$withReference`
+     * vypíná, ať se název pole ve výsledku nezdvojí.
+     */
+    private static function fieldMessage(
+        string $path,
+        string $expectation,
+        bool $withReference = true,
+    ): string {
+        return self::fieldNote(
+            $path,
+            $expectation . ' '
+                . PayrollRegistrationFieldVocabulary::describe($path),
+            $withReference,
+        );
+    }
+
+    /**
+     * Totéž bez věty „kam jít" — pro situace, kde `$expectation` už sama
+     * říká, co dělat („ukončete platnost stávajícího záznamu", „načtěte
+     * protokol"). Obecné „vyplňte to tady" by tam radu popřelo.
+     */
+    private static function fieldNote(
+        string $path,
+        string $expectation,
+        bool $withReference = true,
+    ): string {
+        return PayrollRegistrationFieldVocabulary::label($path)
+            . ' ' . $expectation
+            . ($withReference
+                ? PayrollRegistrationFieldVocabulary::reference($path)
+                : '');
+    }
+
     private static function oic(string $value): string
     {
         $normalized = preg_replace('/\s+/u', '', trim($value));
         if (!is_string($normalized)
             || preg_match('/^[0-9]{10}$/D', $normalized) !== 1
         ) {
-            throw new \InvalidArgumentException(
-                'OIČ / IK MPSV musí obsahovat přesně 10 číslic.',
-            );
+            throw new \InvalidArgumentException(self::fieldMessage(
+                'person_external_identifier',
+                'musí mít přesně 10 číslic, bez mezer, lomítek a písmen.',
+            ));
         }
         $remainder = 0;
         for ($index = 0; $index < 9; $index++) {
             $remainder = (($remainder * 10) + (int) $normalized[$index]) % 11;
         }
         if ($remainder > 9 || $remainder !== (int) $normalized[9]) {
-            throw new \InvalidArgumentException(
-                'OIČ / IK MPSV nemá platnou kontrolní číslici.',
-            );
+            throw new \InvalidArgumentException(self::fieldNote(
+                'person_external_identifier',
+                'má 10 číslic, ale poslední z nich nesedí na kontrolní '
+                . 'výpočet. Porovnejte opis s protokolem od ČSSZ, nejspíš '
+                . 'jsou přehozené dvě číslice.',
+            ));
         }
 
         return $normalized;
@@ -2112,9 +2422,10 @@ final readonly class PayrollRegistrationIdentityService
         if (!is_string($normalized)
             || preg_match('/^[0-9]{1,22}$/D', $normalized) !== 1
         ) {
-            throw new \InvalidArgumentException(
-                'ID PPV musí obsahovat 1 až 22 číslic.',
-            );
+            throw new \InvalidArgumentException(self::fieldMessage(
+                'employment_external_identifier',
+                'musí mít 1 až 22 číslic, bez mezer, lomítek a písmen.',
+            ));
         }
 
         return $normalized;
@@ -2130,14 +2441,30 @@ final readonly class PayrollRegistrationIdentityService
             return null;
         }
         if (!is_string($source[$key])) {
-            throw new \InvalidArgumentException("{$key} musí být text.");
+            throw new \InvalidArgumentException(
+                self::fieldMessage($key, 'musí být text.'),
+            );
         }
         $value = trim($source[$key]);
-        if ($value === ''
-            || mb_strlen($value, 'UTF-8') > $maxLength
-            || preg_match('/[\x00-\x1F\x7F]/u', $value) === 1
-        ) {
-            throw new \InvalidArgumentException("{$key} není platné.");
+        if ($value === '') {
+            throw new \InvalidArgumentException(self::fieldMessage(
+                $key,
+                'obsahuje jen mezery. Buď hodnotu vyplňte, nebo pole nechte '
+                . 'úplně prázdné.',
+            ));
+        }
+        if (mb_strlen($value, 'UTF-8') > $maxLength) {
+            throw new \InvalidArgumentException(self::fieldMessage(
+                $key,
+                "má víc než {$maxLength} znaků. Zkraťte zadanou hodnotu.",
+            ));
+        }
+        if (preg_match('/[\x00-\x1F\x7F]/u', $value) === 1) {
+            throw new \InvalidArgumentException(self::fieldMessage(
+                $key,
+                'obsahuje neviditelný řídicí znak. Přepište hodnotu ručně, '
+                . 'nejspíš se vložila kopírováním z jiného programu.',
+            ));
         }
 
         return $value;
@@ -2150,9 +2477,15 @@ final readonly class PayrollRegistrationIdentityService
             return null;
         }
         if (!is_string($source[$key])) {
-            throw new \InvalidArgumentException("{$key} musí být datum.");
+            throw new \InvalidArgumentException(self::fieldMessage(
+                $key,
+                'musí být datum ve tvaru RRRR-MM-DD.',
+            ));
         }
-        $this->date($source[$key], $key);
+        $this->date(
+            $source[$key],
+            PayrollRegistrationFieldVocabulary::label($key),
+        );
 
         return $source[$key];
     }
@@ -2166,7 +2499,10 @@ final readonly class PayrollRegistrationIdentityService
         }
         $value = strtoupper($value);
         if (preg_match('/^[A-Z]{2}$/D', $value) !== 1) {
-            throw new \InvalidArgumentException("{$key} není platný kód státu.");
+            throw new \InvalidArgumentException(self::fieldMessage(
+                $key,
+                'musí být dvoupísmenný kód státu, například CZ nebo SK.',
+            ));
         }
 
         return $value;
@@ -2183,7 +2519,11 @@ final readonly class PayrollRegistrationIdentityService
     ): ?string {
         $value = $this->optionalText($source, $key, 32);
         if ($value !== null && !in_array($value, $allowed, true)) {
-            throw new \InvalidArgumentException("{$key} není podporované.");
+            throw new \InvalidArgumentException(self::fieldMessage(
+                $key,
+                'má hodnotu, kterou systém nezná. Vyberte jednu '
+                . 'z nabízených možností.',
+            ));
         }
 
         return $value;
@@ -2195,8 +2535,12 @@ final readonly class PayrollRegistrationIdentityService
             return null;
         }
         if (!is_string($value)) {
+            // Porušená integrita dat, ne nevyplněný vstup: v evidenci je
+            // hodnota cizího typu, se kterou se dál počítat nedá.
             throw new \UnexpectedValueException(
-                'Historická identita obsahuje neplatný text.',
+                'V evidenci identity osoby je uložená hodnota, která není '
+                . 'text. Jde o nesrovnalost v datech, obraťte se prosím '
+                . 'na podporu.',
             );
         }
         $value = trim($value);
@@ -2209,12 +2553,16 @@ final readonly class PayrollRegistrationIdentityService
         $value = trim($value);
         if ($value === '' || strlen($value) > 500) {
             throw new \InvalidArgumentException(
-                'Reference důkazu není platná.',
+                'Odkaz na podklad, ze kterého se čísla od ČSSZ přebírají, '
+                . 'chybí nebo je delší než 500 znaků. Napište krátký popis '
+                . 'podkladu, například číslo protokolu o přijetí.',
             );
         }
         if (preg_match('/[\x00-\x1F\x7F]/u', $value) === 1) {
             throw new \InvalidArgumentException(
-                'Reference důkazu obsahuje řídicí znak.',
+                'Odkaz na podklad obsahuje neviditelný řídicí znak. Přepište '
+                . 'text ručně, nejspíš se vložil kopírováním z jiného '
+                . 'programu.',
             );
         }
 
@@ -2225,7 +2573,9 @@ final readonly class PayrollRegistrationIdentityService
     {
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
         if ($date === false || $date->format('Y-m-d') !== $value) {
-            throw new \InvalidArgumentException("{$label} není platné datum.");
+            throw new \InvalidArgumentException(
+                "{$label} není platné datum ve tvaru RRRR-MM-DD.",
+            );
         }
     }
 
@@ -2241,21 +2591,35 @@ final readonly class PayrollRegistrationIdentityService
         string $label,
     ): void {
         if (!in_array($value, $allowed, true)) {
-            throw new \InvalidArgumentException("{$label} není podporované.");
+            throw new \InvalidArgumentException(
+                "{$label}: tuhle hodnotu systém nezná. Vyberte jednu "
+                . 'z nabízených možností.',
+            );
         }
     }
 
     private function code(string $value, string $label): void
     {
         if (preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/D', $value) !== 1) {
-            throw new \InvalidArgumentException("{$label} není platný kód.");
+            throw new \InvalidArgumentException(
+                "{$label}: kód smí mít nejvýš 64 znaků a obsahovat jen malá "
+                . 'písmena bez diakritiky, číslice, tečku, podtržítko '
+                . 'a pomlčku.',
+            );
         }
     }
 
+    /**
+     * ID sem přichází z adresy nebo z načteného formuláře, ne z ruky účetní.
+     * Věta proto neříká „vyplňte", ale „otevřete znovu": vyplnit se to nedá.
+     */
     private function positive(int $value, string $label): void
     {
         if ($value <= 0) {
-            throw new \InvalidArgumentException("{$label} musí být kladné ID.");
+            throw new \InvalidArgumentException(
+                "{$label}: odkaz na záznam je poškozený. Vraťte se "
+                . 'na přehled a otevřete záznam znovu.',
+            );
         }
     }
 

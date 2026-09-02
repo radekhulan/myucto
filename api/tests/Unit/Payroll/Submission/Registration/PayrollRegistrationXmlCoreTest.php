@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission\Registration;
 
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationFieldVocabulary;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshot;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationInteraction;
@@ -718,6 +719,116 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
                 ],
             ],
         );
+    }
+
+    /**
+     * Tři různé vady jedou pod jedním kódem `registration_payload_invalid`.
+     * Společná hláška „nemá platná metadata" neřekla, o kterou jde — a jen
+     * jedna z nich jde opravit v datech firmy.
+     */
+    public function testInvalidPayloadMetadataNamesTheActualProblem(): void
+    {
+        $validator = new PayrollRegistrationXmlValidator(
+            new PayrollRegistrationSchemaCatalog(),
+        );
+        $base = self::payload(
+            self::snapshot('CZ'),
+            new PayrollRegistrationInteraction(
+                'PREZEC26',
+                'limited_pre_registration',
+                9,
+            ),
+        );
+        $cases = [
+            'Pořadové číslo podání' => ['sequenceNumber' => 0],
+            'Identifikátor formuláře' => ['formGuid' => 'nesmysl'],
+            'Variabilní symbol zaměstnavatele u ČSSZ'
+                => ['employerVariableSymbol' => '12'],
+        ];
+        foreach ($cases as $expectedStart => $override) {
+            $payload = new PayrollRegistrationXmlPayload(
+                identity: $base->identity,
+                interaction: $base->interaction,
+                sequenceNumber: $override['sequenceNumber']
+                    ?? $base->sequenceNumber,
+                formGuid: $override['formGuid'] ?? $base->formGuid,
+                preparedOn: $base->preparedOn,
+                expectedStartOn: $base->expectedStartOn,
+                actualStartOn: $base->actualStartOn,
+                employerVariableSymbol: $override['employerVariableSymbol']
+                    ?? $base->employerVariableSymbol,
+                employerName: $base->employerName,
+                csszWorkplaceCode: $base->csszWorkplaceCode,
+            );
+            try {
+                $validator->validate($payload, '<PREZEC/>');
+                self::fail("Očekávána chyba pro {$expectedStart}.");
+            } catch (PayrollRegistrationXmlException $exception) {
+                self::assertSame(
+                    'registration_payload_invalid',
+                    $exception->validationCode,
+                );
+                self::assertStringStartsWith(
+                    $expectedStart,
+                    $exception->getMessage(),
+                );
+            }
+        }
+    }
+
+    /** Chybějící údaje zaměstnavatele musí být pojmenované, ne spočítané. */
+    public function testMissingEmployerMetadataNamesWhichFieldIsMissing(): void
+    {
+        // Oznámení o skončení (A2): chybějící údaje zaměstnavatele se hlásí
+        // dřív než obsah události, takže se test netrefí do jiné brány.
+        $base = self::payload(
+            self::snapshot('SK'),
+            new PayrollRegistrationInteraction(
+                'REGZEC25',
+                'termination',
+                2,
+            ),
+            expectedStartOn: null,
+            actualStartOn: '2026-08-05',
+        );
+        $payload = new PayrollRegistrationXmlPayload(
+            identity: $base->identity,
+            interaction: $base->interaction,
+            sequenceNumber: $base->sequenceNumber,
+            formGuid: $base->formGuid,
+            preparedOn: $base->preparedOn,
+            expectedStartOn: null,
+            actualStartOn: '2026-08-05',
+            employerVariableSymbol: $base->employerVariableSymbol,
+            employerName: null,
+            csszWorkplaceCode: null,
+        );
+
+        try {
+            (new PayrollRegistrationXmlValidator(
+                new PayrollRegistrationSchemaCatalog(),
+            ))->validate($payload, '<REGZEC/>');
+            self::fail('Očekávána chyba chybějících údajů zaměstnavatele.');
+        } catch (PayrollRegistrationXmlException $exception) {
+            self::assertSame(
+                'registration_regzec_full_payload_incomplete',
+                $exception->validationCode,
+            );
+            self::assertStringContainsString(
+                'Název zaměstnavatele',
+                $exception->getMessage(),
+            );
+            self::assertStringContainsString(
+                'kód pracoviště ČSSZ',
+                $exception->getMessage(),
+            );
+            // Cesta se bere ze slovníku, ať test nezakonzervuje starý název
+            // obrazovky — ověřuje se, že hláška vůbec někam pošle.
+            self::assertStringContainsString(
+                PayrollRegistrationFieldVocabulary::WHERE_EMPLOYER,
+                $exception->getMessage(),
+            );
+        }
     }
 
     /** @param callable():mixed $callback */

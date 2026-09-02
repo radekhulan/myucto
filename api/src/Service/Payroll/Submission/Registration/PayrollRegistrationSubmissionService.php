@@ -121,7 +121,9 @@ final readonly class PayrollRegistrationSubmissionService
             'employer_registration' => $resolved['employer_deadline'],
             'official_submission' => [
                 'supported' => false,
-                'reason' => 'Tohle je test: podání se nezakládá a nic se neodesílá.',
+                'reason' => 'Tohle je jen náhled: podání se nezakládá '
+                    . 'a na ČSSZ se nic neodesílá. Odeslat půjde až '
+                    . 'připravené podání.',
             ],
         ];
     }
@@ -182,7 +184,8 @@ final readonly class PayrollRegistrationSubmissionService
      *   status:string,row_version:int,environment:string,agenda_code:string,
      *   interaction:string,artifact_sha256:string,created:bool,
      *   deadline:array{earliest_registration_on:string,due_on:string,
-     *     calendar_basis:string,ruleset_id:string}
+     *     calendar_basis:string,ruleset_id:string},
+     *   problems:list<array{field:?string,code:string,message:string}>
      * }
      */
     public function prepare(
@@ -196,13 +199,17 @@ final readonly class PayrollRegistrationSubmissionService
         // jestli se podání povede připravit. Kdyby vznikaly až spolu s ním,
         // neúspěšná příprava by po sobě nenechala ani stopu po termínu.
         $context = $this->requireContext($supplierId, $employmentId);
+        $problems = [];
         if ($eventId === null) {
-            $this->registerEmployerObligation(
+            $problem = $this->registerEmployerObligation(
                 $supplierId,
                 $environment,
                 $context,
                 $createdBy,
             );
+            if ($problem !== null) {
+                $problems[] = $problem;
+            }
         }
         $probe = $this->resolve(
             $supplierId,
@@ -227,11 +234,17 @@ final readonly class PayrollRegistrationSubmissionService
             $probe,
             $obligation,
             $eventId,
+            $problems,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
+                // Výjimka zůstává: chybí firma, za kterou by se podávalo,
+                // a zároveň jde o hranici mezi firmami. Není co uložit ani
+                // co vypsat jako chybějící údaj.
                 throw new PayrollRegistrationXmlException(
                     'registration_supplier_missing',
-                    'Firma registračního podání nebyla nalezena.',
+                    'Firma, za kterou se registrace podává, nebyla nalezena. '
+                    . 'Přepněte se na správnou firmu a registraci připravte '
+                    . 'znovu.',
                 );
             }
             if ($eventId !== null) {
@@ -269,7 +282,7 @@ final readonly class PayrollRegistrationSubmissionService
                     $submission,
                     $probe,
                     $obligation['id'],
-                );
+                ) + ['problems' => $problems];
             }
 
             // Teprve tady je známé id podání, které patří do rozsahu snapshotu.
@@ -321,9 +334,15 @@ final readonly class PayrollRegistrationSubmissionService
                 hash('sha256', $frozen['xml']),
                 (string) $artifact['artifact_sha256'],
             )) {
+                // Výjimka zůstává: porušená integrita dat. Uloží se přesně
+                // ty bajty, které se pak odešlou ČSSZ — kdyby se rozešly,
+                // účetní by odsouhlasila jiný dokument, než jaký odejde.
                 throw new PayrollRegistrationXmlException(
                     'registration_artifact_mismatch',
-                    'Otisk uloženého artefaktu neodpovídá zmrazenému registračnímu XML.',
+                    'Uložené podání neodpovídá tomu, které aplikace právě '
+                    . 'připravila, proto se registrace neuložila. Zkuste '
+                    . 'přípravu znovu; pokud se hláška vrátí, jde o chybu '
+                    . 'aplikace a podání se odesílat nesmí.',
                 );
             }
             $validated = $this->submissions->transition(
@@ -373,10 +392,19 @@ final readonly class PayrollRegistrationSubmissionService
                 'artifact_sha256' => (string) $artifact['artifact_sha256'],
                 'created' => true,
                 'deadline' => $this->describeDeadline($frozen['deadline']),
+                // Nedostatky, které se registrace zaměstnance netýkají, a tak
+                // ji nesměly zablokovat. Prázdný seznam = všechno sedlo.
+                'problems' => $problems,
             ];
         });
     }
 
+    /**
+     * Obě výjimky níž jsou VNITŘNÍ pojistky, ne hlášky pro účetní: obě id
+     * validují akce `PayrollRegistrationAction::employmentId()`
+     * a `::eventId()` regulárním výrazem `^[1-9][0-9]*$` dřív, než se sem
+     * cokoliv dostane. Přes API tedy nejsou dosažitelné a zůstávají technické.
+     */
     public static function sourceEventReference(
         int $employmentId,
         ?int $eventId = null,
@@ -492,9 +520,25 @@ final readonly class PayrollRegistrationSubmissionService
                 || ($snapshot->employmentExternalIdentifier['value'] ?? null)
                     !== $eventEmploymentIdentifier
             ) {
+                // Výjimka zůstává: porušená integrita dat. Kdyby podání
+                // odešlo s jiným ID PPV, ČSSZ by změnu přiřadila k cizímu
+                // pracovnímu vztahu a oprava se dohledává těžko.
                 throw new PayrollRegistrationXmlException(
                     'registration_event_id_ppv_snapshot_mismatch',
-                    'ID PPV v neměnném zdroji neodpovídá identitě účinné k datu události.',
+                    PayrollRegistrationFieldVocabulary::label(
+                        'employment_external_identifier',
+                    )
+                    . ' uložený u schválené události se liší od toho, který '
+                    . 'má zaměstnanec ke dni události. Zkontrolujte údaj na '
+                    // Ne `describe()`: tady údaj nechybí, jen nesedí, takže
+                    // věta „Údaj doplňte na …" by mířila vedle. Konstanta
+                    // drží cestu v souladu se zbytkem řetězce.
+                    . PayrollRegistrationFieldVocabulary::WHERE_JMHZ_IDENTIFIERS
+                    . ' a událost schvalte znovu'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'employment_external_identifier',
+                    )
+                    . '.',
                 );
             }
         }
@@ -591,16 +635,52 @@ final readonly class PayrollRegistrationSubmissionService
         $variableSymbol = $eventEmployer['variable_symbol']
             ?? $context['employer_variable_symbol'];
         if (!is_string($variableSymbol) || $variableSymbol === '') {
+            // Výjimka zůstává, přestože jde o neúplný vstup: tahle metoda
+            // neukládá, staví DATOVOU VĚTU pro ČSSZ. Bez variabilního symbolu
+            // nevznikne ani náhled, ani zmrazené podání — není kam nedostatek
+            // odložit, formulář pracovního vztahu se ukládá jinou cestou
+            // a tímhle blokovaný není.
             throw new PayrollRegistrationXmlException(
                 'registration_employer_variable_symbol_missing',
-                'Účtárna nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení mezd → Účtárny a registraci podejte znovu.',
+                PayrollRegistrationFieldVocabulary::label(
+                    'employer_variable_symbol',
+                )
+                . ' chybí u mzdové účtárny, pod kterou pracovní vztah patří, '
+                . 'a bez něj ČSSZ neví, komu zaměstnance přihlásit. '
+                . PayrollRegistrationFieldVocabulary::describe(
+                    'employer_variable_symbol',
+                )
+                . ' Potom registraci připravte znovu'
+                . PayrollRegistrationFieldVocabulary::reference(
+                    'employer_variable_symbol',
+                )
+                . '.',
             );
         }
         $regzec = $interaction->documentType === self::AGENDA_REGZEC;
         if ($regzec && $context['cssz_workplace_code'] === null) {
+            // Výjimka zůstává ze stejného důvodu jako výš: plná datová věta
+            // REGZEC bez kódu pracoviště nejde sestavit.
             throw new PayrollRegistrationXmlException(
                 'registration_cssz_workplace_code_missing',
-                'Plná registrace REGZEC vyžaduje kód pracoviště ČSSZ. Doplňte ho v Nastavení mezd → Zaměstnavatel a registraci podejte znovu.',
+                PayrollRegistrationFieldVocabulary::label(
+                    'cssz_workplace_code',
+                )
+                . ' chybí, a bez něj nejde podat „'
+                . PayrollRegistrationFieldVocabulary::action(
+                    $interaction->documentType,
+                    $interaction->actionCode,
+                )
+                . '". '
+                . PayrollRegistrationFieldVocabulary::describe(
+                    'cssz_workplace_code',
+                )
+                . ' V nastavení se položka jmenuje „Kód správy sociálního '
+                . 'zabezpečení". Potom registraci připravte znovu'
+                . PayrollRegistrationFieldVocabulary::reference(
+                    'cssz_workplace_code',
+                )
+                . '.',
             );
         }
 
@@ -696,9 +776,16 @@ final readonly class PayrollRegistrationSubmissionService
         }
         $startOn = $this->effectiveDate($context);
 
-        return $interaction->interaction === 'pre_registration_no_show'
-            ? $this->deadlines->forNoShow($startOn)
-            : $this->deadlines->forEmploymentStart($startOn);
+        return match ($interaction->interaction) {
+            'pre_registration_no_show' => $this->deadlines->forNoShow($startOn),
+            // Doplnění po předregistraci má vlastní lhůtu: osm dnů PO nástupu.
+            // Dokud spadalo do přihlášky, byl termínem den nástupu a aplikace
+            // hlásila zpoždění, které nenastalo — a to zrovna tam, kde
+            // předregistrace existuje právě proto, že údaje ještě nejsou.
+            'full_registration_after_p1' => $this->deadlines
+                ->forFullRegistrationAfterPreRegistration($startOn),
+            default => $this->deadlines->forEmploymentStart($startOn),
+        };
     }
 
     /**
@@ -793,17 +880,25 @@ final readonly class PayrollRegistrationSubmissionService
      * povinnosti neexistuje pro nikoho — a je to lhůta, po jejímž zmeškání
      * vzniká fikce zaměstnavatele.
      *
+     * NEBLOKUJE registraci zaměstnance. Je to povinnost NĚKOHO JINÉHO (firmy),
+     * evidovaná při té příležitosti — když ji registr povinností odmítne,
+     * nesmí tím spadnout přihláška zaměstnance, u které běží zákonná lhůta.
+     * Odmítnutí se proto vrací jako nedostatek k vypsání, ne jako výjimka.
+     * Chyby databáze se ale nechytají: ty znamenají, že se nezaložilo nic,
+     * a musí být vidět.
+     *
      * @param array<string,mixed> $context
+     * @return array{field:?string,code:string,message:string}|null
      */
     private function registerEmployerObligation(
         int $supplierId,
         string $environment,
         array $context,
         ?int $createdBy,
-    ): void {
+    ): ?array {
         $employer = $this->employerDeadline($context);
         if ($employer === null) {
-            return;
+            return null;
         }
         $window = $this->employerDeadlines->forFirstEmployeeStart(
             $this->effectiveDate($context),
@@ -813,32 +908,51 @@ final readonly class PayrollRegistrationSubmissionService
             'first_employment_id' => $context['employment_id'],
             'expected_start_on' => $this->effectiveDate($context),
         ]));
-        $this->obligations->register(
-            $supplierId,
-            self::AGENDA_EMPLOYER_REGISTRATION,
-            'employer',
-            'payroll_employer:' . $supplierId,
-            $window->earliestRegistrationOn,
-            $window->dueOn,
-            'regular',
-            // Přihláška zaměstnavatele se nepodává datovou větou, takže kanál
-            // není `vrep_apep`. Označit ji tak by slibovalo odeslání, které
-            // aplikace neumí.
-            'other',
-            'payroll_employer_registration',
-            'payroll_employer_registration:' . $supplierId,
-            $sourceHash,
-            $window->earliestRegistrationOn,
-            $window->dueOn,
-            $this->calendarBasis($window->calendarBasis),
-            $window->rulesetId,
-            $window->rulesetHash,
-            'employer-registration:' . $environment . ':' . $sourceHash,
-            null,
-            $createdBy,
-            null,
-            $environment,
-        );
+        try {
+            $this->obligations->register(
+                $supplierId,
+                self::AGENDA_EMPLOYER_REGISTRATION,
+                'employer',
+                'payroll_employer:' . $supplierId,
+                $window->earliestRegistrationOn,
+                $window->dueOn,
+                'regular',
+                // Přihláška zaměstnavatele se nepodává datovou větou, takže
+                // kanál není `vrep_apep`. Označit ji tak by slibovalo
+                // odeslání, které aplikace neumí.
+                'other',
+                'payroll_employer_registration',
+                'payroll_employer_registration:' . $supplierId,
+                $sourceHash,
+                $window->earliestRegistrationOn,
+                $window->dueOn,
+                $this->calendarBasis($window->calendarBasis),
+                $window->rulesetId,
+                $window->rulesetHash,
+                'employer-registration:' . $environment . ':' . $sourceHash,
+                null,
+                $createdBy,
+                null,
+                $environment,
+            );
+        } catch (
+            \DomainException
+            | \InvalidArgumentException
+            | PayrollRegistrationXmlException $exception
+        ) {
+            return [
+                'field' => 'employer_registration',
+                'code' => 'registration_employer_obligation_not_recorded',
+                'message' => 'Přihlášku zaměstnavatele do evidence ČSSZ se '
+                    . 'nepodařilo zaevidovat, takže termín '
+                    . $employer['due_on']
+                    . ' nikde nehlídáme. Přihlášku zaměstnance to '
+                    . 'nezastavilo — ta je připravená. Důvod: '
+                    . $exception->getMessage(),
+            ];
+        }
+
+        return null;
     }
 
     /**
@@ -861,9 +975,15 @@ final readonly class PayrollRegistrationSubmissionService
             (int) $submission['id'],
         );
         if ($stored === null || $stored['artifact_sha256'] === null) {
+            // Výjimka zůstává: založit druhé podání by u ČSSZ vyrobilo
+            // duplicitní přihlášku, kterou nelze vzít zpět.
             throw new PayrollRegistrationXmlException(
                 'registration_replay_artifact_missing',
-                'Registrační podání pro tenhle vztah už existuje, ale nemá zmrazený artefakt. Neopakuje se — vyřešte původní podání.',
+                'Registrační podání pro tenhle pracovní vztah už existuje, '
+                . 'ale nemá uložené XML, které by šlo odeslat. Nové podání '
+                . 'se nezakládá, aby u ČSSZ nevznikla duplicita — otevřete '
+                . 'původní podání v Mzdy → Podání a hlášení a dokončete '
+                . 'ho tam.',
             );
         }
 
@@ -894,6 +1014,8 @@ final readonly class PayrollRegistrationSubmissionService
      */
     private function requireContext(int $supplierId, int $employmentId): array
     {
+        // Vnitřní pojistka, ne hláška pro účetní: obě id validuje akce
+        // regulárním výrazem `^[1-9][0-9]*$`, přes API sem nula nedojde.
         if ($supplierId <= 0 || $employmentId <= 0) {
             throw new \InvalidArgumentException(
                 'Rozsah registračního podání není platný.',
@@ -904,8 +1026,12 @@ final readonly class PayrollRegistrationSubmissionService
             $employmentId,
         );
         if ($context === null) {
+            // Výjimka zůstává: chybí entita, které se registrace týká,
+            // a je to zároveň hranice mezi firmami.
             throw new \OutOfBoundsException(
-                'Pracovní vztah pro registraci nebyl nalezen.',
+                'Pracovní vztah, který se má u ČSSZ přihlásit, v téhle '
+                . 'firmě neexistuje. Otevřete kartu zaměstnance znovu — '
+                . 'vztah mohl být mezitím smazán, nebo patří jiné firmě.',
             );
         }
 
@@ -917,9 +1043,20 @@ final readonly class PayrollRegistrationSubmissionService
     {
         $date = $context['actual_start_date'] ?? $context['start_date'];
         if (!is_string($date) || $date === '') {
+            // Výjimka zůstává, přestože jde o neúplný vstup: datum nástupu je
+            // rozhodný den celé registrace — bez něj se nespočítá lhůta ani
+            // nesestaví datová věta. Ukládání pracovního vztahu tím blokované
+            // není, tahle cesta vede jen k náhledu a k podání.
             throw new PayrollRegistrationXmlException(
                 'registration_start_date_missing',
-                'Pracovní vztah nemá datum nástupu. Doplňte ho v kartě pracovního vztahu — bez něj nelze určit lhůtu ani podat přihlášku.',
+                'Datum nástupu u pracovního vztahu chybí, takže nejde '
+                . 'spočítat lhůta pro přihlášku ani přihlášku podat. '
+                . PayrollRegistrationFieldVocabulary::describe(
+                    'contract_start_on',
+                )
+                . ' Registraci potom připravte znovu'
+                . PayrollRegistrationFieldVocabulary::reference('start_date')
+                . '.',
             );
         }
 
@@ -930,9 +1067,15 @@ final readonly class PayrollRegistrationSubmissionService
     {
         $mapped = self::CALENDAR_BASIS_MAP[$basis] ?? null;
         if ($mapped === null) {
+            // Výjimka zůstává: nekonzistence mezi legislativními pravidly
+            // a evidencí povinností. Zaevidovat lhůtu s neznámým kalendářem
+            // by znamenalo hlídat špatné datum, což je horší než hláška.
             throw new PayrollRegistrationXmlException(
                 'registration_calendar_basis_unsupported',
-                'Kalendář registrační lhůty nemá odpovídající hodnotu v registru povinností.',
+                'Lhůta pro přihlášku se počítá podle kalendáře, který '
+                . 'aplikace neumí zaevidovat, takže registraci nelze '
+                . 'připravit. Jde o chybu v legislativních pravidlech mezd '
+                . "— ozvěte se prosím podpoře ({$basis}).",
             );
         }
 

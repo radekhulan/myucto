@@ -501,13 +501,14 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    // Dvanáct: jedenáct dosavadních plus Měsíční přehled coby nová výchozí
-    // záložka. Vlastní záložku má i záměr uplatňovat slevu (OZUSPOJ) — je to
-    // podmínka nároku, ne součást měsíčního hlášení. „Další povinnosti" vede
-    // explicitní NEMPRI/HZUPN/ELDP/úrazovou matici, zatímco „Ostatní" zůstává
-    // záchytná skupina pro neznámé kódy.
+    // Třináct: dvanáct dosavadních plus „K odeslání" — jedno místo, kde jsou
+    // vidět všechna připravená a neodeslaná podání napříč agendami a odkud se
+    // dají odeslat hromadně. Vlastní záložku má i záměr uplatňovat slevu
+    // (OZUSPOJ) — je to podmínka nároku, ne součást měsíčního hlášení.
+    // „Další povinnosti" vede explicitní NEMPRI/HZUPN/ELDP/úrazovou matici,
+    // zatímco „Ostatní" zůstává záchytná skupina pro neznámé kódy.
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(12)
+    expect(tabs).toHaveLength(13)
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.statutory'))).toBe(true)
     await clickTab(wrapper, 'regzel')
     await flushPromises()

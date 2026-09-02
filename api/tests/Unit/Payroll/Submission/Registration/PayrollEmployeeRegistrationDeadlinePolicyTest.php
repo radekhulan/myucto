@@ -111,6 +111,31 @@ final class PayrollEmployeeRegistrationDeadlinePolicyTest extends TestCase
         $this->policy->forEmploymentStart('2026-06-30');
     }
 
+    /**
+     * Doplnění plné registrace po předregistraci má osm dnů PO nástupu.
+     *
+     * Dokud to spadalo do lhůty přihlášky, byl termínem den nástupu: aplikace
+     * hlásila zpoždění, které nenastalo, a tlačila účetní podat dřív, než
+     * musí — a to zrovna u případu, kde předregistrace existuje právě proto,
+     * že údaje ještě nejsou pohromadě.
+     */
+    public function testPlnaRegistracePoPredregistraciMaOsmDnuPoNastupu(): void
+    {
+        $window = $this->policy->forFullRegistrationAfterPreRegistration(
+            '2026-09-10',
+        );
+
+        self::assertSame('2026-09-18', $window->dueOn);
+        // Doplnit údaje jde i dřív, jakmile je zaměstnavatel má.
+        self::assertSame('2026-09-02', $window->earliestRegistrationOn);
+        self::assertSame('calendar_days', $window->calendarBasis);
+        self::assertNotSame(
+            $this->policy->forEmploymentStart('2026-09-10')->rulesetId,
+            $window->rulesetId,
+            'Vlastní lhůta musí mít vlastní ruleset, ne recyklovat přihlášku.',
+        );
+    }
+
     public function testMalformedStartDateIsRefusedDeterministically(): void
     {
         foreach (['2026-13-01', '15.9.2026', '', '2026-09-31'] as $value) {

@@ -132,7 +132,13 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
         )->execute([$this->supplierId, $this->identityId]);
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('explicitní jméno a příjmení');
+        // Hláška musí říct, co chybí, PROČ to nejde odvodit z celého jména
+        // a kam pro to jít; „explicitní jméno a příjmení" nesplňovalo nic z toho.
+        $this->expectExceptionMessage(
+            'Jméno a příjmení v evidenci identity chybí. ČSSZ potřebuje obě '
+            . 'části zvlášť, celé jméno v jednom poli nestačí. Údaj doplňte '
+            . 'na kartě osoby → Identita a adresy → Historie jména.',
+        );
         $this->service->sensitiveIdentityAt(
             $this->supplierId,
             $this->employeeId,
@@ -473,7 +479,14 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
             );
             self::fail('Replay OIČ s jinou provenance musí být odmítnut.');
         } catch (\DomainException $exception) {
-            self::assertStringContainsString('datu nebo důkazu', $exception->getMessage());
+            self::assertSame(
+                'Osobní identifikační číslo od ČSSZ (OIČ / IK MPSV) už '
+                . 'v evidenci je se stejnou hodnotou, ale s jiným dnem '
+                . 'platnosti nebo jiným podkladem. Zadejte původní den '
+                . 'a podklad, nebo nejdřív ukončete platnost stávajícího '
+                . 'záznamu. (person_external_identifier)',
+                $exception->getMessage(),
+            );
         }
 
         try {
@@ -490,7 +503,14 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
             );
             self::fail('Replay ID PPV s jinou provenance musí být odmítnut.');
         } catch (\DomainException $exception) {
-            self::assertStringContainsString('datu nebo důkazu', $exception->getMessage());
+            self::assertSame(
+                'Identifikátor pracovního vztahu od ČSSZ (ID PPV) už '
+                . 'v evidenci je se stejnou hodnotou, ale s jiným dnem '
+                . 'platnosti nebo jiným podkladem. Zadejte původní den '
+                . 'a podklad, nebo nejdřív ukončete platnost stávajícího '
+                . 'záznamu. (employment_external_identifier)',
+                $exception->getMessage(),
+            );
         }
 
         foreach ([

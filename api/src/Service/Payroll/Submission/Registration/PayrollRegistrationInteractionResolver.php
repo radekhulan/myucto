@@ -35,14 +35,24 @@ final class PayrollRegistrationInteractionResolver
         ) {
             $this->invalid(
                 'registration_interaction_before_supported_window',
-                'PREZEC/REGZEC tok není podporován před začátkem ověřeného okna.',
+                'Registrace přes ČSSZ jde v appce podat až od 23. 6. 2026 — dřív '
+                    . 'povinnost neplatila a formuláře PREZEC/REGZEC pro '
+                    . 'starší dny neexistují. Tenhle pracovní vztah začíná '
+                    . 'dřív; přihlaste zaměstnance způsobem platným pro tehdejší '
+                    . 'období.',
             );
         }
         $citizenship = $snapshot->identity['citizenship_country_code'] ?? null;
         if (!is_string($citizenship)) {
             $this->invalid(
                 'registration_interaction_citizenship_unverified',
-                'Bez ověřeného státního občanství nelze rozlišit částečné přihlášení a plnou registraci.',
+                PayrollRegistrationFieldVocabulary::label('citizenship_country_code')
+                    . ' chybí. Podle něj se pozná, jestli stačí částečné '
+                    . 'přihlášení (PREZEC), nebo je nutná plná registrace '
+                    . '(REGZEC). '
+                    . PayrollRegistrationFieldVocabulary::describe(
+                        'citizenship_country_code',
+                    ),
             );
         }
         if (is_string($eventInteraction)) {
@@ -55,7 +65,11 @@ final class PayrollRegistrationInteractionResolver
             ) {
                 $this->invalid(
                     'registration_event_interaction_invalid',
-                    'Neměnný zdroj neodpovídá podporované interakci REGZEC A2–A8.',
+                    'Tenhle druh navazujícího oznámení appka neumí připravit. '
+                        . 'Podat jde skončení vztahu, změna a oprava údajů, '
+                        . 'převod pod jiný variabilní symbol, vznik i skončení '
+                        . 'příslušnosti k českým předpisům a storno '
+                        . 'přihlášení; ostatní podejte přes portál ČSSZ.',
                 );
             }
 
@@ -70,7 +84,11 @@ final class PayrollRegistrationInteractionResolver
             if (!$context['pre_registration_accepted']) {
                 $this->invalid(
                     'registration_interaction_no_show_without_p1',
-                    'PREZEC P2 vyžaduje přijatou předregistraci P1.',
+                    'Oznámení, že zaměstnanec nenastoupil (PREZEC P2), se podává '
+                    . 'jen k částečnému přihlášení (PREZEC P1), které už ČSSZ '
+                    . 'přijala. Tady žádné přijaté P1 není — pokud jste '
+                    . 'zaměstnance přihlašovali plnou registrací REGZEC, '
+                    . 'použijte storno přihlášení (REGZEC A8).',
                 );
             }
 
@@ -84,14 +102,19 @@ final class PayrollRegistrationInteractionResolver
         if ($context['employment_ended'] ?? false) {
             $this->invalid(
                 'registration_regzec_a2_source_missing',
-                'Skončený pracovní vztah vyžaduje samostatný schválený zdroj REGZEC A2; nelze za něj znovu vytvořit přihlášku A1.',
+                'Pracovní vztah už skončil, takže za něj nejde znovu podat '
+                . 'přihlášení. Skončení se hlásí samostatným oznámením '
+                . '(REGZEC A2), které se zakládá u pracovního vztahu.',
             );
         }
         if ($this->agendaFor($citizenship, $context) === 'REGZEC25') {
             if (!$context['full_registration_data']) {
                 $this->invalid(
                     'registration_interaction_full_data_missing',
-                    'REGZEC A1 vyžaduje úplnou a samostatně ověřenou datovou sadu.',
+                    'Přihlášení zaměstnance (REGZEC A1) zatím nemá vyplněné '
+                    . 'všechny povinné údaje. Uložit rozpracovaný profil jde, '
+                    . 'podat ho ale až po doplnění — co chybí, ukáže tlačítko '
+                    . 'Kontrola u registrace.',
                 );
             }
             $this->assertA1Snapshot($snapshot);
@@ -108,7 +131,10 @@ final class PayrollRegistrationInteractionResolver
         if ($context['pre_registration_accepted']) {
             $this->invalid(
                 'registration_interaction_duplicate_p1',
-                'Přijatou PREZEC P1 nelze opakovat.',
+                'Částečné přihlášení před nástupem (PREZEC P1) už ČSSZ přijala, '
+                . 'takže se podruhé nepodává. Až zaměstnanec nastoupí, '
+                . 'navažte plnou registrací (REGZEC A1); pokud nenastoupil, '
+                . 'podejte oznámení PREZEC P2.',
             );
         }
 
@@ -187,7 +213,9 @@ final class PayrollRegistrationInteractionResolver
         if ($snapshot->scope['agenda_code'] !== $documentType) {
             $this->invalid(
                 'registration_interaction_snapshot_agenda_mismatch',
-                'Zmrazený snapshot patří jiné registrační agendě.',
+                'Podání bylo připravené pro jiný formulář ČSSZ, než jaký se '
+                    . 'teď odesílá. Zavřete podání, otevřete registraci '
+                    . 'u pracovního vztahu znovu a připravte ho ještě jednou.',
             );
         }
         // Způsobilost počítá snapshot builder a zmrazí ji do neměnného
@@ -203,7 +231,10 @@ final class PayrollRegistrationInteractionResolver
         ) {
             $this->invalid(
                 'registration_interaction_eligibility_basis_unsupported',
-                'Způsobilost zmrazeného snapshotu neodpovídá dnešnímu výkladu registrační agendy.',
+                'Podání vzniklo podle staršího posouzení, jestli na zaměstnance '
+                    . 'dosáhne částečné přihlášení. Zavřete ho a připravte '
+                    . 'registraci znovu, ať se posouzení udělá z aktuálních '
+                    . 'údajů.',
             );
         }
         // PREZEC26 má `client/@bno` povinné a nemá jediné pole, kterým by se
@@ -218,13 +249,24 @@ final class PayrollRegistrationInteractionResolver
         ) {
             $this->invalid(
                 'registration_prezec_identifier_required',
-                'PREZEC vyžaduje přidělené rodné číslo nebo EČP; bez osobního identifikátoru nelze částečné přihlášení podat.',
+                'Rodné číslo ani evidenční číslo pojištěnce (EČP) nejsou '
+                    . 'vyplněné. Částečné přihlášení před nástupem (PREZEC) '
+                    . 'se bez jednoho z nich podat nedá — rodné číslo má 9 '
+                    . 'nebo 10 číslic bez lomítka. Údaj doplňte na '
+                    . PayrollRegistrationFieldVocabulary::WHERE_IDENTIFIERS
+                    . '; pokud zaměstnanec ani jedno nemá, podejte místo toho '
+                    . 'plnou registraci REGZEC.',
             );
         }
         if (!$interaction->supported()) {
             $this->invalid(
                 'registration_interaction_unsupported',
-                'Registrační interakce není v podporovaném katalogu.',
+                PayrollRegistrationFieldVocabulary::action(
+                    $documentType,
+                    $interaction->actionCode,
+                ) . ' se v této kombinaci nepodává — appka umí jen podání '
+                    . 'z nabídky u pracovního vztahu. Vyberte druh podání znovu '
+                    . 'z nabídky.',
             );
         }
         if ($documentType === 'REGZEC25'
@@ -246,6 +288,12 @@ final class PayrollRegistrationInteractionResolver
         );
     }
 
+    /**
+     * Výjimka tu zůstává vědomě: resolver rozhoduje, JAKÉ podání se vyrobí.
+     * Bez odpovědi nemá co vrátit, takže „sbírat vady" tu nedává smysl — a na
+     * ukládání rozpracovaného profilu resolver vůbec nesahá, ten běží přes
+     * `PayrollRegistrationA1SnapshotBuilder::problems()`.
+     */
     private function invalid(string $code, string $message): never
     {
         throw new PayrollRegistrationXmlException($code, $message);

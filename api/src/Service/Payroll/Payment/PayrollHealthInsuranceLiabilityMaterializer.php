@@ -414,7 +414,7 @@ final class PayrollHealthInsuranceLiabilityMaterializer
             || $this->date(
                 $account['verified_on'],
                 'datum ověření účtu instituce',
-            ) > $dueOn
+            ) > PayrollInstitutionVerificationWindow::latestAcceptable($dueOn)
             || $account['row_version'] <= 0
             || preg_match(
                 '/^[0-9a-f]{64}$/D',

@@ -199,7 +199,13 @@ final class PayrollRunDeductionLedgerApprover
                 if (($previous['revision_kind'] ?? null) !== 'regular'
                     || !in_array(
                         $previous['status'] ?? null,
-                        ['snapshot', 'calculated', 'reviewed'],
+                        // `abandoned` (migrace 1715) je týž případ jako ostatní
+                        // tři: revize, která se NIKDY neschválila. Od chvíle,
+                        // kdy se opuštěné revize označují, by běh, který si
+                        // postavil nový snímek přes zrušení a znovuotevření,
+                        // bez ní narazil na hlášku o „dříve schválených
+                        // srážkách", které přitom žádné nebyly.
+                        ['snapshot', 'calculated', 'reviewed', 'abandoned'],
                         true,
                     )
                     || $this->runs->latestApprovedRevision(

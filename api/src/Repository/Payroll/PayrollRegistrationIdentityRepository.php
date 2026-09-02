@@ -317,6 +317,63 @@ final class PayrollRegistrationIdentityRepository
     }
 
     /**
+     * Odešlo za tenhle vztah registrační podání?
+     *
+     * Tohle je JEDINÉ spolehlivé „bylo odesláno". `status = 'verified'` na
+     * profilu znamená jen to, že prošel přísnou kontrolou — o odeslání
+     * nevypovídá nic. Rozhoduje část podání za tenhle vztah a stav podání,
+     * které opustilo koncept.
+     *
+     * Prostředí ani agenda se schválně nerozlišují: doklad zanechalo i
+     * zkušební podání a stejně tak předběžné přihlášení PREZEC — z profilu
+     * se v obou případech vyrobil zmrazený obsah, který se nesmí přepsat.
+     */
+    public function hasSubmittedRegistration(
+        int $supplierId,
+        int $employmentId,
+    ): bool {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+              WHERE part.supplier_id = ?
+                AND part.subject_reference = ?
+                AND part.agenda_code IN (\'REGZEC25\', \'PREZEC26\')
+                AND submission.status IN (
+                      \'submitted\', \'processing\', \'accepted\',
+                      \'partially_accepted\'
+                    )
+              LIMIT 1'
+        );
+        $statement->execute([
+            $supplierId,
+            "payroll_employment:{$employmentId}",
+        ]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
+     * Smazání pracovního řádku profilu.
+     *
+     * Používá se jen k NAHRAZENÍ rozpracovaného profilu (smaž starý, vlož
+     * nový) — řádek se nikdy nemění na místě, aby šifrovaný obsah a jeho otisk
+     * k sobě pořád patřily. Řádek vztahu, za který už odešlo podání, odmítne
+     * databázový trigger z migrace 1716.
+     */
+    public function deleteA1Profile(int $supplierId, int $id): void
+    {
+        $statement = $this->db->pdo()->prepare(
+            'DELETE FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $statement->execute([$supplierId, $id]);
+    }
+
+    /**
      * Kmenová data, ze kterých se skládá NÁVRH profilu REGZEC A1. Čte se jen
      * pro předvyplnění formuláře; profil se ukládá výhradně do
      * payroll_registration_a1_profiles, takže tady nesmí být žádný zápis.

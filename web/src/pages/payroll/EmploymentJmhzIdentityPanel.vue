@@ -170,13 +170,28 @@ watch(() => [props.startDate, props.endDate], () => {
     data-test="jmhz-identity-panel"
     @toggle="openPanel"
   >
-    <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-3">
-      <span>
+    <!--
+      `list-none` schová vlastní trojúhelníček prohlížeče, takže blok vypadal
+      jako obyčejný nadpis a nešlo poznat, že se dá rozkliknout. Šipku proto
+      kreslíme sami a otáčíme ji podle stavu.
+    -->
+    <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-3 hover:bg-neutral-50">
+      <span class="flex items-center gap-2">
+        <svg
+          class="h-4 w-4 shrink-0 text-neutral-400 transition-transform group-open:rotate-180"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        ><path :d="ICONS.chevron" /></svg>
+        <span>
         <span class="block text-sm font-semibold text-neutral-900">
           {{ t('payroll.people.jmhz_identity.title') }}
         </span>
         <span class="mt-0.5 block text-xs text-neutral-500">
           {{ t('payroll.people.jmhz_identity.summary') }}
+        </span>
         </span>
       </span>
       <span

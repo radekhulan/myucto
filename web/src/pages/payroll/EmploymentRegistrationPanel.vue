@@ -314,7 +314,24 @@ const a1Variant = computed(() => a1Draft.value?.variant ?? null)
 const a1IsFull = computed(() => a1Variant.value === 'OST')
 const a1IsLimited = computed(() => a1Variant.value === '10')
 const a1IsForeigner = computed(() => a1Draft.value?.foreigner === true)
+/**
+ * Odešla registrace na ČSSZ? Dokud ne, je profil rozepsaná práce: server
+ * pracovní řádek při uložení přepisuje, historie žádná nevzniká, a číslo verze
+ * ani upozornění na rozdíl proti nahlášenému stavu proto nemá co ukazovat.
+ */
+const a1Submitted = computed(() => a1Draft.value?.submitted === true)
 const a1SavedVersion = computed(() => a1Stored.value?.row_version ?? 0)
+/** Čas posledního uložení — u rozpracovaného profilu místo čísla verze. */
+const a1SavedAt = computed(() => {
+  const raw = a1Stored.value?.created_at ?? null
+  if (raw === null || raw === '') return null
+  // Server ukládá čas v UTC bez značky zóny; bez `Z` by ho prohlížeč vzal
+  // jako místní a účetní by viděla uložení o dvě hodiny dřív.
+  const parsed = new Date(raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`)
+  return Number.isNaN(parsed.getTime())
+    ? null
+    : parsed.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+})
 
 function a1Source(path: string): string | null {
   return a1Draft.value?.sources[path] ?? null
@@ -624,14 +641,34 @@ async function saveA1Profile(): Promise<void> {
     // značky u polí — účetní nemusí po uložení mačkat ještě Kontrolu.
     a1Problems.value = profile.problems ?? []
     a1Checked.value = true
+    /*
+     * Číslo verze se neukazuje. U rozpracovaného profilu žádná historie
+     * nevzniká (server pracovní řádek přepisuje) a „uložená verze 7" účetní
+     * jen mátla — seznam verzí nikde není a udělat se s ním nedalo nic.
+     */
     a1ProfileMessage.value = profile.status === 'draft'
       ? t('payroll.people.registration.a1.saved_draft', {
-        version: profile.row_version,
         count: a1Problems.value.length,
       })
-      : t('payroll.people.registration.a1.saved', { version: profile.row_version })
+      : t('payroll.people.registration.a1.saved')
     resetPreparedFiling()
     await loadA1Profile()
+    /*
+     * Zápis do kmenových dat patří k uložení, ne do jiného panelu.
+     *
+     * Účetní tady opravuje údaj, který zná z personálního podkladu, a čeká, že
+     * ho tím opravila i v kartě osoby. Když se to nestane, karta dál drží
+     * starou hodnotu a formulář ji donekonečna hlásí jako rozdíl proti
+     * snímku — rozdíl, se kterým odsud nešlo nic udělat.
+     *
+     * Zapisuje se jen to, co se OPRAVDU liší a co má v kmenových datech kam
+     * jít; když se neliší nic, neděje se nic. Výsledek se vypíše, nikdy
+     * potichu — zápis do evidence osoby se zamlčet nesmí.
+     */
+    if (a1WriteMasterData.value) {
+      const writable = a1WritebackWritable.value.map(item => item.field)
+      if (writable.length > 0) await writeA1MasterData(writable)
+    }
   } catch (exception) {
     a1ProfileErrorCode.value = apiErrorCode(exception)
     a1ProfileError.value = apiErrorMessage(
@@ -841,6 +878,64 @@ async function focusA1Gap(field: string): Promise<void> {
     return
   }
   a1GapFailure.value = t('payroll.people.registration.a1.gap_unreachable', { field })
+}
+
+/*
+ * Zápis zpátky do kmenových dat. Je to akce NAVÍC, ne podmínka uložení
+ * profilu: `Uložit` projde vždycky a tenhle zápis jen srovná evidenci osoby
+ * a pracovního vztahu s tím, co účetní opravila ve formuláři.
+ */
+/**
+ * „Zapsat i do kmenových dat" u tlačítka Uložit.
+ *
+ * Zapnuté je schválně: uživatel opakovaně říkal, že když něco opraví, chce to
+ * mít opravené i v kartě osoby a nechápe, k čemu je rozdíl mezi poslední verzí
+ * a kmenovými daty. Vypnout to jde pro případ, kdy formulář nese hodnotu
+ * platnou jen k datu registrace a kmen se měnit nemá.
+ */
+const a1WriteMasterData = ref(true)
+const a1WritebackBusy = ref(false)
+const a1WritebackMessage = ref('')
+const a1WritebackProblems = ref<{ label: string, reason: string }[]>([])
+
+const a1Writeback = computed(() => a1Draft.value?.writeback ?? [])
+const a1WritebackWritable = computed(
+  () => a1Writeback.value.filter(item => item.writable),
+)
+
+async function writeA1MasterData(fields: string[]): Promise<void> {
+  if (!props.canWrite || a1WritebackBusy.value || fields.length === 0) return
+  a1WritebackBusy.value = true
+  a1WritebackMessage.value = ''
+  a1WritebackProblems.value = []
+  try {
+    const result = await payrollApi.writeEmploymentRegistrationA1MasterData(
+      props.employmentId,
+      fields,
+    )
+    // Seznam se musí přepočítat, jinak by u zapsaného údaje zůstalo tlačítko.
+    a1Draft.value = result.view.draft
+    a1WritebackProblems.value = result.skipped.map(item => ({
+      label: item.label,
+      reason: item.reason,
+    }))
+    a1WritebackMessage.value = result.written.length === 0
+      ? t('payroll.people.registration.a1.master_data_none')
+      : t('payroll.people.registration.a1.master_data_written', {
+        count: result.written.length,
+        fields: result.written.map(item => item.label).join(', '),
+      })
+  } catch (exception) {
+    a1WritebackProblems.value = [{
+      label: t('payroll.people.registration.a1.master_data_title'),
+      reason: apiErrorMessage(
+        exception,
+        t('payroll.people.registration.a1.master_data_failed'),
+      ),
+    }]
+  } finally {
+    a1WritebackBusy.value = false
+  }
 }
 
 const deltaFieldOptions = computed(() => eventInteraction.value === 'correction'
@@ -1579,9 +1674,14 @@ async function copyXml(): Promise<void> {
             {{ t('payroll.people.registration.a1.description') }}
           </p>
         </div>
+        <!--
+          Plné tlačítko schválně: doplnit profil je hlavní práce na téhle
+          obrazovce, bez něj se registrace nepodá. Obrysové splývalo
+          s okolím a vypadalo jako druhořadá volba.
+        -->
         <button
           type="button"
-          :class="btnOutline('neutral')"
+          :class="a1ProfileOpen ? btnOutline('neutral') : btnFilled('success')"
           :disabled="a1ProfileLoading"
           data-test="registration-a1-toggle"
           @click="a1ProfileOpen = !a1ProfileOpen"
@@ -1752,20 +1852,32 @@ async function copyXml(): Promise<void> {
           {{ t('payroll.people.registration.a1.check_complete') }}
         </p>
 
+        <!-- Co má formulář jinak než kmenová data. NENÍ to výtka: u každé
+             položky se dá hodnota přenést zpátky do evidence osoby nebo
+             pracovního vztahu. Varování „úřad má jinou hodnotu" se přidává
+             jen tam, kde registrace opravdu odešla — u rozpracovaného profilu
+             žádný nahlášený stav neexistuje. -->
         <div
-          v-if="(a1Draft?.diverged.length ?? 0) > 0"
+          v-if="a1Writeback.length > 0"
           class="rounded-md border border-primary-200 bg-primary-50 p-3"
           data-test="registration-a1-diverged"
         >
           <h6 class="text-xs font-semibold text-primary-800">
-            {{ t('payroll.people.registration.a1.diverged_title') }}
+            {{ t('payroll.people.registration.a1.master_data_title') }}
           </h6>
           <p class="mt-1 text-xs text-primary-800">
-            {{ t('payroll.people.registration.a1.diverged_hint') }}
+            {{ t('payroll.people.registration.a1.master_data_hint') }}
+          </p>
+          <p
+            v-if="a1Submitted"
+            class="mt-1 text-xs font-medium text-primary-900"
+            data-test="registration-a1-submitted-note"
+          >
+            {{ t('payroll.people.registration.a1.master_data_submitted_note') }}
           </p>
           <ul class="mt-1 space-y-1 text-xs text-primary-800">
-            <li v-for="item in a1Draft?.diverged ?? []" :key="item.field">
-              <span class="font-mono">{{ item.field }}</span>:
+            <li v-for="item in a1Writeback" :key="item.field">
+              <span class="font-medium">{{ item.label }}</span>:
               {{ t('payroll.people.registration.a1.diverged_pair', {
                 stored: item.stored ?? '—',
                 suggested: item.suggested ?? '—',
@@ -1778,9 +1890,58 @@ async function copyXml(): Promise<void> {
               >
                 {{ t('payroll.people.registration.a1.gap_open') }}
               </button>
+              <button
+                v-if="item.writable && canWrite"
+                type="button"
+                class="ml-1 whitespace-nowrap rounded-full bg-primary-100 px-2 py-0.5 font-medium underline underline-offset-2 hover:bg-primary-200 hover:text-primary-900 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50"
+                :disabled="a1WritebackBusy"
+                :data-test="`registration-a1-master-data-${item.field}`"
+                @click="writeA1MasterData([item.field])"
+              >
+                {{ t('payroll.people.registration.a1.master_data_write') }}
+              </button>
+              <!-- Údaj, který kmenová data nevedou, tlačítko nedostane —
+                   místo něj věta proč, ať to nevypadá jako chybějící akce. -->
+              <span v-else-if="!item.writable" class="ml-1 italic">
+                {{ item.reason }}
+              </span>
             </li>
           </ul>
+          <div
+            v-if="canWrite && a1WritebackWritable.length > 1"
+            class="mt-2"
+          >
+            <button
+              type="button"
+              :class="btnOutline('primary')"
+              :disabled="a1WritebackBusy"
+              data-test="registration-a1-master-data-all"
+              @click="writeA1MasterData(a1WritebackWritable.map(item => item.field))"
+            >
+              {{ a1WritebackBusy
+                ? t('common.loading')
+                : t('payroll.people.registration.a1.master_data_write_all', {
+                  count: a1WritebackWritable.length,
+                }) }}
+            </button>
+          </div>
         </div>
+        <p
+          v-if="a1WritebackMessage"
+          class="rounded-md border border-success-300 bg-success-50 p-3 text-xs text-success-800"
+          data-test="registration-a1-master-data-saved"
+        >
+          {{ a1WritebackMessage }}
+        </p>
+        <ul
+          v-if="a1WritebackProblems.length > 0"
+          class="rounded-md border border-warning-300 bg-warning-50 p-3 text-xs text-warning-800 space-y-1"
+          data-test="registration-a1-master-data-skipped"
+        >
+          <li v-for="(item, index) in a1WritebackProblems" :key="index">
+            <span class="font-medium">{{ item.label }}</span>: {{ item.reason }}
+          </li>
+        </ul>
 
         <div :class="a1SectionClass">
           <h6 class="text-sm font-semibold text-neutral-900">
@@ -2949,8 +3110,8 @@ async function copyXml(): Promise<void> {
         </p>
 
         <!-- Jedno společné Uložit pro celý profil: server bere celý cílový
-             stav jedním zápisem a zakládá novou verzi, takže tlačítko u každé
-             sekce by slibovalo dílčí uložení, které neexistuje. -->
+             stav jedním zápisem, takže tlačítko u každé sekce by slibovalo
+             dílčí uložení, které neexistuje. -->
         <div
           v-if="canWrite"
           class="sticky bottom-0 -mx-3 -mb-3 flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200 bg-surface px-3 py-2"
@@ -2958,9 +3119,42 @@ async function copyXml(): Promise<void> {
           <span v-if="a1ProfileMessage" class="mr-auto text-xs text-success-700" data-test="registration-a1-saved">
             {{ a1ProfileMessage }}
           </span>
-          <span v-else-if="a1SavedVersion > 0" class="mr-auto text-xs text-neutral-500">
+          <!-- Číslo verze patří jen k ODESLANÉ registraci. U rozpracovaného
+               profilu žádná historie nevzniká, takže by to bylo číslo bez
+               seznamu, ke kterému se účetní nemá jak dostat — místo něj čas
+               posledního uložení. -->
+          <span
+            v-else-if="a1SavedVersion > 0 && a1Submitted"
+            class="mr-auto text-xs text-neutral-500"
+          >
             {{ t('payroll.people.registration.a1.stored_version', { version: a1SavedVersion }) }}
           </span>
+          <span
+            v-else-if="a1SavedAt !== null"
+            class="mr-auto text-xs text-neutral-500"
+            data-test="registration-a1-stored-draft"
+          >
+            {{ t('payroll.people.registration.a1.stored_draft', { time: a1SavedAt }) }}
+          </span>
+          <!-- Zápis do kmenových dat patří k ukládání, ne do jiného panelu:
+               kdo tu opraví adresu, čeká, že ji tím opravil i v kartě osoby.
+               Zapisuje se jen to, co se opravdu liší a má kam jít. -->
+          <label
+            v-if="a1WritebackWritable.length > 0"
+            class="flex items-center gap-2 text-xs text-neutral-700"
+            :title="t('payroll.people.registration.a1.write_master_data_hint')"
+          >
+            <input
+              v-model="a1WriteMasterData"
+              type="checkbox"
+              class="rounded border-neutral-300"
+              :disabled="a1Busy"
+              data-test="registration-a1-write-master-data"
+            >
+            {{ t('payroll.people.registration.a1.write_master_data', {
+              count: a1WritebackWritable.length,
+            }) }}
+          </label>
           <button
             type="button"
             :class="btnOutline('neutral')"

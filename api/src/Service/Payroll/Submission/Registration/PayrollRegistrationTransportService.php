@@ -76,8 +76,13 @@ final readonly class PayrollRegistrationTransportService
             );
         }
         if ($context['status'] !== 'ready') {
+            // Výjimka zůstává: tohle je poslední brána před odesláním na ČSSZ.
+            // Druhé odeslání téhož podání by u ČSSZ založilo duplicitní
+            // přihlášku a vzít ji zpět už nejde.
             throw new \DomainException(
-                'Registrační podání už bylo odesláno; pokračujte dotazem na výsledek původního pokusu.',
+                'Registrační podání na ČSSZ už bylo odesláno, takže se '
+                . 'podruhé neodesílá. Jak podání ČSSZ vyřídila, zjistíte '
+                . 'v historii odeslání u téhož podání.',
             );
         }
         $outcome = $this->dispatch->send(
@@ -122,9 +127,13 @@ final readonly class PayrollRegistrationTransportService
     ): JmhzDispatchOutcome {
         $attempt = $this->attempt($supplierId, $environment, $attemptId);
         if (($attempt['status'] ?? null) !== 'awaiting_protocol') {
+            // Výjimka zůstává: dotaz na výsledek volá ČSSZ. U uzavřeného
+            // pokusu není nač se ptát a zbytečné volání jen zatěžuje bránu.
             throw new JmhzTransportException(
                 'registration_dispatch_poll_unavailable',
-                'Na výsledek se lze zeptat pouze u odeslaného podání, které čeká na protokol ČSSZ.',
+                'Odpověď ČSSZ se dá zjistit jen u odeslání, které na ni '
+                . 'teprve čeká. Tohle odeslání už je uzavřené — jak dopadlo, '
+                . 'najdete v historii odeslání.',
             );
         }
         $submissionId = (int) $attempt['submission_id'];
@@ -191,13 +200,33 @@ final readonly class PayrollRegistrationTransportService
     ): array {
         $submission = $this->submissions->findSubmission($supplierId, $submissionId);
         if ($submission === null) {
-            throw new \DomainException('Registrační podání nebylo nalezeno ve stejné firmě.');
+            // Výjimka zůstává: hranice mezi firmami. Podání cizí firmy se
+            // nesmí odeslat ani zobrazit, takže není co sbírat do seznamu
+            // nedostatků — chybí sám předmět operace.
+            throw new \DomainException(
+                'Registrační podání pod tímhle číslem u téhle firmy '
+                . 'neexistuje. Otevřete kartu zaměstnance znovu a odeslání '
+                . 'spusťte ze seznamu jejích podání.',
+            );
         }
         if ($submission['environment'] !== $environment) {
-            throw new \DomainException('Registrační podání patří jinému prostředí.');
+            // Výjimka zůstává: testovací a ostré prostředí ČSSZ jsou dvě různé
+            // identity. Odeslat testovací podání naostro je nevratná záměna.
+            throw new \DomainException(
+                'Registrační podání bylo připraveno pro jiné prostředí '
+                . '(testovací × ostré), než ze kterého se teď odesílá. '
+                . 'Přepněte prostředí zpět na to, ve kterém podání vzniklo.',
+            );
         }
         if ($statuses !== [] && !in_array($submission['status'], $statuses, true)) {
-            throw new \DomainException('Registrační podání není ve stavu vhodném pro tento krok přenosu.');
+            // Výjimka zůstává: dotaz na výsledek i uzavření pokusu mají smysl
+            // až po odeslání. Dřív by se volala ČSSZ nad podáním, o kterém
+            // ještě neví.
+            throw new \DomainException(
+                'Registrační podání zatím nebylo odesláno na ČSSZ, takže '
+                . 'u něj nejde zjišťovat ani uzavírat odpověď. Nejdřív '
+                . 'podání odešlete.',
+            );
         }
         $obligation = $this->submissions->findObligationOfSubmission(
             $supplierId,
@@ -205,11 +234,25 @@ final readonly class PayrollRegistrationTransportService
             $submissionId,
         );
         if ($obligation === null || $obligation['subject_type'] !== 'employment') {
-            throw new \DomainException('Podání není registrací pracovního vztahu.');
+            // Výjimka zůstává: poslední brána před odesláním. Poslat jiné
+            // podání registrační cestou znamená doručit ČSSZ dokument do
+            // špatné agendy.
+            throw new \DomainException(
+                'Tohle podání není přihláška ani odhláška zaměstnance '
+                . 'u ČSSZ, takže se touhle cestou odeslat nedá. Odešlete '
+                . 'podání z obrazovky Mzdy → Podání a hlášení, kde vzniklo.',
+            );
         }
         $agenda = $obligation['agenda_code'];
         if (!isset(self::DOCUMENTS[$agenda])) {
-            throw new \DomainException('Transport podporuje pouze registrační agendy PREZEC a REGZEC.');
+            // Výjimka zůstává: viz výš — cesta umí jen dva formuláře ČSSZ
+            // a cokoliv jiného by odešlo pod špatnou datovou větou.
+            throw new \DomainException(
+                'Touhle cestou lze odeslat jen přihlášky a odhlášky '
+                . 'zaměstnanců u ČSSZ (formuláře PREZEC a REGZEC). Tohle '
+                . 'podání patří do jiné agendy — odešlete je z obrazovky '
+                . 'Mzdy → Podání a hlášení.',
+            );
         }
 
         return [
@@ -235,8 +278,14 @@ final readonly class PayrollRegistrationTransportService
                 (string) ($attempt['request_sha256'] ?? ''),
             )
         ) {
+            // Výjimka zůstává: klíč pro opakování je jediná pojistka proti
+            // dvojímu odeslání. Kdyby prošel na cizí data, ČSSZ by dostala
+            // jiný dokument, než na který se účetní dívá.
             throw new \DomainException(
-                'Idempotentní klíč už patří jinému registračnímu podání nebo jiným zmrazeným datům.',
+                'Odeslání registračního podání se nedá zopakovat — pod '
+                . 'stejným požadavkem je už evidované jiné podání nebo jiná '
+                . 'data. Načtěte kartu zaměstnance znovu a odeslání spusťte '
+                . 'od začátku.',
             );
         }
     }
@@ -246,14 +295,35 @@ final readonly class PayrollRegistrationTransportService
     {
         $attempt = $this->attempts->find($supplierId, $environment, $attemptId);
         if ($attempt === null) {
+            // Výjimka zůstává: chybí sama entita, se kterou se má pracovat,
+            // a je to zároveň hranice mezi firmami.
             throw new JmhzTransportException(
                 'registration_dispatch_attempt_unknown',
-                'Pokus o odeslání registračního podání neexistuje.',
+                'Odeslání registračního podání pod tímhle číslem u téhle '
+                . 'firmy neexistuje. Otevřete historii odeslání znovu '
+                . 'a vyberte konkrétní odeslání z ní.',
                 404,
             );
         }
 
         return $attempt;
+    }
+
+    /**
+     * Druh podání do závorky na konec věty. Kód akce sám o sobě účetní nic
+     * neříká, takže se přeloží sdíleným slovníkem; nečitelnou hodnotu
+     * pojmenujeme jako chybějící, ať se nepředstírá akce číslo nula.
+     */
+    private function actionReference(string $agendaCode, string $action): string
+    {
+        if (preg_match('/^[0-9]+$/D', $action) !== 1) {
+            return ' (druh podání v datech chybí nebo je nečitelný)';
+        }
+
+        return ' (' . PayrollRegistrationFieldVocabulary::action(
+            $agendaCode,
+            (int) $action,
+        ) . ')';
     }
 
     /**
@@ -277,7 +347,15 @@ final readonly class PayrollRegistrationTransportService
             || $root->localName !== $document['root']
             || $root->namespaceURI !== $document['namespace']
         ) {
-            throw new \DomainException('Zmrazené XML neodpovídá agendě registračního podání.');
+            // Výjimka zůstává: poslední brána před odesláním. Poslat obsah,
+            // který neodpovídá ohlášenému formuláři, znamená jistou chybu
+            // na straně ČSSZ a zbytečně zablokované podání.
+            throw new \DomainException(
+                'Připravené podání neodpovídá formuláři, pod kterým je '
+                . 'vedené (očekává se formulář ' . $document['root'] . '). '
+                . 'Připravte registraci znovu z karty zaměstnance — v tomhle '
+                . 'stavu by ji ČSSZ odmítla.',
+            );
         }
         $xpath = new DOMXPath($dom);
         $xpath->registerNamespace('r', $document['namespace']);
@@ -285,7 +363,13 @@ final readonly class PayrollRegistrationTransportService
             '/r:' . $document['root'] . '/r:employees/r:employee',
         );
         if ($employees === false || $employees->length === 0) {
-            throw new \DomainException('Zmrazené XML registrace neobsahuje zaměstnance.');
+            // Výjimka zůstává: bez zaměstnance není co ČSSZ oznámit, takže
+            // odeslání nemá předmět.
+            throw new \DomainException(
+                'Připravené podání neobsahuje žádného zaměstnance, takže '
+                . 'není co ČSSZ odeslat. Připravte registraci znovu z karty '
+                . 'zaměstnance.',
+            );
         }
         foreach ($employees as $employee) {
             $action = $employee instanceof DOMElement
@@ -295,8 +379,16 @@ final readonly class PayrollRegistrationTransportService
                 || preg_match('/^[0-9]+$/D', $action) !== 1
                 || !in_array((int) $action, $document['actions'], true)
             ) {
+                // Výjimka zůstává: poslední brána před odesláním. Neschválený
+                // druh podání by u ČSSZ založil oznámení, které účetní
+                // nezadala a nemůže vzít zpět.
                 throw new \DomainException(
-                    'Transport podporuje pouze schválenou podporovanou akci PREZEC/REGZEC.',
+                    'Druh registračního podání není podporovaný pro '
+                    . 'odeslání na ČSSZ'
+                    . $this->actionReference($agendaCode, $action)
+                    . '. Připravte registraci znovu z karty zaměstnance; '
+                    . 'pokud se hláška vrátí, jde o chybu aplikace '
+                    . 'a odesílat se nesmí.',
                 );
             }
             if ($agendaCode === 'REGZEC25' && (int) $action === 1) {
@@ -308,6 +400,10 @@ final readonly class PayrollRegistrationTransportService
                         false,
                     );
                 } catch (PayrollRegistrationXmlException $exception) {
+                    // Text se záměrně nepřepisuje: business matice je jediné
+                    // místo, které ví, KTERÝ údaj variantě A1 chybí, a její
+                    // hláška ho jmenuje i s místem zadání. Vlastní obecnější
+                    // věta by informaci ubrala.
                     throw new \DomainException(
                         $exception->getMessage(),
                         0,
@@ -321,7 +417,14 @@ final readonly class PayrollRegistrationTransportService
             '/r:' . $document['root'] . '/r:employees/r:employee/r:comp/@vs',
         );
         if ($nodes === false) {
-            throw new \DomainException('Zmrazené XML registrace nelze zkontrolovat.');
+            // Výjimka zůstává: nezkontrolované podání se odeslat nesmí —
+            // právě tahle kontrola drží vazbu na variabilní symbol, pod
+            // kterým ČSSZ podání spáruje se zaměstnavatelem.
+            throw new \DomainException(
+                'Připravené podání se nepodařilo zkontrolovat, proto se '
+                . 'neodesílá. Připravte registraci znovu z karty '
+                . 'zaměstnance; pokud se hláška vrátí, jde o chybu aplikace.',
+            );
         }
         foreach ($nodes as $node) {
             $value = trim($node->nodeValue ?? '');
@@ -330,11 +433,45 @@ final readonly class PayrollRegistrationTransportService
             }
         }
         if (count($symbols) !== 1) {
-            throw new \DomainException('Registrační podání musí obsahovat právě jeden variabilní symbol zaměstnavatele.');
+            // Výjimka zůstává: poslední brána před odesláním. Pod nejasným
+            // variabilním symbolem by ČSSZ přiřadila zaměstnance jinému
+            // zaměstnavateli, nebo podání odmítla.
+            throw new \DomainException(
+                PayrollRegistrationFieldVocabulary::label(
+                    'employer_variable_symbol',
+                )
+                . ' musí být v celém podání jediný, ale připravené podání '
+                . 'jich obsahuje víc, nebo žádný. '
+                . PayrollRegistrationFieldVocabulary::describe(
+                    'employer_variable_symbol',
+                )
+                . ' Potom registraci připravte znovu'
+                . PayrollRegistrationFieldVocabulary::reference(
+                    'employer_variable_symbol',
+                )
+                . '.',
+            );
         }
         $variableSymbol = (string) array_key_first($symbols);
         if (preg_match('/^[0-9]{10}$/D', $variableSymbol) !== 1) {
-            throw new \DomainException('Variabilní symbol registračního podání musí mít deset číslic.');
+            // Výjimka zůstává: poslední brána před odesláním. ČSSZ přijímá
+            // desetimístný variabilní symbol; jiný tvar je jistý odmítnutý
+            // dokument.
+            throw new \DomainException(
+                PayrollRegistrationFieldVocabulary::label(
+                    'employer_variable_symbol',
+                )
+                . ' musí mít přesně deset číslic, ale v připraveném podání '
+                . "je „{$variableSymbol}\". "
+                . PayrollRegistrationFieldVocabulary::describe(
+                    'employer_variable_symbol',
+                )
+                . ' Potom registraci připravte znovu'
+                . PayrollRegistrationFieldVocabulary::reference(
+                    'employer_variable_symbol',
+                )
+                . '.',
+            );
         }
 
         return [

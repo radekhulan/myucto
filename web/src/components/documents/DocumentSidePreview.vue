@@ -9,10 +9,11 @@
  * `sticky` + vlastní výška podle výřezu: doklad bývá delší než náhled, takže při
  * scrollování řádků musí originál zůstat vidět, jinak je náhled vedle k ničemu.
  */
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
-defineProps<{
+const props = defineProps<{
   /** URL náhledu — musí být inline varianta, jinak prohlížeč embed zablokuje. */
   src: string
   /** Jméno souboru do hlavičky a do `title` iframu. */
@@ -22,13 +23,27 @@ defineProps<{
 defineEmits<{ (e: 'close'): void }>()
 
 const { t } = useI18n()
+
+/**
+ * `#view=FitH` říká prohlížečové čtečce, ať stránku roztáhne na šířku rámu.
+ *
+ * Why: bez toho si čtečka drží výchozí zoom, takže se doklad vykreslil zhruba
+ * na půl šířky sloupce a zbytek zabrala její šedá plocha — náhled vedle
+ * dokladu pak byl menší než ten pod ním, přesně naopak, než k čemu je.
+ *
+ * Fragment se přidává jen když si ho URL nenese sama; vlastní fragment
+ * (třeba `#page=3`) má přednost, protože ho tam někdo dal schválně.
+ */
+const framedSrc = computed(
+  () => props.src.includes('#') ? props.src : `${props.src}#view=FitH`,
+)
 </script>
 
 <template>
   <aside
     data-test="document-side-preview"
     :aria-label="t('common.preview_side_title')"
-    class="shrink-0 grow-0 basis-[38%] min-w-[22rem] max-w-[34rem] flex flex-col overflow-hidden
+    class="shrink-0 grow-0 basis-[46%] min-w-[26rem] max-w-[56rem] flex flex-col overflow-hidden
            bg-surface border border-neutral-200 rounded-lg shadow-sm
            sticky top-[calc(var(--instance-alert-h,0px)+3.5rem)]
            h-[calc(100vh-var(--instance-alert-h,0px)-5rem)]"
@@ -52,7 +67,7 @@ const { t } = useI18n()
       </button>
     </div>
     <iframe
-      :src="src"
+      :src="framedSrc"
       class="flex-1 w-full border-0 bg-neutral-100"
       :title="fileName || t('common.preview_side_title')"
     ></iframe>

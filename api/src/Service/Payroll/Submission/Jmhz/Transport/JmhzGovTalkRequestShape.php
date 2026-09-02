@@ -18,6 +18,17 @@ final readonly class JmhzGovTalkRequestShape
 {
     private const TOKEN = '/^[A-Za-z][A-Za-z0-9._-]{0,63}$/D';
 
+    /**
+     * GovTalk `Class` → `Message/@eType` vnořené ČSSZ obálky. Zdroj je
+     * `CSSZSubmClasses.pdf`, sloupec „Envelope 1.2 eType". Viz
+     * {@see forSubmissionClass()}, kde je i důvod, proč to nesmí být konstanta.
+     */
+    private const ENVELOPE_TYPES = [
+        'CSSZ_JMHZ' => 'JMHZ25',
+        'CSSZ_REGZEC' => 'REGZEC25',
+        'CSSZ_PREZEC' => 'PREZEC26',
+    ];
+
     public function __construct(
         public string $submitQualifier,
         public string $pollQualifier,
@@ -81,6 +92,38 @@ final readonly class JmhzGovTalkRequestShape
      */
     public static function documented(): self
     {
+        return self::forSubmissionClass('CSSZ_JMHZ');
+    }
+
+    /**
+     * `eType` NENÍ pro všechny agendy stejné.
+     *
+     * `CSSZSubmClasses.pdf` (`private/Mzdy/podklady/`) má pro každý tiskopis
+     * vlastní řádek a sloupec „Envelope 1.2 eType" v něm nese NÁZEV FORMULÁŘE,
+     * ne druh GovTalk třídy:
+     *
+     * | Form | GOVTALK CLASS | Envelope 1.2 eType |
+     * |---|---|---|
+     * | JMHZ25 | `CSSZ_JMHZ` | `JMHZ25` |
+     * | REGZEC25 | `CSSZ_REGZEC` | `REGZEC25` |
+     * | PREZEC26 | `CSSZ_PREZEC` | `PREZEC26` |
+     *
+     * Dokud tenhle výběr nebyl, stavěla se obálka registračního podání pořád
+     * přes `documented()`, takže na VREP odcházelo `Class="CSSZ_REGZEC"` s tělem
+     * označeným `eType="JMHZ25"`. Hlavička a obsah si tím protiřečí a ČSSZ
+     * takové podání nemá jak zpracovat — přitom lokální XSD i katalog kontrol
+     * projdou, protože ani jedno na obálku nedosáhne.
+     */
+    public static function forSubmissionClass(string $submissionClass): self
+    {
+        $envelopeType = self::ENVELOPE_TYPES[$submissionClass] ?? null;
+        if ($envelopeType === null) {
+            throw new JmhzTransportException(
+                'jmhz_govtalk_envelope_type_unknown',
+                'Pro tenhle druh podání není doložený `eType` ČSSZ obálky.',
+            );
+        }
+
         return new self(
             submitQualifier: 'request',
             pollQualifier: 'poll',
@@ -88,9 +131,21 @@ final readonly class JmhzGovTalkRequestShape
             closeFunction: 'delete',
             variableSymbolKeyType: 'vars',
             bodyEnvelopeVersion: '1.2',
-            bodyEnvelopeType: 'JMHZ25',
+            bodyEnvelopeType: $envelopeType,
             sourceReference: 'CSSZ Podavaci a dotazovaci protokol v1.7 (11. 2. 2025),'
                 . ' kap. Struktura zpravy; CSSZSubmClasses.pdf',
         );
+    }
+
+    /** Doložený `eType` ČSSZ obálky pro `Class`, viz {@see forSubmissionClass()}. */
+    public static function envelopeTypeFor(string $submissionClass): ?string
+    {
+        return self::ENVELOPE_TYPES[$submissionClass] ?? null;
+    }
+
+    /** Je `eType` jedna z doložených agend? Rozhoduje, jestli má smysl hlídat záměnu. */
+    public static function isCatalogEnvelopeType(string $envelopeType): bool
+    {
+        return in_array($envelopeType, self::ENVELOPE_TYPES, true);
     }
 }
