@@ -1090,8 +1090,18 @@ final class PayrollPersonProfileRepository
                 default => false,
             };
             if (!$valid) {
+                /*
+                 * U zápočtu je pravidlo opačné než u ostatních způsobů: nesmí
+                 * odejít nic. Věta o „přesně 100 %" by tam poslala uživatele
+                 * dorovnávat podíl, který má být naopak nulový — přesně na tom
+                 * se uložení zasekávalo.
+                 */
                 throw new \InvalidArgumentException(
-                    "Rozdělení výplaty není k {$boundary} přesně 100 %."
+                    $method === PayrollPartnerSettlement::KIND
+                        ? "Zápočtem se čistá mzda nevyplácí, takže k {$boundary} "
+                            . 'musí být podíl hotovosti i bankovní cíle nulové. '
+                            . 'Vynulujte je, nebo zvolte jiný způsob výplaty.'
+                        : "Rozdělení výplaty není k {$boundary} přesně 100 %."
                 );
             }
         }

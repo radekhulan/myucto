@@ -188,6 +188,17 @@ async function mountedPanel() {
   return wrapper
 }
 
+/** Přepne způsob výplaty na zápočet přes samotnou komponentu výběru. */
+async function selectPartnerSettlement(
+  wrapper: Awaited<ReturnType<typeof mountedPanel>>,
+): Promise<void> {
+  const select = wrapper.findAllComponents({ name: 'SearchableSelect' })
+    .find(component => component.attributes('data-test') === 'payout-method')
+  if (select === undefined) throw new Error('Výběr způsobu výplaty nebyl nalezen.')
+  select.vm.$emit('update:modelValue', 'partner_settlement')
+  await flushPromises()
+}
+
 async function openPayout(wrapper: Awaited<ReturnType<typeof mountedPanel>>) {
   const button = wrapper.findAll('button').find(item =>
     item.text().includes('payroll.people.profile.tabs.payout'),
@@ -356,6 +367,37 @@ describe('PayrollPersonProfilePanel', () => {
     const filled = wrapper.findAll('button')
       .filter(button => button.classes().includes('bg-primary-600'))
     expect(filled).toHaveLength(1)
+  })
+
+  /**
+   * U zápočtu se čistá mzda nevyplácí, jen přeúčtuje. Server proto vyžaduje
+   * nulový podíl hotovosti — formulář v něm ale nechával výchozích 10000
+   * a uložení padalo na „rozdělení není přesně 100 %". Z hlášky přitom nešlo
+   * poznat, že se má podíl naopak vynulovat.
+   */
+  it('u zápočtu vynuluje podíl hotovosti a nenabízí ho k vyplnění', async () => {
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+    // Než se přepne způsob výplaty, pole na podíl hotovosti existuje.
+    expect(wrapper.find('[data-test="cash-allocation"]').exists()).toBe(true)
+
+    await selectPartnerSettlement(wrapper)
+
+    // Není co rozdělovat, takže se pole nenabízí a místo něj stojí důvod.
+    expect(wrapper.find('[data-test="cash-allocation"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.people.profile.cash_allocation_settlement')
+  })
+
+  /** Účet zápočtu se opisoval ručně; osnovu má nabídnout aplikace. */
+  it('nabízí účet zápočtu z účtové osnovy', async () => {
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+    await selectPartnerSettlement(wrapper)
+
+    const input = wrapper.get('[data-test="partner-settlement-account"]')
+    const listId = input.attributes('list')
+    expect(listId).toBeTruthy()
+    expect(wrapper.find(`datalist#${listId}`).exists()).toBe(true)
   })
 
   it('pošle nový plaintext jen v PUT payloadu a po uložení input vyčistí', async () => {
