@@ -88,6 +88,47 @@ describe('JmhzEmployerAnnualEvidenceSettings', () => {
     expect(m.success).toHaveBeenCalled()
   })
 
+  it('prázdný formulář pojmenuje chybějící pole, tlačítko nezašedne', async () => {
+    const wrapper = mount(JmhzEmployerAnnualEvidenceSettings, {
+      props: { canWrite: true },
+    })
+    await flushPromises()
+
+    // Zašedlé tlačítko bez věty byla slepá ulička: čtyři pole, žádná stopa
+    // po tom, které z nich chybí.
+    expect(wrapper.get('[data-test="jmhz-employer-annual-save"]').attributes('disabled'))
+      .toBeUndefined()
+
+    await wrapper.get('[data-test="jmhz-employer-annual-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.save).not.toHaveBeenCalled()
+    const problems = wrapper.get('[data-test="jmhz-annual-validation"]')
+      .findAll('li').map(node => node.text())
+    expect(problems).toEqual([
+      'payroll.employer.jmhz_annual.validation.collective_types',
+      'payroll.employer.jmhz_annual.validation.ownership',
+      'payroll.employer.jmhz_annual.validation.average_headcount',
+      'payroll.employer.jmhz_annual.validation.average_disabled_headcount',
+    ])
+  })
+
+  it('selhané načtení nabídne opakování, ne prázdnou sekci', async () => {
+    m.load.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mount(JmhzEmployerAnnualEvidenceSettings, {
+      props: { canWrite: true },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="jmhz-annual-load-failed"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="jmhz-annual-load-failed"] button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="jmhz-annual-load-failed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="jmhz-annual-ownership"]').exists()).toBe(true)
+  })
+
   it('v režimu jen pro čtení nedovolí vytvořit revizi', async () => {
     const wrapper = mount(JmhzEmployerAnnualEvidenceSettings, {
       props: { canWrite: false },

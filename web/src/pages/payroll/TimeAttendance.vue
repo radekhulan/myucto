@@ -303,6 +303,11 @@ const approvalBlockedReason = computed<string | null>(() => {
   if (!approvalConditionalComplete.value) {
     return t('payroll.time.jmhz.conditional_missing')
   }
+  // Nálezy ze serveru tlačítko zamykaly taky, ale věta pod ním o nich mlčela:
+  // účetní vyplnila všechna pole, tlačítko zůstalo šedé a nic neřeklo proč.
+  // Seznam nálezů stojí kousek nad tlačítkem, takže stačí na něj ukázat.
+  const issues = approvalItem.value?.jmhz_work_summary.preview?.issues.length ?? 0
+  if (issues > 0) return t('payroll.time.jmhz.issues_blocked', { count: issues })
   return null
 })
 
@@ -1215,7 +1220,10 @@ async function approveSelected() {
   }
   approveFailures.value = failures
   if (approved > 0) toast.success(t('payroll.time.bulk.approved', { count: approved }))
-  bulkApprovalOpen.value = false
+  // Dialog se zavírá jen tehdy, když opravdu všechno prošlo. Když neprošlo nic,
+  // zavření vzalo s sebou i ručně přepsaný zákonný fond a poznámku — účetní je
+  // po znovuotevření psala celé znovu, aby narazila na tutéž chybu.
+  if (failures.length === 0) bulkApprovalOpen.value = false
   await load()
   saving.value = false
 }
@@ -2601,7 +2609,7 @@ onMounted(() => {
             <button
               type="submit"
               :class="btnFilled('success')"
-              :disabled="saving || approvalBlockedReason !== null || Boolean(approvalItem.jmhz_work_summary.preview?.issues.length)"
+              :disabled="saving || approvalBlockedReason !== null"
               :title="disabledTitle(approvalBlockedReason !== null, approvalBlockedReason)"
               data-test="jmhz-confirm"
             >
@@ -3009,10 +3017,21 @@ onMounted(() => {
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
               {{ t('common.cancel') }}
             </button>
-            <button type="submit" :class="btnFilled('warning')" :disabled="saving || !reopenReason.trim()">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>
-              {{ t('payroll.time.reopen') }}
-            </button>
+            <div class="flex flex-col items-end gap-1.5">
+              <button
+                type="submit"
+                :class="btnFilled('warning')"
+                :disabled="saving || !reopenReason.trim()"
+                :title="disabledTitle(!reopenReason.trim(), t('payroll.time.reopen_reason_required'))"
+                data-test="reopen-confirm"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>
+                {{ t('payroll.time.reopen') }}
+              </button>
+              <p v-if="!reopenReason.trim()" :class="BTN_DISABLED_NOTE" data-test="reopen-blocked">
+                {{ t('payroll.time.reopen_reason_required') }}
+              </p>
+            </div>
           </div>
         </form>
       </div>

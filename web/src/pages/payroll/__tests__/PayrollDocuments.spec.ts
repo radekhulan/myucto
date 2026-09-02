@@ -39,6 +39,12 @@ vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-router')>()),
   useRoute: () => ({ query: m.routeQuery }),
   useRouter: () => ({ replace: m.routerReplace }),
+  // Stránka odkazuje na mzdové běhy. Bez routeru by `RouterLink` sáhl na
+  // neexistující `router.resolve`, takže se nahrazuje kotvou s cílem v atributu.
+  RouterLink: {
+    props: ['to'],
+    template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
+  },
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -708,6 +714,12 @@ describe('PayrollDocuments', () => {
     expect(m.generateTaxCertificate).not.toHaveBeenCalled()
     expect(wrapper.find('[data-test="tax-certificate-correction"]').exists()).toBe(true)
 
+    // Ve větě musí stát číslo revize dokumentu (2), ne primární klíč z databáze
+    // (77). Účetní podle id nic nedohledá — v tabulce ani v PDF nestojí.
+    const hint = wrapper.get('[data-test="tax-certificate-correction"]').text()
+    expect(hint).toContain('"document":2')
+    expect(hint).not.toContain('"document":77')
+
     await wrapper.get('[data-test="submit-tax-certificate-correction"]').trigger('submit')
     expect(m.toastError).toHaveBeenCalledWith(
       'payroll.documents.correction_reason_required',
@@ -1095,6 +1107,28 @@ describe('PayrollDocuments', () => {
 
     expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('payroll.documents.empty_description')
+  })
+
+  /*
+   * „Za období zatím není schválená revize." říkalo, co chybí, ne kde to
+   * vzniká. Revize se schvaluje jedině v mzdových bězích, takže tam musí vést
+   * odkaz — jinak se účetní proklikává menu a trefí jiné období.
+   */
+  it('u chybějící revize nabídne cestu do mzdových běhů, ne jen konstatování', async () => {
+    m.listDocuments.mockResolvedValue({
+      period: '2026-07',
+      revisions: [],
+      items: [],
+      total: 0,
+    })
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    const link = wrapper.get('[data-test="revision-unavailable-link"]')
+    expect(JSON.parse(link.attributes('data-to') ?? '{}')).toMatchObject({
+      name: 'payroll-runs',
+    })
   })
 
   /*

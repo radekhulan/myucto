@@ -956,6 +956,34 @@ describe('EmploymentCard', () => {
     })
   })
 
+  /**
+   * Obecné „nepovedlo se" bylo slepá ulička: účetní nevěděla, co má změnit, a
+   * tiskla totéž tlačítko znovu. Server překážku pojmenuje — musí být vidět.
+   */
+  it('u odmítnuté změny stavu ukáže důvod ze serveru, ne obecné nepovedlo se', async () => {
+    toastMocks.error.mockClear()
+    vi.mocked(payrollApi.transitionEmployment).mockRejectedValue({
+      response: {
+        data: {
+          error: {
+            code: 'payroll_employment_in_run',
+            message: 'Vztah je zahrnutý v uzavřeném mzdovém běhu 8/2026.',
+          },
+        },
+      },
+    })
+
+    const wrapper = await mountCard(employment(), {
+      props: { employment: employment(), canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+    await wrapper.get('[data-test="action-confirm-start"]').trigger('click')
+    await flushPromises()
+
+    expect(toastMocks.error)
+      .toHaveBeenCalledWith('Vztah je zahrnutý v uzavřeném mzdovém běhu 8/2026.')
+  })
+
   it('u nástupu v budoucnu nabídne předregistraci, ne potvrzení', async () => {
     const future = employment()
     future.start_date = '2099-01-01'

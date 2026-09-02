@@ -1270,6 +1270,7 @@
       },
       "materialize_blocked": "Liabilities are created from an approved payroll run revision. Approve the revision for this period in Payroll runs first.",
       "materialize_blocked_unknown": "We cannot tell whether there is anything to prepare — the payroll runs for this period failed to load. Please try again.",
+      "materialize_blocked_link": "Open payroll runs",
       "load_failed_hint": "The liabilities for this period did not load, so the list below may be incomplete or stale. Please try again."
     },
     "posting_reconciliation": {
@@ -1432,7 +1433,9 @@
         "open_remediation": "Open the place to fix",
         "draft_inputs_approve_all": "Approve all",
         "draft_inputs_approved": "Approved {count} payroll inputs.",
-        "draft_inputs_approve_partial": "Approved {approved} inputs, {failed} not. First reason: {reason}",
+        "draft_inputs_approve_partial": "Approved {approved} inputs, {failed} not. The reasons are listed at the run.",
+        "draft_inputs_failed_title": "The batch did not approve these inputs:",
+        "draft_inputs_failed_row": "{count}× {reason}",
         "draft_inputs_approve_failed": "Payroll inputs could not be approved in bulk."
       },
       "override": {
@@ -1955,6 +1958,7 @@
       "load_failed": "Payroll components and inputs could not be loaded.",
       "save_failed": "The change could not be saved.",
       "validation_failed": "Check required fields and amount formats.",
+      "validation_field": "Check the “{field}” field. The pay component cannot be saved without it.",
       "no_results": "No matching option",
       "account_placeholder": "Select an account by code or name",
       "active": "Active",
@@ -2351,6 +2355,7 @@
       "tax_certificate_hint": "A certificate is created only from a supported official form, approved payroll, complete statutory evidence and actual payments proven no later than 31 January of the following year.",
       "correction_title": "Corrected tax certificate",
       "correction_hint": "The new certificate will correct document no. {document}, created {created}. The original PDF remains archived and the correction reason is printed in the appendix.",
+      "correction_hint_unnumbered": "The new certificate will correct the last issued certificate from {created}. The original PDF remains archived and the correction reason is printed in the appendix.",
       "correction_reason": "Specific correction reason",
       "correction_reason_placeholder": "Describe which value was incorrect and why the certificate is being corrected…",
       "correction_reason_required": "Enter a specific correction reason before issuing the corrected certificate.",
@@ -2371,6 +2376,7 @@
       "document_revision": "Document revision",
       "approved_revisions": "Approved period revisions: {count}",
       "revision_unavailable": "There is no approved revision for this period yet.",
+      "revision_unavailable_link": "Open payroll runs",
       "employee": "Employee",
       "office": "Payroll office",
       "document": "Document",
@@ -2611,7 +2617,10 @@
         "ruleset_year_not_covered": "We have no effective tax rules covering the whole of this year, so annual amounts cannot be derived.",
         "tax_year_not_finished": "The tax year has not ended yet. The annual settlement can only be performed from 1 January of the following year.",
         "taxpayer_credit_evidence_missing": "The employee has signed the taxpayer declaration, but the basic taxpayer credit is missing from their claim records. Add it on the employee card — without it the settlement would compute the tax without the annual credit."
-      }
+      },
+      "settle_read_only": "Only a user allowed to approve payroll can perform the settlement.",
+      "settle_unavailable": "The settlement preview did not go through. Reload it or check the employee's documents.",
+      "save_request_read_only": "Only a user allowed to write payroll documents can change these records."
     },
     "time": {
       "title": "Time and shifts",
@@ -2632,6 +2641,7 @@
       "reopen_reason": "Reason for correcting the approved month",
       "reopened": "The month was reopened with an audit trail.",
       "reopen_failed": "The month could not be reopened.",
+      "reopen_reason_required": "Fill in the correction reason. It is written into the month audit trail.",
       "jmhz": {
         "title": "Confirm JMHZ work summary",
         "hint": "The figures are prefilled from the records. Check them and confirm — the app does not round or infer them.",
@@ -2655,6 +2665,7 @@
         "employer_obstacle": "Employer-side obstacles",
         "required_missing": "Fill in “{field}” — without it the working-time summary cannot be created.",
         "conditional_missing": "Answer both questions above.",
+        "issues_blocked": "Resolve the issues listed above first. The working-time summary cannot be saved with them.",
         "as_agreed": "Worked exactly the prescribed fund",
         "as_agreed_hint": "Not tracking attendance for this relationship? The button fills worked hours as the agreed fund and answers “no” to both questions below.",
         "unworked_question": "Were there unworked hours this month?",
@@ -3135,7 +3146,6 @@
         "advanced_hint": "All addresses, contacts, identifiers (birth number, ECP, VCP, foreign), payout accounts and historical versions.",
         "change_reason_default": "Quick edit of common employee details",
         "name_required": "Enter both the employee's first and last name.",
-        "structured_history_required": "Older history contains an unstructured display name. Complete it manually in the full personal record; the system will not split it automatically.",
         "address_complete_required": "To change the residence, complete the street, city, postal code and country.",
         "gross_invalid": "Regular gross salary must be a non-negative amount with at most two decimal places.",
         "employment_unavailable": "The employee has no active primary employment relationship whose employment details can be changed.",
@@ -3485,7 +3495,10 @@
         "saved": "The JMHZ identifiers were stored securely.",
         "load_failed": "The JMHZ identifiers could not be loaded.",
         "save_failed": "The JMHZ identifiers could not be saved.",
-        "start_date_missing": "Enter the employment start date first.",
+        "start_date_missing": "Enter the employment start date first — it is higher up on this card, in the relation terms.",
+        "identifier_required": "Enter the person's OIČ or the relation's ID PPV. Whichever you already have from ČSSZ is enough.",
+        "valid_from_required": "Fill in the date the identifier is valid from.",
+        "confirm_required": "Tick the confirmation that the values match the ČSSZ record.",
         "permission_required": "Saving requires permission to edit both the person and the employment."
       },
       "openings": {
@@ -3723,6 +3736,7 @@
         "document_search_placeholder": "Search document title…",
         "document_clear": "Change",
         "document_hint": "Search for an active company document in Documents. The server rejects personal, other-tenant or deleted documents.",
+        "document_open_dms": "Open Documents",
         "document_required": "Select an active company DMS document.",
         "document_search_failed": "Documents could not be searched.",
         "open_document": "Open evidence",
@@ -3917,6 +3931,18 @@
         "pension_insurance_periods": "Pension insurance periods",
         "pension_insurance_hint": "List the pension insurance periods within this relationship. Add no row when there are none.",
         "requested_purpose": "Purpose the employee requested the certificate for",
+        "blocked": {
+          "work_description": "Fill in the type of work performed — Labour Code § 313(1)(b) requires it on the certificate.",
+          "qualification": "Fill in the qualification achieved — Labour Code § 313(1)(b) requires it on the certificate.",
+          "exposure": "Confirm that you assessed work under risk factors.",
+          "deduction_evidence": "For every deduction fill in the beneficiary, the ordering authority and the decision reference.",
+          "deduction": "Confirm that you assessed the wage deductions.",
+          "pension_periods": "Every period needs a start and an end, and the end cannot precede the start.",
+          "pension_category": "Confirm that you assessed the pre-1993 work categories.",
+          "termination": "Confirm that you assessed how the relationship ended.",
+          "requested_purpose": "State the purpose the employee requested the certificate for.",
+          "correction_reason": "This document already exists. Write the reason for the correction so the revision stays traceable."
+        },
         "termination_reasons": {
           "none": "The relationship ended for none of the special reasons",
           "gross_breach": "Particularly gross breach of duties by the employee",
@@ -4064,13 +4090,21 @@
           "show": "Complete profile",
           "hide": "Close profile",
           "warning": "Prefilled values come from the person's and the employment's master data; each one states its source. Saving creates a new version of the snapshot and never changes the person or employment record.",
-          "save": "Save verified version",
+          "save": "Save",
+          "saved_draft": "Version {version} was stored as a draft. {count} items still block filing — they are marked red at the fields and listed above.",
+          "check": "Check",
+          "check_complete": "The check passed — the profile is complete and ready to file from.",
+          "check_incomplete": "The check found {count} items. They are marked red at the fields, with a summary above.",
+          "check_failed": "The check could not be run.",
+          "problems_title": "What blocks filing ({count})",
+          "problems_hint": "You can still save — the draft stays on the server. Filing becomes possible once this list is empty.",
+          "gap_open": "Open where it is entered →",
+          "gap_here": "entered here",
           "saved": "Version {version} was stored and is ready for a new A1 preview.",
           "load_failed": "The REGZEC A1 profile could not be loaded.",
           "save_failed": "The REGZEC A1 profile could not be saved.",
           "error_title": "Nothing was saved — the server state is unchanged",
           "error_kept": "Your values stay in the form and are backed up in this browser, so you keep them even after closing the card or reloading the page.",
-          "error_person_hint": "The missing value is not entered here — it comes from the person's records. Add it on the person card under “Employee registration details” and “Address history”, then come back.",
           "error_person_link": "Open the person card",
           "error_above": "Nothing was saved. The red box at the top says what is missing and where to add it.",
           "draft_title": "You have an unsaved profile here",
@@ -4083,6 +4117,9 @@
           "diverged_title": "The snapshot has drifted from master data",
           "diverged_hint": "The snapshot never updates itself — it evidences the state as of the registration date. Save a new version only when it should replace that evidence.",
           "diverged_pair": "snapshot {stored}, master data {suggested}",
+          "permanent_address_hint": "Mandatory address. It comes from the person card (Address history); the application does not track the house number, so copy it from your records.",
+          "czech_residence_hint": "Optional — fill it in only when the residence in Czechia differs from the permanent address. It is mandatory for a person whose permanent address is outside Czechia, unless they are a cross-border worker (AT, DE, PL, SK). The country is prefilled to Czechia.",
+          "contact_address_hint": "Optional — fill it in only when it differs from the permanent address.",
           "unset": "— not set —",
           "reset": "Restore the master-data suggestion",
           "stored_version": "Stored version {version}.",
@@ -4119,7 +4156,8 @@
             "country_code": "Country of tax residency",
             "identifier_type": "Tax identifier type",
             "identifier": "Tax identifier",
-            "residence_address": "Provide the residence address in the country of residency"
+            "residence_address": "Provide the residence address in the country of residency",
+            "residence_address_hint": "Optional for a Czech tax resident. For a tax resident of another country it is mandatory — enter the residence address in that country, not the stay in Czechia."
           },
           "employment": {
             "activity_code": "Activity type",
@@ -4297,7 +4335,12 @@
         "conflict_title": "Someone else changed this assignment in the meantime",
         "reload_current": "Reload current state",
         "new_title": "New dimension assignment",
-        "edit_title": "Edit dimension assignment"
+        "edit_title": "Edit dimension assignment",
+        "dimension_required": "Pick the dimension you want to assign to this relation.",
+        "valid_from_required": "Fill in the date the assignment starts on.",
+        "valid_to_invalid": "The end of validity cannot precede its start.",
+        "none_available": "This company has no effective payroll dimension yet.",
+        "open_settings": "Create dimensions in payroll settings"
       },
       "surcharge_policy": {
         "title": "Statutory surcharge policy (Sections 114–118)",
@@ -5309,7 +5352,8 @@
         "confirmation_required": "Confirm the complete REGZEL evidence before saving.",
         "confirmed_at": "Last confirmed",
         "version": "Evidence version",
-        "read_only": "The REGZEL profile is read-only."
+        "read_only": "The REGZEL profile is read-only.",
+        "validation_title": "Fix before saving:"
       },
       "prepare": {
         "title": "Prepare supplemental information",
@@ -5415,7 +5459,14 @@
         "office": "Payroll office for the disabled-employee summary",
         "all_offices": "All registered payroll offices",
         "office_hint": "With no selection, the December JMHZ includes the disabled-employee section for every registered office; select one to limit it.",
-        "reference": "Approved annual source reference (optional)"
+        "reference": "Approved annual source reference (optional)",
+        "validation": {
+          "title": "Fill in before saving:",
+          "collective_types": "Select at least one collective agreement type.",
+          "ownership": "Select the ownership form.",
+          "average_headcount": "Enter the average recalculated headcount, for example 12.50.",
+          "average_disabled_headcount": "Enter the average recalculated headcount of employees with a disability. Enter 0 if you have none."
+        }
       },
       "policies": {
         "title": "Employer policies",
@@ -5529,7 +5580,16 @@
             "ok": "The tenant JMHZ activation source is verified.",
             "blocked": "A verifiable tenant JMHZ activation source is missing."
           }
-        }
+        },
+        "validation_fields": {
+          "valid_from": "Enter the date the policy starts on.",
+          "valid_to": "The end of validity must be the same as or later than the start.",
+          "payday_day": "The payday must be a number from 1 to 31.",
+          "leave_entitlement_weeks": "Leave entitlement must be 4 to 12 weeks; four weeks is the statutory minimum.",
+          "source_reference": "The source reference may be at most 255 characters long.",
+          "delivery_verified_on": "The delivery channel verification date is not a valid date."
+        },
+        "delivery_verified_on_hint": "Optional. Until you fill the date in, the policy saves, but payslips will not be sent through this channel."
       },
       "health_accounts": {
         "title": "Institution payment accounts",
@@ -5628,6 +5688,12 @@
           "retry": "Try again",
           "provenance": "{annex} of decree No. {decree}; rates as amended by {rates_source}, effective {rates_effective_from}. The minimum premium per calendar quarter is CZK {minimum}.",
           "source_link": "Full text of the decree"
+        },
+        "validation": {
+          "title": "The rate cannot be added yet:",
+          "institution_code": "Enter the code of the insurer the accident insurance is arranged with.",
+          "rate_per_mille": "Enter the per mille rate as a number greater than zero, for example 5.6.",
+          "effective_from": "Enter the date the rate applies from."
         }
       },
       "accounting_title": "Automatic posting",
@@ -5675,7 +5741,8 @@
         "account_invalid_format": "The account code has an invalid format.",
         "account_not_found": "The account is not in the chart of accounts.",
         "account_inactive": "The account is inactive.",
-        "account_wrong_type": "Select {type}."
+        "account_wrong_type": "Select {type}.",
+        "registration_variable_symbol": "The social security variable symbol must have exactly ten digits."
       },
       "read_only": "You have read-only access. The Payroll settings permission is required to make changes.",
       "discard": "Discard changes",
@@ -5743,7 +5810,8 @@
         "non_deductible_benefit": "The tax-exempt part of a non-cash benefit (recreation, sport, culture, health care, printed books). Under Section 25(1)(h) of the Income Tax Act it is precisely the EXEMPT part that is non-deductible; the part above the cap is taxed at the employee and stays deductible. Account 528 flows automatically into non-deductible expenses in the corporate income tax return.",
         "travel_expense": "A travel allowance reimburses an expense under Part Seven of the Labour Code; it is not remuneration for work and does not belong in wage expenses. The contra account stays the payable account of the employment relationship, because the allowance is paid together with the wage.",
         "enforcement_deductions": "Deductions ordered by a court, a bailiff or an insolvency administrator. Kept apart from other deductions because they carry a claim ranking and go to a different recipient than voluntary deductions — on a shared account the two balances merge and cannot be traced."
-      }
+      },
+      "registration_source_reference_hint": "Optional. A reference to the notice or decision you copied the variable symbol from."
     },
     "status": {
       "disabled": "Inactive",
@@ -6114,7 +6182,9 @@
       "validation": {
         "amount": "Enter an amount in CZK with at most two decimals.",
         "percent": "Enter a percentage between 0 and 100.",
-        "employee": "Select the employee the agreement belongs to."
+        "employee": "Select the employee the agreement belongs to.",
+        "title": "Fill in the agreement name — the deduction appears under it on the payslip.",
+        "read_only": "You only have read access to payroll inputs, so you cannot save the agreement."
       },
       "kinds": {
         "advance": "Advance",
@@ -6181,6 +6251,13 @@
       "document_permission": "Selecting a decision requires permission to read Documents.",
       "document_search_failed": "The decision could not be found in Documents.",
       "court_amount": "Court-determined amount (CZK)",
+      "court_amount_hint": "Optional — you can fill it in later. This mode is calculated manually anyway.",
+      "blocked": {
+        "read_only": "You only have read access to debt relief, so you cannot save it.",
+        "employment": "Pick the employment the deduction comes from — the debt relief payment instruction cannot be created without it.",
+        "account": "Pick a verified CZK account of the insolvency administrator. You add one in Payroll settings.",
+        "document": "Find the debt relief approval decision in Documents; the payment instruction cannot be evidenced without it."
+      },
       "instruction_bound": "The record is bound to immutable payment instruction #{id}.",
       "explicit_cancel_required": "An approved instruction cannot be cancelled by changing the mode. Use the separate Cancel approved debt relief button.",
       "cancel": "Cancel approved debt relief",
@@ -6233,6 +6310,8 @@
       "add_period": "Add period",
       "preview": "Prepare response preview",
       "no_case": "The employee has no enforcement case from which priority can be determined safely.",
+      "case_required": "Select which enforcement case the request concerns — the person has several and priority differs for each.",
+      "dispatch_blocked": "The XML is frozen, but the requesting party could not be matched to a data box. Add the enforcement officer's box and import the request again; the frozen response stays stored.",
       "period_required": "Add at least one period with an approved immutable payroll revision.",
       "preview_failed": "The XMLZAM response preview could not be created.",
       "review_title": "Review the exact disclosed values",
@@ -6343,7 +6422,16 @@
         "entered_total": "Entered total",
         "required_total": "Required total",
         "change_reason": "Reason for the new revision",
-        "total_mismatch": "The components must add up exactly to the recorded claim amount."
+        "zero_placeholder": "0 — an empty field counts as zero",
+        "total_mismatch": "The components must add up exactly to the recorded claim amount.",
+        "blocked": {
+          "party_name": "Fill in the party name.",
+          "effective_from": "Fill in the date the fact is effective from.",
+          "document": "Pick the source document — without a decision in Documents the revision cannot be evidenced.",
+          "recipient_party": "Pick the enforcement officer or beneficiary to be paid.",
+          "recipient_account": "Pick a verified recipient account effective on the given date.",
+          "breakdown_amount": "Breakdown components must be amounts in CZK; an empty field counts as zero."
+        }
       },
       "insolvency_workspace_title": "Debt relief is a separate workflow",
       "insolvency_workspace_hint": "Manage approved debt relief, employment, the administrator account and the decision without creating an enforcement case.",
@@ -6440,6 +6528,7 @@
       "no_ledger": "Movements are created by the payroll period calculation.",
       "month_evidence_title": "Monthly calculation evidence",
       "month_evidence_hint": "Evidence is versioned by employee and period; incomplete verification forces manual review.",
+      "month_evidence_read_only": "You can view the monthly evidence but cannot save it — write access to enforcement is missing. Ask your administrator for it.",
       "monthly_routine_title": "Ordinary monthly check",
       "monthly_routine_hint": "Confirm only the items that actually apply in this month. The application disables irrelevant items and explains why.",
       "monthly_exceptions": {
@@ -18840,6 +18929,7 @@
       "correction_pending": "The related payroll run requires correction review.",
       "average_required_hint": "Pick the average earnings the compensation is calculated from — the absence cannot be created without it.",
       "average_missing_for_relation": "No average earnings have been calculated for this relation. Calculate one on the Averages tab and come back here.",
+      "average_awaiting_approval": "An average earning for this relation has been calculated but is awaiting approval. Approve it on the Averages tab and come back.",
       "go_to_averages": "Go to Averages"
     },
     "dpn": {

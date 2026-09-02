@@ -62,7 +62,18 @@ function permitView(): PayrollForeignPermitView {
 async function mounted(canWrite = true, canReadDocuments = true) {
   const wrapper = mount(PayrollPersonForeignPermitPanel, {
     props: { personId: 17, canWrite, canReadDocuments },
-    global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    global: {
+      stubs: {
+        RouterLink: { template: '<a><slot /></a>' },
+        // Číselník států; ve stubu stačí, že se chová jako pole s hodnotou.
+        CountrySelect: {
+          props: ['modelValue'],
+          emits: ['update:modelValue'],
+          template: '<input :value="modelValue"'
+            + ' @input="$emit(\'update:modelValue\', $event.target.value)">',
+        },
+      },
+    },
   })
   await flushPromises()
   return wrapper
@@ -113,6 +124,20 @@ describe('PayrollPersonForeignPermitPanel', () => {
 
     expect((wrapper.get('[data-test="foreign-permit-effective-from"]').element as HTMLInputElement).value)
       .toBe('2026-09-16')
+  })
+
+  it('stát bere z číselníku, ne jako dvě písmena psaná z hlavy', async () => {
+    const wrapper = await mounted()
+
+    expect(wrapper.find('[data-test="foreign-permit-country"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="foreign-permit-form"] input[maxlength="2"]').exists())
+      .toBe(false)
+  })
+
+  it('když v DMS ještě nic není, vede z formuláře odkaz do Dokumentů', async () => {
+    const wrapper = await mounted()
+
+    expect(wrapper.find('[data-test="foreign-permit-open-documents"]').exists()).toBe(true)
   })
 
   it('vyhledá jen firemní DMS dokument a odešle jeho ID s normalizovanými údaji', async () => {

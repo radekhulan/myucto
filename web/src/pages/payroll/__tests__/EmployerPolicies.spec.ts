@@ -56,6 +56,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import EmployerPolicies from '@/pages/payroll/EmployerPolicies.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 
 function policy(overrides: Partial<PayrollEmployerPolicy> = {}): PayrollEmployerPolicy {
   return {
@@ -262,6 +263,54 @@ describe('EmployerPolicies', () => {
       .not.toHaveProperty('automatic_calculation_enabled')
     expect(m.createEmployerPolicy.mock.calls[0][0])
       .not.toHaveProperty('automatic_payments_enabled')
+
+    wrapper.unmount()
+  })
+
+  /**
+   * Datum ověření doručovacího kanálu je nepovinné. Vyžadovat ho k uložení
+   * politiky byla naše podmínka: skutečnou pojistkou je serverová brána
+   * odesílání, která bez potvrzeného data výplatnici nepustí. Do teď stačilo
+   * vybrat způsob předávání a neuložil se ani výplatní den.
+   */
+  it('uloží politiku s vybraným kanálem i bez data ověření', async () => {
+    const wrapper = await mountComponent(true, [])
+
+    const channel = wrapper.findAllComponents(SearchableSelect)
+      .find(select => select.attributes('data-test') === 'policy-delivery-channel') as
+        { vm: { $emit: (event: string, payload: unknown) => void } } | undefined
+    expect(channel).toBeDefined()
+    channel!.vm.$emit('update:modelValue', 'employee_portal')
+    await wrapper.vm.$nextTick()
+
+    // Věta u pole říká, co se stane: politika se uloží, ale neodešle se nic.
+    expect(wrapper.find('[data-test="policy-delivery-unverified"]').exists()).toBe(true)
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="policy-validation"]').exists()).toBe(false)
+    expect(m.createEmployerPolicy).toHaveBeenCalledOnce()
+    expect(m.createEmployerPolicy.mock.calls[0][0]).toMatchObject({
+      delivery_channel: 'employee_portal',
+      delivery_verified_on: null,
+    })
+
+    wrapper.unmount()
+  })
+
+  it('vadné pole pojmenuje, místo jedné společné věty', async () => {
+    const wrapper = await mountComponent(true, [])
+
+    await wrapper.get('input[type="number"]').setValue(99)
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.createEmployerPolicy).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="policy-validation"]').findAll('li').map(li => li.text()))
+      .toEqual(['payroll.employer.policies.validation_fields.payday_day'])
 
     wrapper.unmount()
   })

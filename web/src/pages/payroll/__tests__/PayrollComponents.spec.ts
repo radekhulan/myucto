@@ -1053,4 +1053,30 @@ describe('PayrollComponents', () => {
     expect(m.toastError).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  /*
+   * Editor katalogu má přes dvacet polí ve čtyřech sloupcích. „Zkontrolujte
+   * povinná pole" znamenalo projít je všechna očima; pojmenované pole je
+   * jedno hledání.
+   */
+  it('u nevyplněného pole ho pojmenuje, místo obecného zkontrolujte povinná pole', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.catalog')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.catalog.add')!
+      .trigger('click')
+    await wrapper.get('[data-testid="payroll-component-code"]').setValue('SYN_SLOZKA')
+    await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
+    await flushPromises()
+
+    expect(m.createComponent).not.toHaveBeenCalled()
+    // `t` je v testu identita, takže se hláška pozná podle klíče: pojmenovaná
+    // varianta místo obecné „zkontrolujte povinná pole".
+    expect(wrapper.get('[role="alert"]').text())
+      .toBe('payroll.components.validation_field')
+    wrapper.unmount()
+  })
 })

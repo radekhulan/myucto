@@ -73,6 +73,9 @@ const pendingDelete = ref<PayrollRun | null>(null)
 const commandReason = ref('')
 const commandError = ref('')
 const commandBlockers = ref<Record<number, string>>({})
+/** Proč se koncepty vstupů nepodařilo schválit — seskupené po větě, u běhu. */
+type DraftInputFailure = { message: string, count: number }
+const draftInputFailures = ref<Record<number, DraftInputFailure[]>>({})
 const pendingOverride = ref<{ run: PayrollRun, validation: PayrollRunValidation } | null>(null)
 const overrideReason = ref('')
 const overrideError = ref('')
@@ -513,6 +516,20 @@ async function createRun() {
   }
 }
 
+/**
+ * Po konfliktu verzí přepnout otevřený dialog na čerstvý běh.
+ *
+ * `load()` sice natáhne nové `row_version`, ale dialog si drží běh zachycený
+ * při otevření. Uživatel proto po hlášce „mezitím to někdo změnil" tiskl totéž
+ * tlačítko se STEJNOU starou verzí a dostával tutéž chybu donekonečna. Napsaný
+ * důvod přitom zůstává — přenačte se jen zámek, ne rozdělaná práce.
+ *
+ * Vrací `null`, když běh mezitím zmizel: pak už dialog nemá co odeslat.
+ */
+function reloadedRun(run: PayrollRun): PayrollRun | null {
+  return runs.value.find(candidate => candidate.id === run.id) ?? null
+}
+
 async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
   if (['request_correction', 'reopen', 'cancel'].includes(command)) {
     pendingCommand.value = { run, command }
@@ -576,7 +593,19 @@ async function submitCommand(
     else if (['post', 'prepare_payments', 'mark_paid'].includes(command)) {
       commandBlockers.value = { ...commandBlockers.value, [run.id]: message }
     } else toast.error(message)
-    if (error?.response?.status === 409) await load()
+    if (error?.response?.status === 409) {
+      await load()
+      const pending = pendingCommand.value
+      if (pending !== null) {
+        const fresh = reloadedRun(pending.run)
+        if (fresh === null) {
+          toast.error(message)
+          pendingCommand.value = null
+        } else {
+          pendingCommand.value = { run: fresh, command: pending.command }
+        }
+      }
+    }
   } finally {
     saving.value = false
   }
@@ -602,6 +631,22 @@ async function confirmCommand() {
   )
 }
 
+function groupedFailures(
+  failures: Array<{ id: number, code: string, message: string }>,
+): DraftInputFailure[] {
+  const counts = new Map<string, number>()
+  for (const failure of failures) {
+    counts.set(failure.message, (counts.get(failure.message) ?? 0) + 1)
+  }
+  return Array.from(counts, ([message, count]) => ({ message, count }))
+}
+
+function dismissDraftInputFailures(runId: number): void {
+  const next = { ...draftInputFailures.value }
+  delete next[runId]
+  draftInputFailures.value = next
+}
+
 /**
  * Schválit rovnou z obrazovky běhu všechny mzdové vstupy, které ho drží.
  *
@@ -618,12 +663,19 @@ async function approveDraftInputs(run: PayrollRun) {
       period: run.period_start.slice(0, 7),
     })
     if (result.failed.length > 0) {
+      // Toast nesl důvod PRVNÍHO neúspěchu a za pár vteřin zmizel; zbylých
+      // devatenáct se uživatel nedozvěděl vůbec. Důvody proto zůstávají u běhu,
+      // seskupené po větě — u pěti set vstupů jich bývá pár, ne pět set.
+      draftInputFailures.value = {
+        ...draftInputFailures.value,
+        [run.id]: groupedFailures(result.failed),
+      }
       toast.error(t('payroll.runs.validation.draft_inputs_approve_partial', {
         approved: result.approved.length,
         failed: result.failed.length,
-        reason: result.failed[0].message,
       }))
     } else {
+      dismissDraftInputFailures(run.id)
       toast.success(t('payroll.runs.validation.draft_inputs_approved', {
         count: result.approved.length,
       }))
@@ -671,7 +723,16 @@ async function confirmOverride() {
     // cokoli, co bychom si tady vymysleli — proto se ukazuje v dialogu.
     overrideError.value = error?.response?.data?.error?.message
       || t('payroll.runs.override.failed')
-    if (error?.response?.status === 409) await load()
+    if (error?.response?.status === 409) {
+      await load()
+      const fresh = reloadedRun(pending.run)
+      if (fresh === null) {
+        toast.error(overrideError.value)
+        pendingOverride.value = null
+      } else {
+        pendingOverride.value = { run: fresh, validation: pending.validation }
+      }
+    }
   } finally {
     saving.value = false
   }
@@ -716,7 +777,10 @@ async function deleteRun() {
     await load()
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('payroll.runs.delete_failed'))
-    if (error?.response?.status === 409) await load()
+    if (error?.response?.status === 409) {
+      await load()
+      pendingDelete.value = reloadedRun(run)
+    }
   } finally {
     saving.value = false
   }
@@ -1249,6 +1313,42 @@ onMounted(load)
               </svg>
               {{ t('payroll.runs.validation.draft_inputs_approve_all') }}
             </button>
+            <!--
+              Co dávka neschválila, zůstává na obrazovce. V toastu se to ztratilo
+              dřív, než se podle toho dalo jednat, a znal se jen první důvod.
+            -->
+            <div
+              v-if="validation.code === 'draft_inputs_present' && draftInputFailures[run.id]?.length"
+              :data-test="`draft-inputs-failures-${run.id}`"
+              class="mt-2 rounded-lg border border-danger-200 bg-danger-50 p-3 text-xs text-danger-700"
+            >
+              <p class="font-medium">{{ t('payroll.runs.validation.draft_inputs_failed_title') }}</p>
+              <ul class="mt-1 space-y-0.5">
+                <li
+                  v-for="failure in draftInputFailures[run.id]"
+                  :key="failure.message"
+                  data-test="draft-inputs-failure-row"
+                >
+                  {{ failure.count > 1
+                    ? t('payroll.runs.validation.draft_inputs_failed_row', {
+                      count: failure.count,
+                      reason: failure.message,
+                    })
+                    : failure.message }}
+                </li>
+              </ul>
+              <button
+                type="button"
+                :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+                :data-test="`draft-inputs-failures-dismiss-${run.id}`"
+                @click="dismissDraftInputFailures(run.id)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.x" />
+                </svg>
+                {{ t('common.close') }}
+              </button>
+            </div>
 
             <!--
               Varování, které čeká na člověka. Bez téhle věty uživatel vidí jen

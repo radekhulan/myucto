@@ -339,6 +339,24 @@ describe('PayrollQuickInputs', () => {
       .toBe('payroll.quick_inputs.field_state.managed')
   })
 
+  it('offers the way to the wage component on both layouts, not just the table', async () => {
+    m.load.mockImplementation(async period => ({
+      period,
+      items: [fixture({ base_managed_elsewhere: true, blockers: ['base_managed_elsewhere'] })],
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    for (const testId of ['quick-base-managed-link-12', 'quick-base-managed-link-mobile-12']) {
+      const link = wrapper.get(`[data-test="${testId}"]`)
+      expect(JSON.parse(link.attributes('data-to') ?? '{}')).toEqual({
+        name: 'payroll-components',
+        query: { employment: '12' },
+      })
+    }
+  })
+
   it('shows effective suspended status and requires an explicit base', async () => {
     m.load.mockImplementation(async period => ({
       period,

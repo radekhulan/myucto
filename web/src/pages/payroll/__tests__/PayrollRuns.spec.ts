@@ -613,6 +613,94 @@ describe('PayrollRuns', () => {
     expect(m.success).toHaveBeenCalledWith('payroll.runs.validation.draft_inputs_approved')
   })
 
+  /**
+   * Toast nesl jen PRVNÍ důvod a za pár vteřin zmizel. Zbytek dávky se účetní
+   * nedozvěděla vůbec a neměla podle čeho dohledat, co ještě odbavit ručně.
+   */
+  it('důvody neschválených vstupů nechá na obrazovce, ne jen první v toastu', async () => {
+    m.approveInputsBatch.mockResolvedValue({
+      approved: [1],
+      skipped: [],
+      failed: [
+        { id: 2, code: 'average_missing', message: 'Chybí průměrný výdělek.' },
+        { id: 3, code: 'average_missing', message: 'Chybí průměrný výdělek.' },
+        { id: 4, code: 'terms_missing', message: 'Vztah nemá účinné podmínky.' },
+      ],
+    })
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [validation({
+        id: 100,
+        code: 'draft_inputs_present',
+        requires_override: false,
+      })],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-validation-100-approve-inputs"]').trigger('click')
+    await flushPromises()
+
+    const rows = wrapper.findAll('[data-test="draft-inputs-failure-row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('payroll.runs.validation.draft_inputs_failed_row')
+    expect(rows[1].text()).toBe('Vztah nemá účinné podmínky.')
+
+    await wrapper.get('[data-test="draft-inputs-failures-dismiss-15"]').trigger('click')
+    expect(wrapper.find('[data-test="draft-inputs-failures-15"]').exists()).toBe(false)
+  })
+
+  /**
+   * Po konfliktu verzí se dialog přepne na čerstvý běh. Dokud si držel ten
+   * zachycený při otevření, každé další kliknutí posílalo TUTÉŽ starou verzi a
+   * dostávalo tutéž chybu — z hlášky nevedla cesta ven.
+   */
+  it('po konfliktu verzí nechá dialog odeslatelný s čerstvou verzí', async () => {
+    m.runs
+      .mockResolvedValueOnce([run({
+        status: 'calculated',
+        can_delete: false,
+        validations: [validation()],
+      })])
+      .mockResolvedValue([run({
+        status: 'calculated',
+        can_delete: false,
+        row_version: 9,
+        validations: [validation()],
+      })])
+    m.overrideValidation.mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: { error: { message: 'Běh se mezitím změnil.' } },
+      },
+    })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-validation-71-override"]').trigger('click')
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('[data-test="run-override-reason"]')!
+    textarea.value = 'Zaměstnanec byl celý měsíc na neplaceném volnu.'
+    textarea.dispatchEvent(new Event('input'))
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-test="confirm-run-override"]')?.click()
+    await flushPromises()
+
+    expect(m.overrideValidation.mock.calls[0][2]).toMatchObject({ row_version: 2 })
+    expect(document.body.querySelector('[data-test="run-override-error"]')?.textContent)
+      .toContain('Běh se mezitím změnil.')
+
+    m.overrideValidation.mockResolvedValue({})
+    document.body.querySelector<HTMLButtonElement>('[data-test="confirm-run-override"]')?.click()
+    await flushPromises()
+
+    // Napsaný důvod zůstal, jen zámek je čerstvý.
+    expect(m.overrideValidation.mock.calls[1][2]).toMatchObject({
+      row_version: 9,
+      reason: 'Zaměstnanec byl celý měsíc na neplaceném volnu.',
+    })
+  })
+
   it('reopens a cancelled run from corrected inputs with the required reason', async () => {
     m.runs.mockResolvedValue([run({
       status: 'cancelled',

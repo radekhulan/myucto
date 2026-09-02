@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollAnnualDocumentBatch,
@@ -468,6 +468,22 @@ function latestTaxCertificate(kind: PayrollTaxCertificateKind): PayrollDocument 
       }
       return item.id > latest.id ? item : latest
     }, null)
+}
+
+/**
+ * Věta „opraví dokument č. …" musí nést číslo revize, které stojí i ve výpisu.
+ *
+ * Interpolovalo se `id`, tedy primární klíč z databáze. Na obrazovce to vypadá
+ * jako číslo dokladu, ale účetní ho v tabulce ani v PDF nenajde. Bez čísla
+ * revize je poctivější mluvit o „posledním potvrzení" než ukázat cokoli.
+ */
+function correctionHint(kind: PayrollTaxCertificateKind): string {
+  const latest = latestTaxCertificate(kind)
+  const created = formatCreated(latest?.created_at ?? '')
+  const revision = latest?.document_revision_no ?? null
+  return revision === null
+    ? t('payroll.documents.correction_hint_unnumbered', { created })
+    : t('payroll.documents.correction_hint', { document: revision, created })
 }
 
 function cancelCorrection(): void {
@@ -1418,12 +1434,7 @@ onBeforeUnmount(() => {
           <div>
             <h2 class="font-semibold text-neutral-900">{{ t('payroll.documents.correction_title') }}</h2>
             <p class="mt-1 text-sm text-neutral-600">
-              {{
-                t('payroll.documents.correction_hint', {
-                  document: latestTaxCertificate(pendingCorrectionKind)?.id,
-                  created: formatCreated(latestTaxCertificate(pendingCorrectionKind)?.created_at ?? ''),
-                })
-              }}
+              {{ correctionHint(pendingCorrectionKind) }}
             </p>
           </div>
           <button type="button" :class="btnOutline('neutral')" @click="cancelCorrection">
@@ -1471,8 +1482,19 @@ onBeforeUnmount(() => {
           <p v-if="activeTab === 'monthly' && data?.revisions.length" class="mt-1 text-xs text-neutral-600">
             {{ t('payroll.documents.approved_revisions', { count: data.revisions.length }) }}
           </p>
+          <!--
+            Věta říkala, že revize chybí, ale ne kde vzniká. Účetní hledala
+            v menu; mzdové běhy jsou přitom jediné místo, kde se revize schvaluje.
+          -->
           <p v-else-if="activeTab === 'monthly' && !loading" class="mt-1 text-xs text-warning-700">
             {{ t('payroll.documents.revision_unavailable') }}
+            <RouterLink
+              :to="{ name: 'payroll-runs', query: { period } }"
+              class="underline decoration-dotted underline-offset-2"
+              data-test="revision-unavailable-link"
+            >
+              {{ t('payroll.documents.revision_unavailable_link') }}
+            </RouterLink>
           </p>
         </div>
       </div>

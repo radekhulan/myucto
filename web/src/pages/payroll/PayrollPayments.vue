@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { payrollApi, type PayrollRun } from '@/api/payroll'
 import {
   payrollPaymentsApi,
@@ -1525,6 +1525,19 @@ onMounted(load)
           </button>
           <p v-if="materializeBlockedReason" :class="BTN_DISABLED_NOTE" data-test="materialize-blocked">
             {{ materializeBlockedReason }}
+            <!--
+              Věta jmenuje Mzdové běhy, ale zůstávala prostým textem: účetní se
+              tam proklikávala menu a hledala období znovu. Po selhání načtení
+              odkaz nedává smysl — tam je řešením tlačítko Načíst znovu vedle.
+            -->
+            <RouterLink
+              v-if="!loadFailed"
+              :to="{ name: 'payroll-runs', query: { period } }"
+              class="underline decoration-dotted underline-offset-2"
+              data-test="materialize-blocked-link"
+            >
+              {{ t('payroll.payments.materialize_blocked_link') }}
+            </RouterLink>
           </p>
         </div>
       </div>

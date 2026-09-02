@@ -75,6 +75,28 @@ describe('RegzelProfileSettings', () => {
     expect(wrapper.text()).toContain('payroll.regzel.profile.confirmed_at')
   })
 
+  /**
+   * Kontroly se vracely postupně `return`em, takže formulář prozradil vždy jen
+   * první vadu — účetní opravila kód úřadu, uložila, dozvěděla se o dalším.
+   */
+  it('vypíše všechny vady najednou, ne jen tu první', async () => {
+    const wrapper = mount(RegzelProfileSettings, { props: { canWrite: true } })
+    await flushPromises()
+
+    await wrapper.get('[data-test="regzel-payer-reference-number"]').setValue('123')
+    await wrapper.get('[data-test="regzel-profile-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveProfile).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="regzel-profile-validation"]')
+      .findAll('li').map(li => li.text()))
+      .toEqual([
+        'payroll.regzel.profile.tax_office_code_invalid',
+        'payroll.regzel.profile.payer_reference_number_invalid',
+        'payroll.regzel.profile.confirmation_required',
+      ])
+  })
+
   it('ponechá přesnou API chybu trvale přímo u formuláře', async () => {
     m.saveProfile.mockRejectedValue({
       response: { data: { error: { message: 'Profil mezitím změnila Jana.' } } },

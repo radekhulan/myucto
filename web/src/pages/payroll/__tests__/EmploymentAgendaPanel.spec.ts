@@ -145,6 +145,20 @@ describe('EmploymentAgendaPanel', () => {
     expect(count(wrapper, 'time')).toBe('–')
   })
 
+  it('z výpadku souhrnu vede akce ven — tlačítko načte znovu', async () => {
+    m.employmentAgendaSummary.mockRejectedValueOnce(new Error('503'))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const retry = wrapper.get('[data-test="employment-agendas-retry"]')
+    m.employmentAgendaSummary.mockResolvedValueOnce(summary([agenda({ key: 'time', count: 3 })]))
+    await retry.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="employment-agendas-failed"]').exists()).toBe(false)
+    expect(count(wrapper, 'time')).toBe('3')
+  })
+
   it('souhrn se načte jedním požadavkem, ne jedním na agendu', async () => {
     mountPanel()
     await flushPromises()

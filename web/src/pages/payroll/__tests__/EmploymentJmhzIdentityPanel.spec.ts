@@ -144,6 +144,22 @@ describe('EmploymentJmhzIdentityPanel', () => {
     expect(wrapper.text()).not.toContain('200000000000000000002')
   })
 
+  it('u zašedlého Uložit řekne, co konkrétně chybí', async () => {
+    const wrapper = mountPanel()
+    await openPanel(wrapper)
+
+    const reason = () => wrapper.get('[data-test="jmhz-identity-save-reason"]').text()
+    expect(reason()).toBe('payroll.people.jmhz_identity.identifier_required')
+
+    await wrapper.get('[data-test="jmhz-person-identifier"]').setValue('1000000001')
+    expect(reason()).toBe('payroll.people.jmhz_identity.confirm_required')
+
+    await wrapper.get('[data-test="jmhz-identity-confirmed"]').setValue(true)
+    expect(wrapper.find('[data-test="jmhz-identity-save-reason"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="jmhz-identity-save"]').attributes('disabled'))
+      .toBeUndefined()
+  })
+
   it('nepovolí zápis bez obou personálních oprávnění', async () => {
     const wrapper = mountPanel(true, false)
     await openPanel(wrapper)

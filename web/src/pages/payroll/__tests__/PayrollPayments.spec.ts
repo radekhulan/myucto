@@ -25,6 +25,12 @@ const m = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: m.routeQuery }),
+  // Věta pod zašedlým tlačítkem odkazuje na mzdové běhy; bez routeru by
+  // `RouterLink` spadl na `router.resolve`, tak se nahrazuje kotvou.
+  RouterLink: {
+    props: ['to'],
+    template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
+  },
 }))
 
 vi.mock('@/api/payrollPayments', () => ({
@@ -423,7 +429,30 @@ describe('PayrollPayments', () => {
     expect(button.attributes('disabled')).toBeDefined()
     expect(button.attributes('title')).toBe('payroll.payments.materialize_blocked')
     expect(wrapper.get('[data-test="materialize-blocked"]').text())
-      .toBe('payroll.payments.materialize_blocked')
+      .toContain('payroll.payments.materialize_blocked')
+    // Věta jmenuje Mzdové běhy, takže z ní musí vést cesta — hledat je v menu
+    // znamenalo odejít z rozdělané práce a vrátit se do jiného období.
+    const link = wrapper.get('[data-test="materialize-blocked-link"]')
+    expect(JSON.parse(link.attributes('data-to') ?? '{}')).toEqual({
+      name: 'payroll-runs',
+      query: { period: '2026-08' },
+    })
+  })
+
+  /*
+   * Po selhání načtení o revizích nevíme nic, takže odkaz „schvalte revizi"
+   * by posílal jinam, než kde je problém. Řešením je tlačítko Načíst znovu.
+   */
+  it('po selhání načtení odkaz na běhy nenabízí, jen důvod', async () => {
+    m.runs.mockRejectedValue(new Error('offline'))
+    m.liabilities.mockRejectedValue(new Error('offline'))
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="materialize-blocked"]').text())
+      .toContain('payroll.payments.materialize_blocked_unknown')
+    expect(wrapper.find('[data-test="materialize-blocked-link"]').exists()).toBe(false)
   })
 
   it('drops the disabled reason once the action is usable', async () => {

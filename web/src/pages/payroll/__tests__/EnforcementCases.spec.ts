@@ -19,6 +19,7 @@ const m = vi.hoisted(() => ({
   claimBreakdowns: vi.fn(),
   recipientInstructions: vi.fn(),
   appendRecipientInstruction: vi.fn(),
+  appendClaimBreakdown: vi.fn(),
   documentSearch: vi.fn(),
   monthEvidence: vi.fn(),
   dependants: vi.fn(),
@@ -60,7 +61,7 @@ vi.mock('@/api/payrollEnforcement', () => ({
     claimBreakdowns: m.claimBreakdowns,
     recipientInstructions: m.recipientInstructions,
     appendParty: vi.fn(),
-    appendClaimBreakdown: vi.fn(),
+    appendClaimBreakdown: m.appendClaimBreakdown,
     appendRecipientInstruction: m.appendRecipientInstruction,
     create: vi.fn(),
     addClaim: vi.fn(),
@@ -1010,6 +1011,183 @@ describe('EnforcementCases', () => {
         .toBeUndefined()
       expect(wrapper.get('[data-test="month-evidence-dependants"]').attributes('disabled'))
         .toBeUndefined()
+      wrapper.unmount()
+    })
+  })
+
+  describe('doložené právní skutečnosti', () => {
+    const eligibleAccount = {
+      id: 91,
+      supplier_id: 1,
+      institution_id: 9,
+      institution_type: 'other_recipient',
+      institution_code: 'SYNTH-RECIPIENT',
+      institution_name: 'Syntetický exekutor',
+      bank_account: '1000000005/0100',
+      bank_account_masked: '******0005/0100',
+      currency_code: 'CZK',
+      variable_symbol: null,
+      specific_symbol: null,
+      constant_symbol: null,
+      valid_from: '2020-01-01',
+      valid_to: null,
+      source_kind: 'manual_verified',
+      source_reference: 'synthetic-test',
+      verified_on: '2020-01-01',
+      verified_by: 1,
+      row_version: 1,
+      created_at: '2020-01-01 00:00:00',
+      updated_at: '2020-01-01 00:00:00',
+    }
+    const executorParty: EnforcementCaseParty = {
+      id: 71,
+      party_role: 'executor',
+      revision_no: 1,
+      effective_from: '2020-01-01',
+      party_name: 'Syntetický exekutor',
+      party_reference: 'TEST-EX-1',
+      source_document_id: 81,
+      created_at: '2020-01-01 08:00:00',
+    }
+
+    /*
+     * Tlačítko se řídilo VŠEMI účty firmy (pojišťovny, cizí měny), zatímco výběr
+     * ve formuláři nabízí jen ověřený CZK účet typu „jiný příjemce". Svítilo tedy
+     * i tam, kde se instrukce uložit nedala, a hláška pod ním tvrdila opak.
+     */
+    it('nenabídne platební instrukci, když firma nemá ověřený CZK účet jiného příjemce', async () => {
+      m.parties.mockResolvedValue([executorParty])
+      m.institutionAccounts.mockResolvedValue([
+        { ...eligibleAccount, id: 92, institution_type: 'health_insurer' },
+        { ...eligibleAccount, id: 93, currency_code: 'EUR' },
+      ])
+
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      const facts = wrapper.get('[data-test="enforcement-legal-facts"]')
+      expect(facts.get('[data-test="add-recipient-instruction"]').attributes('disabled'))
+        .toBeDefined()
+      expect(facts.find('[data-test="recipient-account-missing"]').exists()).toBe(true)
+      wrapper.unmount()
+    })
+
+    /*
+     * Většina rozhodnutí úroky, náklady ani výživné nevyčísluje. Vynutit tam ručně
+     * napsanou nulu byla povinnost, kterou si aplikace vymyslela sama — kontrola
+     * proti evidované částce zůstává (součet musí sedět na korunu).
+     */
+    it('bere prázdné složky rozpadu jako nulu', async () => {
+      const claim = verifiedClaim()
+      m.detail.mockResolvedValue({ ...detailOf(summary()), claims: [claim] })
+      m.claimBreakdowns.mockResolvedValue([])
+      m.documentSearch.mockResolvedValue([
+        { id: 83, title: 'Syntetické rozhodnutí', doc_type: 'pdf' },
+      ])
+      m.appendClaimBreakdown.mockResolvedValue({
+        id: 99,
+        revision_no: 1,
+        principal_minor_units: 250_000,
+        interest_minor_units: 0,
+        costs_minor_units: 0,
+        maintenance_minor_units: 0,
+        total_minor_units: 250_000,
+        source_document_id: 83,
+        change_reason: null,
+        created_at: '2026-05-01 08:00:00',
+      } satisfies EnforcementClaimBreakdown)
+
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      const facts = wrapper.get('[data-test="enforcement-legal-facts"]')
+      await facts.get('[data-test="add-breakdown-51"]').trigger('click')
+      for (const field of ['interest', 'costs', 'maintenance']) {
+        const input = facts.get(`[data-test="breakdown-${field}"]`)
+        expect(input.attributes('required')).toBeUndefined()
+        await input.setValue('')
+      }
+      await facts.get('[data-test="enforcement-breakdown-form"] input[type="search"]')
+        .setValue('Syntetické')
+      await new Promise(resolve => setTimeout(resolve, 300))
+      await flushPromises()
+      await facts.get('[data-test="enforcement-breakdown-form"] ul button').trigger('click')
+      await facts.get('[data-test="enforcement-breakdown-form"]').trigger('submit')
+      await flushPromises()
+
+      expect(m.appendClaimBreakdown).toHaveBeenCalledWith(11, 51, expect.objectContaining({
+        principal_minor_units: 250_000,
+        interest_minor_units: 0,
+        costs_minor_units: 0,
+        maintenance_minor_units: 0,
+      }))
+      wrapper.unmount()
+    })
+
+    /*
+     * Zdrojový dokument zůstává povinný (NOT NULL + DB trigger na živý dokument
+     * se sedícím SHA-256) — nově je ale vidět, že právě on chybí.
+     */
+    it('řekne u zašedlého uložení strany, že chybí zdrojový dokument', async () => {
+      m.parties.mockResolvedValue([executorParty])
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      const facts = wrapper.get('[data-test="enforcement-legal-facts"]')
+      await facts.get('[data-test="add-enforcement-party"]').trigger('click')
+      await facts.get('[data-test="enforcement-party-form"] input[maxlength="255"]')
+        .setValue('Syntetický soud')
+
+      expect(facts.get('[data-test="party-blocked"]').text())
+        .toBe('payroll.enforcement.legal_facts.blocked.document')
+      wrapper.unmount()
+    })
+  })
+
+  /*
+   * Měsíční podklady se ukládají přes `payroll.enforcement` (WRITE) A přes
+   * `payroll.insolvency`. Panel se ale zpřístupňoval jen podle druhého práva,
+   * takže uživatel s právem jen ke čtení exekucí odklikal potvrzení, dal Uložit
+   * a dostal 403 z API — tlačítko slibovalo něco, o čem se předem vědělo,
+   * že spadne.
+   */
+  describe('práva u měsíčních podkladů', () => {
+    it('nenabídne uložení měsíční evidence bez práva zápisu do exekucí', async () => {
+      m.canWrite.mockImplementation((scope: string) => scope !== 'payroll.enforcement')
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      expect(wrapper.get('[data-test="month-evidence-save"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('[data-test="month-evidence-blocked"]').text())
+        .toBe('payroll.enforcement.month_evidence_read_only')
+      expect(wrapper.get('[data-test="month-evidence-claim_register"]').attributes('disabled'))
+        .toBeDefined()
+
+      await wrapper.get('[data-test="dependants-toggle"]').trigger('click')
+      expect(wrapper.find('[data-test="dependant-kind"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="dependants-read-only"]').exists()).toBe(true)
+      wrapper.unmount()
+    })
+
+    /*
+     * Ručně zadaná nezabavitelná částka padala až v `minorUnits()` po kliknutí
+     * na Uložit — účetní dostala toast bez vazby na políčko.
+     */
+    it('pojmenuje neplatnou nezabavitelnou částku u pole, ne až v toastu', async () => {
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+      await wrapper.get('[data-test="month-exceptions-toggle"]').trigger('click')
+      await wrapper.get('[data-test="month-evidence-protected-override"]').setValue('nevím')
+
+      expect(wrapper.find('[data-test="protected-override-invalid"]').exists()).toBe(true)
+      expect(wrapper.get('[data-test="month-evidence-save"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('[data-test="month-evidence-blocked"]').text())
+        .toBe('payroll.enforcement.validation.amount')
       wrapper.unmount()
     })
   })

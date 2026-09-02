@@ -1192,6 +1192,68 @@ describe('TimeAttendance — měsíční mřížka', () => {
   })
 
   /**
+   * Když neprojde nic, dialog zůstává otevřený i s tím, co do něj účetní
+   * napsala. Zavřít ho znamenalo psát zákonný fond a poznámku celé znovu,
+   * jen aby se narazilo na tutéž chybu.
+   */
+  it('po zcela neúspěšné dávce nechá dialog otevřený i s vyplněnými hodnotami', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A']))
+    m.approveTimeMonth.mockRejectedValue({
+      response: { data: { error: { code: 'average_earning_missing', message: '409' } } },
+    })
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-note"]').setValue('Doplněno z docházky')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="bulk-approve-form"]').exists()).toBe(true)
+    expect((wrapper.get('[data-test="bulk-standard-fund"]').element as HTMLInputElement).value)
+      .toBe('168')
+    expect((wrapper.get('[data-test="bulk-note"]').element as HTMLTextAreaElement).value)
+      .toBe('Doplněno z docházky')
+    wrapper.unmount()
+  })
+
+  /**
+   * Nález ze serveru tlačítko zamykal, ale věta pod ním o něm mlčela: účetní
+   * vyplnila všechna pole a dívala se na šedé tlačítko bez vysvětlení.
+   */
+  it('u serverového nálezu řekne, proč potvrzení nejde, místo němého tlačítka', async () => {
+    const page = gridPage(['Osoba A'])
+    const issues: Array<{ code: string, message: string }> =
+      page.items[0].jmhz_work_summary.preview.issues
+    issues.push({
+      code: 'worked_hours_exceed_fund',
+      message: 'Odpracované hodiny přesahují fond.',
+    })
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+    await wrapper.get('[data-test="jmhz-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="jmhz-unworked-no"]').setValue(true)
+    await wrapper.get('[data-test="jmhz-obstacles-no"]').setValue(true)
+
+    expect(wrapper.get('[data-test="jmhz-confirm"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="jmhz-confirm-blocked"]').text())
+      .toBe('payroll.time.jmhz.issues_blocked')
+
+    // Odeslání klávesou dialog obcházelo: brána byla jen na tlačítku.
+    await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.approveTimeMonth).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  /**
    * Klíč buňky je „vztah|den" bez kategorie, takže rozepsané hodnoty se při
    * přepnutí vrstvy musí zahodit. Jinak by se osm hodin běžné práce zapsalo
    * jako osm hodin přesčasu.

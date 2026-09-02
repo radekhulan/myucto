@@ -74,6 +74,28 @@ describe('AccidentInsuranceRateSettings', () => {
     })
   })
 
+  /**
+   * Do teď se dalo tlačítko zmáčknout a NESTALO SE NIC — jediná stopa po
+   * odmítnutí bylo `aria-invalid`, které vidí čtečka obrazovky a nikdo jiný.
+   */
+  it('neúplný formulář pojmenuje chybějící pole, ne mlčky odmítne', async () => {
+    const wrapper = await render()
+
+    const submit = wrapper.findAll('button')
+      .find(button => button.text().includes('accident_insurance.add_rate'))
+    await submit!.trigger('click')
+    await flushPromises()
+
+    expect(m.createAccidentInsuranceRate).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="accident-validation"]').findAll('li').map(li => li.text()))
+      .toEqual([
+        'payroll.employer.accident_insurance.validation.institution_code',
+        'payroll.employer.accident_insurance.validation.rate_per_mille',
+      ])
+    expect(wrapper.find('[data-testid="accident-institution-code-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="accident-rate-error"]').exists()).toBe(true)
+  })
+
   it('sazba vybraná ze sazebníku se jen předvyplní do pole', async () => {
     const wrapper = await render()
 
