@@ -533,12 +533,16 @@ async function createRun() {
   if (!canWrite.value) return
   saving.value = true
   try {
-    await payrollApi.createRun({
+    const created = await payrollApi.createRun({
       period_start: `${period.value}-01`,
       payment_date: paymentDate.value,
       office_id: null,
     })
     toast.success(t('payroll.runs.created'))
+    // Varování ze serveru se ukazuje po úspěchu, ne místo něj: běh vznikl,
+    // jen o něm účetní musí něco vědět. Mlčky ho spolknout by znamenalo, že
+    // se na duplicitní měsíc přijde až u roční uzávěrky.
+    for (const warning of created.warnings ?? []) toast.warning(warning.message)
     await load()
   } catch (error: any) {
     showPayrollError(error, t('payroll.runs.save_failed'))

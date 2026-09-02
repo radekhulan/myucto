@@ -6909,13 +6909,21 @@ export const payrollApi = {
   runHistory: (runId: number) =>
     api.get<{ history: PayrollRunHistory }>(`/payroll/runs/${runId}/history`)
       .then(response => response.data.history),
+  /**
+   * Založení běhu může vrátit varování — typicky že za totéž období už
+   * existuje běh s jiným rozsahem účtárny. Není to chyba (účtárny jsou
+   * legitimní), ale zamlčet to nejde: uzávěrka roku se dívá jen na to,
+   * jestli je aspoň jeden běh uzavřený.
+   */
   createRun: (payload: {
     period_start: string
     payment_date: string
     office_id: number | null
   }) =>
-    api.post<{ run: PayrollRun }>('/payroll/runs', payload)
-      .then(response => response.data.run),
+    api.post<{ run: PayrollRun & { warnings?: { code: string, message: string }[] } }>(
+      '/payroll/runs',
+      payload,
+    ).then(response => response.data.run),
   deleteRun: (runId: number, rowVersion: number) =>
     api.delete<void>(`/payroll/runs/${runId}`, {
       data: { row_version: rowVersion },

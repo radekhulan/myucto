@@ -2479,6 +2479,59 @@ final class PayrollRunPersistenceTest extends TestCase
         }
     }
 
+    /**
+     * Druhý běh za totéž období s jiným rozsahem účtárny musí varovat.
+     *
+     * Běh je klíčovaný i na `office_scope_id`, takže s jiným `office_id`
+     * vznikne za jeden měsíc druhý a rezervace období tomu nebrání — takhle
+     * vznikl duplicitní běh při průchodu rokem 2026. Uzávěrka roku se pak
+     * dívá jen na to, jestli je aspoň jeden uzavřený, takže rozdělaný druhý
+     * běh projde bez povšimnutí. Zakazovat to nejde (účtárny jsou legitimní),
+     * ale účetní se to musí dozvědět při zakládání, ne až u uzávěrky.
+     */
+    public function testDruhyBehZaObdobiSJinouUctarnouVaruje(): void
+    {
+        $first = $this->createRun();
+        self::assertSame([], $first['warnings'] ?? null);
+
+        $officeId = $this->seedOfficeForDuplicateWarning();
+        $second = $this->service->createRun(
+            $this->supplierId,
+            '2026-06-01',
+            '2026-07-15',
+            $officeId,
+            $this->actors[0],
+        );
+
+        $warnings = $second['warnings'] ?? [];
+        self::assertCount(1, $warnings);
+        self::assertSame(
+            'payroll_run_duplicate_period_scope',
+            $warnings[0]['code'],
+        );
+        self::assertStringContainsString(
+            '#' . (int) $first['id'],
+            $warnings[0]['message'],
+        );
+        self::assertStringContainsString('2026-06', $warnings[0]['message']);
+    }
+
+    private function seedOfficeForDuplicateWarning(): int
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'INSERT INTO payroll_offices (supplier_id, code, name)
+             VALUES (?, ?, ?)'
+        );
+        $stmt->execute([
+            $this->supplierId,
+            'DUP',
+            'Účtárna pro test duplicity',
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
     private function createRun(): array
     {
         return $this->service->createRun(
