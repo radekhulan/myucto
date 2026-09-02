@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   approveEvent: vi.fn(),
   a1Profile: vi.fn(),
   saveA1Profile: vi.fn(),
+  writeA1MasterData: vi.fn(),
   checkA1Profile: vi.fn(),
   jmhzOptions: vi.fn(),
   searchMunicipalities: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('@/api/payroll', () => ({
     approveEmploymentRegistrationEvent: m.approveEvent,
     employmentRegistrationA1Profile: m.a1Profile,
     saveEmploymentRegistrationA1Profile: m.saveA1Profile,
+    writeEmploymentRegistrationA1MasterData: m.writeA1MasterData,
     checkEmploymentRegistrationA1Profile: m.checkA1Profile,
     employmentJmhzEvidenceOptions: m.jmhzOptions,
     searchJmhzMunicipalities: m.searchMunicipalities,
@@ -200,6 +202,8 @@ function a1View(overrides: Record<string, unknown> = {}) {
           message: 'Aplikace vede adresu jedním řádkem včetně čísla.',
         },
       ],
+      submitted: false,
+      writeback: [],
       diverged: [],
       ...overrides,
     },
@@ -299,7 +303,11 @@ describe('EmploymentRegistrationPanel', () => {
         city: 'Praha',
       }),
     }))
-    expect(wrapper.get('[data-test="registration-a1-saved"]').text()).toContain('version')
+    // Číslo verze se v hlášce neukazuje — u rozpracovaného profilu žádná
+    // historie nevzniká a seznam verzí nikde není.
+    const saved = wrapper.get('[data-test="registration-a1-saved"]').text()
+    expect(saved).toContain('payroll.people.registration.a1.saved')
+    expect(saved).not.toContain('version')
 
     await wrapper.get('[data-test="registration-preview"]').trigger('click')
     await flushPromises()
@@ -333,8 +341,28 @@ describe('EmploymentRegistrationPanel', () => {
     expect(missing).toContain('Aplikace vede adresu jedním řádkem včetně čísla.')
   })
 
-  it('reports that a stored snapshot drifted from master data', async () => {
-    m.a1Profile.mockResolvedValue({
+  function driftedView(submitted: boolean) {
+    const drift = [
+      {
+        field: 'health_insurance_code',
+        label: 'Kód zdravotní pojišťovny',
+        stored: '201',
+        suggested: '111',
+        writable: true,
+        reason: null,
+      },
+      {
+        field: 'employment.small_scale',
+        label: 'Příznak zaměstnání malého rozsahu',
+        stored: 'true',
+        suggested: 'false',
+        writable: false,
+        reason: 'Zaměstnání malého rozsahu se v evidenci nevede jako '
+          + 'samostatný příznak.',
+      },
+    ]
+
+    return {
       ...a1View(),
       profile: {
         ...a1Suggested(),
@@ -347,18 +375,82 @@ describe('EmploymentRegistrationPanel', () => {
       draft: {
         ...a1View().draft,
         row_version: 3,
-        diverged: [
-          { field: 'health_insurance_code', stored: '201', suggested: '111' },
-        ],
+        submitted,
+        writeback: drift,
+        diverged: submitted ? drift : [],
       },
-    })
+    }
+  }
+
+  it('offers writing the difference back into master data', async () => {
+    m.a1Profile.mockResolvedValue(driftedView(false))
     const wrapper = mountPanel()
     await flushPromises()
     await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
 
-    const diverged = wrapper.get('[data-test="registration-a1-diverged"]').text()
-    expect(diverged).toContain('health_insurance_code')
+    const panel = wrapper.get('[data-test="registration-a1-diverged"]')
+    // Lidský název údaje, ne název sloupce.
+    expect(panel.text()).toContain('Kód zdravotní pojišťovny')
+    expect(panel.text()).not.toContain('health_insurance_code:')
     expect(insurerInput(wrapper).value).toContain('201')
+    expect(
+      wrapper.find('[data-test="registration-a1-master-data-health_insurance_code"]').exists(),
+    ).toBe(true)
+    // Údaj, který kmen nevede, tlačítko nedostane — jen větu proč.
+    expect(
+      wrapper.find('[data-test="registration-a1-master-data-employment.small_scale"]').exists(),
+    ).toBe(false)
+    expect(panel.text()).toContain('nevede jako samostatný příznak')
+    // Rozpracovaný profil nevaruje před rozdílem proti nahlášenému stavu.
+    expect(
+      wrapper.find('[data-test="registration-a1-submitted-note"]').exists(),
+    ).toBe(false)
+  })
+
+  it('warns about a change notice only once the registration was filed', async () => {
+    m.a1Profile.mockResolvedValue(driftedView(true))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    // `t` je v testu nahrazené klíčem, tak se ověřuje klíč, ne česká věta.
+    expect(
+      wrapper.get('[data-test="registration-a1-submitted-note"]').text(),
+    ).toContain('master_data_submitted_note')
+  })
+
+  it('writes the picked value into master data and recomputes the list', async () => {
+    m.a1Profile.mockResolvedValue(driftedView(false))
+    m.writeA1MasterData.mockResolvedValue({
+      written: [
+        { field: 'health_insurance_code', label: 'Kód zdravotní pojišťovny', value: '201' },
+      ],
+      skipped: [
+        {
+          field: 'employment.small_scale',
+          label: 'Příznak zaměstnání malého rozsahu',
+          reason: 'Kmenová data tenhle příznak nevedou.',
+        },
+      ],
+      view: a1View(),
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper
+      .get('[data-test="registration-a1-master-data-health_insurance_code"]')
+      .trigger('click')
+    await flushPromises()
+
+    expect(m.writeA1MasterData).toHaveBeenCalledWith(5, ['health_insurance_code'])
+    expect(
+      wrapper.get('[data-test="registration-a1-master-data-saved"]').text(),
+    ).toContain('Kód zdravotní pojišťovny')
+    expect(
+      wrapper.get('[data-test="registration-a1-master-data-skipped"]').text(),
+    ).toContain('Kmenová data tenhle příznak nevedou.')
+    // Přepočítaný seznam už zapsaný údaj nenabízí.
+    expect(wrapper.find('[data-test="registration-a1-diverged"]').exists()).toBe(false)
   })
 
   /**
@@ -1214,6 +1306,58 @@ describe('EmploymentRegistrationPanel', () => {
     expect(wrapper.find(
       '[data-test="registration-a1-gap-link-employment.position_name"]',
     ).exists()).toBe(false)
+  })
+
+  /**
+   * Zápis do kmenových dat patří k ukládání, ne do jiného panelu. Kdo tady
+   * opraví adresu, čeká, že ji tím opravil i v kartě osoby — jinak karta drží
+   * starou hodnotu a formulář ji donekonečna hlásí jako rozdíl proti snímku.
+   */
+  it('při uložení zapíše rozdílné údaje i do kmenových dat', async () => {
+    m.a1Profile.mockResolvedValue(a1View({
+      writeback: [
+        { field: 'permanent_address.city', label: 'obec trvalého pobytu', writable: true, stored: 'Kolín', suggested: 'Havlíčkův Brod', reason: null },
+        { field: 'facts.disability_card', label: 'průkaz ZTP', writable: false, stored: null, suggested: null, reason: 'Aplikace tenhle údaj o osobě nevede.' },
+      ],
+    }))
+    m.writeA1MasterData.mockResolvedValue({
+      written: [{ field: 'permanent_address.city', label: 'obec trvalého pobytu' }],
+      skipped: [],
+      view: a1View(),
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    // Výchozí stav je zapnuto — o to uživatel opakovaně žádal.
+    const toggle = wrapper.get<HTMLInputElement>(
+      '[data-test="registration-a1-write-master-data"]',
+    )
+    expect(toggle.element.checked).toBe(true)
+
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    // Zapisuje se jen to, co má v kmenových datech kam jít.
+    expect(m.writeA1MasterData)
+      .toHaveBeenCalledWith(5, ['permanent_address.city'])
+  })
+
+  it('vypnuté zaškrtávátko do kmenových dat nezapíše', async () => {
+    m.a1Profile.mockResolvedValue(a1View({
+      writeback: [
+        { field: 'permanent_address.city', label: 'obec trvalého pobytu', writable: true, stored: 'Kolín', suggested: 'Havlíčkův Brod', reason: null },
+      ],
+    }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-write-master-data"]').setValue(false)
+
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.writeA1MasterData).not.toHaveBeenCalled()
   })
 
   /** „Adresa pobytu v ČR" má stát předvyplněný, trvalý pobyt naopak ne. */

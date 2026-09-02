@@ -35,6 +35,17 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         'cz-employee-registration-no-show-2026-07.v1';
     private const FOLLOW_UP_RULESET_ID =
         'cz-regzec-follow-up-2026-04.v1';
+    private const AFTER_PRE_REGISTRATION_RULESET_ID =
+        'cz-regzec-after-prezec-2026-07.v1';
+
+    /**
+     * Doplnění plné registrace po předregistraci: osm dnů PO nástupu.
+     *
+     * Smysl PREZEC je přihlásit člověka, u kterého ještě nemáte všechny údaje.
+     * Kdyby plná registrace musela odejít v den nástupu, nebylo by na to kdy
+     * ty údaje sehnat a předregistrace by ztratila smysl.
+     */
+    private const AFTER_PRE_REGISTRATION_DAYS = 8;
     private const FOLLOW_UP_SUPPORTED_FROM = '2026-04-01';
 
     /**
@@ -57,6 +68,23 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         'no_show_law' => '323/2025 Sb. § 17 odst. 5',
         'cssz_document' =>
             'Metodika PREZEC 1.4 — částečné přihlášení před nástupem',
+        /*
+         * Navazující oznámení REGZEC A2 až A8 a doplnění plné registrace po
+         * předregistraci: osm kalendářních dnů od události.
+         *
+         * ZDROJ JE SLABŠÍ NEŽ U OSTATNÍCH a je to tak napsané schválně.
+         * Konkrétní paragraf pro tuhle lhůtu se v zákoně dohledat nepodařilo;
+         * opírá se o leták ČSSZ k předregistraci a registraci a o potvrzení
+         * účetní, která agendu vede. Osm dnů odpovídá lhůtě u nenastoupení
+         * (§ 17 odst. 5) i obecné osmidenní lhůtě u hlásitelných změn
+         * (§ 19 odst. 5), takže to není odhad z ničeho — ale dokud nebude
+         * doložený paragraf, nesmí se to tvářit jako zákonná citace.
+         */
+        'follow_up_document' =>
+            'Leták ČSSZ „Předregistrace a registrace zaměstnance" '
+            . '(private/Mzdy/podklady/JMHZ_predregistrace_a_registrace.pdf); '
+            . 'lhůtu potvrdila účetní vedoucí agendu 2. 9. 2026. Paragraf '
+            . 'k doložení.',
     ];
 
     /**
@@ -84,6 +112,45 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
                 'earliest_days_before_start' =>
                     self::EARLIEST_DAYS_BEFORE_START,
                 'due_on' => 'employment_start_date',
+            ]),
+        );
+    }
+
+    /**
+     * Lhůta pro plnou registraci (REGZEC A1) po částečném přihlášení (PREZEC P1).
+     *
+     * PROČ SAMOSTATNĚ: dřív tahle interakce spadla do
+     * {@see forEmploymentStart()}, takže termínem byl DEN NÁSTUPU. Aplikace
+     * pak hlásila zpoždění, které nenastalo, a tlačila účetní podat dřív, než
+     * musí — přesně u případu, kde předregistrace existuje proto, že údaje
+     * ještě nejsou. Podle letáku ČSSZ (viz `cssz_document` v SOURCES) je to
+     * nástup plus osm dnů.
+     *
+     * Okno se neotevírá dnem nástupu: doplnit údaje jde i dřív, jakmile je
+     * zaměstnavatel má, takže nejdřívější den zůstává stejný jako u přihlášky.
+     */
+    public function forFullRegistrationAfterPreRegistration(
+        string $startOn,
+    ): PayrollEmployeeRegistrationDeadlineWindow {
+        $start = $this->supportedDate($startOn);
+        $earliest = $start->modify(
+            '-' . self::EARLIEST_DAYS_BEFORE_START . ' days',
+        );
+        $due = $start->modify(
+            '+' . self::AFTER_PRE_REGISTRATION_DAYS . ' days',
+        );
+
+        return new PayrollEmployeeRegistrationDeadlineWindow(
+            $earliest->format('Y-m-d'),
+            $due->format('Y-m-d'),
+            'calendar_days',
+            self::AFTER_PRE_REGISTRATION_RULESET_ID,
+            $this->rulesetHash(self::AFTER_PRE_REGISTRATION_RULESET_ID, [
+                'earliest_days_before_start' =>
+                    self::EARLIEST_DAYS_BEFORE_START,
+                'due_calendar_days_after_start' =>
+                    self::AFTER_PRE_REGISTRATION_DAYS,
+                'due_on' => 'employment_start_date_plus_days',
             ]),
         );
     }
@@ -118,8 +185,11 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         string $effectiveOn,
     ): PayrollEmployeeRegistrationDeadlineWindow {
         if ($actionCode < 2 || $actionCode > 8) {
+            // Kontrakt volajícího, ne vstup účetní: do formuláře se tenhle
+            // kód nedostane, protože druh oznámení se vybírá z nabídky.
             throw new \InvalidArgumentException(
-                'Navazující lhůta patří pouze REGZEC A2–A8.',
+                'Lhůtu pro navazující oznámení umí spočítat jen oznámení '
+                    . 'REGZEC A2 až A8, ne přihlášení ani částečné přihlášení.',
             );
         }
         $effective = $this->date($effectiveOn);
@@ -144,7 +214,10 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         if ($value < self::SUPPORTED_FROM) {
             throw new PayrollRegistrationXmlException(
                 'registration_deadline_before_supported_window',
-                'Registrační lhůta zaměstnance se počítá až od 1. 7. 2026; pro dřívější nástup ji tenhle core neodvozuje.',
+                'Lhůtu pro přihlášení zaměstnance na ČSSZ appka počítá až '
+                    . 'od 1. 7. 2026, kdy povinnost začala platit. Tenhle nástup '
+                    . 'je dřívější, takže lhůtu určete podle tehdejších '
+                    . 'pravidel.',
             );
         }
 
@@ -163,7 +236,8 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_deadline_start_date_invalid',
-                'Datum registrační události musí být ve tvaru RRRR-MM-DD.',
+                'Datum registrační události chybí nebo není platné datum. '
+                    . 'Zadejte ho ve tvaru RRRR-MM-DD, například 2026-08-05.',
             );
         }
         return $date;

@@ -82,11 +82,28 @@ final class PayrollRegistrationA1SnapshotBuilder
         array $identity,
         array $scope,
     ): ?PayrollRegistrationA1Snapshot {
-        $sourceInput = $this->object($input, 'source');
-        $source = $this->within(
-            'source',
-            fn (): array => $this->source($sourceInput, $scope),
-        );
+        // Chybí-li celý podklad, nemá smysl rozepisovat jeho devět vnitřních
+        // polí — účetní by dostala devět technických řádků o `source.*`, které
+        // stejně nikde nevyplňuje. Jedna věta stačí.
+        $sourceInput = $input['source'] ?? null;
+        $source = [];
+        if (!is_array($sourceInput) || array_is_list($sourceInput)) {
+            // Podklad doplňuje aplikace při ukládání, ne účetní. Kdyby ji
+            // `missing()` poslalo „vyplňte přímo v tomhle formuláři", hledala
+            // by pole, které na obrazovce neexistuje.
+            $this->invalid(
+                'registration_regzec_a1_required_field_missing',
+                'Podklad registrace chybí — formulář se neuložil celý. '
+                    . 'Zavřete ho, otevřete registraci znovu a uložte ji ještě '
+                    . 'jednou; pokud se hláška vrátí, jde o chybu aplikace.',
+                'source',
+            );
+        } else {
+            $source = $this->within(
+                'source',
+                fn (): array => $this->source($sourceInput, $scope),
+            );
+        }
         $employmentInput = $this->object($input, 'employment');
         $employment = $this->within('employment', fn (): array => $this->employment(
             $employmentInput,
@@ -162,7 +179,9 @@ final class PayrollRegistrationA1SnapshotBuilder
             if ($proofIdentity === null || $foreignWorker === null) {
                 $this->invalid(
                     'registration_regzec_a1_foreign_data_missing',
-                    'REGZEC A1 cizince vyžaduje ověřený doklad totožnosti a rozhodnutí o přístupu na trh práce.',
+                    'Doklad totožnosti a rozhodnutí o přístupu na trh práce chybí. '
+                        . 'U zaměstnance bez českého státního občanství je ČSSZ '
+                        . 'vyžaduje. Vyplňte obojí přímo v tomhle formuláři.',
                     'proof_identity',
                 );
             }
@@ -179,7 +198,10 @@ final class PayrollRegistrationA1SnapshotBuilder
         ) {
             $this->invalid(
                 'registration_regzec_a1_foreign_data_invalid',
-                'Údaje cizince nelze zmrazit pro českého občana.',
+                'Doklad totožnosti a rozhodnutí o přístupu na trh práce se '
+                    . 'u zaměstnance s českým státním občanstvím nevyplňují. '
+                    . 'Buď je z formuláře odeberte, nebo opravte státní '
+                    . 'občanství na kartě osoby.',
                 'proof_identity',
             );
         }
@@ -196,7 +218,10 @@ final class PayrollRegistrationA1SnapshotBuilder
         ) {
             $this->invalid(
                 'registration_regzec_a1_czech_residence_missing',
-                'Osoba s trvalým pobytem mimo ČR vyžaduje adresu pobytu v ČR, nejde-li o přeshraničního pracovníka.',
+                'Adresa pobytu v ČR chybí. Zaměstnanec s trvalým pobytem mimo '
+                . 'ČR ji musí mít vyplněnou — výjimka platí jen pro dojíždějící '
+                . 'z Německa, Rakouska, Polska a Slovenska. Vyplňte ji přímo '
+                . 'v tomhle formuláři.',
                 'czech_residence_address',
             );
         }
@@ -208,7 +233,9 @@ final class PayrollRegistrationA1SnapshotBuilder
         ) {
             $this->invalid(
                 'registration_regzec_a1_tax_residence_address_missing',
-                'Daňový rezident jiného státu vyžaduje adresu bydliště ve státě rezidence.',
+                'Adresa bydliště ve státě daňové rezidence chybí. U daňového '
+                . 'rezidenta jiného státu než ČR ji ČSSZ vyžaduje. Vyplňte ji '
+                . 'přímo v tomhle formuláři.',
                 'tax_residency.residence_address',
             );
         }
@@ -249,7 +276,9 @@ final class PayrollRegistrationA1SnapshotBuilder
         if (preg_match('/^[a-f0-9]{64}$/D', $hash) !== 1) {
             $this->invalid(
                 'registration_regzec_a1_source_invalid',
-                'Autoritativní zdroj REGZEC A1 nemá platný otisk.',
+                'Kontrolní otisk uložených údajů registrace nesouhlasí — záznam '
+                    . 'se mezitím změnil jinde. Zavřete formulář, otevřete ho '
+                    . 'znovu a zkuste to zopakovat.',
                 'source.reference_hash',
             );
         }
@@ -257,7 +286,10 @@ final class PayrollRegistrationA1SnapshotBuilder
             if ($this->positive($input, $field) !== ($scope[$field] ?? null)) {
                 $this->invalid(
                     'registration_regzec_a1_source_scope_mismatch',
-                    'Autoritativní zdroj REGZEC A1 patří jiné firmě, osobě nebo pracovnímu vztahu.',
+                    'Uložené údaje registrace patří jiné firmě, osobě nebo '
+                        . 'pracovnímu vztahu. Zavřete formulář a otevřete '
+                        . 'registraci znovu z karty toho správného pracovního '
+                        . 'vztahu.',
                     "source.{$field}",
                 );
             }
@@ -265,7 +297,9 @@ final class PayrollRegistrationA1SnapshotBuilder
         if ($this->date($input, 'effective_on') !== ($scope['effective_on'] ?? null)) {
             $this->invalid(
                 'registration_regzec_a1_source_scope_mismatch',
-                'Autoritativní zdroj REGZEC A1 patří k jinému rozhodnému dni.',
+                'Uložené údaje registrace patří k jinému dni nástupu, než se '
+                    . 'právě registruje. Zavřete formulář a otevřete registraci '
+                    . 'znovu z karty pracovního vztahu.',
                 'source.effective_on',
             );
         }
@@ -291,7 +325,9 @@ final class PayrollRegistrationA1SnapshotBuilder
         if ($actualStart !== '' && $actualStart !== $effectiveOn) {
             $this->invalid(
                 'registration_regzec_a1_start_date_invalid',
-                'Datum nástupu v REGZEC A1 musí odpovídat rozhodnému dni snapshotu.',
+                "Skutečné datum nástupu ({$actualStart}) se liší ode dne, ke "
+                    . "kterému se registrace podává ({$effectiveOn}). Srovnejte "
+                    . 'obojí na kartě pracovního vztahu.',
                 'employment.actual_start_on',
             );
         }
@@ -494,7 +530,9 @@ final class PayrollRegistrationA1SnapshotBuilder
         if (!is_array($value) || !array_is_list($value) || count($value) > 9) {
             $this->invalid(
                 'registration_regzec_a1_attachments_invalid',
-                'Přílohy REGZEC A1 musí být seznam nejvýše devíti úplných příloh.',
+                'Přílohy registrace nejdou přijmout. Připojit jich lze nejvýše '
+                    . 'devět a každá musí mít název i obsah. Odeberte přebytečné '
+                    . 'a neúplné přílohy.',
                 'attachments',
             );
 
@@ -510,7 +548,8 @@ final class PayrollRegistrationA1SnapshotBuilder
             if ($data !== '' && base64_decode($data, true) === false) {
                 $this->invalid(
                     'registration_regzec_a1_attachments_invalid',
-                    'Příloha REGZEC A1 není platně kódovaná v Base64.',
+                    'Obsah přílohy se nepodařilo přečíst — soubor se cestou porušil. '
+                    . 'Odeberte přílohu a připojte ji znovu.',
                     'attachments.data_base64',
                 );
             }
@@ -576,15 +615,34 @@ final class PayrollRegistrationA1SnapshotBuilder
     private function text(array $input, string $key, int $max): string
     {
         $value = $input[$key] ?? null;
-        if (!is_string($value) || trim($value) === ''
-            || mb_strlen(trim($value)) > $max
-        ) {
+        if (!is_string($value) || trim($value) === '') {
             $this->missing($key);
 
             return '';
         }
+        $value = trim($value);
+        $length = mb_strlen($value);
+        if ($length > $max) {
+            $this->malformed(
+                $key,
+                'je delší, než ČSSZ přijme: vejde se do ' . self::chars($max)
+                    . ', teď jich má ' . $length . '. Zkraťte hodnotu.',
+            );
 
-        return trim($value);
+            return '';
+        }
+
+        return $value;
+    }
+
+    /** Skloňování „znak / znaky / znaků", ať hláška nezní jako z automatu. */
+    private static function chars(int $count): string
+    {
+        return match (true) {
+            $count === 1 => '1 znak',
+            $count < 5 => "{$count} znaky",
+            default => "{$count} znaků",
+        };
     }
 
     /** @param array<string,mixed> $input */
@@ -601,9 +659,15 @@ final class PayrollRegistrationA1SnapshotBuilder
     /** @param array<string,mixed> $input */
     private function code(array $input, string $key, int $length): string
     {
-        $value = $this->text($input, $key, $length);
+        // Volnější strop než přesná délka schválně: o jednu číslici delší kód
+        // pak dostane hlášku o počtu číslic, ne matoucí „je delší, než ČSSZ
+        // přijme" — účetní potřebuje vědět, kolik číslic tam patří.
+        $value = $this->text($input, $key, $length + 8);
         if ($value !== '' && preg_match('/^\d{' . $length . '}$/D', $value) !== 1) {
-            $this->missing($key);
+            $this->malformed(
+                $key,
+                "musí být číselný kód o přesně {$length} číslicích.",
+            );
 
             return '';
         }
@@ -614,9 +678,14 @@ final class PayrollRegistrationA1SnapshotBuilder
     /** @param array<string,mixed> $input */
     private function country(array $input, string $key): string
     {
-        $value = strtoupper($this->text($input, $key, 2));
+        // Stejný důvod jako u `code()`: „CZE" má dostat hlášku o dvoupísmenné
+        // zkratce, ne o překročené délce.
+        $value = strtoupper($this->text($input, $key, 16));
         if ($value !== '' && preg_match('/^[A-Z]{2}$/D', $value) !== 1) {
-            $this->missing($key);
+            $this->malformed(
+                $key,
+                'musí být dvoupísmenná zkratka státu, například CZ nebo SK.',
+            );
 
             return '';
         }
@@ -650,13 +719,18 @@ final class PayrollRegistrationA1SnapshotBuilder
     /** @param array<string,mixed> $input */
     private function date(array $input, string $key): string
     {
-        $value = $this->text($input, $key, 10);
+        // Vyšší strop než deset znaků schválně: delší nesmysl pak dostane
+        // hlášku o tvaru data, ne matoucí „je delší, než ČSSZ přijme".
+        $value = $this->text($input, $key, 32);
         if ($value === '') {
             return '';
         }
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
         if ($date === false || $date->format('Y-m-d') !== $value) {
-            $this->missing($key);
+            $this->malformed(
+                $key,
+                'musí být datum ve tvaru RRRR-MM-DD, například 2026-08-05.',
+            );
 
             return '';
         }
@@ -689,148 +763,38 @@ final class PayrollRegistrationA1SnapshotBuilder
     }
 
     /**
-     * Kam se údaj zadává. `null` znamená „přímo v tomhle formuláři".
+     * Údaj úplně chybí.
      *
-     * ZÁLOŽKA PATŘÍ DO CESTY. Bez ní popis mířil na sekci, kterou jiná záložka
-     * karty vůbec nevykresluje — účetní ji hledala a nenašla, protože stála na
-     * „Kontaktech". Tlačítko u hlášky sice doskočí samo, ale text musí sedět
-     * i pro toho, kdo si cestu proklikává ručně.
+     * Věta začíná LIDSKÝM názvem údaje, ne názvem sloupce — ten se veze buď
+     * v poli `field` (sběrný režim), nebo v závorce na konci (přísný režim,
+     * kde žádné `field` není kam dát). Slovník je společný pro celý
+     * registrační řetězec, viz {@see PayrollRegistrationFieldVocabulary}.
      */
-    private const WHERE_IDENTITY = 'kartě osoby → Identita a adresy → '
-        . 'Historie jména → Údaje pro registraci zaměstnance';
-    private const WHERE_NAMES = 'kartě osoby → Identita a adresy → Historie jména';
-    private const WHERE_ADDRESSES = 'kartě osoby → Identita a adresy → Historie adres';
-
-    /**
-     * Lidský název a MÍSTO, kde se údaj doplňuje.
-     *
-     * Why: hláška uměla jen technický název sloupce („nemá platné povinné pole
-     * citizenship_country_code"). Účetní z něj nepozná ani co to je, ani kam
-     * jít. Klíč bez překladu se vypíše tak, jak je; neúplný slovník nesmí
-     * zamlčet, že něco chybí.
-     *
-     * @var array<string,array{0:string,1:?string}>
-     */
-    private const FIELD_LABELS = [
-        'citizenship_country_code' => ['státní občanství', self::WHERE_IDENTITY],
-        'birth_country_code' => ['stát narození', self::WHERE_IDENTITY],
-        'birth_place' => ['místo narození', self::WHERE_IDENTITY],
-        'birth_date' => ['datum narození', self::WHERE_IDENTITY],
-        'sex' => ['pohlaví', self::WHERE_IDENTITY],
-        'family_name' => ['příjmení', self::WHERE_NAMES],
-        'given_name' => ['jméno', self::WHERE_NAMES],
-        'permanent_address.street' => ['ulice trvalého pobytu', self::WHERE_ADDRESSES],
-        'permanent_address.house_number' => ['číslo popisné trvalého pobytu', null],
-        'permanent_address.city' => ['obec trvalého pobytu', self::WHERE_ADDRESSES],
-        'permanent_address.postal_code' => ['PSČ trvalého pobytu', self::WHERE_ADDRESSES],
-        'permanent_address.country_code' => ['stát trvalého pobytu', self::WHERE_ADDRESSES],
-        'health_insurance_code' => [
-            'kód zdravotní pojišťovny',
-            'kartě osoby → Zákonná evidence → zdravotní pojištění',
-        ],
-        'tax_residency.country_code' => [
-            'stát daňové rezidence',
-            'kartě osoby → Zákonná evidence → daňová rezidence',
-        ],
-        'tax_residency.identifier_pair' => [
-            'typ i hodnotu zahraničního daňového identifikátoru (buď obojí, nebo nic)',
-            null,
-        ],
-        'employment.activity_code' => [
-            'druh činnosti pro ČSSZ',
-            'kartě pracovního vztahu → sjednané podmínky',
-        ],
-        'employment.actual_start_on' => [
-            'skutečné datum nástupu',
-            'kartě pracovního vztahu',
-        ],
-        'employment.contract_start_on' => ['sjednaný den nástupu', null],
-        'employment.small_scale' => ['příznak zaměstnání malého rozsahu', null],
-        'employment.employment_status_code' => ['postavení zaměstnance', null],
-        'employment.work_mode_code' => ['režim práce', null],
-        'employment.continuous_operation' => ['nepřetržitý provoz', null],
-        'employment.prevailing_workplace_code' => ['převažující pracoviště', null],
-        'employment.contract_workplace' => ['sjednané místo výkonu práce', null],
-        'employment.workplace_city' => ['obec pracoviště', null],
-        'employment.workplace_municipality_code' => ['kód obce pracoviště', null],
-        'employment.profession_code' => ['profesi (CZ-ISCO)', null],
-        'employment.position_name' => ['název pracovní pozice', null],
-        'employment.leadership' => ['příznak vedoucí pozice', null],
-        'facts.highest_education_code' => ['nejvyšší dosažené vzdělání', null],
-        'facts.disability_card' => ['průkaz osoby se zdravotním postižením', null],
-        'facts.health_restrictions' => ['seznam zdravotních omezení', null],
-        'pension.type_and_received_from' => [
-            'druh důchodu i datum přiznání (buď obojí, nebo nic)',
-            null,
-        ],
-        'pension.early_retirement' => ['příznak předčasného důchodu', null],
-        'pension.reduced_retirement_age' => ['příznak snížené důchodové hranice', null],
-        'foreign_legislation.applies' => ['příznak zahraniční legislativy', null],
-        'foreign_legislation.country_code' => ['stát zahraniční legislativy', null],
-        'proof_identity.type_code' => ['typ dokladu totožnosti', null],
-        'proof_identity.number' => ['číslo dokladu totožnosti', null],
-        'proof_identity.country_code' => ['stát vydání dokladu totožnosti', null],
-        'foreign_worker.free_access' => ['volný přístup na trh práce', null],
-        'foreign_worker.free_access_reason_code' => ['důvod volného přístupu na trh práce', null],
-        'foreign_worker.permit' => [
-            'úplné povolení k zaměstnání (typ, číslo, platnost od a do)',
-            null,
-        ],
-    ];
-
-    /**
-     * Adresní listy se opakují ve čtyřech sekcích. Trvalý pobyt má vlastní
-     * záznamy výš (bere se z evidence osoby), zbytek se vyplňuje tady.
-     *
-     * @var array<string,string>
-     */
-    private const ADDRESS_LABELS = [
-        'street' => 'ulice',
-        'house_number' => 'číslo popisné',
-        'orientation_number' => 'číslo orientační',
-        'city' => 'obec',
-        'postal_code' => 'PSČ',
-        'country_code' => 'stát adresy',
-    ];
-
-    /** @return array{0:string,1:?string}|null */
-    private function label(string $path): ?array
-    {
-        if (isset(self::FIELD_LABELS[$path])) {
-            return self::FIELD_LABELS[$path];
-        }
-        $dot = strrpos($path, '.');
-        if ($dot === false) {
-            return null;
-        }
-        $leaf = substr($path, $dot + 1);
-        $address = self::ADDRESS_LABELS[$leaf] ?? null;
-
-        return $address === null ? null : [$address, null];
-    }
-
     private function missing(string $field): void
     {
         $path = $this->prefix . $field;
-        $label = $this->label($path);
-        if ($label === null) {
-            $this->fail(
-                'registration_regzec_a1_required_field_missing',
-                "Autoritativní zdroj REGZEC A1 nemá platné povinné pole {$path}.",
-                $path,
-            );
-
-            return;
-        }
-        [$name, $where] = $label;
         $this->fail(
             'registration_regzec_a1_required_field_missing',
-            $where === null
-                ? "Pro REGZEC A1 chybí {$name} ({$path}). Vyplňte ho přímo"
-                    . ' v tomhle formuláři.'
-                : "Pro REGZEC A1 chybí {$name} ({$path}). Doplňte ho na"
-                    . " {$where} — na tomhle formuláři se nezadává, bere se"
-                    . ' z osobní evidence.',
+            PayrollRegistrationFieldVocabulary::label($path)
+                . ' chybí — registraci na ČSSZ (REGZEC A1) bez toho podat nejde. '
+                . PayrollRegistrationFieldVocabulary::describe($path),
+            $path,
+        );
+    }
+
+    /**
+     * Údaj vyplněný je, ale ve tvaru, který ČSSZ nepřijme.
+     *
+     * „Chybí" by tady lhalo — účetní by koukala na vyplněné pole a hledala
+     * prázdné. `$expectation` proto musí říct, JAK má hodnota vypadat.
+     */
+    private function malformed(string $field, string $expectation): void
+    {
+        $path = $this->prefix . $field;
+        $this->fail(
+            'registration_regzec_a1_field_value_invalid',
+            PayrollRegistrationFieldVocabulary::label($path) . ' ' . $expectation
+                . ' ' . PayrollRegistrationFieldVocabulary::describe($path),
             $path,
         );
     }
@@ -846,7 +810,21 @@ final class PayrollRegistrationA1SnapshotBuilder
     private function fail(string $code, string $message, ?string $field): void
     {
         if ($this->problems === null) {
-            throw new PayrollRegistrationIdentitySnapshotException($code, $message);
+            // Přísný režim nemá kam dát `field`, takže technická cesta jde do
+            // závorky na konec věty. Bez ní by podpora nedohledala pole.
+            throw new PayrollRegistrationIdentitySnapshotException(
+                $code,
+                $message . PayrollRegistrationFieldVocabulary::reference($field),
+            );
+        }
+        // Jedno pole = jedna hláška. Bez toho se u příliš dlouhé hodnoty
+        // vypsalo „je delší, než ČSSZ přijme" a hned pod tím „chybí" (protože
+        // vadnou hodnotu zahazujeme na `null`) — dvě věty, které si odporují.
+        // První hláška je vždycky ta konkrétnější, tak si ji necháme.
+        foreach ($this->problems as $problem) {
+            if ($field !== null && $problem['field'] === $field) {
+                return;
+            }
         }
         $this->problems[] = [
             'field' => $field,

@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Payroll\Submission;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzGovTalkEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzGovTalkRequestShape;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -85,6 +86,57 @@ final class JmhzGovTalkDocumentedShapeTest extends TestCase
 
         self::assertStringNotContainsString('<Class>MPSV</Class>', $xml);
         self::assertStringNotContainsString('Type="ico"', $xml);
+    }
+
+    /**
+     * `eType` NENÍ pro všechny agendy `JMHZ25`.
+     *
+     * `CSSZSubmClasses.pdf` má pro každý tiskopis vlastní řádek a sloupec
+     * „Envelope 1.2 eType" v něm nese název formuláře. Registrační podání se
+     * přesto stavěla přes `documented()`, takže na VREP odcházelo
+     * `Class="CSSZ_REGZEC"` s tělem označeným `eType="JMHZ25"`. Ani XSD, ani
+     * katalog kontrol na obálku nedosáhnou — projevilo by se to až odmítnutím.
+     */
+    public function testEveryDocumentedAgendaCarriesItsOwnEnvelopeType(): void
+    {
+        foreach ([
+            'CSSZ_JMHZ' => 'JMHZ25',
+            'CSSZ_REGZEC' => 'REGZEC25',
+            'CSSZ_PREZEC' => 'PREZEC26',
+        ] as $submissionClass => $envelopeType) {
+            self::assertSame(
+                $envelopeType,
+                JmhzGovTalkRequestShape::forSubmissionClass($submissionClass)
+                    ->bodyEnvelopeType,
+            );
+            self::assertSame(
+                $envelopeType,
+                JmhzGovTalkRequestShape::envelopeTypeFor($submissionClass),
+            );
+        }
+
+        $this->expectException(JmhzTransportException::class);
+        $this->expectExceptionMessage('není doložený `eType`');
+        JmhzGovTalkRequestShape::forSubmissionClass('CSSZ_NEEXISTUJE');
+    }
+
+    /**
+     * Hlavička a tělo musí mluvit o témže tiskopisu. Prohlášený tvar si volí
+     * volající, takže samotná mapa v továrně nestačí — obálka musí záměnu
+     * doložených agend odmítnout, ať ji sestaví kdokoli.
+     */
+    public function testEnvelopeRefusesAnEnvelopeTypeFromAnotherAgenda(): void
+    {
+        $this->expectException(JmhzTransportException::class);
+        $this->expectExceptionMessage('patří jiné agendě');
+
+        (new JmhzGovTalkEnvelope(JmhzGovTalkRequestShape::documented()))->build(
+            JmhzXmlSample::minimal(),
+            '1234567890',
+            'CSSZ_REGZEC',
+            'test',
+            new JmhzSoftwareIdentification('MyÚčto.cz', '5.6.0'),
+        );
     }
 
     private function build(): string

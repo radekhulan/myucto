@@ -94,6 +94,13 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService::DUTY_KINDS',
         'payroll.ts::PayrollDeadlineSource'
             => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::SOURCES',
+        // Fronta odchozích podání: kudy umí aplikace agendu odeslat.
+        'payroll.ts::PayrollSubmissionDispatchMode'
+            => 'const:MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog::MODES',
+        // Řazení fronty. Whitelist je na serveru, protože `ORDER BY` se nedá
+        // parametrizovat — slepené jméno sloupce by byla SQL injection.
+        'payroll.ts::PayrollSubmissionQueueSort'
+            => 'const:MyInvoice\Repository\Payroll\PayrollSubmissionQueueRepository::SORTS',
         // Roční vyúčtování daně: typ vyúčtování je `vdadpz_typ` / `dapdps_forma`
         // z EPO schémat, kód písemnosti rozhoduje o tom, které XML se generuje.
         'payroll.ts::PayrollTaxStatementVariant'

@@ -16,6 +16,8 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnedException;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
+use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Payroll\PayrollLegacyRecapitulationService;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Payment\PayrollPaydayResolver;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
@@ -38,6 +40,7 @@ final class PayrollRunsAction
         private readonly PayrollPeriodOwnershipService $ownership,
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollPaydayResolver $payday,
+        private readonly PayrollLegacyRecapitulationService $legacyRecapitulations,
     ) {}
 
     /**
@@ -125,6 +128,110 @@ final class PayrollRunsAction
         return Json::ok($response, [
             'released' => true,
             'ownership' => $this->ownership->legacyClaimStatus(
+                $this->currentSupplierId($request),
+                $year,
+                $month,
+            ),
+        ]);
+    }
+
+    /**
+     * Co za období zbývá po RUČNÍ mzdové rekapitulaci — bez zápisu.
+     *
+     * @param array<string,string> $args
+     */
+    public function legacyRecapitulation(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll',
+            AccessLevel::READ,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            [$year, $month] = self::periodParts($args['period'] ?? null);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, [
+            'legacy_recapitulation' => $this->legacyRecapitulations->status(
+                $this->currentSupplierId($request),
+                $year,
+                $month,
+            ),
+        ]);
+    }
+
+    /**
+     * Předání měsíce od ruční rekapitulace modulu Mzdy.
+     *
+     * Bez téhle cesty šlo do modulu vzít jen měsíce OD přechodu dál. Starší
+     * měsíc držela legacy rezervace a `release-legacy` ji fail-closed odmítala
+     * uvolnit, dokud za období existoval řádek ve mzdovém listu — a ten se
+     * nedal odstranit odnikud než ruční editací databáze. Rok, který začal
+     * ruční rekapitulací, tak zůstal navždy rozpůlený mezi dvě agendy.
+     *
+     * @param array<string,string> $args
+     */
+    public function handOverLegacyRecapitulation(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.reopen',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        try {
+            [$year, $month] = self::periodParts($args['period'] ?? null);
+            $result = $this->legacyRecapitulations->handOverToModule(
+                $this->currentSupplierId($request),
+                $year,
+                $month,
+                $this->requiredUserId($request),
+                $this->requiredString($body, 'reason'),
+                isset($body['reversal_date']) && $body['reversal_date'] !== ''
+                    ? (string) $body['reversal_date']
+                    : null,
+                $this->clientIp($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (PayrollPeriodOwnedException $e) {
+            return Json::error(
+                $response,
+                'payroll_period_owned',
+                $e->getMessage(),
+                409,
+            );
+        } catch (PostingException $e) {
+            // Storno zamčeného nebo uzavřeného období je odmítnutí účetnictví,
+            // ne vada požadavku — kód i stav si nese výjimka sama.
+            return Json::error(
+                $response,
+                $e->errorCode,
+                $e->getMessage(),
+                $e->httpStatus === 404 ? 404 : 409,
+            );
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, [
+            'hand_over' => $result,
+            'legacy_recapitulation' => $this->legacyRecapitulations->status(
                 $this->currentSupplierId($request),
                 $year,
                 $month,

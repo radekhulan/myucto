@@ -22,7 +22,9 @@ final readonly class PayrollRegistrationXmlValidator
         if (!hash_equals(hash('sha256', $expected), hash('sha256', $xml))) {
             $this->invalid(
                 'registration_xml_snapshot_mismatch',
-                'XML byteově neodpovídá zdrojovému snapshotu.',
+                'Připravený soubor pro ČSSZ neodpovídá uloženým údajům '
+                    . 'registrace — údaje se mezitím změnily. Připravte podání '
+                    . 'znovu, ať se soubor vytvoří z aktuálních dat.',
             );
         }
         $schema = $this->schemas->schemaFor(
@@ -51,9 +53,15 @@ final readonly class PayrollRegistrationXmlValidator
                     trim($error->message),
                 $errors,
             );
+            // Popis od XSD je anglický a technický. Nechat ho tam musíme —
+            // bez něj se nedá zjistit, které pole ČSSZ vadí — ale musí až za
+            // vysvětlením, co se vlastně stalo a co s tím účetní udělá.
             $this->invalid(
                 'registration_xsd_validation_failed',
-                'Registrační XML neprošlo připnutým XSD: '
+                'Podání neprošlo kontrolou proti formuláři ČSSZ, takže by ho '
+                    . 'ČSSZ odmítla. Zkontrolujte údaje registrace a připravte '
+                    . 'podání znovu; pokud vada zůstane, pošlete podpoře tento '
+                    . 'technický popis: '
                     . implode('; ', array_unique($messages)),
             );
         }
@@ -74,18 +82,38 @@ final readonly class PayrollRegistrationXmlValidator
             $payload->identity,
             $payload->interaction,
         );
-        if ($payload->sequenceNumber < 1
-            || $payload->sequenceNumber > 1500
-            || preg_match(
-                '/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/D',
-                $payload->formGuid,
-            ) !== 1
-            || preg_match('/^\d{8,10}$/D', $payload->employerVariableSymbol)
-                !== 1
+        // Tři různé vady pod jedním kódem: společná hláška „nemá platná
+        // metadata" neřekla, která z nich to je — a jen jedna z nich je
+        // uživatelsky opravitelná (variabilní symbol), zbylé dvě znamenají
+        // „připravte podání znovu".
+        if ($payload->sequenceNumber < 1 || $payload->sequenceNumber > 1500) {
+            $this->invalid(
+                'registration_payload_invalid',
+                'Pořadové číslo podání musí být 1 až 1500, teď je '
+                    . $payload->sequenceNumber . '. Připravte podání znovu.',
+            );
+        }
+        if (preg_match(
+            '/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/D',
+            $payload->formGuid,
+        ) !== 1) {
+            $this->invalid(
+                'registration_payload_invalid',
+                'Identifikátor formuláře nemá tvar, který ČSSZ přijímá. '
+                    . 'Vzniká automaticky, takže stačí připravit podání znovu.',
+            );
+        }
+        if (preg_match('/^\d{8,10}$/D', $payload->employerVariableSymbol)
+            !== 1
         ) {
             $this->invalid(
                 'registration_payload_invalid',
-                'Registrační payload nemá platná metadata.',
+                PayrollRegistrationFieldVocabulary::label(
+                    'employer_variable_symbol',
+                ) . ' musí mít 8 až 10 číslic bez mezer a lomítek. '
+                    . PayrollRegistrationFieldVocabulary::describe(
+                        'employer_variable_symbol',
+                    ),
             );
         }
         if ($payload->interaction->documentType === 'PREZEC26') {
@@ -110,22 +138,49 @@ final readonly class PayrollRegistrationXmlValidator
                 // `new DateTimeImmutable('')`, tedy do systémového „dneška",
                 // a okno by se počítalo proti času běhu; nesmyslný řetězec by
                 // navíc vyhodil `DateMalformedStringException` mimo kontrakt.
-                $start = $this->exactDate($payload->expectedStartOn);
-                $prepared = $this->exactDate($payload->preparedOn);
+                $start = $this->exactDate(
+                    $payload->expectedStartOn,
+                    'Předpokládané datum nástupu',
+                );
+                $prepared = $this->exactDate(
+                    $payload->preparedOn,
+                    'Datum vyhotovení podání',
+                );
                 $days = (int) $prepared->diff($start)->format('%r%a');
                 if ($days < 0 || $days > 8) {
                     $this->invalid(
                         'registration_prezec_start_window_invalid',
-                        'PREZEC P1 lze podat nejvýše osm dnů před nástupem.',
+                        'Částečné přihlášení před nástupem (PREZEC P1) jde '
+                            . 'podat nejdřív osm dnů před nástupem a nejpozději '
+                            . 'v den nástupu. Mezi vyhotovením ('
+                            . $prepared->format('d.m.Y') . ') a nástupem ('
+                            . $start->format('d.m.Y') . ') je ' . $days
+                            . ' dnů. Buď s podáním počkejte, nebo podejte rovnou '
+                            . 'plnou registraci REGZEC.',
                     );
                 }
             }
         } elseif ($payload->employerName === null
             || $payload->csszWorkplaceCode === null
         ) {
+            $missing = [];
+            foreach ([
+                'employer_name' => $payload->employerName,
+                'cssz_workplace_code' => $payload->csszWorkplaceCode,
+            ] as $path => $value) {
+                if ($value === null) {
+                    $missing[] = mb_lcfirst(
+                        PayrollRegistrationFieldVocabulary::label($path),
+                    );
+                }
+            }
             $this->invalid(
                 'registration_regzec_full_payload_incomplete',
-                'REGZEC nemá úplná povinná metadata zaměstnavatele.',
+                mb_ucfirst(implode(' a ', $missing))
+                    . ' chybí — podání REGZEC bez toho ČSSZ nepřijme. '
+                    . PayrollRegistrationFieldVocabulary::describe(
+                        'employer_name',
+                    ),
             );
         } elseif ($payload->interaction->actionCode === 1) {
             $a1 = $payload->identity->regzecA1;
@@ -154,7 +209,13 @@ final readonly class PayrollRegistrationXmlValidator
         ) {
             $this->invalid(
                 'registration_event_snapshot_invalid',
-                'REGZEC A2–A8 neodpovídá schválenému neměnnému zdroji.',
+                PayrollRegistrationFieldVocabulary::action(
+                    $payload->interaction->documentType,
+                    $payload->interaction->actionCode,
+                ) . ' neodpovídá uloženému záznamu události — od chvíle, kdy se '
+                    . 'podání připravilo, se záznam změnil nebo se zaměnil za '
+                    . 'jiný. Otevřete oznámení znovu a připravte podání ještě '
+                    . 'jednou.',
             );
         }
         $person = $event['person_external_identifier'] ?? null;
@@ -169,16 +230,37 @@ final readonly class PayrollRegistrationXmlValidator
         ) {
             $this->invalid(
                 'registration_event_identifiers_invalid',
-                'Navazující REGZEC vyžaduje účinné OIČ / IK MPSV a ID PPV.',
+                PayrollRegistrationFieldVocabulary::label(
+                    'person_external_identifier',
+                ) . ' a ' . mb_lcfirst(
+                    PayrollRegistrationFieldVocabulary::label(
+                        'employment_external_identifier',
+                    ),
+                ) . ' chybí nebo nemají platný tvar — OIČ má přesně 10 číslic, '
+                    . 'ID PPV 1 až 22 číslic. Obě čísla přiděluje ČSSZ '
+                    . 'v odpovědi na první přihlášení zaměstnance; než odpověď '
+                    . 'přijde a načte se, navazující oznámení podat nelze.',
             );
         }
-        $this->exactDate($effectiveOn);
-        $this->exactDate($notificationTriggerOn);
+        $this->exactDate(
+            $effectiveOn,
+            PayrollRegistrationFieldVocabulary::label('effective_on'),
+        );
+        $this->exactDate(
+            $notificationTriggerOn,
+            PayrollRegistrationFieldVocabulary::label(
+                'notification_trigger_on',
+            ),
+        );
         $data = $event['data'] ?? null;
         if (!is_array($data) || array_is_list($data)) {
             $this->invalid(
                 'registration_event_snapshot_invalid',
-                'Navazující REGZEC nemá platná data události.',
+                PayrollRegistrationFieldVocabulary::action(
+                    $payload->interaction->documentType,
+                    $payload->interaction->actionCode,
+                ) . ' nemá uložené žádné údaje ke hlášení. Otevřete oznámení, '
+                    . 'vyplňte ho a připravte podání znovu.',
             );
         }
         $action = $payload->interaction->actionCode;
@@ -208,15 +290,53 @@ final readonly class PayrollRegistrationXmlValidator
             default => false,
         };
         if (!$valid) {
+            // Společná hláška „neobsahuje povinná pole z matice" účetní
+            // neřekla, KTERÉ pole u KTERÉHO oznámení. Každá akce má jiný
+            // povinný údaj, takže si každá zaslouží vlastní věty.
             $this->invalid(
                 'registration_event_required_fields_missing',
-                'Neměnný zdroj neobsahuje povinná pole z matice REGZEC A2–A8.',
+                PayrollRegistrationFieldVocabulary::action(
+                    $payload->interaction->documentType,
+                    $action,
+                ) . ' nejde podat: ' . match ($action) {
+                    2 => 'datum skončení pracovního vztahu chybí, nebo nesedí '
+                        . 'na den, ke kterému se změna hlásí. Srovnejte obojí '
+                        . 'na kartě pracovního vztahu.',
+                    3, 4 => 'není vidět žádná změna proti tomu, co už ČSSZ ví. '
+                        . 'Změňte aspoň jeden hlásitelný údaj na kartě osoby '
+                        . 'nebo pracovního vztahu, nebo oznámení zrušte.',
+                    5 => mb_lcfirst(
+                        PayrollRegistrationFieldVocabulary::label(
+                            'new_variable_symbol',
+                        ),
+                    ) . ' chybí nebo nemá 8 až 10 číslic. '
+                        . PayrollRegistrationFieldVocabulary::describe(
+                            'new_variable_symbol',
+                        ),
+                    6 => 'zaměstnanec podle uložených údajů českým předpisům '
+                        . 'nepodléhá, takže není co oznamovat. Opravte '
+                        . 'příslušnost k zahraničnímu pojištění na kartě osoby.',
+                    7 => 'chybí údaj o tom, že příslušnost k českým předpisům '
+                        . 'skončila, nebo identifikátor zahraničního pojištění. '
+                        . 'Doplňte obojí na kartě osoby.',
+                    8 => 'chybí potvrzení, že zaměstnanec skutečně nenastoupil. '
+                        . 'Storno se podává jen k přihlášení, ke kterému '
+                        . 'nástup nedošel.',
+                    default => 'tenhle druh oznámení zatím neumíme připravit. '
+                        . 'Podejte ho přes portál ČSSZ.',
+                },
             );
         }
     }
 
-    private function exactDate(?string $value): \DateTimeImmutable
-    {
+    /**
+     * @param string $label lidský název data, ať hláška nemluví o PREZEC P1
+     *                      i tam, kde se kontroluje datum události A2–A8
+     */
+    private function exactDate(
+        ?string $value,
+        string $label,
+    ): \DateTimeImmutable {
         $date = $value === null
             ? false
             : \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
@@ -225,7 +345,8 @@ final readonly class PayrollRegistrationXmlValidator
         ) {
             $this->invalid(
                 'registration_prezec_start_date_invalid',
-                'PREZEC P1 vyžaduje datum nástupu i datum vyhotovení ve tvaru RRRR-MM-DD.',
+                $label . ' chybí nebo není platné datum. Zadejte ho ve tvaru '
+                    . 'RRRR-MM-DD, například 2026-08-05.',
             );
         }
 

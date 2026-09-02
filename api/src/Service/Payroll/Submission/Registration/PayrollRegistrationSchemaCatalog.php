@@ -23,9 +23,15 @@ final class PayrollRegistrationSchemaCatalog
                 $root . '/regzec-1.4.0.4/baseTypes2.xsd',
                 'http://schemas.cssz.cz/REGZEC/2025',
             ],
+            // Výjimka tu zůstává schválně: bez předlohy formuláře se podání
+            // nedá ani zkontrolovat, natož odeslat. Není to neúplný vstup
+            // účetní, ale požadavek na formulář, který appka neumí.
             default => throw new PayrollRegistrationXmlException(
                 'registration_schema_unavailable',
-                'Požadovaný registrační formulář nemá připnuté XSD.',
+                "Registrační formulář ČSSZ „{$documentType}“ tahle verze "
+                    . 'neumí připravit. Podporované jsou přihlášení a oznámení '
+                    . 'REGZEC25 a částečné přihlášení PREZEC26; ostatní podejte '
+                    . 'přes portál ČSSZ.',
             ),
         };
         [$entry, $entryHash, $dependency, $namespace] = $definition;
@@ -38,9 +44,14 @@ final class PayrollRegistrationSchemaCatalog
             if ($actualHash === false
                 || !hash_equals($expectedHash, $actualHash)
             ) {
+                // Taky vědomě výjimka: kdyby se předloha jen „přeskočila",
+                // odešlo by se na ČSSZ nezkontrolované podání. Účetní s tím
+                // nic neudělá, ale musí vědět, že to není chyba jejích dat.
                 throw new PayrollRegistrationXmlException(
                     'registration_schema_integrity_failed',
-                    'Lokální registrační XSD balíček chybí nebo má jiný otisk.',
+                    'Předlohy formulářů ČSSZ v této instalaci chybí nebo se '
+                        . 'liší od ověřených. Podání proto nejde zkontrolovat — '
+                        . 'není to chybou vašich údajů, obraťte se na podporu.',
                 );
             }
         }

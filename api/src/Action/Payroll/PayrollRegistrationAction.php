@@ -7,8 +7,10 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationA1MasterDataWriter;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotException;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
@@ -34,8 +36,66 @@ final class PayrollRegistrationAction
         private readonly PayrollRegistrationSubmissionService $registrations,
         private readonly PayrollRegistrationIdentityService $identities,
         private readonly PayrollRegistrationChangeDetectionService $changes,
+        private readonly PayrollRegistrationA1MasterDataWriter $masterData,
         private readonly PayrollModuleAccess $access,
+        private readonly IpMatcher $ipMatcher,
     ) {}
+
+    private function ip(Request $request): string
+    {
+        $params = [];
+        foreach ($request->getServerParams() as $key => $value) {
+            if (is_string($key)) {
+                $params[$key] = $value;
+            }
+        }
+
+        return $this->ipMatcher->clientIpFromRequest($params);
+    }
+
+    /**
+     * Zápis opravené hodnoty z formuláře A1 zpátky do kmenových dat.
+     *
+     * Oprávnění je `payroll.person.write`, ne `payroll.submissions`: tenhle
+     * endpoint mění evidenci osoby a pracovního vztahu, ne podání. Kdo smí
+     * podávat, ale ne editovat kartu osoby, sem nesmí.
+     *
+     * @param array<string,string> $args
+     */
+    public function writeA1MasterData(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+            'payroll.person.write',
+        );
+        if ($denied !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $fields = $body['fields'] ?? null;
+        if (!is_array($fields)) {
+            return $this->noStore(Json::error(
+                $response,
+                'validation_failed',
+                'Chybí seznam údajů, které se mají do kmenových dat zapsat.',
+                422,
+            ));
+        }
+
+        return $this->run($response, fn (): array => $this->masterData->write(
+            $this->currentSupplierId($request),
+            $this->employmentId($args),
+            array_values($fields),
+            $this->userId($request),
+            $this->ip($request),
+            $request->getHeaderLine('User-Agent'),
+        ));
+    }
 
     /**
      * Co se od posledního podání rozešlo a do kdy se to má nahlásit.
@@ -368,6 +428,7 @@ final class PayrollRegistrationAction
         Request $request,
         Response $response,
         AccessLevel $level,
+        string $permission = 'payroll.submissions',
     ): ?Response {
         if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error(
@@ -381,7 +442,7 @@ final class PayrollRegistrationAction
         if (!$this->requirePermission(
             $request,
             $response,
-            'payroll.submissions',
+            $permission,
             $level,
             $error,
         )) {

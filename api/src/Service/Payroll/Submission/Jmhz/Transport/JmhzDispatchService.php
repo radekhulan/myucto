@@ -139,7 +139,13 @@ readonly class JmhzDispatchService
         $signer = $this->signer($supplierId, $environment);
         $material = $signer->unlock();
 
-        $sealed = (new JmhzGovTalkEnvelope(JmhzGovTalkRequestShape::documented()))->seal(
+        // Tvar obálky se odvozuje z druhu podání, ne z JMHZ: `eType` vnořené
+        // ČSSZ obálky je pro REGZEC a PREZEC jiné a `documented()` by na ně
+        // nalepilo `JMHZ25`.
+        $envelope = new JmhzGovTalkEnvelope(
+            JmhzGovTalkRequestShape::forSubmissionClass($submissionClass),
+        );
+        $sealed = $envelope->seal(
             $payloadXml,
             $variableSymbol,
             $submissionClass,
@@ -772,8 +778,9 @@ readonly class JmhzDispatchService
         bool $close,
         string $submissionClass = self::SUBMISSION_CLASS,
     ): JmhzVrepPollResult {
-        $request = (new JmhzGovTalkEnvelope(JmhzGovTalkRequestShape::documented()))
-            ->pollRequest($correlation, $variableSymbol, $submissionClass, $close);
+        $request = (new JmhzGovTalkEnvelope(
+            JmhzGovTalkRequestShape::forSubmissionClass($submissionClass),
+        ))->pollRequest($correlation, $variableSymbol, $submissionClass, $close);
 
         return $this->client($environment)->poll($correlation, $request);
     }

@@ -64,6 +64,7 @@ final readonly class JmhzGovTalkEnvelope
         $class = $this->assertClass($submissionClass);
         $symbol = $this->assertVariableSymbol($variableSymbol);
         $environment = $this->assertEnvironment($environment);
+        $this->assertEnvelopeType($shape, $class);
         $payload = $this->parsePayload($bodyXml);
         if ($class === 'CSSZ_JMHZ') {
             $this->assertJmhzPayload($payload, $symbol, $software);
@@ -238,6 +239,7 @@ final readonly class JmhzGovTalkEnvelope
         $class = $this->assertClass($submissionClass);
         $symbol = $this->assertVariableSymbol($variableSymbol);
         $environment = $this->assertEnvironment($environment);
+        $this->assertEnvelopeType($shape, $class);
         $payload = $this->parsePayload($bodyXml);
         if ($class === 'CSSZ_JMHZ') {
             $this->assertJmhzPayload($payload, $symbol, $software);
@@ -404,6 +406,36 @@ final readonly class JmhzGovTalkEnvelope
         }
 
         return $submissionClass;
+    }
+
+    /**
+     * Hlavička a tělo obálky musí mluvit o témže tiskopisu.
+     *
+     * Prohlášený tvar si volí volající a `eType` se od `Class` liší agendu od
+     * agendy (`CSSZSubmClasses.pdf`). Bez téhle kontroly stačilo předat tvar
+     * jedné agendy s třídou druhé — obálka by vznikla, VREP by ji dostal
+     * a rozpor by se projevil až odmítnutím, kdy už lhůta běží.
+     *
+     * Kontroluje se jen ZÁMĚNA MEZI DOLOŽENÝMI agendami. Tahle třída zůstává
+     * hloupý stavitel řízený prohlášeným tvarem — kdo si prohlásí `eType`
+     * mimo katalog, ví, co dělá, a obálka mu vznikne. Co nesmí projít je
+     * `eType` jedné doložené agendy nalepené na třídu jiné.
+     */
+    private function assertEnvelopeType(
+        JmhzGovTalkRequestShape $shape,
+        string $submissionClass,
+    ): void {
+        if (!JmhzGovTalkRequestShape::isCatalogEnvelopeType($shape->bodyEnvelopeType)) {
+            return;
+        }
+        if ($shape->bodyEnvelopeType
+            !== JmhzGovTalkRequestShape::envelopeTypeFor($submissionClass)
+        ) {
+            throw new JmhzTransportException(
+                'jmhz_govtalk_envelope_type_mismatch',
+                'Prohlášený `eType` ČSSZ obálky patří jiné agendě než druh podání.',
+            );
+        }
     }
 
     private function assertVariableSymbol(string $variableSymbol): string

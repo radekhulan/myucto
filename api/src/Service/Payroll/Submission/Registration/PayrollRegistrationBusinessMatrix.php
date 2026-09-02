@@ -47,21 +47,33 @@ final class PayrollRegistrationBusinessMatrix
         ?string $relationshipDetailCode,
         bool $variantDataComplete = true,
     ): string {
+        // Výjimky tu zůstávají: tahle třída rozhoduje, KTERÁ pole jsou pro dané
+        // podání povinná, takže bez druhu činnosti nemá co vracet. Do seznamu
+        // vad je přeloží volající (A1 builder je chytá a sbírá), uložení
+        // rozpracovaného profilu tím nepadá.
+        $activityName = PayrollRegistrationFieldVocabulary::label(
+            'employment.activity_code',
+        );
         if ($activityCode === null || $activityCode === '') {
-            $message = $actionCode === 1
-                ? 'REGZEC A1 nelze připravit: chybí povinný druh činnosti (atribut 10239).'
-                : "REGZEC A{$actionCode} nelze připravit: chybí druh činnosti v neměnném podkladu události.";
             throw new PayrollRegistrationXmlException(
                 $actionCode === 1
                     ? 'registration_regzec_a1_activity_missing'
                     : 'registration_regzec_event_activity_missing',
-                $message,
+                $activityName . ' chybí — podle něj se teprve pozná, které '
+                    . 'další údaje ČSSZ u tohohle zaměstnance chce. '
+                    . PayrollRegistrationFieldVocabulary::describe(
+                        'employment.activity_code',
+                    ),
             );
         }
         if (!in_array($activityCode, self::ACTIVITY_CODES, true)) {
             throw new PayrollRegistrationXmlException(
                 'registration_regzec_activity_invalid',
-                'Druh činnosti neodpovídá autoritativní matici REGZEC.',
+                $activityName . " „{$activityCode}\" není v číselníku ČSSZ. "
+                    . 'Vyberte ho ze seznamu, ručně psaná zkratka neprojde. '
+                    . PayrollRegistrationFieldVocabulary::describe(
+                        'employment.activity_code',
+                    ),
             );
         }
         try {
@@ -85,13 +97,23 @@ final class PayrollRegistrationBusinessMatrix
         if ($allowed === null || !in_array($variant, $allowed, true)) {
             throw new PayrollRegistrationXmlException(
                 'registration_regzec_action_variant_unsupported',
-                "REGZEC A{$actionCode} není pro variantu {$variant} podle autoritativní business matice povolena.",
+                PayrollRegistrationFieldVocabulary::action(
+                    'REGZEC25',
+                    $actionCode,
+                ) . ' se u tohoto druhu činnosti (' . $activityCode
+                    . ') nepodává — ČSSZ ho pro něj nepřipouští. Zkontrolujte '
+                    . mb_lcfirst($activityName) . ' na kartě pracovního vztahu, '
+                    . 'nebo zvolte jiný druh oznámení.',
             );
         }
         if ($actionCode === 1 && !$variantDataComplete) {
             throw new PayrollRegistrationXmlException(
                 'registration_regzec_a1_variant_data_incomplete',
-                "REGZEC A1-{$variant} nelze připravit, dokud není zmrazená úplná povinná datová sada této varianty.",
+                'Přihlášení zaměstnance (REGZEC A1) zatím nemá vyplněné všechny '
+                    . 'údaje, které ČSSZ u tohoto druhu činnosti ('
+                    . $activityCode . ') vyžaduje. Uložit rozpracovaný profil '
+                    . 'jde, podat ho ale až po doplnění — co chybí, ukáže '
+                    . 'tlačítko Kontrola.',
             );
         }
 
@@ -137,7 +159,12 @@ final class PayrollRegistrationBusinessMatrix
         if (!$allowed) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_activity_correction_unsupported',
-                'Tuto změnu druhu činnosti nelze podle autoritativní matice REGZEC opravit elektronickou akcí A4; použijte storno A8 a nové přihlášení A1.',
+                'Změnu druhu činnosti z „' . $sourceActivityCode . '" na „'
+                    . $correctedActivityCode . '" nejde poslat jako opravu '
+                    . '(REGZEC A4) — ČSSZ takový přechod elektronickou opravou '
+                    . 'nepřipouští. Původní přihlášení stornujte (REGZEC A8) '
+                    . 'a podejte nové přihlášení (REGZEC A1) se správným '
+                    . 'druhem činnosti.',
             );
         }
     }

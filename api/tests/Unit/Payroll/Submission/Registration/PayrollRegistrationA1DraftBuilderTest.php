@@ -129,10 +129,82 @@ final class PayrollRegistrationA1DraftBuilderTest extends TestCase
         self::assertContains('health_insurance_code', $missing);
     }
 
-    public function testStoredSnapshotDriftIsShownButNeverRewritten(): void
+    public function testStoredSnapshotDriftIsOfferedForWriteBackButNeverRewritten(): void
     {
-        $builder = new PayrollRegistrationA1DraftBuilder();
-        $stored = $builder->build(
+        $draft = self::draftWithDrift(false);
+
+        self::assertSame(
+            [[
+                'field' => 'health_insurance_code',
+                'label' => 'Kód zdravotní pojišťovny',
+                'stored' => '201',
+                'suggested' => '111',
+                'writable' => true,
+                'reason' => null,
+            ]],
+            $draft['writeback'],
+        );
+        // Návrh se nepřepisuje uloženým snímkem ani naopak.
+        self::assertSame('111', $draft['suggested']['health_insurance_code']);
+    }
+
+    /**
+     * Dokud registrace neodešla, není snímek doklad o ničem — rozdíl proti
+     * kmenovým datům se proto nehlásí jako rozejití, jen se nabídne k zápisu.
+     */
+    public function testDivergenceIsReportedOnlyForSubmittedRegistration(): void
+    {
+        self::assertSame([], self::draftWithDrift(false)['diverged']);
+        self::assertFalse(self::draftWithDrift(false)['submitted']);
+
+        $submitted = self::draftWithDrift(true);
+        self::assertTrue($submitted['submitted']);
+        self::assertSame(
+            ['health_insurance_code'],
+            array_map(
+                static fn (array $item): string => $item['field'],
+                $submitted['diverged'],
+            ),
+        );
+    }
+
+    /**
+     * Údaj, který se z kmenových dat sice bere, ale zpátky do nich nevede,
+     * nesmí nabízet tlačítko — a musí říct proč.
+     */
+    public function testFieldWithoutWriteBackPathCarriesReason(): void
+    {
+        $stored = self::storedSnapshot();
+        $stored['employment']['small_scale'] = true;
+        $draft = (new PayrollRegistrationA1DraftBuilder())->build(
+            self::sources(),
+            self::identity(),
+            null,
+            null,
+            '2026-08-14',
+            1,
+            $stored,
+            true,
+        );
+        $item = null;
+        foreach ($draft['writeback'] as $candidate) {
+            if ($candidate['field'] === 'employment.small_scale') {
+                $item = $candidate;
+            }
+        }
+
+        self::assertNotNull($item);
+        self::assertFalse($item['writable']);
+        self::assertStringContainsString(
+            'druhu pracovního vztahu',
+            (string) $item['reason'],
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private static function storedSnapshot(): array
+    {
+        return (new PayrollRegistrationA1DraftBuilder())->build(
             self::sources(),
             self::identity(),
             null,
@@ -141,25 +213,24 @@ final class PayrollRegistrationA1DraftBuilderTest extends TestCase
             1,
             null,
         )['suggested'];
+    }
+
+    /** @return array<string,mixed> */
+    private static function draftWithDrift(bool $submitted): array
+    {
+        $stored = self::storedSnapshot();
         $stored['health_insurance_code'] = '201';
 
-        $sources = self::sources();
-        $draft = $builder->build(
-            $sources,
+        return (new PayrollRegistrationA1DraftBuilder())->build(
+            self::sources(),
             self::identity(),
             null,
             null,
             '2026-08-14',
             1,
             $stored,
+            $submitted,
         );
-
-        self::assertSame(
-            [['field' => 'health_insurance_code', 'stored' => '201', 'suggested' => '111']],
-            $draft['diverged'],
-        );
-        // Návrh se nepřepisuje uloženým snímkem ani naopak.
-        self::assertSame('111', $draft['suggested']['health_insurance_code']);
     }
 
     public function testMissingIdentityHistoryIsReportedInsteadOfFailing(): void

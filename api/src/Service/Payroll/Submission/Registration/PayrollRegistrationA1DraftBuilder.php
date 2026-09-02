@@ -37,6 +37,7 @@ final class PayrollRegistrationA1DraftBuilder
         string $effectiveOn,
         int $rowVersion,
         ?array $stored,
+        bool $submitted = false,
     ): array {
         $this->sources = [];
         $this->missing = [];
@@ -86,13 +87,15 @@ final class PayrollRegistrationA1DraftBuilder
         $permanentAddress = $this->address(
             $this->section($sources, 'permanent_address'),
             'permanent_address',
-            'Adresa trvalého pobytu osoby (karta osoby → Adresy).',
+            'Adresa trvalého pobytu osoby (karta osoby → Identita a adresy '
+            . '→ Historie adres).',
         );
         if ($permanentAddress === null) {
             $this->miss(
                 'permanent_address',
                 'Osoba nemá k rozhodnému dni evidovanou adresu trvalého '
-                . 'pobytu. Doplňte ji na kartě osoby → Historie adres.',
+                . 'pobytu. Doplňte ji na '
+                . PayrollRegistrationFieldVocabulary::WHERE_ADDRESSES . '.',
             );
         }
         $permanentCountry = $permanentAddress['country_code'] ?? null;
@@ -102,7 +105,8 @@ final class PayrollRegistrationA1DraftBuilder
                 ? $this->address(
                     $this->section($sources, 'contact_address'),
                     'contact_address',
-                    'Kontaktní adresa osoby (karta osoby → Adresy).',
+                    'Kontaktní adresa osoby (karta osoby → Identita a adresy '
+                    . '→ Historie adres).',
                 )
                 : null;
 
@@ -175,6 +179,8 @@ final class PayrollRegistrationA1DraftBuilder
             'attachments' => [],
         ];
 
+        $differences = $this->diverged($stored, $suggested);
+
         return [
             'effective_on' => $effectiveOn,
             'row_version' => $rowVersion,
@@ -185,18 +191,41 @@ final class PayrollRegistrationA1DraftBuilder
             'suggested' => $suggested,
             'sources' => $this->sources,
             'missing' => $this->missing,
-            'diverged' => $this->diverged($stored, $suggested),
+            'submitted' => $submitted,
+            /*
+             * Co je ve formuláři jinak než v kmenových datech. Je to NABÍDKA
+             * K ZÁPISU, ne výtka: u každé položky se dá hodnota z formuláře
+             * přenést zpátky do evidence osoby nebo pracovního vztahu.
+             */
+            'writeback' => $differences,
+            /*
+             * Varování „úřad má jinou hodnotu" dává smysl JEN u odeslané
+             * registrace. U rozpracovaného profilu žádný nahlášený stav
+             * neexistuje, takže se nehlásí nic — dřív se tu hlásil rozdíl
+             * proti vlastnímu staršímu konceptu, se kterým nešlo nic dělat.
+             */
+            'diverged' => $submitted ? $differences : [],
         ];
     }
 
     /**
-     * Rozchod snímku s kmenovými daty se jen ukazuje; snímek se nikdy
-     * nepřepisuje sám, protože doložitelnost k datu registrace je přednější
-     * než pohodlí.
+     * Rozdíl mezi uloženým snímkem a dnešními kmenovými daty.
+     *
+     * Slouží dvěma věcem, které volající rozlišuje: nabídce zápisu zpátky do
+     * kmenových dat (vždy) a varování, že ODESLANÁ registrace nese jinou
+     * hodnotu, než jaká dnes platí (jen po odeslání).
+     *
+     * Snímek se nikdy nepřepisuje sám — doložitelnost toho, co odešlo, je
+     * přednější než pohodlí. Zapsat se dá opačným směrem (hodnota ze snímku
+     * do kmenových dat), viz {@see PayrollRegistrationA1MasterDataFields};
+     * `writable` a `reason` říkají, u kterého údaje to jde.
      *
      * @param array<string,mixed>|null $stored
      * @param array<string,mixed> $suggested
-     * @return list<array{field:string,stored:?string,suggested:?string}>
+     * @return list<array{
+     *   field:string,label:string,stored:?string,suggested:?string,
+     *   writable:bool,reason:?string
+     * }>
      */
     private function diverged(?array $stored, array $suggested): array
     {
@@ -212,8 +241,15 @@ final class PayrollRegistrationA1DraftBuilder
             }
             $result[] = [
                 'field' => $path,
+                'label' => PayrollRegistrationFieldVocabulary::label($path),
                 'stored' => $storedValue,
                 'suggested' => $suggestedValue,
+                'writable' => PayrollRegistrationA1MasterDataFields::writable(
+                    $path,
+                ),
+                'reason' => PayrollRegistrationA1MasterDataFields::blockedReason(
+                    $path,
+                ),
             ];
         }
 
@@ -348,7 +384,7 @@ final class PayrollRegistrationA1DraftBuilder
             $this->source(
                 'tax_residency.identifier',
                 'Zahraniční daňový identifikátor osoby (karta osoby → '
-                . 'Identifikátory).',
+                . 'Kontakty a identifikátory).',
             );
             $this->miss(
                 'tax_residency.identifier_type',
@@ -630,7 +666,8 @@ final class PayrollRegistrationA1DraftBuilder
         if ($citizenship !== null) {
             $this->source(
                 'proof_identity.country_code',
-                'Státní občanství osoby (karta osoby → Identita).',
+                'Státní občanství osoby (karta osoby → Identita a adresy → '
+                . 'Historie jména → Údaje pro registraci zaměstnance).',
             );
         }
 

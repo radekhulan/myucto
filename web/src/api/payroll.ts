@@ -2393,6 +2393,139 @@ export interface PayrollSubmissionOverviewResponse {
 }
 
 /**
+ * Kudy umí aplikace agendu odeslat. `none` znamená „neumíme" — a pak je
+ * v `blocked_reason` věta proč, nikdy prázdno.
+ */
+export type PayrollSubmissionDispatchMode =
+  | 'vrep_jmhz'
+  | 'vrep_registration'
+  | 'isds_payroll'
+  | 'isds_health'
+  | 'none'
+
+/** Jeden řádek fronty odchozích podání. */
+export interface PayrollSubmissionQueueItem {
+  submission_id: number
+  submission_status: string
+  submission_kind: string
+  submission_channel: string
+  created_at: string
+  corrects_submission_id: number | null
+  obligation_id: number
+  agenda_code: string
+  subject_type: string
+  subject_reference: string
+  /** Jméno zaměstnance / účtárna / pojišťovna; `null`, když se ověřit nedá. */
+  subject_label: string | null
+  period_start: string
+  period_end: string
+  obligation_kind: string
+  obligation_status: PayrollSubmissionObligationStatus
+  earliest_submission_on: string
+  due_on: string
+  deadline: {
+    phase: PayrollSubmissionDeadlinePhase
+    days_to_due: number
+    is_action_required: boolean
+    is_overdue: boolean
+  }
+  dispatch: {
+    mode: PayrollSubmissionDispatchMode
+    /** Druhý rovnocenný kanál, když existuje (JMHZ jde VREP i datovkou). */
+    alternate_mode: PayrollSubmissionDispatchMode | null
+    dispatchable: boolean
+    /** Celá věta, proč odeslat nejde. Vyplněná právě když `dispatchable` je `false`. */
+    blocked_reason: string | null
+  }
+  blocking_issue_count: number
+  attempt: {
+    id: number
+    attempt_no: number
+    status: string
+    channel: string
+    error_code: string | null
+    error_message: string | null
+    sent_at: string | null
+    correlation_reference: string | null
+  } | null
+  outbox: {
+    id: number
+    dispatch_state: string
+    acceptance_state: string
+    correlation_reference: string | null
+  } | null
+}
+
+export type PayrollSubmissionQueueSort = 'due' | 'agenda'
+
+/**
+ * Velikost PORCE hromadného odeslání. Musí odpovídat
+ * `PayrollSubmissionQueueService::MAX_BATCH_SIZE` — server větší porci odmítne.
+ */
+export const PAYROLL_QUEUE_BATCH_SIZE = 25
+
+export interface PayrollSubmissionQueueResponse {
+  environment: PayrollRegzelEnvironment
+  items: PayrollSubmissionQueueItem[]
+  total: number
+  limit: number
+  offset: number
+  agenda_code: string | null
+  sort: PayrollSubmissionQueueSort
+  /** Agendy ve frontě i s počty — nad CELOU frontou, ne nad stránkou. */
+  agendas: { agenda_code: string; count: number }[]
+  /** `total` je nad celou frontou, zbytek nad načtenou stránkou. */
+  summary: {
+    total: number
+    ready: number
+    blocked: number
+    overdue: number
+  }
+}
+
+/** Výsledek jedné položky dávky. `ok` rozhoduje, ostatní pole se podle něj liší. */
+export interface PayrollSubmissionQueueBatchItemResult {
+  ok: boolean
+  submission_id: number
+  dispatched: boolean
+  message: string
+  mode?: PayrollSubmissionDispatchMode
+  correlation_reference?: string | null
+  error_code?: string
+}
+
+export interface PayrollSubmissionQueueBatchResult {
+  environment: PayrollRegzelEnvironment
+  results: PayrollSubmissionQueueBatchItemResult[]
+  summary: { requested: number; sent: number; failed: number }
+}
+
+export interface PayrollChangeSweepResult {
+  environment: PayrollRegzelEnvironment
+  /** Kolik vztahů se porovnalo (jen ty, u kterých se pohnul zdroj). */
+  scanned: number
+  /** U kolika z nich vznikl návrh povinnosti. */
+  changed: number
+  /** Kolik se nepodařilo přečíst; zkusí se znovu při příštím běhu. */
+  skipped: number
+  /** `true` = strop porce byl vyčerpán, další vztahy čekají. */
+  has_more: boolean
+}
+
+export interface PayrollSubmissionQueueDispatchResult {
+  submission_id: number
+  mode: PayrollSubmissionDispatchMode
+  dispatched: boolean
+  /** `true` = úřad už vrátil protokol; `false` = teprve zpracovává. */
+  settled: boolean
+  correlation_reference: string | null
+  attempt: Record<string, unknown> | null
+  outbox: Record<string, unknown> | null
+  /** Věta pro účetní: co se stalo a co se stane dál. */
+  message: string
+}
+
+/**
  * Jeden měsíční přehled pro účetní ({@see PayrollMonthlyChecklistItem.action}):
  * u KAŽDÉ položky platí právě jedno ze tří — `send` (jde odeslat rovnou),
  * `generate` (není hotová / jde jen o platbu či úkon — odkaz vede tam, kde se
@@ -3314,11 +3447,30 @@ export interface PayrollRegistrationA1DraftGap {
   message: string
 }
 
-/** Uložený snímek se rozešel s kmenovými daty; snímek se neaktualizuje sám. */
+/**
+ * Údaj, který má formulář jinak než kmenová data.
+ *
+ * Slouží dvěma věcem: nabídce zápisu zpátky do kmenových dat (`writeback`,
+ * vždy) a upozornění, že ODESLANÁ registrace nese jinou hodnotu, než jaká dnes
+ * platí (`diverged`, jen po odeslání).
+ */
 export interface PayrollRegistrationA1DraftDivergence {
   field: string
+  /** Lidský název údaje — v UI se nikdy neukazuje název sloupce. */
+  label: string
   stored: string | null
   suggested: string | null
+  /** Dá se hodnota zapsat zpátky do kmenových dat? */
+  writable: boolean
+  /** Věta „proč to nejde"; `null` u zapsatelného údaje. */
+  reason: string | null
+}
+
+/** Výsledek zápisu do kmenových dat: co se zapsalo a co ne a proč. */
+export interface PayrollRegistrationA1MasterDataResult {
+  written: { field: string, label: string, value: string | null }[]
+  skipped: { field: string, label: string, reason: string }[]
+  view: PayrollRegistrationA1View
 }
 
 export interface PayrollRegistrationA1Draft {
@@ -3331,6 +3483,11 @@ export interface PayrollRegistrationA1Draft {
   suggested: PayrollRegistrationA1ProfilePayload
   sources: Record<string, string>
   missing: PayrollRegistrationA1DraftGap[]
+  /** Odešla za tenhle vztah registrace? Rozpracovaný profil nic nehlásí. */
+  submitted: boolean
+  /** Rozdíly proti kmenovým datům, nabídnuté k zápisu zpátky. */
+  writeback: PayrollRegistrationA1DraftDivergence[]
+  /** Totéž, ale jen u ODESLANÉ registrace — podklad pro upozornění na A3. */
   diverged: PayrollRegistrationA1DraftDivergence[]
 }
 
@@ -5795,6 +5952,68 @@ export const payrollApi = {
       },
     }).then(response => response.data),
   /**
+   * Fronta odchozích podání — všechno připravené a neodeslané napříč agendami.
+   *
+   * Na rozdíl od `submissionOverview` NEBERE období: podání po lhůtě je
+   * typicky ze staršího měsíce, než jaký má účetní nastavený, a v přehledu
+   * by ho proto nenašla.
+   */
+  submissionQueue: (
+    environment: PayrollRegzelEnvironment,
+    options?: PayrollPageParams & {
+      agenda_code?: string | null
+      sort?: PayrollSubmissionQueueSort
+    },
+  ) =>
+    api.get<PayrollSubmissionQueueResponse>('/payroll/submissions/queue', {
+      params: {
+        environment,
+        ...(options?.agenda_code ? { agenda_code: options.agenda_code } : {}),
+        ...(options?.sort ? { sort: options.sort } : {}),
+        ...pageParams(options),
+      },
+    }).then(response => response.data),
+  /**
+   * Hromadné odeslání JEDNÉ PORCE dávky (nejvýš `PAYROLL_QUEUE_BATCH_SIZE`).
+   *
+   * Odpověď je vždy 200 s výsledkem každé položky — „37 odesláno, 3 selhala"
+   * není chyba požadavku. Volající porce řetězí sám, aby viděl průběh.
+   */
+  dispatchSubmissionBatch: (
+    environment: PayrollRegzelEnvironment,
+    items: { submission_id: number; idempotency_key: string }[],
+  ) =>
+    api.post<PayrollSubmissionQueueBatchResult>(
+      '/payroll/submissions/queue/dispatch',
+      { environment, items },
+    ).then(response => response.data),
+  /**
+   * Zkontroluje hlásitelné změny u všech aktivních vztahů firmy.
+   *
+   * Bez tohohle běhu se změna zjistí jen tehdy, když někdo otevře kartu
+   * konkrétního zaměstnance — a osmidenní lhůta mezitím tiše uteče.
+   */
+  detectPayrollChangesForCompany: (environment: PayrollRegzelEnvironment) =>
+    api.post<PayrollChangeSweepResult>(
+      '/payroll/submissions/queue/detect-changes',
+      { environment },
+    ).then(response => response.data),
+  /**
+   * Odeslání jednoho podání z fronty. `Idempotency-Key` je povinný: bez něj
+   * by druhé kliknutí založilo druhé podání za totéž období, které úřad
+   * odmítne jako duplicitu a vzít zpět už nejde.
+   */
+  dispatchSubmissionFromQueue: (
+    environment: PayrollRegzelEnvironment,
+    submissionId: number,
+    idempotencyKey: string,
+  ) =>
+    api.post<PayrollSubmissionQueueDispatchResult>(
+      `/payroll/submissions/queue/${submissionId}/dispatch`,
+      { environment },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  /**
    * Jeden měsíční přehled: co se za zvolené období generuje/odesílá, kam,
    * jakou cestou, do kdy a co s tím — přes VŠECHNY agendy i to, co appka
    * jen počítá nebo drží jako úkol bez podání (viz {@see PayrollMonthlyChecklistItem}).
@@ -6053,6 +6272,18 @@ export const payrollApi = {
   ) => api.post<PayrollRegistrationA1Check>(
     `/payroll/submissions/registration/${employmentId}/a1-profile/check`,
     payload,
+  ).then(response => response.data),
+  /**
+   * Opačný směr než „Vrátit návrh z kmenových dat": hodnota z formuláře se
+   * zapíše do evidence osoby a pracovního vztahu. Odpověď říká, co se zapsalo,
+   * co ne a proč, a nese přepočítaný seznam rozdílů.
+   */
+  writeEmploymentRegistrationA1MasterData: (
+    employmentId: number,
+    fields: string[],
+  ) => api.post<PayrollRegistrationA1MasterDataResult>(
+    `/payroll/submissions/registration/${employmentId}/a1-profile/master-data`,
+    { fields },
   ).then(response => response.data),
   /**
    * Přepočet detekce změn hlásitelných do registru pojištěnců.

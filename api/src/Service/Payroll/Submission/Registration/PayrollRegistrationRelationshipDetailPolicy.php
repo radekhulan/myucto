@@ -20,31 +20,57 @@ final class PayrollRegistrationRelationshipDetailPolicy
         string $activityCode,
         ?string $relationshipDetailCode,
     ): ?string {
+        // Výjimky tu zůstávají: volající (business matice) je chytá a překládá
+        // na sbíranou vadu, takže uložení rozpracovaného profilu tím nepadá.
+        $detail = PayrollRegistrationFieldVocabulary::label(
+            'employment.relationship_detail_code',
+        );
+        $where = PayrollRegistrationFieldVocabulary::describe(
+            'employment.relationship_detail_code',
+        );
         $mode = self::modeForActivity($activityCode);
         if ($mode === self::MODE_FORBIDDEN) {
             if ($relationshipDetailCode !== null && $relationshipDetailCode !== '') {
+                /*
+                 * Tady se pole MAŽE, nepřidává. Obecná věta „údaj doplňte
+                 * na …" by si s tím protiřečila — hláška by v jedné větě
+                 * říkala nechte prázdné a zároveň jděte to vyplnit.
+                 */
+                $place = PayrollRegistrationFieldVocabulary::where(
+                    'employment.relationship_detail_code',
+                );
                 throw new \InvalidArgumentException(
-                    "Druh činnosti {$activityCode} zakazuje bližší určení pracovněprávního vztahu.",
+                    $detail . " se u druhu činnosti „{$activityCode}“ "
+                        . "nevyplňuje, teď je „{$relationshipDetailCode}“. "
+                        . ($place === null
+                            ? 'Vymažte ho přímo v tomhle formuláři.'
+                            : "Vymažte ho na {$place}."),
                 );
             }
             return null;
         }
         if ($relationshipDetailCode === null || $relationshipDetailCode === '') {
             throw new \InvalidArgumentException(
-                'Druh činnosti vyžaduje bližší určení pracovněprávního vztahu.',
+                $detail . " chybí — u druhu činnosti „{$activityCode}“ ho ČSSZ "
+                    . 'vyžaduje. ' . $where,
             );
         }
         if ($mode === self::MODE_SELECT) {
             if (!in_array($relationshipDetailCode, ['1', '2', '3'], true)) {
                 throw new \InvalidArgumentException(
-                    'Pro druh činnosti 1 až 9 musí být bližší určení 1, 2 nebo 3.',
+                    $detail . ' musí být 1 (pracovní poměr), 2 (dohoda '
+                        . 'o provedení práce) nebo 3 (dohoda o pracovní '
+                        . "činnosti), teď je „{$relationshipDetailCode}“. "
+                        . $where,
                 );
             }
             return $relationshipDetailCode;
         }
         if ($relationshipDetailCode !== '1') {
             throw new \InvalidArgumentException(
-                'Pro tento druh činnosti musí být bližší určení 1 — žádné.',
+                $detail . " musí být u druhu činnosti „{$activityCode}“ "
+                    . 'hodnota 1 (žádné bližší určení), teď je '
+                    . "„{$relationshipDetailCode}“. " . $where,
             );
         }
 

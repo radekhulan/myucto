@@ -26,13 +26,14 @@ import PayrollMonthlyChecklistPanel from './PayrollMonthlyChecklistPanel.vue'
 import PayrollStatutoryObligationsPanel from './PayrollStatutoryObligationsPanel.vue'
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
+import PayrollSubmissionQueuePanel from './PayrollSubmissionQueuePanel.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
-  'monthly' | 'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'sickness' | 'eldp' | 'health'
-  | 'statutory' | 'other' | 'inbox' | 'certificate'
+  'monthly' | 'queue' | 'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'sickness' | 'eldp'
+  | 'health' | 'statutory' | 'other' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -61,9 +62,13 @@ const activeTab = ref<SubmissionTab>('monthly')
 // je volný text, takže se do přehledu může dostat kód, který server neumí
 // zařadit. Bez téhle záložky by taková povinnost nebyla vidět NIKDE — panely
 // filtrují skupinu na serveru, takže by ji ani jeden z nich nenačetl.
+// „K odeslání" stojí hned za měsíčním přehledem: přehled říká, CO se má
+// tenhle měsíc udělat, fronta odpovídá na navazující „a co z toho mám
+// připravené a ještě to neodešlo" — napříč agendami i zaměstnanci. Bez ní
+// se ta odpověď skládala z pěti různých obrazovek.
 const tabs: SubmissionTab[] = [
-  'monthly', 'transport', 'regzel', 'jmhz', 'discount_intents', 'sickness', 'eldp', 'health',
-  'statutory', 'other', 'inbox', 'certificate',
+  'monthly', 'queue', 'transport', 'regzel', 'jmhz', 'discount_intents', 'sickness', 'eldp',
+  'health', 'statutory', 'other', 'inbox', 'certificate',
 ]
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
@@ -351,6 +356,15 @@ onMounted(loadInboxBadge)
     -->
     <PayrollMonthlyChecklistPanel
       v-if="activeTab === 'monthly'"
+      v-model:environment="environment"
+    />
+
+    <!--
+      Fronta odchozích podání si data obstarává sama a na REGZEL profilu
+      nezávisí, proto stojí mimo společný skeleton.
+    -->
+    <PayrollSubmissionQueuePanel
+      v-else-if="activeTab === 'queue'"
       v-model:environment="environment"
     />
 

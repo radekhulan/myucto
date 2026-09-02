@@ -251,6 +251,11 @@ final class RoutePermissionMap
         // mzdového vstupu.
         ['GET', '#^/api/payroll/periods/[0-9]{4}-[0-9]{2}/ownership$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/periods/[0-9]{4}-[0-9]{2}/ownership/release-legacy$#', 'payroll.reopen', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/periods/[0-9]{4}-[0-9]{2}/legacy-recapitulation$#', 'payroll', AccessLevel::READ],
+        // Převzetí měsíce od ruční rekapitulace stornuje účetní zápis a odloží
+        // mzdový list — je to zásah do už zaúčtovaného období, ne nastavení.
+        // Proto totéž právo jako znovuotevření běhu, ne `payroll.settings`.
+        ['POST', '#^/api/payroll/periods/[0-9]{4}-[0-9]{2}/legacy-recapitulation/hand-over$#', 'payroll.reopen', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/close$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/cancel$#', 'payroll.reopen', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/[a-z_]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
@@ -275,6 +280,14 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/submissions/regzel/(?:profile|snapshots(?:/[0-9]+/xml)?)$#', 'payroll.submissions', AccessLevel::READ],
         ['*', '#^/api/payroll/submissions/regzel/(?:profile|prepare)$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/overview$#', 'payroll.submissions', AccessLevel::READ],
+        // Fronta odchozích podání. Zobrazení je čtení, odeslání zápis —
+        // stejné právo jako u odesílacích obrazovek jednotlivých agend,
+        // protože jde o tutéž operaci, jen spuštěnou odjinud.
+        ['GET', '#^/api/payroll/submissions/queue$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/queue/[0-9]+/dispatch$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/queue/dispatch$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Detekce změn zakládá povinnosti s běžící lhůtou → zápis.
+        ['POST', '#^/api/payroll/submissions/queue/detect-changes$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/deadlines$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/statutory-obligations$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/statutory-obligations/evidence$#', 'payroll.submissions', AccessLevel::WRITE],
@@ -304,6 +317,11 @@ final class RoutePermissionMap
         // na `a1-profile$` — bez něj by kontrola spadla do obecného `payroll`
         // a byla by dostupná i tomu, kdo na podání právo nemá.
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+/a1-profile/check$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Zápis hodnoty z formuláře A1 zpátky do kmenových dat. Mění evidenci
+        // osoby a pracovního vztahu, ne podání — proto TOTÉŽ právo jako
+        // editace karty osoby. Kdo smí podávat, ale kartu osoby editovat ne,
+        // by tudy jinak obešel omezení, které na kartě platí.
+        ['POST', '#^/api/payroll/submissions/registration/[0-9]+/a1-profile/master-data$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+/events$#', 'payroll.submissions', AccessLevel::READ],

@@ -251,4 +251,19 @@ describe('InvoiceDetail.vue — náhled originálu vedle dokladu', () => {
     )
     expect(wrapper.find(SIDE).exists()).toBe(false)
   })
+  /*
+   * Bez `#view=FitH` si čtečka prohlížeče drží výchozí zoom a doklad se
+   * vykreslí zhruba na půl šířky sloupce — náhled vedle je pak menší než ten
+   * pod dokladem, přesně naopak, než k čemu je.
+   */
+  it('roztáhne doklad na šířku rámu', async () => {
+    stubViewport(true)
+    m.get.mockResolvedValue(makeInvoice())
+    const wrapper = await mountDetail()
+
+    const iframe = wrapper.get('[data-test="document-side-preview"] iframe')
+    expect(iframe.attributes('src')).toContain('#view=FitH')
+
+    wrapper.unmount()
+  })
 })

@@ -30,8 +30,13 @@ final class EmployerRegistrationDeadlinePolicy
             || $start->format('Y-m-d') !== $expectedStartOn
             || $expectedStartOn < self::SUPPORTED_FROM
         ) {
+            // Výjimka zůstává: bez platného dne nástupu se lhůta nedá
+            // spočítat, takže by se vracelo prázdno tvářící se jako výsledek.
             throw new \InvalidArgumentException(
-                'Předpokládaný nástup prvního zaměstnance musí být podporované datum od 1. 7. 2026.',
+                'Předpokládané datum nástupu prvního zaměstnance chybí nebo '
+                    . 'není platné. Zadejte ho ve tvaru RRRR-MM-DD a nejdřív '
+                    . 'k 1. 7. 2026 — od té doby se zaměstnavatel na ČSSZ '
+                    . 'přihlašuje tímhle způsobem.',
             );
         }
 

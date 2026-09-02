@@ -11,10 +11,18 @@ final class PayrollRegistrationXmlSerializer
 {
     public function serialize(PayrollRegistrationXmlPayload $payload): string
     {
+        // Výjimky v serializéru zůstávají: tady se skládá soubor, který půjde
+        // na ČSSZ. Neúplný vstup sem nemá vůbec dojít (sbírá ho A1 builder
+        // a kontrola profilu), a co projde až sem, nesmí odejít napůl hotové.
         if (!$payload->interaction->supported()) {
             throw new PayrollRegistrationXmlException(
                 'registration_interaction_unsupported',
-                'Registrační interakce není v podporovaném katalogu.',
+                PayrollRegistrationFieldVocabulary::action(
+                    $payload->interaction->documentType,
+                    $payload->interaction->actionCode,
+                ) . ' se v této kombinaci nepodává — appka umí jen podání '
+                    . 'z nabídky u pracovního vztahu. Vyberte druh podání znovu '
+                    . 'z nabídky.',
             );
         }
         if ($payload->interaction->documentType === 'REGZEC25'
@@ -50,7 +58,9 @@ final class PayrollRegistrationXmlSerializer
             'REGZEC25' => $this->regzec($payload),
             default => throw new PayrollRegistrationXmlException(
                 'registration_serializer_unavailable',
-                'Požadovaný registrační formulář nemá serializér.',
+                "Registrační formulář ČSSZ „{$payload->interaction->documentType}“ "
+                    . 'tahle verze neumí vyplnit. Podporované jsou REGZEC25 '
+                    . 'a PREZEC26; ostatní podejte přes portál ČSSZ.',
             ),
         };
     }
@@ -89,7 +99,10 @@ final class PayrollRegistrationXmlSerializer
         if ($a1 === null) {
             throw new PayrollRegistrationXmlException(
                 'registration_regzec_a1_variant_data_incomplete',
-                'REGZEC A1 nemá zmrazenou autoritativní datovou sadu.',
+                'Přihlášení zaměstnance (REGZEC A1) nemá uložený profil '
+                    . 's údaji pro ČSSZ. Otevřete registraci u pracovního '
+                    . 'vztahu, vyplňte profil, uložte ho a připravte podání '
+                    . 'znovu.',
             );
         }
         $document = $this->document();
@@ -343,7 +356,12 @@ final class PayrollRegistrationXmlSerializer
         if (!is_array($event)) {
             throw new PayrollRegistrationXmlException(
                 'registration_event_snapshot_missing',
-                'REGZEC A2–A8 vyžaduje neměnný zdroj události.',
+                PayrollRegistrationFieldVocabulary::action(
+                    $payload->interaction->documentType,
+                    $payload->interaction->actionCode,
+                ) . ' nemá uložený záznam události, ze kterého se podání '
+                    . 'skládá. Otevřete oznámení u pracovního vztahu, uložte '
+                    . 'ho a připravte podání znovu.',
             );
         }
         $namespace = 'http://schemas.cssz.cz/REGZEC/2025';
@@ -563,7 +581,10 @@ final class PayrollRegistrationXmlSerializer
         if (!is_array($value) || array_is_list($value)) {
             throw new PayrollRegistrationXmlException(
                 'registration_event_snapshot_invalid',
-                "Neměnný zdroj REGZEC nemá objekt {$key}.",
+                PayrollRegistrationFieldVocabulary::label($key)
+                    . ' v uloženém oznámení chybí. Otevřete oznámení, '
+                    . 'zkontrolujte údaje a připravte podání znovu.'
+                    . PayrollRegistrationFieldVocabulary::reference($key),
             );
         }
         return $value;
@@ -576,7 +597,10 @@ final class PayrollRegistrationXmlSerializer
         if (!is_string($value) || $value === '') {
             throw new PayrollRegistrationXmlException(
                 'registration_event_snapshot_invalid',
-                "Neměnný zdroj REGZEC nemá text {$key}.",
+                PayrollRegistrationFieldVocabulary::label($key)
+                    . ' v uloženém oznámení chybí. '
+                    . PayrollRegistrationFieldVocabulary::describe($key)
+                    . PayrollRegistrationFieldVocabulary::reference($key),
             );
         }
         return $value;
@@ -651,7 +675,10 @@ final class PayrollRegistrationXmlSerializer
                 'female' => 'Ž',
                 default => throw new PayrollRegistrationXmlException(
                     'registration_identity_invalid',
-                    'Registrační identita nemá platný kód pohlaví.',
+                    PayrollRegistrationFieldVocabulary::label('sex')
+                        . ' musí být muž, nebo žena — ČSSZ jinou hodnotu '
+                        . 'nepřijímá. '
+                        . PayrollRegistrationFieldVocabulary::describe('sex'),
                 ),
             });
         }
@@ -676,7 +703,10 @@ final class PayrollRegistrationXmlSerializer
         if (!is_string($value) || $value === '') {
             throw new PayrollRegistrationXmlException(
                 'registration_identity_invalid',
-                "Registrační identita nemá platné pole {$key}.",
+                PayrollRegistrationFieldVocabulary::label($key)
+                    . ' chybí v evidenci osoby, takže podání nejde vyplnit. '
+                    . PayrollRegistrationFieldVocabulary::describe($key)
+                    . PayrollRegistrationFieldVocabulary::reference($key),
             );
         }
 
@@ -697,7 +727,12 @@ final class PayrollRegistrationXmlSerializer
         if (!is_string($value) || $value === '') {
             throw new PayrollRegistrationXmlException(
                 'registration_identity_invalid',
-                "Registrační identita nemá platné pole {$key}.",
+                PayrollRegistrationFieldVocabulary::label($key)
+                    . ' je v evidenci osoby uložený prázdný. Buď ho doplňte, '
+                    . 'nebo ho nechte úplně nevyplněný — prázdná hodnota '
+                    . 'ČSSZ neprojde. '
+                    . PayrollRegistrationFieldVocabulary::describe($key)
+                    . PayrollRegistrationFieldVocabulary::reference($key),
             );
         }
 
@@ -718,7 +753,13 @@ final class PayrollRegistrationXmlSerializer
         if ($value === null) {
             throw new PayrollRegistrationXmlException(
                 'registration_prezec_identifier_required',
-                'PREZEC vyžaduje přidělené rodné číslo nebo EČP; bez osobního identifikátoru nelze částečné přihlášení podat.',
+                'Rodné číslo ani evidenční číslo pojištěnce (EČP) nejsou '
+                    . 'vyplněné. Částečné přihlášení před nástupem (PREZEC) '
+                    . 'se bez jednoho z nich podat nedá — rodné číslo má 9 '
+                    . 'nebo 10 číslic bez lomítka. Údaj doplňte na '
+                    . PayrollRegistrationFieldVocabulary::WHERE_IDENTIFIERS
+                    . '; pokud zaměstnanec ani jedno nemá, podejte místo toho '
+                    . 'plnou registraci REGZEC.',
             );
         }
 
@@ -752,7 +793,12 @@ final class PayrollRegistrationXmlSerializer
     {
         $xml = $document->saveXML();
         if ($xml === false) {
-            throw new \RuntimeException('Registrační XML nelze serializovat.');
+            // Selhání rozšíření DOM, ne vstupu od uživatele.
+            throw new \RuntimeException(
+                'Soubor pro ČSSZ se nepodařilo vytvořit. Zkuste podání '
+                    . 'připravit znovu; pokud to bude padat dál, obraťte se '
+                    . 'na podporu.',
+            );
         }
 
         return rtrim($xml, "\r\n");

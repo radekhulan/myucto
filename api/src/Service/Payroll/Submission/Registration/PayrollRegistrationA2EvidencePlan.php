@@ -34,23 +34,37 @@ final readonly class PayrollRegistrationA2EvidencePlan
             || !in_array($environment, ['test', 'production'], true)
             || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $effectiveOn) !== 1
         ) {
-            throw new \InvalidArgumentException('Rozsah důkazního plánu REGZEC A2 není platný.');
+            throw new \InvalidArgumentException(
+                'Rozsah měsíců, za které se dokládá skončení pracovního '
+                    . 'vztahu, musí mít aspoň jeden měsíc.',
+            );
         }
         $normalized = [];
         foreach ($months as $month) {
             if (!is_array($month) || array_is_list($month)) {
-                throw new \InvalidArgumentException('Měsíc důkazního plánu REGZEC A2 není platný.');
+                throw new \InvalidArgumentException(
+                    'Měsíc v podkladu ke skončení pracovního vztahu musí být '
+                        . 've tvaru RRRR-MM, například 2026-08.',
+                );
             }
             $periodStart = $month['period_start'] ?? null;
             if (!is_string($periodStart)
                 || preg_match('/^\d{4}-\d{2}-01$/D', $periodStart) !== 1
                 || isset($normalized[$periodStart])
             ) {
-                throw new \InvalidArgumentException('Období důkazního plánu REGZEC A2 není jednoznačné.');
+                throw new \InvalidArgumentException(
+                    'Podklad ke skončení pracovního vztahu obsahuje jeden '
+                        . 'měsíc dvakrát. Každý měsíc smí být uvedený jen '
+                        . 'jednou.',
+                );
             }
             $decision = $month['decision'] ?? null;
             if (!in_array($decision, ['accepted', 'pending', 'rejected', 'missing'], true)) {
-                throw new \InvalidArgumentException('Výsledek měsíce důkazního plánu REGZEC A2 není platný.');
+                throw new \InvalidArgumentException(
+                    'Měsíc v podkladu ke skončení pracovního vztahu nemá '
+                        . 'vyplněný výsledek. U každého měsíce musí být '
+                        . 'uvedeno, jak dopadl.',
+                );
             }
             $normalized[$periodStart] = self::month($month, $periodStart, $decision);
         }
@@ -154,7 +168,11 @@ final readonly class PayrollRegistrationA2EvidencePlan
                 || $normalized['transport_attempt_id'] === null
                 || $normalized['receipt_id'] === null)
         ) {
-            throw new \InvalidArgumentException('Přijatý měsíc REGZEC A2 nemá úplný důkazní řetězec.');
+            throw new \InvalidArgumentException(
+                'Měsíc označený za přijatý nemá doložený celý řetězec '
+                    . 'dokladů. Buď doklady doplňte, nebo měsíc jako přijatý '
+                    . 'neoznačujte.',
+            );
         }
 
         return $normalized;
@@ -163,7 +181,11 @@ final readonly class PayrollRegistrationA2EvidencePlan
     private static function positive(mixed $value, string $label): int
     {
         if (!is_int($value) || $value <= 0) {
-            throw new \InvalidArgumentException("{$label} důkazního plánu REGZEC A2 není platný.");
+            throw new \InvalidArgumentException(
+                mb_ucfirst($label)
+                    . ' v podkladu ke skončení pracovního vztahu chybí nebo '
+                    . 'není platné číslo.',
+            );
         }
         return $value;
     }
@@ -179,7 +201,10 @@ final readonly class PayrollRegistrationA2EvidencePlan
             return null;
         }
         if (!is_string($value) || trim($value) === '') {
-            throw new \InvalidArgumentException('Text důkazního plánu REGZEC A2 není platný.');
+            throw new \InvalidArgumentException(
+                'Popis v podkladu ke skončení pracovního vztahu musí být '
+                    . 'vyplněný text.',
+            );
         }
         return trim($value);
     }

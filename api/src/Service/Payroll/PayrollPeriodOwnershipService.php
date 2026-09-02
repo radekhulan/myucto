@@ -243,9 +243,14 @@ final class PayrollPeriodOwnershipService
             ];
         }
 
+        // Odložený řádek (`retired_at`, migrace 1718) se nepočítá: to je přesně
+        // ten stav „mzdový list po legacy větvi zůstal jako doklad, ale už
+        // neplatí, protože měsíc přebírá modul". Kdyby blokoval dál, nezbývalo
+        // by než ho z databáze smazat — a mazat evidenci podle § 38j ZDP nejde.
         $records = $this->db->pdo()->prepare(
             'SELECT COUNT(*) FROM payroll_monthly_records
-              WHERE supplier_id = ? AND year = ? AND month = ?',
+              WHERE supplier_id = ? AND year = ? AND month = ?
+                AND retired_at IS NULL',
         );
         $records->execute([$supplierId, $year, $month]);
         $recordCount = (int) $records->fetchColumn();
