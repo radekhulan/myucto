@@ -1086,3 +1086,22 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 }
 @keyframes vt-out { to { opacity: 0; } }
 @keyframes vt-in { from { opacity: 0; transform: translateY(4px); } }
+
+/* ═══════════════════════ DOSKOK NA POLOŽKU ═══════════════════════
+ * Vysvícení cíle po skoku z chybové hlášky (viz utils/revealField.ts).
+ * Samotný scroll nechá člověka hádat, které z patnácti polí na obrazovce bylo
+ * to hledané — dvě vteřiny orámování mu to ukážou. Trvání musí sedět s
+ * konstantou FLASH_MS. */
+.field-flash {
+  animation: field-flash 3000ms var(--ease-quiet) both;
+  border-radius: 0.375rem;
+}
+@keyframes field-flash {
+  0%, 70% {
+    box-shadow: 0 0 0 3px rgb(245 158 11 / 0.55), 0 0 0 7px rgb(245 158 11 / 0.18);
+  }
+  100% { box-shadow: 0 0 0 3px rgb(245 158 11 / 0), 0 0 0 7px rgb(245 158 11 / 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .field-flash { animation-duration: 1ms; box-shadow: 0 0 0 3px rgb(245 158 11 / 0.55); }
+}

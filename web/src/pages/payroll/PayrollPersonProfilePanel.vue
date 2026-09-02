@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
@@ -29,6 +29,7 @@ import RequiredMark from '@/components/ui/RequiredMark.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { usePaneDom } from '@/composables/usePaneDom'
+import { fieldSelector, revealField } from '@/utils/revealField'
 import { todayIso } from './employmentLifecycleUi'
 
 const props = defineProps<{
@@ -190,9 +191,57 @@ const tabs: Tab[] = ['identity', 'contacts', 'payout']
  * bez přepnutí by odkaz doručil na prázdno; samotné odrolování řeší seznam
  * osob, který povel `?panel=` zpracovává.
  */
-function focusSection(section: 'registration_identity' | 'addresses'): void {
-  void section
+/** Počká, než karta doběhne — nejvýš dvě vteřiny. */
+async function untilLoaded(): Promise<void> {
+  if (!loading.value) return
+  await new Promise<void>((resolve) => {
+    const stop = watch(loading, (value) => {
+      if (value) return
+      stop()
+      window.clearTimeout(timer)
+      resolve()
+    })
+    const timer = window.setTimeout(() => {
+      stop()
+      resolve()
+    }, 2000)
+  })
+  await nextTick()
+}
+
+/**
+ * Doskok z chybové hlášky jinde v aplikaci na konkrétní položku karty.
+ *
+ * Dvě věci, které tu dřív chyběly a kvůli kterým hláška „doplňte to na kartě
+ * osoby" končila naprázdno:
+ *
+ * 1. Přepnutí záložky samo o sobě nestačí — na dlouhé kartě člověk pořád hledá
+ *    očima, které z polí bylo to hledané. Proto se cíl navíc vysvítí.
+ * 2. Historie jména je SEZNAM. Když osoba nemá ani jeden záznam, je sekce
+ *    prázdná: nadpis a tlačítko Přidat, žádné pole. Hláška přitom tvrdí, že se
+ *    údaj doplňuje právě tady. Řádek se proto založí za uživatele — prázdný
+ *    formulář k vyplnění je přesně to, co po něm hláška chce.
+ */
+async function focusSection(
+  section: 'registration_identity' | 'addresses',
+  field?: string,
+): Promise<void> {
   tab.value = 'identity'
+  // Povel přichází z adresy, tedy DŘÍV, než doběhne načtení karty. Bez čekání
+  // by se skákalo na kostru bez polí, doskok by tiše selhal a uživatel by
+  // podruhé viděl přesně to, na co si stěžoval: hlášku, která ho nikam
+  // nedovede. Strop je tu proto, aby zaseknuté načítání nedrželo příslib.
+  await untilLoaded()
+  if (section === 'registration_identity' && form.identity_history.length === 0
+    && props.canWrite
+  ) {
+    addIdentity()
+  }
+  await nextTick()
+  if (field !== undefined && field !== '') {
+    if (revealField(fieldSelector(field))) return
+  }
+  revealField(`[data-panel-anchor="${section}"]`)
 }
 
 defineExpose({ focusSection })
@@ -1054,6 +1103,7 @@ onMounted(load)
                       :disabled="!canWrite"
                       accent="payroll"
                       data-test="identity-citizenship-country"
+                      :data-a1-field="index === 0 ? 'identity.citizenship_country_code' : undefined"
                     />
                   </label>
                   <p class="self-end text-xs text-neutral-500 lg:col-span-1">

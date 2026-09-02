@@ -43,6 +43,11 @@ vi.mock('@/api/payroll', () => ({
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
 // `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+const routerPush = vi.fn(async () => {})
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush }),
+}))
+
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
@@ -1104,10 +1109,13 @@ describe('EmploymentRegistrationPanel', () => {
   })
 
   /**
-   * Žlutý seznam „Co aplikace o osobě nevede" musí navigovat: u údajů, které
-   * se doplňují jinde, odkazem, u zbytku aspoň značkou, že se zadávají tady.
+   * Žlutý seznam „Co aplikace o osobě nevede" musí NAVIGOVAT, ne popisovat
+   * cestu slovy. Dřív tu byly dvě varianty a jedna z nich („vyplňuje se zde")
+   * nebyla klikací — vypadala jako akce a nedělala nic. Teď je tlačítko vždy
+   * a rozhoduje se až při kliknutí: co je na tomhle formuláři, se vysvítí
+   * tady; co tu není, otevře kartu osoby s povelem na konkrétní pole.
    */
-  it('links every gap to the place where it is entered', async () => {
+  it('navigates every gap to the field where it is entered', async () => {
     m.a1Profile.mockResolvedValue(a1View({
       missing: [
         {
@@ -1115,12 +1123,8 @@ describe('EmploymentRegistrationPanel', () => {
           message: 'Osoba nemá k rozhodnému dni státní občanství.',
         },
         {
-          field: 'permanent_address.city',
-          message: 'Osoba nemá evidovanou adresu trvalého pobytu.',
-        },
-        {
-          field: 'health_insurance_code',
-          message: 'Zdravotní pojišťovna osoby není ověřená.',
+          field: 'employment.position_name',
+          message: 'Aplikace nevede název pracovní pozice.',
         },
         {
           field: 'permanent_address.house_number',
@@ -1132,22 +1136,42 @@ describe('EmploymentRegistrationPanel', () => {
     await flushPromises()
     await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
 
-    const target = (field: string) => JSON.parse(
-      wrapper.get(`[data-test="registration-a1-gap-link-${field}"]`).attributes('data-to') ?? '{}',
-    )
-    expect(target('identity.citizenship_country_code')).toEqual({
+    const gap = (field: string) =>
+      wrapper.get(`[data-test="registration-a1-gap-link-${field}"]`)
+
+    // Každá položka má klikací povel — žádná mrtvá cedulka.
+    for (const field of [
+      'identity.citizenship_country_code',
+      'employment.position_name',
+      'permanent_address.house_number',
+    ]) {
+      expect(gap(field).element.tagName).toBe('BUTTON')
+    }
+
+    // Pole, která na formuláři jsou, musí být adresovatelná pro doskok.
+    expect(wrapper.find('[data-a1-field="employment.position_name"]').exists()).toBe(true)
+    expect(wrapper.find('[data-a1-field="permanent_address.house_number"]').exists()).toBe(true)
+
+    // Občanství se tu nevyplňuje — teprve to otevře kartu osoby, a to rovnou
+    // na konkrétní pole, ne jen na sekci.
+    routerPush.mockClear()
+    await gap('identity.citizenship_country_code').trigger('click')
+    await flushPromises()
+    expect(routerPush).toHaveBeenCalledWith({
       name: 'payroll-people',
-      query: { employment: '5', panel: 'registration_identity', person: '9' },
+      query: {
+        employment: '5',
+        panel: 'registration_identity',
+        field: 'identity.citizenship_country_code',
+        person: '9',
+      },
     })
-    expect(target('permanent_address.city').query.panel).toBe('addresses')
-    expect(target('health_insurance_code').query.panel).toBe('statutory_evidence')
-    // Číslo popisné aplikace nevede vůbec — odkaz jinam by vedl na prázdno.
-    expect(wrapper.find(
-      '[data-test="registration-a1-gap-link-permanent_address.house_number"]',
-    ).exists()).toBe(false)
-    expect(wrapper.find(
-      '[data-test="registration-a1-gap-here-permanent_address.house_number"]',
-    ).exists()).toBe(true)
+
+    // Co je na formuláři, nikam neodnavigovává.
+    routerPush.mockClear()
+    await gap('employment.position_name').trigger('click')
+    await flushPromises()
+    expect(routerPush).not.toHaveBeenCalled()
   })
 
   /** „Adresa pobytu v ČR" má stát předvyplněný, trvalý pobyt naopak ne. */

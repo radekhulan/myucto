@@ -29,6 +29,7 @@ import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultIns
 import { loadPayrollOffices } from '@/composables/usePayrollOffices'
 import { useToast } from '@/composables/useToast'
 import { healthInsurerOptions } from '@/utils/healthInsurers'
+import { fieldSelector, revealField } from '@/utils/revealField'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -960,17 +961,31 @@ const FOCUSABLE_PANELS = [
 
 async function focusPanel(panel: string) {
   if (!(FOCUSABLE_PANELS as readonly string[]).includes(panel)) return
+  // Konkrétní položka, na kterou se má doskočit. Povel ji nese proto, že
+  // odrolovat na sekci nestačí: hláška mluví o jednom údaji a člověk by ho
+  // v desítkách polí hledal očima.
+  const fieldRaw = Array.isArray(route.query.field) ? route.query.field[0] : route.query.field
+  const field = typeof fieldRaw === 'string' && fieldRaw !== '' ? fieldRaw : undefined
   // Všechno kromě zákonné evidence sedí pod sbaleným „Další údaje".
   if (panel !== 'statutory_evidence') advancedProfileOpen.value = true
-  // Historie jména i adres jsou na záložce Identita karty osoby; bez přepnutí
-  // by povel doskočil na prázdno, protože jiná záložka je nevykresluje.
-  if (panel === 'registration_identity' || panel === 'addresses') {
-    await nextTick()
-    personProfilePanel.value?.focusSection(panel)
-  }
   const query = { ...route.query }
   delete query.panel
+  delete query.field
   await router.replace({ query })
+  // Historie jména i adres jsou na záložce Identita karty osoby; bez přepnutí
+  // by povel doskočil na prázdno, protože jiná záložka je nevykresluje.
+  // Panel si doskok i vysvícení řídí sám — zná svoje pole i to, kdy je seznam
+  // prázdný a musí se řádek nejdřív založit.
+  if (panel === 'registration_identity' || panel === 'addresses') {
+    await nextTick()
+    await personProfilePanel.value?.focusSection(panel, field)
+
+    return
+  }
+  if (field !== undefined) {
+    await nextTick()
+    if (revealField(fieldSelector(field))) return
+  }
   await nextTick()
   const target = document.querySelector(`[data-panel-anchor="${panel}"]`)
   if (target === null) return
