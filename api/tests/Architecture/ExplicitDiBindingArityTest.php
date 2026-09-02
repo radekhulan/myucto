@@ -41,6 +41,12 @@ final class ExplicitDiBindingArityTest extends TestCase
         \MyInvoice\Service\Tenant\SupplierAccessResolver::class,
         \MyInvoice\Security\UserRoleProfile::class,
         \MyInvoice\Action\Auth\MeAction::class,
+        // Obě mají volitelný ?SharedCertificateResolver. Bez vyplnění by
+        // certifikát navázaný na sdílený trezor (migrace 1711) v produkci
+        // nešel odemknout vůbec, přestože testy se závislostí předanou ručně
+        // zůstanou zelené.
+        \MyInvoice\Service\Submission\SubmissionCredentialService::class,
+        \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class,
     ];
 
     /**

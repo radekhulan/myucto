@@ -754,6 +754,26 @@ final class Bootstrap
             \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationSource::class => fn (ContainerInterface $c)
                 => $c->get(\MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class),
 
+            // ── Sdílený trezor certifikátů pro obě ISDS cesty (migrace 1711) ──
+            // Obě služby mají poslední parametr `?SharedCertificateResolver = null`,
+            // aby si je testy postavily bez plného grafu. To je tatáž past jako níž:
+            // PHP-DI parametr s výchozí hodnotou nikdy nedosadí, takže bez těchhle
+            // bindů by v PRODUKCI nešel odemknout ŽÁDNÝ řádek navázaný na trezor —
+            // skončil by chybou `shared_certificate_unavailable`, přestože testy
+            // (které si závislost předávají ručně) zůstanou zelené.
+            \MyInvoice\Service\Submission\SubmissionCredentialService::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Submission\SubmissionCredentialService(
+                    $c->get(\MyInvoice\Repository\Submission\SubmissionChannelCredentialRepository::class),
+                    $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                    $c->get(\MyInvoice\Service\Submission\SharedCertificateResolver::class),
+                ),
+            \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService(
+                    $c->get(\MyInvoice\Repository\Submission\IsdsGatewayRegistrationRepository::class),
+                    $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                    $c->get(\MyInvoice\Service\Submission\SharedCertificateResolver::class),
+                ),
+
             // ── Past PHP-DI: nullable parametr S výchozí hodnotou se NEautowiruje ──
             // `PayrollIsdsSubmissionService` a `HealthInsuranceIsdsSubmissionService`
             // mají poslední konstruktorový parametr `?IsdsTransportAvailabilityResolver

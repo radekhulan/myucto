@@ -29,6 +29,13 @@ use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
  * obsluhuje `SubmissionInboxAction`; běžné heslo použije jen v právě spuštěném
  * požadavku a SMS mezikrok drží nejvýše po TTL v odděleném šifrovaném flow.
  * Proto v této tabulce nejsou sloupce pro login ani heslo.
+ *
+ * ── Dvě cesty k certifikátu, jedna kontrola ─────────────────────────────────
+ * Řádek buď drží vlastní šifrovanou kopii (`certificate_ciphertext`), nebo
+ * odkazuje do sdíleného trezoru (`credential_id`, migrace 1711). Existující
+ * řádky jedou beze změny první cestou; nová volba „vybrat z trezoru" jde
+ * druhou a odemyká se přes {@see SharedCertificateResolver}, aby se tentýž
+ * klíč nemusel nahrávat podruhé a jeho platnost žila na jednom místě.
  */
 final readonly class SubmissionCredentialService
 {
@@ -37,9 +44,16 @@ final readonly class SubmissionCredentialService
 
     private const ENVIRONMENTS = ['production', 'test'];
 
+    /**
+     * `$sharedCertificates` je volitelný jen kvůli testům, které si službu
+     * skládají ručně; v kontejneru se vyplňuje vždy. Když chybí a řádek přesto
+     * na trezor odkazuje, {@see unlock()} skončí pojmenovanou chybou — nikdy
+     * tichým pádem na prázdný certifikát.
+     */
     public function __construct(
         private SubmissionChannelCredentialRepository $repository,
         private SecretEncryption $crypto,
+        private ?SharedCertificateResolver $sharedCertificates = null,
     ) {}
 
     /** @return list<array<string,mixed>> Bez tajných hodnot — bezpečné pro API. */
@@ -87,18 +101,8 @@ final readonly class SubmissionCredentialService
         $this->assertEncryptionReady();
         $this->assertEnvironment($environment);
 
-        $boxId = strtolower(trim($boxId));
-        if (preg_match('/^[a-z0-9]{7}$/', $boxId) !== 1) {
-            throw new SubmissionChannelException(
-                'invalid_box_id',
-                'ID datové schránky má přesně 7 znaků (písmena a číslice). Zkontrolujte ho v Informačním systému datových schránek.',
-                400,
-            );
-        }
-        $label = trim($label);
-        if ($label === '') {
-            throw new SubmissionChannelException('label_required', 'Vyplňte název přístupu.', 400);
-        }
+        $boxId = $this->normalizeBoxId($boxId);
+        $label = $this->normalizeLabel($label);
 
         if ($certificateBytes === '') {
             throw new SubmissionChannelException(
@@ -113,8 +117,9 @@ final readonly class SubmissionCredentialService
         [$fingerprint, $validTo] = $this->inspectCertificate($certificateBytes, $certificatePassphrase);
 
         $this->repository->save($supplierId, 'isds', $environment, [
-            'label' => mb_substr($label, 0, 120),
+            'label' => $label,
             'box_id' => $boxId,
+            'credential_id' => null,
             'certificate_ciphertext' => $this->crypto->encryptFor(
                 base64_encode($certificateBytes),
                 self::CONTEXT_CERTIFICATE,
@@ -126,15 +131,69 @@ final readonly class SubmissionCredentialService
             'certificate_valid_to' => $validTo,
         ], $userId);
 
-        $saved = $this->repository->findPublic($supplierId, 'isds', $environment);
-        if ($saved === null) {
+        return $this->reloadSaved($supplierId, $environment);
+    }
+
+    /**
+     * Naváže přístup na certifikát, který už ve sdíleném trezoru je.
+     *
+     * Nekopíruje NIC: ani ciphertext, ani otisk, ani platnost. Kdyby se
+     * metadata opsala do řádku, rozešla by se s trezorem v okamžiku obnovy
+     * certifikátu — a celé sjednocení vzniklo právě proto, aby platnost žila
+     * na jednom místě. Karta i odemykání proto čtou přes vazbu.
+     *
+     * Volba se ověřuje TEĎ, ne až při odesílání: neexistující nebo pro firmu
+     * nepovolený certifikát se má ozvat u formuláře, ne v den termínu.
+     *
+     * @return array<string,mixed>
+     */
+    public function saveFromVault(
+        int $supplierId,
+        string $environment,
+        string $label,
+        string $boxId,
+        int $credentialId,
+        ?int $userId,
+    ): array {
+        $this->assertEncryptionReady();
+        $this->assertEnvironment($environment);
+
+        $boxId = $this->normalizeBoxId($boxId);
+        $label = $this->normalizeLabel($label);
+
+        if ($credentialId <= 0) {
             throw new SubmissionChannelException(
-                'credential_store_failed',
-                'Přístup se uložil, ale nelze ho znovu načíst.',
-                500,
+                'certificate_required',
+                'Vyberte certifikát ze sdíleného trezoru, nebo nahrajte soubor PFX/P12.',
+                400,
             );
         }
-        return $saved;
+
+        // Ověření volby; vrácená tajemství se zahodí spolu s koncem metody.
+        $this->sharedCertificates()->resolve($credentialId, $supplierId);
+
+        $this->repository->save($supplierId, 'isds', $environment, [
+            'label' => $label,
+            'box_id' => $boxId,
+            'credential_id' => $credentialId,
+            'certificate_ciphertext' => null,
+            'certificate_passphrase_ciphertext' => null,
+            'certificate_fingerprint' => null,
+            'certificate_valid_to' => null,
+        ], $userId);
+
+        return $this->reloadSaved($supplierId, $environment);
+    }
+
+    /**
+     * Certifikáty, ze kterých smí uživatel u téhle firmy vybírat.
+     * Jen metadata — ciphertext se pro tuhle otázku vůbec nečte.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listSharedCertificates(int $ownerUserId, int $supplierId): array
+    {
+        return $this->sharedCertificates()->listUsable($ownerUserId, $supplierId);
     }
 
     public function delete(int $supplierId, string $environment): bool
@@ -164,6 +223,20 @@ final readonly class SubmissionCredentialService
             );
         }
 
+        // Jedna větev navíc: řádek s odkazem si certifikát vezme ze sdíleného
+        // trezoru, řádek s vlastní kopií pokračuje přesně jako dosud.
+        $credentialId = ($row['credential_id'] ?? null) !== null ? (int) $row['credential_id'] : 0;
+        if ($credentialId > 0) {
+            $shared = $this->sharedCertificates()->resolve($credentialId, $supplierId);
+
+            return new ChannelContext($supplierId, $environment, new ChannelCredentials(
+                boxId: (string) $row['box_id'],
+                authMode: (string) $row['auth_mode'],
+                certificate: $shared->certificate,
+                certificatePassphrase: $shared->passphrase,
+            ));
+        }
+
         try {
             $credentials = new ChannelCredentials(
                 boxId: (string) $row['box_id'],
@@ -187,6 +260,63 @@ final readonly class SubmissionCredentialService
     }
 
     // ───────────────────────── interní ─────────────────────────
+
+    /**
+     * Bez resolveru se odkaz do trezoru NEDÁ odemknout. Fail-closed
+     * s pojmenovaným kódem: prázdný certifikát by se projevil až
+     * nesrozumitelným selháním TLS na straně ISDS.
+     */
+    private function sharedCertificates(): SharedCertificateResolver
+    {
+        if ($this->sharedCertificates === null) {
+            throw new SubmissionChannelException(
+                'shared_certificate_unavailable',
+                'Sdílený trezor certifikátů není k dispozici.',
+                500,
+            );
+        }
+
+        return $this->sharedCertificates;
+    }
+
+    private function normalizeBoxId(string $boxId): string
+    {
+        $boxId = strtolower(trim($boxId));
+        if (preg_match('/^[a-z0-9]{7}$/', $boxId) !== 1) {
+            throw new SubmissionChannelException(
+                'invalid_box_id',
+                'ID datové schránky má přesně 7 znaků (písmena a číslice). Zkontrolujte ho v Informačním systému datových schránek.',
+                400,
+            );
+        }
+
+        return $boxId;
+    }
+
+    private function normalizeLabel(string $label): string
+    {
+        $label = trim($label);
+        if ($label === '') {
+            throw new SubmissionChannelException('label_required', 'Vyplňte název přístupu.', 400);
+        }
+
+        return mb_substr($label, 0, 120);
+    }
+
+    /** @return array<string,mixed> */
+    private function reloadSaved(int $supplierId, string $environment): array
+    {
+        $saved = $this->repository->findPublic($supplierId, 'isds', $environment);
+        if ($saved === null) {
+            throw new SubmissionChannelException(
+                'credential_store_failed',
+                'Přístup se uložil, ale nelze ho znovu načíst.',
+                500,
+            );
+        }
+
+        return $saved;
+    }
 
     private function reveal(mixed $ciphertext, string $context): ?SensitiveValue
     {

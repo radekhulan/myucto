@@ -1,12 +1,17 @@
 -- Jedno úložiště certifikátů místo tří.
 --
--- PROČ: `signing_credentials` je už dnes centrála pro e-mailové podpisy, EPO
--- i mzdová podání (`payroll_submission_signing_profiles.credential_id` míří
--- sem). ISDS si ale drží vlastní kopie ve dvou tabulkách, takže tentýž
--- certifikát nahrává uživatel dvakrát — jednou v Podáních, podruhé v Datové
--- schránce. Horší než opisování je platnost: certifikát vyprší a vyměnit ho
--- musíte na třech místech, aniž by kterékoli z nich řeklo, že ta zbylá dvě
--- jsou prošlá.
+-- PROČ: trezor `epo_signing_credentials` je už dnes centrála, ze které vybírají
+-- EPO i mzdová podání (`payroll_submission_signing_profiles.credential_id` na něj
+-- míří cizím klíčem `fk_pssp_credential`, viz migrace 1373) a do které
+-- `CertificateVaultAction` nahrává certifikáty. ISDS si ale drží vlastní kopie
+-- ve dvou tabulkách, takže tentýž certifikát nahrává uživatel dvakrát — jednou
+-- v Podáních, podruhé v Datové schránce. Horší než opisování je platnost:
+-- certifikát vyprší a vyměnit ho musíte na víc místech, aniž by kterékoli
+-- z nich řeklo, že ta ostatní jsou prošlá.
+--
+-- POZOR na jméno: `signing_credentials` je JINÁ tabulka — profily podepisování
+-- dokumentů, kde certifikát bydlí jako soubor na disku (`certificate_path`).
+-- Sem `credential_id` NEMÍŘÍ.
 --
 -- Sloupce s ciphertextem se ZATÍM neruší, jen se uvolňují na NULL: řádek
 -- s vlastní kopií jede dál beze změny, nový odkazuje. Zahodí je až migrace
@@ -26,7 +31,7 @@ ALTER TABLE isds_gateway_registrations
   MODIFY COLUMN certificate_ciphertext MEDIUMTEXT NULL
     COMMENT 'vlastní kopie certifikátu; NULL, když se bere z credential_id';
 
--- Index, ne cizí klíč: `signing_credentials` maže měkce (`deleted_at`), takže
+-- Index, ne cizí klíč: trezor maže měkce (`deleted_at`), takže
 -- tvrdá vazba by bránila i tomu měkkému smazání. Osiřelý odkaz řeší čtecí
 -- cesta pojmenovanou chybou, ne tichým pádem na prázdno.
 CREATE INDEX IF NOT EXISTS idx_channel_credentials_credential

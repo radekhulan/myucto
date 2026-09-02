@@ -162,6 +162,48 @@ final class EpoSigningCredentialRepository
         return $row !== false ? $this->normalizeSecret($row) : null;
     }
 
+    /**
+     * Certifikát z trezoru BEZ vazby na vlastníka.
+     *
+     * Proč bez `owner_user_id`: systémový certifikát k datové schránce
+     * a certifikát odesílací brány se odemykají i tam, kde žádný přihlášený
+     * uživatel není (cron, callback brány). Vlastnictví je tu tedy nepoužitelná
+     * podmínka — autorizaci nese `epo_signing_credential_suppliers`, kterou
+     * ověřuje {@see isEnabledForSupplier()}, a u instalačně globální brány
+     * oprávnění k jejímu nastavení.
+     *
+     * Měkce smazaný řádek se ZÁMĚRNĚ nevrací: odkaz na něj má skončit
+     * pojmenovanou chybou volajícího, ne tichým průchodem.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findShared(int $credentialId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM epo_signing_credentials
+              WHERE id = ? AND deleted_at IS NULL'
+        );
+        $stmt->execute([$credentialId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? $this->normalizeSecret($row) : null;
+    }
+
+    /** Povolil vlastník certifikátu jeho použití pro tuhle firmu? */
+    public function isEnabledForSupplier(int $credentialId, int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM epo_signing_credential_suppliers cs
+               JOIN epo_signing_credentials c ON c.id = cs.credential_id
+              WHERE cs.credential_id = ? AND cs.supplier_id = ?
+                AND c.deleted_at IS NULL
+              LIMIT 1'
+        );
+        $stmt->execute([$credentialId, $supplierId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** @return array<string,mixed>|null */
     public function findUsable(int $credentialId, int $ownerUserId, int $supplierId): ?array
     {

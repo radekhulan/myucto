@@ -8,6 +8,7 @@ use MyInvoice\Repository\Submission\IsdsGatewayRegistrationRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Submission\Channel\SensitiveValue;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
+use MyInvoice\Service\Submission\SharedCertificateResolver;
 
 /**
  * Trezor registrace odesílací brány.
@@ -63,9 +64,16 @@ final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegist
         ],
     ];
 
+    /**
+     * `$sharedCertificates` je volitelný jen kvůli testům, které si službu
+     * skládají ručně (PHP-DI nullable parametr s defaultem neautowiruje —
+     * binding je v `Bootstrap`). Když chybí a registrace přesto na sdílený
+     * trezor odkazuje, {@see load()} skončí pojmenovanou chybou.
+     */
     public function __construct(
         private IsdsGatewayRegistrationRepository $repository,
         private SecretEncryption $crypto,
+        private ?SharedCertificateResolver $sharedCertificates = null,
     ) {}
 
     /** @return list<array<string,mixed>> Bez tajných hodnot — bezpečné pro API. */
@@ -264,18 +272,32 @@ final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegist
             );
         }
 
-        try {
-            $certificate = $this->reveal($row['certificate_ciphertext'] ?? null, self::CONTEXT_CERTIFICATE);
-            $passphrase = $this->reveal($row['certificate_passphrase_ciphertext'] ?? null, self::CONTEXT_PASSPHRASE);
-        } catch (\RuntimeException) {
-            // `previous` se ZÁMĚRNĚ nepředává: nesl by v trace ciphertext
-            // i šifrovací kontext.
-            throw new SubmissionChannelException(
-                'isds_gateway_certificate_decryption_failed',
-                'Certifikát odesílací brány se nepodařilo rozšifrovat. '
-                . 'Nejspíš se změnil šifrovací klíč — nahrajte certifikát znovu.',
-                500,
-            );
+        // Jedna větev navíc: registrace s odkazem si certifikát vezme ze
+        // sdíleného trezoru, registrace s vlastní kopií jede přesně jako dosud.
+        //
+        // `supplierId` je tu `null` schválně: registrace brány je instalačně
+        // globální (jedna na prostředí, tabulka nemá `supplier_id`), takže
+        // rozsah na firmu není čím ověřit. Autorizaci nese oprávnění, kterým
+        // se registrace nastavuje.
+        $credentialId = ($row['credential_id'] ?? null) !== null ? (int) $row['credential_id'] : 0;
+        if ($credentialId > 0) {
+            $shared = $this->sharedCertificates()->resolve($credentialId, null);
+            $certificate = $shared->certificate;
+            $passphrase = $shared->passphrase;
+        } else {
+            try {
+                $certificate = $this->reveal($row['certificate_ciphertext'] ?? null, self::CONTEXT_CERTIFICATE);
+                $passphrase = $this->reveal($row['certificate_passphrase_ciphertext'] ?? null, self::CONTEXT_PASSPHRASE);
+            } catch (\RuntimeException) {
+                // `previous` se ZÁMĚRNĚ nepředává: nesl by v trace ciphertext
+                // i šifrovací kontext.
+                throw new SubmissionChannelException(
+                    'isds_gateway_certificate_decryption_failed',
+                    'Certifikát odesílací brány se nepodařilo rozšifrovat. '
+                    . 'Nejspíš se změnil šifrovací klíč — nahrajte certifikát znovu.',
+                    500,
+                );
+            }
         }
 
         if ($certificate === null) {
@@ -364,6 +386,24 @@ final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegist
     }
 
     // ───────────────────────── interní ─────────────────────────
+
+    /**
+     * Bez resolveru nejde odkaz do trezoru odemknout. Fail-closed
+     * s pojmenovaným kódem — prázdný certifikát by se projevil až
+     * nesrozumitelným selháním TLS proti bráně.
+     */
+    private function sharedCertificates(): SharedCertificateResolver
+    {
+        if ($this->sharedCertificates === null) {
+            throw new SubmissionChannelException(
+                'shared_certificate_unavailable',
+                'Sdílený trezor certifikátů není k dispozici.',
+                500,
+            );
+        }
+
+        return $this->sharedCertificates;
+    }
 
     private function reveal(mixed $ciphertext, string $context): ?SensitiveValue
     {

@@ -47,6 +47,13 @@ export interface DataBoxCredential {
   label: string
   box_id: string
   auth_mode: 'certificate'
+  /** Odkaz do sdíleného trezoru certifikátů; `null` = vlastní kopie v řádku. */
+  credential_id: number | null
+  credential_label: string | null
+  credential_subject: string | null
+  /** Odkaz vede do prázdna — certifikát někdo z trezoru smazal. */
+  credential_missing: boolean
+  /** U navázaného řádku přichází z trezoru, ne z kopie — proto jedna platnost. */
   certificate_fingerprint: string | null
   certificate_valid_to: string | null
   last_verified_at: string | null
@@ -54,6 +61,21 @@ export interface DataBoxCredential {
   inbox_polling_enabled: boolean
   inbox_polling_enabled_at: string | null
   inbox_polling_enabled_by: number | null
+}
+
+/**
+ * Certifikát ze sdíleného trezoru, jak ho vidí nabídka. Pouze metadata —
+ * soukromý klíč ani heslo se přes API nikdy nevrací.
+ */
+export interface SharedCertificateOption {
+  id: number
+  label: string
+  subject: string | null
+  fingerprint: string | null
+  valid_from: string | null
+  valid_to: string | null
+  expired: boolean
+  valid_now: boolean
 }
 
 export interface DataBoxArchiveFolder {
@@ -527,6 +549,10 @@ export const dataBoxApi = {
     api.post<DataBoxCredential>('/settings/databox', data, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data),
+
+  sharedCertificates: () =>
+    api.get<{ items: SharedCertificateOption[] }>('/settings/databox/certificates')
+      .then(r => r.data.items),
 
   deleteCredential: (environment: string) =>
     api.delete(`/settings/databox/${environment}`).then(r => r.data),

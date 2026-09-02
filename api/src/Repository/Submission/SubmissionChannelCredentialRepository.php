@@ -23,13 +23,31 @@ final class SubmissionChannelCredentialRepository
 {
     private const TABLE = 'submission_channel_credentials';
 
-    private const PUBLIC_COLUMNS = 'id, supplier_id, environment, channel, label, box_id, auth_mode,
-        certificate_fingerprint, certificate_valid_to, last_verified_at,
-        inbox_polling_enabled, inbox_polling_enabled_at, inbox_polling_enabled_by,
-        created_at, updated_at';
+    /**
+     * Platnost a otisk se čtou přes `COALESCE`: u vlastní kopie z vlastního
+     * sloupce, u odkazu do sdíleného trezoru z trezoru. Kdyby se při navázání
+     * zkopírovaly do řádku, rozešly by se v okamžiku, kdy uživatel certifikát
+     * v trezoru obnoví — a přesně tomu má sjednocení zabránit.
+     */
+    private const PUBLIC_COLUMNS = 'c.id, c.supplier_id, c.environment, c.channel, c.label, c.box_id,
+        c.auth_mode, c.credential_id,
+        COALESCE(c.certificate_fingerprint, v.fingerprint_sha256) AS certificate_fingerprint,
+        COALESCE(c.certificate_valid_to, v.valid_to) AS certificate_valid_to,
+        v.label AS credential_label, v.subject_dn AS credential_subject,
+        c.last_verified_at,
+        c.inbox_polling_enabled, c.inbox_polling_enabled_at, c.inbox_polling_enabled_by,
+        c.created_at, c.updated_at';
 
-    private const SECRET_COLUMNS = self::PUBLIC_COLUMNS . ', certificate_ciphertext,
-        certificate_passphrase_ciphertext';
+    private const SECRET_COLUMNS = self::PUBLIC_COLUMNS . ', c.certificate_ciphertext,
+        c.certificate_passphrase_ciphertext';
+
+    /**
+     * Měkce smazaný certifikát se ZÁMĚRNĚ nepřipojuje: v kartě se pak
+     * `credential_missing` rozsvítí a odemykání skončí pojmenovanou chybou,
+     * místo aby se tvářilo, že je všechno v pořádku.
+     */
+    private const VAULT_JOIN = ' LEFT JOIN epo_signing_credentials v
+              ON v.id = c.credential_id AND v.deleted_at IS NULL';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -47,8 +65,8 @@ final class SubmissionChannelCredentialRepository
     {
         $this->assertAvailable();
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::PUBLIC_COLUMNS . ' FROM ' . self::TABLE . '
-              WHERE supplier_id = ? ORDER BY channel ASC, environment ASC'
+            'SELECT ' . self::PUBLIC_COLUMNS . ' FROM ' . self::TABLE . ' c' . self::VAULT_JOIN . '
+              WHERE c.supplier_id = ? ORDER BY c.channel ASC, c.environment ASC'
         );
         $stmt->execute([$supplierId]);
         return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
@@ -59,8 +77,8 @@ final class SubmissionChannelCredentialRepository
     {
         $this->assertAvailable();
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::PUBLIC_COLUMNS . ' FROM ' . self::TABLE . '
-              WHERE supplier_id = ? AND channel = ? AND environment = ?'
+            'SELECT ' . self::PUBLIC_COLUMNS . ' FROM ' . self::TABLE . ' c' . self::VAULT_JOIN . '
+              WHERE c.supplier_id = ? AND c.channel = ? AND c.environment = ?'
         );
         $stmt->execute([$supplierId, $channel, $environment]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -78,8 +96,8 @@ final class SubmissionChannelCredentialRepository
     {
         $this->assertAvailable();
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::SECRET_COLUMNS . ' FROM ' . self::TABLE . '
-              WHERE supplier_id = ? AND channel = ? AND environment = ?'
+            'SELECT ' . self::SECRET_COLUMNS . ' FROM ' . self::TABLE . ' c' . self::VAULT_JOIN . '
+              WHERE c.supplier_id = ? AND c.channel = ? AND c.environment = ?'
         );
         $stmt->execute([$supplierId, $channel, $environment]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -87,25 +105,35 @@ final class SubmissionChannelCredentialRepository
     }
 
     /**
+     * Uloží přístup. Právě jedna z cest k certifikátu smí být vyplněná —
+     * hlídá to i CHECK z migrace 1711, ale tady se obě větve zapisují tak, aby
+     * se nemohly potkat: navázání nuluje ciphertext, nahrání nuluje odkaz.
+     * Zbytek po předchozím uložení by jinak zůstal ležet jako druhá kopie
+     * klíče, o které nikdo neví.
+     *
      * @param array{
      *   label:string, box_id:string,
-     *   certificate_ciphertext:string, certificate_passphrase_ciphertext:?string,
+     *   credential_id?:?int,
+     *   certificate_ciphertext:?string, certificate_passphrase_ciphertext:?string,
      *   certificate_fingerprint:?string, certificate_valid_to:?string
      * } $data
      */
     public function save(int $supplierId, string $channel, string $environment, array $data, ?int $userId): void
     {
         $this->assertAvailable();
+        $credentialId = isset($data['credential_id']) ? (int) $data['credential_id'] : 0;
+        $credentialId = $credentialId > 0 ? $credentialId : null;
         // Historické sloupce `inbox_polling_*` se tu nenastavují. Automatické
         // vybírání bylo odstraněno; migrace 1530 případné staré volby vynuluje.
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO ' . self::TABLE . '
-                (supplier_id, environment, channel, label, box_id, auth_mode,
+                (supplier_id, environment, channel, label, box_id, auth_mode, credential_id,
                  certificate_ciphertext, certificate_passphrase_ciphertext,
                  certificate_fingerprint, certificate_valid_to, created_by)
-             VALUES (?, ?, ?, ?, ?, \'certificate\', ?, ?, ?, ?, ?)
+             VALUES (?, ?, ?, ?, ?, \'certificate\', ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 label = VALUES(label), box_id = VALUES(box_id),
+                credential_id = VALUES(credential_id),
                 certificate_ciphertext = VALUES(certificate_ciphertext),
                 certificate_passphrase_ciphertext = VALUES(certificate_passphrase_ciphertext),
                 certificate_fingerprint = VALUES(certificate_fingerprint),
@@ -118,10 +146,11 @@ final class SubmissionChannelCredentialRepository
             $channel,
             $data['label'],
             $data['box_id'],
-            $data['certificate_ciphertext'],
-            $data['certificate_passphrase_ciphertext'],
-            $data['certificate_fingerprint'],
-            $data['certificate_valid_to'],
+            $credentialId,
+            $credentialId !== null ? null : $data['certificate_ciphertext'],
+            $credentialId !== null ? null : $data['certificate_passphrase_ciphertext'],
+            $credentialId !== null ? null : $data['certificate_fingerprint'],
+            $credentialId !== null ? null : $data['certificate_valid_to'],
             $userId,
         ]);
     }
@@ -155,6 +184,11 @@ final class SubmissionChannelCredentialRepository
         $row['inbox_polling_enabled_by'] = $row['inbox_polling_enabled_by'] !== null
             ? (int) $row['inbox_polling_enabled_by']
             : null;
+        $credentialId = ($row['credential_id'] ?? null) !== null ? (int) $row['credential_id'] : null;
+        $row['credential_id'] = $credentialId;
+        // Odkaz vede do prázdna — certifikát někdo z trezoru smazal. Karta to
+        // musí říct dřív, než to řekne odmítnuté podání.
+        $row['credential_missing'] = $credentialId !== null && ($row['credential_label'] ?? null) === null;
         return $row;
     }
 }

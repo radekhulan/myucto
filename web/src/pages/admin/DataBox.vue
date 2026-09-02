@@ -37,6 +37,7 @@ import {
   type ReceiptCandidate,
   type ReceiptUploadResult,
   type RecipientKind,
+  type SharedCertificateOption,
   type SubmissionRecipient,
 } from '@/api/dataBox'
 import { apiErrorMessage } from '@/api/errors'
@@ -76,6 +77,7 @@ async function removeCredential() {
     certBoxId.value = ''
     certPassword.value = ''
     certFile.value = null
+    certCredentialId.value = null
     await loadAll()
   } catch (error) {
     toast.error(apiErrorMessage(error, t('databox.access.credentialDeleteFailed')))
@@ -121,9 +123,38 @@ const certPassword = ref('')
 const certFile = ref<File | null>(null)
 const certFileInput = ref<HTMLInputElement | null>(null)
 
+/*
+ * Odkud se certifikát vezme.
+ *
+ * Why: aplikace má jeden trezor certifikátů (Systém → Elektronické podpisy)
+ * a mzdová podání z něj jen vybírají. Datovka si dosud držela vlastní kopii,
+ * takže týž klíč se nahrával podruhé — a při obnově se měnil na víc místech,
+ * aniž by kterékoli z nich řeklo, že ta zbylá jsou prošlá. Výběr z trezoru je
+ * proto výchozí; nahrání souboru zůstává pro certifikát, který v trezoru není.
+ */
+const certSource = ref<'vault' | 'file'>('vault')
+const certCredentialId = ref<number | null>(null)
+const sharedCertificates = ref<SharedCertificateOption[]>([])
+
 const currentCredential = computed(
   () => credentials.value.find(c => c.environment === environment.value) ?? null,
 )
+
+const selectedSharedCertificate = computed(
+  () => sharedCertificates.value.find(c => c.id === certCredentialId.value) ?? null,
+)
+
+/**
+ * Platnost patří k popisku, ne do nápovědy pod ním. Právě proto se celý trezor
+ * sjednocoval: dokud měl každý kanál vlastní kopii, prošlý certifikát se poznal
+ * až z odmítnutého podání.
+ */
+function sharedCertificateOptionLabel(item: SharedCertificateOption): string {
+  const validTo = item.valid_to ?? '—'
+  return item.expired
+    ? t('databox.access.sharedCertificateExpiredOption', { label: item.label, validTo })
+    : t('databox.access.sharedCertificateOption', { label: item.label, validTo })
+}
 
 const currentInboxStorage = computed(
   () => inboxStorageItems.value.find(item => item.environment === environment.value) ?? null,
@@ -293,7 +324,12 @@ async function loadAll() {
     const storagePromise = typeof dataBoxApi.inboxStorage === 'function'
       ? dataBoxApi.inboxStorage().catch(() => ({ items: [], folders: [] }))
       : Promise.resolve({ items: [], folders: [] })
-    const [creds, recips, out, inb, unmatched, mobileProfile, storage] = await Promise.all([
+    // Nabídka z trezoru nesmí shodit celou obrazovku, když ji instalace
+    // (starší API) neumí — bez ní se jen nedá vybírat a zbude nahrání souboru.
+    const sharedPromise = typeof dataBoxApi.sharedCertificates === 'function'
+      ? dataBoxApi.sharedCertificates().catch(() => [] as SharedCertificateOption[])
+      : Promise.resolve([] as SharedCertificateOption[])
+    const [creds, recips, out, inb, unmatched, mobileProfile, storage, shared] = await Promise.all([
       dataBoxApi.credentials(),
       dataBoxApi.recipients(),
       dataBoxApi.outbox(environment.value),
@@ -307,8 +343,17 @@ async function loadAll() {
         environment: environment.value,
       })),
       storagePromise,
+      sharedPromise,
     ])
     credentials.value = creds
+    sharedCertificates.value = shared
+    // Bez čeho vybírat není co nabízet — pak zbývá jediná cesta, nahrání souboru.
+    if (shared.length === 0) certSource.value = 'file'
+    const linked = creds.find(c => c.environment === environment.value)?.credential_id ?? null
+    if (linked !== null && certCredentialId.value === null) {
+      certCredentialId.value = linked
+      certSource.value = 'vault'
+    }
     recipients.value = recips
     outbox.value = out
     inbox.value = inb.items
@@ -594,7 +639,12 @@ async function assignReceipt(inboxMessageId: number, outboxId: number) {
 }
 
 async function saveCredential() {
-  if (!certFile.value) {
+  const fromVault = certSource.value === 'vault'
+  if (fromVault && !certCredentialId.value) {
+    toast.error(t('databox.errors.certificateSelectionRequired'))
+    return
+  }
+  if (!fromVault && !certFile.value) {
     toast.error(t('databox.errors.certificateRequired'))
     return
   }
@@ -604,8 +654,14 @@ async function saveCredential() {
     form.append('environment', environment.value)
     form.append('label', certLabel.value)
     form.append('box_id', certBoxId.value)
-    form.append('certificate', certFile.value)
-    form.append('certificate_password', certPassword.value)
+    // Právě jedna cesta k certifikátu. Poslat obojí by znamenalo dvě kopie
+    // klíče, o kterých nikdo neví, která se použije.
+    if (fromVault) {
+      form.append('credential_id', String(certCredentialId.value))
+    } else {
+      form.append('certificate', certFile.value as File)
+      form.append('certificate_password', certPassword.value)
+    }
     await dataBoxApi.saveCredential(form)
     certPassword.value = ''
     certFile.value = null
@@ -1329,8 +1385,18 @@ onUnmounted(clearMobileStatusTimer)
             <div class="text-neutral-500">
               {{ t('databox.access.boxId') }}: <code>{{ currentCredential.box_id }}</code>
             </div>
+            <div v-if="currentCredential.credential_label" class="text-neutral-500">
+              {{ t('databox.access.sharedCertificateInUse', { label: currentCredential.credential_label }) }}
+            </div>
             <div v-if="currentCredential.certificate_valid_to" class="text-neutral-500">
               {{ t('databox.access.validTo') }}: {{ currentCredential.certificate_valid_to }}
+            </div>
+            <!--
+              Odkaz do prázdna se musí ozvat tady, ne až z odmítnutého podání:
+              vazba je schválně jen index, protože trezor maže měkce.
+            -->
+            <div v-if="currentCredential.credential_missing" class="mt-1 font-medium text-danger-600">
+              {{ t('databox.access.sharedCertificateMissing') }}
             </div>
           </div>
           <!--
@@ -1359,6 +1425,69 @@ onUnmounted(clearMobileStatusTimer)
             <span class="text-sm font-medium">{{ t('databox.access.boxId') }}</span>
             <input v-model="certBoxId" type="text" maxlength="7" class="form-input mt-1 w-full" />
           </label>
+        </div>
+
+        <!--
+          Odkud se certifikát vezme. Výběr z trezoru je první, protože je to
+          ta cesta, která nevyrábí druhou kopii klíče ani druhou platnost.
+        -->
+        <fieldset class="mt-4">
+          <legend class="text-sm font-medium">{{ t('databox.access.certificateSource') }}</legend>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('databox.access.certificateSourceHint') }}</p>
+          <div class="mt-2 flex flex-wrap gap-4 text-sm">
+            <label class="flex items-center gap-2">
+              <input
+                v-model="certSource"
+                type="radio"
+                value="vault"
+                :disabled="sharedCertificates.length === 0"
+                data-test="databox-cert-source-vault"
+              />
+              <span>{{ t('databox.access.certificateFromVault') }}</span>
+            </label>
+            <label class="flex items-center gap-2">
+              <input v-model="certSource" type="radio" value="file" data-test="databox-cert-source-file" />
+              <span>{{ t('databox.access.certificateFromFile') }}</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div v-if="certSource === 'vault'" class="mt-3 grid gap-3 sm:grid-cols-2">
+          <label class="block sm:col-span-2">
+            <span class="text-sm font-medium">{{ t('databox.access.sharedCertificate') }}</span>
+            <select
+              v-model.number="certCredentialId"
+              class="form-select mt-1 w-full"
+              data-test="databox-shared-certificate"
+            >
+              <option :value="null">{{ t('databox.access.sharedCertificatePlaceholder') }}</option>
+              <option v-for="item in sharedCertificates" :key="item.id" :value="item.id">
+                {{ sharedCertificateOptionLabel(item) }}
+              </option>
+            </select>
+          </label>
+          <p v-if="sharedCertificates.length === 0" class="text-sm text-neutral-500 sm:col-span-2">
+            {{ t('databox.access.sharedCertificateEmpty') }}
+          </p>
+          <div
+            v-else-if="selectedSharedCertificate"
+            class="text-xs text-neutral-500 sm:col-span-2"
+            data-test="databox-shared-certificate-detail"
+          >
+            <div v-if="selectedSharedCertificate.subject">
+              {{ t('databox.access.sharedCertificateSubject') }}: {{ selectedSharedCertificate.subject }}
+            </div>
+            <div v-if="selectedSharedCertificate.fingerprint">
+              {{ t('databox.access.sharedCertificateFingerprint') }}: <code>{{ selectedSharedCertificate.fingerprint }}</code>
+            </div>
+            <div :class="selectedSharedCertificate.expired ? 'font-medium text-danger-600' : ''">
+              {{ t('databox.access.validTo') }}: {{ selectedSharedCertificate.valid_to ?? '—' }}
+              <span v-if="selectedSharedCertificate.expired">· {{ t('databox.access.sharedCertificateExpired') }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="mt-3 grid gap-3 sm:grid-cols-2">
           <label class="block">
             <span class="text-sm font-medium">{{ t('databox.access.certificate') }}</span>
             <input
