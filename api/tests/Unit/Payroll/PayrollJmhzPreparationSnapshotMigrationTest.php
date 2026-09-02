@@ -119,7 +119,7 @@ final class PayrollJmhzPreparationSnapshotMigrationTest extends TestCase
     {
         $sql = file_get_contents(
             dirname(__DIR__, 4)
-            . '/db/migrations/1880_payroll_jmhz_default_tristate_interpretation.sql',
+            . '/db/migrations/1728_payroll_jmhz_default_tristate_interpretation.sql',
         );
         self::assertIsString($sql);
         self::assertStringContainsString("'jmhz-preparation-source.v11'", $sql);
@@ -141,7 +141,7 @@ final class PayrollJmhzPreparationSnapshotMigrationTest extends TestCase
     {
         $sql = file_get_contents(
             dirname(__DIR__, 4)
-            . '/db/migrations/1940_payroll_jmhz_identity_name_branch.sql',
+            . '/db/migrations/1729_payroll_jmhz_identity_name_branch.sql',
         );
         self::assertIsString($sql);
         self::assertStringContainsString("'jmhz-preparation-source.v12'", $sql);
