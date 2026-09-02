@@ -1922,6 +1922,38 @@ final class PayrollRunStatutoryInputAssembler
         return $result;
     }
 
+    /**
+     * Vstupuje složka do vyměřovacího základu TÉHLE domény?
+     *
+     * Why: zápornou částku má smysl hlídat jen tam, kde se o základ opravdu
+     * opře. Náhrada mzdy při DPN je osvobozená od daně (§ 6 odst. 9 písm. p)
+     * ZDP) a tím pádem mimo vyměřovací základ sociálního i zdravotního
+     * pojistného (§ 5 odst. 1 zák. 589/1992 Sb. — pozor, v taxativním výčtu
+     * odst. 2 ji nenajdete, vypadává už přes odstavec 1). Do žádné ze tří
+     * domén tedy nevstupuje.
+     *
+     * Přesto shazovala všechny tři: kontrola nezápornosti běžela PŘED filtrem
+     * podle zacházení, takže stornovaná nemocenská poslala celý běh do ručního
+     * posouzení a nešla schválit. Období se dalo odblokovat jen ručním SQL.
+     *
+     * `manual_review` se tu bere jako „vstupuje": nevíme to jistě, a mlčet
+     * u záporné částky, o které nevíme, kam patří, by bylo horší než falešný
+     * poplach.
+     */
+    private static function entersDomainBase(array $component, string $domain): bool
+    {
+        return match ($domain) {
+            'social_insurance' => ($component['social_treatment'] ?? 'manual_review') !== 'excluded',
+            'health_insurance' => ($component['health_treatment'] ?? 'manual_review') !== 'excluded',
+            'income_tax' => !in_array(
+                $component['tax_treatment'] ?? 'manual_review',
+                ['exempt', 'withholding_candidate'],
+                true,
+            ),
+            default => true,
+        };
+    }
+
     /** @param array<string,mixed> $input */
     private function assertCurrentNonNegativeComponent(
         array $input,
@@ -1951,7 +1983,9 @@ final class PayrollRunStatutoryInputAssembler
             );
             return false;
         }
-        if ($amount < 0) {
+        if ($amount < 0
+            && self::entersDomainBase($this->object($input['component'] ?? null), $domain)
+        ) {
             $this->issue(
                 $domain,
                 'negative_component_requires_revision',
