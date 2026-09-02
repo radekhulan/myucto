@@ -196,17 +196,49 @@ final class PayrollAbsenceValidator
         $text = trim((string) $value);
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $text);
         if ($date === false || $date->format('Y-m-d') !== $text) {
-            throw new \InvalidArgumentException("{$field} musí být platné datum YYYY-MM-DD.");
+            throw new \InvalidArgumentException(self::label($field) . ' musí být platné datum ve tvaru RRRR-MM-DD.');
         }
         return $text;
     }
 
     /** @param array<string,mixed> $body */
+    /**
+     * Lidský název pole pro chybovou hlášku.
+     *
+     * Why: validátor pojmenovával sloupce („gross_earnings_minor musí být
+     * nezáporné celé číslo"), jenže ve formuláři se to pole jmenuje
+     * „Započitatelná mzda (Kč)" a zadává se v korunách, ne v minorech. Účetní
+     * z hlášky nepoznala ani které pole má opravit, ani proč. Klíč bez překladu
+     * se vypíše tak, jak je — neúplný slovník nesmí zamlčet, že něco chybí.
+     */
+    private const FIELD_LABELS = [
+        'gross_earnings_minor' => 'Započitatelná mzda',
+        'worked_hours_milli' => 'Odpracované hodiny',
+        'worked_days' => 'Odpracované dny',
+        'employment_id' => 'Pracovní vztah',
+        'employee_id' => 'Zaměstnanec',
+        'average_snapshot_id' => 'Snímek průměrného výdělku',
+        'applicable_year' => 'Rok',
+        'applicable_quarter' => 'Čtvrtletí',
+        'date_from' => 'Datum od',
+        'date_to' => 'Datum do',
+        'effective_date' => 'Datum účinnosti',
+        'leave_entitlement_weeks' => 'Nárok na dovolenou v týdnech',
+        'compensation_rate_basis_points' => 'Sazba náhrady',
+        'partial_first_minutes' => 'Zameškané minuty prvního dne',
+        'partial_last_minutes' => 'Zameškané minuty posledního dne',
+    ];
+
+    private static function label(string $field): string
+    {
+        return self::FIELD_LABELS[$field] ?? $field;
+    }
+
     private function positiveInt(array $body, string $field): int
     {
         $value = filter_var($body[$field] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         if ($value === false) {
-            throw new \InvalidArgumentException("{$field} musí být kladné celé číslo.");
+            throw new \InvalidArgumentException(self::label($field) . ' musí být kladné celé číslo.');
         }
         return (int) $value;
     }
@@ -216,7 +248,7 @@ final class PayrollAbsenceValidator
     {
         $value = filter_var($body[$field] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
         if ($value === false) {
-            throw new \InvalidArgumentException("{$field} musí být nezáporné celé číslo.");
+            throw new \InvalidArgumentException(self::label($field) . ' musí být nezáporné celé číslo.');
         }
         return (int) $value;
     }
@@ -228,7 +260,7 @@ final class PayrollAbsenceValidator
         }
         $result = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         if ($result === false) {
-            throw new \InvalidArgumentException("{$field} musí být kladné celé číslo.");
+            throw new \InvalidArgumentException(self::label($field) . ' musí být kladné celé číslo.');
         }
         return (int) $result;
     }
