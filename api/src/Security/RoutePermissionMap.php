@@ -300,6 +300,10 @@ final class RoutePermissionMap
         // by se v praxi vždy přidělovaly společně.
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+/a1-profile$#', 'payroll.submissions', AccessLevel::READ],
         ['PUT', '#^/api/payroll/submissions/registration/[0-9]+/a1-profile$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Kontrola úplnosti profilu. Vlastní pravidlo, protože vzor výš končí
+        // na `a1-profile$` — bez něj by kontrola spadla do obecného `payroll`
+        // a byla by dostupná i tomu, kdo na podání právo nemá.
+        ['POST', '#^/api/payroll/submissions/registration/[0-9]+/a1-profile/check$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+/events$#', 'payroll.submissions', AccessLevel::READ],
