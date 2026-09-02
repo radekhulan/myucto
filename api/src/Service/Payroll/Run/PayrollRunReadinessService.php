@@ -496,10 +496,13 @@ final class PayrollRunReadinessService
             }
             $code = $coverage['insurer_code'] ?? null;
             if (is_string($code) && preg_match('/^[0-9]{3}$/D', $code) === 1) {
-                $codes[$code] = true;
+                // Hodnota, ne `true`: číselný řetězcový klíč se v PHP změní na
+                // int, takže `array_keys()` by vrátilo 111 místo '111' a
+                // striktní porovnání s ověřenými kódy by nesedlo nikdy.
+                $codes[$code] = $code;
             }
         }
 
-        return array_keys($codes);
+        return array_values($codes);
     }
 }
