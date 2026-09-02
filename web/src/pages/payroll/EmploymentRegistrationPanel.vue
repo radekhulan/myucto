@@ -721,6 +721,46 @@ const a1PersonCardTarget = computed(() => {
 })
 
 /**
+ * „Co aplikace o osobě nevede" ukazuje jen to, co JEŠTĚ CHYBÍ.
+ *
+ * PROČ: seznam vzniká při sestavení návrhu a říká, co se nedá předvyplnit
+ * z kmenových dat. Jenže se vypisoval dál i potom, co uživatel všechna ta
+ * pole vyplnil a uložil — takže vedle sebe svítilo jedenáct „chybí" a zelené
+ * „Kontrola prošla, 0 položek brání podání". Obojí byla pravda o něčem
+ * jiném a dohromady to nedávalo smysl: první mluvilo o předvyplnění, druhé
+ * o podání. Zůstat má jen to, s čím má uživatel ještě něco udělat.
+ */
+function a1ValueAt(path: string): unknown {
+  let node: unknown = a1Form.value
+  for (const key of path.split('.')) {
+    if (node === null || typeof node !== 'object') return undefined
+    node = (node as Record<string, unknown>)[key]
+  }
+
+  return node
+}
+
+/**
+ * Pole, u kterých je „nevyplněno" legitimní odpověď, takže z hodnoty nejde
+ * poznat, jestli je člověk potvrdil. U nich je potvrzením uložení verze —
+ * přesně to po uživateli hláška chce („Potvrďte je ručně").
+ */
+const A1_CONFIRMED_BY_SAVING = new Set(['pension', 'facts.disability_card'])
+
+function a1GapOutstanding(field: string): boolean {
+  if (A1_CONFIRMED_BY_SAVING.has(field)) return a1SavedVersion.value === 0
+  const value = a1ValueAt(field)
+  if (value === undefined) return true
+  if (value === null) return true
+
+  return typeof value === 'string' ? value.trim() === '' : false
+}
+
+const a1Gaps = computed(
+  () => (a1Draft.value?.missing ?? []).filter(gap => a1GapOutstanding(gap.field)),
+)
+
+/**
  * Doskok na položku z „Co aplikace o osobě nevede".
  *
  * PROČ TAKHLE: dřív tu byly dvě varianty — odkaz na kartu osoby, nebo text
@@ -1636,15 +1676,23 @@ async function copyXml(): Promise<void> {
         </p>
 
         <div
-          v-if="(a1Draft?.missing.length ?? 0) > 0"
+          v-if="a1Gaps.length > 0"
           class="rounded-md border border-warning-200 bg-warning-50 p-3"
           data-test="registration-a1-missing"
         >
           <h6 class="text-xs font-semibold text-warning-800">
-            {{ t('payroll.people.registration.a1.missing_title') }}
+            {{ t('payroll.people.registration.a1.missing_title', { count: a1Gaps.length }) }}
           </h6>
-          <ul class="mt-1 space-y-1.5 text-xs text-warning-800">
-            <li v-for="gap in a1Draft?.missing ?? []" :key="gap.field">
+          <!--
+            Bez téhle věty se seznam četl jako jedenáct chyb, zatímco o kus
+            níž svítilo „Kontrola prošla, 0 položek brání podání". Musí být
+            napsané, čí je to seznam a že nic neblokuje.
+          -->
+          <p class="mt-1 text-xs text-warning-800">
+            {{ t('payroll.people.registration.a1.missing_hint') }}
+          </p>
+          <ul class="mt-2 space-y-1.5 text-xs text-warning-800">
+            <li v-for="gap in a1Gaps" :key="gap.field">
               <span class="font-mono">{{ gap.field }}</span> — {{ gap.message }}
               <button
                 type="button"

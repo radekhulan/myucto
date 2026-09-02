@@ -332,15 +332,30 @@ describe('PayrollPersonProfilePanel', () => {
     }))
   })
 
-  it('používá pro přidávací akce plné primární tlačítko', async () => {
+  /**
+   * Plné tlačítko je na kartě právě JEDNO — to ukládající.
+   *
+   * Dřív měly „Přidat jméno" i „Uložit" stejnou plnou barvu a stály nad
+   * sebou. Uživatel z toho nepoznal, co která akce dělá a co vlastně
+   * „Uložit" ukládá: „velmi matoucí, že Uložit k té historii je až nahoře
+   * a pak jsou dva další modré buttony". Přidávání je proto obrysové.
+   */
+  it('nechá plné primární tlačítko jen ukládání, přidávání je obrysové', async () => {
     const wrapper = await mountedPanel()
     const addIdentity = wrapper.findAll('button').find(button =>
       button.text().includes('payroll.people.profile.add_identity'),
     )
 
     expect(addIdentity).toBeDefined()
-    expect(addIdentity!.classes()).toContain('bg-primary-600')
-    expect(addIdentity!.classes()).toContain('text-white')
+    expect(addIdentity!.classes()).not.toContain('bg-primary-600')
+
+    const save = wrapper.get('[data-test="save-profile"]')
+    expect(save.classes()).toContain('bg-primary-600')
+    expect(save.classes()).toContain('text-white')
+
+    const filled = wrapper.findAll('button')
+      .filter(button => button.classes().includes('bg-primary-600'))
+    expect(filled).toHaveLength(1)
   })
 
   it('pošle nový plaintext jen v PUT payloadu a po uložení input vyčistí', async () => {

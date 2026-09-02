@@ -286,10 +286,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         $result = [];
         foreach (self::IDENTIFIER_TYPES as $type) {
             if (!array_key_exists($type, $source)) {
-                $this->invalid(
-                    'registration_identity_person_invalid',
-                    "Snapshot identity neobsahuje klíč {$type}.",
-                );
+                $this->corrupted("chybí položka {$type}");
             }
             $result[$type] = $this->nullableText(
                 $source[$type],
@@ -316,7 +313,13 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             ) {
                 $this->invalid(
                     'registration_identity_identifier_invalid',
-                    "{$type} neodpovídá číselnému typu bno 9 až 10 číslic.",
+                    sprintf(
+                        '%s musí mít 9 nebo 10 číslic bez lomítka a mezer. '
+                        . 'Opravte je na %s (%s).',
+                        self::ucfirst(self::IDENTIFIER_NAMES[$type]),
+                        self::WHERE_IDENTIFIERS,
+                        $type,
+                    ),
                 );
             }
         }
@@ -325,7 +328,12 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         ) {
             $this->invalid(
                 'registration_identity_identifier_invalid',
-                'VČP musí obsahovat přesně devět číslic a začínat číslicí 6.',
+                sprintf(
+                    '%s musí mít přesně devět číslic a začínat šestkou. '
+                    . 'Opravte je na %s (vcp).',
+                    self::ucfirst(self::IDENTIFIER_NAMES['vcp']),
+                    self::WHERE_IDENTIFIERS,
+                ),
             );
         }
     }
@@ -347,10 +355,11 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             $hasValue = $identifiers[$type] !== null;
             if (!$hasValue) {
                 if (array_key_exists($type, $sources)) {
-                    $this->invalid(
-                        'registration_identity_person_invalid',
-                        "Prázdný identifikátor {$type} nesmí mít zdrojovou verzi.",
-                    );
+                    $this->corrupted(sprintf(
+                        '%s je prázdné, ale má uloženou zdrojovou verzi (%s)',
+                        self::ucfirst(self::IDENTIFIER_NAMES[$type]),
+                        $type,
+                    ));
                 }
                 continue;
             }
@@ -545,7 +554,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         if (!is_array($value) || array_is_list($value)) {
             $this->invalid(
                 'registration_identity_source_invalid',
-                "{$field} musí být objekt.",
+                self::corruptedMessage("poškozená struktura u {$field}"),
             );
         }
         $result = [];
@@ -553,7 +562,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             if (!is_string($key)) {
                 $this->invalid(
                     'registration_identity_source_invalid',
-                    "{$field} musí mít textové klíče.",
+                    "poškozené klíče u {$field}",
                 );
             }
             $result[$key] = $item;
@@ -580,7 +589,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         if (!is_int($value) || $value <= 0) {
             $this->invalid(
                 'registration_identity_source_invalid',
-                "{$key} musí být kladné celé číslo.",
+                self::corruptedMessage("{$key} není kladné celé číslo"),
             );
         }
 
@@ -597,7 +606,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         ) {
             $this->invalid(
                 'registration_identity_source_invalid',
-                "{$key} musí být neprázdný text.",
+                self::corruptedMessage("{$key} je prázdné nebo příliš dlouhé"),
             );
         }
 
@@ -618,7 +627,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         ) {
             $this->invalid(
                 'registration_identity_source_invalid',
-                "{$field} není platný volitelný text.",
+                self::corruptedMessage("{$field} je prázdné nebo příliš dlouhé"),
             );
         }
 
@@ -635,7 +644,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         if (preg_match('/^[A-Z]{2}$/D', $country) !== 1) {
             $this->invalid(
                 'registration_identity_source_invalid',
-                "{$field} není platný kód země.",
+                self::corruptedMessage("{$field} není dvoupísmenný kód země"),
             );
         }
 
@@ -649,14 +658,14 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         ) {
             $this->invalid(
                 'registration_identity_source_invalid',
-                "{$field} není platné datum.",
+                self::corruptedMessage("{$field} není platné datum"),
             );
         }
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
         if ($date === false || $date->format('Y-m-d') !== $value) {
             $this->invalid(
                 'registration_identity_source_invalid',
-                "{$field} není platné datum.",
+                self::corruptedMessage("{$field} není platné datum"),
             );
         }
 
@@ -676,7 +685,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         if (!is_int($value) || $value <= 0) {
             $this->invalid(
                 'registration_identity_source_invalid',
-                "{$field} musí být kladné celé číslo.",
+                self::corruptedMessage("{$field} není kladné celé číslo"),
             );
         }
 
@@ -690,11 +699,60 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         ) {
             $this->invalid(
                 'registration_identity_source_invalid',
-                "{$field} není platný SHA-256.",
+                self::corruptedMessage("{$field} nemá platný otisk SHA-256"),
             );
         }
 
         return $value;
+    }
+
+    /**
+     * Lidské názvy identifikátorů.
+     *
+     * PROČ: hláška uměla jen název sloupce — „birth_number neodpovídá
+     * číselnému typu bno 9 až 10 číslic." Účetní z toho nepozná ani co to je,
+     * ani kam jít to opravit. Technický název zůstává, ale až v závorce na
+     * konci, aby se o něm dalo mluvit s podporou.
+     *
+     * @var array<string,string>
+     */
+    private const IDENTIFIER_NAMES = [
+        'birth_number' => 'rodné číslo',
+        'ecp' => 'evidenční číslo pojištěnce (EČP)',
+        'vcp' => 'variabilní číslo pojištěnce (VČP)',
+        'foreign_tax_identifier' => 'zahraniční daňový identifikátor',
+    ];
+
+    private const WHERE_IDENTIFIERS =
+        'kartě osoby → Kontakty a identifikátory';
+
+    private static function ucfirst(string $value): string
+    {
+        return mb_strtoupper(mb_substr($value, 0, 1, 'UTF-8'), 'UTF-8')
+            . mb_substr($value, 1, null, 'UTF-8');
+    }
+
+    /**
+     * Hláška o poškozené uložené evidenci.
+     *
+     * Tohle NEJSOU chyby vstupu — na zmrazený snímek se uživatel nedostane,
+     * takže „doplňte to" by bylo lhaní. Když sem kód dojde, je rozbitý řádek
+     * v databázi. Věta to musí říct rovnou a technický detail nechat na konci
+     * pro podporu, ne ho vydávat za úkol pro účetní.
+     */
+    private static function corruptedMessage(string $detail): string
+    {
+        return 'Uložená registrační evidence je poškozená, aplikace z ní '
+            . 'nedokáže sestavit podklad. Ozvěte se prosím podpoře a předejte '
+            . "jí tenhle detail: {$detail}.";
+    }
+
+    private function corrupted(string $detail): never
+    {
+        $this->invalid(
+            'registration_identity_person_invalid',
+            self::corruptedMessage($detail),
+        );
     }
 
     private function invalid(string $code, string $message): never
