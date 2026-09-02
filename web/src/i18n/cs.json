@@ -5315,7 +5315,7 @@
         "description": "Vytvoří neměnný šifrovaný snapshot, XML ověří proti připnutému oficiálnímu XSD 1.2 a zpřístupní je ke stažení. Nic se automaticky neodesílá.",
         "open_settings": "Upravit REGZEL profil",
         "profile_required": "Nejdříve v Nastavení mezd potvrďte REGZEL profil zaměstnavatele.",
-        "profile_confirmed": "REGZEL profil v{version} potvrzen {at}.",
+        "profile_confirmed": "REGZEL profil potvrzen {at}.",
         "office_required": "Vyberte aktivní mzdovou účtárnu.",
         "confirmation": "Potvrzuji, že vybrané prostředí, účtárna, identifikátory a evidenční příznaky jsou pro tento konkrétní XML snapshot aktuální.",
         "confirmation_required": "Před přípravou XML potvrďte aktuálnost všech zdrojových údajů.",
