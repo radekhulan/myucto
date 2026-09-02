@@ -123,11 +123,16 @@ prohlížeči a není společné s ostatními uživateli. Stejnou obrazovku najd
 pátou záložku v **Profilu → Klávesové zkratky**; na mobilu ji vybereš z nabídky
 záložek pod nadpisem Profil.
 
-Výchozí kombinace jsou **Alt+Q** pro hledání, **Alt+1** vydaná faktura,
-**Alt+2** přijatá faktura, **Alt+3** klient, **Alt+4** dodavatel,
-**Alt+5** účetní zápis, **Alt+6** pravidelná fakturace a **Alt+7** přehled
-firem. Poslední zkratka se nabízí jen uživatelům s přístupem k více firmám.
-Kolizní nebo prohlížečem vyhrazenou kombinaci nelze uložit.
+Na Windows a Linuxu jsou výchozí kombinace **Alt+Q** pro hledání,
+**Alt+1** vydaná faktura, **Alt+2** přijatá faktura, **Alt+3** klient,
+**Alt+4** dodavatel, **Alt+5** účetní zápis, **Alt+6** pravidelná
+fakturace a **Alt+7** přehled firem. Na macOS se klávesy zobrazují jako
+**Cmd** a **Option**. Samostatné hledání tam nemá rizikovou výchozí
+kombinaci Option+Q; **Cmd+K** otevře paletu příkazů, která vyhledává
+také v menu, klientech a fakturách. Číselné zkratky se zobrazí jako
+**Option+1** až **Option+7**. Poslední zkratka se nabízí jen uživatelům
+s přístupem k více firmám. Kolizní nebo prohlížečem vyhrazenou
+kombinaci nelze uložit.
 
 ### 10.6.2 Více panelů pracovního prostoru
 
@@ -145,6 +150,9 @@ panelu se otevře další položka hlavního menu, výsledek globálního hledá
 příkaz z palety nebo rychlá akce **+**. Aktivní panel lze rychle přepnout také
 klávesami **Ctrl+Alt+1**, **Ctrl+Alt+2** a **Ctrl+Alt+3**. Kombinace
 **Shift+Alt+1**, **Shift+Alt+2** a **Shift+Alt+3** nastaví přímo počet panelů.
+Na macOS odpovídá přepnutí panelu kombinace **Cmd+Option+1** až
+**Cmd+Option+3** a počet panelů se mění přes **Shift+Option+1** až
+**Shift+Option+3**.
 Odkazy a tlačítka uvnitř otevřené stránky zůstávají v témže panelu. Každý panel má vlastní tlačítka **Zpět** a
 **Vpřed**; tlačítka prohlížeče ovládají první panel, jehož adresa je vidět
 v adresním řádku. Tlačítko **×** zavře nejprve pouze obsah daného panelu;

@@ -4,7 +4,6 @@ import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
   type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssBulkFailure, type OssReviewScope } from '@/api/invoices'
 import { formatMoney, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
-import { useHotkey } from '@/composables/useHotkey'
 import { useRowLink } from '@/composables/useRowLink'
 import { useToast } from '@/composables/useToast'
 import { useI18n } from 'vue-i18n'
@@ -42,8 +41,6 @@ const supplierStore = useSupplierStore()
 const thanksEnabled = computed(() => supplierStore.currentSupplier?.payment_thanks_enabled ?? false)
 // Účetní badge „Zaúčtováno / Nezaúčtováno" jen v podvojném účetnictví (daňová evidence doklady neúčtuje).
 const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
-
-useHotkey('ctrl+n', (e) => { e.preventDefault(); router.push('/invoices/new') })
 
 const router = useRouter()
 const route = useRoute()

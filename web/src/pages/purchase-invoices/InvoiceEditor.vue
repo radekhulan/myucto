@@ -47,6 +47,7 @@ import VendorPicker from '@/components/purchase/VendorPicker.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import { clientsApi, type Client } from '@/api/clients'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
+import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -54,6 +55,7 @@ import { btnFilled } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { appIsoDate } from '@/utils/date'
+import { useSidePreviewWide } from '@/composables/useSidePreviewWide'
 
 const route = useRoute()
 const router = useRouter()
@@ -347,6 +349,11 @@ const existingPdf = ref<{ path: string; hash: string; size: number; name: string
 // mimo isdoc/isdocx) ho `populate()` přepne na otevřeno, ať má uživatel originál rovnou
 // na očích při kontrole vytěžených dat (viz komentář u `structuredSource` v populate()).
 const pdfPreviewOpen = ref(false)
+const pdfPreviewWide = useSidePreviewWide()
+const pdfSideBySide = computed(() => !!existingPdf.value && !!invoiceId.value && pdfPreviewOpen.value && pdfPreviewWide.value)
+const pdfInlineUrl = computed(() => invoiceId.value
+  ? `${purchaseInvoicesApi.pdfUrl(invoiceId.value, true)}#view=FitH`
+  : '')
 const pdfUploading = ref(false)
 const handoffUploading = ref(false)
 const dropzoneVisible = ref(true)
@@ -1392,7 +1399,8 @@ function fieldErr(key: string): string | null {
 </script>
 
 <template>
-  <div class="space-y-4 max-w-5xl">
+  <div :class="pdfSideBySide ? 'flex items-start gap-4' : ''">
+  <div class="space-y-4 max-w-5xl min-w-0" :class="pdfSideBySide ? 'flex-1' : ''">
     <header class="flex items-center justify-between">
       <h1 class="text-xl font-semibold">
         {{ isEdit ? t('purchase_invoice.title_edit') : t('purchase_invoice.title_new') }}
@@ -1612,9 +1620,9 @@ function fieldErr(key: string): string | null {
         </div>
         <!-- Inline PDF preview přes browser PDF viewer. Musí být ?inline=1 (jinak
              Content-Disposition: attachment a Edge/IE blokují embed). -->
-        <div v-if="pdfPreviewOpen && invoiceId" class="bg-neutral-100">
+        <div v-if="pdfPreviewOpen && invoiceId && !pdfSideBySide" class="bg-neutral-100">
           <iframe
-            :src="purchaseInvoicesApi.pdfUrl(invoiceId, true) + '#view=FitH'"
+            :src="pdfInlineUrl"
             class="w-full h-[80vh] border-0"
             :title="existingPdf.name || 'PDF'"
           ></iframe>
@@ -2435,5 +2443,12 @@ function fieldErr(key: string): string | null {
       :defaults="{ is_vendor: true, is_customer: false }"
       @created="onVendorCreated"
       @close="vendorModalOpen = false" />
+  </div>
+  <DocumentSidePreview
+    v-if="pdfSideBySide"
+    :src="pdfInlineUrl"
+    :file-name="existingPdf?.name"
+    @close="pdfPreviewOpen = false"
+  />
   </div>
 </template>

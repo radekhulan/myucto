@@ -48,12 +48,14 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { isApplePlatform } from '@/utils/clientPlatform'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
+const primaryModifierLabel = isApplePlatform() ? 'Cmd' : 'Ctrl'
 // Období z odkazu má přednost: kdo sem přijde z přípravy mzdového běhu za
 // srpen, musí vidět srpen. Stránka, která období zahodí a otevře se na
 // zpracovávaném měsíci, ho tiše přepne jinam a docházka pak sedí na cizí měsíc.
@@ -2282,7 +2284,7 @@ onMounted(() => {
         jeden formulář o sedmi stech políčkách, ne dvacet pět formulářů.
       -->
       <div class="sticky bottom-0 flex flex-wrap items-center justify-end gap-3 border-t border-neutral-200 bg-surface/95 px-4 py-3">
-        <p class="mr-auto text-xs text-neutral-500">{{ t('payroll.time.grid.keyboard_hint') }}</p>
+        <p class="mr-auto text-xs text-neutral-500">{{ t('payroll.time.grid.keyboard_hint', { primary: primaryModifierLabel }) }}</p>
         <div class="flex flex-col items-end gap-1.5">
           <button
             :class="btnFilled('primary')"

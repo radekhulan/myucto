@@ -44,6 +44,7 @@ const automationStore = useAutomationStore()
 const sessionSecurity = useSessionSecurityStore()
 const toast = useToast()
 const keyboardShortcuts = useKeyboardShortcuts()
+const paletteShortcutLabel = formatShortcut('ctrl+k')
 const workspace = useWorkspaceStore()
 const workspaceNavigation = useWorkspaceNavigation()
 const activeRoute = computed(() => router.resolve(workspace.activeFullPath))
@@ -1797,7 +1798,7 @@ onBeforeUnmount(() => {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3" />
                   <rect x="3" y="4" width="18" height="16" rx="2" />
                 </svg>
-                <kbd class="font-sans">Ctrl+K</kbd>
+                <kbd class="font-sans">{{ paletteShortcutLabel }}</kbd>
               </button>
             </div>
 

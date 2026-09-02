@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { PurchaseInvoice } from '@/api/purchaseInvoices'
 
@@ -237,11 +237,28 @@ const stubs = {
   EmptyState: true,
 }
 
+function stubViewport(matches: boolean): void {
+  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
+    matches,
+    media: '',
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }))
+}
+
 describe('InvoiceEditor.vue — výchozí stav PDF náhledu (FR5)', () => {
   beforeEach(() => {
     m.get.mockReset()
     m.expenseSuggestions.mockReset()
     m.expenseSuggestions.mockResolvedValue({ items: {} })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('koncept z AI extrakce (source_format=pdf) → náhled otevřený defaultně', async () => {
@@ -282,5 +299,56 @@ describe('InvoiceEditor.vue — výchozí stav PDF náhledu (FR5)', () => {
     await flushPromises()
 
     expect(wrapper.find('iframe').exists()).toBe(false)
+  })
+
+  it('na široké obrazovce otevře AI koncept v pravém bočním náhledu', async () => {
+    stubViewport(true)
+    m.get.mockResolvedValue(makeInvoice({ status: 'draft', source_format: 'pdf' }))
+    const wrapper = mount(InvoiceEditor, { global: { stubs } })
+    await flushPromises()
+
+    const side = wrapper.get('[data-test="document-side-preview"]')
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
+    expect(side.find('iframe').exists()).toBe(true)
+  })
+
+  it('na užší obrazovce ponechá otevřený náhled pod formulářem', async () => {
+    stubViewport(false)
+    m.get.mockResolvedValue(makeInvoice({ status: 'draft', source_format: 'pdf' }))
+    const wrapper = mount(InvoiceEditor, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="document-side-preview"]').exists()).toBe(false)
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
+  })
+
+  it('zavření bočního náhledu odstraní jediný iframe', async () => {
+    stubViewport(true)
+    m.get.mockResolvedValue(makeInvoice({ status: 'draft', source_format: 'pdf' }))
+    const wrapper = mount(InvoiceEditor, { global: { stubs } })
+    await flushPromises()
+
+    await wrapper.get('[data-test="document-side-preview-close"]').trigger('click')
+
+    expect(wrapper.find('[data-test="document-side-preview"]').exists()).toBe(false)
+    expect(wrapper.findAll('iframe')).toHaveLength(0)
+  })
+
+  it('bez PDF nevytvoří na široké obrazovce prázdný boční sloupec', async () => {
+    stubViewport(true)
+    m.get.mockResolvedValue(makeInvoice({
+      status: 'draft',
+      source_format: 'pdf',
+      pdf_path: null,
+      pdf_hash: null,
+      pdf_size_bytes: null,
+      pdf_original_name: null,
+      pdf_uploaded_at: null,
+    }))
+    const wrapper = mount(InvoiceEditor, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="document-side-preview"]').exists()).toBe(false)
+    expect(wrapper.findAll('iframe')).toHaveLength(0)
   })
 })

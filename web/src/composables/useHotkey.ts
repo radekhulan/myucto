@@ -3,7 +3,8 @@ import { usePaneActivity } from '@/workspace/paneActivity'
 
 /**
  * Globální keyboard shortcuts.
- *  combo: "ctrl+s" | "ctrl+n" | "esc" | "/"
+ *  `ctrl` je primární platformní modifikátor: Ctrl na Windows/Linuxu,
+ *  Cmd na macOS. combo: "ctrl+s" | "esc" | "/"
  *  handler dostane KeyboardEvent — může zavolat preventDefault.
  */
 export function useHotkey(combo: string, handler: (e: KeyboardEvent) => void) {

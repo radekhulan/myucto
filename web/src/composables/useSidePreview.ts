@@ -1,5 +1,8 @@
-import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
+import { onMounted, ref, type Ref } from 'vue'
 import { ensurePrefsLoaded, getPagePrefs, patchPagePrefs } from '@/composables/useUserPrefs'
+import { useSidePreviewWide } from '@/composables/useSidePreviewWide'
+
+export { SIDE_PREVIEW_MEDIA_QUERY } from '@/composables/useSidePreviewWide'
 
 /**
  * Náhled originálu dokladu vedle obsahu místo pod ním.
@@ -17,8 +20,6 @@ import { ensurePrefsLoaded, getPagePrefs, patchPagePrefs } from '@/composables/u
  * media query v JS a ne dvojice `2xl:hidden` / `hidden 2xl:block`: ta by v DOM nechala
  * dva `<iframe>`y a prohlížeč by PDF stáhl dvakrát.
  */
-export const SIDE_PREVIEW_MEDIA_QUERY = '(min-width: 1536px)'
-
 /** Klíč lepkavého přepínače uvnitř `user_preferences` → `payload.flags`. */
 export const SIDE_PREVIEW_FLAG = 'preview_open'
 
@@ -39,29 +40,14 @@ export interface SidePreviewCtrl {
 export function useSidePreview(pageKey: string, flagKey: string = SIDE_PREVIEW_FLAG): SidePreviewCtrl {
   const prefs = getPagePrefs(pageKey)
   const open = ref(false)
-  const wide = ref(false)
-  let mql: MediaQueryList | null = null
-
-  function onMediaChange(event: MediaQueryListEvent): void {
-    wide.value = event.matches
-  }
+  const wide = useSidePreviewWide()
 
   onMounted(async () => {
-    if (typeof window.matchMedia === 'function') {
-      mql = window.matchMedia(SIDE_PREVIEW_MEDIA_QUERY)
-      wide.value = mql.matches
-      mql.addEventListener('change', onMediaChange)
-    }
     // Lepkavá volba se čte až po ensurePrefsLoaded(), takže se náhled může otevřít
     // o tik později než první vykreslení. Výchozí stav zůstává zavřený.
     await ensurePrefsLoaded()
     const stored = prefs.value.flags?.[flagKey]
     if (typeof stored === 'boolean') open.value = stored
-  })
-
-  onBeforeUnmount(() => {
-    mql?.removeEventListener('change', onMediaChange)
-    mql = null
   })
 
   function setOpen(next: boolean): void {

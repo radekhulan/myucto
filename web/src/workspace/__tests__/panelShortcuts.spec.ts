@@ -27,6 +27,11 @@ describe('panel keyboard shortcuts', () => {
     expect(panelIndexFromShortcut(shortcut({ code: '', key: '2' }))).toBe(1)
   })
 
+  it('na macOS používá Cmd+Option místo Ctrl+Alt', () => {
+    expect(panelIndexFromShortcut(shortcut({ ctrlKey: false, metaKey: true }), true)).toBe(0)
+    expect(panelIndexFromShortcut(shortcut(), true)).toBeNull()
+  })
+
   it.each([
     { ctrlKey: false },
     { altKey: false },
