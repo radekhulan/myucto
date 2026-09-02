@@ -138,6 +138,25 @@ Když brána není dostupná, zůstává ruční postup:
 
 MyÚčto vede zvlášť stav dopravy datové zprávy a věcný stav formuláře u cílové instituce. Doručená datová zpráva proto ještě neznamená, že instituce podání přijala bez výhrad. Nahraná doručenka se eviduje jako podklad; aplikace nezaručuje kryptografické ověření jejího podpisu.
 
+### 93.4.4 Zrušení a smazání odchozí zprávy
+
+**Zrušit** stáhne zpátky odchozí zprávu, která ještě neodešla. **Podání tím
+nezmizí** — hlášení dál není podané a čeká na odeslání, jen se přestane
+nabízet v téhle frontě. U zrušené zprávy je proto vidět věta, které agendy
+a období se to týká, a odkaz na podání samotné.
+
+**Smazat** zrušenou zprávu můžete jen tehdy, když **nikdy neopustila
+aplikaci**. Tlačítko se nabídne pouze u zprávy bez jediné stopy po odeslání:
+bez ID datové zprávy, bez doručenky, bez navázané příchozí zprávy, bez
+záznamu v historii pokusů, bez relace odesílací brány a bez navazující výzvy
+či podání. Když některá z těch stop existuje, tlačítko se nenabídne vůbec
+a u řádku je jednou větou napsané proč — **doklad o skutečně podaném podání
+smazat nelze**. Smazání se zapisuje do auditní stopy včetně agendy, období
+a spisové značky, aby bylo zpětně poznat, co zmizelo a kdo to smazal.
+
+Smazáním se povinnost nesplní. Podání se vrátí mezi nesplněné přesně tak jako
+po zrušení a fronta mzdových podání ho zase nabídne k zařazení.
+
 ## 93.5 Příjemci a výzvy
 
 V záložce **Příjemci** zkontrolujte ID datové schránky cílové instituce. Výchozí adresář zdravotních pojišťoven lze přepsat pro konkrétní firmu; jiné instituce doplňte podle jejich aktuálních údajů. Před každým odesláním příjemce ověřte.

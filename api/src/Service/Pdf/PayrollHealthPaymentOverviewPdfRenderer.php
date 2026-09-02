@@ -134,15 +134,16 @@ final class PayrollHealthPaymentOverviewPdfRenderer extends ReportPdfRendererBas
                 'ZamUli' => $employer->street,
                 'ZamCpCo' => $employer->houseNumber,
                 'ZamIC' => $employer->payerNumber,
-                'ZamPSC' => $employer->postalCode,
+                'ZamPSC' => self::postalCode($employer->postalCode),
                 'ZamObe' => $employer->city,
                 'ZamTel' => $employer->normalizedPhone(),
                 'ObdHla' => sprintf('%02d/%04d', $payload->month, $payload->year),
                 'PocZam' => (string) $payload->employeeCount,
                 // Vyměřovací základ se tiskne přesně tak, jak jde do datové
-                // věty, jen s desetinnou čárkou — halíře se nezaokrouhlují.
-                'VymZak' => str_replace('.', ',', $payload->assessmentBaseDecimal()),
-                'SumPoj' => (string) $payload->contributionCzk,
+                // věty — halíře se nezaokrouhlují, jen se neuvádějí, když
+                // žádné nejsou.
+                'VymZak' => self::amount($payload->assessmentBaseDecimal()),
+                'SumPoj' => self::amount((string) $payload->contributionCzk),
                 'DatVyp' => $date->format('d.m.Y'),
             ],
             [
@@ -152,5 +153,41 @@ final class PayrollHealthPaymentOverviewPdfRenderer extends ReportPdfRendererBas
             ],
             'Přehled o platbě pojistného zaměstnavatele',
         );
+    }
+
+    /**
+     * PSČ ve tvaru, jaký na tentýž tiskopis tiskne portál pojišťovny — tedy
+     * `301 00`, ne `30100`. Formulář sám v hlavičce říká, že „bude zpracován
+     * elektronicky"; držet se podoby, která pojišťovnám prokazatelně prochází,
+     * je levnější než zjišťovat, na čem se jejich čtečka zakoukne. Cizí nebo
+     * jinak dlouhé PSČ se nechává, jak přišlo.
+     */
+    private static function postalCode(string $value): string
+    {
+        $digits = (string) preg_replace('/\s+/', '', $value);
+
+        return preg_match('/^[0-9]{5}$/D', $digits) === 1
+            ? substr($digits, 0, 3) . ' ' . substr($digits, 3)
+            : $value;
+    }
+
+    /**
+     * Částka s mezerou po tisících a bez desetinných míst, když jsou nulová —
+     * opět tvar z portálu pojišťovny. Halíře, pokud nějaké jsou, zůstávají:
+     * zaokrouhlit je kvůli vzhledu by změnilo hlášenou částku.
+     */
+    private static function amount(string $decimal): string
+    {
+        $sign = str_starts_with($decimal, '-') ? '-' : '';
+        [$whole, $fraction] = array_pad(
+            explode('.', ltrim($decimal, '-'), 2),
+            2,
+            '',
+        );
+        $grouped = strrev(implode(' ', str_split(strrev($whole), 3)));
+
+        return $fraction === '' || (int) $fraction === 0
+            ? $sign . $grouped
+            : $sign . $grouped . ',' . $fraction;
     }
 }

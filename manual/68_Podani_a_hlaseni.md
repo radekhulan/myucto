@@ -8,6 +8,29 @@ Agenda připravuje vybraná mzdová hlášení, provádí formální kontroly a 
 
 Je nutné oprávnění `payroll.submissions`, způsobilý uzavřený běh nebo schválená revize, úplné identifikátory a správně oddělené TEST/produkční prostředí. Pro ČSSZ TEST použijte pouze testovací profil a certifikát v určeném bezpečném úložišti. ISDS musí být nastaveno pro správnou firmu a prostředí.
 
+## 68.2.1 Měsíční přehled — co následuje
+
+Záložka **Měsíční přehled** (a tentýž panel pod uzavřeným mzdovým během) skládá
+za zvolené období jeden seznam: co se generuje a odesílá, komu, jakou cestou a
+do kdy, a u toho, co MyÚčto neodesílá samo, také proč.
+
+Přehled nese **povinnost, ne dokument**. Měsíční hlášení zaměstnavatele (JMHZ) a
+přehled o platbě pojistného za každou zdravotní pojišťovnu, u které je v období
+pojištěný aspoň jeden zaměstnanec, se v něm objeví hned po schválení mzdové
+revize — tedy dřív, než k nim vůbec existuje podání. U každé takové položky je
+zákonná lhůta konkrétním datem, stav **nepřipraveno** a tlačítko **Připravit**,
+které podání za tu agendu, to období a tu pojišťovnu založí a rovnou otevře.
+Uzávěrka sama žádná podání nezakládá: koncept, který se musí rušit při každé
+opravě běhu, by práci spíš přidal.
+
+Povinnost vzniká ze schváleného běhu, ne z prostředí, takže se ukazuje v ostrém
+i testovacím režimu. Přepínač prostředí rozhoduje jen o tom, kde se hledá už
+založené podání — zkušební podání v testu proto ostrou povinnost neodškrtne.
+
+Za splněnou se položka považuje teprve tehdy, když je podání **odeslané a
+přijaté**. Zrušené podání povinnost nesplnilo: zůstává v seznamu jako
+nesplněné, s poznámkou, že se má připravit nové.
+
 ## 68.3 Fronta „K odeslání"
 
 Záložka **K odeslání** ukazuje na jednom místě všechna připravená podání, která

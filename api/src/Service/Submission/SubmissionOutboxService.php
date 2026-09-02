@@ -45,6 +45,21 @@ final readonly class SubmissionOutboxService
     private const ARTIFACT_KINDS = ['payroll_submission', 'tax_submission', 'document', 'payroll_xmlzam'];
     private const ENVIRONMENTS = ['production', 'test'];
 
+    /**
+     * Odmítnutí mazání větou, ne kódem. Klíče musí odpovídat
+     * {@see SubmissionOutboxDeletionPolicy::REASONS} — API vrací kód, tohle je
+     * záchranná hláška pro případ, že se někdo pokusí mazat mimo UI.
+     */
+    private const DELETE_REFUSALS = [
+        'state' => 'Smazat jde jen zrušená odchozí zpráva. Tuhle nejdřív zrušte.',
+        'sent' => 'Zpráva z aplikace odešla — je to doklad o podání a smazat ho nelze.',
+        'receipt' => 'Ke zprávě je navázaná doručenka nebo příchozí zpráva z datové schránky, takže se nemaže.',
+        'decided' => 'O podání už úřad rozhodl, takže se záznam nemaže.',
+        'attempt' => 'V historii pokusů je zaznamenaný pokus o odeslání. Auditní stopa se nemaže.',
+        'gateway' => 'Zpráva se předávala odesílací bránou datové schránky a záznam o tom se nemaže.',
+        'linked' => 'Na zprávu navazuje další záznam (výzva k odstranění vad nebo navazující podání).',
+    ];
+
     public function __construct(
         private SubmissionOutboxRepository $outbox,
         private SubmissionOutboxAttemptRepository $attempts,
@@ -763,11 +778,105 @@ final readonly class SubmissionOutboxService
         );
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Výpis fronty. Zrušené zprávy se navíc doplní o dvě věci, které z holého
+     * řádku nejdou poznat a bez kterých obrazovka mlčí o tom podstatném:
+     *
+     *   `deletable` / `delete_blocked_reason`
+     *     — jestli se zrušená zpráva smí smazat, a když ne, tak proč. Počítá se
+     *       tady, aby UI tlačítko vůbec nenabídlo, místo aby ho nabídlo a pak
+     *       odmítlo.
+     *
+     *   `source_obligation`
+     *     — stav PODKLADU, ze kterého zpráva vznikla. „Zrušit" tady ruší
+     *       odchozí zprávu, ne povinnost: podání dál platí a čeká na odeslání.
+     *       Bez téhle věty si uživatel myslí, že zrušením podání smazal, a pak
+     *       nechápe, proč mu ho mzdová fronta pořád nabízí.
+     *
+     * @return list<array<string,mixed>>
+     */
     public function listForSupplier(int $supplierId, string $environment, int $limit = 100): array
     {
         $this->assertEnvironment($environment);
-        return $this->outbox->listForSupplier($supplierId, $environment, $limit);
+        $rows = $this->outbox->listForSupplier($supplierId, $environment, $limit);
+
+        foreach ($rows as $index => $row) {
+            if ((string) $row['dispatch_state'] !== SubmissionOutboxDeletionPolicy::DELETABLE_STATE->value) {
+                continue;
+            }
+            $reason = $this->deletionBlockingReason($supplierId, $row);
+            $rows[$index]['deletable'] = $reason === null;
+            $rows[$index]['delete_blocked_reason'] = $reason;
+            $rows[$index]['source_obligation'] = $this->outbox->sourceObligation(
+                $supplierId,
+                (string) $row['environment'],
+                (string) $row['artifact_kind'],
+                (int) $row['artifact_id'],
+            );
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Proč nejde zrušenou zprávu smazat — nebo null, když jde.
+     *
+     * @param array<string,mixed> $row
+     */
+    public function deletionBlockingReason(int $supplierId, array $row): ?string
+    {
+        return SubmissionOutboxDeletionPolicy::blockingReason(
+            $row,
+            $this->attempts->deletionEvidence($supplierId, (int) $row['id']),
+            $this->outbox->linkedRecordCounts($supplierId, (int) $row['id']),
+        );
+    }
+
+    /**
+     * Trvale smaže zrušenou odchozí zprávu, která nikdy neopustila aplikaci.
+     *
+     * ── Co se maže a co ne ──────────────────────────────────────────────────
+     * Maže se JEDEN pokus dopravit podklad k úřadu, ne podání. Povinnost tím
+     * nezmizí ani se nesplní — naopak se vrátí mezi nesplněné přesně tak, jako
+     * po zrušení. Mzdová fronta ji zase nabídne k zařazení, protože si zařazení
+     * čte právě z tohohle řádku.
+     *
+     * Rozhoduje {@see SubmissionOutboxDeletionPolicy} nad kompletní stopou
+     * (ID zprávy, doručenka, protokol, příchozí zprávy, ledger pokusů, relace
+     * odesílací brány, navazující záznamy). Doklad o skutečně podaném podání
+     * se nemaže nikdy.
+     *
+     * @return array<string,mixed> snímek řádku, který zmizel — volající ho
+     *                             potřebuje do auditní stopy
+     */
+    public function delete(int $supplierId, int $id): array
+    {
+        $row = $this->outbox->find($supplierId, $id);
+        if ($row === null) {
+            throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
+        }
+
+        $reason = $this->deletionBlockingReason($supplierId, $row);
+        if ($reason !== null) {
+            throw new SubmissionChannelException(
+                'submission_not_deletable',
+                self::DELETE_REFUSALS[$reason],
+                409,
+            );
+        }
+
+        if (!$this->outbox->deleteCancelled($supplierId, $id)) {
+            // Mezi rozhodnutím a mazáním se řádek změnil (souběžné odeslání).
+            // Poslední pojistka je v samotném DELETE, takže se sem nedostane
+            // nic odeslaného — jen se to musí říct nahlas.
+            throw new SubmissionChannelException(
+                'submission_conflict',
+                'Zpráva se mezitím změnila, takže se nesmazala. Načtěte seznam znovu.',
+                409,
+            );
+        }
+
+        return $row;
     }
 
     /**

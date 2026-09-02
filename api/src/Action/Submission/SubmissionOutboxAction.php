@@ -578,6 +578,67 @@ final class SubmissionOutboxAction
         return Json::ok($response, $row);
     }
 
+    /**
+     * Trvale smaže zrušenou odchozí zprávu, která nikdy neopustila aplikaci.
+     *
+     * ── Proč to vůbec jde ───────────────────────────────────────────────────
+     * Zrušená zpráva, která se nikam neodeslala, nedokládá nic. Zůstávala ale
+     * ve výpisu navždy jako řádek se štítkem „Zrušeno" a jediným tlačítkem
+     * „Historie pokusů" — tedy jako trvalý zmatek u podání, které pořád čeká
+     * na odeslání.
+     *
+     * ── Co se maže ──────────────────────────────────────────────────────────
+     * Odchozí ZPRÁVA, ne podání. Povinnost tím zůstává nesplněná, přesně jako
+     * po zrušení.
+     *
+     * Auditní stopa nese všechno, co bylo v řádku (agenda, období, spisová
+     * značka), protože po smazání se to nikde jinde nedočte.
+     *
+     * @param array<string,string> $args
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $userId = $this->userId($request);
+        $id = (int) ($args['id'] ?? 0);
+
+        try {
+            $row = $this->outbox->delete($supplierId, $id);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'submission_conflict', $e->getMessage(), 409);
+        }
+
+        $this->logger->log(
+            'submission_outbox_deleted',
+            $userId,
+            'submission_outbox',
+            $id,
+            [
+                'agenda_code' => $row['agenda_code'],
+                'subject' => $row['subject'],
+                'environment' => $row['environment'],
+                'channel' => $row['channel'],
+                'correlation_reference' => $row['correlation_reference'],
+                'artifact_kind' => $row['artifact_kind'],
+                'artifact_id' => $row['artifact_id'],
+                'artifact_filename' => $row['artifact_filename'],
+                'recipient_box_id' => $row['recipient_box_id'],
+                'dispatch_state' => $row['dispatch_state'],
+                'created_at' => $row['created_at'],
+            ],
+            null,
+            null,
+            $supplierId,
+        );
+
+        return Json::ok($response, ['deleted' => true]);
+    }
+
     private function guard(Request $request, Response $response, AccessLevel $level): ?Response
     {
         if (!RequestAuthorization::allows($request, 'settings.signing', $level)) {

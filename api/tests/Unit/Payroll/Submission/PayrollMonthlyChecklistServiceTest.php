@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissi
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessment;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
+use MyInvoice\Service\Payroll\Submission\PayrollMonthlyAgendaDutyService;
 use MyInvoice\Service\Payroll\Submission\PayrollMonthlyChecklistService;
 use MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog;
 use MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver;
@@ -417,14 +418,120 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
     }
 
     /**
+     * NULY MÍSTO PRÁCE.
+     *
+     * Uzavřený srpen bez jediného podání vracel prázdný přehled a větu „za
+     * zvolené období nemá firma žádnou otevřenou položku" — přestože nebylo
+     * podané ani JMHZ, ani přehled o platbě pojistného. Povinnost, kterou nikdo
+     * neuvidí, není hlídaná.
+     */
+    public function testUnpreparedAgendaDutyIsListedWithConcreteDeadline(): void
+    {
+        $service = $this->service(
+            agendaDuties: [$this->agendaDuty(JmhzSubmissionBridgeService::AGENDA_CODE)],
+        );
+
+        $item = $this->onlyItem($service, 'agenda_duty');
+        self::assertSame(JmhzSubmissionBridgeService::AGENDA_CODE, $item['agenda_code']);
+        self::assertSame('not_prepared', $item['status']);
+        self::assertSame('2026-08-20', $item['due_on']);
+        self::assertSame(self::PERIOD, $item['period']);
+        self::assertFalse($item['done']);
+    }
+
+    /**
+     * Akce nesmí být odkaz „najděte si to" — musí povinnost připravit na jedno
+     * kliknutí, a to za TU agendu, TO období a TU pojišťovnu.
+     */
+    public function testAgendaDutyCarriesOneClickPreparation(): void
+    {
+        $service = $this->service(
+            agendaDuties: [$this->agendaDuty('PPZ_2026', '201')],
+        );
+
+        $item = $this->onlyItem($service, 'agenda_duty');
+        self::assertSame([
+            'agenda_code' => 'PPZ_2026',
+            'period' => self::PERIOD,
+            'insurer_code' => '201',
+        ], $item['action']['prepare']);
+        self::assertSame('/payroll/submissions/health', $item['action']['path']);
+        self::assertSame('VZP (201)', $item['subject']);
+    }
+
+    /** Dvě pojišťovny = dvě položky, každá se svou pojišťovnou. */
+    public function testEachInsurerGetsItsOwnRow(): void
+    {
+        $service = $this->service(agendaDuties: [
+            $this->agendaDuty('PPZ_2026', '111'),
+            $this->agendaDuty('PPZ_2026', '201'),
+        ]);
+
+        $items = array_values(array_filter(
+            $service->checklist(11, 'production', self::PERIOD)['items'],
+            static fn (array $item): bool => $item['source'] === 'agenda_duty',
+        ));
+        self::assertCount(2, $items);
+        self::assertSame(
+            ['111', '201'],
+            array_map(
+                static fn (array $item): string => (string) $item['action']['prepare']['insurer_code'],
+                $items,
+            ),
+        );
+    }
+
+    /**
+     * ZRUŠENÉ podání povinnost NESPLNILO.
+     *
+     * Dřív se fáze `cancelled` počítala mezi splněné, takže se řádek odškrtl
+     * zeleným „Hotovo" a účetní, která podání zrušila, o povinnosti přišla
+     * přesně ve chvíli, kdy ji bylo potřeba připravit znovu.
+     */
+    public function testCancelledSubmissionStaysUnfulfilledAndOffersNewPreparation(): void
+    {
+        $service = $this->service(
+            submissionRows: [$this->submissionRow(
+                agendaCode: JmhzSubmissionBridgeService::AGENDA_CODE,
+                latestSubmissionStatus: 'cancelled_in_time',
+                obligationStatus: 'cancelled',
+            )],
+            transport: ['automatic' => true, 'channel' => 'gateway', 'reason' => null],
+        );
+
+        $item = $this->onlyItem($service, 'submission');
+        self::assertFalse($item['done'], 'Zrušené podání povinnost nesplnilo.');
+        self::assertSame('generate', $item['action']['kind']);
+        self::assertSame('Připravit znovu', $item['action']['label']);
+        self::assertStringContainsString('nezanikla', (string) $item['action']['reason']);
+        self::assertSame(0, $service->checklist(11, 'production', self::PERIOD)['summary']['done']);
+    }
+
+    /** Přijaté podání je splněné — to je jediná cesta k „Hotovo". */
+    public function testAcceptedSubmissionIsDone(): void
+    {
+        $service = $this->service(
+            submissionRows: [$this->submissionRow(
+                agendaCode: JmhzSubmissionBridgeService::AGENDA_CODE,
+                latestSubmissionStatus: 'accepted',
+                obligationStatus: 'fulfilled',
+            )],
+        );
+
+        self::assertTrue($this->onlyItem($service, 'submission')['done']);
+    }
+
+    /**
      * @param list<array<string,mixed>> $submissionRows
      * @param list<array<string,mixed>> $deadlineItems
      * @param array{automatic:bool,channel:string,reason:?string} $transport
+     * @param list<array<string,mixed>> $agendaDuties
      */
     private function service(
         array $submissionRows = [],
         array $deadlineItems = [],
         array $transport = ['automatic' => false, 'channel' => 'manual_upload', 'reason' => 'isds_transport_unavailable'],
+        array $agendaDuties = [],
     ): PayrollMonthlyChecklistService {
         $submissions = $this->createStub(PayrollSubmissionRepository::class);
         $submissions->method('listOverview')->willReturn([
@@ -437,17 +544,24 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
 
         $assessments = $this->createStub(PayrollDeadlineAssessmentService::class);
         $assessments->method('assess')->willReturnCallback(
-            static fn (string $earliest, string $due, string $status, ?string $submissionStatus): PayrollDeadlineAssessment
-                => new PayrollDeadlineAssessment(
-                    $status === 'fulfilled' ? 'fulfilled' : 'open',
-                    5,
-                    false,
-                    false,
-                ),
+            // Zjednodušená kopie pravidel skutečné služby — jen ty tři fáze,
+            // které přehled rozlišuje (`fulfilled` / `cancelled` / zbytek).
+            static function (string $earliest, string $due, string $status, ?string $submissionStatus): PayrollDeadlineAssessment {
+                $phase = match (true) {
+                    $status === 'cancelled' || $submissionStatus === 'cancelled_in_time' => 'cancelled',
+                    $status === 'fulfilled' || $submissionStatus === 'accepted' => 'fulfilled',
+                    default => 'open',
+                };
+
+                return new PayrollDeadlineAssessment($phase, 5, false, false);
+            },
         );
 
         $transportAvailability = $this->createStub(IsdsTransportAvailabilityResolver::class);
         $transportAvailability->method('resolve')->willReturn($transport);
+
+        $duties = $this->createStub(PayrollMonthlyAgendaDutyService::class);
+        $duties->method('unprepared')->willReturn($agendaDuties);
 
         return new PayrollMonthlyChecklistService(
             $submissions,
@@ -455,7 +569,32 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
             $assessments,
             new PayrollStatutoryAgendaCatalog(),
             $transportAvailability,
+            $duties,
         );
+    }
+
+    /** @return array<string,mixed> */
+    private function agendaDuty(
+        string $agendaCode,
+        ?string $insurerCode = null,
+    ): array {
+        return [
+            'key' => 'agenda_duty:' . $agendaCode . ':5'
+                . ($insurerCode === null ? '' : ':' . $insurerCode),
+            'agenda_code' => $agendaCode,
+            'insurer_code' => $insurerCode,
+            'subject' => $insurerCode === null ? null : 'VZP (' . $insurerCode . ')',
+            'run_id' => 5,
+            'revision_id' => 9,
+            'period' => self::PERIOD,
+            'due_on' => '2026-08-20',
+            'earliest_submission_on' => '2026-08-01',
+            'phase' => 'open',
+            'days_to_due' => 5,
+            'is_overdue' => false,
+            'deadline_source' => 'calendar_days',
+            'deadline_ruleset_id' => 'x',
+        ];
     }
 
     /** @return array<string,mixed> */

@@ -725,6 +725,69 @@ async function cancelSubmission(row: OutboxSubmission) {
   }
 }
 
+/**
+ * Zrušená zpráva, kterou lze smazat nadobro.
+ *
+ * `deletable` posílá server jen u zrušených řádků a jen když prošly celou
+ * kontrolou stop po odeslání. UI si to nedopočítává — jinak by tlačítko
+ * svítilo i tam, kde by mazání skončilo chybou.
+ *
+ * Oprávnění se tu neřeší zvlášť, stejně jako u sousedních akcí: na celou
+ * obrazovku pustí router jen `settings.signing` se zápisem
+ * (`admin-databox` v `router/index.ts`) a server si totéž ověřuje znovu
+ * (`AccessLevel::WRITE` v `SubmissionOutboxAction::guard()`).
+ */
+function canDeleteSubmission(row: OutboxSubmission): boolean {
+  return row.dispatch_state === 'cancelled' && row.deletable === true
+}
+
+/**
+ * Kam se podívat na podání, které zrušením odchozí zprávy NEZMIZELO.
+ *
+ * Mzdová podání čekají ve frontě „K odeslání", daňová v archivu EPO podání.
+ * `null` = podklad neznáme (dokument, smazaný artefakt), a pak se odkaz
+ * nenabízí — slepý odkaz je horší než žádný.
+ */
+function sourceObligationLink(row: OutboxSubmission): string | null {
+  if (row.source_obligation?.pending !== true) return null
+  return row.source_obligation.kind === 'payroll_submission'
+    ? '/payroll/submissions/queue'
+    : '/reports/submissions'
+}
+
+/** Věta „proč to smazat nejde" u zrušené zprávy, která smazat nejde. */
+function deleteBlockedReason(row: OutboxSubmission): string | null {
+  if (row.dispatch_state !== 'cancelled' || row.deletable !== false) return null
+  return t(`databox.outbox.deleteBlocked.${row.delete_blocked_reason ?? 'sent'}`)
+}
+
+/**
+ * Trvalé smazání zrušené zprávy.
+ *
+ * V otázce stojí agenda, období a spisová značka — bez nich by účetní
+ * potvrzovala „něco" a u osmi podání za měsíc se to splete.
+ */
+async function deleteSubmission(row: OutboxSubmission) {
+  if (!canDeleteSubmission(row)) return
+  const confirmed = window.confirm(t('databox.outbox.deleteConfirm', {
+    agenda: row.agenda_code,
+    period: row.source_obligation?.period ?? row.artifact_filename,
+    reference: row.correlation_reference,
+  }))
+  if (!confirmed) return
+
+  busyId.value = row.id
+  try {
+    await dataBoxApi.remove(row.id)
+    toast.success(t('databox.outbox.deleted'))
+    await loadAll()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    busyId.value = null
+  }
+}
+
 async function toggleAttempts(row: OutboxSubmission) {
   if (expanded.value === row.id) {
     expanded.value = null
@@ -1748,6 +1811,37 @@ onUnmounted(clearMobileStatusTimer)
           {{ row.last_error_message }}
         </p>
 
+        <!-- ── Zrušená zpráva ≠ smazané podání ──
+             Kořen zmatku: „Zrušit" ruší odchozí zprávu, ale hlášení dál čeká
+             na odeslání a jiná obrazovka ho poctivě ukazuje jako připravené.
+             Obě mají pravdu o něčem jiném; tady se to říká nahlas. -->
+        <p
+          v-if="row.dispatch_state === 'cancelled' && row.source_obligation?.pending"
+          class="mt-3 rounded-md bg-warning-50 p-2 text-sm text-warning-800 dark:bg-warning-900/20 dark:text-warning-200"
+          data-test="outbox-source-still-pending"
+        >
+          {{ t('databox.outbox.cancelledStillPending', {
+            agenda: row.source_obligation.agenda_code ?? row.agenda_code,
+            period: row.source_obligation.period ?? '',
+          }) }}
+          <RouterLink
+            v-if="sourceObligationLink(row)"
+            :to="sourceObligationLink(row) as string"
+            class="font-medium underline underline-offset-2"
+            data-test="outbox-source-link"
+          >{{ t('databox.outbox.cancelledStillPendingLink') }}</RouterLink>
+        </p>
+
+        <!-- Proč se zrušená zpráva nesmí smazat. Věta u řádku, ne chyba
+             po kliknutí na tlačítko, které se nemělo nabídnout. -->
+        <p
+          v-if="deleteBlockedReason(row)"
+          class="mt-3 text-sm text-neutral-500"
+          data-test="outbox-delete-blocked"
+        >
+          {{ deleteBlockedReason(row) }}
+        </p>
+
         <!-- ── Co udělat teď ──
              Ne nápověda někde stranou: konkrétní postup u konkrétního podání,
              včetně čísla jednacího, díky kterému se doručenka spáruje sama. -->
@@ -2088,6 +2182,22 @@ onUnmounted(clearMobileStatusTimer)
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" />
             </svg>
             {{ t('databox.outbox.cancel') }}
+          </button>
+          <!-- Zrušená zpráva, která nikdy neopustila aplikaci, nedokládá nic.
+               Tlačítko se nabídne jen když to server dovolí; doklad o skutečně
+               podaném podání smazat nelze. -->
+          <button
+            v-if="canDeleteSubmission(row)"
+            type="button"
+            :class="btnOutline('danger')"
+            :disabled="busyId === row.id"
+            data-test="outbox-delete"
+            @click="deleteSubmission(row)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" />
+            </svg>
+            {{ t('databox.outbox.delete') }}
           </button>
         </div>
 

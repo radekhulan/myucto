@@ -124,6 +124,7 @@ use MyInvoice\Action\Payroll\PayrollJmhzIsdsAction;
 use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollMonthlyChecklistAction;
+use MyInvoice\Action\Payroll\PayrollMonthlyChecklistPrepareAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
 use MyInvoice\Action\Payroll\PayrollPeriodExportAction;
@@ -1373,6 +1374,12 @@ final class Routes
                 '/submissions/monthly-checklist',
                 PayrollMonthlyChecklistAction::class,
             );
+            // Příprava jedné povinnosti přímo z přehledu. POST, protože
+            // zakládá podání se zmrazeným artefaktem.
+            $g->post(
+                '/submissions/monthly-checklist/prepare',
+                PayrollMonthlyChecklistPrepareAction::class,
+            );
             $g->get('/deadlines', PayrollDeadlineOverviewAction::class);
             $g->get('/operational-health', PayrollOperationalHealthAction::class);
             $g->get(
@@ -2607,6 +2614,12 @@ final class Routes
         $app->post   ('/api/submissions/outbox/mobile-key/confirm-batch', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'mobileKeyConfirmBatch']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/resolve',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'resolve']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/cancel',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'cancel']);
+        // Trvalé smazání ZRUŠENÉ zprávy, která nikdy neopustila aplikaci.
+        // Maže se odchozí zpráva, ne podání — povinnost zůstává nesplněná.
+        // Doklad o skutečně podaném podání se nemaže nikdy; hlídá to
+        // SubmissionOutboxDeletionPolicy a jako poslední pojistka WHERE
+        // v samotném DELETE.
+        $app->delete ('/api/submissions/outbox/{id:[0-9]+}',          [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'delete']);
         // Ruční cesta: uživatel odešle zprávu ze své datové schránky a přinese
         // zpátky doručenku. Bez těchhle dvou kroků by podání odeslané ručně
         // zůstalo navždy v „připraveno".

@@ -517,7 +517,211 @@ final class SubmissionOutboxRepository
         return $this->mutate($supplierId, $id, 'dispatch_state = \'cancelled\'', [], $expectedVersion);
     }
 
+    /**
+     * Kolik záznamů na tuhle zprávu odjinud ukazuje.
+     *
+     * Slouží {@see \MyInvoice\Service\Submission\SubmissionOutboxDeletionPolicy}
+     * k rozhodnutí, jestli zrušená zpráva vůbec smí zmizet. Počítá se i to,
+     * co samo o sobě neznamená odeslání (zahájená relace odesílací brány):
+     * takový záznam je auditní stopa s `ON DELETE RESTRICT`, takže by mazání
+     * stejně skončilo chybou z databáze — a to je horší než tlačítko, které
+     * se vůbec nenabídne.
+     *
+     * `hasTable()` u každé tabulky zvlášť: instalace, kde ještě neproběhly
+     * pozdější migrace (1394, 1412, 1583), nemá důvod přijít o mazání.
+     *
+     * @return array{
+     *   inbox_messages:int,defect_notices:int,
+     *   gateway_sessions:int,enforcement_dispatches:int
+     * }
+     */
+    public function linkedRecordCounts(int $supplierId, int $id): array
+    {
+        $this->assertAvailable();
+
+        return [
+            'inbox_messages' => $this->countLinked(
+                'submission_inbox_messages',
+                'SELECT COUNT(*) FROM submission_inbox_messages
+                  WHERE supplier_id = ? AND matched_outbox_id = ?',
+                [$supplierId, $id],
+            ),
+            'defect_notices' => $this->countLinked(
+                'submission_defect_notices',
+                'SELECT COUNT(*) FROM submission_defect_notices
+                  WHERE supplier_id = ? AND (outbox_id = ? OR response_outbox_id = ?)',
+                [$supplierId, $id, $id],
+            ),
+            'gateway_sessions' => $this->countLinked(
+                'isds_gateway_sessions',
+                'SELECT COUNT(*) FROM isds_gateway_sessions
+                  WHERE supplier_id = ? AND outbox_id = ?',
+                [$supplierId, $id],
+            ),
+            'enforcement_dispatches' => $this->countLinked(
+                'payroll_enforcement_xmlzam_dispatches',
+                'SELECT COUNT(*) FROM payroll_enforcement_xmlzam_dispatches
+                  WHERE supplier_id = ? AND outbox_id = ?',
+                [$supplierId, $id],
+            ),
+        ];
+    }
+
+    /**
+     * Trvale smaže zrušenou odchozí zprávu.
+     *
+     * Podmínky v `WHERE` jsou poslední pojistka, ne hlavní brána: o tom, jestli
+     * se mazat smí, rozhoduje {@see \MyInvoice\Service\Submission\SubmissionOutboxDeletionPolicy}
+     * nad kompletní stopou. Tady se jen ověří v SAMOTNÉM zápisu, že mezi
+     * rozhodnutím a mazáním zpráva neodešla — souběžné odeslání by jinak
+     * smazalo doklad.
+     *
+     * @return bool false, když řádek podmínkám neodpovídá (nebo už není)
+     */
+    public function deleteCancelled(int $supplierId, int $id): bool
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'DELETE FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND id = ?
+                AND dispatch_state = \'cancelled\'
+                AND external_message_id IS NULL
+                AND sent_at IS NULL
+                AND delivered_at IS NULL
+                AND acceptance_state = \'unknown\'
+                AND receipt_document_id IS NULL
+                AND receipt_inbox_message_id IS NULL'
+        );
+        $stmt->execute([$supplierId, $id]);
+
+        return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * Podklad, ze kterého zpráva vznikla, a jeho VLASTNÍ stav.
+     *
+     * ── Proč to fronta vůbec musí umět říct ─────────────────────────────────
+     * „Zrušit" na téhle obrazovce ruší odchozí ZPRÁVU, ne povinnost. Podání
+     * samo dál existuje a čeká na odeslání — jenže to je vidět až na jiné
+     * obrazovce. Uživatel byl přesvědčený, že zrušením podání smazal, a pak
+     * se divil, že mu ho fronta mzdových podání pořád nabízí. Obě obrazovky
+     * měly pravdu o něčem jiném a nikde to nebylo napsané.
+     *
+     * @return array{kind:string,status:string,pending:bool,agenda_code:?string,period:?string}|null
+     *         null = podklad neznáme (dokument, smazaný artefakt, chybějící tabulka)
+     */
+    public function sourceObligation(
+        int $supplierId,
+        string $environment,
+        string $artifactKind,
+        int $artifactId,
+    ): ?array {
+        return match ($artifactKind) {
+            'payroll_submission' => $this->payrollSource($supplierId, $environment, $artifactId),
+            'tax_submission' => $this->taxSource($supplierId, $artifactId),
+            default => null,
+        };
+    }
+
     // ───────────────────────── interní ─────────────────────────
+
+    /** @param list<mixed> $params */
+    private function countLinked(string $table, string $sql, array $params): int
+    {
+        if (!$this->db->hasTable($table)) {
+            return 0;
+        }
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Mzdové podání: `artifact_id` míří na zmrazený artefakt, ne na podání,
+     * takže se k povinnosti dojde přes něj. Za „čeká na odeslání" se považují
+     * jen stavy PŘED podáním — `submitted` a výš už podané je, i když zpráva
+     * z fronty zmizela.
+     *
+     * @return array{kind:string,status:string,pending:bool,agenda_code:?string,period:?string}|null
+     */
+    private function payrollSource(int $supplierId, string $environment, int $artifactId): ?array
+    {
+        if (!$this->db->hasTable('payroll_submission_artifacts')) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT submission.status, submission.submitted_at,
+                    obligation.agenda_code, obligation.period_start
+               FROM payroll_submission_artifacts artifact
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = artifact.supplier_id
+                AND submission.environment = artifact.environment
+                AND submission.id = artifact.submission_id
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+              WHERE artifact.supplier_id = ? AND artifact.environment = ? AND artifact.id = ?'
+        );
+        $stmt->execute([$supplierId, $environment, $artifactId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+
+        $status = (string) $row['status'];
+        $period = (string) $row['period_start'];
+
+        return [
+            'kind' => 'payroll_submission',
+            'status' => $status,
+            'pending' => $row['submitted_at'] === null && in_array(
+                $status,
+                ['draft', 'validated', 'prepared', 'ready', 'waiting_for_identity'],
+                true,
+            ),
+            'agenda_code' => (string) $row['agenda_code'],
+            'period' => substr($period, 0, 7),
+        ];
+    }
+
+    /**
+     * @return array{kind:string,status:string,pending:bool,agenda_code:?string,period:?string}|null
+     */
+    private function taxSource(int $supplierId, int $artifactId): ?array
+    {
+        if (!$this->db->hasTable('tax_submissions')) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT status, form_code, period_year, period_month, period_quarter
+               FROM tax_submissions WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $artifactId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+
+        $period = (string) $row['period_year'];
+        if ($row['period_month'] !== null) {
+            $period .= '-' . str_pad((string) $row['period_month'], 2, '0', STR_PAD_LEFT);
+        } elseif ($row['period_quarter'] !== null) {
+            $period .= '-Q' . (string) $row['period_quarter'];
+        }
+        $status = (string) $row['status'];
+
+        return [
+            'kind' => 'tax_submission',
+            'status' => $status,
+            // `rejected` je taky nesplněná povinnost, ale podané JIŽ BYLO —
+            // věta „čeká na odeslání" by u něj lhala.
+            'pending' => !in_array($status, ['submitted', 'accepted', 'rejected'], true),
+            'agenda_code' => strtoupper((string) $row['form_code']),
+            'period' => $period,
+        ];
+    }
 
     /** @return array<string,mixed>|null */
     private function findByIdempotencyHash(string $hash): ?array
