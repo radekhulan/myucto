@@ -7,6 +7,7 @@ namespace MyInvoice\Repository\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
+use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use PDO;
@@ -33,6 +34,8 @@ use PDO;
  *   contacts:list<array<string,mixed>>,
  *   identifiers:list<array<string,mixed>>,
  *   accounts:list<array<string,mixed>>,
+ *   payout_warnings:list<string>,
+ *   frozen_through:?string,
  *   created_at:?string,
  *   updated_at:?string
  * }
@@ -43,6 +46,7 @@ final class PayrollPersonProfileRepository
         private readonly Connection $db,
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollApprovedPeriodFreeze $freeze,
     ) {}
 
     /** @return ProfileView|null */
@@ -222,6 +226,27 @@ final class PayrollPersonProfileRepository
             'contacts' => $contacts,
             'identifiers' => $identifiers,
             'accounts' => $accounts,
+            /*
+             * Rozdělení výplaty bývalo PODMÍNKOU uložení: dokud součet podílů
+             * nedal 100 %, neuložila se ani změna jména nebo adresy. Přitom
+             * druhý účet se přidává právě proto, aby se podíly potom srovnaly.
+             * Kontrola proto zůstává, ale u rozpracované karty vrací větu
+             * k přečtení místo odmítnutí — tvrdě blokuje až stav „hotová".
+             */
+            'payout_warnings' => $this->payoutWarnings(
+                $supplierId,
+                $employeeId,
+                $row['payout_method'] === null ? 'cash' : (string) $row['payout_method'],
+                $row['cash_allocation_basis_points'] === null
+                    ? 10000
+                    : (int) $row['cash_allocation_basis_points'],
+                $row['payout_effective_on'] === null
+                    ? (new \DateTimeImmutable('today'))->format('Y-m-d')
+                    : (string) $row['payout_effective_on'],
+            ),
+            // Do kdy je historie uzavřená schválenou mzdou — karta podle toho
+            // ví, které řádky ještě jde smazat.
+            'frozen_through' => $this->freeze->frozenThrough($supplierId),
             'created_at' => $row['created_at'] === null ? null : (string) $row['created_at'],
             'updated_at' => $row['updated_at'] === null ? null : (string) $row['updated_at'],
         ];
@@ -277,6 +302,9 @@ final class PayrollPersonProfileRepository
                 $created = true;
             }
 
+            // Mazání jde PRVNÍ: uvolní unikátní klíče i interval, na který se
+            // v témže uložení může posunout jiný řádek.
+            $this->deleteRows($supplierId, $employeeId, $data);
             $this->saveIdentityHistory($supplierId, $employeeId, $data['identity_history']);
             $this->saveAddresses($supplierId, $employeeId, $data['addresses']);
             $this->saveContacts($supplierId, $employeeId, $data['contacts']);
@@ -284,13 +312,26 @@ final class PayrollPersonProfileRepository
             $this->saveAccounts($supplierId, $employeeId, $data['accounts']);
             $this->assertStoredIntervals($supplierId, $employeeId);
             $this->assertStoredPrimaryContacts($supplierId, $employeeId);
-            $this->assertPayoutAllocation(
-                $supplierId,
-                $employeeId,
-                (string) $data['payout_method'],
-                (int) $data['cash_allocation_basis_points'],
-                (string) $data['payout_effective_on'],
-            );
+            /*
+             * Rozdělení výplaty se ODMÍTÁ jen u karty prohlášené za hotovou.
+             * Rozpracovaná karta se uloží a nesrovnaný součet se vrátí jako
+             * `payout_warnings` — jinak by výměna účtu (druhý účet přidán,
+             * podíly zatím nesrovnané) držela jako rukojmí i opravu jména.
+             */
+            if ((string) $data['payout_method'] === PayrollPartnerSettlement::KIND) {
+                // Způsob výplaty musí být přípustný vždy — zápočet u osoby bez
+                // podílu na společnosti není rozpracovanost, ale nesmysl.
+                $this->assertPartnerSettlementEligible($supplierId, $employeeId);
+            }
+            if ((string) $data['profile_status'] === 'ready') {
+                $this->assertPayoutAllocation(
+                    $supplierId,
+                    $employeeId,
+                    (string) $data['payout_method'],
+                    (int) $data['cash_allocation_basis_points'],
+                    (string) $data['payout_effective_on'],
+                );
+            }
             $this->assertReadyProfile($supplierId, $employeeId, (string) $data['profile_status']);
             $this->synchronizeCurrentLegacyIdentity($supplierId, $employeeId);
 
@@ -416,6 +457,7 @@ final class PayrollPersonProfileRepository
         try {
             $this->saveIdentityHistory($supplierId, $employeeId, [[
                 'id' => null,
+                'delete' => false,
                 'full_name' => $fullName,
                 'first_name' => $firstName,
                 'last_name' => $lastName,
@@ -443,6 +485,7 @@ final class PayrollPersonProfileRepository
             if ($birthNumber !== null) {
                 $this->saveIdentifiers($supplierId, $employeeId, [[
                     'id' => null,
+                    'delete' => false,
                     'identifier_type' => 'birth_number',
                     'value' => $birthNumber,
                 ]]);
@@ -459,6 +502,171 @@ final class PayrollPersonProfileRepository
             }
             throw $e;
         }
+    }
+
+    /**
+     * Odstraní řádky označené `delete`.
+     *
+     * ## Proč to vůbec jde
+     *
+     * Karta uměla jen přidávat a měnit. Řádek přidaný omylem — druhá verze
+     * jména s dnešním datem (formulář ho nabízí jako výchozí), adresa u špatné
+     * osoby, dvakrát zadaný účet — pak zůstal navždy. U účtu to navíc
+     * ROZBIJE součet rozdělení výplaty, takže omyl blokoval uložení celé karty
+     * a cesta ven z aplikace nevedla.
+     *
+     * ## Co se nesmaže
+     *
+     * Historizovaný řádek (identita, adresa, účet), který začal PŘED koncem
+     * posledního schváleného mzdového období. O ten se opírá vyplacená mzda,
+     * takže se jen ukončuje. Kontakt a identifikátor historii nemají — jsou to
+     * údaje o AKTUÁLNÍM stavu, takže mažou vždy; chybějící identifikátor pak
+     * nepustí kartu do stavu „hotová" ({@see assertReadyProfile()}).
+     *
+     * @param ProfileInput $data
+     */
+    private function deleteRows(int $supplierId, int $employeeId, array $data): void
+    {
+        $frozenThrough = $this->freeze->frozenThrough($supplierId);
+        $historized = [
+            'identity_history' => [
+                'table' => 'payroll_person_identity_history',
+                'label' => 'Verzi jména',
+            ],
+            'addresses' => [
+                'table' => 'payroll_person_addresses',
+                'label' => 'Verzi adresy',
+            ],
+            'accounts' => [
+                'table' => 'payroll_person_accounts',
+                'label' => 'Výplatní účet',
+            ],
+        ];
+        foreach ($historized as $key => $spec) {
+            foreach ($data[$key] as $row) {
+                if (($row['delete'] ?? false) !== true || $row['id'] === null) {
+                    continue;
+                }
+                $start = $this->deletableStart(
+                    $spec['table'],
+                    $supplierId,
+                    $employeeId,
+                    (int) $row['id'],
+                );
+                if ($start === null) {
+                    continue;
+                }
+                if ($frozenThrough !== null && $start <= $frozenThrough) {
+                    throw new \InvalidArgumentException(sprintf(
+                        '%s od %s už kryje schválená mzda (do %s), takže ji nelze'
+                        . ' smazat — ukončete ji datem a novou skutečnost zapište'
+                        . ' jako další verzi. Když do toho období opravdu patří'
+                        . ' omyl, otevřete nejdřív ten mzdový běh k opravě'
+                        . ' a řádek půjde smazat.',
+                        $spec['label'],
+                        $start,
+                        $frozenThrough,
+                    ));
+                }
+                if ($key === 'accounts') {
+                    $this->assertAccountUnused($supplierId, $employeeId, (int) $row['id']);
+                }
+                $this->deleteOwnedRow($spec['table'], $supplierId, $employeeId, (int) $row['id']);
+            }
+        }
+
+        foreach (['contacts' => 'payroll_person_contacts', 'identifiers' => 'payroll_person_identifiers'] as $key => $table) {
+            foreach ($data[$key] as $row) {
+                if (($row['delete'] ?? false) !== true || $row['id'] === null) {
+                    continue;
+                }
+                $this->deleteOwnedRow($table, $supplierId, $employeeId, (int) $row['id']);
+            }
+        }
+    }
+
+    /**
+     * Účet, na který míří aktivní výplatní pravidlo, se nemaže.
+     *
+     * Reference je textová (`account:<id>`), takže ji cizí klíč nedrží —
+     * po smazání by pravidlo ukazovalo do prázdna a výplata by spadla až při
+     * zpracování mzdy, tedy daleko od místa, kde omyl vznikl.
+     */
+    private function assertAccountUnused(int $supplierId, int $employeeId, int $accountId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_payout_rules
+              WHERE supplier_id = ? AND employee_id = ?
+                AND destination_reference = ? AND is_active = 1
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employeeId, 'account:' . $accountId]);
+        if ($stmt->fetchColumn() !== false) {
+            throw new \InvalidArgumentException(
+                'Na tenhle výplatní účet míří aktivní výplatní pravidlo.'
+                . ' Nejdřív pravidlo přesměrujte nebo deaktivujte, teprve pak'
+                . ' půjde účet smazat.'
+            );
+        }
+    }
+
+    /** @return ?string začátek účinnosti; null = řádek u osoby není */
+    private function deletableStart(
+        string $table,
+        int $supplierId,
+        int $employeeId,
+        int $id,
+    ): ?string {
+        $stmt = $this->db->pdo()->prepare(sprintf(
+            'SELECT effective_from FROM %s
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?
+              FOR UPDATE',
+            $table,
+        ));
+        $stmt->execute([$supplierId, $employeeId, $id]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    private function deleteOwnedRow(string $table, int $supplierId, int $employeeId, int $id): void
+    {
+        $delete = $this->db->pdo()->prepare(sprintf(
+            'DELETE FROM %s WHERE supplier_id = ? AND employee_id = ? AND id = ?',
+            $table,
+        ));
+        $delete->execute([$supplierId, $employeeId, $id]);
+    }
+
+    /**
+     * Nesrovnané rozdělení výplaty jako VĚTA, ne jako odmítnutí uložení.
+     *
+     * Text musí sedět s {@see assertPayoutAllocation()} — jinak by karta
+     * varovala jinak, než se pak uložení odmítne u stavu „hotová".
+     *
+     * @return list<string>
+     */
+    private function payoutWarnings(
+        int $supplierId,
+        int $employeeId,
+        string $method,
+        int $cashBasisPoints,
+        string $effectiveOn,
+    ): array {
+        try {
+            $this->assertPayoutAllocation(
+                $supplierId,
+                $employeeId,
+                $method,
+                $cashBasisPoints,
+                $effectiveOn,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return [$e->getMessage()];
+        }
+
+        return [];
     }
 
     private function lockEmployee(int $supplierId, int $employeeId): void
@@ -572,6 +780,10 @@ final class PayrollPersonProfileRepository
         $earliestEmploymentStart = $this->earliestEmploymentStart($supplierId, $employeeId);
         $hasExistingVersion = $this->hasIdentityVersion($supplierId, $employeeId);
         foreach ($rows as $row) {
+            // Smazané řádky odbavil deleteRows() ještě před tímhle zápisem.
+            if (($row['delete'] ?? false) === true) {
+                continue;
+            }
             if ($row['id'] === null) {
                 // ⚠️ PRVNÍ verze identity musí platit od NÁSTUPU, ne ode dne, kdy
                 // se karta vyplnila. Prvotní registrace do registru pojištěnců se
@@ -673,6 +885,9 @@ final class PayrollPersonProfileRepository
         $earliestEmploymentStart = $this->earliestEmploymentStart($supplierId, $employeeId);
         $seenTypes = $this->addressTypesWithVersion($supplierId, $employeeId);
         foreach ($rows as $row) {
+            if (($row['delete'] ?? false) === true) {
+                continue;
+            }
             if ($row['id'] === null) {
                 // ⚠️ Táž vada jako u historie identity: PRVNÍ adresa daného
                 // druhu se razítkovala dnem vyplnění karty, ne nástupem. Kdo
@@ -742,6 +957,9 @@ final class PayrollPersonProfileRepository
     private function saveContacts(int $supplierId, int $employeeId, array $rows): void
     {
         foreach ($rows as $row) {
+            if (($row['delete'] ?? false) === true) {
+                continue;
+            }
             $id = $row['id'];
             $field = $row['contact_type'] === 'email'
                 ? PayrollSensitiveField::CONTACT_EMAIL
@@ -841,6 +1059,9 @@ final class PayrollPersonProfileRepository
     private function saveIdentifiers(int $supplierId, int $employeeId, array $rows): void
     {
         foreach ($rows as $row) {
+            if (($row['delete'] ?? false) === true) {
+                continue;
+            }
             $id = $row['id'];
             $type = (string) $row['identifier_type'];
             $created = false;
@@ -905,6 +1126,9 @@ final class PayrollPersonProfileRepository
     private function saveAccounts(int $supplierId, int $employeeId, array $rows): void
     {
         foreach ($rows as $row) {
+            if (($row['delete'] ?? false) === true) {
+                continue;
+            }
             $id = $row['id'];
             if ($id === null) {
                 $this->db->pdo()->prepare(

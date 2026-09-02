@@ -49,6 +49,8 @@ type SelectOption<T extends string> = { value: T; label: string }
 
 interface IdentityFormRow {
   id?: number
+  /** Označen ke smazání jedním společným Uložit; neuložený řádek se rovnou odebere. */
+  deleted?: boolean
   full_name: string
   first_name: string
   last_name: string
@@ -67,6 +69,8 @@ interface IdentityFormRow {
 
 interface AddressFormRow {
   id?: number
+  /** Označen ke smazání jedním společným Uložit; neuložený řádek se rovnou odebere. */
+  deleted?: boolean
   address_type: PayrollPersonAddressType
   address_masked: string
   street_line: string
@@ -79,6 +83,8 @@ interface AddressFormRow {
 
 interface ContactFormRow {
   id?: number
+  /** Označen ke smazání jedním společným Uložit; neuložený řádek se rovnou odebere. */
+  deleted?: boolean
   contact_type: PayrollPersonContactType
   value_masked: string
   value: string
@@ -88,6 +94,8 @@ interface ContactFormRow {
 
 interface IdentifierFormRow {
   id?: number
+  /** Označen ke smazání jedním společným Uložit; neuložený řádek se rovnou odebere. */
+  deleted?: boolean
   identifier_type: PayrollPersonIdentifierType
   value_masked: string
   value: string
@@ -95,6 +103,8 @@ interface IdentifierFormRow {
 
 interface AccountFormRow {
   id?: number
+  /** Označen ke smazání jedním společným Uložit; neuložený řádek se rovnou odebere. */
+  deleted?: boolean
   label: string
   bank_account_masked: string
   bank_account: string
@@ -155,6 +165,9 @@ const toast = useToast()
 const paneDom = usePaneDom()
 const loading = ref(true)
 const saving = ref(false)
+const checking = ref(false)
+/** Nesrovnané rozdělení výplaty — věta, ne odmítnutí uložení. */
+const payoutWarnings = ref<string[]>([])
 const profile = ref<PayrollPersonProfile | null>(null)
 const tab = ref<Tab>('identity')
 const verifyingAccountId = ref<number | null>(null)
@@ -663,6 +676,10 @@ async function applyPayoutDefaults() {
 
 function hydrate(value: PayrollPersonProfile) {
   profile.value = value
+  // Řádky se staví znovu ze serverové odpovědi, takže označení ke smazání
+  // zaniká uložením samo. Varování o rozdělení výplaty přebíráme rovnou —
+  // je to věta k přečtení, ne důvod, proč se karta neuložila.
+  payoutWarnings.value = value.payout_warnings ?? []
   form.profile_status = value.profile_status === 'missing' ? 'setup' : value.profile_status
   form.payout_method = value.payout_method
   form.partner_settlement_account_code = value.partner_settlement_account_code ?? ''
@@ -781,7 +798,9 @@ function payload(): PayrollPersonProfilePayload {
     cash_allocation_basis_points: Number(form.cash_allocation_basis_points),
     payout_effective_on: form.payout_effective_on,
     secure_delivery_channel: form.secure_delivery_channel,
-    identity_history: form.identity_history.map(row => ({
+    identity_history: form.identity_history.map(row => (row.id && row.deleted
+      ? { id: row.id, delete: true }
+      : {
       ...(row.id ? { id: row.id } : {}),
       full_name: row.full_name,
       first_name: row.first_name,
@@ -800,6 +819,7 @@ function payload(): PayrollPersonProfilePayload {
       effective_to: optionalValue(row.effective_to) ?? null,
     })),
     addresses: form.addresses.map(row => {
+      if (row.id && row.deleted) return { id: row.id, delete: true }
       const replacesAddress = [
         row.street_line,
         row.city,
@@ -821,19 +841,25 @@ function payload(): PayrollPersonProfilePayload {
         effective_to: optionalValue(row.effective_to) ?? null,
       }
     }),
-    contacts: form.contacts.map(row => ({
+    contacts: form.contacts.map(row => (row.id && row.deleted
+      ? { id: row.id, delete: true }
+      : {
       ...(row.id ? { id: row.id } : {}),
       contact_type: row.contact_type,
       ...(optionalValue(row.value) !== undefined ? { value: row.value.trim() } : {}),
       is_primary: row.is_primary,
       is_active: row.is_active,
     })),
-    identifiers: form.identifiers.map(row => ({
+    identifiers: form.identifiers.map(row => (row.id && row.deleted
+      ? { id: row.id, identifier_type: row.identifier_type, delete: true }
+      : {
       ...(row.id ? { id: row.id } : {}),
       identifier_type: row.identifier_type,
       ...(optionalValue(row.value) !== undefined ? { value: row.value.trim() } : {}),
     })),
-    accounts: form.accounts.map(row => ({
+    accounts: form.accounts.map(row => (row.id && row.deleted
+      ? { id: row.id, delete: true }
+      : {
       ...(row.id ? { id: row.id } : {}),
       label: row.label,
       ...(optionalValue(row.bank_account) !== undefined
@@ -844,6 +870,27 @@ function payload(): PayrollPersonProfilePayload {
       effective_to: optionalValue(row.effective_to) ?? null,
       is_active: row.is_active,
     })),
+  }
+}
+
+/**
+ * Kontrola nanečisto.
+ *
+ * Server projde tutéž zápisovou cestu a transakci pak vrátí zpět, takže
+ * uživatel dostane přesně ty věty, které by ho jinak zastavily až při uložení
+ * — a formulář zůstává, jak byl.
+ */
+async function check() {
+  if (checking.value || saving.value) return
+  checking.value = true
+  try {
+    const rehearsal = await payrollApi.checkPersonProfile(props.personId, payload())
+    payoutWarnings.value = rehearsal.payout_warnings ?? []
+    if (payoutWarnings.value.length === 0) toast.success(t('common.success'))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.profile.save_failed')))
+  } finally {
+    checking.value = false
   }
 }
 
@@ -987,8 +1034,28 @@ function addAccount() {
   })
 }
 
-function removeUnsaved<T extends { id?: number }>(rows: T[], index: number) {
-  if (!rows[index]?.id) rows.splice(index, 1)
+/**
+ * Odebrání řádku.
+ *
+ * Neuložený řádek zmizí rovnou. Uložený se jen OZNAČÍ — smaže ho až společné
+ * „Uložit", takže omyl jde vzít zpět tlačítkem vedle (a když ne, tak zavřením
+ * karty bez uložení). Dřív šlo odebrat jen neuložený řádek, takže druhá verze
+ * jména s dnešním datem nebo omylem přidaný účet zůstaly na kartě navždy —
+ * a nesrovnaný účet blokoval uložení celé karty.
+ */
+function removeRow<T extends { id?: number; deleted?: boolean }>(rows: T[], index: number) {
+  const row = rows[index]
+  if (!row) return
+  if (!row.id) {
+    rows.splice(index, 1)
+    return
+  }
+  row.deleted = true
+}
+
+function restoreRow<T extends { deleted?: boolean }>(rows: T[], index: number) {
+  const row = rows[index]
+  if (row) row.deleted = false
 }
 
 watch(() => props.personId, load)
@@ -1010,21 +1077,47 @@ onMounted(load)
         jen tohle, přidávání je obrysové a rozsah je napsaný pod ním.
       -->
       <div v-if="canWrite && !loading && profile" class="text-right">
-        <button
-          type="button"
-          :class="btnFilled('primary')"
-          :disabled="saving"
-          data-test="save-profile"
-          @click="save"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path :d="ICONS.check" />
-          </svg>
-          {{ t('payroll.people.profile.save_card') }}
-        </button>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <!--
+            Kontrola je SAMOSTATNÁ AKCE PŘED uložením, ne jeho podmínka.
+            Projde tytéž kontroly jako uložení (překryv intervalů, součet
+            rozdělení výplaty) a nic neuloží, takže rozdělaná práce zůstává
+            ve formuláři.
+          -->
+          <button
+            type="button"
+            :class="btnOutline('neutral')"
+            :disabled="saving || checking"
+            data-test="check-profile"
+            @click="check"
+          >
+            {{ checking ? t('common.loading') : t('payroll.people.registration.a1.check') }}
+          </button>
+          <button
+            type="button"
+            :class="btnFilled('primary')"
+            :disabled="saving"
+            data-test="save-profile"
+            @click="save"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.check" />
+            </svg>
+            {{ t('payroll.people.profile.save_card') }}
+          </button>
+        </div>
         <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.people.profile.save_scope') }}</p>
       </div>
     </header>
+
+    <!--
+      Nesrovnané rozdělení výplaty se dřív hlásilo tak, že se NEULOŽILA celá
+      karta — včetně opravy jména, která s výplatou nesouvisí. Teď je to věta;
+      uložení odmítne až stav „hotová".
+    -->
+    <div v-if="payoutWarnings.length" class="border-b border-warning-500/30 bg-warning-50 px-4 py-3 text-xs text-warning-800 sm:px-6" data-test="profile-payout-warnings">
+      <p v-for="(warning, index) in payoutWarnings" :key="index">{{ warning }}</p>
+    </div>
 
     <div v-if="loading" class="space-y-3 p-4 sm:p-6">
       <div v-for="index in 3" :key="index" class="h-20 animate-pulse rounded-lg bg-neutral-100" />
@@ -1175,8 +1268,10 @@ onMounted(load)
                   </p>
                 </div>
               </details>
-              <div v-if="canWrite && !row.id" class="mt-3 flex justify-end">
-                <button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.identity_history, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button>
+              <div v-if="canWrite" class="mt-3 flex items-center justify-end gap-2">
+                <span v-if="row.deleted" class="text-xs text-danger-600">{{ t('common.deleted') }}</span>
+                <button v-if="row.deleted" type="button" :class="btnOutlineSm('neutral')" @click="restoreRow(form.identity_history, index)">{{ t('common.undo') }}</button>
+                <button v-else type="button" :class="btnOutlineSm('danger')" @click="removeRow(form.identity_history, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button>
               </div>
             </article>
           </div>
@@ -1215,7 +1310,7 @@ onMounted(load)
                 </template>
               </div>
               <p v-if="canWrite && row.id" class="mt-2 text-xs text-neutral-500">{{ t('payroll.people.profile.address_replace_hint') }}</p>
-              <div v-if="canWrite && !row.id" class="mt-3 flex justify-end"><button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.addresses, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
+              <div v-if="canWrite" class="mt-3 flex items-center justify-end gap-2"><span v-if="row.deleted" class="text-xs text-danger-600">{{ t('common.deleted') }}</span><button v-if="row.deleted" type="button" :class="btnOutlineSm('neutral')" @click="restoreRow(form.addresses, index)">{{ t('common.undo') }}</button><button v-else type="button" :class="btnOutlineSm('danger')" @click="removeRow(form.addresses, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
             </article>
           </div>
         </section>
@@ -1236,7 +1331,7 @@ onMounted(load)
                 <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_primary" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.primary_contact') }}</label>
                 <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_active" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.active') }}</label>
               </div>
-              <div v-if="canWrite && !row.id" class="mt-3 flex justify-end"><button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.contacts, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
+              <div v-if="canWrite" class="mt-3 flex items-center justify-end gap-2"><span v-if="row.deleted" class="text-xs text-danger-600">{{ t('common.deleted') }}</span><button v-if="row.deleted" type="button" :class="btnOutlineSm('neutral')" @click="restoreRow(form.contacts, index)">{{ t('common.undo') }}</button><button v-else type="button" :class="btnOutlineSm('danger')" @click="removeRow(form.contacts, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
             </article>
           </div>
         </section>
@@ -1253,7 +1348,7 @@ onMounted(load)
                 <div v-if="row.value_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.value_masked }}</p></div>
                 <label v-if="canWrite" :class="[labelClass, 'sm:col-span-2']">{{ t('payroll.people.profile.new_value') }} <RequiredMark v-if="!row.id" /><input v-model="row.value" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : ''"></label>
               </div>
-              <div v-if="canWrite && !row.id" class="mt-3 flex justify-end"><button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.identifiers, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
+              <div v-if="canWrite" class="mt-3 flex items-center justify-end gap-2"><span v-if="row.deleted" class="text-xs text-danger-600">{{ t('common.deleted') }}</span><button v-if="row.deleted" type="button" :class="btnOutlineSm('neutral')" @click="restoreRow(form.identifiers, index)">{{ t('common.undo') }}</button><button v-else type="button" :class="btnOutlineSm('danger')" @click="removeRow(form.identifiers, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
             </article>
           </div>
         </section>
@@ -1331,7 +1426,7 @@ onMounted(load)
                   </p>
                 </div>
               </div>
-              <div v-if="canWrite && !row.id" class="mt-3 flex justify-end"><button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.accounts, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
+              <div v-if="canWrite" class="mt-3 flex items-center justify-end gap-2"><span v-if="row.deleted" class="text-xs text-danger-600">{{ t('common.deleted') }}</span><button v-if="row.deleted" type="button" :class="btnOutlineSm('neutral')" @click="restoreRow(form.accounts, index)">{{ t('common.undo') }}</button><button v-else type="button" :class="btnOutlineSm('danger')" @click="removeRow(form.accounts, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
             </article>
           </div>
         </section>

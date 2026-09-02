@@ -207,6 +207,188 @@ final class PayrollDependantRepository
      * @param DependantInput $data
      * @return DependantsView
      */
+    /**
+     * Smazání omylem založené vyživované osoby.
+     *
+     * Evidence uměla osoby jen zakládat a měnit — vyživovaná osoba zapsaná
+     * u špatného zaměstnance nebo podruhé se z aplikace nedala odstranit
+     * vůbec. „Ukončit vyživování" není náhrada: ukončená osoba zůstane
+     * v přehledu, počítá se do pořadí dětí a nese rodné číslo, které pak
+     * u správného zaměstnance narazí na jedinečnost.
+     *
+     * Maže se jen to, o co se ještě nic neopírá: osoba bez jediného nároku.
+     * Nárok se maže vlastní cestou ({@see deleteClaim()}), a ta zase hlídá
+     * schválenou mzdu.
+     *
+     * @return DependantsView
+     */
+    public function deleteDependant(
+        int $supplierId,
+        int $employeeId,
+        int $dependantId,
+        int $expectedVersion,
+        string $effectiveOn,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        return $this->transactional(
+            $supplierId,
+            $employeeId,
+            $effectiveOn,
+            function () use (
+                $supplierId,
+                $employeeId,
+                $dependantId,
+                $expectedVersion,
+                $userId,
+                $ip,
+                $userAgent,
+            ): void {
+                $current = $this->lockDependant($supplierId, $employeeId, $dependantId);
+                if ((int) $current['row_version'] !== $expectedVersion) {
+                    throw new PayrollDependantConflictException((int) $current['row_version']);
+                }
+                $claims = $this->db->pdo()->prepare(
+                    'SELECT COUNT(*)
+                       FROM payroll_person_tax_child_claims
+                      WHERE supplier_id = ? AND employee_id = ? AND dependant_id = ?'
+                );
+                $claims->execute([$supplierId, $employeeId, $dependantId]);
+                if ((int) $claims->fetchColumn() > 0) {
+                    throw new \InvalidArgumentException(
+                        'U téhle osoby je evidovaný nárok na daňové zvýhodnění.'
+                        . ' Smažte nejdřív ten nárok, teprve pak půjde smazat'
+                        . ' i osobu.',
+                    );
+                }
+                $delete = $this->db->pdo()->prepare(
+                    'DELETE FROM payroll_dependants
+                      WHERE supplier_id = ? AND employee_id = ? AND id = ?'
+                );
+                $delete->execute([$supplierId, $employeeId, $dependantId]);
+                if ($delete->rowCount() !== 1) {
+                    throw new PayrollDependantNotFoundException();
+                }
+                $this->activityLogger->log(
+                    'payroll.dependant.deleted',
+                    $userId,
+                    'payroll_dependant',
+                    $dependantId,
+                    [
+                        'employee_id' => $employeeId,
+                        'relation' => (string) $current['relation'],
+                        'existence_from' => (string) $current['existence_from'],
+                        'existence_to' => $current['existence_to'] === null
+                            ? null
+                            : (string) $current['existence_to'],
+                    ],
+                    $ip,
+                    $userAgent,
+                    $supplierId,
+                );
+            },
+        );
+    }
+
+    /**
+     * Smazání omylem zapsaného nároku na daňové zvýhodnění.
+     *
+     * Nárok šel jen ukončit datem nebo nahradit novou verzí — a obojí je
+     * u OMYLU špatně: nárok, který nikdy neměl vzniknout (zapsaný u špatného
+     * dítěte nebo s obráceným pořadím), zůstával v evidenci a blokoval pořadí
+     * i souběh s jiným poplatníkem.
+     *
+     * Nemaže se, co kryje schválená mzda — ta z nároku vycházela — ani nárok,
+     * na který už navazuje novější verze; ta by po smazání ukazovala do prázdna.
+     *
+     * @return DependantsView
+     */
+    public function deleteClaim(
+        int $supplierId,
+        int $employeeId,
+        int $dependantId,
+        int $claimId,
+        int $expectedVersion,
+        string $effectiveOn,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        return $this->transactional(
+            $supplierId,
+            $employeeId,
+            $effectiveOn,
+            function () use (
+                $supplierId,
+                $employeeId,
+                $dependantId,
+                $claimId,
+                $expectedVersion,
+                $userId,
+                $ip,
+                $userAgent,
+            ): void {
+                $claim = $this->lockClaim($supplierId, $employeeId, $dependantId, $claimId);
+                if ((int) $claim['row_version'] !== $expectedVersion) {
+                    throw new PayrollDependantConflictException((int) $claim['row_version']);
+                }
+                if ($claim['superseded_by_id'] !== null) {
+                    throw new \InvalidArgumentException(
+                        'Na tenhle nárok navazuje novější verze. Smažte nejdřív'
+                        . ' ji, teprve pak půjde smazat i tenhle nárok.',
+                    );
+                }
+                $frozenThrough = $this->frozenThrough($supplierId);
+                $from = (string) $claim['effective_from'];
+                if ($frozenThrough !== null && $from <= $frozenThrough) {
+                    throw new \InvalidArgumentException(sprintf(
+                        'Nárok od %s už kryje schválená mzda (do %s), takže ho'
+                        . ' nelze smazat — ukončete ho datem, nebo nejdřív'
+                        . ' otevřete mzdový běh k opravě.',
+                        $from,
+                        $frozenThrough,
+                    ));
+                }
+                $delete = $this->db->pdo()->prepare(
+                    'DELETE FROM payroll_person_tax_child_claims
+                      WHERE supplier_id = ? AND employee_id = ?
+                        AND dependant_id = ? AND id = ?'
+                );
+                $delete->execute([$supplierId, $employeeId, $dependantId, $claimId]);
+                if ($delete->rowCount() !== 1) {
+                    throw new PayrollDependantNotFoundException();
+                }
+                // Předchozí verze na smazaný nárok ukazovat nesmí — jinak by
+                // zůstala „nahrazená" něčím, co už neexistuje, a nešla by ani
+                // opravit ({@see saveClaim()} nahrazené nároky odmítá).
+                $this->db->pdo()->prepare(
+                    'UPDATE payroll_person_tax_child_claims
+                        SET superseded_by_id = NULL, row_version = row_version + 1
+                      WHERE supplier_id = ? AND employee_id = ? AND superseded_by_id = ?'
+                )->execute([$supplierId, $employeeId, $claimId]);
+                $this->activityLogger->log(
+                    'payroll.dependant_claim.deleted',
+                    $userId,
+                    'payroll_dependant',
+                    $dependantId,
+                    [
+                        'employee_id' => $employeeId,
+                        'claim_id' => $claimId,
+                        'effective_from' => $from,
+                        'effective_to' => $claim['effective_to'] === null
+                            ? null
+                            : (string) $claim['effective_to'],
+                        'child_order' => (int) $claim['child_order'],
+                    ],
+                    $ip,
+                    $userAgent,
+                    $supplierId,
+                );
+            },
+        );
+    }
+
     public function updateDependant(
         int $supplierId,
         int $employeeId,

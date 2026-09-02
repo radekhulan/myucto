@@ -159,6 +159,41 @@ final class PayrollInputRepository
     }
 
     /**
+     * Původ vstupu tak, jak je uložený — `find()` otisk podkladu záměrně
+     * nevrací, takže se čte zvlášť.
+     *
+     * @return array{source_kind:string,external_id:?string,
+     *   source_snapshot_json:?string,source_snapshot_hash:?string}
+     */
+    private function sourceOrigin(int $supplierId, int $id): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT source_kind, external_id,
+                    source_snapshot_json, source_snapshot_hash
+               FROM payroll_inputs
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            throw new \RuntimeException('Mzdový vstup se nepodařilo načíst.');
+        }
+
+        return [
+            'source_kind' => (string) $row['source_kind'],
+            'external_id' => $row['external_id'] === null
+                ? null
+                : (string) $row['external_id'],
+            'source_snapshot_json' => $row['source_snapshot_json'] === null
+                ? null
+                : (string) $row['source_snapshot_json'],
+            'source_snapshot_hash' => $row['source_snapshot_hash'] === null
+                ? null
+                : (string) $row['source_snapshot_hash'],
+        ];
+    }
+
+    /**
      * @param array<string,mixed> $data
      * @return array<string,mixed>
      */
@@ -228,6 +263,20 @@ final class PayrollInputRepository
         if ($currentVersion !== $expectedVersion) {
             throw new PayrollInputConflictException($currentVersion);
         }
+        /*
+         * Původ vstupu (odkud se vzal a jaký podklad na to má) se úpravou
+         * částky nemění — patří k němu. Validátor formuláře ho ale nezná
+         * a dosazoval `manual` + prázdný snímek, což u konceptu z importu nebo
+         * z pravidelné složky porušilo databázový CHECK a vrátilo neošetřenou
+         * pětistovku bez hlášky. Držíme proto hodnoty z uloženého řádku.
+         */
+        $origin = $this->sourceOrigin($supplierId, $id);
+        $sourceKind = $origin['source_kind'];
+        $sourceSnapshotJson = $origin['source_snapshot_json'];
+        $sourceSnapshotHash = $origin['source_snapshot_hash'];
+        $externalId = $sourceKind === 'manual'
+            ? $data['external_id']
+            : $origin['external_id'];
         try {
             $stmt = $this->db->pdo()->prepare(
                 'UPDATE payroll_inputs
@@ -247,10 +296,10 @@ final class PayrollInputRepository
                 $data['source_period_start'],
                 $data['amount_minor'],
                 $data['quantity_milliunits'],
-                $data['source_kind'],
-                $data['external_id'],
-                $data['source_snapshot_json'] ?? null,
-                $data['source_snapshot_hash'] ?? null,
+                $sourceKind,
+                $externalId,
+                $sourceSnapshotJson,
+                $sourceSnapshotHash,
                 $supplierId,
                 $id,
                 $expectedVersion,
@@ -259,6 +308,15 @@ final class PayrollInputRepository
             if ((string) $e->getCode() === '23000') {
                 throw new \InvalidArgumentException(
                     'Externí mzdový vstup už byl pro tento vztah a měsíc importován.',
+                    previous: $e,
+                );
+            }
+            if ((string) $e->getCode() === 'HY000'
+                && (int) ($e->errorInfo[1] ?? 0) === 3819
+            ) {
+                throw new \InvalidArgumentException(
+                    'Úpravu odmítlo pravidlo integrity mzdového vstupu. Zkuste '
+                    . 'vstup místo úpravy zrušit a zadat znovu.',
                     previous: $e,
                 );
             }
@@ -1440,20 +1498,15 @@ final class PayrollInputRepository
             );
         }
 
-        $import = $pdo->prepare(
-            'SELECT 1
-               FROM payroll_input_import_rows
-              WHERE supplier_id = ? AND input_id = ?
-              LIMIT 1'
-        );
-        $import->execute([$supplierId, $id]);
-        if ($import->fetchColumn() !== false) {
-            throw new PayrollInputCancellationException(
-                'input_has_movement',
-                'Vstup vznikl importem a drží vazbu na jeho řádek; zrušit ho nelze.',
-            );
-        }
-
+        /*
+         * Řádek importu tu dřív zrušení blokoval. Byla to past bez východiska:
+         * import zakládá vstupy rovnou jako KONCEPTY, takže špatně naimportovaný
+         * řádek nešlo zrušit, nešlo smazat, držel běh na blokátoru
+         * „draft_inputs_present" a jedinou cestou dál bylo schválit chybnou
+         * částku. Vazba přitom není pohyb peněz — je to stopa po souboru, a ta
+         * zrušením konceptu nikam nemizí (vstup zůstává, jen ve stavu
+         * `cancelled`).
+         */
         $this->assertNotFrozenInApprovedRevision($pdo, $supplierId, $id, $periodStart);
     }
 

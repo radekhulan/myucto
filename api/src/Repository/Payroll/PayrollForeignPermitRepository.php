@@ -174,6 +174,276 @@ final class PayrollForeignPermitRepository
         }
     }
 
+    /**
+     * Oprava už zaevidovaného oprávnění.
+     *
+     * Oprávnění bývalo NEMĚNNÉ (trigger zakazoval UPDATE i DELETE) a formulář
+     * přitom nabízí jako výchozí účinnost dnešek. Překlep v čísle, ve státu
+     * vydání nebo v datu tak byl trvalý: opravit nešlo, smazat nešlo a
+     * „obnovení" musí začínat POZDĚJI, takže se špatná účinnost nedala vrátit
+     * dozadu. Migrace 1740 blanketní zákaz zrušila; věcné hlídání (doklad,
+     * řetěz obnovení, překryv) platí pro opravu stejně jako pro vložení.
+     *
+     * @param array<string,mixed> $input
+     * @return array{employee_id:int,as_of:string,warning_days:int,history:list<array<string,mixed>>,alerts:list<array<string,mixed>>}
+     */
+    public function correct(
+        int $supplierId,
+        int $employeeId,
+        int $permitId,
+        array $input,
+        int $actorUserId,
+        string $asOf,
+    ): array {
+        $permit = $this->normalize($input);
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            if (!$this->lockEmployee($supplierId, $employeeId)) {
+                throw new PayrollForeignPermitException('person_not_found', 'Zaměstnanec nebyl v této firmě nalezen.', 404);
+            }
+            $stored = $this->lockPermit($supplierId, $employeeId, $permitId);
+            $document = $this->documents->findActiveReferenceForUpdate(
+                $permit['document_id'],
+                $supplierId,
+                DocumentViewerContext::internalCompanyForeignPermit(),
+            );
+            if ($document === null) {
+                throw new PayrollForeignPermitException(
+                    'company_evidence_document_required',
+                    'Oprávnění musí dokládat aktivní firemní dokument této firmy.',
+                );
+            }
+            $sha256 = strtolower($document['sha256']);
+            if (preg_match('/^[0-9a-f]{64}$/D', $sha256) !== 1) {
+                throw new \LogicException('Firemní dokument nemá platný SHA-256 otisk.');
+            }
+            $this->assertPredecessorAndOverlap($supplierId, $employeeId, $permit, $permitId);
+            $this->assertSuccessorStaysLater($supplierId, $permitId, $permit['effective_from']);
+
+            $update = $pdo->prepare(
+                'UPDATE payroll_person_foreign_permits
+                    SET permit_kind = ?, permit_label = ?, issuing_country_code = ?,
+                        effective_from = ?, valid_until = ?,
+                        document_supplier_id = ?, document_id = ?, document_sha256 = ?,
+                        supersedes_permit_id = ?
+                  WHERE supplier_id = ? AND employee_id = ? AND id = ?',
+            );
+            $update->execute([
+                $permit['permit_kind'],
+                $permit['permit_label'],
+                $permit['issuing_country_code'],
+                $permit['effective_from'],
+                $permit['valid_until'],
+                $supplierId,
+                $document['id'],
+                $sha256,
+                $permit['supersedes_permit_id'],
+                $supplierId,
+                $employeeId,
+                $permitId,
+            ]);
+            $this->activityLogger->log(
+                'payroll.person_foreign_permit.corrected',
+                $actorUserId,
+                'payroll_person_foreign_permit',
+                $permitId,
+                [
+                    'employee_id' => $employeeId,
+                    'before' => [
+                        'permit_kind' => (string) $stored['permit_kind'],
+                        'permit_label' => (string) $stored['permit_label'],
+                        'issuing_country_code' => (string) $stored['issuing_country_code'],
+                        'effective_from' => (string) $stored['effective_from'],
+                        'valid_until' => (string) $stored['valid_until'],
+                        'document_id' => (int) $stored['document_id'],
+                        'supersedes_permit_id' => $stored['supersedes_permit_id'] === null
+                            ? null
+                            : (int) $stored['supersedes_permit_id'],
+                    ],
+                    'after' => [
+                        'permit_kind' => $permit['permit_kind'],
+                        'permit_label' => $permit['permit_label'],
+                        'issuing_country_code' => $permit['issuing_country_code'],
+                        'effective_from' => $permit['effective_from'],
+                        'valid_until' => $permit['valid_until'],
+                        'document_id' => $document['id'],
+                        'supersedes_permit_id' => $permit['supersedes_permit_id'],
+                    ],
+                ],
+                null,
+                null,
+                $supplierId,
+            );
+            $view = $this->view($supplierId, $employeeId, $asOf);
+            if ($view === null) {
+                throw new \LogicException('Opravené oprávnění nelze načíst.');
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+
+            return $view;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $this->translate($e);
+        }
+    }
+
+    /**
+     * Smazání omylem zaevidovaného oprávnění.
+     *
+     * Maže se jen to, o co se ještě nic neopírá: na oprávnění, na které už
+     * navazuje obnovení, drží cizí klíč `fk_payroll_foreign_permit_predecessor`
+     * (RESTRICT). Kontrola je tady ještě jednou, aby uživatel dostal větu
+     * místo databázové chyby.
+     *
+     * @return array{employee_id:int,as_of:string,warning_days:int,history:list<array<string,mixed>>,alerts:list<array<string,mixed>>}
+     */
+    public function remove(
+        int $supplierId,
+        int $employeeId,
+        int $permitId,
+        int $actorUserId,
+        string $asOf,
+    ): array {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            if (!$this->lockEmployee($supplierId, $employeeId)) {
+                throw new PayrollForeignPermitException('person_not_found', 'Zaměstnanec nebyl v této firmě nalezen.', 404);
+            }
+            $stored = $this->lockPermit($supplierId, $employeeId, $permitId);
+            $successor = $pdo->prepare(
+                'SELECT id FROM payroll_person_foreign_permits
+                  WHERE supplier_id = ? AND supersedes_permit_id = ? FOR UPDATE',
+            );
+            $successor->execute([$supplierId, $permitId]);
+            if ($successor->fetchColumn() !== false) {
+                throw new PayrollForeignPermitException(
+                    'permit_has_successor',
+                    'Na tohle oprávnění už navazuje obnovení. Smažte nejdřív to'
+                    . ' obnovení, teprve pak půjde smazat tohle oprávnění.',
+                    409,
+                );
+            }
+
+            $delete = $pdo->prepare(
+                'DELETE FROM payroll_person_foreign_permits
+                  WHERE supplier_id = ? AND employee_id = ? AND id = ?',
+            );
+            $delete->execute([$supplierId, $employeeId, $permitId]);
+            $this->activityLogger->log(
+                'payroll.person_foreign_permit.deleted',
+                $actorUserId,
+                'payroll_person_foreign_permit',
+                $permitId,
+                [
+                    'employee_id' => $employeeId,
+                    'permit_kind' => (string) $stored['permit_kind'],
+                    'permit_label' => (string) $stored['permit_label'],
+                    'effective_from' => (string) $stored['effective_from'],
+                    'valid_until' => (string) $stored['valid_until'],
+                    'document_id' => (int) $stored['document_id'],
+                ],
+                null,
+                null,
+                $supplierId,
+            );
+            $view = $this->view($supplierId, $employeeId, $asOf);
+            if ($view === null) {
+                throw new \LogicException('Evidenci oprávnění nelze načíst.');
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+
+            return $view;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $this->translate($e);
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function lockPermit(int $supplierId, int $employeeId, int $permitId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, permit_kind, permit_label, issuing_country_code, effective_from,
+                    valid_until, document_id, supersedes_permit_id
+               FROM payroll_person_foreign_permits
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?
+              FOR UPDATE',
+        );
+        $stmt->execute([$supplierId, $employeeId, $permitId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new PayrollForeignPermitException(
+                'permit_not_found',
+                'Oprávnění není u této osoby evidováno.',
+                404,
+            );
+        }
+
+        return $row;
+    }
+
+    /**
+     * Posunutím účinnosti dozadu se nesmí porušit pořadí řetězu obnovení —
+     * navazující oprávnění musí pořád začínat později.
+     */
+    private function assertSuccessorStaysLater(
+        int $supplierId,
+        int $permitId,
+        string $effectiveFrom,
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT effective_from FROM payroll_person_foreign_permits
+              WHERE supplier_id = ? AND supersedes_permit_id = ? FOR UPDATE',
+        );
+        $stmt->execute([$supplierId, $permitId]);
+        $successor = $stmt->fetchColumn();
+        if ($successor !== false && $effectiveFrom >= (string) $successor) {
+            throw new PayrollForeignPermitException(
+                'permit_successor_must_be_later',
+                'Na tohle oprávnění navazuje obnovení od ' . (string) $successor
+                . '. Účinnost proto musí zůstat dřívější — opravte nejdřív to obnovení.',
+            );
+        }
+    }
+
+    private function translate(\Throwable $e): \Throwable
+    {
+        if ($e instanceof \PDOException && (string) $e->getCode() === '45000') {
+            return new PayrollForeignPermitException(
+                'permit_storage_rejected',
+                'Oprávnění nebylo možné bezpečně uložit.',
+                422,
+            );
+        }
+        if ($e instanceof \PDOException && (string) $e->getCode() === '23000') {
+            return new PayrollForeignPermitException(
+                'permit_has_successor',
+                'Na tohle oprávnění se odkazuje jiný záznam, takže ho nelze smazat.',
+                409,
+            );
+        }
+
+        return $e;
+    }
+
     /** @param array<string,mixed> $input
      * @return array{permit_kind:string,permit_label:string,issuing_country_code:string,effective_from:string,valid_until:string,document_id:int,supersedes_permit_id:?int}
      */
@@ -211,9 +481,23 @@ final class PayrollForeignPermitRepository
         ];
     }
 
-    /** @param array{permit_kind:string,effective_from:string,valid_until:string,supersedes_permit_id:?int} $permit */
-    private function assertPredecessorAndOverlap(int $supplierId, int $employeeId, array $permit): void
-    {
+    /**
+     * @param array{permit_kind:string,effective_from:string,valid_until:string,supersedes_permit_id:?int} $permit
+     * @param ?int $selfId ID opravovaného oprávnění — samo se sebou se
+     *     nepřekrývá a samo sebe nesmí nahrazovat.
+     */
+    private function assertPredecessorAndOverlap(
+        int $supplierId,
+        int $employeeId,
+        array $permit,
+        ?int $selfId = null,
+    ): void {
+        if ($selfId !== null && $permit['supersedes_permit_id'] === $selfId) {
+            throw new PayrollForeignPermitException(
+                'invalid_permit_predecessor',
+                'Oprávnění nemůže nahrazovat samo sebe.',
+            );
+        }
         if ($permit['supersedes_permit_id'] !== null) {
             $predecessor = $this->db->pdo()->prepare(
                 'SELECT id, effective_from FROM payroll_person_foreign_permits
@@ -232,9 +516,16 @@ final class PayrollForeignPermitRepository
             }
             $successor = $this->db->pdo()->prepare(
                 'SELECT id FROM payroll_person_foreign_permits
-                  WHERE supplier_id = ? AND supersedes_permit_id = ? FOR UPDATE',
+                  WHERE supplier_id = ? AND supersedes_permit_id = ?
+                    AND (? IS NULL OR id <> ?)
+                  FOR UPDATE',
             );
-            $successor->execute([$supplierId, $permit['supersedes_permit_id']]);
+            $successor->execute([
+                $supplierId,
+                $permit['supersedes_permit_id'],
+                $selfId,
+                $selfId,
+            ]);
             if ($successor->fetchColumn() !== false) {
                 throw new PayrollForeignPermitException(
                     'permit_predecessor_already_superseded',
@@ -242,11 +533,19 @@ final class PayrollForeignPermitRepository
                 );
             }
         }
+        /*
+         * Z překryvu se vyjímá sám opravovaný řádek a OBA konce jeho řetězu
+         * obnovení — ten, který nahrazuje, i ten, který nahrazuje jeho. Bez
+         * druhé strany by se předchůdce nedal opravit, jakmile na něj navázalo
+         * obnovení; a to je právě ten řádek, u kterého se překlep objeví.
+         */
         $overlap = $this->db->pdo()->prepare(
             'SELECT id FROM payroll_person_foreign_permits
               WHERE supplier_id = ? AND employee_id = ? AND permit_kind = ?
                 AND effective_from <= ? AND valid_until >= ?
                 AND (? IS NULL OR id <> ?)
+                AND (? IS NULL OR id <> ?)
+                AND (? IS NULL OR supersedes_permit_id IS NULL OR supersedes_permit_id <> ?)
               FOR UPDATE',
         );
         $overlap->execute([
@@ -257,6 +556,10 @@ final class PayrollForeignPermitRepository
             $permit['effective_from'],
             $permit['supersedes_permit_id'],
             $permit['supersedes_permit_id'],
+            $selfId,
+            $selfId,
+            $selfId,
+            $selfId,
         ]);
         if ($overlap->fetchColumn() !== false) {
             throw new PayrollForeignPermitException(

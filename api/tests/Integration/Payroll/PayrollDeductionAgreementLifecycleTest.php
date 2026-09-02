@@ -183,6 +183,65 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
         self::assertSame(20_000, $ended['ledger'][0]['amount_minor']);
     }
 
+    /**
+     * Omylem ukončená dohoda se vrací. „Ukončit" šlo zmáčknout jedním klikem
+     * a zpátky nevedlo nic — dohoda se nedala ani měnit, ani obnovit, takže se
+     * musela zakládat znovu a rozpadla se historie srážek. Návrat míří do
+     * POZASTAVENO, ne do AKTIVNÍ: srážky se samy nerozjedou.
+     */
+    public function testEndedAgreementCanBeReopenedIntoPausedState(): void
+    {
+        $agreement = $this->createAgreement('Spoření', 20_000);
+        $agreementId = (int) $agreement['id'];
+
+        $ended = $this->repository->transition(
+            $this->supplierId,
+            $agreementId,
+            DeductionAgreementCommand::End,
+            (int) $agreement['row_version'],
+            '2026-07-31',
+            'Překlep',
+            null,
+        );
+        self::assertSame('ended', $ended['status']);
+        self::assertSame('2026-07-31', $ended['valid_to']);
+
+        $reopened = $this->repository->transition(
+            $this->supplierId,
+            $agreementId,
+            DeductionAgreementCommand::Reopen,
+            (int) $ended['row_version'],
+            null,
+            'Ukončeno omylem',
+            null,
+        );
+        self::assertSame('paused', $reopened['status']);
+        self::assertNull($reopened['valid_to']);
+        self::assertFalse($reopened['enters_payroll_run']);
+        self::assertSame(
+            'reopened',
+            $reopened['versions'][count($reopened['versions']) - 1]['change_kind'],
+        );
+
+        // A odsud už jde dohoda zase opravit i obnovit.
+        $updated = $this->repository->update(
+            $this->supplierId,
+            $agreementId,
+            DeductionAgreementTerms::fromRequest([
+                'title' => 'Spoření (opraveno)',
+                'deduction_kind' => 'other',
+                'priority_no' => 100,
+                'requested_minor' => 25_000,
+                'valid_from' => '2026-06-01',
+            ]),
+            (int) $reopened['row_version'],
+            null,
+            null,
+            null,
+        );
+        self::assertSame('Spoření (opraveno)', $updated['title']);
+    }
+
     public function testAgreementWithLedgerHistoryCannotBeCancelled(): void
     {
         $agreement = $this->createAgreement('Náhrada škody', 15_000);

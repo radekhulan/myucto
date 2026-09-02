@@ -54,10 +54,17 @@ const periodYear = Number(linkedPeriod.slice(0, 4))
 const periodMonthIndex = Number(linkedPeriod.slice(5, 7)) - 1
 const monthStart = `${linkedPeriod}-01`
 const monthEnd = localDate(new Date(periodYear, periodMonthIndex + 1, 0))
-const applicationQuarter = Math.floor(today.getMonth() / 3) + 1
+/*
+ * Průměr se předvyplňuje na ČTVRTLETÍ OTEVŘENÉHO OBDOBÍ, ne na dnešní.
+ * Kdo sem přijde ze srpnového běhu v listopadu, potřebuje průměr pro Q3;
+ * formulář mu ale nabízel Q4, ona ho tak uložila — a srpnová dovolená ten
+ * průměr nesměla použít (kontrola žádá shodné čtvrtletí), takže musela počítat
+ * znovu. Rok i čtvrtletí jdou pořád přepsat ručně.
+ */
+const applicationQuarter = Math.floor(periodMonthIndex / 3) + 1
 const applicationQuarterStartMonth = (applicationQuarter - 1) * 3
-const decisiveFrom = localDate(new Date(year, applicationQuarterStartMonth - 3, 1))
-const decisiveTo = localDate(new Date(year, applicationQuarterStartMonth, 0))
+const decisiveFrom = localDate(new Date(periodYear, applicationQuarterStartMonth - 3, 1))
+const decisiveTo = localDate(new Date(periodYear, applicationQuarterStartMonth, 0))
 
 const loading = ref(true)
 /*
@@ -93,7 +100,7 @@ const selectedEmployeeId = ref<number | null>(null)
 const selectedEmploymentId = ref<number | null>(null)
 const filterFrom = ref(monthStart)
 const filterTo = ref(monthEnd)
-const leaveYear = ref(year)
+const leaveYear = ref(periodYear)
 const minimumFormYear = year - 5
 const maximumFormYear = year + 2
 const canWrite = computed(() => auth.canWrite('payroll.time.write'))
@@ -127,7 +134,7 @@ const absenceForm = reactive({
 })
 const averageForm = reactive({
   employment_id: 0,
-  applicable_year: year,
+  applicable_year: periodYear,
   applicable_quarter: applicationQuarter,
   decisive_from: decisiveFrom,
   decisive_to: decisiveTo,
@@ -151,7 +158,7 @@ const averageSuggestionError = ref('')
 const averagePrefill = ref<{ gross: number, hours: number, days: number } | null>(null)
 const entitlementForm = reactive({
   employment_id: 0,
-  leave_year: year,
+  leave_year: periodYear,
   weekly_hours: 40,
   entitlement_weeks: 4,
   continuous_calendar_days: 365,
@@ -160,8 +167,8 @@ const entitlementForm = reactive({
 })
 const entryForm = reactive({
   employment_id: 0,
-  leave_year: year,
-  effective_date: `${year}-01-01`,
+  leave_year: periodYear,
+  effective_date: `${periodYear}-01-01`,
   entry_type: 'adjustment',
   hours_delta: 1,
   reason: '',
@@ -231,11 +238,12 @@ const needsAverage = computed(() =>
     .includes(absenceForm.absence_type),
 )
 /*
- * Proč „Vytvořit" nejde zmáčknout. Dovolená, DPN a překážky se počítají
- * z průměrného výdělku, takže bez vybraného průměru nemá server z čeho počítat.
- * Rozlišujeme dva různé stavy: průměr existuje a jen není vybraný (uživatel ho
- * doplní tady) versus pro vztah žádný spočítaný není (musí se nejdřív spočítat
- * na záložce Průměry — bez odkazu tam uživatel netrefil).
+ * Co bude chybět při SCHVÁLENÍ. Dovolená, DPN a překážky se počítají
+ * z průměrného výdělku, takže bez něj nemá server z čeho počítat náhradu —
+ * uložit nepřítomnost to ale nebrání, jen ji nepůjde schválit. Rozlišujeme dva
+ * různé stavy: průměr existuje a jen není vybraný (uživatel ho doplní tady)
+ * versus pro vztah žádný spočítaný není (musí se nejdřív spočítat na záložce
+ * Průměry — bez odkazu tam uživatel netrefil).
  */
 const missingAverage = computed(() =>
   needsAverage.value && absenceForm.average_snapshot_id === null)
@@ -261,9 +269,15 @@ const absenceBlockedReason = computed<string | null>(() => {
     : t('payroll_absence.absences.average_required_hint')
 })
 
-const canCreateAbsence = computed(() =>
-  !saving.value && (!needsAverage.value || absenceForm.average_snapshot_id !== null),
-)
+/*
+ * Chybějící průměr UŽ NEBLOKUJE ULOŽENÍ. Nepřítomnost je evidence: účetní se
+ * o dovolené nebo neschopence dozví dřív, než je spočítaný a schválený
+ * čtvrtletní průměr, a obrazovka, která ji do té doby nepustí nic uložit, ji
+ * nutí držet papír na stole a pamatovat si ho. Kontrola se posunula tam, kde
+ * z ní vznikají peníze — na SCHVÁLENÍ absence (server ji tam odmítne s hláškou,
+ * co doplnit). Věta pod tlačítkem zůstává, ale je to upozornění, ne závora.
+ */
+const canCreateAbsence = computed(() => !saving.value)
 
 function exactError(error: any, fallbackKey: string) {
   return apiErrorMessage(error, t(fallbackKey))
@@ -451,10 +465,6 @@ function showAllEmployees() {
 }
 
 async function createAbsence() {
-  if (!canCreateAbsence.value) {
-    toast.error(t('payroll_absence.messages.average_required'))
-    return
-  }
   absenceError.value = ''
   saving.value = true
   try {
@@ -1147,7 +1157,7 @@ onMounted(async () => {
             <button
               :class="btnFilled('primary')"
               :disabled="!canCreateAbsence"
-              :title="disabledTitle(!canCreateAbsence, absenceBlockedReason)"
+              :title="disabledTitle(!canCreateAbsence, null)"
               data-test="absence-create"
             >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

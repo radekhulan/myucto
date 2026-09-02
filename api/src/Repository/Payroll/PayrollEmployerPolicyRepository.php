@@ -59,9 +59,23 @@ final class PayrollEmployerPolicyRepository
         $stmt->execute([$supplierId, $effectiveOn, $effectiveOn]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if (count($rows) > 1) {
-            throw new \RuntimeException(
-                'K danému dni je účinných více zaměstnavatelských politik.',
-            );
+            /*
+             * Překryv politik je VSTUPNÍ chyba, ne porucha serveru. Jako
+             * `\RuntimeException` propadal až ven a mzdový běh se na něm
+             * rozsypal na HTTP 500 — účetní viděla „chyba serveru" a neměla
+             * z toho jak poznat, že si jen dvě politiky přebíjejí datum.
+             * `PayrollEmployerPolicyOverlapException` je `InvalidArgumentException`,
+             * kterou volající akce už překládají na srozumitelnou 422.
+             */
+            throw new PayrollEmployerPolicyOverlapException(sprintf(
+                'K %s jsou účinné hned dvě zaměstnavatelské mzdové politiky '
+                    . '(#%d a #%d). Otevřete Mzdy → Nastavení zaměstnavatele → '
+                    . 'Mzdové politiky a jedné z nich doplňte datum „platí do“, '
+                    . 'aby se období nepřekrývala.',
+                $effectiveOn,
+                (int) ($rows[0]['id'] ?? 0),
+                (int) ($rows[1]['id'] ?? 0),
+            ));
         }
 
         return isset($rows[0]) ? self::hydrate($rows[0]) : null;

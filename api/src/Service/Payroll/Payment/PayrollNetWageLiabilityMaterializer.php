@@ -774,9 +774,21 @@ final class PayrollNetWageLiabilityMaterializer
                 $verifiedOn,
                 'datum ověření platebního účtu',
             );
-            if ($verifiedDate > $paymentDate) {
+            /*
+             * Stejná úleva, jakou už má institucionální větev
+             * (`PayrollInstitutionVerificationWindow`): u období, jehož výplata
+             * je dávno za námi, se ověření měří k dnešku, ne k datu výplaty.
+             * Bez toho nešlo dopočítat žádný zpětně přebíraný měsíc — účet je
+             * ověřený dnes, výplata byla v březnu — a jediným východiskem bylo
+             * zpětně zfalšovat datum ověření.
+             */
+            if ($verifiedDate > PayrollInstitutionVerificationWindow::latestAcceptable(
+                $paymentDate,
+            )) {
                 throw new \DomainException(
-                    "Zmrazený účet {$id} je ověřen až po datu výplaty.",
+                    "Zmrazený účet {$id} je ověřen až po datu výplaty "
+                    . "({$verifiedOn} > {$paymentDate}). Ověřte účet dřívějším "
+                    . 'dokladem, nebo nejdřív dopočítejte starší období.',
                 );
             }
             $accounts[$id] = [

@@ -993,11 +993,18 @@ final class PayrollPersonStatutoryEvidenceRepository
                 $values['health_evidence_document_sha256'] = $existingDocument['sha256'];
                 continue;
             }
-            if ($existingDocument !== null && $documentId !== $existingDocument['id']) {
-                throw new InvalidArgumentException(
-                    'DMS důkaz zdravotního pojištění je po připojení neměnný.',
-                );
-            }
+            /*
+             * Připojený doklad JDE vyměnit.
+             *
+             * Býval neměnný „po připojení" (a stejně to hlídal i trigger,
+             * migrace 1602). Kdo připojil špatný sken, neměl jak ho opravit:
+             * řádek se nedal změnit a smazat ho lze jen mimo období uzavřené
+             * schválenou mzdou. Věcná ochrana je jinde a beze změny — řádek
+             * ve zmrazeném období se nepřepisuje, ale uzavírá a nová verze
+             * vzniká jako další řádek (viz plannedIntervalUpdate()). Doklad
+             * se pořád ověřuje: musí to být aktivní dokument této firmy
+             * a otisk se čte ze serveru, ne z požadavku.
+             */
             if ($documentId === null) {
                 if ($row['id'] === null
                     && $values['insurer_evidence_reference'] !== null

@@ -22,6 +22,10 @@ final class PayrollEmploymentLifecycleTest extends TestCase
         yield 'end suspended' => ['suspended', 'ended'];
         yield 'archive ended' => ['ended', 'archived'];
         yield 'archive no show' => ['no_show', 'archived'];
+        // Návrat z omylem zapsaného ukončení. Datum konce se zapisuje jedním
+        // tlačítkem a formulář datum nabízí sám; splést se je běžné a opravit
+        // to pak nešlo — podmínky ukončeného vztahu se editovat nesmí.
+        yield 'reopen wrongly ended' => ['ended', 'active'];
     }
 
     #[DataProvider('allowedTransitions')]
@@ -37,7 +41,8 @@ final class PayrollEmploymentLifecycleTest extends TestCase
      * v budoucnu, ne jako povinná mezizastávka.
      *
      * `archived → active` odmítnuté zůstává — z archivu vede cesta jen zpátky
-     * do stavu, ze kterého se archivovalo, ne k oživení skončeného vztahu.
+     * do stavu, ze kterého se archivovalo. Oživit vztah jde až odtamtud
+     * (`archived → ended → active`), takže se to dělá vědomě ve dvou krocích.
      */
     public function testRejectsSkippedAndReverseTransitions(): void
     {
@@ -46,7 +51,7 @@ final class PayrollEmploymentLifecycleTest extends TestCase
             ['planned', 'ended'],
             ['planned', 'suspended'],
             ['active', 'planned'],
-            ['ended', 'active'],
+            ['ended', 'preregistered'],
             ['archived', 'active'],
             ['archived', 'planned'],
         ] as [$from, $to]) {

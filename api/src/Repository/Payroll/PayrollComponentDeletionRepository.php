@@ -36,6 +36,11 @@ final class PayrollComponentDeletionRepository extends PayrollRowDeletionReposit
                     . 'platnosti nebo ji deaktivujte.',
                 'sql' => 'component.code IN (' . self::defaultCodeList() . ')',
             ],
+            /*
+             * Zrušený vstup není pohyb — je to zahozený pokus. Blokoval ale
+             * mazání natrvalo, takže jediný omylem založený a hned zrušený
+             * vstup uměl složku uvěznit v číselníku navždy.
+             */
             'input' => [
                 'code' => 'payroll_component_used_in_inputs',
                 'message' => 'Složka je použitá v mzdových vstupech. Jde o peníze, takže '
@@ -45,6 +50,7 @@ final class PayrollComponentDeletionRepository extends PayrollRowDeletionReposit
                       FROM payroll_inputs input
                      WHERE input.supplier_id = component.supplier_id
                        AND input.component_id = component.id
+                       AND input.status <> "cancelled"
                 )',
             ],
             'recurring' => [

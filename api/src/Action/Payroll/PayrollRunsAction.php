@@ -67,8 +67,81 @@ final class PayrollRunsAction
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
 
+        $supplierId = $this->currentSupplierId($request);
+
         return Json::ok($response, [
             'ownership' => $this->ownership->legacyClaimStatus(
+                $supplierId,
+                $year,
+                $month,
+            ),
+            /*
+             * Druhý směr musí obrazovka vidět taky. Bez něj uměla nabídnout jen
+             * „převzít měsíc z původního zaúčtování"; cesta zpátky nebyla vidět,
+             * protože neexistovala.
+             */
+            'payroll_ownership' => $this->ownership->payrollClaimStatus(
+                $supplierId,
+                $year,
+                $month,
+            ),
+        ]);
+    }
+
+    /**
+     * Uvolnění rezervace, kterou drží MZDOVÝ MODUL — cesta zpět k původnímu
+     * ruční zaúčtování.
+     *
+     * Rezervaci pro modul zabírá už samo založení běhu, tedy dřív, než se
+     * cokoliv spočítá. Kdo běh založil na špatný měsíc, zabral ho natrvalo:
+     * zrušení běhu rezervaci neuvolní a smazat běh po prvním „Uzamknout
+     * vstupy" už nejde. Uvolnění je fail-closed — služba ho odmítne, dokud za
+     * období existuje živý běh, schválená revize, zaúčtování, platba, podání
+     * nebo vydaný doklad — a je auditované včetně povinného důvodu.
+     *
+     * @param array<string,string> $args
+     */
+    public function releasePayrollPeriod(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.reopen',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        try {
+            [$year, $month] = self::periodParts($args['period'] ?? null);
+            $this->ownership->releasePayroll(
+                $this->currentSupplierId($request),
+                $year,
+                $month,
+                $this->requiredUserId($request),
+                $this->requiredString($body, 'reason'),
+                $this->clientIp($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (PayrollPeriodOwnedException $e) {
+            return Json::error(
+                $response,
+                'payroll_period_owned',
+                $e->getMessage(),
+                409,
+            );
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, [
+            'released' => true,
+            'payroll_ownership' => $this->ownership->payrollClaimStatus(
                 $this->currentSupplierId($request),
                 $year,
                 $month,
@@ -323,6 +396,15 @@ final class PayrollRunsAction
                 PayrollTimeValue::int($item['id'] ?? null, 'run.id'),
             );
             $item['can_delete'] = $deletion !== null && $deletion->canDelete;
+            /*
+             * Samotné `can_delete` jen schová tlačítko a účetní se nedozví NIC.
+             * Přitom rozhodnutí důvod zná a zbytek modulu ho vedle příznaku
+             * posílá běžně ({@see PayrollRowDeletionRepository}) — běhy byly
+             * jediné, kde se zahazoval.
+             */
+            $item['delete_blocker'] = $deletion === null
+                ? null
+                : $deletion->blockerMessage;
         }
         unset($item);
 

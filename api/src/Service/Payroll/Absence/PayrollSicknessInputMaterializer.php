@@ -278,7 +278,14 @@ final class PayrollSicknessInputMaterializer
             $amounts[PayrollTimeValue::string($row['period_start'] ?? null, 'period_start')] = $amount;
         }
         if ($amounts === []) {
-            throw new \DomainException('DPN nemá segmenty náhrady k promítnutí do mzdy.');
+            // Nejčastější příčina je chybějící rozvrh: náhrada mzdy podle § 192
+            // ZP se počítá ze zameškaných rozvržených směn, a bez nich je nula.
+            throw new \DomainException(
+                'Neschopenka nemá ani jednu zameškanou rozvrženou směnu v okně '
+                . 'náhrady mzdy (§ 192 ZP), takže není co promítnout do mzdy. '
+                . 'Rozvrhněte a publikujte směny v Docházce a schválení zopakujte; '
+                . 'nepřítomnost zůstává uložená.',
+            );
         }
 
         return $amounts;

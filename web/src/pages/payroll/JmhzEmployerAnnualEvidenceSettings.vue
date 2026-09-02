@@ -12,7 +12,21 @@ import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 const props = defineProps<{ canWrite: boolean }>()
 const { t, locale } = useI18n()
 const toast = useToast()
-const reportYear = ref(Math.max(2026, new Date().getFullYear()))
+/*
+ * Roční údaje zaměstnavatele se posílají v PROSINCOVÉM hlášení, takže se
+ * vyplňují až v lednu — po přelomu roku. Předvyplněný běžný rok proto mířil
+ * o rok vedle a evidence je jen přírůstková: omylem uložený ročník už ze
+ * seznamu nezmizí a příští prosinec se z něj tiše čerpá. Do konce března
+ * proto nabízíme rok, za který se hlásí.
+ */
+function defaultReportYear(): number {
+  const now = new Date()
+  const year = now.getMonth() <= 2 ? now.getFullYear() - 1 : now.getFullYear()
+
+  return Math.max(2026, year)
+}
+
+const reportYear = ref(defaultReportYear())
 const view = ref<PayrollJmhzEmployerAnnualEvidenceView | null>(null)
 const loading = ref(false)
 const saving = ref(false)

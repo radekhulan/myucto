@@ -849,6 +849,82 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
     }
 
     /**
+     * Špatně datovaná verze podmínek se dá posunout — ale jen výslovně.
+     *
+     * Formulář nové verze nabízí jako výchozí účinnost DNEŠEK. Kdo přidal
+     * verzi dřív, než si vzpomněl, že zvýšení platí od 1. 7., si tím zapsal
+     * špatné datum a neuměl ho vrátit: oprava účinnost mlčky přepisovala,
+     * nová verze musí začínat později a verzi nejde smazat.
+     */
+    public function testEffectiveDateCanBeCorrectedOnRequest(): void
+    {
+        $employment = $this->create($this->employeeId, 'OPRAVA-DATUM', 'employment', true);
+        $employment = $this->terms($employment, $this->termsPayload(true, '2026-09-01'));
+        self::assertSame('2026-09-01', $employment['terms'][0]['effective_from']);
+
+        $corrected = $this->correctTerms($employment, [
+            'correct_effective_from' => true,
+            'effective_from' => '2026-07-01',
+        ] + $this->termsPayload(true, '2026-07-01'));
+
+        self::assertSame('2026-07-01', $corrected['terms'][0]['effective_from']);
+        // Řada zůstává souvislá: předchozí verze si zkrátila konec.
+        self::assertSame('2026-06-30', $corrected['terms'][1]['effective_to']);
+    }
+
+    /** Za předchozí verzi se posunout nedá — řekne se to větou, ne mlčením. */
+    public function testEffectiveDateCorrectionStopsAtThePreviousVersion(): void
+    {
+        $employment = $this->create($this->employeeId, 'OPRAVA-DATUM-2', 'employment', true);
+        $employment = $this->terms($employment, $this->termsPayload(true, '2026-09-01'));
+
+        $response = $this->action->correctTerms(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$employment['id']}/terms/current",
+                [
+                    'row_version' => $employment['row_version'],
+                    'correct_effective_from' => true,
+                    'effective_from' => '2025-12-01',
+                ] + $this->termsPayload(true, '2025-12-01'),
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertStringContainsString(
+            'předchozí verze podmínek',
+            (string) $this->json($response)['error']['message'],
+        );
+    }
+
+    /**
+     * Omylem zapsané ukončení jde vzít zpět.
+     *
+     * Datum konce se zapisuje jedním tlačítkem a formulář ho nabízí sám;
+     * splést se je běžné. Opravit ho ale nešlo — podmínky ukončeného vztahu
+     * se editovat nesmí — a jediná cesta ven bylo smazat celý vztah, což
+     * u vztahu s navázanou mzdou nejde vůbec.
+     */
+    public function testWronglyEndedEmploymentCanBeReopened(): void
+    {
+        $employment = $this->create($this->employeeId, 'NAVRAT', 'employment', true);
+        $employment = $this->transition($employment, 'active', '2026-01-01');
+        $employment = $this->transition($employment, 'ended', '2026-02-28');
+        self::assertSame('2026-02-28', $employment['end_date']);
+        self::assertContains('active', $employment['allowed_transitions']);
+
+        $reopened = $this->transition($employment, 'active', '2026-03-01');
+
+        self::assertSame('active', $reopened['status']);
+        self::assertNull($reopened['end_date']);
+        // A podmínky jde zase opravovat — právě kvůli tomu se návrat dělá.
+        $corrected = $this->correctTerms($reopened, $this->termsPayload(true, '2026-01-01'));
+        self::assertSame('active', $corrected['status']);
+    }
+
+    /**
      * Nová verze zůstává tou správnou cestou pro skutečnou změnu podmínek —
      * obě cesty musí vedle sebe fungovat, jinak by oprava jen přejmenovala
      * problém.

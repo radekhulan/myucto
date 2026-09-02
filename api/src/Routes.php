@@ -858,6 +858,20 @@ final class Routes
                 '/enforcement/people/{employeeId:[0-9]+}/dependants',
                 [PayrollEnforcementAction::class, 'dependants'],
             );
+            /*
+             * Oprava a smazání vyživované osoby. Nezabavitelná částka se čte
+             * podle `valid_from`, takže dítě zapsané se špatnou platností
+             * znamená, že se srazilo VÍC, než zákon dovoluje — a bez těchto
+             * dvou cest to nešlo opravit vůbec.
+             */
+            $g->put(
+                '/enforcement/people/{employeeId:[0-9]+}/dependants/{dependantId:[0-9]+}',
+                [PayrollEnforcementAction::class, 'updateDependant'],
+            );
+            $g->delete(
+                '/enforcement/people/{employeeId:[0-9]+}/dependants/{dependantId:[0-9]+}',
+                [PayrollEnforcementAction::class, 'deleteDependant'],
+            );
             $g->get(
                 '/benefit-baskets',
                 [PayrollBenefitBasketOverviewAction::class, 'list'],
@@ -1018,6 +1032,13 @@ final class Routes
             $g->post(
                 '/periods/{period:[0-9]{4}-[0-9]{2}}/legacy-recapitulation/hand-over',
                 [PayrollRunsAction::class, 'handOverLegacyRecapitulation'],
+            );
+            // Uvolnění období, které si modul zabral mzdovým během. Zrušení
+            // běhu ho dřív neuvolnilo a hláška přitom tvrdila, že ano —
+            // měsíc tak zůstal zamčený napořád.
+            $g->post(
+                '/periods/{period:[0-9]{4}-[0-9]{2}}/ownership/release-payroll',
+                [PayrollRunsAction::class, 'releasePayrollPeriod'],
             );
             // MZ-01-W07 — chybějící půlka override: varování vyžadující schválení
             // dosud zastavilo `approve` a nešlo ho odklidit žádnou routou.

@@ -145,7 +145,7 @@ final class PayrollForeignPermitApiTest extends TestCase
         self::assertSame(0, $this->countPermits());
     }
 
-    public function testPermitRowsAreAppendOnlyAndAnOverlappingRenewalMustNameItsPredecessor(): void
+    public function testAnOverlappingRenewalMustNameItsPredecessorAndOwnershipStaysImmutable(): void
     {
         $first = $this->json($this->create($this->payload($this->document($this->supplierId, 'company')), '2026-08-20'))['permits']['history'][0];
 
@@ -178,10 +178,81 @@ final class PayrollForeignPermitApiTest extends TestCase
         self::assertSame(200, $renewed->getStatusCode());
         self::assertCount(2, $this->json($renewed)['permits']['history']);
 
+        /*
+         * Oprava překlepu v označení projde — oprávnění bývalo neměnné
+         * a formulář nabízí jako výchozí účinnost dnešek, takže překlep neměl
+         * cestu ven (migrace 1740). Vlastnictví řádku neměnné ZŮSTÁVÁ:
+         * přepsat firmu nebo osobu je útok, ne oprava.
+         */
         $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_person_foreign_permits SET permit_label = ? WHERE id = ?')
+            ->execute(['Opravené označení', $first['id']]);
+        $label = $pdo->prepare('SELECT permit_label FROM payroll_person_foreign_permits WHERE id = ?');
+        $label->execute([$first['id']]);
+        self::assertSame('Opravené označení', (string) $label->fetchColumn());
+
         $this->expectException(\PDOException::class);
-        $pdo->prepare('UPDATE payroll_person_foreign_permits SET permit_label = "tampered" WHERE id = ?')
+        $pdo->prepare('UPDATE payroll_person_foreign_permits SET employee_id = employee_id + 1 WHERE id = ?')
             ->execute([$first['id']]);
+    }
+
+    /**
+     * Oprava a smazání zaevidovaného oprávnění.
+     *
+     * Oprávnění bývalo neměnné na úrovni databáze (UPDATE i DELETE končily
+     * SIGNALem) a formulář nabízí jako výchozí účinnost DNEŠEK. Kdo se v datu
+     * nebo v čísle spletl, nedostal se z toho: opravit nešlo, smazat nešlo
+     * a „obnovení" musí začínat později, takže se účinnost nedala vrátit
+     * dozadu. Řetěz obnovení chráněný zůstává.
+     */
+    public function testWronglyRecordedPermitCanBeCorrectedAndDeleted(): void
+    {
+        $document = $this->document($this->supplierId, 'company');
+        $stored = $this->json($this->create($this->payload($document), '2026-08-20'))['permits']['history'][0];
+
+        $corrected = $this->create([
+            ...$this->payload($document),
+            'id' => $stored['id'],
+            'permit_label' => 'Povolení k pobytu — opraveno',
+            'effective_from' => '2025-06-01',
+            'valid_until' => '2026-09-15',
+        ], '2026-08-20');
+        self::assertSame(200, $corrected->getStatusCode(), (string) $corrected->getBody());
+        $history = $this->json($corrected)['permits']['history'];
+        self::assertCount(1, $history);
+        self::assertSame('2025-06-01', $history[0]['effective_from']);
+        self::assertSame('Povolení k pobytu — opraveno', $history[0]['permit_label']);
+
+        // Na oprávnění, na které navazuje obnovení, se sahat nedá — smazáním
+        // by řetěz ukazoval do prázdna.
+        $renewal = $this->json($this->create([
+            ...$this->payload($this->document($this->supplierId, 'company')),
+            'effective_from' => '2026-09-16',
+            'valid_until' => '2027-09-15',
+            'supersedes_permit_id' => $stored['id'],
+        ], '2026-09-20'))['permits']['history'];
+        self::assertCount(2, $renewal);
+
+        $blocked = $this->action->create(
+            $this->request('POST')->withParsedBody(['id' => $stored['id'], 'delete' => true]),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(409, $blocked->getStatusCode());
+        self::assertSame('permit_has_successor', $this->json($blocked)['error']['code']);
+
+        $successorId = (int) array_values(array_filter(
+            $renewal,
+            static fn (array $row): bool => $row['supersedes_permit_id'] !== null,
+        ))[0]['id'];
+        $deleted = $this->action->create(
+            $this->request('POST')->withParsedBody(['id' => $successorId, 'delete' => true]),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(200, $deleted->getStatusCode(), (string) $deleted->getBody());
+        self::assertCount(1, $this->json($deleted)['permits']['history']);
+        self::assertSame(1, $this->countPermits());
     }
 
     public function testBearerRequestFailsClosedEvenWhenItCarriesACompanyDocumentId(): void

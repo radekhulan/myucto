@@ -221,8 +221,10 @@ describe('AbsenceManagement', () => {
   })
 
   /*
-   * Zašedlé „Vytvořit" u dovolené dřív mlčelo. Když navíc pro vztah není
-   * spočítaný žádný průměr, uživatel neměl jak zjistit, že se počítá jinde.
+   * Chybějící průměr UŽ NEBLOKUJE ULOŽENÍ — je to podmínka schválení, ne zápisu.
+   * Věta pod tlačítkem i odkaz na Průměry zůstávají jako upozornění: uživatel má
+   * vědět, co bude při schvalování chybět, ale rozdělaná evidence se nesmí
+   * ztratit jen proto, že průměr ještě nikdo nespočítal.
    */
   it('points to the Averages tab when no average exists for the relation', async () => {
     m.averages.mockResolvedValue([])
@@ -231,9 +233,7 @@ describe('AbsenceManagement', () => {
     await flushPromises()
 
     const button = wrapper.get('[data-test="absence-create"]')
-    expect(button.attributes('disabled')).toBeDefined()
-    expect(button.attributes('title'))
-      .toBe('payroll_absence.absences.average_missing_for_relation')
+    expect(button.attributes('disabled')).toBeUndefined()
     expect(wrapper.get('[data-test="absence-create-blocked"]').text())
       .toBe('payroll_absence.absences.average_missing_for_relation')
 
@@ -274,8 +274,10 @@ describe('AbsenceManagement', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="go-to-averages"]').exists()).toBe(false)
-    expect(wrapper.get('[data-test="absence-create"]').attributes('title'))
+    expect(wrapper.get('[data-test="absence-create-blocked"]').text())
       .toBe('payroll_absence.absences.average_required_hint')
+    // Upozornění, ne závora.
+    expect(wrapper.get('[data-test="absence-create"]').attributes('disabled')).toBeUndefined()
   })
 
   it('renders a responsive DPN card and sends explicit review flags', async () => {
@@ -383,16 +385,24 @@ describe('AbsenceManagement', () => {
     )
   })
 
-  it('does not submit an absence requiring an approved average without one', async () => {
+  /*
+   * Uložit musí jít i bez průměru. Účetní se o dovolené dozví dřív, než je
+   * čtvrtletní průměr spočítaný a schválený — zamčený formulář ji nutil ten
+   * papír někam odložit a vrátit se k němu. Kontrola je na schválení.
+   */
+  it('saves an absence requiring an approved average even without one', async () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()
 
     const create = wrapper.findAll('button')
       .find(button => button.text().includes('payroll_absence.absences.create'))
-    expect(create!.attributes('disabled')).toBeDefined()
-    await create!.trigger('click')
+    expect(create!.attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-test="absence-form"]').trigger('submit')
+    await flushPromises()
 
-    expect(m.createAbsence).not.toHaveBeenCalled()
+    expect(m.createAbsence).toHaveBeenCalled()
+    expect(m.createAbsence.mock.calls.at(-1)?.[0])
+      .toMatchObject({ average_snapshot_id: null })
     wrapper.unmount()
   })
 

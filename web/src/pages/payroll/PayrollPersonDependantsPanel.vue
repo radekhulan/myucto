@@ -295,6 +295,54 @@ async function save(): Promise<void> {
   }
 }
 
+/**
+ * Smazání vyživované osoby a nároku.
+ *
+ * Evidence uměla jen zakládat a měnit — osoba zapsaná u špatného zaměstnance
+ * nebo nárok u špatného dítěte se z aplikace nedaly odstranit vůbec.
+ * „Ukončit datem" to nenahrazuje: záznam zůstane v přehledu, drží pořadí dítěte
+ * i rodné číslo. Co kryje schválená mzda, odmítne server větou.
+ */
+async function removeDependant(dependant: PayrollDependant): Promise<void> {
+  if (!props.canWrite || saving.value) return
+  saving.value = true
+  errorMessage.value = ''
+  try {
+    data.value = await payrollApi.deletePersonDependant(
+      props.personId,
+      dependant.id,
+      dependant.row_version,
+    )
+    toast.success(t('common.deleted'))
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error, t('common.delete_failed'))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeClaim(
+  dependant: PayrollDependant,
+  claim: PayrollDependantClaim,
+): Promise<void> {
+  if (!props.canWrite || saving.value) return
+  saving.value = true
+  errorMessage.value = ''
+  try {
+    data.value = await payrollApi.deletePersonDependantClaim(
+      props.personId,
+      dependant.id,
+      claim.id,
+      claim.row_version,
+    )
+    toast.success(t('common.deleted'))
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error, t('common.delete_failed'))
+  } finally {
+    saving.value = false
+  }
+}
+
 function relationLabel(relation: PayrollDependantRelation): string {
   return t(`payroll.people.dependants.relations.${relation}`)
 }
@@ -390,6 +438,9 @@ function creditLabel(claim: PayrollDependantClaim): string {
                   <td :colspan="detailColspan" class="bg-neutral-50 px-4 py-4">
                   <div class="space-y-3">
                     <div class="flex flex-wrap gap-2">
+                      <button v-if="canWrite" type="button" :class="btnOutline('danger')" class="whitespace-nowrap" :disabled="saving" :data-test="`delete-dependant-${dependant.id}`" @click="removeDependant(dependant)">
+                        {{ t('common.delete') }}
+                      </button>
                       <button v-if="canWrite" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :data-test="`edit-dependant-${dependant.id}`" @click="openDependantEditor(dependant)">
                         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
                         {{ t('payroll.people.dependants.edit_person') }}
@@ -419,6 +470,9 @@ function creditLabel(claim: PayrollDependantClaim): string {
                         </div>
                         <div class="flex flex-wrap justify-end gap-2">
                           <span v-if="claim.is_frozen" class="rounded-full bg-neutral-100 px-2 py-1 text-xs text-neutral-600">{{ t('payroll.people.dependants.frozen') }}</span>
+                          <button v-if="canWrite && claim.superseded_by_id === null" type="button" :class="btnOutline('danger')" class="whitespace-nowrap" :disabled="saving" :data-test="`delete-claim-${claim.id}`" @click="removeClaim(dependant, claim)">
+                            {{ t('common.delete') }}
+                          </button>
                           <button v-if="canWrite && claim.superseded_by_id === null" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="openClaimEditor(dependant, claim)">
                             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
                             {{ t('payroll.people.dependants.edit_claim') }}
@@ -472,6 +526,9 @@ function creditLabel(claim: PayrollDependantClaim): string {
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
               {{ t(expandedId === dependant.id ? 'payroll.people.dependants.hide' : 'payroll.people.dependants.show') }}
             </button>
+            <button v-if="canWrite" type="button" :class="btnOutline('danger')" class="whitespace-nowrap" :disabled="saving" @click="removeDependant(dependant)">
+              {{ t('common.delete') }}
+            </button>
             <button v-if="canWrite" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="openDependantEditor(dependant)">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
               {{ t('payroll.people.dependants.edit_person') }}
@@ -494,6 +551,9 @@ function creditLabel(claim: PayrollDependantClaim): string {
                   {{ blockerLabel(blocker) }}
                 </li>
               </ul>
+              <button v-if="canWrite && claim.superseded_by_id === null" type="button" :class="btnOutline('danger')" class="mt-2 whitespace-nowrap" :disabled="saving" @click="removeClaim(dependant, claim)">
+                {{ t('common.delete') }}
+              </button>
               <button v-if="canWrite && claim.superseded_by_id === null" type="button" :class="btnOutline('neutral')" class="mt-2 whitespace-nowrap" @click="openClaimEditor(dependant, claim)">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
                 {{ t('payroll.people.dependants.edit_claim') }}

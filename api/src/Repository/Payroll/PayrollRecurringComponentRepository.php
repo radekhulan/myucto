@@ -230,7 +230,7 @@ final class PayrollRecurringComponentRepository
                     'Vztah, složku ani začátek platnosti nelze měnit; založte nový předpis.'
                 );
             }
-            $this->assertValidReferences($supplierId, $data);
+            $this->assertValidReferences($supplierId, $data, false);
             $this->assertNoOverlap($supplierId, $data, $id);
             $stmt = $pdo->prepare(
                 'UPDATE payroll_recurring_components
@@ -453,9 +453,23 @@ final class PayrollRecurringComponentRepository
         }
     }
 
-    /** @param array<string,mixed> $data */
-    private function assertValidReferences(int $supplierId, array $data): void
-    {
+    /**
+     * Kontrola vazeb předpisu.
+     *
+     * `$creating` rozlišuje dvě různé situace, které se dřív posuzovaly stejně
+     * a tvořily slepou uličku: založit předpis na neaktivní nebo už ukončenou
+     * složku opravdu nemá smysl, ale UPRAVIT existující předpis — typicky ho
+     * ukončit nebo vypnout — muselo jít pořád. Když se složka deaktivovala nebo
+     * jí legislativní překlopení nasadilo `valid_to`, nešly její předpisy ani
+     * upravit, ani smazat, a hláška navíc tvrdila, že vztah nepatří firmě.
+     *
+     * @param array<string,mixed> $data
+     */
+    private function assertValidReferences(
+        int $supplierId,
+        array $data,
+        bool $creating = true,
+    ): void {
         $stmt = $this->db->pdo()->prepare(
             'SELECT component.valid_from, component.valid_to,
                     COALESCE(
@@ -472,17 +486,30 @@ final class PayrollRecurringComponentRepository
                JOIN payroll_component_definitions component
                  ON component.supplier_id = employment.supplier_id
                 AND component.id = ?
-                AND component.frequency_kind = "regular"
-                AND component.is_active = 1
-              WHERE employment.supplier_id = ? AND employment.id = ?
+                AND component.frequency_kind = "regular"'
+            . ($creating ? ' AND component.is_active = 1' : '')
+            . ' WHERE employment.supplier_id = ? AND employment.id = ?
               FOR UPDATE'
         );
         $stmt->execute([$data['component_id'], $supplierId, $data['employment_id']]);
         $raw = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($raw === false) {
             throw new \InvalidArgumentException(
-                'Pracovní vztah nebo pravidelná mzdová složka nepatří této firmě.'
+                $creating
+                    ? 'Pracovní vztah nebo pravidelná mzdová složka nepatří této '
+                        . 'firmě, případně je složka neaktivní. Aktivujte složku '
+                        . 'v číselníku, nebo vyberte jinou.'
+                    : 'Pracovní vztah nebo pravidelná mzdová složka nepatří této firmě.'
             );
+        }
+        /*
+         * Ukončení nebo vypnutí předpisu se nesmí posuzovat intervalem: právě
+         * tím se předpis uklízí, když se pod ním složka nebo vztah zavřely.
+         */
+        if (!$creating
+            && (!$data['is_active'] || ($data['valid_to'] ?? null) !== null)
+        ) {
+            return;
         }
         $component = PayrollTimeValue::row($raw, 'component_interval');
         $componentFrom = PayrollTimeValue::string(

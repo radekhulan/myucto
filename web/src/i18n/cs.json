@@ -3520,7 +3520,9 @@
         "identifier_required": "Zadejte OIČ osoby nebo ID PPV vztahu. Stačí ten, který už máte z ČSSZ.",
         "valid_from_required": "Vyplňte datum, od kterého identifikátor platí.",
         "confirm_required": "Zaškrtněte potvrzení, že hodnoty odpovídají podkladu ČSSZ.",
-        "permission_required": "K uložení potřebujete oprávnění měnit osobu i pracovní vztah."
+        "permission_required": "K uložení potřebujete oprávnění měnit osobu i pracovní vztah.",
+        "correct": "Opravit",
+        "correction_hint": "Opravujete ručně opsané číslo. Původní hodnota se zahodí a nahradí tím, co uložíte. Už odeslaná podání zůstávají beze změny."
       },
       "openings": {
         "title": "Zaměstnanec nastoupil dřív, než v MyÚčtu vedete mzdy",
@@ -5533,9 +5535,9 @@
       "registration_effective_from": "Účinné od",
       "registration_source_reference": "Reference zdroje",
       "registration_undo": "Vzít zpět",
-        "registration_undone": "Poslední registrace byla vzata zpět.",
-        "registration_undo_failed": "Registraci se nepodařilo vzít zpět.",
-        "registration_history_empty": "Pro tuto účtárnu není doložená historie registrace; nové přípravy budou blokované, dokud ji nezaložíte.",
+      "registration_undone": "Poslední registrace byla vzata zpět.",
+      "registration_undo_failed": "Registraci se nepodařilo vzít zpět.",
+      "registration_history_empty": "Pro tuto účtárnu není doložená historie registrace; nové přípravy budou blokované, dokud ji nezaložíte.",
       "registration_history_failed": "Historii registrací ČSSZ se nepodařilo načíst.",
       "registration_saved": "Nová účinná registrace ČSSZ byla uložena.",
       "registration_save_failed": "Registraci ČSSZ se nepodařilo uložit.",
@@ -6326,7 +6328,8 @@
         "pause": "Pozastavit",
         "resume": "Obnovit",
         "end": "Ukončit",
-        "cancel": "Zrušit"
+        "cancel": "Zrušit",
+        "reopen": "Znovu otevřít"
       },
       "change_kind": {
         "created": "Založeno",
@@ -6335,7 +6338,8 @@
         "paused": "Pozastaveno",
         "resumed": "Obnoveno",
         "ended": "Ukončeno",
-        "cancelled": "Zrušeno"
+        "cancelled": "Zrušeno",
+        "reopened": "Znovu otevřeno"
       },
       "ledger_kind": {
         "withheld": "Sraženo",
@@ -6493,6 +6497,9 @@
         "other": "Pohledávka už má právní, mzdovou nebo platební návaznost a musí zůstat v historii."
       },
       "dependant_created": "Vyživovaná osoba byla přidána.",
+      "dependant_updated": "Vyživovaná osoba byla opravena.",
+      "dependant_deleted": "Vyživovaná osoba byla smazána.",
+      "dependant_delete_confirm": "Opravdu smazat tuto vyživovanou osobu? Nezabavitelná částka se v dotčených měsících přepočítá.",
       "evidence_saved": "Stav ověření podkladů byl uložen.",
       "month_evidence_saved": "Měsíční podklady byly uloženy.",
       "month_evidence_load_failed": "Měsíční podklady se nepodařilo načíst.",
@@ -16002,6 +16009,7 @@
       "stock": "Sklad",
       "eshop": "E-shop číselníky",
       "logbook": "Kniha jízd",
+      "payroll": "Mzdy",
       "settings": "Nastavení firmy",
       "utilities": "Nástroje",
       "profile": "Osobní profil"

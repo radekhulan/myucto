@@ -143,9 +143,16 @@ final class PayrollEmploymentAction
      * účinnosti. Do historie se tím zapsalo, že se podmínky k tomu datu
      * změnily, přestože se jen opravoval už zapsaný údaj.
      *
-     * `effective_from` se z těla NEBERE: účinnost je vlastnost opravované
-     * verze. Payload podmínek ji vyžaduje, takže se doplní z uložené hodnoty —
-     * klient tak nemá čím ji omylem posunout.
+     * `effective_from` se z těla bere JEN u relace přihlášeného uživatele a
+     * jen jako výslovná oprava (`correct_effective_from: true`).
+     *
+     * Why: formulář nové verze nabízí jako výchozí účinnost DNEŠEK. Kdo přidal
+     * verzi dřív, než si vzpomněl, že zvýšení platí od 1. 7., si tím zapsal
+     * špatné datum — a už ho neuměl vrátit: opravu účinnost přepisovala
+     * uloženou hodnotou (mlčky, bez chyby), nová verze musí začínat POZDĚJI
+     * a smazat verzi nejde. Cesta zpět proto vede tudy; posunout se smí jen
+     * za předchozí verzi a mimo období, za které je mzda zaúčtovaná nebo
+     * vyplacená. Bez příznaku se chová beze změny — token jím nesmí hýbat.
      *
      * @param array{id:string} $args
      */
@@ -169,7 +176,16 @@ final class PayrollEmploymentAction
                 $body,
                 false,
             );
-            $body['effective_from'] = $current;
+            $correctEffectiveFrom = $body['correct_effective_from'] ?? false;
+            if (!is_bool($correctEffectiveFrom)) {
+                throw new \InvalidArgumentException('Pole correct_effective_from musí být boolean.');
+            }
+            if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+                $correctEffectiveFrom = false;
+            }
+            if (!$correctEffectiveFrom) {
+                $body['effective_from'] = $current;
+            }
             $terms = $this->validator->terms(
                 $body,
                 $this->employments->currentCzIscoCode($supplierId, $employmentId),
@@ -189,6 +205,7 @@ final class PayrollEmploymentAction
                 $request->getHeaderLine('User-Agent'),
                 array_key_exists('monthly_gross_minor', $body),
                 $this->validator->optionalMonthlyGrossMinor($body),
+                $correctEffectiveFrom,
             );
         } catch (\Throwable $e) {
             return $this->domainError($response, $e);

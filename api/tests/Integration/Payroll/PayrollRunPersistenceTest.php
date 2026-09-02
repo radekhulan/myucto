@@ -911,9 +911,13 @@ final class PayrollRunPersistenceTest extends TestCase
     public function testMissingEffectiveEmployerPolicyFailsClosed(): void
     {
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage(
-            'chybí účinná zaměstnavatelská politika',
-        );
+        /*
+         * Hláška musí JMENOVAT období a poradit, co udělat — „chybí účinná
+         * politika" účetní neřeklo, který měsíc vadí ani kam jít. Nejčastější
+         * příčinou je politika založená s účinností „dnes", která tím zneplatní
+         * všechny starší měsíce.
+         */
+        $this->expectExceptionMessage('Za období 06/2026');
         $this->container->get(PayrollRunSnapshotBuilder::class)->build(
             $this->otherSupplierId,
             '2026-06-01',

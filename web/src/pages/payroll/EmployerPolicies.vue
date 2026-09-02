@@ -32,6 +32,8 @@ const saving = ref(false)
 const editorOpen = ref(false)
 const editingId = ref<number | null>(null)
 const policies = ref<PayrollEmployerPolicy[]>([])
+/** Datum, odkdy firma vede mzdy — výchozí účinnost úplně první politiky. */
+const payrollStartDate = ref<string | null>(null)
 const COLUMNS: ColumnDef[] = [
   { key: 'validity', labelKey: 'payroll.employer.policies.validity', required: true },
   { key: 'payday', labelKey: 'payroll.employer.policies.payday' },
@@ -217,7 +219,20 @@ function openNew() {
   editingId.value = null
   form.value = {
     ...newPolicy(),
-    valid_from: effectiveOn.value,
+    /*
+     * PRVNÍ politika nesmí začínat dneškem. Mzdová politika (výplatní termín,
+     * zaokrouhlení, nárok na dovolenou) platí od chvíle, kdy firma vede mzdy —
+     * ne ode dne, kdy ji účetní opsala do aplikace. S dneškem si zablokovala
+     * všechny předchozí měsíce: `PayrollRunSnapshotBuilder` pro ně nenajde
+     * účinnou politiku a běh nejde ani uzamknout. Je to tatáž past jako
+     * u účinnosti registrace u ČSSZ.
+     *
+     * Další politika v pořadí je skutečná ZMĚNA pravidel a ta nastává k datu,
+     * které účetní vybere — tam zůstává dnešek rozumným výchozím bodem.
+     */
+    valid_from: policies.value.length === 0 && payrollStartDate.value !== null
+      ? payrollStartDate.value
+      : effectiveOn.value,
   }
   saveError.value = ''
   conflict.value = false
@@ -391,7 +406,22 @@ function apiCode(error: unknown): string {
   return error.response?.data?.error?.code ?? ''
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  /*
+   * Datum, odkdy firma vede mzdy. Slouží jako výchozí účinnost PRVNÍ mzdové
+   * politiky; když ho neznáme, zůstane null a formulář spadne na dnešek.
+   * Selhání se schválně mlčí — je to pohodlí, ne podmínka.
+   */
+  try {
+    const period = (await payrollApi.activation()).state.start_period
+    payrollStartDate.value = period === null
+      ? null
+      : (period.length === 7 ? `${period}-01` : period)
+  } catch {
+    payrollStartDate.value = null
+  }
+})
 </script>
 
 <template>

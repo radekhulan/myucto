@@ -2634,6 +2634,9 @@ final class PayrollEnforcementApiTest extends TestCase
         self::assertSame('2026-05-20', $shared['first_payer_delivered_on']);
         self::assertSame('2026-05-20', $shared['priority_date']);
 
+        // Překlep v datu doručení jde opravit, dokud se o pohledávku nic
+        // neopírá — a oprava platí pro celý exekuční příkaz, takže se s ní
+        // posune i pohledávka vedená pod stejným příkazem.
         $changedDelivery = $this->action->updateClaim(
             $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/claims/{$first['id']}")
                 ->withParsedBody([
@@ -2644,8 +2647,10 @@ final class PayrollEnforcementApiTest extends TestCase
             new Response(),
             ['id' => (string) $caseId, 'claimId' => (string) $first['id']],
         );
-        self::assertSame(422, $changedDelivery->getStatusCode());
-        self::assertSame('validation_failed', $this->errorCode($changedDelivery));
+        self::assertSame(200, $changedDelivery->getStatusCode(), (string) $changedDelivery->getBody());
+        $corrected = PayrollTimeValue::row($this->json($changedDelivery)['claim'] ?? null, 'claim');
+        self::assertSame('2026-05-21', $corrected['first_payer_delivered_on']);
+        self::assertSame('2026-05-21', $corrected['priority_date']);
 
         $earlier = $this->action->addClaim(
             $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
@@ -2662,13 +2667,13 @@ final class PayrollEnforcementApiTest extends TestCase
 
         $detail = $this->repository->findCase($this->supplierId, $caseId);
         self::assertNotNull($detail);
-        self::assertSame(['2026-05-19', '2026-05-20', '2026-05-20'], array_column(
+        self::assertSame(['2026-05-19', '2026-05-21', '2026-05-21'], array_column(
             $detail['claims'],
             'priority_date',
         ));
     }
 
-    public function testLegacyStatutoryClaimCanCaptureFirstPayerDeliveryOnce(): void
+    public function testLegacyStatutoryClaimCapturesAndCorrectsFirstPayerDelivery(): void
     {
         $case = $this->createCase($this->employeeId);
         $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
@@ -2707,6 +2712,7 @@ final class PayrollEnforcementApiTest extends TestCase
         self::assertSame('2026-05-20', $claim['first_payer_delivered_on']);
         self::assertSame('2026-05-20', $claim['priority_date']);
 
+        // Doplněné datum jde ještě opravit, dokud pohledávka nemá stopu.
         $changed = $this->action->updateClaim(
             $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}")
                 ->withParsedBody([
@@ -2717,8 +2723,24 @@ final class PayrollEnforcementApiTest extends TestCase
             new Response(),
             ['id' => (string) $caseId, 'claimId' => (string) $claimId],
         );
-        self::assertSame(422, $changed->getStatusCode());
-        self::assertSame('validation_failed', $this->errorCode($changed));
+        self::assertSame(200, $changed->getStatusCode(), (string) $changed->getBody());
+        $recorrected = PayrollTimeValue::row($this->json($changed)['claim'] ?? null, 'claim');
+        self::assertSame('2026-05-21', $recorrected['first_payer_delivered_on']);
+        self::assertSame('2026-05-21', $recorrected['priority_date']);
+
+        // Zmizet ale nesmí — pořadí zákonné pohledávky se z něj odvozuje.
+        $dropped = $this->action->updateClaim(
+            $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => null,
+                    'row_version' => $recorrected['row_version'],
+                ]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
+        );
+        self::assertSame(422, $dropped->getStatusCode());
+        self::assertSame('validation_failed', $this->errorCode($dropped));
     }
 
     public function testClaimMutationFailsClosedAfterActivationOrPayrollSnapshot(): void
@@ -2817,6 +2839,197 @@ final class PayrollEnforcementApiTest extends TestCase
     }
 
     /** @return array<string,mixed> */
+    /**
+     * Formulář nabízel jako účinnost DNEŠEK, jenže případ je účinný ode dne
+     * doručení exekučního příkazu zaměstnavateli — typicky o týdny zpět.
+     * S dnešní účinností případ tiše minul všechny dřívější měsíce
+     * (`effective_from <= datum výplaty`) a opravit to nešlo. Dokud je případ
+     * ve stavu „přijato", oprava projde; po aktivaci ji odmítne.
+     */
+    /**
+     * Nezabavitelnou částku řídí `valid_from`, a formulář nabízel dnešek.
+     * Dítě zapsané v září tak nezvyšovalo ochranu za červen a srazilo se víc,
+     * než zákon dovolí — a opravit to nešlo vůbec. Hranicí je spočítaný měsíc.
+     */
+    public function testDependantCanBeCorrectedUntilAMonthIsCalculated(): void
+    {
+        $dependant = $this->repository->addDependant(
+            $this->supplierId,
+            $this->employeeId,
+            [
+                'dependant_kind' => 'dependant',
+                'valid_from' => '2026-09-01',
+                'valid_to' => null,
+                'eligibility_verified' => true,
+                'excluded_for_maintenance' => false,
+            ],
+        );
+        $dependantId = PayrollTimeValue::int($dependant['id'] ?? null, 'id');
+
+        $corrected = $this->updateDependant($dependantId, '2026-06-01', $dependant['row_version']);
+        self::assertSame(200, $corrected->getStatusCode(), (string) $corrected->getBody());
+        $correctedDependant = PayrollTimeValue::row(
+            $this->json($corrected)['dependant'] ?? null,
+            'dependant',
+        );
+        self::assertSame('2026-06-01', $correctedDependant['valid_from']);
+
+        $this->freezeEnforcementMonth('2026-06-01', 'synthetic-dependant-footprint');
+
+        $blocked = $this->updateDependant(
+            $dependantId,
+            '2026-07-01',
+            $correctedDependant['row_version'],
+        );
+        self::assertSame(409, $blocked->getStatusCode());
+        self::assertSame('enforcement_dependant_change_blocked', $this->errorCode($blocked));
+        // Odmítnutí musí pojmenovat měsíc, kvůli kterému to nejde.
+        $error = $this->json($blocked)['error'] ?? [];
+        self::assertSame('2026-06', $error['frozen_period'] ?? null);
+        self::assertStringContainsString('2026-06', (string) ($error['message'] ?? ''));
+
+        $blockedDelete = $this->deleteDependant(
+            $dependantId,
+            $correctedDependant['row_version'],
+        );
+        self::assertSame(409, $blockedDelete->getStatusCode());
+        self::assertSame('enforcement_dependant_change_blocked', $this->errorCode($blockedDelete));
+    }
+
+    /** Omylem zapsanou osobu, podle které nic nepočítalo, lze smazat. */
+    public function testUnusedDependantCanBeDeleted(): void
+    {
+        $dependant = $this->repository->addDependant(
+            $this->supplierId,
+            $this->employeeId,
+            [
+                'dependant_kind' => 'dependant',
+                'valid_from' => '2026-06-01',
+                'valid_to' => null,
+                'eligibility_verified' => false,
+                'excluded_for_maintenance' => false,
+            ],
+        );
+        $dependantId = PayrollTimeValue::int($dependant['id'] ?? null, 'id');
+
+        $stale = $this->deleteDependant($dependantId, 99);
+        self::assertSame(409, $stale->getStatusCode());
+        self::assertSame('row_version_conflict', $this->errorCode($stale));
+
+        $deleted = $this->deleteDependant($dependantId, $dependant['row_version']);
+        self::assertSame(200, $deleted->getStatusCode(), (string) $deleted->getBody());
+        self::assertTrue($this->json($deleted)['deleted'] ?? false);
+        self::assertSame(
+            [],
+            $this->repository->dependantsForEmployee($this->supplierId, $this->employeeId),
+        );
+    }
+
+    private function updateDependant(
+        int $dependantId,
+        string $validFrom,
+        int $rowVersion,
+    ): Response {
+        return $this->action->updateDependant(
+            $this->request(
+                'PUT',
+                "/api/payroll/enforcement/people/{$this->employeeId}/dependants/{$dependantId}",
+            )->withParsedBody([
+                'dependant_kind' => 'dependant',
+                'valid_from' => $validFrom,
+                'valid_to' => null,
+                'eligibility_verified' => true,
+                'excluded_for_maintenance' => false,
+                'row_version' => $rowVersion,
+            ]),
+            new Response(),
+            [
+                'employeeId' => (string) $this->employeeId,
+                'dependantId' => (string) $dependantId,
+            ],
+        );
+    }
+
+    private function deleteDependant(int $dependantId, int $rowVersion): Response
+    {
+        return $this->action->deleteDependant(
+            $this->request(
+                'DELETE',
+                "/api/payroll/enforcement/people/{$this->employeeId}/dependants/{$dependantId}",
+            )->withParsedBody(['row_version' => $rowVersion]),
+            new Response(),
+            [
+                'employeeId' => (string) $this->employeeId,
+                'dependantId' => (string) $dependantId,
+            ],
+        );
+    }
+
+    /** Spočítaný měsíc srážky — hranice, za kterou už je evidence dokladem. */
+    private function freezeEnforcementMonth(string $periodStart, string $idempotencyKey): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_month_results
+                (supplier_id, revision_id, employee_id, period_start,
+                 result_status, ruleset_id, ruleset_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json, result_snapshot_hash,
+                 total_withheld_minor_units, employee_payment_minor_units,
+                 employer_fee_minor_units, idempotency_key_hash)
+             VALUES (?, NULL, ?, ?, "supported", "synthetic", ?, "{}", ?,
+                     "{}", ?, 0, 0, 0, ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $periodStart,
+            str_repeat('a', 64),
+            hash('sha256', '{}'),
+            hash('sha256', '{}'),
+            hash('sha256', $idempotencyKey, true),
+        ]);
+    }
+
+    public function testCaseEffectiveFromCanBeCorrectedBeforeActivation(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        self::assertSame('2026-05-20', $case['effective_from']);
+
+        $corrected = $this->action->updateEvidence(
+            $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/evidence")
+                ->withParsedBody([
+                    'evidence_complete' => false,
+                    'recipient_verified' => false,
+                    'effective_from' => '2026-03-02',
+                    'row_version' => $case['row_version'],
+                ]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(200, $corrected->getStatusCode(), (string) $corrected->getBody());
+        $correctedCase = PayrollTimeValue::row($this->json($corrected)['case'] ?? null, 'case');
+        self::assertSame('2026-03-02', $correctedCase['effective_from']);
+
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_enforcement_cases
+                SET status = 'withhold_and_hold'
+              WHERE supplier_id = ? AND id = ?"
+        )->execute([$this->supplierId, $caseId]);
+
+        $blocked = $this->action->updateEvidence(
+            $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/evidence")
+                ->withParsedBody([
+                    'evidence_complete' => false,
+                    'recipient_verified' => false,
+                    'effective_from' => '2026-01-05',
+                    'row_version' => $correctedCase['row_version'],
+                ]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(409, $blocked->getStatusCode());
+        self::assertSame('evidence_incomplete', $this->errorCode($blocked));
+    }
+
     private function createCase(int $employeeId, ?int $supplierId = null): array
     {
         $request = $this->request(

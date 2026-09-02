@@ -183,7 +183,7 @@ final class PayrollComponentRepository
                 'Kód a začátek platnosti verze nelze měnit; založte novou verzi.'
             );
         }
-        $this->assertNotUsedByApprovedInput($supplierId, $id);
+        $this->assertUsedComponentChangeAllowed($supplierId, $id, $current, $data);
         $this->assertJmhzMappingCompatible(
             $supplierId,
             $id,
@@ -414,21 +414,75 @@ final class PayrollComponentRepository
         }
     }
 
-    private function assertNotUsedByApprovedInput(int $supplierId, int $id): void
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT 1
-               FROM payroll_inputs
-              WHERE supplier_id = ? AND component_id = ?
-                AND status IN ("approved", "locked")
-              LIMIT 1'
-        );
-        $stmt->execute([$supplierId, $id]);
-        if ($stmt->fetchColumn() !== false) {
+    /**
+     * Pole, která u použité složky nemění ani korunu už schváleného vstupu.
+     *
+     * Zamykala se celá věta složky, takže u složky s jediným schváleným vstupem
+     * nešel opravit ani překlep v názvu, ani ji vyřadit z nabídky. A protože
+     * blokátor mazání radí „nastavte konec platnosti nebo ji deaktivujte",
+     * posílal uživatele přesně na to, co bylo zakázané — kruh bez východiska,
+     * který navíc uměl umrtvit celý rychlý formulář (viz `is_active`
+     * v `PayrollQuickInputRepository::componentIds()`).
+     *
+     * Sazby, daňové a pojistné režimy ani předkontace mezi nezamčenými poli
+     * NEJSOU: ty určují, jak se schválený vstup spočítal, a musí zůstat.
+     */
+    private const USED_COMPONENT_EDITABLE = ['name', 'is_active', 'valid_to'];
+
+    /**
+     * @param array<string,mixed> $current
+     * @param array<string,mixed> $data
+     */
+    private function assertUsedComponentChangeAllowed(
+        int $supplierId,
+        int $id,
+        array $current,
+        array $data,
+    ): void {
+        $lastUsedPeriod = $this->lastApprovedInputPeriod($supplierId, $id);
+        if ($lastUsedPeriod === null) {
+            return;
+        }
+        foreach ($data as $field => $value) {
+            if (in_array($field, self::USED_COMPONENT_EDITABLE, true)
+                || !array_key_exists($field, $current)
+            ) {
+                continue;
+            }
+            if ((string) ($current[$field] ?? '') !== (string) ($value ?? '')) {
+                throw new \DomainException(
+                    'Složka je použitá ve schváleném mzdovém vstupu, takže '
+                    . 'v ní nejde měnit „' . $field . '" — podle téhle hodnoty '
+                    . 'se už počítalo. Změnu do budoucna zaveďte novou účinnou '
+                    . 'verzí složky. Název, konec platnosti a aktivaci upravit '
+                    . 'můžete.',
+                );
+            }
+        }
+        $validTo = ($data['valid_to'] ?? null) === null
+            ? null
+            : PayrollTimeValue::string($data['valid_to'], 'valid_to');
+        if ($validTo !== null && $validTo < $lastUsedPeriod) {
             throw new \DomainException(
-                'Použitou mzdovou složku nelze měnit; založte novou účinnou verzi.'
+                'Konec platnosti nemůže být dřív než měsíc, ve kterém je složka '
+                . 'použitá ve schváleném vstupu (' . substr($lastUsedPeriod, 0, 7)
+                . '). Zadejte konec platnosti od tohoto měsíce dál.',
             );
         }
+    }
+
+    private function lastApprovedInputPeriod(int $supplierId, int $id): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MAX(period_start)
+               FROM payroll_inputs
+              WHERE supplier_id = ? AND component_id = ?
+                AND status IN ("approved", "locked")'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $period = $stmt->fetchColumn();
+
+        return is_string($period) && $period !== '' ? $period : null;
     }
 
     /**
@@ -446,6 +500,24 @@ final class PayrollComponentRepository
      */
     private static function rethrowCheckViolation(PDOException $e): void
     {
+        /*
+         * Triggerový SIGNAL (SQLSTATE 45000) chodil ven jako neošetřené 500
+         * s anglickou hláškou z databáze. Nejčastější případ: složka se vyřazuje
+         * z JMHZ, ale drží aktivní mapování — a to mapování si aplikace zakládá
+         * SAMA při otevření číselníku, takže o něm uživatel ani neví.
+         */
+        if ((string) $e->getCode() === '45000') {
+            $message = (string) ($e->errorInfo[2] ?? $e->getMessage());
+
+            throw new \DomainException(
+                str_contains($message, 'JMHZ mapping')
+                    ? 'Složka má aktivní mapování na pole hlášení JMHZ. '
+                        . 'Nejdřív mapování zrušte (tlačítko u složky), teprve '
+                        . 'pak ji jde z JMHZ vyřadit.'
+                    : 'Změnu odmítlo databázové pravidlo: ' . $message,
+                previous: $e,
+            );
+        }
         $driverCode = $e->errorInfo[1] ?? null;
         if ((string) $e->getCode() !== 'HY000' || (int) $driverCode !== 3819) {
             return;

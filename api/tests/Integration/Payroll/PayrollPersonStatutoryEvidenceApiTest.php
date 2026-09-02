@@ -400,14 +400,23 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         self::assertSame($documentId, (int) $visibleCoverage['health_evidence_document_id']);
         self::assertSame(str_repeat('a', 64), $visibleCoverage['health_evidence_document_sha256']);
 
+        /*
+         * Špatně připojený sken JDE vyměnit.
+         *
+         * Doklad býval „po připojení neměnný" a řádek evidence se u zmrazeného
+         * období nedá ani smazat — kdo připojil špatný sken, neměl cestu ven.
+         * Ověřování zůstává: nový otisk čte server z DMS, klient ho neposílá.
+         */
+        $replacementSha = str_repeat('b', 64);
         $changedLink = $this->payloadFrom($visible);
         $changedLink['sections']['health_coverages'][0]['health_evidence_document_id']
-            = $this->document($this->supplierId, str_repeat('b', 64));
-        $immutable = $this->saveAs($changedLink, $healthWriter);
-        self::assertSame(422, $immutable->getStatusCode());
-        self::assertStringContainsString(
-            'po připojení neměnný',
-            $this->json($immutable)['error']['message'],
+            = $this->document($this->supplierId, $replacementSha);
+        $replaced = $this->saveAs($changedLink, $healthWriter);
+        self::assertSame(200, $replaced->getStatusCode(), (string) $replaced->getBody());
+        $afterReplacement = $this->json($this->showAs($healthReader))['evidence'];
+        self::assertSame(
+            $replacementSha,
+            $afterReplacement['sections']['health_coverages'][0]['health_evidence_document_sha256'],
         );
     }
 

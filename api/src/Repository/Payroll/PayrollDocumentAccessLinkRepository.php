@@ -91,6 +91,30 @@ final class PayrollDocumentAccessLinkRepository
         return ['id' => (int) $id, 'created' => false];
     }
 
+    /**
+     * Kolikrát už rozesílka pro tenhle dokument doběhla naprázdno.
+     *
+     * Idempotenční klíč byl vázaný jen na dokument a otisk souboru, které se
+     * nikdy nemění — poslat odkaz tedy šlo přesně JEDNOU za život dokumentu.
+     * Zneplatnění a nové odeslání (postup, který sama služba doporučuje) nebo
+     * odkaz vyhořelý na špatné adrese skončily tím, že `create()` vrátil starý
+     * mrtvý řádek s `created:false` a účetní dostala „odesláno", i když se
+     * nic nezařadilo. Počet mrtvých odkazů se proto stává součástí klíče:
+     * dvojklik zůstává idempotentní, ale po zneplatnění vznikne nový odkaz.
+     */
+    public function deadLinkGeneration(int $supplierId, int $documentId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_document_access_links
+              WHERE supplier_id = ? AND payroll_document_id = ?
+                AND (revoked_at IS NOT NULL
+                     OR dispatch_state IN ("failed", "cancelled"))',
+        );
+        $stmt->execute([$supplierId, $documentId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
     /** @return array<string,mixed>|null */
     public function find(int $supplierId, int $linkId): ?array
     {

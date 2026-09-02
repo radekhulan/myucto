@@ -1046,6 +1046,116 @@ final class PayrollAbsenceApiTest extends TestCase
         return (int) $average['id'];
     }
 
+    /**
+     * Nepřítomnost se ULOŽÍ i bez schváleného průměru — účetní se o dovolené
+     * dozví dřív, než je čtvrtletní průměr spočítaný, a rozdělaná evidence se
+     * nesmí ztratit. Kontrola je až na schválení, kde vzniká mzdový vstup.
+     */
+    public function testAbsenceSavesWithoutAverageAndBlocksOnlyApproval(): void
+    {
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody([
+                ...$this->absencePayload(0),
+                'average_snapshot_id' => null,
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+        self::assertNull($absence['average_snapshot_id']);
+
+        $approved = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(422, $approved->getStatusCode());
+        self::assertStringContainsString(
+            'průměrného výdělku',
+            (string) ($this->json($approved)['error']['message'] ?? ''),
+        );
+
+        // A pořád je tam, uložená a čekající.
+        $still = $this->action->list(
+            $this->request('GET')->withQueryParams([
+                'from' => '2026-06-01',
+                'to' => '2026-06-30',
+                'employment_id' => $this->employmentId,
+            ]),
+            new Response(),
+        );
+        self::assertSame(200, $still->getStatusCode());
+        self::assertSame(1, $this->json($still)['total']);
+    }
+
+    /** Zamítnutí nic nematerializuje, takže překlik smí jít zpátky. */
+    public function testRejectedAbsenceCanBeApprovedAfterAll(): void
+    {
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody([
+                ...$this->absencePayload(0),
+                'absence_type' => 'unpaid_leave',
+                'average_snapshot_id' => null,
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+
+        $rejected = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'rejected',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $rejected->getStatusCode(), (string) $rejected->getBody());
+        $rejectedAbsence = $this->json($rejected)['absence'];
+        self::assertSame('rejected', $rejectedAbsence['status']);
+
+        $approved = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $rejectedAbsence['row_version'],
+                'decision' => 'approved',
+            ]),
+            new Response(),
+            ['id' => (string) $rejectedAbsence['id']],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+        self::assertSame('approved', $this->json($approved)['absence']['status']);
+    }
+
+    /** Kolizní nepřítomnost se v hlášce pojmenuje, ne jen ohlásí. */
+    public function testOverlapErrorNamesTheConflictingAbsence(): void
+    {
+        $first = $this->action->create(
+            $this->request('POST')->withParsedBody([
+                ...$this->absencePayload(0),
+                'absence_type' => 'unpaid_leave',
+                'average_snapshot_id' => null,
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $first->getStatusCode(), (string) $first->getBody());
+
+        $second = $this->action->create(
+            $this->request('POST')->withParsedBody([
+                ...$this->absencePayload(0),
+                'absence_type' => 'other',
+                'average_snapshot_id' => null,
+            ]),
+            new Response(),
+        );
+        self::assertSame(409, $second->getStatusCode());
+        $message = (string) ($this->json($second)['error']['message'] ?? '');
+        self::assertStringContainsString('2026-06-15', $message);
+        self::assertStringContainsString('neplacené volno', $message);
+    }
+
     private function createAbsence(int $averageId): Response
     {
         return $this->action->create(

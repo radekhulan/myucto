@@ -20,7 +20,18 @@ final class PayrollEmploymentLifecycle
         'preregistered' => ['active', 'no_show'],
         'active' => ['suspended', 'ended'],
         'suspended' => ['active', 'ended'],
-        'ended' => ['archived'],
+        /*
+         * `ended → active` je NÁVRAT z omylem zapsaného ukončení.
+         *
+         * Ukončení se zapisuje jedním tlačítkem a s datem, které formulář
+         * nabídne sám. Splést se v něm — ukončit špatnou osobu, trefit špatný
+         * den — je běžné; jenže datum konce se pak nedalo opravit (podmínky
+         * ukončeného vztahu se editovat nesmí) a jediná cesta ven byla smazat
+         * celý vztah, což u vztahu s navázanou mzdou nejde vůbec. Vztah, ke
+         * kterému už je vydaný výstupní doklad, se takhle vrátit nedá — ten
+         * doklad je neměnný a odešel ven; hlídá to zápisová cesta.
+         */
+        'ended' => ['archived', 'active'],
         'no_show' => ['archived'],
         // Archiv není slepá ulička. Archivace je úklid, ne rozhodnutí o osudu
         // vztahu — omylem archivovaný vztah šel dřív jen smazat, a to u vztahu

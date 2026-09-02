@@ -385,6 +385,11 @@ final class PayrollRunRepository
                           FROM payroll_posting_batches posting
                          WHERE posting.supplier_id = run.supplier_id
                            AND posting.run_id = run.id
+                           -- Jen SKUTEČNĚ zaúčtovaná dávka. Dávka ve stavu
+                           -- `prepared` do deníku nikdy nedošla, takže žádnou
+                           -- účetní stopu nepředstavuje — a přesto běh dělala
+                           -- nesmazatelným.
+                           AND posting.journal_entry_id IS NOT NULL
                     ) AS posting_count,
                     (
                         SELECT COUNT(*)
@@ -427,6 +432,20 @@ final class PayrollRunRepository
                          WHERE revision.supplier_id = run.supplier_id
                            AND revision.run_id = run.id
                     ) AS revision_count,
+                    /*
+                     * Revize, které se neměnnost opravdu týká. Od migrace 1723
+                     * je `approved`/`superseded` jediný stav, který DELETE
+                     * odmítá i na úrovni databáze — podle takové revize se už
+                     * mohlo počítat, účtovat a podávat. Rozpracovaná revize
+                     * neplatila nikdy a blokuje z jiného důvodu (viz níže).
+                     */
+                    (
+                        SELECT COUNT(*)
+                          FROM payroll_run_revisions frozen_revision
+                         WHERE frozen_revision.supplier_id = run.supplier_id
+                           AND frozen_revision.run_id = run.id
+                           AND frozen_revision.status IN ("approved", "superseded")
+                    ) AS frozen_revision_count,
                     (
                         SELECT COUNT(*)
                           FROM payroll_run_commands command_receipt
@@ -488,19 +507,39 @@ final class PayrollRunRepository
 
         foreach ([
             ['document_count', 'payroll_run_has_documents', 'Mzdový běh má vygenerované dokumenty.'],
-            ['posting_count', 'payroll_run_has_posting', 'Mzdový běh má účetní stopu.'],
+            ['posting_count', 'payroll_run_has_posting', 'Mzdový běh je zaúčtovaný.'],
             ['payment_count', 'payroll_run_has_payments', 'Mzdový běh má platební stopu.'],
             ['submission_count', 'payroll_run_has_submissions', 'Mzdový běh je zdrojem podání.'],
-            ['revision_count', 'payroll_run_has_revision', 'Mzdový běh už obsahuje neměnnou revizi.'],
+            [
+                'frozen_revision_count',
+                'payroll_run_has_revision',
+                'Mzdový běh má schválenou revizi, podle které se už mohlo '
+                    . 'účtovat a podávat — smazat ho nelze. Opravu proveďte '
+                    . 'přes „Otevřít k opravě“.',
+            ],
         ] as [$field, $code, $message]) {
             if ((int) $row[$field] > 0) {
                 return PayrollRunDeletionDecision::blocked($code, $message);
             }
         }
-        if ((int) $row['current_revision_no'] !== 0) {
+        /*
+         * Rozpracovaná revize (`snapshot`/`calculated`/`reviewed`) neplatila
+         * nikdy a od migrace 1723 ji databáze smazat dovolí. Tahle vrstva ji
+         * přesto zatím blokuje: úklid po ní znamená odemknout `payroll_inputs`
+         * a smazat snapshot graf i spočítané výsledky, a to je samostatná
+         * práce. Dokud není hotová, musí hláška aspoň říct, kudy ven — zrušení
+         * běhu je plnohodnotná cesta, po ní běh nedrží období ani neblokuje
+         * uzávěrku roku.
+         */
+        if ((int) $row['revision_count'] > 0
+            || (int) $row['current_revision_no'] !== 0
+        ) {
             return PayrollRunDeletionDecision::blocked(
-                'payroll_run_has_revision',
-                'Mzdový běh odkazuje na neměnnou revizi.',
+                'payroll_run_has_working_revision',
+                'Mzdový běh má rozpracovanou revizi, protože už proběhlo '
+                    . '„Uzamknout vstupy“. Smazat ho zatím nejde — použijte '
+                    . '„Zrušit běh“; zrušený běh nic neblokuje a období se '
+                    . 'uvolní.',
             );
         }
         $status = (string) $row['status'];
@@ -1577,6 +1616,55 @@ final class PayrollRunRepository
                 AND abandoned.status IN ("snapshot", "calculated", "reviewed")'
         );
         $stmt->execute([$currentRevisionId, $supplierId, $runId]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Zrušení běhu zahodí i jeho rozdělané revize.
+     *
+     * {@see supersedeAbandonedRevisions()} ošetřilo jen jednu ze dvou cest,
+     * kterými rozpracovaná OPRAVNÁ revize zůstane viset — tu, kde ji přebije
+     * novější revize. Druhá cesta je ZRUŠENÍ běhu: `CANCEL` měnil jen stav
+     * běhu a živé revize se nedotkl. Účetní, která otevřela opravu a pak
+     * zjistila, že opravovat nebylo co, běh zrušila — a `openCorrectionCount()`
+     * tu revizi počítal dál, takže uzávěrka mzdového roku byla NATRVALO
+     * zablokovaná. Zrušený běh už novou revizi nezaloží, takže z toho
+     * nevedla cesta ven jinudy než ručním zásahem do databáze.
+     *
+     * Nástupce se nestampuje — žádný není a vymyslet ho by byla lež. Migrace
+     * 1722 ho proto u zrušeného běhu nevyžaduje.
+     *
+     * ZÁMĚRNĚ JEN OPRAVNÉ revize. Uzávěrku blokují právě a jen ty
+     * ({@see PayrollYearCloseRepository::openCorrectionCount()}); rozdělaná
+     * ŘÁDNÁ revize zrušeného běhu neblokuje nic, a zahodit ji tady by zbytečně
+     * zahodilo i vazbu na nástupce, kterou u cesty přes `REOPEN` stampuje
+     * {@see supersedeAbandonedRevisions()}. Zahazuje se tedy jen to, co jinak
+     * škodí — ne všechno, na co dosáhneme.
+     *
+     * Volá se AŽ PO tom, co je běh ve stavu `cancelled`: trigger se na ten
+     * stav dívá, takže dřív by zápis neprošel.
+     *
+     * @return int počet zahozených revizí
+     */
+    public function abandonRevisionsOnCancel(
+        int $supplierId,
+        int $runId,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_revisions revision
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+                AND run.status = "cancelled"
+                SET revision.status = "abandoned",
+                    revision.superseded_at = NOW()
+              WHERE revision.supplier_id = ?
+                AND revision.run_id = ?
+                AND revision.revision_kind = "correction"
+                AND revision.status IN ("snapshot", "calculated", "reviewed")'
+        );
+        $stmt->execute([$supplierId, $runId]);
 
         return $stmt->rowCount();
     }

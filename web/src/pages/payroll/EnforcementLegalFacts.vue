@@ -19,6 +19,14 @@ import { appIsoDate } from '@/utils/date'
 const props = defineProps<{
   caseId: number
   caseStatus: EnforcementCaseStatus
+  /*
+   * Účinnost PŘÍPADU, ne dnešek. Aktivace se poměřuje k ní
+   * (`assertLegalRecipientReadyForActivation`), takže strana zapsaná s dnešní
+   * účinností u případu doručeného v červnu aktivaci neodemkla — a řádky jsou
+   * append-only, takže je nešlo přepsat. Formulář proto nabízí rovnou datum,
+   * ke kterému se to bude číst; přepsat ho jde.
+   */
+  caseEffectiveFrom: string
   claims: EnforcementClaim[]
   canWrite: boolean
   canReadDocuments: boolean
@@ -49,14 +57,15 @@ const partyRoles = ['court', 'executor', 'beneficiary'] as const
  * VČEREJŠEK — nová revize se uložila s datem o den zpět a `latestParties`
  * (`effective_from <= currentDate`) ji hned po uložení nezobrazila.
  */
+const defaultFactDate = () => props.caseEffectiveFrom || appIsoDate()
 const party = ref({
   party_role: 'executor' as EnforcementCaseParty['party_role'],
-  effective_from: appIsoDate(),
+  effective_from: defaultFactDate(),
   party_name: '',
   party_reference: '',
 })
 const recipientInstruction = ref({
-  effective_from: appIsoDate(),
+  effective_from: defaultFactDate(),
   recipient_party_id: null as number | null,
   payment_account_id: null as number | null,
   change_reason: '',
@@ -264,7 +273,7 @@ function openPartyForm(role: EnforcementCaseParty['party_role'] = 'executor') {
   showPartyForm.value = true
   party.value = {
     party_role: role,
-    effective_from: appIsoDate(),
+    effective_from: defaultFactDate(),
     party_name: '',
     party_reference: '',
   }
@@ -290,7 +299,7 @@ function openRecipientInstructionForm() {
   breakdownClaimId.value = null
   const defaultParty = recipientPartyOptions.value[0] ?? null
   recipientInstruction.value = {
-    effective_from: appIsoDate(),
+    effective_from: defaultFactDate(),
     recipient_party_id: defaultParty?.id ?? null,
     payment_account_id: null,
     change_reason: '',

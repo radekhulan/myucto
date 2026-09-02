@@ -247,15 +247,38 @@ final class PayrollInputCancellationApiTest extends TestCase
         self::assertSame(409, $blockedTravel->getStatusCode());
         self::assertSame('input_has_movement', $this->errorCode($blockedTravel));
 
+    }
+
+    /**
+     * Řádek importu NENÍ pohyb peněz.
+     *
+     * Import zakládá vstupy rovnou jako koncepty, takže dokud vazba na řádek
+     * importu blokovala zrušení, neměl špatně naimportovaný řádek východisko:
+     * nešel zrušit, držel mzdový běh na blokátoru `draft_inputs_present`
+     * a jedinou cestou dál bylo schválit chybnou částku.
+     */
+    public function testImportedDraftCanBeCancelled(): void
+    {
         $imported = $this->createInput('with-import', 3_000);
         $importedId = PayrollTimeValue::int($imported['id'] ?? null, 'id');
         $this->linkImportRow($importedId);
-        $blockedImport = $this->cancel(
+        $cancelled = $this->cancel(
             $importedId,
             PayrollTimeValue::int($imported['row_version'] ?? null, 'row_version'),
         );
-        self::assertSame(409, $blockedImport->getStatusCode());
-        self::assertSame('input_has_movement', $this->errorCode($blockedImport));
+        self::assertSame(200, $cancelled->getStatusCode(), (string) $cancelled->getBody());
+        self::assertSame(
+            'cancelled',
+            PayrollTimeValue::row($this->json($cancelled)['input'] ?? null, 'input')['status'],
+        );
+
+        // Stopa po souboru zůstává; zrušením konceptu nemizí.
+        $rows = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_input_import_rows
+              WHERE supplier_id = ? AND input_id = ?'
+        );
+        $rows->execute([$this->supplierId, $importedId]);
+        self::assertSame(1, (int) $rows->fetchColumn());
     }
 
     public function testInputFrozenInARunRevisionCannotBeCancelled(): void

@@ -555,6 +555,80 @@ final class PayrollDependantApiTest extends TestCase
         self::assertNull($claims[0]['superseded_by_id']);
     }
 
+    /**
+     * Cesta zpět z omylem založené osoby a omylem zapsaného nároku.
+     *
+     * Evidence uměla jen zakládat a měnit — dítě zapsané u špatného
+     * zaměstnance nebo nárok s obráceným pořadím zůstaly navždy, držely pořadí
+     * i rodné číslo a blokovaly jeho zápis u toho správného. „Ukončit datem"
+     * to nenahrazuje.
+     */
+    public function testWronglyRecordedDependantAndClaimCanBeDeleted(): void
+    {
+        $dependantId = $this->createChild();
+        $created = $this->json($this->postClaim($dependantId, $this->claim()));
+        $claim = $created['dependants'][0]['claims'][0];
+        self::assertSame(1, $this->claimCount());
+
+        // Dokud u osoby visí nárok, smazat ji nejde — a řekne se proč.
+        $blocked = $this->action->update(
+            $this->request(
+                'PUT',
+                $this->supplierId,
+                "/api/payroll/people/{$this->employeeId}/dependants/{$dependantId}",
+                ['row_version' => 1, 'delete' => true],
+            ),
+            new Response(),
+            ['id' => (string) $this->employeeId, 'dependantId' => (string) $dependantId],
+        );
+        self::assertSame(422, $blocked->getStatusCode(), (string) $blocked->getBody());
+        self::assertStringContainsString(
+            'Smažte nejdřív ten nárok',
+            (string) $this->json($blocked)['error']['message'],
+        );
+
+        $claimRemoved = $this->putClaim($dependantId, (int) $claim['id'], [
+            'row_version' => $claim['row_version'],
+            'delete' => true,
+        ]);
+        self::assertSame(200, $claimRemoved->getStatusCode(), (string) $claimRemoved->getBody());
+        self::assertSame(0, $this->claimCount());
+
+        $removed = $this->action->update(
+            $this->request(
+                'PUT',
+                $this->supplierId,
+                "/api/payroll/people/{$this->employeeId}/dependants/{$dependantId}",
+                ['row_version' => 1, 'delete' => true],
+            ),
+            new Response(),
+            ['id' => (string) $this->employeeId, 'dependantId' => (string) $dependantId],
+        );
+        self::assertSame(200, $removed->getStatusCode(), (string) $removed->getBody());
+        self::assertSame([], $this->json($removed)['dependants']);
+    }
+
+    /** Co kryje schválená mzda, se nemaže — a uživatel se dozví, co s tím. */
+    public function testClaimInsideFrozenPeriodIsNotDeleted(): void
+    {
+        $dependantId = $this->createChild();
+        $created = $this->json($this->postClaim($dependantId, $this->claim()));
+        $claim = $created['dependants'][0]['claims'][0];
+        $this->approveRun('2026-03-01');
+
+        $response = $this->putClaim($dependantId, (int) $claim['id'], [
+            'row_version' => $claim['row_version'],
+            'delete' => true,
+        ]);
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString(
+            'kryje schválená mzda',
+            (string) $this->json($response)['error']['message'],
+        );
+        self::assertSame(1, $this->claimCount());
+    }
+
     // --- pomocníci ---------------------------------------------------------
 
     /** @param array<string,mixed> $overrides @return array<string,mixed> */

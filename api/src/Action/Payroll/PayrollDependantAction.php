@@ -146,13 +146,39 @@ final class PayrollDependantAction
             );
         }
 
+        /*
+         * `delete: true` je SMAZÁNÍ, ne uložení prázdné osoby.
+         *
+         * Evidence uměla osoby jen zakládat a měnit, takže vyživovaná osoba
+         * zapsaná u špatného zaměstnance zůstala navždy. Příznak jde tudy,
+         * a ne novou routou, aby cesta ven existovala hned.
+         */
+        $delete = $body['delete'] ?? false;
+        if (!is_bool($delete)) {
+            return Json::error($response, 'validation_failed', 'Pole delete musí být boolean.', 422);
+        }
+
         return $this->run($request, $response, function () use (
             $request,
             $args,
             $body,
             $version,
             $effectiveOn,
+            $delete,
         ): array {
+            if ($delete) {
+                return $this->dependants->deleteDependant(
+                    $this->currentSupplierId($request),
+                    (int) $args['id'],
+                    (int) $args['dependantId'],
+                    $version,
+                    $effectiveOn,
+                    $this->userId($request),
+                    $this->clientIp($request),
+                    $request->getHeaderLine('User-Agent'),
+                );
+            }
+
             return $this->dependants->updateDependant(
                 $this->currentSupplierId($request),
                 (int) $args['id'],
@@ -257,13 +283,34 @@ final class PayrollDependantAction
             );
         }
 
+        // Viz update(): `delete: true` maže nárok, který nikdy neměl vzniknout.
+        $delete = $body['delete'] ?? false;
+        if (!is_bool($delete)) {
+            return Json::error($response, 'validation_failed', 'Pole delete musí být boolean.', 422);
+        }
+
         return $this->run($request, $response, function () use (
             $request,
             $args,
             $body,
             $version,
             $effectiveOn,
+            $delete,
         ): array {
+            if ($delete) {
+                return $this->dependants->deleteClaim(
+                    $this->currentSupplierId($request),
+                    (int) $args['id'],
+                    (int) $args['dependantId'],
+                    (int) $args['claimId'],
+                    $version,
+                    $effectiveOn,
+                    $this->userId($request),
+                    $this->clientIp($request),
+                    $request->getHeaderLine('User-Agent'),
+                );
+            }
+
             return $this->dependants->saveClaim(
                 $this->currentSupplierId($request),
                 (int) $args['id'],

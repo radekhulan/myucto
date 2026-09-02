@@ -62,14 +62,44 @@ final class PayrollForeignPermitAction
         if (!is_array($body) || array_is_list($body)) {
             return Json::error($response, 'validation_failed', 'Tělo požadavku musí být objekt.', 422);
         }
+        /*
+         * Týž endpoint zapisuje i OPRAVU a SMAZÁNÍ.
+         *
+         * Oprávnění bývalo neměnné (trigger zakazoval UPDATE i DELETE) a
+         * formulář nabízí jako výchozí účinnost dnešek, takže překlep byl
+         * trvalý. Cesta zpět musí existovat a nesmí čekat na novou routu:
+         * `id` v těle znamená „oprav tenhle záznam", `delete: true` znamená
+         * „smaž ho". Bez `id` je chování beze změny — vloží se nový záznam.
+         */
+        $permitId = $this->permitId($body['id'] ?? null);
+        if ($permitId === false) {
+            return Json::error($response, 'validation_failed', 'Pole id musí být kladné celé číslo.', 422);
+        }
+        $delete = $body['delete'] ?? false;
+        if (!is_bool($delete)) {
+            return Json::error($response, 'validation_failed', 'Pole delete musí být boolean.', 422);
+        }
+        if ($delete && $permitId === null) {
+            return Json::error($response, 'validation_failed', 'Smazání vyžaduje id oprávnění.', 422);
+        }
+
+        $supplierId = $this->currentSupplierId($request);
+        $employeeId = (int) $args['id'];
+        $actorId = $this->userId($request) ?? throw new \LogicException('Chybí uživatel relace.');
+        $today = (new DateTimeImmutable('today'))->format('Y-m-d');
         try {
-            $view = $this->permits->create(
-                $this->currentSupplierId($request),
-                (int) $args['id'],
-                $body,
-                $this->userId($request) ?? throw new \LogicException('Chybí uživatel relace.'),
-                (new DateTimeImmutable('today'))->format('Y-m-d'),
-            );
+            $view = match (true) {
+                $delete => $this->permits->remove($supplierId, $employeeId, (int) $permitId, $actorId, $today),
+                $permitId !== null => $this->permits->correct(
+                    $supplierId,
+                    $employeeId,
+                    $permitId,
+                    $body,
+                    $actorId,
+                    $today,
+                ),
+                default => $this->permits->create($supplierId, $employeeId, $body, $actorId, $today),
+            };
         } catch (PayrollForeignPermitException $exception) {
             return Json::error($response, $exception->errorCode, $exception->getMessage(), $exception->getCode());
         }
@@ -93,6 +123,17 @@ final class PayrollForeignPermitAction
             return false;
         }
         return $this->requirePayrollEnabled($request, $response, $this->access, $error);
+    }
+
+    /** @return int|null|false false = neplatná hodnota */
+    private function permitId(mixed $value): int|null|false
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $id = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+        return is_int($id) ? $id : false;
     }
 
     private function asOf(mixed $value): ?string

@@ -33,6 +33,13 @@ export function transitionPresentation(
       icon: 'cycle' as const,
     }))
   }
+  // Návrat z omylem zapsaného ukončení je OPRAVA, ne hlavní krok — vypadat
+  // jako zelené „Zahájit" u skončeného vztahu by svádělo k překliku.
+  if (from === 'ended') {
+    return allowed.map(target => (target === 'active'
+      ? { target, variant: 'neutral' as const, tier: 'secondary' as const, icon: 'cycle' as const }
+      : { target, ...PRESENTATION[target] }))
+  }
   return allowed.map(target => ({ target, ...PRESENTATION[target] }))
 }
 

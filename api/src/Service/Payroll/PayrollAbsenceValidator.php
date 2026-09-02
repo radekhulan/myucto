@@ -26,6 +26,15 @@ final class PayrollAbsenceValidator
 
     private const DOMAIN = PayrollRulesetDomain::CompensationAverages;
 
+    /**
+     * Druhy absence, jejichž náhrada se počítá z průměrného výdělku. Uložit je
+     * lze i bez něj; bez něj je nelze SCHVÁLIT, protože ze schválení vzniká
+     * mzdový vstup a ten by neměl z čeho počítat.
+     */
+    public const TYPES_REQUIRING_AVERAGE = [
+        'vacation', 'dpn', 'quarantine', 'employee_obstacle', 'employer_obstacle',
+    ];
+
     public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
 
     /** @param array<string,mixed> $body @return array<string,mixed> */
@@ -65,16 +74,37 @@ final class PayrollAbsenceValidator
         if (in_array($policy, ['average_100', 'statutory_manual_review'], true)
             && $this->calendarQuarter($from) !== $this->calendarQuarter($to)
         ) {
-            throw new \InvalidArgumentException(
-                'Absenci s náhradou mzdy rozděl podle kalendářních čtvrtletí.'
-            );
+            /*
+             * ZŮSTÁVÁ. Průměrný výdělek se zjišťuje vždy k prvnímu dni
+             * kalendářního čtvrtletí (§ 354 odst. 1 ZP) — jedna nepřítomnost
+             * přes přelom čtvrtletí by se počítala dvěma různými průměry
+             * a v jednom řádku by to nešlo poctivě uložit. Hláška ale musí
+             * říct, KDE ten řez vede, ne jen „rozděl to".
+             */
+            $boundary = self::nextQuarterStart($from);
+            $lastOfQuarter = $boundary->modify('-1 day')->format('Y-m-d');
+            throw new \InvalidArgumentException(sprintf(
+                'Nepřítomnost s náhradou mzdy nesmí přejít přes konec čtvrtletí — '
+                . 'průměrný výdělek se zjišťuje k prvnímu dni čtvrtletí '
+                . '(§ 354 odst. 1 ZP). Zapište ji dvakrát: %s – %s a %s – %s.',
+                $from,
+                $lastOfQuarter,
+                $boundary->format('Y-m-d'),
+                $to,
+            ));
         }
+        /*
+         * Průměrný výdělek se tu ZÁMĚRNĚ nevyžaduje. Je to podmínka VÝPOČTU
+         * náhrady, ne podmínka zápisu nepřítomnosti: účetní se o dovolené nebo
+         * neschopence dozví dřív, než je spočítaný a schválený čtvrtletní
+         * průměr, a evidence, která ji do té doby nepustí nic uložit, ji nutí
+         * držet papír na stole. Kontrola zůstává — přesunula se na schválení
+         * absence, kde teprve vzniká mzdový vstup. Do té doby je absence rozdělaná
+         * práce, která se nesmí ztratit. Seznam dotčených druhů drží konstanta
+         * {@see self::TYPES_REQUIRING_AVERAGE}, podle které se kontroluje
+         * schválení.
+         */
         $averageId = $this->nullablePositiveInt($body['average_snapshot_id'] ?? null, 'average_snapshot_id');
-        if (in_array($type, ['dpn', 'quarantine', 'vacation', 'employee_obstacle', 'employer_obstacle'], true)
-            && $averageId === null
-        ) {
-            throw new \InvalidArgumentException('Tento druh absence vyžaduje schválený snapshot průměru.');
-        }
         return [
             'employment_id' => $employmentId,
             'absence_type' => $type,
@@ -275,6 +305,21 @@ final class PayrollAbsenceValidator
             throw new \InvalidArgumentException("Text smí mít nejvýše {$max} znaků.");
         }
         return $text;
+    }
+
+    /** První den čtvrtletí, které následuje po čtvrtletí daného data. */
+    private static function nextQuarterStart(string $date): \DateTimeImmutable
+    {
+        $value = new \DateTimeImmutable($date);
+        $quarter = intdiv((int) $value->format('n') - 1, 3) + 1;
+
+        return $quarter === 4
+            ? new \DateTimeImmutable(sprintf('%04d-01-01', (int) $value->format('Y') + 1))
+            : new \DateTimeImmutable(sprintf(
+                '%04d-%02d-01',
+                (int) $value->format('Y'),
+                ($quarter * 3) + 1,
+            ));
     }
 
     private function calendarQuarter(string $date): string

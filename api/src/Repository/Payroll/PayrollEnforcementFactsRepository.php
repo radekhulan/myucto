@@ -211,7 +211,16 @@ final class PayrollEnforcementFactsRepository
         if (!isset($roles['beneficiary'])
             || (!isset($roles['court']) && !isset($roles['executor']))) {
             throw new \InvalidArgumentException(
-                'Aktivace vyžaduje aktuální doložený soud nebo exekutora a oprávněného.',
+                'Aktivace vyžaduje aktuální doložený soud nebo exekutora a oprávněného '
+                . 'k datu účinnosti případu ' . $effectiveOn . '. '
+                . $this->laterRevisionHint(
+                    'payroll_enforcement_case_parties',
+                    $supplierId,
+                    $caseId,
+                    $effectiveOn,
+                    'Strany případu jsou zapsané, ale až od pozdějšího data',
+                    'strany případu',
+                ),
             );
         }
         $instruction = $this->currentRecipientInstruction(
@@ -221,7 +230,16 @@ final class PayrollEnforcementFactsRepository
         );
         if ($instruction === null) {
             throw new \InvalidArgumentException(
-                'Aktivace vyžaduje doloženou instrukci příjemce k ověřenému účtu.',
+                'Aktivace vyžaduje doloženou instrukci příjemce k ověřenému účtu '
+                . 'k datu účinnosti případu ' . $effectiveOn . '. '
+                . $this->laterRevisionHint(
+                    'payroll_enforcement_recipient_instructions',
+                    $supplierId,
+                    $caseId,
+                    $effectiveOn,
+                    'Instrukce příjemce je zapsaná, ale až od pozdějšího data',
+                    'instrukci příjemce',
+                ),
             );
         }
         $partyId = (int) $instruction['recipient_party_id'];
@@ -254,6 +272,39 @@ final class PayrollEnforcementFactsRepository
                 'Instrukce příjemce neodkazuje k datu účinnosti na ověřený účet.',
             );
         }
+    }
+
+    /**
+     * Doplněk k fail-closed hlášce aktivace: pověz, KUDY ven.
+     *
+     * Formulář právních faktů nabízel jako účinnost dnešek, jenže aktivace se
+     * poměřuje k účinnosti PŘÍPADU — u exekučního příkazu doručeného před pár
+     * měsíci to je jiné datum. Účetní pak četla „aktivace vyžaduje doloženého
+     * exekutora“ nad obrazovkou, kde exekutor viditelně byl, a řádky jsou
+     * append-only, takže je nešlo přepsat. Cesta ven existuje — přidat revizi
+     * s dřívější účinností — ale nikde nebyla napsaná.
+     */
+    private function laterRevisionHint(
+        string $table,
+        int $supplierId,
+        int $caseId,
+        string $effectiveOn,
+        string $found,
+        string $subject,
+    ): string {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT MIN(effective_from) FROM {$table}
+              WHERE supplier_id = ? AND case_id = ? AND effective_from > ?",
+        );
+        $stmt->execute([$supplierId, $caseId, $effectiveOn]);
+        $earliest = $stmt->fetchColumn();
+        if (!is_string($earliest) || $earliest === '') {
+            return 'Doplňte ' . $subject . ' s účinností nejpozději od ' . $effectiveOn . '.';
+        }
+
+        return $found . ' (' . $earliest . '). Záznamy jsou nepřepisovatelné — '
+            . 'přidejte novou revizi s účinností od ' . $effectiveOn
+            . ', nebo opravte datum účinnosti případu.';
     }
 
     private function caseExists(int $supplierId, int $caseId, bool $lock = false): void

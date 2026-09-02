@@ -119,12 +119,30 @@ final class PayrollDocumentRepository
         return $row === false ? null : self::cast($row);
     }
 
-    /** @return array<string,mixed>|null */
+    /**
+     * `period_start` se přidává z běhu, ke kterému dokument patří.
+     *
+     * Tabulka dokumentů ten sloupec nemá, takže `$document['period_start']`
+     * byl vždycky prázdný — a odesílací pravidla se pak vyhodnocovala
+     * k DNEŠKU místo k měsíci pásky. Prosincová páska rozesílaná v lednu tak
+     * narazila na lednovou zaměstnavatelskou politiku a hlásila, že pro
+     * „toto období" politika chybí, i když prosincová existovala.
+     *
+     * @return array<string,mixed>|null
+     */
     public function find(int $supplierId, int $documentId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payroll_generated_documents
-              WHERE supplier_id = ? AND id = ?'
+            /*
+             * LEFT JOIN: roční doklady (potvrzení, mzdový list) běh nemají,
+             * a INNER JOIN by je z `find()` tiše ztratil.
+             */
+            'SELECT document.*, run.period_start
+               FROM payroll_generated_documents document
+          LEFT JOIN payroll_runs run
+                 ON run.supplier_id = document.supplier_id
+                AND run.id = document.run_id
+              WHERE document.supplier_id = ? AND document.id = ?'
         );
         $stmt->execute([$supplierId, $documentId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -155,9 +173,18 @@ final class PayrollDocumentRepository
      * Skryje nahrazenou verzi dokumentu ze seznamu.
      *
      * Nemaže soubor: `payroll_generated_documents` je neměnná tabulka -
-     * dokument je doklad o tom, co zaměstnanec dostal. Skrýt jde proto JEN
-     * verzi, kterou už nahradila novější; poslední verze je ta platná
-     * a zmizet nesmí.
+     * dokument je doklad o tom, co zaměstnanec dostal.
+     *
+     * Skrýt jde ve dvou případech:
+     *  - verzi, kterou už nahradila novější (původní pravidlo), nebo
+     *  - dokument, který se k zaměstnanci NIKDY NEDOSTAL — nemá záznam
+     *    o předání ani odeslaný zabezpečený odkaz.
+     *
+     * Druhá větev je tu proto, že první sama o sobě tvořila slepou uličku:
+     * u nezměněné schválené revize se nová verze vůbec nezakládá (generování
+     * vrátí tu původní), takže omylem vygenerovaná páska nešla přegenerovat
+     * ANI skrýt a v seznamu zůstala navždy. Doručenou pásku to nadále
+     * neskryje — ta je doklad.
      *
      * @return array{document_id:int,document_kind:string,document_revision_no:int}
      */
@@ -170,7 +197,18 @@ final class PayrollDocumentRepository
                         SELECT 1 FROM payroll_generated_documents newer
                          WHERE newer.supplier_id = document.supplier_id
                            AND newer.supersedes_document_id = document.id
-                    ) AS superseded
+                    ) AS superseded,
+                    EXISTS (
+                        SELECT 1 FROM payroll_document_delivery_events event
+                         WHERE event.supplier_id = document.supplier_id
+                           AND event.payroll_document_id = document.id
+                    ) AS delivered,
+                    EXISTS (
+                        SELECT 1 FROM payroll_document_access_links link
+                         WHERE link.supplier_id = document.supplier_id
+                           AND link.payroll_document_id = document.id
+                           AND link.sent_at IS NOT NULL
+                    ) AS link_sent
                FROM payroll_generated_documents document
               WHERE document.supplier_id = ? AND document.id = ?',
         );
@@ -179,10 +217,12 @@ final class PayrollDocumentRepository
         if (!is_array($row)) {
             throw new \DomainException('Dokument nebyl nalezen.');
         }
-        if (!(bool) $row['superseded']) {
+        $handedOver = (bool) $row['delivered'] || (bool) $row['link_sent'];
+        if (!(bool) $row['superseded'] && $handedOver) {
             throw new \DomainException(
-                'Skrýt jde jen verzi, kterou nahradila novější. '
-                . 'Tahle je poslední platná.',
+                'Tenhle dokument už zaměstnanec dostal, takže je to doklad '
+                . 'a ze seznamu nezmizí. Skrýt jde jen verzi, kterou nahradila '
+                . 'novější.',
             );
         }
         $insert = $this->db->pdo()->prepare(
