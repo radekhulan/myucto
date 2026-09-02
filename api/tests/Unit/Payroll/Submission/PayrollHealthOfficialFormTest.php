@@ -70,6 +70,34 @@ final class PayrollHealthOfficialFormTest extends TestCase
         self::assertStringNotContainsString('K?', $text);
     }
 
+    /**
+     * Celé koruny se tisknou bez desetinných míst, stejně jako je tiskne
+     * portál pojišťovny. Účetní porovnávala náš tiskopis s tím, který jí
+     * VZP přijala, a rozdíl byl právě tady: `22400,00` proti `22 400`.
+     */
+    public function testWholeCrownsPrintWithoutDecimals(): void
+    {
+        $bytes = (new PayrollHealthPaymentOverviewPdfRenderer())->renderPayload(
+            new HealthPaymentOverviewPayload(
+                insurerCode: '111',
+                overviewKind: HealthPaymentOverviewPayload::KIND_REGULAR,
+                employer: $this->employer(),
+                month: 8,
+                year: 2026,
+                employeeCount: 1,
+                assessmentBaseMinorUnits: 2240000,
+                contributionCzk: 3024,
+            ),
+            'Všeobecná zdravotní pojišťovna',
+            '2026-09-02',
+        );
+
+        $text = $this->text($bytes);
+        self::assertStringContainsString('22 400', $text);
+        self::assertStringNotContainsString('22 400,00', $text);
+        self::assertStringContainsString('3 024', $text);
+    }
+
     public function testPaymentOverviewUsesTheOfficialFormAndMarksCorrectiveKind(): void
     {
         $bytes = (new PayrollHealthPaymentOverviewPdfRenderer())->renderPayload(
@@ -91,9 +119,14 @@ final class PayrollHealthOfficialFormTest extends TestCase
         self::assertStringContainsString('76.51/2026', $text);
         self::assertStringContainsString('Řepařská Ďůra s.r.o.', $text);
         self::assertStringContainsString('08/2026', $text);
-        // Halíře se na tiskopis tisknou tak, jak jdou do datové věty.
-        self::assertStringContainsString('123456,78', $text);
-        self::assertStringContainsString('16667', $text);
+        // Částky se tisknou v podobě, jakou na tentýž tiskopis dává portál
+        // pojišťovny — tisíce oddělené mezerou. Halíře se nezaokrouhlují.
+        self::assertStringContainsString('123 456,78', $text);
+        self::assertStringContainsString('16 667', $text);
+        self::assertStringNotContainsString('123456,78', $text);
+        // PSČ taky s mezerou; slepené `11000` by čtečka pojišťovny vidět
+        // neměla.
+        self::assertStringContainsString('110 00', $text);
         // Křížek se kreslí do políčka daného typu přehledu — u řádného
         // přehledu vyjde jinam, takže se dokumenty musí lišit.
         self::assertStringContainsString('X', $text);

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
@@ -20,6 +21,12 @@ import { payrollWorkingPeriod } from './payrollComponentsUi'
  * u položky proto vždy vede na místo, kde se úkon reálně udělá; duplikovat
  * tam JMHZ náhledy, zdravotní karty nebo Mobilní klíč by znamenalo druhou
  * kopii pěti set řádků logiky, která se dřív nebo později rozejde s první.
+ *
+ * Jediná výjimka je `action.prepare`: povinnost, která ještě nemá založené
+ * podání, nemá kam odkázat — odkaz na obrazovku agendy by po uživateli chtěl,
+ * ať si sám najde běh, revizi a účtárnu. Panel proto zavolá přípravu pro tu
+ * konkrétní agendu a období a TEPRVE PAK otevře `path` s hotovým podáním.
+ * I tady ale všechnu práci dělá backend nad existujícími službami agend.
  */
 const props = defineProps<{
   environment: PayrollRegzelEnvironment
@@ -36,6 +43,7 @@ const emit = defineEmits<{
 }>()
 
 const { t, te } = useI18n()
+const router = useRouter()
 const { submissionAgendaLabel, submissionStatusLabel } = usePayrollLabels()
 const environmentModel = computed({
   get: () => props.environment,
@@ -50,6 +58,9 @@ const period = computed({
 const loading = ref(true)
 const error = ref('')
 const response = ref<PayrollMonthlyChecklistResponse | null>(null)
+/** Klíč položky, jejíž podání se právě zakládá — ať nejde kliknout dvakrát. */
+const preparing = ref('')
+const prepareError = ref<Record<string, string>>({})
 
 const items = computed(() => response.value?.items ?? [])
 const summary = computed(() => response.value?.summary ?? {
@@ -97,7 +108,13 @@ function agendaLabel(item: PayrollMonthlyChecklistItem): string {
     const key = `payroll.people.checklist.${code}`
     return te(key) ? t(key) : item.agenda_label
   }
-  if (item.source !== 'submission') return item.agenda_label
+  // `agenda_duty` nese TÝŽ kód agendy jako `submission` (JMHZ25, PPZ_2026) —
+  // jen k němu ještě neexistuje podání. Kdyby se překládal jinak, četla by
+  // účetní o téže povinnosti dva různé názvy podle toho, jestli už na ni
+  // klikla.
+  if (item.source !== 'submission' && item.source !== 'agenda_duty') {
+    return item.agenda_label
+  }
   return submissionAgendaLabel(code)
 }
 
@@ -122,16 +139,50 @@ function statusLabel(item: PayrollMonthlyChecklistItem): string {
   return t(CUSTOM_STATUS_KEYS[item.status] ?? 'payroll.submissions.monthly_checklist.status.unknown')
 }
 
-function actionClass(kind: string): string {
-  if (kind === 'send') return btnFilledSm('primary')
-  if (kind === 'generate') return btnOutlineSm('accent')
+/*
+ * Příprava povinnosti je HLAVNÍ krok toho řádku (bez ní se nedá nic dalšího
+ * udělat), takže plná primární barva — stejně jako „Odeslat" u povinnosti,
+ * která už podání má. Odkazy na cizí obrazovku zůstávají outline.
+ */
+function actionClass(item: PayrollMonthlyChecklistItem): string {
+  if (item.action.prepare) return btnFilledSm('primary')
+  if (item.action.kind === 'send') return btnFilledSm('primary')
+  if (item.action.kind === 'generate') return btnOutlineSm('accent')
   return btnOutlineSm('neutral')
 }
 
-function actionIcon(kind: string): string {
-  if (kind === 'send') return ICONS.send
-  if (kind === 'generate') return ICONS.doc
+function actionIcon(item: PayrollMonthlyChecklistItem): string {
+  if (item.action.kind === 'send') return ICONS.send
+  if (item.action.kind === 'generate') return ICONS.doc
   return ICONS.x
+}
+
+/**
+ * Založí podání pro jednu povinnost a otevře ho. Když příprava selže (chybí
+ * variabilní symbol účtárny, revize se mezitím změnila), zůstane hláška
+ * U TÉ POLOŽKY — nesmí spadnout do společného pruhu nahoře, kde by vypadala
+ * jako výpadek celého přehledu.
+ */
+async function prepare(item: PayrollMonthlyChecklistItem) {
+  const request = item.action.prepare
+  if (!request || preparing.value) return
+  preparing.value = item.key
+  prepareError.value = { ...prepareError.value, [item.key]: '' }
+  try {
+    const result = await payrollApi.prepareMonthlyChecklistItem(props.environment, request)
+    await load()
+    await router.push(result.path)
+  } catch (exception) {
+    prepareError.value = {
+      ...prepareError.value,
+      [item.key]: apiErrorMessage(
+        exception,
+        t('payroll.submissions.monthly_checklist.prepare_failed'),
+      ),
+    }
+  } finally {
+    preparing.value = ''
+  }
 }
 
 async function load() {
@@ -316,14 +367,29 @@ onMounted(load)
                     {{ t('payroll.submissions.monthly_checklist.done_label') }}
                   </span>
                   <template v-else>
+                    <button
+                      v-if="item.action.prepare"
+                      type="button"
+                      :class="[actionClass(item), 'whitespace-nowrap']"
+                      :disabled="preparing === item.key"
+                      data-test="monthly-checklist-prepare"
+                      @click="prepare(item)"
+                    >
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="actionIcon(item)" />
+                      </svg>
+                      {{ preparing === item.key
+                        ? t('payroll.submissions.monthly_checklist.preparing')
+                        : item.action.label }}
+                    </button>
                     <RouterLink
-                      v-if="item.action.path"
+                      v-else-if="item.action.path"
                       :to="item.action.path"
-                      :class="actionClass(item.action.kind)"
+                      :class="actionClass(item)"
                       data-test="monthly-checklist-action"
                     >
                       <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path :d="actionIcon(item.action.kind)" />
+                        <path :d="actionIcon(item)" />
                       </svg>
                       {{ item.action.label }}
                     </RouterLink>
@@ -336,6 +402,14 @@ onMounted(load)
                       data-test="monthly-checklist-reason"
                     >
                       {{ item.action.reason }}
+                    </p>
+                    <p
+                      v-if="prepareError[item.key]"
+                      class="mt-1 max-w-xs text-xs text-danger-600"
+                      role="alert"
+                      data-test="monthly-checklist-prepare-error"
+                    >
+                      {{ prepareError[item.key] }}
                     </p>
                   </template>
                 </td>
@@ -380,15 +454,34 @@ onMounted(load)
                 {{ t('payroll.submissions.monthly_checklist.done_label') }}
               </span>
               <template v-else>
+                <button
+                  v-if="item.action.prepare"
+                  type="button"
+                  :class="[actionClass(item), 'whitespace-nowrap']"
+                  :disabled="preparing === item.key"
+                  data-test="monthly-checklist-prepare"
+                  @click="prepare(item)"
+                >
+                  {{ preparing === item.key
+                    ? t('payroll.submissions.monthly_checklist.preparing')
+                    : item.action.label }}
+                </button>
                 <RouterLink
-                  v-if="item.action.path"
+                  v-else-if="item.action.path"
                   :to="item.action.path"
-                  :class="actionClass(item.action.kind)"
+                  :class="actionClass(item)"
                 >
                   {{ item.action.label }}
                 </RouterLink>
                 <span v-else class="text-xs text-neutral-500">{{ item.action.label }}</span>
                 <p v-if="item.action.reason" class="mt-1 text-xs text-neutral-500">{{ item.action.reason }}</p>
+                <p
+                  v-if="prepareError[item.key]"
+                  class="mt-1 text-xs text-danger-600"
+                  role="alert"
+                >
+                  {{ prepareError[item.key] }}
+                </p>
               </template>
             </div>
           </article>

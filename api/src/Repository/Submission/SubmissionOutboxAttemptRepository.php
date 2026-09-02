@@ -128,6 +128,43 @@ final class SubmissionOutboxAttemptRepository
     }
 
     /**
+     * Co ledger říká o tom, jestli zpráva opustila aplikaci.
+     *
+     * `left_application` počítá pokusy, u kterých NELZE tvrdit, že zpráva
+     * zůstala uvnitř:
+     *   - přidělené `external_message_id` — zpráva u příjemce prokazatelně je,
+     *   - `sent` — kanál odeslání potvrdil,
+     *   - `uncertain` — spojení se přerušilo a nevíme (nevědomost není důkaz
+     *     o neodeslání),
+     *   - `in_flight` — proces zemřel mezi voláním kanálu a zápisem výsledku,
+     *     tedy tatáž nevědomost,
+     *   - `rejected` — odmítnout může jen ten, komu zpráva došla.
+     * Zbývá `failed`: kanál se ozval chybou JEŠTĚ PŘED odesláním, takže sám
+     * o sobě neznamená, že zpráva ven šla. Proto se počítá zvlášť do `total`.
+     *
+     * @return array{total:int,left_application:int}
+     */
+    public function deletionEvidence(int $supplierId, int $outboxId): array
+    {
+        if (!$this->isAvailable()) {
+            return ['total' => 0, 'left_application' => 0];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) AS total,
+                    COALESCE(SUM(external_message_id IS NOT NULL OR outcome <> \'failed\'), 0) AS left_application
+               FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND outbox_id = ?'
+        );
+        $stmt->execute([$supplierId, $outboxId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return [
+            'total' => (int) ($row['total'] ?? 0),
+            'left_application' => (int) ($row['left_application'] ?? 0),
+        ];
+    }
+
+    /**
      * @param list<mixed> $params
      *
      * @return array<string,mixed>

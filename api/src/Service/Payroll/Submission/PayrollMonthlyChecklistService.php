@@ -33,7 +33,11 @@ use MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver;
  *      zákonných termínů,
  *   3. {@see PayrollStatutoryAgendaCatalog} — ověřená matice schopností pro
  *      NEMPRI/HZUPN/ELDP/úrazové pojištění, kterou už používá záložka „Další
- *      povinnosti".
+ *      povinnosti",
+ *   4. {@see PayrollMonthlyAgendaDutyService} — měsíční agendové povinnosti,
+ *      které ještě NEMAJÍ založené podání (JMHZ, přehled o platbě pojistného
+ *      za každou pojišťovnu období). Bez nich přehled tvrdil „nemáte co dělat"
+ *      právě tomu, kdo ještě nezačal.
  *
  * Kdyby si tahle třída data stavěla znovu, rozešla by se s panely, které nad
  * týmiž daty už existují — a účetní by dostala DRUHOU verzi pravdy o tom, co
@@ -64,9 +68,26 @@ use MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver;
  *                se to udělá,
  *   `manual`   — appka to poslat neumí, `reason` říká PROČ jednou větou.
  *
- * `done=true` navíc znamená, že už není co dělat (splněno/zrušeno) — `kind`
- * pak popisuje, co by se dělalo, kdyby splněno nebylo (pro konzistenci dat),
- * ale UI místo tlačítka ukáže stav.
+ * `done=true` navíc znamená, že už není co dělat — `kind` pak popisuje, co by
+ * se dělalo, kdyby splněno nebylo (pro konzistenci dat), ale UI místo tlačítka
+ * ukáže stav.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * „Splněno" = ODESLÁNO A PŘIJATÉ, ne založené a ne zrušené
+ * ═══════════════════════════════════════════════════════════════════════════
+ * `done` se odvozuje výhradně z fáze `fulfilled`
+ * ({@see PayrollDeadlineAssessmentService}: přijaté podání nebo splněná
+ * povinnost). Dřív se za splněnou počítala i fáze `cancelled` — jenže zrušené
+ * podání povinnost NESPLNILO. Účetní, která podání zrušila, tak přehled
+ * odškrtl a povinnost jí zmizela z očí přesně ve chvíli, kdy ji bylo potřeba
+ * připravit znovu.
+ *
+ * `action.prepare` je nepovinný doplněk akce: nese, co přesně se má založit
+ * (agenda, období, pojišťovna), aby tlačítko povinnost vyrobilo na jedno
+ * kliknutí místo toho, aby uživatele poslalo obrazovku hledat. Skládá se
+ * odsud, ale sestavuje ho
+ * {@see PayrollMonthlyAgendaPreparationService} — tahle třída pořád nic
+ * negeneruje.
  */
 final readonly class PayrollMonthlyChecklistService
 {
@@ -76,6 +97,7 @@ final readonly class PayrollMonthlyChecklistService
         private PayrollDeadlineAssessmentService $assessments,
         private PayrollStatutoryAgendaCatalog $statutoryCatalog,
         private IsdsTransportAvailabilityResolver $transportAvailability,
+        private PayrollMonthlyAgendaDutyService $agendaDuties,
     ) {}
 
     /**
@@ -107,8 +129,24 @@ final readonly class PayrollMonthlyChecklistService
         // vlastní mutovatelné vlastnosti).
         $transport = $this->transportAvailability->resolve($supplierId, $environment);
 
+        // JEDEN dotaz do evidence povinností pro OBA prameny, které z ní
+        // žijí: `submissionRows()` z něj vypíše, co existuje, a agendové
+        // povinnosti z něj vezmou DOPLNĚK. Kdyby si každý pramen sáhl pro
+        // vlastní stránku s vlastní podmínkou období, rozešly by se v tom,
+        // co pokrývají — a řádek by se buď zdvojil, nebo zmizel.
+        $registered = $this->submissions->listOverview(
+            $supplierId,
+            $environment,
+            $periodStart,
+            $periodEnd,
+            PayrollSubmissionRepository::LIST_MAX_LIMIT,
+            0,
+            null,
+        )['items'];
+
         $items = [
-            ...$this->submissionRows($supplierId, $environment, $periodStart, $periodEnd, $transport),
+            ...$this->submissionRows($registered, $transport),
+            ...$this->agendaDutyRows($supplierId, $period, $registered, $transport),
             ...$this->deadlineRows($supplierId, $environment, $periodStart, $periodEnd),
         ];
         usort(
@@ -159,36 +197,33 @@ final readonly class PayrollMonthlyChecklistService
      * se nedostalo (bylo vyfiltrované) — přesně ve chvíli, kdy zbýval jediný
      * krok, totiž odeslat ho.
      *
+     * ═══════════════════════════════════════════════════════════════════════
+     * ZRUŠENÉ podání zůstává mezi nesplněnými
+     * ═══════════════════════════════════════════════════════════════════════
+     * Řádek ve zrušeném stavu tenhle pramen vypisuje dál a `done` u něj je
+     * `false` — povinnost zrušením nezanikla, jen se k ní musí vyrobit nový
+     * dokument. Akce proto vede na PŘÍPRAVU, ne na odeslání; historie
+     * zrušeného podání (spisová značka, důvod) zůstává na obrazovce agendy.
+     *
+     * @param list<array<string,mixed>> $registered
      * @param array{automatic:bool,channel:string,reason:?string} $transport
      * @return list<array<string,mixed>>
      */
     private function submissionRows(
-        int $supplierId,
-        string $environment,
-        string $periodStart,
-        string $periodEnd,
+        array $registered,
         array $transport,
     ): array {
-        $page = $this->submissions->listOverview(
-            $supplierId,
-            $environment,
-            $periodStart,
-            $periodEnd,
-            PayrollSubmissionRepository::LIST_MAX_LIMIT,
-            0,
-            null,
-        );
-
         $rows = [];
-        foreach ($page['items'] as $row) {
+        foreach ($registered as $row) {
             $assessment = $this->assessments->assess(
                 $row['earliest_submission_on'],
                 $row['due_on'],
                 $row['status'],
                 $row['latest_submission']['status'] ?? null,
             );
-            $done = in_array($assessment->phase, ['fulfilled', 'cancelled'], true);
-            $generated = $row['latest_submission'] !== null;
+            $done = $assessment->phase === 'fulfilled';
+            $cancelled = $assessment->phase === 'cancelled';
+            $generated = $row['latest_submission'] !== null && !$cancelled;
             $description = $this->submissionAgendaDescription(
                 (string) $row['agenda_code'],
                 (string) $row['subject_reference'],
@@ -218,18 +253,125 @@ final readonly class PayrollMonthlyChecklistService
                 'recipient' => self::withApplicable($description['recipient']),
                 'channel' => self::withApplicable($description['channel']),
                 'done' => $done,
-                'action' => $done
-                    ? $description['action']
-                    : ($generated ? $description['action'] : [
+                'action' => $done || $generated
+                    ? self::withoutPreparation($description['action'])
+                    : self::withoutPreparation([
                         'kind' => 'generate',
-                        'label' => 'Připravit podání',
+                        'label' => $cancelled
+                            ? 'Připravit znovu'
+                            : 'Připravit podání',
                         'path' => $description['tab_path'],
-                        'reason' => null,
+                        // Zrušené podání povinnost nesplnilo. Bez téhle věty
+                        // vypadá řádek jako chyba („vždyť jsem to zrušil"),
+                        // místo aby řekl, co po zrušení zbývá udělat.
+                        'reason' => $cancelled
+                            ? 'Podání bylo zrušeno, povinnost tím ale nezanikla '
+                                . '— připravte a odešlete nové.'
+                            : null,
                     ]),
             ];
         }
 
         return $rows;
+    }
+
+    /**
+     * Měsíční agendové povinnosti, ke kterým v evidenci ještě NENÍ řádek.
+     *
+     * Doplněk k {@see self::submissionRows()} nad TOUTÉŽ stránkou evidence —
+     * disjunktnost proto neplyne z filtru, ale z toho, že jeden pramen vypisuje
+     * existující řádky a druhý ty chybějící. Podrobně
+     * {@see PayrollMonthlyAgendaDutyService}.
+     *
+     * Prostředí se sem ZÁMĚRNĚ nepředává. Povinnost vzniká ze schváleného
+     * mzdového běhu, a ten prostředí nemá — zákon nezajímá, jestli si účetní
+     * podání zkoušela na testu. Přepínač test/ostré tedy povinnost schovat
+     * nemůže; ovlivňuje jen to, ve kterém prostředí se hledá už založené
+     * podání, protože `$registered` je čtené právě za jedno prostředí.
+     * Zkušební podání na testu tak ostrou povinnost neodškrtne.
+     *
+     * @param list<array<string,mixed>> $registered
+     * @param array{automatic:bool,channel:string,reason:?string} $transport
+     * @return list<array<string,mixed>>
+     */
+    private function agendaDutyRows(
+        int $supplierId,
+        string $period,
+        array $registered,
+        array $transport,
+    ): array {
+        $rows = [];
+        foreach ($this->agendaDuties->unprepared(
+            $supplierId,
+            $period,
+            array_map(
+                static fn (array $row): array => [
+                    'agenda_code' => (string) $row['agenda_code'],
+                    'subject_reference' => (string) $row['subject_reference'],
+                ],
+                $registered,
+            ),
+        ) as $duty) {
+            $agendaCode = (string) $duty['agenda_code'];
+            // Popis (formát, příjemce, kanál) je TÝŽ jako u povinnosti, která
+            // už řádek má — jinak by se stejná agenda popisovala dvakrát jinak
+            // podle toho, jestli se na ni už kliklo.
+            $description = $this->submissionAgendaDescription(
+                $agendaCode,
+                $duty['insurer_code'] === null
+                    ? 'payroll_run:' . $duty['run_id']
+                    : 'payroll_run:' . $duty['run_id'] . ':' . $duty['insurer_code'],
+                $transport,
+            );
+
+            $rows[] = [
+                'key' => $duty['key'],
+                'source' => 'agenda_duty',
+                'agenda_code' => $agendaCode,
+                'agenda_label' => $agendaCode,
+                'subject' => $duty['subject'],
+                'period' => $duty['period'],
+                'due_on' => $duty['due_on'],
+                'phase' => $duty['phase'],
+                'days_to_due' => $duty['days_to_due'],
+                'is_overdue' => $duty['is_overdue'],
+                'status' => 'not_prepared',
+                'document' => $description['document'],
+                'recipient' => self::withApplicable($description['recipient']),
+                'channel' => self::withApplicable($description['channel']),
+                'done' => false,
+                'action' => [
+                    'kind' => 'generate',
+                    'label' => 'Připravit',
+                    'path' => $description['tab_path'],
+                    'reason' => null,
+                    // Tohle je ten rozdíl proti pouhému odkazu: klient volá
+                    // přípravu rovnou pro tuhle agendu, tohle období a tuhle
+                    // pojišťovnu, a teprve pak otevře `path` s hotovým
+                    // podáním.
+                    'prepare' => [
+                        'agenda_code' => $agendaCode,
+                        'period' => $duty['period'],
+                        'insurer_code' => $duty['insurer_code'],
+                    ],
+                ],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * `prepare` je nepovinný doplněk, ale tvar řádku musí být jednotný napříč
+     * prameny — jinak by klient musel u každé položky hádat, jestli klíč
+     * existuje.
+     *
+     * @param array{kind:string,label:string,path:?string,reason:?string} $action
+     * @return array<string,mixed>
+     */
+    private static function withoutPreparation(array $action): array
+    {
+        return $action + ['prepare' => null];
     }
 
     /**
@@ -287,7 +429,7 @@ final readonly class PayrollMonthlyChecklistService
                 'recipient' => self::withApplicable($description['recipient']),
                 'channel' => self::withApplicable($description['channel']),
                 'done' => false,
-                'action' => $description['action'],
+                'action' => self::withoutPreparation($description['action']),
             ];
         }
 

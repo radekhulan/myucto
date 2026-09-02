@@ -3,11 +3,17 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 const m = vi.hoisted(() => ({
   monthlyChecklist: vi.fn(),
+  prepareItem: vi.fn(),
+  push: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
-  payrollApi: { monthlyChecklist: m.monthlyChecklist },
+  payrollApi: {
+    monthlyChecklist: m.monthlyChecklist,
+    prepareMonthlyChecklistItem: m.prepareItem,
+  },
 }))
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }) }))
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
@@ -27,6 +33,33 @@ function baseResponse(overrides: Partial<Record<string, unknown>> = {}) {
     summary: { total: 0, send: 0, generate: 0, manual: 0, done: 0 },
     items: [],
     ...overrides,
+  }
+}
+
+function agendaDutyItem() {
+  return {
+    key: 'agenda_duty:PPZ_2026:5:111',
+    source: 'agenda_duty',
+    agenda_code: 'PPZ_2026',
+    agenda_label: 'PPZ_2026',
+    subject: 'VZP (111)',
+    period: '2026-08',
+    due_on: '2026-09-21',
+    phase: 'open',
+    days_to_due: 18,
+    is_overdue: false,
+    status: 'not_prepared',
+    document: { format: 'XML nebo PDF', note: '' },
+    recipient: { label: 'VZP (111)', note: '', applicable: true },
+    channel: { label: 'datová schránka — ručně', note: '', applicable: true },
+    done: false,
+    action: {
+      kind: 'generate',
+      label: 'Připravit',
+      path: '/payroll/submissions/health',
+      reason: null,
+      prepare: { agenda_code: 'PPZ_2026', period: '2026-08', insurer_code: '111' },
+    },
   }
 }
 
@@ -407,5 +440,76 @@ describe('PayrollMonthlyChecklistPanel', () => {
     await flushPromises()
 
     expect(m.monthlyChecklist).toHaveBeenCalledWith('production', '2026-09')
+  })
+  /**
+   * NULY MÍSTO PRÁCE — uzavřené období bez jediného podání vypadalo, že není
+   * co dělat. Povinnost bez podání nemá kam odkázat, takže dostane TLAČÍTKO,
+   * které ji připraví, ne odkaz „najděte si to".
+   */
+  it('nepřipravenou povinnost nabídne jako tlačítko Připravit, ne jako odkaz', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({
+      summary: { total: 1, send: 0, generate: 1, manual: 0, done: 0 },
+      items: [agendaDutyItem()],
+    }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="monthly-checklist-action"]').exists()).toBe(false)
+    const button = wrapper.get('tbody [data-test="monthly-checklist-prepare"]')
+    expect(button.element.tagName).toBe('BUTTON')
+    expect(button.text()).toContain('Připravit')
+  })
+
+  it('kliknutí připraví právě tu agendu, období a pojišťovnu a otevře výsledek', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({
+      summary: { total: 1, send: 0, generate: 1, manual: 0, done: 0 },
+      items: [agendaDutyItem()],
+    }))
+    m.prepareItem.mockResolvedValue({
+      agenda_code: 'PPZ_2026',
+      period: '2026-08',
+      insurer_code: '111',
+      prepared: 1,
+      submission_ids: [42],
+      path: '/payroll/submissions/health',
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepareItem).toHaveBeenCalledWith('production', {
+      agenda_code: 'PPZ_2026',
+      period: '2026-08',
+      insurer_code: '111',
+    })
+    // Přehled se musí přečíst znovu, jinak by řádek zůstal „nepřipraveno"
+    // i po tom, co podání vzniklo.
+    expect(m.monthlyChecklist).toHaveBeenCalledTimes(2)
+    expect(m.push).toHaveBeenCalledWith('/payroll/submissions/health')
+  })
+
+  /**
+   * Hláška patří K TÉ POLOŽCE. Ve společném pruhu nahoře by vypadala jako
+   * výpadek celého přehledu a schovala by zbytek seznamu.
+   */
+  it('neúspěšná příprava hlásí chybu u položky, ne přes celý panel', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({
+      summary: { total: 1, send: 0, generate: 1, manual: 0, done: 0 },
+      items: [agendaDutyItem()],
+    }))
+    m.prepareItem.mockRejectedValue(new Error('nope'))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="monthly-checklist-error"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="monthly-checklist-prepare-error"]').text())
+      .toContain('nope')
+    expect(m.push).not.toHaveBeenCalled()
   })
 })

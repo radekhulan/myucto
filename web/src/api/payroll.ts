@@ -2649,21 +2649,36 @@ export interface PayrollSubmissionQueueDispatchResult {
  */
 export type PayrollMonthlyChecklistActionKind = 'send' | 'generate' | 'manual'
 
+/**
+ * Co se má připravit, když je akce „Připravit". Není to odkaz na obrazovku —
+ * klient tímhle zavolá přípravu pro TUHLE agendu, TOHLE období a TUHLE
+ * pojišťovnu a teprve pak otevře `path` s hotovým podáním.
+ */
+export interface PayrollMonthlyChecklistPreparation {
+  agenda_code: string
+  period: string
+  insurer_code: string | null
+}
+
 export interface PayrollMonthlyChecklistAction {
   kind: PayrollMonthlyChecklistActionKind
   label: string
   path: string | null
   reason: string | null
+  /** `null` = položka se připravuje jinde, tlačítko je jen odkaz. */
+  prepare: PayrollMonthlyChecklistPreparation | null
 }
+
+/**
+ * `agenda_duty` = měsíční povinnost, která ještě NEMÁ založené podání
+ * (JMHZ, přehled o platbě pojistného za pojišťovnu). Ostatní hodnoty sdílí
+ * doménu s {@see PayrollDeadlineSource}.
+ */
+export type PayrollMonthlyChecklistSource = PayrollDeadlineSource | 'agenda_duty'
 
 export interface PayrollMonthlyChecklistItem {
   key: string
-  /**
-   * Sdílí doménu s {@see PayrollDeadlineSource} (`PayrollDeadlineOverviewService::SOURCES`
-   * na backendu) — ta už `submission` obsahuje, takže přehled agendové
-   * povinnosti ze záložky „Stav odeslání" i zdroje termínů kryje jedním typem.
-   */
-  source: PayrollDeadlineSource
+  source: PayrollMonthlyChecklistSource
   agenda_code: string | null
   /**
    * U zdrojů `submission` a `checklist` nese jen surový kód/`item_key` —
@@ -2689,9 +2704,23 @@ export interface PayrollMonthlyChecklistItem {
    */
   recipient: { label: string | null; note: string; applicable: boolean }
   channel: { label: string | null; note: string; applicable: boolean }
-  /** Splněno/zrušeno — appka nabídne stav místo tlačítka `action`. */
+  /**
+   * Splněno = ODESLÁNO A PŘIJATÉ. Zrušené podání povinnost nesplnilo, takže
+   * `done` u něj zůstává `false` a akce vede na přípravu nového.
+   */
   done: boolean
   action: PayrollMonthlyChecklistAction
+}
+
+export interface PayrollMonthlyChecklistPreparationResult {
+  agenda_code: string
+  period: string
+  insurer_code: string | null
+  /** Kolik podání vzniklo — JMHZ se zmrazí za každou mzdovou účtárnu zvlášť. */
+  prepared: number
+  submission_ids: number[]
+  /** Kam se má uživatel podívat na hotové podání. */
+  path: string
 }
 
 export interface PayrollMonthlyChecklistResponse {
@@ -6308,6 +6337,18 @@ export const payrollApi = {
     api.get<PayrollMonthlyChecklistResponse>('/payroll/submissions/monthly-checklist', {
       params: { environment, period },
     }).then(response => response.data),
+  /**
+   * Připraví JEDNU povinnost z přehledu — podání za tu agendu, to období
+   * a tu pojišťovnu. Vrací, kolik podání vzniklo a kam se má uživatel podívat.
+   */
+  prepareMonthlyChecklistItem: (
+    environment: PayrollRegzelEnvironment,
+    preparation: PayrollMonthlyChecklistPreparation,
+  ) =>
+    api.post<PayrollMonthlyChecklistPreparationResult>(
+      '/payroll/submissions/monthly-checklist/prepare',
+      { environment, ...preparation },
+    ).then(response => response.data),
   operationalHealth: () =>
     api.get<PayrollOperationalHealth>('/payroll/operational-health')
       .then(response => response.data),

@@ -176,6 +176,41 @@ export interface OutboxSubmission {
   last_error_message: string | null
   row_version: number
   created_at: string
+  /**
+   * Smí zrušená zpráva zmizet nadobro? Server ji doplňuje JEN u zrušených
+   * řádků — jinde je `undefined`, protože se tam mazat nedá vůbec.
+   *
+   * Rozhoduje server, ne UI: kdyby si podmínku odvozoval frontend, tlačítko
+   * by se nabídlo i tam, kde by mazání skončilo chybou.
+   */
+  deletable?: boolean
+  /** Proč se mazat nesmí — překládá se přes `databox.outbox.deleteBlocked.*`. */
+  delete_blocked_reason?: OutboxDeleteBlockedReason | null
+  /**
+   * Stav PODKLADU, ze kterého zpráva vznikla.
+   *
+   * Zrušením odchozí zprávy podání nezmizí — pořád čeká na odeslání. Tohle je
+   * jediné místo, kde se to na téhle obrazovce dá říct.
+   */
+  source_obligation?: OutboxSourceObligation | null
+}
+
+export type OutboxDeleteBlockedReason =
+  | 'state'
+  | 'sent'
+  | 'receipt'
+  | 'decided'
+  | 'attempt'
+  | 'gateway'
+  | 'linked'
+
+export interface OutboxSourceObligation {
+  kind: 'payroll_submission' | 'tax_submission'
+  status: string
+  /** true = podání pořád čeká na odeslání, povinnost tedy není splněná. */
+  pending: boolean
+  agenda_code: string | null
+  period: string | null
 }
 
 export interface OutboxAttempt {
@@ -639,6 +674,15 @@ export const dataBoxApi = {
 
   cancel: (id: number) =>
     api.post<OutboxSubmission>(`/submissions/outbox/${id}/cancel`, {}).then(r => r.data),
+
+  /**
+   * Trvale smaže ZRUŠENOU odchozí zprávu, která nikdy neopustila aplikaci.
+   *
+   * Maže se zpráva, ne podání: povinnost zůstává nesplněná a mzdová fronta ji
+   * zase nabídne k zařazení. Doklad o skutečně podaném podání server odmítne.
+   */
+  remove: (id: number) =>
+    api.delete<{ deleted: boolean }>(`/submissions/outbox/${id}`).then(r => r.data),
 
   // ── Odesílací brána ISDS ───────────────────────────────────────────────────
 
