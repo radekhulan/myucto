@@ -22,6 +22,7 @@ use PDO;
 final class PayrollRunCommandService
 {
     private const COMMAND_SAVEPOINT = 'payroll_run_command';
+    private const COMBINED_SAVEPOINT = 'payroll_run_lock_calc';
     private const DELETE_SAVEPOINT = 'payroll_run_delete';
     private readonly PayrollYearCloseGuard $yearClose;
 
@@ -153,6 +154,168 @@ final class PayrollRunCommandService
             PayrollRunCommand::LOCK_INPUTS,
             $idempotencyKey,
             $actorUserId,
+        );
+    }
+
+    /**
+     * Zamknout vstupy a rovnou spočítat — jedna akce, dva příkazy.
+     *
+     * ── Proč ────────────────────────────────────────────────────────────────
+     * Mezi zamknutím a výpočtem se nic lidského nedělo. Zámek zmrazí snímek
+     * vstupů a výpočet z TÉHOŽ snímku počítá; mezi tím není co rozhodnout,
+     * co prohlédnout ani co opravit — jediné, co šlo udělat, bylo kliknout
+     * podruhé. Účetní tak proklikávala „Pokračovat" jen proto, že workflow
+     * mělo dva stavy tam, kde má práce jeden krok.
+     *
+     * ── Co se NEMĚNÍ ────────────────────────────────────────────────────────
+     * Oba příkazy zůstávají samostatné a volatelné: opravné revize i API je
+     * používají zvlášť a stav `inputs_locked` v datech dál existuje. Tohle je
+     * jen jejich obálka — pod sebou volá TYTÉŽ dvě `execute()` v jedné
+     * transakci, takže AUDITNÍ STOPA SE NETENČÍ: v historii běhu zůstanou dvě
+     * události (`lock_inputs` i `calculate`), obě s vlastní potvrzenkou
+     * a vlastním otiskem požadavku. Kdyby se druhá polovina nepovedla, zámek
+     * se s ní vrátí zpátky — běh nezůstane viset v `inputs_locked`.
+     *
+     * Idempotency key se pro každou polovinu odvozuje příponou, aby si
+     * potvrzenky nepřekážely; opakované zavolání s týmž klíčem tedy vrátí
+     * replay obou polovin a nic nespočítá znovu.
+     */
+    public function lockAndCalculate(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        string $idempotencyKey,
+        int $actorUserId,
+    ): PayrollRunCommandResult {
+        $this->assertActor($actorUserId);
+        $normalizedKey = trim($idempotencyKey);
+        // Strop je nižší než u jednotlivého příkazu (190) o délku přípony,
+        // kterou tahle metoda ke klíči připojuje.
+        if (mb_strlen($normalizedKey) < 8 || mb_strlen($normalizedKey) > 178) {
+            throw new \InvalidArgumentException(
+                'Idempotency key musí mít 8 až 178 znaků.',
+            );
+        }
+
+        $pdo = $this->db->pdo();
+        $nestedTransaction = $pdo->inTransaction();
+        if ($nestedTransaction) {
+            $pdo->exec('SAVEPOINT ' . self::COMBINED_SAVEPOINT);
+        } else {
+            $pdo->beginTransaction();
+        }
+        try {
+            /*
+             * Idempotenci si obálka musí vyřídit SAMA. Kdyby se jen spolehla
+             * na potvrzenky obou polovin, druhá polovina by při opakování
+             * dostala jiné `expected_row_version` (běh je mezitím o dva
+             * kroky dál) a otisk požadavku by nesouhlasil — replay by skončil
+             * konfliktem idempotence místo toho, aby vrátil původní výsledek.
+             */
+            $replayed = $this->replayCombined($supplierId, $runId, $normalizedKey);
+            if ($replayed !== null) {
+                if ($nestedTransaction) {
+                    $pdo->exec('RELEASE SAVEPOINT ' . self::COMBINED_SAVEPOINT);
+                } else {
+                    $pdo->commit();
+                }
+                return $replayed;
+            }
+            $locked = $this->execute(
+                $supplierId,
+                $runId,
+                $expectedVersion,
+                PayrollRunCommand::LOCK_INPUTS,
+                $normalizedKey . ':lock_inputs',
+                $actorUserId,
+            );
+            $calculated = $this->execute(
+                $supplierId,
+                $runId,
+                (int) $locked->run['row_version'],
+                PayrollRunCommand::CALCULATE,
+                $normalizedKey . ':calculate',
+                $actorUserId,
+            );
+            if ($nestedTransaction) {
+                $pdo->exec('RELEASE SAVEPOINT ' . self::COMBINED_SAVEPOINT);
+            } else {
+                $pdo->commit();
+            }
+
+            /*
+             * Výsledek se hlásí jako výpočet — to je stav, ve kterém běh
+             * skončil — ale `from` je stav PŘED zámkem, aby volající viděl
+             * celý skok, ne jen jeho druhou půlku.
+             */
+            return new PayrollRunCommandResult(
+                PayrollRunCommand::CALCULATE,
+                $locked->from,
+                $calculated->to,
+                $calculated->run,
+                $calculated->revision,
+                $locked->idempotentReplay && $calculated->idempotentReplay,
+                $calculated->outcome,
+            );
+        } catch (\Throwable $e) {
+            if ($nestedTransaction) {
+                if ($pdo->inTransaction()) {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::COMBINED_SAVEPOINT);
+                    $pdo->exec('RELEASE SAVEPOINT ' . self::COMBINED_SAVEPOINT);
+                }
+            } elseif ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Opakované zavolání sloučeného kroku s týmž klíčem.
+     *
+     * Vrací `null`, když se ještě neběželo — pak se příkaz provede normálně.
+     * Když potvrzenky obou polovin existují, poskládá se z nich týž výsledek,
+     * jaký vrátilo první volání: `from` z první poloviny (stav před zámkem),
+     * `to` z druhé (stav po výpočtu). Nic se nepočítá znovu.
+     */
+    private function replayCombined(
+        int $supplierId,
+        int $runId,
+        string $normalizedKey,
+    ): ?PayrollRunCommandResult {
+        $lockReceipt = $this->runs->commandReceipt(
+            $supplierId,
+            hash('sha256', $normalizedKey . ':lock_inputs', true),
+        );
+        $calcReceipt = $this->runs->commandReceipt(
+            $supplierId,
+            hash('sha256', $normalizedKey . ':calculate', true),
+        );
+        if ($lockReceipt === null || $calcReceipt === null) {
+            return null;
+        }
+        // Týž klíč nad JINÝM během je chyba volajícího, ne replay.
+        if ((int) $lockReceipt['run_id'] !== $runId
+            || (int) $calcReceipt['run_id'] !== $runId
+            || (string) $lockReceipt['command_name'] !== PayrollRunCommand::LOCK_INPUTS->value
+            || (string) $calcReceipt['command_name'] !== PayrollRunCommand::CALCULATE->value
+        ) {
+            throw new PayrollRunIdempotencyException();
+        }
+        $run = $this->runs->find($supplierId, $runId)
+            ?? throw new \OutOfBoundsException('Mzdový běh nebyl nalezen.');
+        $revision = $calcReceipt['revision_id'] === null
+            ? null
+            : $this->runs->revision($supplierId, (int) $calcReceipt['revision_id']);
+
+        return new PayrollRunCommandResult(
+            PayrollRunCommand::CALCULATE,
+            PayrollRunStatus::from((string) $lockReceipt['from_status']),
+            PayrollRunStatus::from((string) $calcReceipt['to_status']),
+            $run,
+            $revision,
+            true,
+            null,
         );
     }
 

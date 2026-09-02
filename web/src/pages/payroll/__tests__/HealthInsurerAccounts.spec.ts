@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   createInstitutionAccount: vi.fn(),
   updateInstitutionAccount: vi.fn(),
   deleteInstitutionAccount: vi.fn(),
+  employerSettings: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   routeHash: '',
@@ -23,6 +24,7 @@ vi.mock('@/api/payroll', () => ({
     createInstitutionAccount: m.createInstitutionAccount,
     updateInstitutionAccount: m.updateInstitutionAccount,
     deleteInstitutionAccount: m.deleteInstitutionAccount,
+    employerSettings: m.employerSettings,
   },
 }))
 
@@ -108,6 +110,9 @@ describe('HealthInsurerAccounts', () => {
     vi.clearAllMocks()
     m.routeHash = ''
     document.body.innerHTML = ''
+    // Kód pracoviště ČSSZ pro nabídku u sociálního pojištění; stránka ho
+    // načítá z nastavení zaměstnavatele a bez něj zůstává volný text.
+    m.employerSettings.mockResolvedValue({ social_security_office_code: '444' })
   })
 
   it('ukazuje číslo účtu i variabilní symbol rovnou v přehledu, bez rozklikávání', async () => {
@@ -177,8 +182,8 @@ describe('HealthInsurerAccounts', () => {
     const add = wrapper.findAll('button')
       .find(button => button.text() === 'payroll.employer.health_accounts.add')
     await add!.trigger('click')
-    // Typ instituce + pojišťovna z číselníku + zdroj údaje. Po přepnutí na ČSSZ
-    // číselník mizí (mimo zdravotní pojišťovny žádný nemáme) a zbydou dva.
+    // Typ instituce + kód instituce z nabídky + zdroj údaje. Nabídku má i ČSSZ
+    // (kód pracoviště z nastavení zaměstnavatele), takže zůstanou tři.
     const selects = wrapper.findAllComponents(SearchableSelect)
     expect(selects).toHaveLength(3)
     await wrapper
@@ -187,6 +192,9 @@ describe('HealthInsurerAccounts', () => {
     const socialSecurity = wrapper.findAll('[role="option"]')
       .find(option => option.text() === 'payroll.employer.health_accounts.types.social_security')
     await socialSecurity!.trigger('click')
+    expect(wrapper.findAllComponents(SearchableSelect)).toHaveLength(3)
+    // Kód mimo nabídku (jiné pracoviště) musí jít pořád zadat ručně.
+    await wrapper.get('[data-testid="health-create-manual-code"]').trigger('click')
     await wrapper.get('[data-testid="health-create-code"]').setValue('synth-201')
     await wrapper.get('[data-testid="health-create-name"]').setValue('Syntetická správa sociálního zabezpečení')
     await wrapper.get('[data-testid="health-create-account"]').setValue('1000000005/0300')
@@ -254,6 +262,56 @@ describe('HealthInsurerAccounts', () => {
     wrapper.unmount()
   })
 
+  /*
+   * Kód účtu finančního úřadu je DRUH DANĚ (zálohová má jiné předčíslí než
+   * srážková), ne značka úřadu. Volný text sváděl napsat „FUPLZEN" a příprava
+   * plateb pak účet nenašla, takže musí být na výběr.
+   */
+  it('u finančního úřadu nabízí druh daně, ne volný text', async () => {
+    m.createInstitutionAccount.mockResolvedValue(account({
+      id: 12,
+      institution_type: 'tax_office',
+      institution_code: 'ADVANCE_TAX',
+    }))
+    const wrapper = await mountComponent([])
+
+    const add = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.add')
+    await add!.trigger('click')
+    await wrapper
+      .get('[aria-label="payroll.employer.health_accounts.institution_type"]')
+      .trigger('focus')
+    const taxOffice = wrapper.findAll('[role="option"]')
+      .find(option => option.text() === 'payroll.employer.health_accounts.types.tax_office')
+    await taxOffice!.trigger('click')
+
+    expect(wrapper.find('[data-testid="health-create-code"]').exists()).toBe(false)
+    await wrapper
+      .get('[aria-label="payroll.employer.health_accounts.tax_kind"]')
+      .trigger('focus')
+    const kinds = wrapper.findAll('[role="option"]').map(option => option.text())
+    expect(kinds.some(text => text.startsWith('ADVANCE_TAX'))).toBe(true)
+    expect(kinds.some(text => text.startsWith('WITHHOLDING_TAX'))).toBe(true)
+    const advance = wrapper.findAll('[role="option"]')
+      .find(option => option.text().startsWith('ADVANCE_TAX'))
+    await advance!.trigger('click')
+
+    await wrapper.get('[data-testid="health-create-account"]').setValue('713-1000000005/0710')
+    await wrapper.get('[data-testid="health-create-source-reference"]').setValue('SYNTHETIC-FU-713')
+    const create = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.create')
+    await create!.trigger('click')
+    await flushPromises()
+
+    expect(m.createInstitutionAccount).toHaveBeenCalledTimes(1)
+    expect(m.createInstitutionAccount.mock.calls[0][0]).toMatchObject({
+      institution_type: 'tax_office',
+      institution_code: 'ADVANCE_TAX',
+    })
+
+    wrapper.unmount()
+  })
+
   it('umožní zadat kód pojišťovny mimo číselník ručně', async () => {
     m.createInstitutionAccount.mockResolvedValue(account({ id: 10, institution_code: '299' }))
     const wrapper = await mountComponent([])
@@ -316,6 +374,10 @@ describe('HealthInsurerAccounts', () => {
     expect((name.element as HTMLInputElement).value).toBe('Syntetická zdravotní pojišťovna')
 
     await name.setValue('Přejmenovaná pojišťovna')
+    // Kód mimo nabídku se v editaci ukazuje jako volný text a jde ho přepsat —
+    // právě kvůli němu se účet opravuje, dřív byl zamčený navždy.
+    expect((wrapper.get('[data-testid="health-edit-code"]').element as HTMLInputElement).value)
+      .toBe('SYNTH-111')
     const save = wrapper.get('[data-testid="health-account-edit"]').findAll('button')
       .find(button => button.text() === 'common.save')
     await save!.trigger('click')
@@ -324,8 +386,8 @@ describe('HealthInsurerAccounts', () => {
     expect(m.updateInstitutionAccount).toHaveBeenCalledTimes(1)
     expect(m.updateInstitutionAccount.mock.calls[0][1]).toMatchObject({
       institution_name: 'Přejmenovaná pojišťovna',
+      institution_code: 'SYNTH-111',
     })
-    expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('institution_code')
 
     wrapper.unmount()
   })
@@ -355,7 +417,6 @@ describe('HealthInsurerAccounts', () => {
     })
     expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('bank_account')
     expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('bank_account_masked')
-    expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('institution_code')
     expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('valid_from')
 
     wrapper.unmount()

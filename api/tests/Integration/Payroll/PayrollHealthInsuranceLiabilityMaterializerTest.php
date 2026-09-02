@@ -16,6 +16,7 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
+use MyInvoice\Service\Payroll\Payment\PayrollInstitutionPaymentTargetResolver;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
@@ -118,7 +119,9 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
             new PayrollHealthInsuranceLiabilityMaterializer(
                 $liabilityRepository,
                 new PayrollStatutoryResultRepository($connection),
-                $institutionRepository,
+                new PayrollInstitutionPaymentTargetResolver(
+                    $institutionRepository,
+                ),
                 $sensitive,
                 new PayrollLevyDeadlinePolicy(),
             );
@@ -284,7 +287,7 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
             '201',
         );
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('nemá k datu splatnosti ověřený účet');
+        $this->expectExceptionMessage('ověřený účinný účet pod kódem');
         $this->materializer->materialize(
             $this->supplierId,
             $missingRevision,
@@ -482,7 +485,7 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
         );
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('nemá k datu splatnosti ověřený účet');
+        $this->expectExceptionMessage('ověřený účinný účet pod kódem');
         $this->materializer->materialize(
             $this->supplierId,
             $revisionId,
@@ -540,7 +543,7 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
             self::fail('Prošlý účet nesmí vytvořit závazek.');
         } catch (\DomainException $exception) {
             self::assertStringContainsString(
-                'nemá k datu splatnosti',
+                'ověřený účinný účet pod kódem',
                 $exception->getMessage(),
             );
         }
@@ -558,7 +561,7 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
             13_500,
         );
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('nejednoznačný účet');
+        $this->expectExceptionMessage('víc než jeden účinný účet');
         $this->materializer->materialize(
             $this->supplierId,
             $ambiguousRevision,

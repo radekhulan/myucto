@@ -4023,6 +4023,12 @@ export interface PayrollInstitutionAccountCreatePayload {
 
 export interface PayrollInstitutionAccountUpdatePayload {
   row_version: number
+  /**
+   * Kód instituce je klasifikace platebního cíle, ne obsah dokladu — jde
+   * opravit, dokud se o účet neopírá závazek čekající na platbu. Číslo účtu,
+   * typ instituce, měna a začátek platnosti neměnné zůstávají.
+   */
+  institution_code: string
   institution_name: string
   variable_symbol: string | null
   specific_symbol: string | null
@@ -4873,8 +4879,22 @@ export type PayrollRunStatus =
   | 'reopened'
   | 'cancelled'
 
+/**
+ * Příkazy mzdového běhu, které API přijímá.
+ *
+ * `lock_and_calculate` je sloučený krok „Spočítat mzdy": zamkne vstupy a
+ * rovnou spočítá. Mezi zamknutím a výpočtem se nic lidského nedělo, takže to
+ * byla dvě kliknutí na jednu práci. Server pod tím pořád volá oba příkazy
+ * v jedné transakci a zapíše obě auditní události, takže `lock_inputs`
+ * i `calculate` zůstávají volatelné samostatně.
+ *
+ * `review` (samostatná kontrola) se v UI už nenabízí — u jedné účetní je to
+ * druhý podpis téhož člověka — ale příkaz i stav `reviewed` zůstávají kvůli
+ * starším datům a API. Schválení si kontrolu zapíše samo.
+ */
 export type PayrollRunCommand =
   | 'lock_inputs'
+  | 'lock_and_calculate'
   | 'calculate'
   | 'review'
   | 'approve'
@@ -5113,11 +5133,39 @@ export interface PayrollRunHistory {
   events: PayrollRunHistoryEvent[]
 }
 
+/**
+ * Jeden nález kontroly PŘED zahájením běhu. Neblokuje — je to informace pro
+ * rozhodnutí „opravdu zahájit?", ne podmínka.
+ */
+export interface PayrollRunReadinessFinding {
+  code: string
+  severity: 'blocker' | 'warning' | 'info'
+  message: string
+  remediation_path: string | null
+  /** Kolika vztahů/položek se nález týká. */
+  count: number
+  entities: { entity_type: string, entity_id: number | null }[]
+}
+
+/**
+ * Kontrola před zahájením mzdového běhu. Čtecí, nic neukládá — stejný vzor
+ * jako `blockers` u roční uzávěrky. `null`, když se seznam ptal bez období
+ * nebo je běh za období už za zámkem (tam nálezy visí na revizi).
+ */
+export interface PayrollRunReadiness {
+  period_start: string
+  payment_date: string
+  office_id: number | null
+  ready: boolean
+  findings: PayrollRunReadinessFinding[]
+}
+
 export interface PayrollRunsPage {
   runs: PayrollRun[]
   total: number
   limit: number
   offset: number
+  readiness: PayrollRunReadiness | null
   /**
    * Návrh data výplaty pro dotázané období podle sjednané mzdové politiky
    * (den, posun měsíce, posun na pracovní den včetně státních svátků).

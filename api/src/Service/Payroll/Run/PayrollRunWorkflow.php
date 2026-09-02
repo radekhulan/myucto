@@ -82,6 +82,13 @@ final class PayrollRunWorkflow
         $this->assertPreconditions($from, $command, $context);
 
         $to = match ($command) {
+            // Sloučený krok není přechod: `availableCommands()` ho nikdy
+            // nevrátí, takže sem nedojde (kontrola dostupnosti je výš).
+            // Arm tu je proto, aby `match` zůstal úplný a případná chyba
+            // volajícího skončila srozumitelně, ne `UnhandledMatchError`.
+            PayrollRunCommand::LOCK_AND_CALCULATE => throw new \LogicException(
+                'Sloučený krok se provádí jako dva samostatné příkazy.',
+            ),
             PayrollRunCommand::LOCK_INPUTS => PayrollRunStatus::INPUTS_LOCKED,
             PayrollRunCommand::CALCULATE => PayrollRunStatus::CALCULATED,
             PayrollRunCommand::REVIEW => PayrollRunStatus::REVIEWED,

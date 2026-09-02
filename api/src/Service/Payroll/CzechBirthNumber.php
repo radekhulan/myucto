@@ -96,6 +96,34 @@ final class CzechBirthNumber
         return sprintf('%04d-%02d-%02d', $year, $month, $day);
     }
 
+    /**
+     * Pohlaví zapsané v rodném čísle.
+     *
+     * Měsíc navýšený o 50 (a od roku 2004 i o 70 u vyčerpané kapacity dne) nese
+     * ženu, navýšení o 20 je mužská alternativa. Registrace zaměstnance u ČSSZ
+     * pohlaví vyžaduje, ale karta osoby ho po účetní chtěla vyplnit ručně,
+     * přestože ho rodné číslo jednoznačně určuje — a chybějící údaj se poznal
+     * až na obrazovce podání.
+     *
+     * @return 'female'|'male'|null null = tvar, ze kterého se to odvodit nedá
+     */
+    public static function sex(string $normalized): ?string
+    {
+        $digits = (string) preg_replace('/\D/', '', $normalized);
+        if (strlen($digits) < 6) {
+            return null;
+        }
+        $month = (int) substr($digits, 2, 2);
+
+        return match (true) {
+            $month >= 1 && $month <= 12 => 'male',
+            $month >= 21 && $month <= 32 => 'male',
+            $month >= 51 && $month <= 62 => 'female',
+            $month >= 71 && $month <= 82 => 'female',
+            default => null,
+        };
+    }
+
     public static function rejectMaskPlaceholder(string $value): void
     {
         if (str_contains($value, '•') || preg_match('/\*{3,}/u', $value) === 1) {

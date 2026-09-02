@@ -69,13 +69,67 @@ const COLUMNS: ColumnDef[] = [
 const tbl = useTablePrefs('payroll-health-insurer-accounts', COLUMNS)
 const insurerOptions = healthInsurerOptions()
 /**
- * Escape hatch pro kód mimo číselník. Seznam pojišťoven je v kódu, backend
- * u účtů institucí kód proti číselníku nevaliduje — kdyby byl výběr jediná
+ * Escape hatch pro kód mimo nabídku. Nabídku aplikace zná jen u typů, kde kód
+ * něco znamená; backend ho proti číselníku nevaliduje — kdyby byl výběr jediná
  * cesta, zanikla by možnost založit účet nově vzniklé (nebo přejmenované)
- * pojišťovny až do dalšího releasu. Výchozí stav je vypnutý, takže běžná cesta
+ * instituce až do dalšího releasu. Výchozí stav je vypnutý, takže běžná cesta
  * je pořád výběr ze seznamu.
  */
 const manualInsurerCode = ref(false)
+const manualEditCode = ref(false)
+/** Kód pracoviště ČSSZ z nastavení zaměstnavatele; null = nenačteno/nevyplněno. */
+const employerOfficeCode = ref<string | null>(null)
+
+/**
+ * Kód instituce NENÍ volný štítek — příprava plateb podle něj hledá platební
+ * účet. U ČSSZ se hledá pod kódem pracoviště z nastavení zaměstnavatele,
+ * u finančního úřadu pod DRUHEM DANĚ (každý má vlastní předčíslí účtu),
+ * u zdravotní pojišťovny pod kódem z číselníku. Účetní to nemá jak uhodnout
+ * z prázdného textového pole — kdo napsal „FUPLZEN", zůstal bez platby. Proto
+ * se všude, kde aplikace nabídku zná, vybírá ze seznamu; volný text zůstává
+ * únikovou cestou pro to, co v nabídce není.
+ */
+const TAX_OFFICE_CODES = ['ADVANCE_TAX', 'WITHHOLDING_TAX'] as const
+
+function institutionCodeName(type: PayrollInstitutionType, code: string): string {
+  if (code === '') return ''
+  if (type === 'health_insurer') return healthInsurerName(code) ?? ''
+  if (type === 'tax_office') {
+    return (TAX_OFFICE_CODES as readonly string[]).includes(code)
+      ? t(`payroll.employer.health_accounts.tax_office_codes.${code}`)
+      : ''
+  }
+  if (type === 'social_security') {
+    return t('payroll.employer.health_accounts.social_office_name', { code })
+  }
+  return ''
+}
+
+function institutionCodeOptions(
+  type: PayrollInstitutionType,
+): Array<{ value: string; label: string }> | null {
+  if (type === 'health_insurer') return insurerOptions
+  if (type === 'tax_office') {
+    return TAX_OFFICE_CODES.map(code => ({
+      value: code,
+      label: `${code} — ${t(`payroll.employer.health_accounts.tax_office_codes.${code}`)}`,
+    }))
+  }
+  if (type === 'social_security') {
+    const code = employerOfficeCode.value?.trim().toUpperCase() ?? ''
+    return code === ''
+      ? null
+      : [{ value: code, label: `${code} — ${institutionCodeName(type, code)}` }]
+  }
+  return null
+}
+
+function institutionCodeLabel(type: PayrollInstitutionType): string {
+  if (type === 'health_insurer') return t('payroll.employer.health_accounts.insurer')
+  if (type === 'tax_office') return t('payroll.employer.health_accounts.tax_kind')
+  if (type === 'social_security') return t('payroll.employer.health_accounts.social_office')
+  return t('payroll.employer.health_accounts.institution_code')
+}
 const sourceOptions = computed(() => sources.map(source => ({
   value: source,
   label: sourceLabel(source),
@@ -125,6 +179,7 @@ function emptyCreate(): PayrollInstitutionAccountCreatePayload {
 const createForm = reactive(emptyCreate())
 const editForm = reactive<PayrollInstitutionAccountUpdatePayload>({
   row_version: 0,
+  institution_code: '',
   institution_name: '',
   variable_symbol: null,
   specific_symbol: null,
@@ -135,8 +190,10 @@ const editForm = reactive<PayrollInstitutionAccountUpdatePayload>({
   verified_on: localToday(),
 })
 
+const createCodeOptions = computed(() => institutionCodeOptions(createForm.institution_type))
+const createCodeLabel = computed(() => institutionCodeLabel(createForm.institution_type))
 const insurerPickerActive = computed(() =>
-  createForm.institution_type === 'health_insurer' && !manualInsurerCode.value)
+  createCodeOptions.value !== null && !manualInsurerCode.value)
 /**
  * Vybraná pojišťovna pro `SearchableSelect`. `null` znamená „ještě nevybráno";
  * `selectedOption` níže drží popisek i pro kód, který v číselníku není, aby se
@@ -149,8 +206,27 @@ const selectedInsurerCode = computed(() => {
 const selectedInsurerOption = computed(() => {
   const code = selectedInsurerCode.value
   if (code === null) return null
-  const known = healthInsurerName(code)
-  return { value: code, label: known === null ? code : `${code} — ${known}` }
+  const known = institutionCodeName(createForm.institution_type, code)
+  return { value: code, label: known === '' ? code : `${code} — ${known}` }
+})
+
+const editingAccount = computed(() =>
+  accounts.value.find(account => account.id === editingId.value) ?? null)
+const editCodeType = computed<PayrollInstitutionType>(() =>
+  editingAccount.value?.institution_type ?? 'other_recipient')
+const editCodeOptions = computed(() => institutionCodeOptions(editCodeType.value))
+const editCodeLabel = computed(() => institutionCodeLabel(editCodeType.value))
+const editPickerActive = computed(() =>
+  editCodeOptions.value !== null && !manualEditCode.value)
+const selectedEditCode = computed(() => {
+  const code = editForm.institution_code.trim()
+  return code === '' ? null : code
+})
+const selectedEditCodeOption = computed(() => {
+  const code = selectedEditCode.value
+  if (code === null) return null
+  const known = institutionCodeName(editCodeType.value, code)
+  return { value: code, label: known === '' ? code : `${code} — ${known}` }
 })
 
 const institutionAccounts = computed(() =>
@@ -262,7 +338,7 @@ const createProblems = computed<string[]>(() => {
   const problems: string[] = []
   if (!/^[A-Z0-9][A-Z0-9._/-]{0,31}$/.test(createForm.institution_code.trim().toUpperCase())) {
     problems.push(insurerPickerActive.value
-      ? t('payroll.employer.health_accounts.insurer')
+      ? createCodeLabel.value
       : t('payroll.employer.health_accounts.institution_code'))
   }
   if (createForm.bank_account.trim() === '') problems.push(t('payroll.employer.health_accounts.bank_account'))
@@ -277,6 +353,9 @@ const createProblems = computed<string[]>(() => {
 const editProblems = computed<string[]>(() => {
   const original = accounts.value.find(account => account.id === editingId.value)
   const problems: string[] = []
+  if (!/^[A-Z0-9][A-Z0-9._/-]{0,31}$/.test(editForm.institution_code.trim().toUpperCase())) {
+    problems.push(editCodeLabel.value)
+  }
   if (original !== undefined
     && editForm.valid_to !== null
     && editForm.valid_to !== ''
@@ -290,6 +369,7 @@ const editProblems = computed<string[]>(() => {
 const editValid = computed(() => {
   const original = accounts.value.find(account => account.id === editingId.value)
   return original !== undefined
+    && /^[A-Z0-9][A-Z0-9._/-]{0,31}$/.test(editForm.institution_code.trim().toUpperCase())
     && (editForm.valid_to === null
       || editForm.valid_to === ''
       || (validDate(editForm.valid_to) && editForm.valid_to >= original.valid_from))
@@ -396,6 +476,7 @@ function cancelCreate() {
 function startEdit(account: PayrollInstitutionAccount) {
   Object.assign(editForm, {
     row_version: account.row_version,
+    institution_code: account.institution_code,
     institution_name: account.institution_name,
     variable_symbol: account.variable_symbol,
     specific_symbol: account.specific_symbol,
@@ -409,12 +490,33 @@ function startEdit(account: PayrollInstitutionAccount) {
   conflictId.value = null
   showValidation.value = false
   showCreate.value = false
+  // Kód, který v nabídce není (typicky ten, kvůli kterému se účet opravuje),
+  // se nesmí ztratit — formulář se pro něj rovnou otevře v ruční větvi.
+  const options = institutionCodeOptions(account.institution_type)
+  manualEditCode.value = options === null
+    || !options.some(option => option.value === account.institution_code)
 }
 
 function cancelEdit() {
   editingId.value = null
   conflictId.value = null
   showValidation.value = false
+  manualEditCode.value = false
+}
+
+/** Výběr z nabídky doplní kód i název naráz — o to tady jde. */
+function setEditCode(value: string | null) {
+  editForm.institution_code = value ?? ''
+  const name = institutionCodeName(editCodeType.value, editForm.institution_code)
+  if (name !== '') editForm.institution_name = name
+}
+
+function enableManualEditCode() {
+  manualEditCode.value = true
+}
+
+function disableManualEditCode() {
+  manualEditCode.value = false
 }
 
 async function createAccount() {
@@ -455,6 +557,7 @@ async function updateAccount() {
   try {
     const updated = await payrollApi.updateInstitutionAccount(id, {
       ...editForm,
+      institution_code: editForm.institution_code.trim().toUpperCase(),
       institution_name: editForm.institution_name.trim(),
       variable_symbol: nullable(editForm.variable_symbol),
       specific_symbol: nullable(editForm.specific_symbol),
@@ -499,10 +602,12 @@ function setCreateInstitutionType(value: PayrollInstitutionType | null) {
   manualInsurerCode.value = false
 }
 
-/** Výběr z číselníku doplní kód i název naráz — o to tady jde. */
+/** Výběr z nabídky doplní kód i název naráz — o to tady jde. */
 function setCreateInsurer(value: string | null) {
   createForm.institution_code = value ?? ''
-  createForm.institution_name = value === null ? '' : healthInsurerName(value) ?? ''
+  createForm.institution_name = value === null
+    ? ''
+    : institutionCodeName(createForm.institution_type, value)
 }
 
 function enableManualInsurerCode() {
@@ -546,8 +651,22 @@ function setEditSource(value: PayrollInstitutionAccountSource | null) {
   if (value !== null) editForm.source_kind = value
 }
 
+/**
+ * Kód pracoviště ČSSZ se bere z nastavení zaměstnavatele, ať ho účetní nemusí
+ * opisovat z jiné obrazovky. Když se nastavení nepodaří načíst, zůstane
+ * u sociálního pojištění volný text — nabídka je pohodlí, ne podmínka.
+ */
+async function loadEmployerOfficeCode() {
+  try {
+    const settings = await payrollApi.employerSettings()
+    employerOfficeCode.value = settings.social_security_office_code
+  } catch {
+    employerOfficeCode.value = null
+  }
+}
+
 onMounted(async () => {
-  await loadAccounts()
+  await Promise.all([loadAccounts(), loadEmployerOfficeCode()])
   await nextTick()
   if (route.hash === '#health-insurer-accounts') {
     paneDom.querySelector('#health-insurer-accounts')
@@ -715,16 +834,16 @@ onMounted(async () => {
           <!-- Ne <label>: nese vlastní tlačítko a klik na něj by přes label
                zároveň otevřel nabídku výběru. Přístupný název dává aria-label. -->
           <div v-if="insurerPickerActive" class="block md:col-span-2 xl:col-span-2">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.insurer') }}<RequiredMark /></span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ createCodeLabel }}<RequiredMark /></span>
             <SearchableSelect
               data-testid="health-create-insurer"
               :model-value="selectedInsurerCode"
-              :options="insurerOptions"
+              :options="createCodeOptions ?? []"
               :selected-option="selectedInsurerOption"
               :placeholder="t('payroll.employer.health_accounts.select_insurer')"
               :no-results-label="t('payroll.employer.account_no_results')"
               :invalid="showValidation && selectedInsurerCode === null"
-              :aria-label="t('payroll.employer.health_accounts.insurer')"
+              :aria-label="createCodeLabel"
               accent="payroll"
               @update:model-value="setCreateInsurer"
             />
@@ -746,7 +865,7 @@ onMounted(async () => {
               <span class="mt-1 block text-xs text-neutral-500">
                 {{ t('payroll.employer.health_accounts.institution_code_hint') }}
                 <button
-                  v-if="manualInsurerCode && createForm.institution_type === 'health_insurer'"
+                  v-if="manualInsurerCode && createCodeOptions !== null"
                   type="button"
                   class="cursor-pointer font-medium text-payroll-700 underline"
                   data-testid="health-create-back-to-picker"
@@ -834,6 +953,45 @@ onMounted(async () => {
           </button>
         </div>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <!-- Ne <label>: nese vlastní tlačítko a klik na něj by přes label
+               zároveň otevřel nabídku výběru. Přístupný název dává aria-label. -->
+          <div v-if="editPickerActive" class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ editCodeLabel }}<RequiredMark /></span>
+            <SearchableSelect
+              data-testid="health-edit-code-picker"
+              :model-value="selectedEditCode"
+              :options="editCodeOptions ?? []"
+              :selected-option="selectedEditCodeOption"
+              :placeholder="t('payroll.employer.health_accounts.select_insurer')"
+              :no-results-label="t('payroll.employer.account_no_results')"
+              :invalid="showValidation && selectedEditCode === null"
+              :aria-label="editCodeLabel"
+              accent="payroll"
+              @update:model-value="setEditCode"
+            />
+            <span class="mt-1 block text-xs text-neutral-500">
+              {{ t('payroll.employer.health_accounts.institution_code_editable_hint') }}
+              <button type="button" class="cursor-pointer font-medium text-payroll-700 underline" data-testid="health-edit-manual-code" @click="enableManualEditCode">
+                {{ t('payroll.employer.health_accounts.insurer_manual') }}
+              </button>
+            </span>
+          </div>
+          <label v-else class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_code') }}<RequiredMark /></span>
+            <input v-model="editForm.institution_code" data-testid="health-edit-code" type="text" maxlength="32" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            <span class="mt-1 block text-xs text-neutral-500">
+              {{ t('payroll.employer.health_accounts.institution_code_editable_hint') }}
+              <button
+                v-if="editCodeOptions !== null"
+                type="button"
+                class="cursor-pointer font-medium text-payroll-700 underline"
+                data-testid="health-edit-back-to-picker"
+                @click="disableManualEditCode"
+              >
+                {{ t('payroll.employer.health_accounts.insurer_back_to_list') }}
+              </button>
+            </span>
+          </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_name') }}<RequiredMark /></span>
             <input v-model="editForm.institution_name" data-testid="health-edit-name" type="text" maxlength="190" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">

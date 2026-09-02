@@ -559,10 +559,12 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         $response = $this->save($payload);
 
         self::assertSame(422, $response->getStatusCode());
-        self::assertStringContainsString(
-            'kanonická reference',
-            (string) $this->json($response)['error']['message'],
-        );
+        $message = (string) $this->json($response)['error']['message'];
+        // Hláška musí jmenovat POLE a povolený tvar, ne jen odbýt uživatele
+        // slovem „kanonická reference" — z toho se nepozná, co se po něm chce.
+        self::assertStringContainsString('evidence_reference', $message);
+        self::assertStringContainsString('bez diakritiky', $message);
+        self::assertStringContainsString('např.', $message);
     }
 
     public function testUnverifiedVariantIsAcceptedAndStaysVisibleAsABlocker(): void

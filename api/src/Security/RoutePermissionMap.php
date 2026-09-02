@@ -237,6 +237,9 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/runs$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/runs/[0-9]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/calculate$#', 'payroll.calculate', AccessLevel::WRITE],
+        // Sloučené uzamčení vstupů a výpočet; akce sama vynucuje navíc
+        // `payroll.inputs.write`, protože zamyká vstupy.
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/lock_and_calculate$#', 'payroll.calculate', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/(review|request_correction)$#', 'payroll.review', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/reopen$#', 'payroll.reopen', AccessLevel::WRITE],

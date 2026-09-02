@@ -39,8 +39,14 @@ final class PayrollPersonAccountVerificationService
             $verificationSource,
         );
         if ($source === null) {
+            // Hláška musí vypsat přípustné zdroje — bez nich zbývá hádat, a to
+            // u kroku, který teprve odemyká výplatu na účet.
             throw new \InvalidArgumentException(
-                'Zdroj ověření zaměstnaneckého účtu není podporovaný.',
+                'Zdroj ověření zaměstnaneckého účtu není podporovaný. Přípustné hodnoty: '
+                . implode(', ', array_map(
+                    static fn (PayrollPersonAccountVerificationSource $case): string => $case->value,
+                    PayrollPersonAccountVerificationSource::cases(),
+                )) . '.',
             );
         }
         $this->verifiedDate($verifiedOn);

@@ -133,6 +133,18 @@ final class PayrollPersonCreateValidator
          */
         $insurerCode = trim($this->string($input['health_insurer_code'] ?? null));
 
+        /*
+         * Druh činnosti pro ČSSZ se u zakládaného zaměstnance ODVODÍ.
+         *
+         * Zůstával prázdný, takže se na něj přišlo až na obrazovce registrace
+         * („Druh činnosti pro ČSSZ chybí") nebo při sestavení měsíčního
+         * hlášení — u obojího už běží lhůta. U prvního vztahu u zaměstnavatele
+         * je přitom kód jednoznačný, viz
+         * {@see PayrollEmploymentJmhzActivityFamily::firstRelationDefaults()}.
+         */
+        [$activityCode, $relationshipDetailCode] =
+            PayrollEmploymentJmhzActivityFamily::firstRelationDefaults($relationType);
+
         $employment = $this->employmentValidator->create([
             'code' => 'ZAM-PENDING',
             'relation_type' => $relationType,
@@ -162,8 +174,8 @@ final class PayrollPersonCreateValidator
                 'jmhz_functional_benefits_status' => 'unverified',
                 'jmhz_temporary_assignment_status' => 'unverified',
                 'cz_isco_code' => null,
-                'activity_code' => null,
-                'jmhz_relationship_detail_code' => null,
+                'activity_code' => $activityCode,
+                'jmhz_relationship_detail_code' => $relationshipDetailCode,
                 'social_insurance_participation' => 'automatic',
                 'health_insurance_participation' => 'automatic',
                 'tax_regime' => 'advance',

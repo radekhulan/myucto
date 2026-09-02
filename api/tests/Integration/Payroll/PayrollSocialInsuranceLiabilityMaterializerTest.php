@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
+use MyInvoice\Service\Payroll\Payment\PayrollInstitutionPaymentTargetResolver;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
@@ -383,9 +384,112 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         );
 
         $this->expectException(\DomainException::class);
-        // Hláška musí pojmenovat kód pracoviště, pod kterým se účet hledal —
-        // jinak účetní vidí „účet chybí" nad obrazovkou s ověřeným účtem.
-        $this->expectExceptionMessage('účinný ověřený účet pod kódem pracoviště');
+        // Hláška musí pojmenovat kód, pod kterým se účet hledal — jinak
+        // účetní vidí „účet chybí" nad obrazovkou s ověřeným účtem.
+        $this->expectExceptionMessage('ověřený účinný účet pod kódem');
+        $this->service()->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+    }
+
+    /**
+     * Účet ČSSZ založený pod jiným kódem, než je kód pracoviště v nastavení
+     * zaměstnavatele, nesmí zastavit přípravu plateb. ČSSZ je jedna a kód
+     * účtu je jen značka; ten účet účetní ověřila, tedy na něj chce platit.
+     */
+    public function testUsesVerifiedAccountUnderDifferentInstitutionCode(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_institutions
+                SET institution_code = "CSSZ"
+              WHERE supplier_id = ? AND institution_type = "social_security"',
+        )->execute([$this->supplierId]);
+        $revisionId = $this->createRevision(
+            1,
+            'regular',
+            null,
+            7_100,
+            24_800,
+            7_100,
+        );
+        $result = $this->service()->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        self::assertSame(1, $result['created_count']);
+        $row = $this->liability($result['liability_ids'][0]);
+        $source = $this->jsonObject(
+            $this->string($row, 'source_snapshot_json'),
+        );
+        // Do reference i do zmrazeného cíle jde kód ÚČTU, kód pracoviště se
+        // zmrazuje zvlášť — jinak by se dávka o tu neshodu rozbila později.
+        self::assertSame('CSSZ', $source['institution_code']);
+        self::assertSame('P', $source['social_security_office_code']);
+        self::assertStringContainsString(
+            'institution:social_security:CSSZ:account:',
+            $this->string($row, 'recipient_reference'),
+        );
+        $batch = $this->batches->build(
+            $this->supplierId,
+            'abo',
+            "currency:{$this->payerCurrencyId}",
+            [[
+                'liability_id' => $result['liability_ids'][0],
+                'amount_minor' => 31_900,
+            ]],
+            $this->actorId,
+        );
+        $instruction = $this->batchInstruction($batch['batch_id']);
+        self::assertSame('0012345678', $instruction['variable_symbol']);
+    }
+
+    /**
+     * Dva ověřené účinné účty ČSSZ pod různými kódy — aplikace nesmí hádat,
+     * na který z nich odvod poslat. Fail-closed s hláškou, která oba vypíše.
+     */
+    public function testRefusesToGuessBetweenTwoVerifiedSocialAccounts(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_institutions
+                SET institution_code = "CSSZ"
+              WHERE supplier_id = ? AND institution_type = "social_security"',
+        )->execute([$this->supplierId]);
+        (new PayrollInstitutionAccountRepository(
+            $this->db,
+            $this->sensitiveData,
+            new PayrollInstitutionAccountDeletionRepository(
+                $this->db,
+                new ActivityLogger($this->db),
+            ),
+        ))->create($this->supplierId, [
+            'institution_type' => 'social_security',
+            'institution_code' => 'OSSZ',
+            'institution_name' => 'Druhá syntetická správa',
+            'bank_account' => '1000000006/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => null,
+            'specific_symbol' => null,
+            'constant_symbol' => '7618',
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:second-cssz',
+            'verified_on' => '2026-06-15',
+        ], $this->actorId);
+        $revisionId = $this->createRevision(
+            1,
+            'regular',
+            null,
+            7_100,
+            24_800,
+            7_100,
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('aplikace nesmí hádat');
         $this->service()->materialize(
             $this->supplierId,
             $revisionId,
@@ -697,12 +801,14 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         return new PayrollSocialInsuranceLiabilityMaterializer(
             new PayrollPaymentLiabilityRepository($this->db),
             new PayrollStatutoryResultRepository($this->db),
-            new PayrollInstitutionAccountRepository(
-                $this->db,
-                $this->sensitiveData,
-                new PayrollInstitutionAccountDeletionRepository(
+            new PayrollInstitutionPaymentTargetResolver(
+                new PayrollInstitutionAccountRepository(
                     $this->db,
-                    new ActivityLogger($this->db),
+                    $this->sensitiveData,
+                    new PayrollInstitutionAccountDeletionRepository(
+                        $this->db,
+                        new ActivityLogger($this->db),
+                    ),
                 ),
             ),
             $this->sensitiveData,

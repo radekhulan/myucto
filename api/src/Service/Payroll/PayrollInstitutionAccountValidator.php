@@ -79,6 +79,7 @@ final class PayrollInstitutionAccountValidator
     /**
      * @param array<string,mixed> $input
      * @return array{
+     *   institution_code:?string,
      *   institution_name:string,
      *   variable_symbol:?string,
      *   specific_symbol:?string,
@@ -91,10 +92,15 @@ final class PayrollInstitutionAccountValidator
      */
     public function validateUpdate(array $input): array
     {
+        // Číslo účtu, typ instituce, měna a začátek platnosti jsou historie —
+        // jejich změna je nový řádek. Kód instituce ale historie NENÍ: je to
+        // naše klasifikace platebního cíle, kterou účetní vyplňovala do
+        // volného textu bez šance uhodnout, co aplikace očekává („FUPLZEN"
+        // místo druhu daně). Držet ho neměnný znamenalo, že překlep nešlo
+        // opravit vůbec — nový řádek se stejnou platností spadl na překryv.
         foreach ([
             'bank_account',
             'institution_type',
-            'institution_code',
             'currency_code',
             'valid_from',
         ] as $immutable) {
@@ -105,9 +111,23 @@ final class PayrollInstitutionAccountValidator
             }
         }
 
+        $code = null;
+        if (array_key_exists('institution_code', $input)
+            && $input['institution_code'] !== null
+        ) {
+            $code = strtoupper(trim($this->requiredString(
+                $input['institution_code'],
+                'institution_code',
+            )));
+            if (preg_match('/^[A-Z0-9][A-Z0-9._\/-]{0,31}$/', $code) !== 1) {
+                throw new \InvalidArgumentException('Kód instituce není platný.');
+            }
+        }
+
         $common = $this->validateCommon($input, currencyRequired: false);
 
         return [
+            'institution_code' => $code,
             'institution_name' => $common['institution_name'],
             'variable_symbol' => $common['variable_symbol'],
             'specific_symbol' => $common['specific_symbol'],

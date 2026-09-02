@@ -137,6 +137,92 @@ final class PayrollInstitutionAccountRepository
         string $currencyCode,
         string $effectiveOn,
     ): array {
+        return $this->lockPaymentTargets(
+            $supplierId,
+            $institutionType,
+            $institutionCode,
+            $currencyCode,
+            $effectiveOn,
+        );
+    }
+
+    /**
+     * Všechny účinné platební účty daného TYPU instituce, bez ohledu na kód.
+     *
+     * Slouží {@see \MyInvoice\Service\Payroll\Payment\PayrollInstitutionPaymentTargetResolver}
+     * k tomu, aby uměl (a) doplnit do hlášky, jaké kódy účtů firma ve skutečnosti
+     * má, a (b) u institucí, kde je kód jen organizační značka (ČSSZ, pojistitel
+     * zákonného pojištění), použít jednoznačný ověřený účet i tehdy, když se
+     * jeho kód neshoduje s kódem z nastavení zaměstnavatele.
+     *
+     * @return list<array{
+     *   id:int,
+     *   institution_id:int,
+     *   institution_type:string,
+     *   institution_code:string,
+     *   institution_name:string,
+     *   bank_account_ciphertext:string,
+     *   bank_account_hash:string,
+     *   currency_code:string,
+     *   variable_symbol:?string,
+     *   specific_symbol:?string,
+     *   constant_symbol:?string,
+     *   valid_from:string,
+     *   valid_to:?string,
+     *   source_kind:string,
+     *   source_reference:string,
+     *   verified_on:string,
+     *   verified_by:?int,
+     *   row_version:int
+     * }>
+     */
+    public function lockEffectiveInstitutionPaymentTargets(
+        int $supplierId,
+        string $institutionType,
+        string $currencyCode,
+        string $effectiveOn,
+    ): array {
+        return $this->lockPaymentTargets(
+            $supplierId,
+            $institutionType,
+            null,
+            $currencyCode,
+            $effectiveOn,
+        );
+    }
+
+    /**
+     * @return list<array{
+     *   id:int,
+     *   institution_id:int,
+     *   institution_type:string,
+     *   institution_code:string,
+     *   institution_name:string,
+     *   bank_account_ciphertext:string,
+     *   bank_account_hash:string,
+     *   currency_code:string,
+     *   variable_symbol:?string,
+     *   specific_symbol:?string,
+     *   constant_symbol:?string,
+     *   valid_from:string,
+     *   valid_to:?string,
+     *   source_kind:string,
+     *   source_reference:string,
+     *   verified_on:string,
+     *   verified_by:?int,
+     *   row_version:int
+     * }>
+     */
+    private function lockPaymentTargets(
+        int $supplierId,
+        string $institutionType,
+        ?string $institutionCode,
+        string $currencyCode,
+        string $effectiveOn,
+    ): array {
+        $codeCondition = $institutionCode === null
+            ? ''
+            : ' AND institution.institution_code = ?';
         $statement = $this->db->pdo()->prepare(
             'SELECT account.id, account.institution_id,
                     institution.institution_type,
@@ -155,22 +241,22 @@ final class PayrollInstitutionAccountRepository
                  ON institution.supplier_id = account.supplier_id
                 AND institution.id = account.institution_id
               WHERE account.supplier_id = ?
-                AND institution.institution_type = ?
-                AND institution.institution_code = ?
-                AND account.currency_code = ?
+                AND institution.institution_type = ?'
+            . $codeCondition
+            . ' AND account.currency_code = ?
                 AND account.valid_from <= ?
                 AND (account.valid_to IS NULL OR account.valid_to >= ?)
               ORDER BY account.id
               FOR UPDATE'
         );
-        $statement->execute([
-            $supplierId,
-            $institutionType,
-            $institutionCode,
-            $currencyCode,
-            $effectiveOn,
-            $effectiveOn,
-        ]);
+        $parameters = [$supplierId, $institutionType];
+        if ($institutionCode !== null) {
+            $parameters[] = $institutionCode;
+        }
+        $parameters[] = $currencyCode;
+        $parameters[] = $effectiveOn;
+        $parameters[] = $effectiveOn;
+        $statement->execute($parameters);
 
         $result = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $value) {
@@ -348,6 +434,7 @@ final class PayrollInstitutionAccountRepository
 
     /**
      * @param array{
+     *   institution_code?:?string,
      *   institution_name:string,
      *   variable_symbol:?string,
      *   specific_symbol:?string,
@@ -375,9 +462,15 @@ final class PayrollInstitutionAccountRepository
         try {
             $this->lockTenant($supplierId);
             $lock = $pdo->prepare(
-                'SELECT institution_id, currency_code, valid_from, row_version
-                   FROM payroll_institution_accounts
-                  WHERE supplier_id = ? AND id = ?
+                'SELECT account.institution_id, account.currency_code,
+                        account.valid_from, account.row_version,
+                        institution.institution_type,
+                        institution.institution_code
+                   FROM payroll_institution_accounts account
+                   JOIN payroll_institutions institution
+                     ON institution.supplier_id = account.supplier_id
+                    AND institution.id = account.institution_id
+                  WHERE account.supplier_id = ? AND account.id = ?
                   FOR UPDATE'
             );
             $lock->execute([$supplierId, $id]);
@@ -400,9 +493,30 @@ final class PayrollInstitutionAccountRepository
                 );
             }
 
+            // Kód instituce je NAŠE klasifikace platebního cíle, ne obsah
+            // dokladu — účetní ho vyplnila naslepo do volného textu („FUPLZEN"
+            // místo „ADVANCE_TAX", „CSSZ" místo kódu pracoviště) a pak ho
+            // neměla jak srovnat: formulář ho měl mezi neměnnými poli a nový
+            // řádek se stejnou platností spadl na překryv. Číslo účtu, typ
+            // instituce, měna a začátek platnosti neměnné zůstávají, ty tvoří
+            // historii; kód jde opravit, dokud se o něj neopírá závazek
+            // čekající na platbu.
+            $institutionId = self::requiredInt($current, 'institution_id');
+            $newCode = $data['institution_code'] ?? null;
+            if ($newCode !== null
+                && $newCode !== self::requiredString($current, 'institution_code')
+            ) {
+                $this->assertCodeChangeAllowed($supplierId, $id);
+                $institutionId = $this->institutionId(
+                    $supplierId,
+                    self::requiredString($current, 'institution_type'),
+                    $newCode,
+                );
+            }
+
             $this->assertNoOverlap(
                 $supplierId,
-                self::requiredInt($current, 'institution_id'),
+                $institutionId,
                 self::requiredString($current, 'currency_code'),
                 $currentValidFrom,
                 $data['valid_to'],
@@ -411,7 +525,8 @@ final class PayrollInstitutionAccountRepository
 
             $update = $pdo->prepare(
                 'UPDATE payroll_institution_accounts
-                    SET institution_name = ?,
+                    SET institution_id = ?,
+                        institution_name = ?,
                         variable_symbol = ?,
                         specific_symbol = ?,
                         constant_symbol = ?,
@@ -425,6 +540,7 @@ final class PayrollInstitutionAccountRepository
                   WHERE supplier_id = ? AND id = ? AND row_version = ?'
             );
             $update->execute([
+                $institutionId,
                 $data['institution_name'],
                 $data['variable_symbol'],
                 $data['specific_symbol'],
@@ -486,6 +602,45 @@ final class PayrollInstitutionAccountRepository
             throw new \RuntimeException('Instituci se nepodařilo založit.');
         }
         return $id;
+    }
+
+    /**
+     * Kód instituce se smí přepsat, dokud se o něj neopírá závazek, který
+     * čeká na platbu.
+     *
+     * Zmrazený závazek nese v referenci příjemce kód, pod kterým se účet
+     * dohledal; sestavení platební dávky ho porovnává s tím, co je na účtu
+     * dnes. Přejmenovat účet, na který se ještě nezaplatilo, by tedy shodilo
+     * přípravu plateb až u dávky — dávno po zaúčtování mezd, a s hláškou,
+     * ze které by nebylo poznat, co se změnilo. Závazky, které už v dávce
+     * jsou, mají svou platební instrukci zmrazenou zvlášť a přejmenování
+     * účtu se jich netýká.
+     */
+    private function assertCodeChangeAllowed(int $supplierId, int $id): void
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_payment_liabilities liability
+              WHERE liability.supplier_id = ?
+                AND liability.recipient_reference LIKE ?
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM payroll_payment_allocations allocation
+                     WHERE allocation.supplier_id = liability.supplier_id
+                       AND allocation.liability_id = liability.id)'
+        );
+        $statement->execute([$supplierId, '%:account:' . $id]);
+        $pending = (int) $statement->fetchColumn();
+        if ($pending > 0) {
+            throw new \InvalidArgumentException(sprintf(
+                'Kód instituce u tohoto účtu nelze změnit — odkazují se na něj'
+                . ' platební závazky (%d), které ještě nejsou v platební'
+                . ' dávce, a přejmenování by je shodilo až u přípravy plateb.'
+                . ' Připravte a odešlete dávku, nebo závazky stornujte'
+                . ' opravnou revizí; potom už kód přepsat jde.',
+                $pending,
+            ));
+        }
     }
 
     private function assertNoOverlap(

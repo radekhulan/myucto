@@ -80,9 +80,22 @@ final class PayrollQuickInputValidator
                     'Přesčas podle hodin vyžaduje identifikaci a verzi schváleného průměru.'
                 );
             }
-            $versions = $raw['versions'] ?? null;
+            /*
+             * Chybějící `versions` = žádný vstup zatím neexistuje.
+             *
+             * Řádek za měsíc, do kterého ještě nikdo nesáhl, nemá co verzovat —
+             * po volajícím se přesto vyžadoval prázdný objekt a bez něj celé
+             * uložení skončilo hláškou o „verzích měněných vstupů", které
+             * žádné nebyly. Nic se tím nerozvolňuje: samé `null` je fail-closed,
+             * proti existujícímu řádku skončí konfliktem (viz
+             * PayrollQuickInputRepository::guard()).
+             */
+            $versions = $raw['versions'] ?? [];
             if (!is_array($versions)) {
-                throw new \InvalidArgumentException('versions musí obsahovat verze měněných vstupů.');
+                throw new \InvalidArgumentException(
+                    'versions musí být objekt s verzemi měněných vstupů'
+                    . ' (klíče base, overtime, bonus, surcharges), nebo chybět úplně.',
+                );
             }
             $rows[] = [
                 'employment_id' => $employmentId,

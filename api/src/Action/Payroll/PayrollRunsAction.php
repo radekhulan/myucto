@@ -20,8 +20,10 @@ use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Payroll\PayrollLegacyRecapitulationService;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Payment\PayrollPaydayResolver;
+use MyInvoice\Service\Payroll\Run\PayrollRunCommand;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
+use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
 use MyInvoice\Service\Payroll\Run\PayrollRunPaymentsUnsettledException;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
@@ -41,6 +43,10 @@ final class PayrollRunsAction
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollPaydayResolver $payday,
         private readonly PayrollLegacyRecapitulationService $legacyRecapitulations,
+        private readonly PayrollRunReadinessService $readiness,
+        // Doplňuje prokazatelně nulové počáteční stavy kumulací při založení
+        // běhu — viz komentář v create().
+        private readonly \MyInvoice\Service\Payroll\PayrollOpeningBalanceService $openingBalances,
     ) {}
 
     /**
@@ -379,12 +385,12 @@ final class PayrollRunsAction
                     $item['revision_id'],
                     'run.revision_id',
                 );
-            $item['available_commands'] = array_map(
+            $item['available_commands'] = self::withCombinedCommand(array_map(
                 static fn ($command): string => $command->value,
                 $this->workflow->availableCommands(
                     PayrollRunStatus::from($status),
                 ),
-            );
+            ));
             $item['validations'] = $revisionId === null
                 ? []
                 : $this->runs->validations(
@@ -417,18 +423,95 @@ final class PayrollRunsAction
         // a datum výplaty není kosmetika: visí na něm splatnost odvodů, lhůty
         // hlášení i mez podle § 141 odst. 1 zákoníku práce. Počítá se na
         // serveru, protože posun na pracovní den musí znát státní svátky.
+        $suggestedPaymentDate = $period === null
+            ? null
+            : $this->payday->suggest(
+                $this->currentSupplierId($request),
+                "{$period}-01",
+            );
+
         return Json::ok($response, [
             'runs' => $items,
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,
-            'suggested_payment_date' => $period === null
-                ? null
-                : $this->payday->suggest(
-                    $this->currentSupplierId($request),
-                    "{$period}-01",
-                ),
+            'suggested_payment_date' => $suggestedPaymentDate,
+            /*
+             * KONTROLA PŘED ZAHÁJENÍM. Čtecí, nic neukládá, nic neblokuje —
+             * stejný vzor jako `GET /payroll/year-close/{year}`, který vrací
+             * `blockers` k prohlédnutí. Jede jen tam, kde má smysl: dokud za
+             * období není běh, nebo je teprve v konceptu. Po zamknutí už tytéž
+             * nálezy visí na revizi ve `validations`, takže druhá kopie by je
+             * jen zdvojila.
+             */
+            'readiness' => $this->readinessForPeriod(
+                $request,
+                $period,
+                $suggestedPaymentDate,
+                $items,
+            ),
         ]);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $items
+     * @return array<string,mixed>|null
+     */
+    private function readinessForPeriod(
+        Request $request,
+        ?string $period,
+        ?string $suggestedPaymentDate,
+        array $items,
+    ): ?array {
+        if ($period === null) {
+            return null;
+        }
+        $periodStart = "{$period}-01";
+        $paymentDate = $suggestedPaymentDate;
+        foreach ($items as $item) {
+            if ((string) ($item['period_start'] ?? '') !== $periodStart) {
+                continue;
+            }
+            if ((string) ($item['status'] ?? '') !== PayrollRunStatus::DRAFT->value) {
+                // Běh už je za zámkem: nálezy jsou na revizi, ne tady.
+                return null;
+            }
+            $paymentDate = (string) $item['payment_date'];
+        }
+        if ($paymentDate === null) {
+            return null;
+        }
+
+        try {
+            return $this->readiness->inspect(
+                $this->currentSupplierId($request),
+                $periodStart,
+                $paymentDate,
+                null,
+            );
+        } catch (\Throwable) {
+            // Kontrola nesmí shodit seznam běhů. Když se nepovede, obrazovka
+            // prostě nic nepředvyplní a účetní pokračuje jako dřív.
+            return null;
+        }
+    }
+
+    /**
+     * Sloučený krok „Spočítat mzdy" (zamknout vstupy + spočítat) je nabídka
+     * navíc, ne náhrada: jednotlivé příkazy zůstávají v seznamu, protože je
+     * používají opravné revize i API.
+     *
+     * @param list<string> $commands
+     * @return list<string>
+     */
+    private static function withCombinedCommand(array $commands): array
+    {
+        if (!in_array(PayrollRunCommand::LOCK_INPUTS->value, $commands, true)) {
+            return $commands;
+        }
+        array_unshift($commands, PayrollRunCommand::LOCK_AND_CALCULATE->value);
+
+        return $commands;
     }
 
     /**
@@ -524,6 +607,23 @@ final class PayrollRunsAction
         } catch (\InvalidArgumentException|\DomainException|\OutOfBoundsException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
+        /*
+         * Nulové počáteční stavy kumulací tam, kde je nula prokazatelná.
+         *
+         * Bez nich spadl zákonný výpočet do `manual_review` u KAŽDÉHO
+         * zaměstnance a účetní musela u každého ručně uložit prázdnou tabulku
+         * úhrnů z „předchozího programu", který žádný neexistoval. V lednu to
+         * platilo pro celou firmu každý rok znovu. Zaměstnanec, jehož část roku
+         * zpracoval jiný program, tudy neprojde a zůstává na ručním zadání —
+         * viz {@see PayrollOpeningBalanceService::seedProvableZeroOpenings()}.
+         */
+        $this->openingBalances->seedProvableZeroOpenings(
+            $this->currentSupplierId($request),
+            substr((string) ($run['period_start'] ?? ''), 0, 10),
+            [],
+            $this->requiredUserId($request),
+        );
+
         return Json::ok($response, ['run' => $run], 201);
     }
 
@@ -606,6 +706,9 @@ final class PayrollRunsAction
         $command = (string) ($args['command'] ?? '');
         $permission = match ($command) {
             'calculate' => 'payroll.calculate',
+            // Sloučený krok „Spočítat mzdy" pod sebou udělá obojí, takže musí
+            // projít OBĚMA branami — druhá se ověřuje hned pod tímhle blokem.
+            'lock_and_calculate' => 'payroll.calculate',
             'review', 'request_correction' => 'payroll.review',
             'approve' => 'payroll.approve',
             'reopen' => 'payroll.reopen',
@@ -632,6 +735,16 @@ final class PayrollRunsAction
             $permission,
             AccessLevel::WRITE,
         )) !== null) {
+            return $error;
+        }
+        if ($command === 'lock_and_calculate'
+            && ($error = $this->authorize(
+                $request,
+                $response,
+                'payroll.inputs.write',
+                AccessLevel::WRITE,
+            )) !== null
+        ) {
             return $error;
         }
         $body = $this->input($request);
@@ -718,6 +831,12 @@ final class PayrollRunsAction
     ): PayrollRunCommandResult {
         return match ($command) {
             'lock_inputs' => $this->commands->lockInputs(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            // Jeden krok účetní, dva příkazy v jedné transakci a dvě auditní
+            // události. Samostatný `lock_inputs` zůstává dostupný pro API
+            // a pro opravné revize.
+            'lock_and_calculate' => $this->commands->lockAndCalculate(
                 $supplierId, $runId, $version, $idempotencyKey, $userId,
             ),
             'calculate' => $this->commands->calculate(

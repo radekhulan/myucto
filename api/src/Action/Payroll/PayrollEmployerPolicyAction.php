@@ -134,8 +134,16 @@ final class PayrollEmployerPolicyAction
             return $error;
         }
         $body = $this->input($request);
+        // Zakládaná politika ještě žádnou verzi nemá, takže se na ni nedá ptát:
+        // chybějící `row_version` znamená nulu, ne chybu. Vyžadovat ho po
+        // volajícím bylo pole, které nikdo nepožaduje — a hláška navíc jen
+        // opakovala číslo, které si aplikace umí doplnit sama.
+        $rawVersion = $body['row_version'] ?? null;
+        if ($rawVersion === null || $rawVersion === '') {
+            $rawVersion = 0;
+        }
         $version = filter_var(
-            $body['row_version'] ?? null,
+            $rawVersion,
             FILTER_VALIDATE_INT,
             ['options' => ['min_range' => 0, 'max_range' => 0]],
         );
@@ -143,7 +151,7 @@ final class PayrollEmployerPolicyAction
             return Json::error(
                 $response,
                 'validation_failed',
-                'Nová politika musí mít row_version 0.',
+                'Zakládaná mzdová politika ještě žádnou verzi nemá — pole row_version buď vynechte, nebo pošlete 0.',
                 422,
             );
         }

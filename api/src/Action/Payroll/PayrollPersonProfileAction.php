@@ -31,6 +31,9 @@ final class PayrollPersonProfileAction
         private readonly PayrollModuleAccess $access,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
+        // Z uložené karty odvodí výplatní pravidlo, plyne-li z ní jednoznačně
+        // — viz komentář na konci put().
+        private readonly \MyInvoice\Service\Payroll\Net\PayrollPayoutRuleDefaultsService $payoutDefaults,
     ) {}
 
     /** @param array{id:string} $args */
@@ -116,6 +119,21 @@ final class PayrollPersonProfileAction
         $supplierId = $this->currentSupplierId($request);
         $employeeId = (int) $args['id'];
         $pdo = $this->db->pdo();
+        /*
+         * Chybějící `payout_effective_on` se ODVODÍ, nevyžaduje.
+         *
+         * Čtecí cesta ho vrací jako `null`, takže načtená karta poslaná zpět
+         * beze změny skončila hláškou „payout_effective_on musí být datum
+         * YYYY-MM-DD" — a jediná nabízená hodnota byl DNEŠEK. U člověka, který
+         * nastoupil prvního a jehož kartu účetní dodělává až v dalším měsíci,
+         * by pravidlo výplaty začalo platit po výplatním termínu, tedy pozdě.
+         * Odvozuje se proto z nástupu; teprve když ani ten není, zbývá dnešek.
+         */
+        if (!isset($body['payout_effective_on'])
+            || !is_string($body['payout_effective_on'])
+            || trim($body['payout_effective_on']) === '') {
+            $body['payout_effective_on'] = $this->defaultPayoutEffectiveOn($supplierId, $employeeId);
+        }
         // Uvnitř cizí transakce (testy, dávkové zpracování) se zkouška zabalí
         // do SAVEPOINTu — jinak by `dry_run` tiše zapsal, což je horší než
         // kdyby neexistoval.
@@ -159,7 +177,59 @@ final class PayrollPersonProfileAction
         }
         $this->rollBackRehearsal($rehearsal, $rehearsalOwnsTransaction);
 
+        /*
+         * Z uložené karty rovnou VZNIKNE výplatní pravidlo, pokud z ní plyne
+         * jednoznačně.
+         *
+         * `payout_method` na kartě byl deklarativní údaj, ze kterého se nic
+         * neodvozovalo — o výplatě rozhoduje samostatná sada v
+         * `payroll_payout_rules`. Účetní tedy vyplnila „bankou" i číslo účtu,
+         * karta vypadala hotově a chybějící pravidlo se ozvalo až u příkazu
+         * Připravit platby, tedy PO zaúčtování mzdy; náprava pak znamenala
+         * vyžádat opravu běhu a přepočítat novou revizi.
+         *
+         * ⚠️ Nic se nehádá a nic se nepřepisuje: služba zapíše jen tehdy, když
+         * osoba žádné aktivní pravidlo nemá a z karty plyne jediný cíl
+         * (viz {@see PayrollPayoutRuleDefaultsService}). Rozdělená výplata,
+         * chybějící nebo neověřený účet zůstávají na ručním zadání.
+         */
+        if (!$dryRun) {
+            try {
+                $this->payoutDefaults->applyDefaults($supplierId, $employeeId);
+            } catch (\Throwable) {
+                // Nejednoznačná karta = pravidlo se nezaloží a zůstane ruční
+                // cesta. Uložení karty to nesmí shodit.
+            }
+        }
+
         return Json::ok($response, ['profile' => $profile, 'dry_run' => $dryRun]);
+    }
+
+    /**
+     * Odkdy platí pravidlo výplaty, když ho volající neposlal: dosud uložené
+     * datum, jinak nejstarší nástup osoby, jinak dnešek.
+     */
+    private function defaultPayoutEffectiveOn(int $supplierId, int $employeeId): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT payout_effective_on FROM payroll_employee_profiles
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $stmt->execute([$supplierId, $employeeId]);
+        $stored = $stmt->fetchColumn();
+        if (is_string($stored) && $stored !== '') {
+            return substr($stored, 0, 10);
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MIN(COALESCE(actual_start_date, start_date))
+               FROM payroll_employments
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $stmt->execute([$supplierId, $employeeId]);
+        $start = $stmt->fetchColumn();
+
+        return is_string($start) && $start !== '' ? substr($start, 0, 10) : date('Y-m-d');
     }
 
     private function rollBackRehearsal(bool $rehearsal, bool $ownsTransaction): void

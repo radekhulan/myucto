@@ -442,7 +442,12 @@ final class PayrollEmploymentValidator
         $version = $this->rowVersion($input);
         $status = $this->inputString($input['status'] ?? '');
         if (!in_array($status, self::CHECKLIST_STATUSES, true)) {
-            throw new \InvalidArgumentException('Stav položky checklistu není platný.');
+            // Hláška musí vypsat, co JDE poslat — jinak zbývá hádat mezi
+            // `done`, `ok`, `completed` a podobnými.
+            throw new \InvalidArgumentException(
+                'Stav položky checklistu není platný. Přípustné hodnoty: '
+                . implode(', ', self::CHECKLIST_STATUSES) . '.',
+            );
         }
         return [
             'row_version' => $version,

@@ -43,6 +43,23 @@ final class PayrollEmployerPolicyService
         ],
     ];
 
+    /**
+     * Neutrální výchozí hodnoty pro pole, u kterých „nevyplněno" znamená
+     * „nepoužíváme". Zakládaná politika je tak úplná i z volání, které pošle
+     * jen výplatní termín — chybějící přepínač nesmí být hádanka, když
+     * existuje bezpečná nula.
+     *
+     * `balance_rounding_mode` tady schválně NENÍ: zaokrouhlení je peněžní
+     * rozhodnutí zaměstnavatele a aplikace ho za něj vybírat nebude.
+     */
+    private const ENUM_DEFAULTS = [
+        'payday_business_day_rule' => 'none',
+        'home_office_policy' => 'not_used',
+        'travel_expense_policy' => 'not_used',
+        'delivery_channel' => 'disabled',
+        'source_kind' => 'manual',
+    ];
+
     public function __construct(
         private readonly PayrollEmployerPolicyRepository $repository,
     ) {}
@@ -134,15 +151,24 @@ final class PayrollEmployerPolicyService
         ];
         foreach (self::ENUMS as $field => $allowed) {
             $rawValue = $input[$field] ?? null;
+            if (($rawValue === null || $rawValue === '')
+                && array_key_exists($field, self::ENUM_DEFAULTS)) {
+                $result[$field] = self::ENUM_DEFAULTS[$field];
+                continue;
+            }
             if (!is_string($rawValue)) {
                 throw new \InvalidArgumentException(
-                    "Pole {$field} musí být text.",
+                    "Vyplňte pole {$field}. Přípustné hodnoty: "
+                    . implode(', ', $allowed) . '.',
                 );
             }
             $value = trim($rawValue);
             if (!in_array($value, $allowed, true)) {
+                // Hláška musí vypsat, co JDE poslat — jinak je jediná cesta
+                // dál hádání, a to je přesně to, co uživatele zastavuje.
                 throw new \InvalidArgumentException(
-                    "Pole {$field} nemá podporovanou hodnotu.",
+                    "Pole {$field} nemá podporovanou hodnotu „{$value}“. Přípustné hodnoty: "
+                    . implode(', ', $allowed) . '.',
                 );
             }
             $result[$field] = $value;

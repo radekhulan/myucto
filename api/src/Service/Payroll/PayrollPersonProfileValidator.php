@@ -397,9 +397,19 @@ final class PayrollPersonProfileValidator
                 static fn (string $key): bool => array_key_exists($key, $row),
             ));
             if ($presentCount !== 0 && $presentCount !== count($addressKeys)) {
-                throw new \InvalidArgumentException(
-                    "addresses.{$index}: při změně adresy musí být poslané všechny její části."
-                );
+                // Vyjmenovat, co chybí — jinak zbývá hádat, která ze čtyř
+                // částí adresy se v požadavku neobjevila.
+                $missing = array_values(array_filter(
+                    $addressKeys,
+                    static fn (string $key): bool => !array_key_exists($key, $row),
+                ));
+                throw new \InvalidArgumentException(sprintf(
+                    'addresses.%d: při změně adresy musí být poslané všechny její části'
+                    . ' (%s). Chybí: %s.',
+                    $index,
+                    implode(', ', $addressKeys),
+                    implode(', ', $missing),
+                ));
             }
             $addressPresent = $presentCount === count($addressKeys);
             if ($id === null && !$addressPresent) {
@@ -700,7 +710,15 @@ final class PayrollPersonProfileValidator
     private function enum(mixed $value, array $allowed, string $path): string
     {
         if (!is_string($value) || !in_array($value, $allowed, true)) {
-            throw new \InvalidArgumentException("{$path} má nepodporovanou hodnotu.");
+            // Vypsat přípustné hodnoty. Bez nich hláška říká jen „je to
+            // špatně" a nezbývá než hádat, co se sem má poslat — u chybějícího
+            // pole dokonce obviňuje hodnotu, kterou nikdo neposlal.
+            throw new \InvalidArgumentException(sprintf(
+                '%s %s. Přípustné hodnoty: %s.',
+                $path,
+                $value === null || $value === '' ? 'je povinné' : 'má nepodporovanou hodnotu',
+                implode(', ', $allowed),
+            ));
         }
 
         return $value;

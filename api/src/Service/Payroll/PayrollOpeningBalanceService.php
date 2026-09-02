@@ -92,6 +92,133 @@ final readonly class PayrollOpeningBalanceService
     }
 
     /**
+     * Doplní NULOVÉ počáteční stavy tam, kde je nula prokazatelná.
+     *
+     * Počáteční stav je „co se spočítalo před MyÚčtem". Když firma vede mzdy
+     * v aplikaci od dřívějšího měsíce, než ve kterém zaměstnanec v daném roce
+     * poprvé nastoupil, tak před tímhle obdobím žádné cizí zpracování NENÍ a
+     * nula je jediná možná hodnota — přesto to dřív po účetní chtěla aplikace
+     * vyplnit ručně, u každého člověka zvlášť, a do té doby odmítala schválit
+     * mzdový běh. Nejhůř to bilo v lednu, kdy je roční kumulace nulová vždycky
+     * a přesto blokovala celou firmu.
+     *
+     * ⚠️ Odvozuje se jen prokazatelná nula. Zaměstnanec, který v roce pracoval
+     * dřív, než firma začala vést mzdy v MyÚčtu, tudy NEPROJDE — jeho úhrny
+     * aplikace nezná a hádat je nesmí (zkreslily by roční maximum sociálního
+     * pojištění i daňový bonus). Ten zůstává na ručním zadání.
+     *
+     * @param list<int> $employeeIds prázdné = všichni zaměstnanci firmy
+     * @return list<int> id zaměstnanců, kterým se nulový počátek doplnil
+     */
+    public function seedProvableZeroOpenings(
+        int $supplierId,
+        string $periodStart,
+        array $employeeIds = [],
+        ?int $actorUserId = null,
+    ): array {
+        if ($supplierId <= 0
+            || preg_match('/^\d{4}-\d{2}-01$/D', $periodStart) !== 1) {
+            return [];
+        }
+        $year = (int) substr($periodStart, 0, 4);
+        $yearStart = sprintf('%04d-01-01', $year);
+
+        $moduleStart = $this->moduleStartPeriod($supplierId);
+        if ($moduleStart === null) {
+            return [];
+        }
+
+        $seeded = [];
+        foreach ($this->firstEmploymentStarts($supplierId, $employeeIds) as $employeeId => $firstStart) {
+            // Okno „měsíce roku před obdobím, ve kterých u téhle firmy mohl mít
+            // příjem" začíná pozdějším z: začátek roku a nástup.
+            $windowStart = $firstStart !== null && $firstStart > $yearStart
+                ? $firstStart
+                : $yearStart;
+            $windowIsEmpty = $windowStart >= $periodStart;
+            if (!$windowIsEmpty && $moduleStart > $windowStart) {
+                // Kus roku firma zpracovala mimo aplikaci — nulu tvrdit nelze.
+                continue;
+            }
+            if ($this->hasAnyOpening($supplierId, $employeeId, $year)) {
+                continue;
+            }
+            try {
+                $this->save(
+                    $supplierId,
+                    $employeeId,
+                    $year,
+                    [],
+                    'Automaticky: mzdy za předchozí měsíce roku vede MyÚčto, není co převádět.',
+                    $actorUserId,
+                );
+                $seeded[] = $employeeId;
+            } catch (\Throwable) {
+                // Doplnění je pohodlí, ne podmínka. Když nevyjde (schválená
+                // mzda za rok, souběžný zápis), zůstane ruční cesta.
+                continue;
+            }
+        }
+
+        return $seeded;
+    }
+
+    private function moduleStartPeriod(int $supplierId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT start_period FROM payroll_module_state WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? substr($value, 0, 10) : null;
+    }
+
+    /**
+     * @param list<int> $employeeIds
+     * @return array<int,?string>
+     */
+    private function firstEmploymentStarts(int $supplierId, array $employeeIds): array
+    {
+        $sql = 'SELECT employee_id, MIN(COALESCE(actual_start_date, start_date)) AS first_start
+                  FROM payroll_employments
+                 WHERE supplier_id = ?
+                   AND status <> \'no_show\'';
+        $params = [$supplierId];
+        $ids = array_values(array_unique(array_filter(
+            array_map(static fn ($id): int => (int) $id, $employeeIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids !== []) {
+            $sql .= ' AND employee_id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ')';
+            $params = [...$params, ...$ids];
+        }
+        $sql .= ' GROUP BY employee_id';
+
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+
+        $result = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $start = $row['first_start'] ?? null;
+            $result[(int) $row['employee_id']] = is_string($start) ? substr($start, 0, 10) : null;
+        }
+
+        return $result;
+    }
+
+    private function hasAnyOpening(int $supplierId, int $employeeId, int $year): bool
+    {
+        foreach (self::KINDS as $kind) {
+            if ($this->accumulators->openingBalance($supplierId, $employeeId, $year, $kind) !== null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Uloží počáteční stavy. Opakované uložení TÝCHŽ čísel je replay (repozitář
      * vrátí původní řádek), změna čísel je oprava navázaná na aktuální verzi.
      *

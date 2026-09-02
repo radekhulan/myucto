@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import type { PayrollRun, PayrollRunValidation } from '@/api/payroll'
+import type { PayrollRun, PayrollRunReadiness, PayrollRunValidation } from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
   runs: vi.fn(),
@@ -18,6 +18,7 @@ const m = vi.hoisted(() => ({
   error: vi.fn(),
   total: vi.fn(),
   suggestedPaymentDate: vi.fn(),
+  readiness: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
 }))
@@ -42,6 +43,8 @@ vi.mock('@/api/payroll', () => ({
         // Návrh výplatního termínu ze mzdové politiky posílá server;
         // scénáře, které ho neřeší, dostanou `null` a platí nouzový termín.
         suggested_payment_date: m.suggestedPaymentDate?.() ?? null,
+        // Kontrola před zahájením běhu; scénáře, které ji neřeší, dostanou `null`.
+        readiness: m.readiness?.() ?? null,
       })),
     run: m.runDetail,
     runHistory: m.runHistory,
@@ -117,6 +120,7 @@ describe('PayrollRuns', () => {
     m.runs.mockResolvedValue([run()])
     m.total.mockReturnValue(undefined)
     m.suggestedPaymentDate.mockReturnValue(null)
+    m.readiness.mockReturnValue(null)
     m.runDetail.mockResolvedValue(run())
     m.runHistory.mockResolvedValue({ run_id: 15, revisions: [], events: [] })
     m.peopleOptions.mockResolvedValue([])
@@ -1130,6 +1134,124 @@ describe('PayrollRuns', () => {
     await flushPromises()
 
     expect((paymentDate.element as HTMLInputElement).value).toBe('2026-10-20')
+
+    wrapper.unmount()
+  })
+
+  // ── Sloučený první krok a kontrola PŘED zahájením ───────────────────────
+  //
+  // Účetní mačkala „Pokračovat" třikrát po sobě, aniž by mezi tím cokoli
+  // rozhodovala: zámek vstupů a výpočet je jedna práce a samostatná kontrola
+  // je u jediné účetní druhý podpis téhož člověka.
+  it('nabízí v konceptu jediný sloučený krok místo „Uzamknout vstupy"', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'draft',
+      can_delete: false,
+      available_commands: ['lock_and_calculate', 'lock_inputs', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const primary = wrapper.get('[data-testid="payroll-run-15-lock_and_calculate"]')
+    expect(primary.classes().join(' ')).toContain('bg-')
+    expect(wrapper.find('[data-testid="payroll-run-15-lock_inputs"]').exists()).toBe(false)
+    // Vysvětlení patří pod tlačítka, ne vedle nich.
+    expect(wrapper.find('[data-testid="payroll-run-15-hint"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('ze spočítaného běhu vede rovnou schválení, bez samostatné kontroly', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'review', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-review"]').exists()).toBe(false)
+    const approve = wrapper.get('[data-testid="payroll-run-15-approve"]')
+    expect(approve.classes().join(' ')).toContain('bg-')
+
+    wrapper.unmount()
+  })
+
+  it('nálezy kontroly ukáže předem a před zahájením se zeptá, ale nezablokuje', async () => {
+    const readiness: PayrollRunReadiness = {
+      period_start: '2026-08-01',
+      payment_date: '2026-09-15',
+      office_id: null,
+      ready: false,
+      findings: [{
+        code: 'time_month_not_approved',
+        severity: 'blocker',
+        message: 'Docházka pracovního vztahu není schválena.',
+        remediation_path: '/payroll/time',
+        count: 2,
+        entities: [{ entity_type: 'employment', entity_id: 3 }],
+      }],
+    }
+    m.readiness.mockReturnValue(readiness)
+    m.runs.mockResolvedValue([run({
+      status: 'draft',
+      can_delete: false,
+      available_commands: ['lock_and_calculate', 'lock_inputs'],
+    })])
+    m.commandRun.mockResolvedValue({ outcome: null })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    // Nález je vidět DŘÍV, než se cokoli zmrazí.
+    expect(wrapper.get('[data-testid="run-readiness-time_month_not_approved"]').text())
+      .toContain('Docházka pracovního vztahu není schválena.')
+
+    await wrapper.get('[data-testid="payroll-run-15-lock_and_calculate"]').trigger('click')
+    await flushPromises()
+
+    // Zeptá se, ale neodešle — a hlavně nezakáže pokračovat.
+    expect(m.commandRun).not.toHaveBeenCalled()
+    expect(document.body.querySelector('[data-test="run-readiness-dialog"]')).not.toBeNull()
+
+    document.body.querySelector<HTMLButtonElement>('[data-test="confirm-run-readiness"]')?.click()
+    await flushPromises()
+
+    expect(m.commandRun).toHaveBeenCalledWith(
+      15,
+      'lock_and_calculate',
+      { row_version: 2 },
+      expect.any(String),
+    )
+
+    wrapper.unmount()
+  })
+
+  it('bez nálezů se sloučený krok odešle rovnou, bez dialogu', async () => {
+    m.readiness.mockReturnValue({
+      period_start: '2026-08-01',
+      payment_date: '2026-09-15',
+      office_id: null,
+      ready: true,
+      findings: [],
+    } satisfies PayrollRunReadiness)
+    m.runs.mockResolvedValue([run({
+      status: 'draft',
+      can_delete: false,
+      available_commands: ['lock_and_calculate', 'lock_inputs'],
+    })])
+    m.commandRun.mockResolvedValue({ outcome: null })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="payroll-run-15-lock_and_calculate"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-test="run-readiness-dialog"]')).toBeNull()
+    expect(m.commandRun).toHaveBeenCalledTimes(1)
 
     wrapper.unmount()
   })
