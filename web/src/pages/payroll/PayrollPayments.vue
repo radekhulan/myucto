@@ -1001,6 +1001,20 @@ async function createBatch(): Promise<void> {
     selectedIds.value = []
     activeTab.value = 'batches'
     await load()
+    /*
+     * Dávka bez souboru pro banku je půl kroku. Účetní ji zakládá právě proto,
+     * aby soubor dostala, a musela na něj klikat zvlášť — u čtyř skupin odvodů
+     * (zaměstnanci, ČSSZ, pojišťovny, FÚ) s různým dnem splatnosti to bylo
+     * čtyřikrát totéž kliknutí navíc.
+     *
+     * Generování je idempotentní (běží přes klíč dávky), takže opakování
+     * nezaloží druhý soubor. Ruční „Vygenerovat" zůstává — pro nové revize
+     * i pro `manual` dávku, která soubor nemá.
+     */
+    const created = batches.value.find(batch => batch.id === result.batch_id)
+    if (created !== undefined && created.export_format !== 'manual') {
+      await generateExport(created)
+    }
   } catch (error) {
     toast.error(apiErrorMessage(
       error,
