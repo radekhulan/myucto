@@ -1684,6 +1684,15 @@ async function copyXml(): Promise<void> {
             <li v-for="(problem, index) in a1Problems" :key="`${problem.field ?? ''}-${index}`">
               <span v-if="problem.field" class="font-mono">{{ problem.field }}</span>
               <span v-if="problem.field"> — </span>{{ problem.message }}
+              <button
+                v-if="problem.field"
+                type="button"
+                class="ml-1 whitespace-nowrap rounded-full bg-danger-100 px-2 py-0.5 font-medium underline underline-offset-2 hover:bg-danger-200 hover:text-danger-900 focus:outline-none focus:ring-2 focus:ring-danger-500/40"
+                :data-test="`registration-a1-problem-link-${problem.field}`"
+                @click="focusA1Gap(problem.field)"
+              >
+                {{ t('payroll.people.registration.a1.gap_open') }}
+              </button>
             </li>
           </ul>
         </div>
@@ -1713,6 +1722,14 @@ async function copyXml(): Promise<void> {
                 stored: item.stored ?? '—',
                 suggested: item.suggested ?? '—',
               }) }}
+              <button
+                type="button"
+                class="ml-1 whitespace-nowrap rounded-full bg-primary-100 px-2 py-0.5 font-medium underline underline-offset-2 hover:bg-primary-200 hover:text-primary-900 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+                :data-test="`registration-a1-diverged-link-${item.field}`"
+                @click="focusA1Gap(item.field)"
+              >
+                {{ t('payroll.people.registration.a1.gap_open') }}
+              </button>
             </li>
           </ul>
         </div>
