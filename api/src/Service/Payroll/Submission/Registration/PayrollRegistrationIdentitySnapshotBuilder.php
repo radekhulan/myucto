@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
+use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\PayrollVcp;
 
 final class PayrollRegistrationIdentitySnapshotBuilder
@@ -293,6 +294,27 @@ final class PayrollRegistrationIdentitySnapshotBuilder
                 191,
                 "identifiers.{$type}",
             );
+        }
+        /*
+         * Rodné číslo se v evidenci drží v kanonickém ČESKÉM tvaru
+         * `RRMMDD/XXXX` — tak se píše a tak ho účetní čte. Schémata ČSSZ
+         * (`client/@bno`, `t:simpleNNType`) ale berou jen 9 až 10 číslic
+         * a lomítko odmítnou. Bez tohohle převodu neprošel snímek ŽÁDNÉMU
+         * českému zaměstnanci s desetimístným rodným číslem a hláška
+         * tvrdila, že je údaj neplatný, i když byl od začátku v pořádku.
+         *
+         * Převádí se jen kopie pro podání. V kartě osoby zůstává lomítko.
+         */
+        if ($result['birth_number'] !== null) {
+            try {
+                $result['birth_number'] = CzechBirthNumber::digits(
+                    $result['birth_number'],
+                );
+            } catch (\InvalidArgumentException) {
+                // Nesmyslnou hodnotu tady nepřepisujeme — pojmenuje ji
+                // `validateIdentifierFacets()` větou, ze které jde poznat,
+                // co s tím.
+            }
         }
 
         return $result;
