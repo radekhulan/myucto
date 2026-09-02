@@ -333,10 +333,23 @@ final class PayrollSubmissionTransportAttemptRepository
                  ON obligation.supplier_id = submission.supplier_id
                 AND obligation.environment = submission.environment
                 AND obligation.id = submission.obligation_id
+               -- Blokuje jen pokus, po kterém MOHLA zpráva opustit aplikaci.
+               -- Dokud tady stálo prosté `attempt.submission_id = submission.id`,
+               -- stačil JEDEN neúspěšný pokus a zmrazené podání navždy zmizelo
+               -- z nabídky k odeslání: `submission.status` zůstal `ready`, ale
+               -- obrazovka pro něj neměla žádné tlačítko. Účetní pak nemohla
+               -- opravné ani stornovací podání odeslat vůbec.
+               -- `failed` BEZ `sent_at` znamená, že se odeslání nepovedlo
+               -- dřív, než cokoli odešlo (spadlo volání VREP, nezařadilo se
+               -- do ISDS fronty) — u ČSSZ po něm nic nezůstalo, takže druhý
+               -- pokus nemůže nic zdvojit. Všechny ostatní stavy (včetně
+               -- `failed` PO odeslání a `expired`) dál blokují: tam už se
+               -- neví, co ČSSZ přijala, a řeší se stornem nebo opravou.
                LEFT JOIN ' . self::TABLE . ' attempt
                  ON attempt.supplier_id = submission.supplier_id
                 AND attempt.environment = submission.environment
                 AND attempt.submission_id = submission.id
+                AND NOT (attempt.status = "failed" AND attempt.sent_at IS NULL)
                LEFT JOIN submission_outbox outbox
                  ON outbox.id = (
                     SELECT MAX(candidate.id)

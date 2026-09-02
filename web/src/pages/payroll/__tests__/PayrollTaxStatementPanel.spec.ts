@@ -12,16 +12,15 @@ const m = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   routeQuery: {} as Record<string, string>,
+  canRead: vi.fn((permission: string) =>
+    permission === 'payroll.reports' || permission === 'reports.export'),
 }))
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: { taxStatementPreview: m.preview, taxStatementXmlUrl: m.xmlUrl },
 }))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({
-    canRead: (permission: string) =>
-      permission === 'payroll.reports' || permission === 'reports.export',
-  }),
+  useAuthStore: () => ({ canRead: m.canRead }),
 }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.success, error: m.error }),
@@ -204,5 +203,18 @@ describe('PayrollTaxStatementPanel', () => {
     expect(wrapper.get('[data-test="tax-statement-error"]').text())
       .toContain('Za zvolený rok není žádný schválený mzdový běh.')
     expect(wrapper.find('[data-test="tax-statement-months"]').exists()).toBe(false)
+  })
+
+  /**
+   * Bez práva na export zmizí obě tlačítka a zůstala prázdná lišta nad
+   * tabulkou plnou čísel — účetní z toho četla, že XML nejde sestavit.
+   */
+  it('bez práva exportovat vysvětlí, proč tam žádné tlačítko není', async () => {
+    m.canRead.mockImplementation((permission: string) => permission === 'payroll.reports')
+    const wrapper = mount(PayrollTaxStatementPanel, { props: { initialYear: 2026 } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="tax-statement-read-only"]').text())
+      .toContain('payroll.tax_statement.export_not_allowed')
   })
 })

@@ -18,6 +18,7 @@ import {
 } from '@/api/payrollAbsences'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
+import { formatDate, formatPeriod } from '@/composables/useFormat'
 
 const props = defineProps<{ runs: PayrollRun[] }>()
 
@@ -336,9 +337,46 @@ function controlGroups(report: PayrollJmhzControlReport): ControlGroup[] {
   ] satisfies ControlGroup[]).filter(group => group.findings.length > 0)
 }
 
+/**
+ * Proč je tlačítko zhasnuté.
+ *
+ * Bez téhle věty se test podání nedal spustit a obrazovka mlčela: u revize
+ * přes víc mzdových účtáren se čeká na volbu registrace, u čtenáře na právo
+ * zapisovat — a obojí vypadá stejně jako rozbité tlačítko.
+ */
+function startBlockedReason(payrollRun: PayrollRun): string {
+  if (!canWrite.value) {
+    return t('payroll.submissions.overview.jmhz_dry_run_read_only')
+  }
+  const id = revisionId(payrollRun)
+  if (id !== null
+    && officeOptions(payrollRun).length > 1
+    && selectedOffice.value[id] == null
+  ) {
+    return t('payroll.submissions.overview.jmhz_social_multiple_offices')
+  }
+  return ''
+}
+
+/** Kopírovat se nemusí podařit — schránku umí prohlížeč zakázat politikou. */
+const copiedRevision = ref<number | null>(null)
+const copyFailedRevision = ref<number | null>(null)
+
 async function copyXml(payrollRun: PayrollRun) {
+  const id = revisionId(payrollRun)
   const xml = state(payrollRun)?.result?.xml
-  if (xml) await navigator.clipboard.writeText(xml)
+  if (id === null || !xml) return
+  copiedRevision.value = null
+  copyFailedRevision.value = null
+  try {
+    await navigator.clipboard.writeText(xml)
+    copiedRevision.value = id
+  } catch {
+    // Tlačítko, po kterém se mlčky nic nestane, vypadá jako rozbitá aplikace.
+    // XML je vidět pod „Zobrazit XML", takže cesta ven existuje — musí se ale
+    // říct nahlas, jinak ji nikdo nehledá.
+    copyFailedRevision.value = id
+  }
 }
 </script>
 
@@ -367,7 +405,7 @@ async function copyXml(payrollRun: PayrollRun) {
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h3 class="font-semibold text-neutral-900">
             {{ t('payroll.submissions.overview.jmhz_dry_run_card', {
-              period: payrollRun.period_start.slice(0, 7),
+              period: formatPeriod(payrollRun.period_start.slice(0, 7)),
               revision: payrollRun.revision_no,
             }) }}
           </h3>
@@ -416,6 +454,13 @@ async function copyXml(payrollRun: PayrollRun) {
               : t('payroll.submissions.overview.jmhz_dry_run_start') }}
           </button>
         </div>
+        <p
+          v-if="startBlockedReason(payrollRun) && !state(payrollRun)?.running"
+          class="mt-2 text-right text-xs text-neutral-600"
+          :data-test="`jmhz-dry-run-blocked-${payrollRun.revision_id}`"
+        >
+          {{ startBlockedReason(payrollRun) }}
+        </p>
 
         <template v-if="state(payrollRun)?.result">
           <div
@@ -452,8 +497,8 @@ async function copyXml(payrollRun: PayrollRun) {
               data-test="jmhz-dry-run-deadline"
             >
               {{ t('payroll.submissions.overview.jmhz_deadline', {
-                from: state(payrollRun)!.result!.deadline!.earliest_submission_on,
-                to: state(payrollRun)!.result!.deadline!.due_on,
+                from: formatDate(state(payrollRun)!.result!.deadline!.earliest_submission_on),
+                to: formatDate(state(payrollRun)!.result!.deadline!.due_on),
               }) }}
             </p>
 
@@ -501,11 +546,16 @@ async function copyXml(payrollRun: PayrollRun) {
                   {{ t(group.title, { count: group.findings.length }) }}
                 </p>
                 <ul class="mt-2 space-y-1 text-sm">
+                  <!--
+                    Kód kontroly stojí AŽ ZA větou. Účetní čte, co je špatně;
+                    „291" je údaj pro podporu a napřed jen odsouvá smysl řádku
+                    o dva sloupce doprava.
+                  -->
                   <li v-for="finding in group.findings" :key="`${group.key}-${finding.control_id}-${finding.form_ordinal ?? ''}`">
+                    {{ finding.message }}
                     <span class="font-mono text-xs opacity-75">
                       {{ finding.error_code ?? finding.control_id }}
                     </span>
-                    {{ finding.message }}
                     <span
                       v-if="finding.form_ordinal !== null"
                       class="text-xs opacity-75"
@@ -534,8 +584,18 @@ async function copyXml(payrollRun: PayrollRun) {
                 :class="btnOutline('neutral')"
                 @click="copyXml(payrollRun)"
               >
-                {{ t('payroll.submissions.overview.jmhz_dry_run_copy_xml') }}
+                {{ copiedRevision === payrollRun.revision_id
+                  ? t('payroll.submissions.transport.copied')
+                  : t('payroll.submissions.overview.jmhz_dry_run_copy_xml') }}
               </button>
+              <span
+                v-if="copyFailedRevision === payrollRun.revision_id"
+                class="self-center text-xs text-warning-700"
+                :data-test="`jmhz-dry-run-copy-failed-${payrollRun.revision_id}`"
+                role="status"
+              >
+                {{ t('payroll.submissions.overview.jmhz_dry_run_copy_failed') }}
+              </span>
             </div>
             <pre
               v-if="state(payrollRun)!.showXml"

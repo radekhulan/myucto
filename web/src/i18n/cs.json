@@ -4490,6 +4490,7 @@
         "environment": "Prostředí",
         "period": "Období",
         "matrix_version": "Matice {version} · SHA-256 {hash}",
+        "matrix_technical": "Technický detail pro podporu",
         "error": "Přehled zákonných povinností se nepodařilo načíst nebo uložit.",
         "saved": "Důkaz ručního splnění byl neměnně uložen.",
         "replacement": "Vztah k JMHZ",

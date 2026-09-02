@@ -141,6 +141,37 @@ describe('PayrollStatutoryObligationsPanel', () => {
       .toContain('payroll.submissions.statutory.transport_not_supported')
   })
 
+  /**
+   * Panel nemá v hlavičce žádné Obnovit, takže po výpadku zbývala jen červená
+   * věta a jediná cesta ven bylo přepnout měsíc na jiný a zpátky.
+   */
+  it('po neúspěšném načtení nabídne opakování', async () => {
+    m.overview.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = mount(PayrollStatutoryObligationsPanel, {
+      props: { environment: 'production' },
+      global: { stubs: { SearchableSelect: SearchableSelectStub } },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-test="statutory-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="statutory-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="statutory-agenda-NEMPRI"]').exists()).toBe(true)
+  })
+
+  /** Otisk matice je údaj pro podporu, ne nadpis pro účetní. */
+  it('verzi a otisk matice schová do technického detailu', async () => {
+    const wrapper = mount(PayrollStatutoryObligationsPanel, {
+      props: { environment: 'production' },
+      global: { stubs: { SearchableSelect: SearchableSelectStub } },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="statutory-matrix-version"]').element.tagName)
+      .toBe('DETAILS')
+  })
+
   it('records evidence only after explicit confirmation', async () => {
     const wrapper = mount(PayrollStatutoryObligationsPanel, {
       props: { environment: 'production' },

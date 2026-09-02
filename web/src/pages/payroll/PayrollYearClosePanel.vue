@@ -4,11 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { payrollApi, type PayrollYearCloseBlocker, type PayrollYearCloseStatusResponse } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
-import { formatDateTime } from '@/composables/useFormat'
+import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { formatDateTime, formatPeriod } from '@/composables/useFormat'
+import type { RouteLocationRaw } from 'vue-router'
 
 const props = defineProps<{ initialYear: number }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const year = ref(props.initialYear)
@@ -26,12 +27,39 @@ const blockers = computed(() => data.value?.blockers ?? [])
 
 function blockerText(blocker: PayrollYearCloseBlocker): string {
   if (blocker.code === 'missing_months') {
-    return t('payroll.year_close.blocker.missing_months', { months: blocker.months?.join(', ') ?? '' })
+    // „2026-03" vedle „01.03.2026" ve zbytku appky vypadá jako useknuté datum.
+    return t('payroll.year_close.blocker.missing_months', {
+      months: (blocker.months ?? []).map(formatPeriod).join(', '),
+    })
   }
   if (blocker.code === 'schema_unavailable') {
     return t('payroll.year_close.blocker.schema_unavailable')
   }
-  return t(`payroll.year_close.blocker.${blocker.code}`, { count: blocker.count ?? 0 })
+  const key = `payroll.year_close.blocker.${blocker.code}`
+  // Nový kód překážky ze serveru se nesmí vypsat jako překladový klíč —
+  // účetní by pod „Co brání uzavření" četla `payroll.year_close.blocker.foo`.
+  return te(key) ? t(key, { count: blocker.count ?? 0 }) : t('payroll.year_close.blocker.unknown')
+}
+
+/**
+ * Kam se jde překážka vyřešit.
+ *
+ * Seznam říkal „Čeká 5 neukončených zákonných podání" a končil tečkou —
+ * účetní pak hledala v deseti záložkách, které to je. Uzávěrka se přitom
+ * dělá jednou za rok, takže si tu cestu nikdo nepamatuje.
+ */
+const BLOCKER_TARGETS: Record<string, RouteLocationRaw> = {
+  missing_months: { name: 'payroll-runs' },
+  open_corrections: { name: 'payroll-runs' },
+  open_submissions: { name: 'payroll-submissions-tab', params: { tab: 'monthly' } },
+  open_liabilities: { name: 'payroll-payments' },
+  open_leave: { name: 'payroll-absences' },
+  open_enforcement: { name: 'payroll-enforcement' },
+  reconciliation_differences: { name: 'payroll-posting-reconciliation' },
+}
+
+function blockerTarget(blocker: PayrollYearCloseBlocker): RouteLocationRaw | null {
+  return BLOCKER_TARGETS[blocker.code] ?? null
 }
 
 async function load(): Promise<void> {
@@ -116,8 +144,26 @@ onMounted(load)
 
       <div v-if="!closed && blockers.length > 0" class="mt-4 rounded-lg border border-warning-500/40 bg-warning-50 p-3">
         <p class="text-sm font-medium text-warning-900">{{ t('payroll.year_close.blockers_title') }}</p>
-        <ul class="mt-2 space-y-1 text-sm text-warning-800">
-          <li v-for="blocker in blockers" :key="blocker.code">{{ blockerText(blocker) }}</li>
+        <ul class="mt-2 space-y-2 text-sm text-warning-800">
+          <li
+            v-for="blocker in blockers"
+            :key="blocker.code"
+            class="flex flex-wrap items-center gap-2"
+            :data-test="`year-close-blocker-${blocker.code}`"
+          >
+            <span>{{ blockerText(blocker) }}</span>
+            <RouterLink
+              v-if="blockerTarget(blocker)"
+              :to="blockerTarget(blocker)!"
+              :class="btnOutlineSm('warning')"
+              :data-test="`year-close-blocker-link-${blocker.code}`"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.edit" />
+              </svg>
+              {{ t('payroll.year_close.blocker_open') }}
+            </RouterLink>
+          </li>
         </ul>
       </div>
 
@@ -138,8 +184,28 @@ onMounted(load)
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.uturn" /></svg>
             {{ saving ? t('common.saving') : t('payroll.year_close.reopen') }}
           </button>
+          <!--
+            Délku důvodu vynucuje `PayrollYearCloseService` (min. 10 znaků) —
+            znovuotevření uzavřeného roku je auditní stopa, ne poznámka. Než
+            se to napsalo pod tlačítko, vypadalo zhasnuté tlačítko po vyplnění
+            „ok" jako porucha.
+          -->
+          <span v-if="reason.trim().length < 10" class="text-xs text-neutral-500" data-test="year-close-reopen-hint">
+            {{ t('payroll.year_close.reopen_reason_hint') }}
+          </span>
         </template>
       </div>
+      <!--
+        Čtenář bez práva schvalovat viděl prázdno pod stavem a nevěděl, jestli
+        se uzávěrka dělá jinde, nebo jestli na ni nemá právo.
+      -->
+      <p
+        v-else
+        class="mt-4 text-sm text-neutral-500"
+        data-test="year-close-read-only"
+      >
+        {{ t(closed ? 'payroll.year_close.reopen_read_only' : 'payroll.year_close.close_read_only') }}
+      </p>
     </template>
   </section>
 </template>

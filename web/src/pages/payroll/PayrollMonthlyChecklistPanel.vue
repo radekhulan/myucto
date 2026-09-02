@@ -10,7 +10,7 @@ import {
 } from '@/api/payroll'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
-import { formatDate } from '@/composables/useFormat'
+import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 
@@ -35,7 +35,7 @@ const emit = defineEmits<{
   'update:environment': [value: PayrollRegzelEnvironment]
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { submissionAgendaLabel, submissionStatusLabel } = usePayrollLabels()
 const environmentModel = computed({
   get: () => props.environment,
@@ -90,7 +90,13 @@ function phaseLabel(item: PayrollMonthlyChecklistItem): string {
 function agendaLabel(item: PayrollMonthlyChecklistItem): string {
   const code = item.agenda_code
   if (code === null) return item.agenda_label
-  if (item.source === 'checklist') return t(`payroll.people.checklist.${code}`)
+  if (item.source === 'checklist') {
+    // Neznámý klíč by se vypsal jako `payroll.people.checklist.foo` — účetní
+    // by na řádku četla kus našeho zdrojáku. Popisek ze serveru je horší než
+    // překlad, ale pořád je to věta o povinnosti.
+    const key = `payroll.people.checklist.${code}`
+    return te(key) ? t(key) : item.agenda_label
+  }
   if (item.source !== 'submission') return item.agenda_label
   return submissionAgendaLabel(code)
 }
@@ -191,14 +197,32 @@ onMounted(load)
       </div>
     </div>
 
-    <p
+    <!--
+      Tlačítko patří k hlášce, ne jen do hlavičky panelu. Vložený panel
+      (příprava mzdového běhu) hlavičku NEMÁ, takže po výpadku zbývala jen
+      červená věta bez jakékoli cesty ven — a jediné, co pak šlo udělat, bylo
+      přenačíst celou obrazovku a přijít o rozpracovaný běh.
+    -->
+    <div
       v-if="error"
       class="rounded-xl border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
       role="alert"
       data-test="monthly-checklist-error"
     >
-      {{ error }}
-    </p>
+      <p>{{ error }}</p>
+      <button
+        type="button"
+        :class="[btnOutlineSm('danger'), 'mt-3']"
+        :disabled="loading"
+        data-test="monthly-checklist-retry"
+        @click="load"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.cycle" />
+        </svg>
+        {{ t('common.retry') }}
+      </button>
+    </div>
 
     <div v-if="loading" class="grid grid-cols-2 gap-3 lg:grid-cols-5">
       <div v-for="index in 5" :key="index" class="h-20 animate-pulse rounded-xl bg-neutral-100" />
@@ -243,7 +267,7 @@ onMounted(load)
                 <td class="px-4 py-3">
                   <span class="block font-medium text-neutral-900">{{ agendaLabel(item) }}</span>
                   <span v-if="item.subject" class="mt-0.5 block text-xs text-neutral-500">{{ item.subject }}</span>
-                  <span v-if="item.period" class="mt-0.5 block text-xs text-neutral-400">{{ item.period }}</span>
+                  <span v-if="item.period" class="mt-0.5 block text-xs text-neutral-400">{{ formatPeriod(item.period) }}</span>
                 </td>
                 <td class="px-4 py-3 text-neutral-700">
                   <span v-if="item.document.format" class="block">{{ item.document.format }}</span>

@@ -25,7 +25,7 @@ const emit = defineEmits<{
   (e: 'update:open-count', count: number | null): void
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const {
   artifactKindLabel,
   issueSeverityLabel,
@@ -143,8 +143,15 @@ function escalationClass(item: PayrollSubmissionInboxItem): string {
   return 'bg-payroll-50 text-payroll-700'
 }
 
+/*
+ * Neznámý druh problému ze serveru nesmí skončit vypsaným překladovým klíčem.
+ * `problem_kind` i `status` přibývají na serveru nezávisle na buildu webu,
+ * takže starší frontend na nový druh dřív nebo později narazí — a účetní by
+ * ve sloupci „Problém" četla `payroll.submissions.inbox.problem.foo`.
+ */
 function problemLabel(item: PayrollSubmissionInboxItem): string {
-  return t(`payroll.submissions.inbox.problem.${item.problem_kind}`)
+  const key = `payroll.submissions.inbox.problem.${item.problem_kind}`
+  return te(key) ? t(key) : t('payroll.submissions.inbox.problem_unknown')
 }
 
 function statusClass(status: string): string {
@@ -154,7 +161,8 @@ function statusClass(status: string): string {
 }
 
 function statusLabel(status: string): string {
-  return t(`payroll.submissions.inbox.status.${status}`)
+  const key = `payroll.submissions.inbox.status.${status}`
+  return te(key) ? t(key) : t('payroll.submissions.inbox.status_unknown')
 }
 
 /**
@@ -214,15 +222,28 @@ async function acknowledge(item: PayrollSubmissionInboxItem) {
   }
 }
 
+/** `datetime-local` chce místní čas, ne UTC — proto ruční posun o offset. */
+function toLocalInput(at: Date): string {
+  const local = new Date(at.getTime() - at.getTimezoneOffset() * 60000)
+  local.setSeconds(0, 0)
+  return local.toISOString().slice(0, 16)
+}
+
+/*
+ * Nejbližší přípustný termín odložení. Server přijme jen budoucnost
+ * (`PayrollSubmissionInboxService::assertFutureDateTime`), takže se stejná
+ * mez dává poli jako `min` — jinak jde vybrat včerejšek, kliknout na Odložit
+ * a odpověď přijde jako chyba odněkud z hloubky.
+ */
+const snoozeMin = ref('')
+
 function openSnooze(item: PayrollSubmissionInboxItem) {
   snoozeTarget.value = item
   snoozeError.value = ''
   snoozeReason.value = ''
-  const inHours = new Date(Date.now() + 24 * 60 * 60 * 1000)
-  inHours.setSeconds(0, 0)
-  snoozeUntilInput.value = new Date(inHours.getTime() - inHours.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16)
+  const now = new Date()
+  snoozeMin.value = toLocalInput(new Date(now.getTime() + 60 * 1000))
+  snoozeUntilInput.value = toLocalInput(new Date(now.getTime() + 24 * 60 * 60 * 1000))
 }
 
 function closeSnooze() {
@@ -235,6 +256,12 @@ async function confirmSnooze() {
   snoozeError.value = ''
   if (!snoozeUntilInput.value) {
     snoozeError.value = t('payroll.submissions.inbox.snooze_until_required')
+    return
+  }
+  // Termín v minulosti odmítne server. Říct to tady je rozdíl mezi „doplňte
+  // budoucí termín" a technickou hláškou z hloubky služby.
+  if (new Date(snoozeUntilInput.value).getTime() <= Date.now()) {
+    snoozeError.value = t('payroll.submissions.inbox.snooze_until_past')
     return
   }
   if (!snoozeReason.value.trim()) {
@@ -532,7 +559,7 @@ defineExpose({ reload: load })
               {{ submissionStatusLabel(expandedDetail.submission.status) }}
             </span>
             <span class="text-xs text-neutral-500">{{ submissionChannelLabel(expandedDetail.submission.channel) }}</span>
-            <span class="text-xs text-neutral-500">{{ expandedDetail.submission.created_at }}</span>
+            <span class="text-xs text-neutral-500">{{ formatDateTime(expandedDetail.submission.created_at) }}</span>
           </div>
           <button type="button" :class="btnOutline('neutral')" @click="expandedId = null">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -631,6 +658,7 @@ defineExpose({ reload: load })
           <input
             v-model="snoozeUntilInput"
             type="datetime-local"
+            :min="snoozeMin"
             data-test="snooze-until-input"
             class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm focus:border-payroll-500 focus:outline-none focus:ring-2 focus:ring-payroll-500/20"
           >

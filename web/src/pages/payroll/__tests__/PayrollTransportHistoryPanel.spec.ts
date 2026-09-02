@@ -1332,6 +1332,26 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(wrapper.find('[data-test="transport-import-protocol"]').exists()).toBe(false)
   })
 
+  /**
+   * Prohlížeč umí schránku zakázat politikou. Tlačítko, po kterém se mlčky
+   * nic nestane, vypadá jako rozbitá aplikace — a uživatel do dotazu na ČSSZ
+   * vloží to, co měl ve schránce předtím.
+   */
+  it('když schránka selže, řekne to a pošle uživatele označit text ručně', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-copy-1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="transport-copy-failed-1"]').text())
+      .toContain('payroll.submissions.transport.copy_failed')
+  })
+
   it('nečitelný uložený originál nezruší doklad, jen jeho detail', async () => {
     m.jmhzTransportHistory.mockResolvedValue({ environment: 'production', attempts: [] })
     m.jmhzImportedProtocols.mockResolvedValue({

@@ -653,6 +653,57 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
     }
 
     /**
+     * Neúspěšné odeslání nesmí podání navždy odstřihnout od tlačítka.
+     *
+     * Zmrazené podání zůstává `ready`, dokud reálně neodejde. Když se pokus
+     * rozbil dřív, než cokoli odešlo (`failed` bez `sent_at`), u ČSSZ po něm
+     * nic nezůstalo — musí se dát odeslat znovu. Dokud přehled joinoval
+     * všechny pokusy, zmizelo takové podání z nabídky nadobro a opravné ani
+     * stornovací hlášení nešlo odeslat vůbec.
+     */
+    public function testReadySubmissionReturnsAfterFailedAttemptThatNeverLeft(): void
+    {
+        $pdo = $this->db->pdo();
+        $obligationId = (int) $pdo->query(
+            'SELECT obligation_id FROM payroll_submissions WHERE id = '
+            . $this->submissionId,
+        )->fetchColumn();
+        $pdo->prepare('UPDATE payroll_obligations SET agenda_code = ? WHERE id = ?')
+            ->execute([JmhzSubmissionBridgeService::AGENDA_CODE, $obligationId]);
+        $pdo->prepare('UPDATE payroll_submissions SET status = "ready" WHERE id = ?')
+            ->execute([$this->submissionId]);
+
+        $attempt = $this->open('transport-ready-after-failure');
+        self::assertSame(
+            [],
+            $this->repository->listReadySubmissions(
+                $this->supplierId,
+                self::ENVIRONMENT,
+                [JmhzSubmissionBridgeService::AGENDA_CODE],
+            ),
+            'Rozpracovaný pokus musí podání z nabídky držet pryč.',
+        );
+
+        $this->repository->markFailed(
+            (int) $attempt['id'],
+            'transport_unavailable',
+            'Brána VREP odmítla spojení.',
+            null,
+            null,
+            (int) $attempt['row_version'],
+        );
+
+        $ready = $this->repository->listReadySubmissions(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            [JmhzSubmissionBridgeService::AGENDA_CODE],
+        );
+
+        self::assertCount(1, $ready);
+        self::assertSame($this->submissionId, $ready[0]['submission_id']);
+    }
+
+    /**
      * Pokus, jehož podání v evidenci není.
      *
      * Cizí klíč i vstupní trigger (migrace 1372) to za normálního provozu

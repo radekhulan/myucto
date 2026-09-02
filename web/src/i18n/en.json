@@ -4490,6 +4490,7 @@
         "environment": "Environment",
         "period": "Period",
         "matrix_version": "Matrix {version} · SHA-256 {hash}",
+        "matrix_technical": "Technical detail for support",
         "error": "The statutory-obligation overview could not be loaded or saved.",
         "saved": "The manual-completion evidence was stored immutably.",
         "replacement": "Relationship to JMHZ",

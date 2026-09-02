@@ -34,7 +34,9 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, parameters?: Record<string, string | number>) =>
       parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
-    te: () => true,
+    // Neznámý klíč se musí umět chovat jako neznámý — jinak by fallbacky
+    // na „neznámý stav" nebylo čím otestovat.
+    te: (key: string) => !key.includes('brand_new_kind'),
   }),
 }))
 
@@ -234,16 +236,27 @@ describe('PayrollSubmissionInboxPanel', () => {
     await flushPromises()
     await wrapper.get('[data-test="inbox-snooze"]').trigger('click')
 
-    const until = wrapper.get('[data-test="snooze-until-input"]')
-    expect(until.attributes('min')).toBeTruthy()
+    // Modal se teleportuje mimo strom wrapperu, hledá se proto v document.body.
+    const until = document.body
+      .querySelector<HTMLInputElement>('[data-test="snooze-until-input"]')!
+    expect(until).not.toBeNull()
+    expect(until.getAttribute('min')).toBeTruthy()
 
-    await until.setValue('2020-01-01T10:00')
-    await wrapper.get('[data-test="snooze-reason-input"]').setValue('Čeká se na protokol.')
-    await wrapper.get('[data-test="snooze-confirm"]').trigger('click')
+    until.value = '2020-01-01T10:00'
+    until.dispatchEvent(new Event('input'))
+    const reason = document.body
+      .querySelector<HTMLTextAreaElement>('[data-test="snooze-reason-input"]')!
+    reason.value = 'Čeká se na protokol.'
+    reason.dispatchEvent(new Event('input'))
+    await flushPromises()
+
+    document.body
+      .querySelector<HTMLButtonElement>('[data-test="snooze-confirm"]')!.click()
     await flushPromises()
 
     expect(m.snoozeSubmissionInboxItem).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('payroll.submissions.inbox.snooze_until_past')
+    expect(document.body.textContent)
+      .toContain('payroll.submissions.inbox.snooze_until_past')
   })
 
   /** Neznámý druh problému nesmí skončit vypsaným překladovým klíčem. */
