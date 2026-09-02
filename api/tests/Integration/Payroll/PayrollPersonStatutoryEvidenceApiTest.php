@@ -11,6 +11,23 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKind;
+use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
+use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponent;
+use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
+use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxInput;
+use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxResult;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCreditClaim;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
+use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationEvidence;
+use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
+use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
+use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
+use MyInvoice\Service\Payroll\IncomeTax\TaxResidenceEvidence;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -28,6 +45,9 @@ use Slim\Psr7\Response;
 final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
 {
     use IsolatedSupplierTrait;
+
+    /** Měsíční základní sleva na poplatníka podle rulesetu 2026 (2 570 Kč). */
+    private const TAXPAYER_CREDIT_MINOR_UNITS = 257_000;
 
     private Connection $db;
     private PayrollPersonStatutoryEvidenceAction $action;
@@ -160,6 +180,100 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
             'employer_obstacle_verified',
             $snapshot['health']['month_evidence']['top_up_responsibility'],
         );
+    }
+
+    /**
+     * Zaevidovaná sleva na poplatníka musí dojít až do zálohy na daň.
+     *
+     * Do téhle chvíle do `payroll_person_tax_credit_claims` nevedla zapisovací
+     * cesta, takže `MonthlyEmploymentIncomeTaxCalculator` nikdy žádnou slevu
+     * nedostal a každý zaměstnanec s podepsaným prohlášením platil o měsíční
+     * slevu vyšší zálohu. Test proto jde celou cestou: zápis přes API →
+     * snímek mzdového běhu → výpočet.
+     */
+    public function testTaxpayerCreditIsStoredAndLowersTheMonthlyAdvance(): void
+    {
+        $payload = $this->completeEvidence();
+        $payload['sections']['tax_credit_claims'] = [[
+            'credit_kind' => 'taxpayer',
+            'evidence_status' => 'verified',
+            'evidence_reference' => 'credit:38k-taxpayer-claim',
+            'effective_from' => '2026-01-01',
+            'effective_to' => null,
+        ]];
+
+        $response = $this->save($payload);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $stored = $this->json($response)['evidence']['sections']['tax_credit_claims'];
+        self::assertCount(1, $stored);
+        self::assertSame('taxpayer', $stored[0]['credit_kind']);
+        self::assertSame('verified', $stored[0]['evidence_status']);
+
+        $snapshot = $this->repository->snapshot(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-08-31',
+        );
+        self::assertIsArray($snapshot);
+        $claims = $snapshot['income_tax']['credit_claims'];
+        self::assertCount(1, $claims);
+        self::assertSame('taxpayer', $claims[0]['credit_kind']);
+
+        $withCredit = $this->monthlyIncomeTax($claims);
+        $withoutCredit = $this->monthlyIncomeTax([]);
+
+        self::assertSame([], $withCredit->issues);
+        self::assertSame(TaxCalculationStatus::Calculated, $withCredit->status);
+        // § 35ba odst. 1 písm. a) — 30 840 Kč ročně, tedy 2 570 Kč měsíčně.
+        self::assertSame(self::TAXPAYER_CREDIT_MINOR_UNITS, $withCredit->claimedNonRefundableCreditsMinorUnits);
+        self::assertSame(
+            ['taxpayer' => self::TAXPAYER_CREDIT_MINOR_UNITS],
+            $withCredit->claimedNonRefundableCreditBreakdown,
+        );
+        self::assertNotNull($withCredit->advanceTax);
+        self::assertNotNull($withoutCredit->advanceTax);
+        self::assertSame(
+            $withoutCredit->advanceTax->taxAfterCreditsMinorUnits
+                - self::TAXPAYER_CREDIT_MINOR_UNITS,
+            $withCredit->advanceTax->taxAfterCreditsMinorUnits,
+        );
+    }
+
+    /**
+     * Vazbu na podepsané prohlášení hlídá kalkulátor sám (§ 38k odst. 4);
+     * evidence slevy ji nezdvojuje. Test je tu proto, aby bylo vidět, že
+     * uložená sleva bez prohlášení zálohu NESNÍŽÍ a řekne proč.
+     */
+    public function testCreditWithoutSignedDeclarationDoesNotLowerTheAdvance(): void
+    {
+        $payload = $this->completeEvidence();
+        $payload['sections']['tax_declarations'][0]['status'] = 'not-signed';
+        $payload['sections']['tax_declarations'][0]['evidence_reference']
+            = 'declaration:38k-not-signed';
+        $payload['sections']['tax_credit_claims'] = [[
+            'credit_kind' => 'taxpayer',
+            'evidence_status' => 'verified',
+            'evidence_reference' => 'credit:38k-taxpayer-claim',
+            'effective_from' => '2026-01-01',
+            'effective_to' => null,
+        ]];
+        self::assertSame(200, $this->save($payload)->getStatusCode());
+
+        $snapshot = $this->repository->snapshot(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-08-31',
+        );
+        self::assertIsArray($snapshot);
+
+        $result = $this->monthlyIncomeTax(
+            $snapshot['income_tax']['credit_claims'],
+            TaxDeclarationStatus::NotSigned,
+        );
+
+        self::assertContains('tax-credit-requires-signed-declaration', $result->issues);
+        self::assertSame(TaxCalculationStatus::ManualReview, $result->status);
+        self::assertNull($result->advanceTax);
     }
 
     public function testHealthEvidenceDocumentRequiresSessionPermissionAndActiveTenantDocument(): void
@@ -590,6 +704,65 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
 
     // --- pomocníci ---------------------------------------------------------
 
+    /**
+     * Měsíční daň z jednoho pracovního poměru se 40 000 Kč hrubého; slevy
+     * se berou přímo z řádků snímku, ať test nepočítá s jinými daty, než
+     * jaká zapsalo API.
+     *
+     * @param list<array<string,mixed>> $creditClaims řádky
+     *     `income_tax.credit_claims` ze snímku mzdového běhu
+     */
+    private function monthlyIncomeTax(
+        array $creditClaims,
+        TaxDeclarationStatus $declaration = TaxDeclarationStatus::Signed,
+    ): MonthlyEmploymentIncomeTaxResult {
+        $claims = [];
+        foreach ($creditClaims as $row) {
+            $claims[] = new TaxCreditClaim(
+                TaxCreditKind::from((string) $row['credit_kind']),
+                (string) $row['effective_from'],
+                $row['effective_to'] === null ? null : (string) $row['effective_to'],
+                TaxEvidenceStatus::from((string) $row['evidence_status']),
+                $row['evidence_reference'] === null
+                    ? null
+                    : (string) $row['evidence_reference'],
+            );
+        }
+
+        $calculator = new MonthlyEmploymentIncomeTaxCalculator(
+            new PayrollRulesetProvider([
+                CzechPayrollRulesets2026::provider()
+                    ->forDate(PayrollRulesetDomain::IncomeTax, '2026-08-31'),
+            ]),
+        );
+
+        return $calculator->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-08-31',
+            employeeReference: "employee:{$this->employeeId}",
+            relationships: [new EmploymentRelationshipTaxInput(
+                'employment:synthetic',
+                "supplier:{$this->supplierId}",
+                EmploymentRelationshipKind::Employment,
+                [new IncomeTaxComponent('synthetic-income', 4_000_000)],
+            )],
+            declarations: [new TaxDeclarationEvidence(
+                $declaration,
+                '2026-01-01',
+                null,
+                $declaration === TaxDeclarationStatus::Signed
+                    ? 'document:tax-declaration-2026'
+                    : 'declaration:38k-not-signed',
+            )],
+            residence: new TaxResidenceEvidence(
+                TaxResidence::CzechResident,
+                '2026-01-01',
+                null,
+                'document:tax-residence-2026',
+            ),
+            creditClaims: $claims,
+        ));
+    }
+
     /** @return array<string,mixed> */
     private function completeEvidence(): array
     {
@@ -610,6 +783,9 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
                     'effective_from' => '2026-01-01',
                     'effective_to' => null,
                 ]],
+                // Slevy na dani jsou nepovinné — výchozí evidence je bez nich,
+                // ať se na nich neveze každý jiný test.
+                'tax_credit_claims' => [],
                 'social_jurisdictions' => [[
                     'jurisdiction' => 'czech_regime_verified',
                     'foreign_country_code' => null,

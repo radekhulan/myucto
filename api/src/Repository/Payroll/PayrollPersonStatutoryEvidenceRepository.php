@@ -118,10 +118,14 @@ final class PayrollPersonStatutoryEvidenceRepository
      * jejich hodnoty prochází stejným `PayrollPersonStatutoryEvidenceValidator`em
      * jako čtecí cesta, takže se pravidla nemůžou rozejít.
      *
+     * `timeline` říká, jestli řada musí pokrývat čas beze zbytku
+     * (`contiguous`, výchozí), nebo jestli je díra legitimní stav (`sparse`).
+     *
      * @var array<string, array{
      *     section:string,
      *     collection:string,
      *     kind:'interval'|'month',
+     *     timeline?:'contiguous'|'sparse',
      *     fields:list<string>
      * }>
      */
@@ -137,6 +141,7 @@ final class PayrollPersonStatutoryEvidenceRepository
     public const EDITABLE_SECTIONS = [
         'tax_declarations',
         'tax_residences',
+        'tax_credit_claims',
         'social_jurisdictions',
         'social_discount_claims',
         'health_coverages',
@@ -155,6 +160,21 @@ final class PayrollPersonStatutoryEvidenceRepository
             'collection' => 'residences',
             'kind' => 'interval',
             'fields' => ['residence', 'country_code', 'evidence_reference'],
+        ],
+        'tax_credit_claims' => [
+            'section' => 'income_tax',
+            'collection' => 'credit_claims',
+            'kind' => 'interval',
+            /*
+             * Slevy podle § 35ba jsou SOUBĚŽNÉ řady po druzích a žádná z nich
+             * není povinná. Souvislost by proto vynucovala výplňový řádek,
+             * který nemá jak vypadat — evidence slevy nezná hodnotu
+             * „neuplatňuje se“, uplatnění se vyjadřuje existencí řádku.
+             * Překryv téhož druhu odmítá validátor (`intervalRows` řadu dělí
+             * podle `credit_kind`), takže se tím nic nepovoluje navíc.
+             */
+            'timeline' => 'sparse',
+            'fields' => ['credit_kind', 'evidence_status', 'evidence_reference'],
         ],
         'social_jurisdictions' => [
             'section' => 'social',
@@ -443,7 +463,11 @@ final class PayrollPersonStatutoryEvidenceRepository
 
             foreach (self::EDITABLE as $key => $spec) {
                 if ($spec['kind'] === 'interval') {
-                    $this->assertTimeline($key, $plans[$key]);
+                    $this->assertTimeline(
+                        $key,
+                        $plans[$key],
+                        ($spec['timeline'] ?? 'contiguous') === 'contiguous',
+                    );
                 }
             }
             $this->assertPlannedEvidenceIsValid(
@@ -792,9 +816,12 @@ final class PayrollPersonStatutoryEvidenceRepository
      * zmrazeném období), by jinak nešlo obejít a stránka by se stala
      * nepoužitelnou právě pro data, kvůli kterým vznikla.
      *
+     * Zarovnání na celé měsíce platí pro každou řadu; navazování jen pro tu,
+     * která musí pokrývat čas beze zbytku (`$contiguous`).
+     *
      * @param list<array<string,mixed>> $plan
      */
-    private function assertTimeline(string $key, array $plan): void
+    private function assertTimeline(string $key, array $plan, bool $contiguous): void
     {
         $rows = $plan;
         usort(
@@ -808,6 +835,9 @@ final class PayrollPersonStatutoryEvidenceRepository
             $to = $row['effective_to'] === null ? null : (string) $row['effective_to'];
             if ($row['touched'] === true) {
                 $this->assertMonthAligned($key, $from, $to);
+            }
+            if (!$contiguous) {
+                continue;
             }
             if ($previous === null) {
                 $previous = $row;

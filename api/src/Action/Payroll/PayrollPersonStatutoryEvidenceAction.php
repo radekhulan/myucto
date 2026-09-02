@@ -18,9 +18,9 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * Zákonná evidence osoby — prohlášení k dani, daňová rezidence, sociální
- * a zdravotní příslušnost, sleva pracujícího důchodce a měsíční evidence
- * zdravotního minima.
+ * Zákonná evidence osoby — prohlášení k dani, daňová rezidence, slevy na dani
+ * podle § 35ba, sociální a zdravotní příslušnost, sleva pracujícího důchodce
+ * a měsíční evidence zdravotního minima.
  *
  * Tabulky (migrace 1256) tu byly od začátku, ale nevedla do nich žádná
  * zapisovací cesta: `INSERT` existoval jen v testech. Bez těchto údajů shodí

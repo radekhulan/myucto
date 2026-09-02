@@ -55,6 +55,22 @@ export interface StatutorySectionSpec {
   summaryKey: string
   /** Doplněk přehledu (kód pojišťovny); vykresluje ho panel, ne tenhle modul. */
   summaryDetailKey?: string
+  /**
+   * Pole, které řadu dělí na SOUBĚŽNÉ řady (u slev na dani druh slevy).
+   * Neuvedeno = jedna řada, ve které smí být otevřený jen jeden záznam.
+   */
+  scopeKey?: string
+  /**
+   * Prázdná evidence je legitimní stav, ne chybějící údaj. Platí pro slevy:
+   * kdo žádnou neuplatňuje, nemá co vyplnit — na rozdíl od rezidence nebo
+   * příslušnosti k pojištění, bez kterých se výpočet nespočítá.
+   */
+  optional?: boolean
+  /**
+   * Pole, jehož hodnota `unverified` znamená nedoložený stav. Neuvedeno =
+   * rozhoduje `summaryKey` (u většiny sekcí je to totéž pole).
+   */
+  verificationKey?: string
   fields: readonly StatutoryFieldSpec[]
 }
 
@@ -115,6 +131,30 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
         key: 'evidence_reference',
         kind: 'evidence',
         visible: row => text(row, 'residence') !== 'unverified',
+      },
+    ],
+  },
+  {
+    // Slevy podle § 35ba. Bez zaevidované slevy na poplatníka platí každý
+    // podepsaný zaměstnanec o 2 570 Kč měsíčně vyšší zálohu — sekce je proto
+    // sice nepovinná, ale u běžného zaměstnance se vyplňuje vždy.
+    key: 'tax_credit_claims',
+    kind: 'interval',
+    summaryKey: 'credit_kind',
+    scopeKey: 'credit_kind',
+    optional: true,
+    verificationKey: 'evidence_status',
+    fields: [
+      {
+        key: 'credit_kind',
+        kind: 'enum',
+        options: ['taxpayer', 'disability-basic', 'disability-extended', 'ztp-p'],
+      },
+      { key: 'evidence_status', kind: 'enum', options: ['verified', 'unverified'] },
+      {
+        key: 'evidence_reference',
+        kind: 'evidence',
+        visible: row => text(row, 'evidence_status') === 'verified',
       },
     ],
   },
@@ -238,6 +278,11 @@ export const EVIDENCE_REASONS: Readonly<Record<string, readonly string[]>> = {
     'residence:foreign-domicile-certificate',
     'residence:foreign-tax-authority-confirmation',
   ],
+  'tax_credit_claims.evidence_reference': [
+    'credit:38k-taxpayer-claim',
+    'credit:disability-pension-decision',
+    'credit:ztp-p-card',
+  ],
   'social_jurisdictions.jurisdiction_evidence_reference': [
     'social:a1-certificate',
     'social:foreign-insurance-confirmation',
@@ -283,6 +328,15 @@ export function reasonOptions(
   if (section === 'tax_declarations' && field === 'evidence_reference') {
     const signed = text(row, 'status') !== 'not-signed'
     return all.filter(reason => (reason === 'declaration:38k-not-signed') !== signed)
+  }
+  if (section === 'tax_credit_claims' && field === 'evidence_reference') {
+    const kind = text(row, 'credit_kind')
+    const expected = kind === 'taxpayer'
+      ? 'credit:38k-taxpayer-claim'
+      : kind === 'ztp-p'
+        ? 'credit:ztp-p-card'
+        : 'credit:disability-pension-decision'
+    return all.filter(reason => reason === expected)
   }
   if (section === 'tax_residences' && field === 'evidence_reference') {
     const prefix = text(row, 'residence') === 'non-resident'
@@ -361,6 +415,35 @@ export function currentRow(
 }
 
 /**
+ * Řádky, které k danému dni PLATÍ.
+ *
+ * U sekce se souběžnými řadami je jich víc — jedna sleva od každého druhu —
+ * takže „co teď platí" nesmí být jeden řádek. Jinde je to nejvýš jeden.
+ */
+export function currentRows(
+  section: StatutorySectionSpec,
+  rows: readonly PayrollStatutoryEvidenceRow[],
+  effectiveOn: string,
+): PayrollStatutoryEvidenceRow[] {
+  const scopeKey = section.scopeKey
+  if (scopeKey === undefined) {
+    const row = currentRow(section, rows, effectiveOn)
+    return row === null ? [] : [row]
+  }
+  const scopes = [...new Set(rows.map(row => text(row, scopeKey)))].sort()
+  const found: PayrollStatutoryEvidenceRow[] = []
+  for (const scope of scopes) {
+    const row = currentRow(
+      section,
+      rows.filter(item => text(item, scopeKey) === scope),
+      effectiveOn,
+    )
+    if (row !== null) found.push(row)
+  }
+  return found
+}
+
+/**
  * Dorovná závislá pole tak, aby řádek prošel serverem.
  *
  * Volá se po každé změně i nad novým řádkem — invariant „formulář nikdy nedrží
@@ -431,6 +514,15 @@ const DEFAULT_VALUES: Readonly<
 > = {
   tax_declarations: { status: 'not-signed', evidence_reference: null },
   tax_residences: { residence: 'czech-resident', country_code: 'CZ', evidence_reference: null },
+  // Řádek slevy VZNIKÁ tím, že ho účetní založí — sám o sobě je uplatněním
+  // nároku, takže „neuplatňuje se" tu není co zvolit. Výchozí `verified` je
+  // proto poctivější než `unverified`: nedoložená sleva shodí celý zákonný
+  // výpočet do ručního posouzení, takže by založený řádek beztak nic nedělal.
+  tax_credit_claims: {
+    credit_kind: 'taxpayer',
+    evidence_status: 'verified',
+    evidence_reference: null,
+  },
   social_jurisdictions: {
     jurisdiction: 'czech_regime_verified',
     foreign_country_code: null,
@@ -562,14 +654,28 @@ export function rowIssues(
   return issues
 }
 
-/** Chyby, které dávají smysl až nad celou řadou. */
+/**
+ * Chyby, které dávají smysl až nad celou řadou.
+ *
+ * U sekce se souběžnými řadami (slevy po druzích) se počítá otevřený záznam
+ * V RÁMCI DRUHU: sleva na poplatníka a na ZTP/P běží současně a otevřené jsou
+ * obě právem. Bez toho by běžný souběh nešlo uložit.
+ */
 export function sectionIssues(
   section: StatutorySectionSpec,
   rows: readonly PayrollStatutoryEvidenceRow[],
 ): StatutoryIssue[] {
   if (section.kind !== 'interval') return []
-  const open = rows.filter(row => text(row, 'effective_to') === '').length
-  return open > 1 ? [{ key: 'multiple_open_rows' }] : []
+  const openPerScope = new Map<string, number>()
+  for (const row of rows) {
+    if (text(row, 'effective_to') !== '') continue
+    const scope = section.scopeKey === undefined ? '' : text(row, section.scopeKey)
+    openPerScope.set(scope, (openPerScope.get(scope) ?? 0) + 1)
+  }
+  for (const open of openPerScope.values()) {
+    if (open > 1) return [{ key: 'multiple_open_rows' }]
+  }
+  return []
 }
 
 export { text as statutoryText }

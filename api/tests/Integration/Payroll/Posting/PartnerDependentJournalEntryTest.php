@@ -654,6 +654,9 @@ final class PartnerDependentJournalEntryTest extends TestCase
                         'effective_from' => '2026-01-01',
                         'effective_to' => null,
                     ]],
+                    // Společník prohlášení nepodepsal, takže by se sleva podle
+                    // § 35ba stejně neuplatnila — účetní zadavatele ji nevede.
+                    'tax_credit_claims' => [],
                     'social_jurisdictions' => [[
                         'jurisdiction' => 'czech_regime_verified',
                         'foreign_country_code' => null,
