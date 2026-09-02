@@ -78,6 +78,9 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind',
         'payroll.ts::PayrollSurchargeCompensationMode'
             => 'enum:MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeCompensationMode',
+        // Krácení měsíční mzdy za absence: titul, kterým je vyňatá doba nahrazena.
+        'payroll.ts::PayrollWageReplacementTitle'
+            => 'enum:MyInvoice\Service\Payroll\Absence\PayrollWageReplacementTitle',
         // Mzdový běh
         'payroll.ts::PayrollPeriodExportScope'
             => 'enum:MyInvoice\Service\Payroll\Export\PayrollPeriodExportScope',

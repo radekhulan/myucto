@@ -25,6 +25,7 @@ use MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementConflictException;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
 use MyInvoice\Service\Payroll\Absence\LeaveEntitlementCalculator;
+use MyInvoice\Service\Payroll\Absence\PayrollLeaveInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\SicknessCompensationCalculator;
 use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
@@ -53,6 +54,7 @@ final class PayrollAbsenceAction
         private readonly AutomaticLeaveEntitlementService $automaticLeaveEntitlements,
         private readonly SicknessCompensationCalculator $sicknessCalculator,
         private readonly PayrollSicknessInputMaterializer $sicknessInputs,
+        private readonly PayrollLeaveInputMaterializer $leaveInputs,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollRulesetProvider $rulesets,
         private readonly PayrollAverageEarningDeletionRepository $averageDeletion,
@@ -225,6 +227,16 @@ final class PayrollAbsenceAction
                         $this->userId($request),
                     );
                 }
+                // § 222 odst. 1 ZP — kniha dovolené odepsala hodiny, tohle je
+                // jejich peněžní půlka. Bez ní by se ze základní mzdy odečetly
+                // hodiny, které by nic nenahradilo.
+                if ($decision === 'approved' && $absence['absence_type'] === 'vacation') {
+                    $this->leaveInputs->materialize(
+                        $supplierId,
+                        $absence,
+                        $this->userId($request),
+                    );
+                }
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
@@ -272,6 +284,11 @@ final class PayrollAbsenceAction
             try {
                 if ($before['status'] === 'approved' && $before['absence_type'] === 'vacation') {
                     $this->leave->reverseTaken($before, $this->userId($request));
+                    $this->leaveInputs->reverseForAbsence(
+                        $supplierId,
+                        $id,
+                        $this->userId($request),
+                    );
                 }
                 $absence = $this->absences->cancel(
                     $supplierId,
