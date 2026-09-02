@@ -975,7 +975,8 @@
         "deadlines": "Deadlines",
         "codebooks": "Code lists",
         "submissions": "Submission versions"
-      }
+      },
+      "reason_why": "The reason is stored in the audit trail — for an overridden statutory rate it is the only record of why the company departed from the shipped value."
     },
     "title": "Payroll",
     "subtitle": "HR and payroll records, monthly runs, documents, payments, automatic posting and statutory submissions.",
@@ -1003,6 +1004,10 @@
       "close": "Close payroll year",
       "close_confirm": "Do you really want to close payroll year {year}? Reopening requires an audit reason.",
       "blocked_hint": "Resolve every listed blocker first.",
+      "blocker_open": "Open",
+      "reopen_reason_hint": "The reason needs at least ten characters — it is the audit trail for reopening a closed year."
+      ,"close_read_only": "Only a user with payroll approval rights can close the payroll year."
+      ,"reopen_read_only": "Only a user with payroll reopen rights can reopen a closed year.",
       "reopen": "Reopen year",
       "reopen_reason": "Reason for reopening",
       "reopen_reason_placeholder": "Describe the reason in at least ten characters…",
@@ -1336,7 +1341,8 @@
         "match": "Match",
         "diff": "Difference",
         "not_applicable": "Not applicable"
-      }
+      },
+      "open_runs": "Open payroll runs"
     },
     "runs": {
       "person_picker": {
@@ -1948,7 +1954,10 @@
         "draft": "Evidence draft",
         "approved": "Approved / awaiting calculation or payment",
         "paid": "Paid"
-      }
+      },
+      "missing_fields": "Still missing before saving: {fields}.",
+      "new_entry": "New record",
+      "empty": "No risky savings contribution has been recorded for this month yet."
     },
     "components": {
       "title": "Payroll components and inputs",
@@ -4546,6 +4555,17 @@
           "receipt_reference": "Receipt / protocol reference",
           "payment_reference": "Payment / official document reference",
           "document_id": "Company DMS document ID",
+          "document": "Confirmation in the DMS",
+          "document_placeholder": "Search for the receipt, protocol or payment document…",
+          "read_only": "write access to payroll submissions",
+          "missing": "Still missing before it can be saved: {list}.",
+          "missing_employee": "pick an employee",
+          "missing_amount": "the paid amount",
+          "missing_completed_on": "the completion date",
+          "missing_case_reference": "the case reference",
+          "missing_receipt_reference": "the receipt or protocol reference",
+          "missing_document": "pick a document from the DMS",
+          "missing_confirmation": "tick the confirmation below",
           "document_hint": "The server accepts only an active company-scoped document owned by this tenant and freezes its SHA-256 itself.",
           "confirmation": "I confirm that the submission was actually completed in an official external channel and the specified company DMS document is its real receipt or protocol.",
           "payment_confirmation": "I confirm that the amount was determined using a professionally verified external procedure, actually paid, and the specified company DMS document is its payment confirmation or a specific official document. MyÚčto did not verify the calculation or payment.",
@@ -4679,6 +4699,7 @@
         "copy": "Copy",
         "copied": "Copied",
         "http_status": "HTTP response",
+        "copy_failed": "The browser did not allow clipboard access. Select the CorrelationID and copy it manually.",
         "completed_at": "Completed",
         "acknowledged": "ČSSZ confirmed receipt, processing is running. Recommended delay before the next query: {seconds} s.",
         "protocol_status": {
@@ -4980,6 +5001,8 @@
         "jmhz_dry_run_show_xml": "Show XML",
         "jmhz_dry_run_hide_xml": "Hide XML",
         "jmhz_dry_run_copy_xml": "Copy XML",
+        "jmhz_dry_run_copy_failed": "The browser did not allow clipboard access. Open the XML with the button next to it and copy it manually.",
+        "jmhz_dry_run_read_only": "You do not have write access to payroll submissions, so the dry run cannot be started.",
         "jmhz_dry_run_incomplete": "The XML passed the schema, but the control catalogue is not fully executed yet — the submission is not ready to send.",
         "jmhz_controls_summary": "CSSZ controls: {passed} passed · {failed} failed · {remote} decided by CSSZ · {gaps} not implemented",
         "jmhz_controls_blocking": "Blocking defects ({count}) — the submission would be ineffective",
@@ -5090,6 +5113,7 @@
         "channel_label": "Channel",
         "status_label": "Status",
         "detail_action": "Detail",
+        "not_prepared_action": "Where to prepare it",
         "detail_hide": "Hide detail",
         "detail_load_failed": "The submission detail could not be loaded.",
         "detail_title": "{agenda} — submission #{id}",
@@ -5297,8 +5321,24 @@
         "dueOn": "Due",
         "sections": "Sections"
       },
+      "blockers": {
+        "title": "Still missing: {list}.",
+        "readOnly": "write access to payroll submissions",
+        "employment": "pick an employment",
+        "excluded": "confirm the excluded periods",
+        "deducted": "confirm the deducted periods",
+        "authorityDate": "the date the ČSSZ request was delivered",
+        "note": "a note of at least five characters",
+        "noteTooLong": "shorten the note to 500 characters",
+        "document": "pick the confirmation from the DMS",
+        "reference": "the result reference from the ČSSZ protocol",
+        "referenceTooLong": "shorten the reference to 190 characters",
+        "confirmedOn": "the result date",
+        "alreadyRecorded": "pick another result, this one is already recorded"
+      },
       "errors": {
         "loadFailed": "The record sheet source data could not be loaded.",
+        "statementLoadFailed": "The record sheet source data for this employment and year could not be loaded. Please try again.",
         "prepareFailed": "The record sheet could not be built.",
         "downloadFailed": "The record sheet control XML could not be downloaded."
       }
@@ -5653,7 +5693,9 @@
         "delete_confirm": "Really delete the account {institution} ({account})? Only an account that has never been paid from can be deleted, so if this is a duplicate under a wrong institution code, nothing is lost.",
         "deleted": "The institution payment account was deleted.",
         "delete_failed": "The institution payment account could not be deleted.",
-        "delete_blocked": "This account has already been paid from, so it cannot be deleted. Set an end of validity instead."
+        "delete_blocked": "This account has already been paid from, so it cannot be deleted. Set an end of validity instead.",
+        "validation_fields": "Please check these fields: {fields}.",
+        "insurer_back_to_list": "Back to picking from the list"
       },
       "accident_insurance": {
         "title": "Statutory employer liability insurance",
@@ -5832,7 +5874,8 @@
       "conflict": "Another user changed the settings. The current state has been reloaded.",
       "production_release_title": "Payroll is currently in test operation",
       "production_release_description": "Calculations and test-environment filings remain available. Production filings and payroll payment orders stay safely blocked until MyÚčto completes its internal product verification.",
-      "production_release_customer_action": "You do not need to run parallel payroll, create a correction run or provide a qualification protocol."
+      "production_release_customer_action": "You do not need to run parallel payroll, create a correction run or provide a qualification protocol.",
+      "no_permission": "Only a user with payroll settings permission can turn payroll on. Please ask your company administrator."
     },
     "dashboard": {
       "start_period": "Starting period",
@@ -5843,7 +5886,8 @@
       "setup": {
         "title": "Setup is not complete",
         "description": "Complete these employer details before a payroll run can be calculated.",
-        "action": "Open settings"
+        "action": "Open settings",
+        "resolve": "Complete"
       },
       "deadlines": {
         "title": "Statutory deadlines",
@@ -5920,7 +5964,12 @@
         "reconciliation_not_materialized": "Missing evidence",
         "reconciliation_periods": "Affected periods",
         "liabilities": "Payroll liabilities",
-        "overdue_unpaid": "Overdue and not fully paid"
+        "overdue_unpaid": "Overdue and not fully paid",
+        "open_documents": "Open documents",
+        "open_submissions": "Open submissions",
+        "open_outbox": "Open sent messages",
+        "open_reconciliation": "Open posting reconciliation",
+        "open_payments": "Open payments and levies"
       },
       "month": {
         "title": "This month",
@@ -5937,7 +5986,8 @@
         "payments_hint": "Prepare net pay, tax and insurance payments.",
         "documents": "Documents and filings",
         "documents_hint": "Download payslips, the monthly package and review outputs."
-      }
+      },
+      "load_failed_hint": "The payroll module status could not be loaded, so there is nothing we can show yet. Please try again; if the problem persists, reload the page."
     },
     "setup_guide": {
       "eyebrow": "Payroll first-time setup guide",
@@ -6909,6 +6959,22 @@
         "done": "carried out",
         "skipped_hold": "skipped — hold",
         "skipped_changed": "skipped — conditions changed"
+      },
+      "confirm_missing_ack": "Please tick the confirmation that you understand the erasure is irreversible.",
+      "confirm_missing_id": "Please retype the proposal number in the field above.",
+      "confirm_wrong_id": "The number you typed does not match the open proposal #{id}.",
+      "cascade": {
+        "identity_history": "name and personal data history",
+        "addresses": "addresses",
+        "contacts": "contacts",
+        "identifiers": "identifiers (birth number, document number)",
+        "accounts": "bank accounts",
+        "dependants": "dependants",
+        "payroll_generated_documents": "issued payroll documents (PDF)",
+        "payroll_annual_document_revisions": "annual documents and their revisions",
+        "payroll_jmhz_eldp_evidence_snapshots": "submitted ELDP records",
+        "payroll_jmhz_ordinary_evidence_snapshots": "submitted social security reports",
+        "payroll_registration_identity_snapshots": "submitted social security registration data"
       }
     },
     "features": {
@@ -7181,6 +7247,7 @@
       },
       "hints": {
         "createRequirements": "First select the employment and the day the discount applies from.",
+        "readOnly": "You do not have write access to payroll submissions.",
         "acceptedOnRequired": "First copy the delivery date from the CSSA protocol - the entitlement rests on it.",
         "rejectionReasonRequired": "First copy the rejection reason from the CSSA protocol.",
         "endOnRequired": "First enter the last day the discount is applied."
@@ -7334,6 +7401,13 @@
         "unknown_money_account": "The cash/bank account is not in the chart of accounts.",
         "unknown_liability_account": "The payroll liability account is not in the chart of accounts."
       }
+    },
+    "file_dropzone": {
+      "unsupported_detail": "The file \"{name}\" does not have a supported extension. We accept: {extensions}.",
+      "too_large_detail": "The file \"{name}\" is {size}, which is over the {limit} limit. Try shrinking or splitting it.",
+      "multiple": "You dropped {count} files — the first one, \"{name}\", was used. The rest were not loaded.",
+      "no_file": "Nothing you dropped could be read as a file. Folders and content from other pages will not work; please pick a file from disk.",
+      "pick_another": "Pick another file"
     }
   },
   "foreign_income": {
@@ -12409,6 +12483,8 @@
     "download": "Download",
     "confirm": "Confirm",
     "close": "Close",
+    "preview_side_title": "Original preview",
+    "preview_side_close": "Close preview",
     "of": "of",
     "from": "From",
     "to": "To",
@@ -12423,6 +12499,7 @@
     "created": "Created.",
     "remove": "Remove",
     "refresh": "Refresh",
+    "retry": "Try again",
     "warning": "Warning",
     "error": "Error",
     "success": "Done",

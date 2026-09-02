@@ -975,7 +975,8 @@
         "deadlines": "Termíny a lhůty",
         "codebooks": "Číselníky",
         "submissions": "Verze podání"
-      }
+      },
+      "reason_why": "Důvod se ukládá do auditní stopy — u přepsané legislativní sazby je to jediný záznam o tom, proč se firma od dodané hodnoty odchýlila."
     },
     "title": "Mzdy",
     "subtitle": "Personální a mzdová agenda, měsíční běhy, dokumenty, platby, automatické účtování a zákonná podání.",
@@ -992,6 +993,7 @@
       "blockers_title": "Co brání uzavření",
       "blocker": {
         "schema_unavailable": "Potřebná mzdová evidence není v databázi dostupná.",
+        "unknown": "Uzavření brání další překážka, kterou tahle verze aplikace neumí pojmenovat. Ozvěte se prosím podpoře.",
         "missing_months": "Chybí uzavřená období: {months}.",
         "open_corrections": "Čekají {count} otevřené opravy mzdových běhů.",
         "open_submissions": "Čeká {count} neukončených zákonných podání.",
@@ -1003,6 +1005,10 @@
       "close": "Uzavřít mzdový rok",
       "close_confirm": "Opravdu uzavřít mzdový rok {year}? Znovuotevření vyžaduje auditní důvod.",
       "blocked_hint": "Nejdřív vyřešte všechny uvedené překážky.",
+      "blocker_open": "Otevřít",
+      "reopen_reason_hint": "Důvod musí mít aspoň deset znaků — je to auditní stopa o znovuotevření uzavřeného roku."
+      ,"close_read_only": "Uzavřít mzdový rok může jen uživatel s právem schvalovat mzdy."
+      ,"reopen_read_only": "Znovu otevřít uzavřený rok může jen uživatel s právem znovuotevírat mzdy.",
       "reopen": "Znovu otevřít rok",
       "reopen_reason": "Důvod znovuotevření",
       "reopen_reason_placeholder": "Popište důvod alespoň deseti znaky…",
@@ -1336,7 +1342,8 @@
         "match": "Souhlasí",
         "diff": "Rozdíl",
         "not_applicable": "Nepoužije se"
-      }
+      },
+      "open_runs": "Otevřít mzdové běhy"
     },
     "runs": {
       "person_picker": {
@@ -1948,7 +1955,10 @@
         "draft": "Koncept podkladů",
         "approved": "Schváleno / čeká na výpočet či úhradu",
         "paid": "Uhrazeno"
-      }
+      },
+      "missing_fields": "K uložení ještě chybí: {fields}.",
+      "new_entry": "Nový záznam",
+      "empty": "Za tento měsíc zatím není evidovaný žádný příspěvek na rizikové spoření."
     },
     "components": {
       "title": "Mzdové složky a vstupy",
@@ -4546,6 +4556,17 @@
           "receipt_reference": "Reference doručenky / protokolu",
           "payment_reference": "Reference úhrady / oficiálního dokladu",
           "document_id": "ID firemního dokumentu v DMS",
+        "document": "Potvrzení v DMS",
+        "document_placeholder": "Vyhledejte doručenku, protokol nebo doklad o úhradě…",
+        "read_only": "oprávnění zapisovat mzdová podání",
+        "missing": "K uložení ještě chybí: {list}.",
+        "missing_employee": "vybrat zaměstnance",
+        "missing_amount": "částka úhrady",
+        "missing_completed_on": "datum splnění",
+        "missing_case_reference": "reference případu",
+        "missing_receipt_reference": "reference doručenky nebo protokolu",
+        "missing_document": "vybrat dokument z DMS",
+        "missing_confirmation": "zaškrtnout potvrzení dole",
           "document_hint": "Server přijme jen aktivní firemní dokument této firmy a sám zmrazí jeho SHA-256.",
           "confirmation": "Potvrzuji, že podání bylo skutečně dokončeno v oficiálním externím kanálu a uvedený firemní DMS dokument je jeho skutečná doručenka nebo protokol.",
           "payment_confirmation": "Potvrzuji, že částka byla určena odborně ověřeným externím postupem, skutečně uhrazena a uvedený firemní DMS dokument je potvrzení úhrady nebo konkrétní oficiální doklad. MyÚčto výpočet ani platbu neověřilo.",
@@ -4679,6 +4700,7 @@
         "copy": "Kopírovat",
         "copied": "Zkopírováno",
         "http_status": "HTTP odpověď",
+        "copy_failed": "Prohlížeč schránku nepovolil. Označte CorrelationID myší a zkopírujte ho ručně.",
         "completed_at": "Dokončeno",
         "acknowledged": "ČSSZ potvrdila převzetí, zpracování běží. Doporučený odstup dalšího dotazu: {seconds} s.",
         "protocol_status": {
@@ -4980,6 +5002,8 @@
         "jmhz_dry_run_show_xml": "Zobrazit XML",
         "jmhz_dry_run_hide_xml": "Skrýt XML",
         "jmhz_dry_run_copy_xml": "Kopírovat XML",
+        "jmhz_dry_run_copy_failed": "Prohlížeč schránku nepovolil. Otevřete XML tlačítkem vedle a zkopírujte ho ručně.",
+        "jmhz_dry_run_read_only": "Nemáte oprávnění zapisovat do mzdových podání, test proto spustit nelze.",
         "jmhz_dry_run_incomplete": "XML prošlo schématem, ale katalog kontrol ještě není celý vykonaný — podání zatím není připravené k odeslání.",
         "jmhz_controls_summary": "Kontroly ČSSZ: {passed} splněno · {failed} nesplněno · {remote} rozhodne až ČSSZ · {gaps} bez implementace",
         "jmhz_controls_blocking": "Nepropustné vady ({count}) — podání by bylo neúčinné",
@@ -5090,6 +5114,7 @@
         "channel_label": "Kanál",
         "status_label": "Stav",
         "detail_action": "Detail",
+        "not_prepared_action": "Kde to připravit",
         "detail_hide": "Skrýt detail",
         "detail_load_failed": "Detail podání se nepodařilo načíst.",
         "detail_title": "{agenda} — podání č. {id}",
@@ -5297,8 +5322,24 @@
         "dueOn": "Termín",
         "sections": "Počet sekcí"
       },
+      "blockers": {
+        "title": "Ještě chybí: {list}.",
+        "readOnly": "oprávnění zapisovat mzdová podání",
+        "employment": "vybrat pracovní vztah",
+        "excluded": "potvrdit vyloučené doby",
+        "deducted": "potvrdit odečítané doby",
+        "authorityDate": "datum doručení výzvy ČSSZ",
+        "note": "poznámka aspoň o pěti znacích",
+        "noteTooLong": "zkrátit poznámku na 500 znaků",
+        "document": "vybrat potvrzení z DMS",
+        "reference": "reference výsledku z protokolu ČSSZ",
+        "referenceTooLong": "zkrátit referenci na 190 znaků",
+        "confirmedOn": "datum výsledku",
+        "alreadyRecorded": "zvolit jiný výsledek, tenhle je už doložený"
+      },
       "errors": {
         "loadFailed": "Podklady evidenčního listu se nepodařilo načíst.",
+        "statementLoadFailed": "Podklad evidenčního listu se pro tento vztah a rok nepodařilo načíst. Zkuste to prosím znovu.",
         "prepareFailed": "Evidenční list se nepodařilo sestavit.",
         "downloadFailed": "Kontrolní XML evidenčního listu se nepodařilo stáhnout."
       }
@@ -5653,7 +5694,9 @@
         "delete_confirm": "Opravdu smazat účet {institution} ({account})? Smazat jde jen účet, ze kterého se nikdy neplatilo — pokud jde o duplicitu pod špatným kódem instituce, o nic nepřijdete.",
         "deleted": "Platební účet instituce byl smazán.",
         "delete_failed": "Platební účet instituce se nepodařilo smazat.",
-        "delete_blocked": "Z tohoto účtu už se platilo, takže smazat nejde. Nastavte mu konec platnosti."
+        "delete_blocked": "Z tohoto účtu už se platilo, takže smazat nejde. Nastavte mu konec platnosti.",
+        "validation_fields": "Zkontrolujte prosím tato pole: {fields}.",
+        "insurer_back_to_list": "Zpět na výběr ze seznamu"
       },
       "accident_insurance": {
         "title": "Zákonné pojištění odpovědnosti zaměstnavatele",
@@ -5832,7 +5875,8 @@
       "conflict": "Nastavení mezitím změnil jiný uživatel. Načetl se aktuální stav.",
       "production_release_title": "Mzdy jsou zatím v testovacím provozu",
       "production_release_description": "Výpočty a podání do testovacího prostředí můžete používat. Ostrá podání a mzdové platební příkazy zůstanou bezpečně zablokované, dokud MyÚčto nedokončí interní ověření produktu.",
-      "production_release_customer_action": "Na vaší straně není potřeba paralelní provoz, opravný běh ani kvalifikační protokol."
+      "production_release_customer_action": "Na vaší straně není potřeba paralelní provoz, opravný běh ani kvalifikační protokol.",
+      "no_permission": "Mzdy může zapnout jen uživatel s právem na nastavení mezd. Požádejte prosím správce firmy."
     },
     "dashboard": {
       "start_period": "Počáteční období",
@@ -5843,7 +5887,8 @@
       "setup": {
         "title": "Nastavení není hotové",
         "description": "Než půjde spočítat mzdový běh, doplňte tyhle údaje zaměstnavatele.",
-        "action": "Otevřít nastavení"
+        "action": "Otevřít nastavení",
+        "resolve": "Doplnit"
       },
       "deadlines": {
         "title": "Zákonné termíny",
@@ -5920,7 +5965,12 @@
         "reconciliation_not_materialized": "Chybí podklad",
         "reconciliation_periods": "Dotčená období",
         "liabilities": "Mzdové závazky",
-        "overdue_unpaid": "Po splatnosti a ne zcela uhrazené"
+        "overdue_unpaid": "Po splatnosti a ne zcela uhrazené",
+        "open_documents": "Otevřít dokumenty",
+        "open_submissions": "Otevřít podání",
+        "open_outbox": "Otevřít odeslané zprávy",
+        "open_reconciliation": "Otevřít porovnání se zaúčtováním",
+        "open_payments": "Otevřít platby a odvody"
       },
       "month": {
         "title": "Tento měsíc",
@@ -5937,7 +5987,8 @@
         "payments_hint": "Připravit čisté mzdy, daň a pojistné k úhradě.",
         "documents": "Dokumenty a podání",
         "documents_hint": "Stáhnout pásky, měsíční balíček a zkontrolovat výstupy."
-      }
+      },
+      "load_failed_hint": "Stav mzdového modulu se nepodařilo načíst, takže nevíme, co vám tu ukázat. Zkuste to prosím znovu; pokud potíž trvá, obnovte stránku."
     },
     "setup_guide": {
       "eyebrow": "Průvodce prvním nastavením mezd",
@@ -6909,6 +6960,22 @@
         "done": "provedeno",
         "skipped_hold": "přeskočeno — zadržení",
         "skipped_changed": "přeskočeno — změna podmínek"
+      },
+      "confirm_missing_ack": "Zaškrtněte prosím potvrzení, že rozumíte nevratnosti výmazu.",
+      "confirm_missing_id": "Opište prosím číslo návrhu do pole výše.",
+      "confirm_wrong_id": "Opsané číslo nesouhlasí s otevřeným návrhem #{id}.",
+      "cascade": {
+        "identity_history": "historie jména a osobních údajů",
+        "addresses": "adresy",
+        "contacts": "kontakty",
+        "identifiers": "identifikátory (rodné číslo, číslo dokladu)",
+        "accounts": "bankovní účty",
+        "dependants": "vyživované osoby",
+        "payroll_generated_documents": "vystavené mzdové dokumenty (PDF)",
+        "payroll_annual_document_revisions": "roční doklady a jejich revize",
+        "payroll_jmhz_eldp_evidence_snapshots": "odeslané ELDP (evidenční listy)",
+        "payroll_jmhz_ordinary_evidence_snapshots": "odeslaná hlášení ČSSZ",
+        "payroll_registration_identity_snapshots": "odeslané registrační údaje ČSSZ"
       }
     },
     "features": {
@@ -7181,6 +7248,7 @@
       },
       "hints": {
         "createRequirements": "Nejdřív vyberte pracovní vztah a den, od kterého se sleva uplatní.",
+        "readOnly": "Nemáte oprávnění zapisovat do mzdových podání.",
         "acceptedOnRequired": "Nejdřív opište den doručení z protokolu ČSSZ — na něm stojí nárok na slevu.",
         "rejectionReasonRequired": "Nejdřív opište důvod odmítnutí z protokolu ČSSZ.",
         "endOnRequired": "Nejdřív zadejte poslední den, ke kterému se sleva uplatňuje."
@@ -7334,6 +7402,13 @@
         "unknown_money_account": "Účet peněžního prostředku není v osnově.",
         "unknown_liability_account": "Závazkový účet mzdového závazku není v osnově."
       }
+    },
+    "file_dropzone": {
+      "unsupported_detail": "Soubor „{name}\" nemá podporovanou příponu. Přijímáme: {extensions}.",
+      "too_large_detail": "Soubor „{name}\" má {size}, což je nad limitem {limit}. Zkuste ho zmenšit nebo rozdělit.",
+      "multiple": "Přetáhli jste {count} souborů — použil se první, „{name}\". Ostatní se nenačetly.",
+      "no_file": "Z toho, co jste přetáhli, nešel přečíst žádný soubor. Složky ani obsah z jiné stránky bohužel nejdou; vyberte prosím soubor z disku.",
+      "pick_another": "Vybrat jiný soubor"
     }
   },
   "foreign_income": {
@@ -12409,6 +12484,8 @@
     "download": "Stáhnout",
     "confirm": "Potvrdit",
     "close": "Zavřít",
+    "preview_side_title": "Náhled originálu",
+    "preview_side_close": "Zavřít náhled",
     "of": "z",
     "from": "Od",
     "to": "Do",
@@ -12423,6 +12500,7 @@
     "created": "Vytvořeno.",
     "remove": "Odebrat",
     "refresh": "Obnovit",
+    "retry": "Zkusit znovu",
     "warning": "Pozor",
     "error": "Chyba",
     "success": "Hotovo",

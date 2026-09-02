@@ -32,6 +32,14 @@ vi.mock('@/api/purchaseInvoices', () => ({
   },
 }))
 
+// Lepkavý přepínač bočního náhledu (useSidePreview) čte per-user preference. Bez mocku
+// by se přes `@/i18n` protáhl skutečný createI18n, který tenhle test na vue-i18n nemá.
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: {} }),
+  patchPagePrefs: vi.fn(),
+}))
+
 vi.mock('@/composables/useFormat', () => ({
   formatMoney: (v: number, c?: string) => `${v} ${c ?? ''}`.trim(),
   formatDate: (d: string | null | undefined) => d ?? '',
