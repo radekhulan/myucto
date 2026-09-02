@@ -36,7 +36,7 @@ final class ReportXlsxExporter
     {
         $ss = new Spreadsheet();
         $sheet = $ss->getActiveSheet();
-        $fy = (string) ($data['period']['fiscal_year'] ?? '');
+        $fy = !empty($data['all_periods']) ? 'všechna období' : (string) ($data['period']['fiscal_year'] ?? '');
         $sheet->setTitle('Hlavní kniha');
         $sheet->setCellValue('A1', 'Hlavní kniha — fiskální rok ' . $fy);
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
@@ -103,7 +103,7 @@ final class ReportXlsxExporter
 
         $this->finishTable($sheet, $head, $r, $cols, 3);
 
-        return $this->out($ss, 'hlavni-kniha-' . $fy . '.xlsx');
+        return $this->out($ss, 'hlavni-kniha-' . (!empty($data['all_periods']) ? 'vse' : $fy) . '.xlsx');
     }
 
     /**

@@ -40,7 +40,7 @@ final class LedgerReportRepository
      * @return list<array<string,mixed>> {id, account_code, name, account_type,
      *                                    normal_side, is_synthetic, ps_md, ps_d, to_md, to_d}
      */
-    public function trialBalanceRows(int $supplierId, string $from, string $to, string $periodStart, bool $analytics = false, array $filters = [], bool $excludeClosing = false): array
+    public function trialBalanceRows(int $supplierId, string $from, string $to, string $periodStart, bool $analytics = false, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
         $anchor = $this->openingAnchor($supplierId, $from);
         [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
@@ -51,6 +51,10 @@ final class LedgerReportRepository
         // source_id >= STOCK_SLOT_BASE) zůstávají — reálné zůstatky zásob k rozvahovému dni.
         $closingSql = $excludeClosing ? " AND NOT (e.source_type = 'closing' AND e.source_id < ?)" : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
+        $turnoverOpeningSql = $excludeAllOpenings
+            ? "e.source_type <> 'opening'"
+            : "NOT (e.entry_date = ? AND e.source_type = 'opening')";
+        $turnoverOpeningParams = $excludeAllOpenings ? [] : [$from];
         $stmt = $this->db->pdo()->prepare(
             "WITH agg AS (
                 SELECT
@@ -69,9 +73,9 @@ final class LedgerReportRepository
                               AND (a.account_type NOT IN ('revenue','expense') OR e.entry_date >= ?)
                               AND (a.account_type NOT IN ('asset','liability','equity') OR ? IS NULL OR e.entry_date >= ?)
                               AND l.side = 'credit' THEN l.amount ELSE 0 END) AS ps_d,
-                    SUM(CASE WHEN e.entry_date >= ? AND NOT (e.entry_date = ? AND e.source_type = 'opening')
+                    SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql}
                               AND l.side = 'debit'  THEN l.amount ELSE 0 END) AS to_md,
-                    SUM(CASE WHEN e.entry_date >= ? AND NOT (e.entry_date = ? AND e.source_type = 'opening')
+                    SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql}
                               AND l.side = 'credit' THEN l.amount ELSE 0 END) AS to_d
                 FROM journal_entry_lines l
                 JOIN journal_entries e   ON e.id = l.entry_id
@@ -89,7 +93,9 @@ final class LedgerReportRepository
             $analytics ? 1 : 0,
             $from, $from, $periodStart, $anchor, $anchor,
             $from, $from, $periodStart, $anchor, $anchor,
-            $from, $from, $from, $from, $supplierId, $to,
+            $from, ...$turnoverOpeningParams,
+            $from, ...$turnoverOpeningParams,
+            $supplierId, $to,
             ...$filterParams,
             ...$closingParams,
         ]);
@@ -125,11 +131,15 @@ final class LedgerReportRepository
      * @param array{vendor?:string, client?:string, item?:string} $filters viz {@see counterpartyFilter()}
      * @return list<array{account_id:int, month:string, md:float, d:float}>
      */
-    public function monthlyTurnovers(int $supplierId, string $from, string $to, bool $analytics, array $filters = [], bool $excludeClosing = false): array
+    public function monthlyTurnovers(int $supplierId, string $from, string $to, bool $analytics, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
         [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
         $closingSql = $excludeClosing ? " AND NOT (e.source_type = 'closing' AND e.source_id < ?)" : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
+        $openingSql = $excludeAllOpenings
+            ? " AND e.source_type <> 'opening'"
+            : " AND NOT (e.entry_date = ? AND e.source_type = 'opening')";
+        $openingParams = $excludeAllOpenings ? [] : [$from];
         $stmt = $this->db->pdo()->prepare(
             "SELECT CASE WHEN ? = 1 THEN a.id ELSE COALESCE(a.parent_id, a.id) END AS acc_id,
                     DATE_FORMAT(e.entry_date, '%Y-%m') AS ym,
@@ -139,10 +149,10 @@ final class LedgerReportRepository
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.entry_date = ? AND e.source_type = 'opening'){$filterSql}{$closingSql}
+                {$openingSql}{$filterSql}{$closingSql}
               GROUP BY acc_id, ym"
         );
-        $stmt->execute([$analytics ? 1 : 0, $supplierId, $from, $to, $from, ...$filterParams, ...$closingParams]);
+        $stmt->execute([$analytics ? 1 : 0, $supplierId, $from, $to, ...$openingParams, ...$filterParams, ...$closingParams]);
         return array_map(static fn (array $r): array => [
             'account_id' => (int) $r['acc_id'],
             'month'      => (string) $r['ym'],

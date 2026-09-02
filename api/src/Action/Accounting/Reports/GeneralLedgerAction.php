@@ -49,7 +49,9 @@ final class GeneralLedgerAction
         if ($params === null) return $err;
 
         try {
-            $data = $this->ledger->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing']);
+            $data = $params['all_periods']
+                ? $this->ledger->buildAllPeriods($supplierId, $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing'])
+                : $this->ledger->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing']);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -73,11 +75,14 @@ final class GeneralLedgerAction
         }
 
         try {
-            $data = $this->ledger->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing']);
+            $data = $params['all_periods']
+                ? $this->ledger->buildAllPeriods($supplierId, $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing'])
+                : $this->ledger->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing']);
+            $periodLabel = $params['all_periods'] ? 'vse' : (string) ($data['period']['fiscal_year'] ?? '');
             $out = $format === 'pdf'
                 ? [
                     'bytes'    => $this->pdf->render($data),
-                    'filename' => sprintf('hlavni-kniha-%s.pdf', (string) ($data['period']['fiscal_year'] ?? '')),
+                    'filename' => sprintf('hlavni-kniha-%s.pdf', $periodLabel),
                     'mime'     => 'application/pdf',
                 ]
                 : $this->xlsx->generalLedger($data);
@@ -102,21 +107,35 @@ final class GeneralLedgerAction
     }
 
     /**
-     * @return array{period_id:int, from:?string, to:?string, analytics:bool, filters:array{vendor?:string, client?:string, item?:string}}|null
+     * @return array{period_id:?int, all_periods:bool, from:?string, to:?string, analytics:bool, after_closing:bool, filters:array{vendor?:string, client?:string, item?:string}}|null
      */
     private function validateParams(Request $request, Response $response, int $supplierId, ?Response &$err): ?array
     {
         $q = $request->getQueryParams();
 
-        $periodId = (int) ($q['period_id'] ?? 0);
-        if ($periodId <= 0) {
-            $err = Json::error($response, 'validation_failed', 'period_id je povinný.', 422);
-            return null;
-        }
-        $period = $this->periods->findById($supplierId, $periodId);
-        if ($period === null) {
-            $err = Json::error($response, 'not_found', 'Účetní období nenalezeno.', 404);
-            return null;
+        $allPeriods = (string) ($q['all_periods'] ?? '') === '1';
+        $periodId = null;
+        if ($allPeriods) {
+            $periods = $this->periods->listForTenant($supplierId);
+            if ($periods === []) {
+                $err = Json::error($response, 'not_found', 'Firma nemá žádné účetní období.', 404);
+                return null;
+            }
+            $rangeStart = (string) min(array_column($periods, 'starts_on'));
+            $rangeEnd = (string) max(array_column($periods, 'ends_on'));
+        } else {
+            $periodId = (int) ($q['period_id'] ?? 0);
+            if ($periodId <= 0) {
+                $err = Json::error($response, 'validation_failed', 'period_id je povinný.', 422);
+                return null;
+            }
+            $period = $this->periods->findById($supplierId, $periodId);
+            if ($period === null) {
+                $err = Json::error($response, 'not_found', 'Účetní období nenalezeno.', 404);
+                return null;
+            }
+            $rangeStart = (string) $period['starts_on'];
+            $rangeEnd = (string) $period['ends_on'];
         }
 
         $range = [];
@@ -128,8 +147,9 @@ final class GeneralLedgerAction
                 $err = Json::error($response, 'validation_failed', "{$key} musí být datum (YYYY-MM-DD).", 422);
                 return null;
             }
-            if ($v < (string) $period['starts_on'] || $v > (string) $period['ends_on']) {
-                $err = Json::error($response, 'validation_failed', "{$key} musí ležet uvnitř zvoleného období.", 422);
+            if ($v < $rangeStart || $v > $rangeEnd) {
+                $scope = $allPeriods ? 'rozsahu účetních období' : 'zvoleného období';
+                $err = Json::error($response, 'validation_failed', "{$key} musí ležet uvnitř {$scope}.", 422);
                 return null;
             }
             $range[$key] = $v;
@@ -150,6 +170,7 @@ final class GeneralLedgerAction
         $err = null;
         return [
             'period_id' => $periodId,
+            'all_periods' => $allPeriods,
             'from'      => $range['from'],
             'to'        => $range['to'],
             'analytics' => (string) ($q['analytics'] ?? '') === '1',

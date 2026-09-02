@@ -197,6 +197,41 @@ final class GeneralLedgerReportTest extends TestCase
         self::assertSame(self::cents(1000.00), self::cents($a211['closing_md']), 'KS = PS + (nulové) obraty.');
     }
 
+    public function testAllPeriodsCombinesYearsWithoutTechnicalClosingAndOpeningEntries(): void
+    {
+        $this->manual([
+            self::l('211', 'debit', 1000.00),
+            self::l('602', 'credit', 1000.00),
+        ], self::YEAR . '-06-10');
+        $this->insertJournalEntry('closing', $this->periodId, '702', '211', 1000.00, self::YEAR . '-12-31');
+
+        $secondPeriodId = $this->periods->create(
+            $this->supplierId,
+            self::YEAR + 1,
+            (self::YEAR + 1) . '-01-01',
+            (self::YEAR + 1) . '-12-31',
+        );
+        $this->periodId = $secondPeriodId;
+        $this->insertJournalEntry('opening', $this->periodId, '211', '701', 1000.00, (self::YEAR + 1) . '-01-01');
+        $this->manual([
+            self::l('211', 'debit', 200.00),
+            self::l('602', 'credit', 200.00),
+        ], (self::YEAR + 1) . '-03-15');
+
+        $data = $this->generalLedger->buildAllPeriods($this->supplierId);
+
+        self::assertTrue($data['all_periods']);
+        self::assertNull($data['period']);
+        self::assertSame(self::YEAR . '-01-01', $data['from']);
+        self::assertSame((self::YEAR + 1) . '-12-31', $data['to']);
+        self::assertCount(24, $data['months']);
+        $account = $this->accountByCode($data['accounts'], '211');
+        self::assertNotNull($account);
+        self::assertSame(self::cents(1200.00), self::cents($account['turnover_md']));
+        self::assertSame(0, self::cents($account['turnover_d']));
+        self::assertSame(self::cents(1200.00), self::cents($account['closing_md']));
+    }
+
     /**
      * Otevírací zápis prvního dne období patří do PS, ne do lednového obratu —
      * a to i v MĚSÍČNÍM rozpadu. Dokud měsíční agregace technický zápis

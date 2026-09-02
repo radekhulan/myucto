@@ -100,7 +100,7 @@ final class JournalIntegrityLinkTest extends TestCase
     {
         $page = file_get_contents(dirname(__DIR__, 5) . '/web/src/pages/accounting/Journal.vue');
         self::assertIsString($page);
-        foreach (['route.query.entry_id', 'route.query.source_type', 'route.query.source_id', 'q.integrity'] as $param) {
+        foreach (['route.query.entry_id', 'route.query.source_id', 'hydrateFilters(route.query)', "value('source_type')", "value('integrity')"] as $param) {
             self::assertStringContainsString($param, $page, "Journal.vue přestal číst {$param} — deep-link z dashboardu je mrtvý.");
         }
     }

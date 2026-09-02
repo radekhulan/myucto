@@ -17,7 +17,8 @@ final class GeneralLedgerPdfRenderer extends ReportPdfRendererBase
     {
         $body = $this->renderTemplate('general_ledger.twig', $data);
         $mpdf = $this->mpdf();
-        $mpdf->SetTitle('Hlavní kniha ' . (string) ($data['period']['fiscal_year'] ?? ''));
+        $label = !empty($data['all_periods']) ? 'všechna období' : (string) ($data['period']['fiscal_year'] ?? '');
+        $mpdf->SetTitle('Hlavní kniha ' . $label);
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

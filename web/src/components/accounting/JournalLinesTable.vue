@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import { formatMoney } from '@/composables/useFormat'
 import type { JournalLine } from '@/api/accounting'
+import { calendarYearRange } from '@/utils/accountingPeriod'
 
 /**
  * Rozpad účetního zápisu na účty (MD/DAL) jako samostatná karta.
@@ -19,6 +21,9 @@ const props = withDefaults(defineProps<{
   lines: JournalLine[]
   /** Menší varianta do vnořeného panelu (Souvisí), kde karta nesmí přebít hostitele. */
   dense?: boolean
+  dateFrom?: string
+  dateTo?: string
+  contextDate?: string | null
 }>(), { dense: false })
 
 const { t } = useI18n()
@@ -66,6 +71,20 @@ const twoSidedAccounts = computed(() => {
 })
 
 const cell = computed(() => (props.dense ? 'px-2 py-1' : 'px-3 py-2'))
+
+function movementLink(line: JournalLine) {
+  const fallback = calendarYearRange(props.contextDate)
+  const from = props.dateFrom || fallback.from
+  const to = props.dateTo || fallback.to
+  return {
+    name: 'accounting-account-statement',
+    params: { accountId: line.account_id },
+    query: {
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+    },
+  }
+}
 </script>
 
 <template>
@@ -82,8 +101,12 @@ const cell = computed(() => (props.dense ? 'px-2 py-1' : 'px-3 py-2'))
       <tbody class="divide-y divide-neutral-100">
         <tr v-for="l in lines" :key="l.id">
           <td :class="cell">
-            <span class="font-mono font-medium text-neutral-900">{{ l.account_code }}</span>
-            <span class="text-neutral-600 ml-1.5">{{ l.account_name }}</span>
+            <RouterLink :to="movementLink(l)"
+              class="inline-flex flex-wrap items-baseline gap-x-1.5 text-primary-600 hover:text-primary-700 hover:underline"
+              :title="t('accounting.accounts.detail.statement')">
+              <span class="font-mono font-medium">{{ l.account_code }}</span>
+              <span class="text-neutral-600">{{ l.account_name }}</span>
+            </RouterLink>
           </td>
           <td class="text-neutral-500 text-xs" :class="cell">{{ l.cost_center || '—' }}</td>
           <td class="text-right font-mono font-medium text-neutral-900" :class="cell">

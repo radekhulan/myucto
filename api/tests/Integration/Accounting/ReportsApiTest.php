@@ -133,6 +133,18 @@ final class ReportsApiTest extends TestCase
         self::assertNotEmpty($res['body']['accounts']);
     }
 
+    public function testGeneralLedgerReturnsAllPeriodsWithoutPeriodId(): void
+    {
+        $res = $this->call($this->generalLedgerAction, 'get', 'GET', 'readonly', ['all_periods' => '1']);
+
+        self::assertSame(200, $res['status']);
+        self::assertTrue($res['body']['all_periods']);
+        self::assertNull($res['body']['period']);
+        self::assertSame(self::YEAR . '-01-01', $res['body']['from']);
+        self::assertSame(self::YEAR . '-12-31', $res['body']['to']);
+        self::assertNotEmpty($res['body']['accounts']);
+    }
+
     public function testTrialBalanceReturnsChecks(): void
     {
         $res = $this->call($this->trialBalanceAction, 'get', 'GET', 'readonly', ['period_id' => (string) $this->periodId]);
