@@ -123,7 +123,7 @@ const attachItems = computed(() => tm('support_page.attach_items') as unknown[])
         </ul>
         <p class="mt-3 text-sm text-neutral-700">{{ t('support_page.attach_privacy') }}</p>
         <div class="mt-4">
-          <RouterLink to="/admin/diagnostics" :class="btnOutline('primary')">
+          <RouterLink v-if="isAdmin" to="/admin/diagnostics" :class="btnOutline('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" />
             </svg>

@@ -35,7 +35,10 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       {
         path: 'invoices/import', name: 'invoices-import',
         component: () => import('@/pages/admin/DataExchange.vue'), props: { scope: 'issued', mode: 'import' },
-        beforeEnter: () => (useAuthStore().isSuperadmin ? true : { path: '/invoices/export' }),
+        beforeEnter: () => {
+          const auth = useAuthStore()
+          return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/invoices/export' }
+        },
       },
       // Přijaté faktury (fáze 1 integrace forku)
       { path: 'purchase-invoices',                 name: 'purchase-invoices',        component: () => import('@/pages/purchase-invoices/InvoiceList.vue'), meta: {  } },
@@ -49,10 +52,12 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       {
         path: 'purchase-invoices/import', name: 'purchase-invoices-import',
         component: () => import('@/pages/admin/DataExchange.vue'), props: { scope: 'purchase', mode: 'import' },
-        // Import je jen pro superadmina (BE endpoint je adminOnly) — bez gate by nezapnutý
-        // nav item stejně nešel rozkliknout, ale přímý odkaz by ukázal upload UI zbytečně;
-        // zrcadlí dřívější tiché downgrade chování normalizeTab() v DataExchange.vue.
-        beforeEnter: () => (useAuthStore().isSuperadmin ? true : { path: '/purchase-invoices/export' }),
+        beforeEnter: () => {
+          const auth = useAuthStore()
+          return !auth.isClientRole && auth.canWrite('utilities.import')
+            ? true
+            : { path: '/purchase-invoices/export' }
+        },
       },
       { path: 'purchase-invoices/payment-orders',  name: 'purchase-invoices-payment-orders', component: () => import('@/pages/purchase-invoices/PaymentOrders.vue') },
       // AI import přijaté faktury (§12b) — extrakční flow vytažený z admin Integrations
@@ -268,9 +273,11 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
         name: 'admin-codebooks',
         component: () => import('@/pages/admin/Codebooks.vue'),
         meta: {  },
-        beforeEnter: to => to.query.tab === 'tax_constants'
-          ? { path: '/admin/tax-constants' }
-          : true,
+        beforeEnter: to => {
+          if (to.query.tab === 'tax_constants') return { path: '/admin/tax-constants' }
+          if (to.query.scope !== 'company' && !useAuthStore().isSuperadmin) return { name: 'home' }
+          return true
+        },
       },
       { path: 'admin/tax-constants',    name: 'admin-tax-constants', component: () => import('@/pages/admin/TaxConstants.vue'), meta: {  } },
       { path: 'admin/electronic-signatures', name: 'admin-electronic-signatures', component: () => import('@/pages/admin/ElectronicSignatures.vue'), meta: {  } },

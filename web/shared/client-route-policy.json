@@ -7,6 +7,9 @@
     { "name": "portal-purchase-invoice-submissions", "path_pattern": "^/portal/purchase-invoice-submissions/?$", "kind": "permission", "permission": "documents.submit", "access": "read" },
     { "name": "portal-company-settings", "path_pattern": "^/portal/settings/?$", "kind": "permission", "permission": "settings.company", "access": "write" },
 
+    { "name": "admin-codebooks", "path_pattern": "^/admin/codebooks/?$", "kind": "permission", "permission": "settings.company", "access": "read" },
+    { "name": "admin-support", "path_pattern": "^/admin/support/?$", "kind": "permission", "permission": "profile", "access": "read" },
+
     { "name": "clients", "path_pattern": "^/clients/?$", "kind": "permission", "permission": "clients", "access": "read" },
     { "name": "client-new", "path_pattern": "^/clients/new/?$", "kind": "permission", "permission": "clients.create", "access": "write" },
     { "name": "client-detail", "path_pattern": "^/clients/[0-9]+/?$", "kind": "permission", "permission": "clients", "access": "read" },

@@ -15768,7 +15768,7 @@
   "codebooks": {
     "title": "Číselníky",
     "subtitle": "Měny + bankovní účty, sazby DPH, země, jednotky. Pouze pro admin.",
-    "subtitle_company": "Kategorie nákladů a tržeb pro rozpad v CRM. Pouze pro admin.",
+    "subtitle_company": "Kategorie nákladů a tržeb pro rozpad v CRM.",
     "subtitle_global": "Sazby DPH, klasifikace DPH, země a jednotky. Pouze pro admin.",
     "subtitle_tax_constants": "Roční sazby, limity a zákonné hodnoty společné pro celý systém. Pouze pro admin.",
     "tab_currencies": "Měny",

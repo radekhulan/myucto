@@ -25,7 +25,10 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 
 // embedded = vykresleno jako záložky uvnitř BankPage.vue (Finance → Bankovní účty);
 // hlavičku a lištu záložek pak dodává obálka, aktivní tab řídí přes ?tab=.
-defineProps<{ embedded?: boolean }>()
+const props = withDefaults(defineProps<{ embedded?: boolean; canManageAccounts?: boolean }>(), {
+  embedded: false,
+  canManageAccounts: true,
+})
 
 const { t } = useI18n()
 const toast = useToast()
@@ -287,6 +290,7 @@ async function loadMessagesPage(p: number) {
 }
 
 function startEditCurrency(c: CurrencyAccount) {
+  if (!props.canManageAccounts) return
   editingCurrency.value = c.id
   editingCurrencyLabel.value = c.label
   bankDraftMsg.value = null
@@ -296,6 +300,7 @@ function startEditCurrency(c: CurrencyAccount) {
 }
 
 async function saveCurrency() {
+  if (!props.canManageAccounts) return
   // V demu se formulář vyplní i odešle, jen se neuloží — uživatel si tak projde
   // celý průchod a dostane hlášku místo 403 z DemoReadOnlyMiddleware.
   if (blockDemoMutation()) return
@@ -331,6 +336,7 @@ async function saveCurrency() {
 }
 
 function startNewCurrencyAccount() {
+  if (!props.canManageAccounts) return
   bankDraftMsg.value = null
   bankDraftAccounts.value = []
   Object.assign(currencyDraft, {
@@ -405,6 +411,7 @@ async function loadBankToDraft() {
 }
 
 async function removeCurrency(c: CurrencyAccount) {
+  if (!props.canManageAccounts) return
   // Před confirmem, ať se v ukázce ani neptáme na něco, co stejně neproběhne.
   if (blockDemoMutation()) return
   if (!window.confirm(t('bank_accounts.delete_account_confirm', { label: c.label }))) return
@@ -785,7 +792,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('bank_accounts.currencies_title') }}</h2>
             <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank_accounts.currencies_subtitle') }}</p>
           </div>
-          <button type="button" @click="startNewCurrencyAccount()"
+          <button v-if="canManageAccounts" type="button" @click="startNewCurrencyAccount()"
             :class="[btnFilled('primary'), 'shrink-0 self-start sm:self-auto']">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
             {{ t('bank_accounts.new_account') }}
@@ -825,9 +832,11 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                   <span v-else class="text-neutral-400">—</span>
                 </td>
                 <td class="px-3 py-2 text-right whitespace-nowrap">
+                  <template v-if="canManageAccounts">
                   <button type="button" @click="startEditCurrency(c)" class="cursor-pointer text-primary-600 hover:text-primary-700 text-xs">{{ t('common.edit') }}</button>
                   <button v-if="(c.invoices_count ?? 0) === 0" type="button" @click="removeCurrency(c)"
                     class="cursor-pointer text-danger-600 hover:text-danger-700 text-xs ml-2">{{ t('common.delete') }}</button>
+                  </template>
                 </td>
               </tr>
             </tbody>
@@ -855,7 +864,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                 <span v-if="c.is_default && c.is_active" class="text-neutral-400 mx-1.5">·</span>
                 <span v-if="c.is_active" class="text-success-600">✓ {{ t('bank_accounts.th_active') }}</span>
               </span>
-              <div class="flex gap-2">
+              <div v-if="canManageAccounts" class="flex gap-2">
                 <button type="button" @click="startEditCurrency(c)" :class="btnOutline('primary')">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                   {{ t('common.edit') }}</button>
@@ -1456,7 +1465,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
       </div>
     </div>
 
-    <div v-if="currencyFormOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+    <div v-if="canManageAccounts && currencyFormOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
         <h3 class="text-lg font-semibold mb-3">{{ editingCurrency === null ? t('bank_accounts.new_account') : t('bank_accounts.edit_account_title', { label: editingCurrencyLabel }) }}</h3>
         <div class="space-y-3">

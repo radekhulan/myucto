@@ -23,6 +23,7 @@ const { t } = useI18n()
 const route = useRoute()
 const toast = useToast()
 const auth = useAuthStore()
+const canManageCompanyCodebooks = computed(() => auth.isDemo || auth.canWrite('settings.company.write'))
 const props = withDefaults(defineProps<{
   taxConstantsOnly?: boolean
 }>(), {
@@ -1080,7 +1081,7 @@ watch(tab, (newTab) => {
     <section v-else-if="tab === 'expense_categories'">
       <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 gap-2">
         <p class="text-sm text-neutral-500">{{ t('expense_categories.hint') }}</p>
-        <button @click="newExpense" :class="[btnFilled('primary'), 'shrink-0 self-start']">
+        <button v-if="canManageCompanyCodebooks" @click="newExpense" :class="[btnFilled('primary'), 'shrink-0 self-start']">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('expense_categories.new') }}
         </button>
@@ -1113,7 +1114,7 @@ watch(tab, (newTab) => {
               </td>
               <td class="px-3 py-2 text-right font-mono text-xs text-neutral-600">{{ c.purchases_count || 0 }}</td>
               <td class="px-3 py-2 text-right whitespace-nowrap">
-                <div class="flex items-center justify-end gap-1.5">
+                <div v-if="canManageCompanyCodebooks" class="flex items-center justify-end gap-1.5">
                   <button @click="editExpense(c)" :class="btnOutlineSm('primary')">
                     {{ t('common.edit') }}
                   </button>
@@ -1132,7 +1133,7 @@ watch(tab, (newTab) => {
     <section v-else-if="tab === 'revenue_categories'">
       <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 gap-2">
         <p class="text-sm text-neutral-500">{{ t('revenue_categories.hint') }}</p>
-        <button @click="newRevenue" :class="[btnFilled('primary'), 'shrink-0 self-start']">
+        <button v-if="canManageCompanyCodebooks" @click="newRevenue" :class="[btnFilled('primary'), 'shrink-0 self-start']">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('revenue_categories.new') }}
         </button>
@@ -1159,7 +1160,7 @@ watch(tab, (newTab) => {
               </td>
               <td class="px-3 py-2 text-right font-mono text-xs text-neutral-600">{{ c.invoices_count || 0 }}</td>
               <td class="px-3 py-2 text-right whitespace-nowrap">
-                <div class="flex items-center justify-end gap-1.5">
+                <div v-if="canManageCompanyCodebooks" class="flex items-center justify-end gap-1.5">
                   <button @click="editRevenue(c)" :class="btnOutlineSm('primary')">
                     {{ t('common.edit') }}
                   </button>
@@ -1678,7 +1679,7 @@ watch(tab, (newTab) => {
     </div>
 
     <!-- Expense category modal -->
-    <div v-if="expenseOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+    <div v-if="canManageCompanyCodebooks && expenseOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
         <h3 class="text-lg font-semibold mb-3">
           {{ expenseDraft.id ? t('expense_categories.edit_title') : t('expense_categories.new_title') }}
@@ -1728,7 +1729,7 @@ watch(tab, (newTab) => {
     </div>
 
     <!-- Revenue category modal -->
-    <div v-if="revenueOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+    <div v-if="canManageCompanyCodebooks && revenueOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto">
         <h3 class="text-lg font-semibold mb-3">
           {{ revenueDraft.id ? t('revenue_categories.edit_title') : t('revenue_categories.new_title') }}

@@ -37,6 +37,16 @@ final class RbacSourceGuardsTest extends TestCase
     ];
 
     /**
+     * Záměrné kompatibilní adaptéry pro middleware-less testy a starší volající.
+     * Výjimka je omezená na konkrétní symbol, aby nezakrývala nový kód ve stejném souboru.
+     *
+     * @var array<string, list<string>>
+     */
+    private const BACKEND_ROLE_IDENTITY_METHOD_BOUNDARY = [
+        'Repository/DocumentViewerContext.php' => ['fromRole'],
+    ];
+
+    /**
      * Správa rolí a uživatelů musí zobrazit typ role a chránit systémový
      * superadmin preset; auth store převádí typ role na klientský UX režim.
      * Nejde o permission guard zápisové akce.
@@ -56,8 +66,13 @@ final class RbacSourceGuardsTest extends TestCase
         foreach (self::phpFiles($src) as $path) {
             $relative = str_replace('\\', '/', substr($path, strlen($src) + 1));
             if (in_array($relative, self::BACKEND_ROLE_IDENTITY_BOUNDARY, true)) continue;
+            $method = null;
             foreach (file($path, FILE_IGNORE_NEW_LINES) ?: [] as $index => $line) {
-                if (!preg_match('/(?:===|!==|==|!=|in_array\s*\()[^;]*(?:[\'\"](?:superadmin|accountant|readonly|client)[\'\"])/', $line)) continue;
+                if (preg_match('/\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $line, $methodMatch) === 1) {
+                    $method = $methodMatch[1];
+                }
+                if (in_array($method, self::BACKEND_ROLE_IDENTITY_METHOD_BOUNDARY[$relative] ?? [], true)) continue;
+                if (!preg_match('/(?:===|!==|==|!=|in_array\s*\()[^;]*(?:[\'\"](?:admin|superadmin|accountant|readonly|client)[\'\"])/', $line)) continue;
                 if (!preg_match('/\b(?:role|role_type|system_key|is_superadmin|legacy)\b/i', $line)) continue;
                 $violations[] = $relative . ':' . ($index + 1) . ' ' . trim($line);
             }
@@ -74,7 +89,7 @@ final class RbacSourceGuardsTest extends TestCase
             $relative = str_replace('\\', '/', substr($path, strlen($src) + 1));
             if (in_array($relative, self::FRONTEND_ROLE_IDENTITY_BOUNDARY, true)) continue;
             foreach (file($path, FILE_IGNORE_NEW_LINES) ?: [] as $index => $line) {
-                if (!preg_match('/(?:===|!==|==|!=|includes\s*\(|in_array\s*\()[^;]*(?:[\'\"](?:superadmin|accountant|readonly|client)[\'\"])/', $line)) continue;
+                if (!preg_match('/(?:===|!==|==|!=|includes\s*\(|in_array\s*\()[^;]*(?:[\'\"](?:admin|superadmin|accountant|readonly|client)[\'\"])/', $line)) continue;
                 if (!preg_match('/\b(?:role|role_type|system_key|is_superadmin)\b/i', $line)) continue;
                 $violations[] = $relative . ':' . ($index + 1) . ' ' . trim($line);
             }
