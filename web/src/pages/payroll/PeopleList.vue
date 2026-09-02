@@ -145,9 +145,20 @@ const selectedOfficeOption = computed(
  * ve sbalitelné části „Další údaje" je zbytek, který dřív šlo doplnit až
  * po založení na kartě: rodné číslo, datum narození, mzda, úvazek, mzdová
  * účtárna a zdravotní pojišťovna. Nic z toho uložení neblokuje.
+ *
+ * JMÉNO SE ZADÁVÁ PO ČÁSTECH a `full_name` se z nich SKLÁDÁ — proto tu není
+ * vlastní pole. Historická identita potřebuje křestní jméno a příjmení zvlášť
+ * (bez nich měsíční JMHZ hlásí „Historická identita nemá explicitní jméno
+ * a příjmení") a server si je z `full_name` domýšlet nesmí (migrace 1272).
+ * Zbývaly tedy dvě možnosti: tři pole (celé jméno + obě části), nebo dvě
+ * a `full_name` odvodit. Vyhrály dvě — účetní píše jméno jednou místo dvakrát
+ * a celé jméno nemůže rozejít s částmi, ze kterých vzniklo. Opačný směr, tedy
+ * rozpad celého jména na části, by byl HÁDÁNÍ a ten zůstává zakázaný. Kdo
+ * potřebuje titul nebo jinou podobu celého jména, upraví ho na kartě osoby.
  */
 const employeeForm = reactive({
-  full_name: '',
+  first_name: '',
+  last_name: '',
   birth_date: '',
   birth_number: '',
   relation_type: 'employment' as PayrollRelationType,
@@ -158,6 +169,12 @@ const employeeForm = reactive({
   health_insurer_code: '',
 })
 const insurerOptions = healthInsurerOptions()
+/** Celé jméno vzniká spojením zadaných částí, nikdy naopak — viz komentář výš. */
+const newEmployeeFullName = computed(
+  () => [employeeForm.first_name.trim(), employeeForm.last_name.trim()]
+    .filter(part => part !== '')
+    .join(' '),
+)
 const selectedNewEmployeeOffice = computed(() => officeOption(employeeForm.office_id))
 /**
  * Editace osoby je vlastní POHLED, ne panel nad seznamem.
@@ -436,7 +453,8 @@ function removeEmploymentFromDetail(personId: number, employmentId: number) {
 }
 
 function resetEmployeeForm() {
-  employeeForm.full_name = ''
+  employeeForm.first_name = ''
+  employeeForm.last_name = ''
   employeeForm.birth_date = ''
   employeeForm.birth_number = ''
   employeeForm.relation_type = 'employment'
@@ -747,8 +765,13 @@ function updateEmployment(personId: number, updated: PayrollEmployment) {
 
 async function createEmployee() {
   if (savingEmployee.value) return
-  const fullName = employeeForm.full_name.trim()
-  if (!fullName) {
+  const firstName = employeeForm.first_name.trim()
+  const lastName = employeeForm.last_name.trim()
+  /*
+   * Obě části jsou povinné, ne jen dohromady: historická identita je hlásí
+   * ZVLÁŠŤ a osoba bez nich neprojde měsíčním JMHZ.
+   */
+  if (!firstName || !lastName) {
     employeeError.value = t('payroll.people.create.name_required')
     toast.error(employeeError.value)
     return
@@ -756,7 +779,9 @@ async function createEmployee() {
   savingEmployee.value = true
   employeeError.value = ''
   const payload: PayrollPersonCreatePayload = {
-    full_name: fullName,
+    full_name: newEmployeeFullName.value,
+    first_name: firstName,
+    last_name: lastName,
     birth_date: employeeForm.birth_date || null,
     birth_number: employeeForm.birth_number.trim() || null,
     relation_type: employeeForm.relation_type,
@@ -1060,10 +1085,26 @@ onMounted(async () => {
         </button>
       </div>
       <div class="mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <label class="min-w-0 text-xs text-neutral-600 sm:col-span-2">
-          {{ t('payroll.people.create.full_name') }} <RequiredMark />
-          <input v-model="employeeForm.full_name" required class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-name">
+        <!--
+          Jméno po částech, celé jméno se z nich složí — historická identita
+          potřebuje křestní a příjmení zvlášť a server si je odvodit nesmí.
+          Zdůvodnění, proč tu není i pole na celé jméno, je u `employeeForm`.
+        -->
+        <label class="min-w-0 text-xs text-neutral-600">
+          {{ t('payroll.people.create.first_name') }} <RequiredMark />
+          <input v-model="employeeForm.first_name" required maxlength="96" autocomplete="off" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-first-name">
         </label>
+        <label class="min-w-0 text-xs text-neutral-600">
+          {{ t('payroll.people.create.last_name') }} <RequiredMark />
+          <input v-model="employeeForm.last_name" required maxlength="96" autocomplete="off" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-last-name">
+        </label>
+        <p
+          v-if="newEmployeeFullName"
+          class="min-w-0 self-end pb-2 text-xs text-neutral-500 sm:col-span-2 lg:col-span-1"
+          data-test="new-employee-full-name-preview"
+        >
+          {{ t('payroll.people.create.full_name_preview', { name: newEmployeeFullName }) }}
+        </p>
         <label class="min-w-0 text-xs text-neutral-600">
           {{ t('payroll.people.create.relation_type') }} <RequiredMark />
           <SearchableSelect

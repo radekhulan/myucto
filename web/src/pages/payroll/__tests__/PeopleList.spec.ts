@@ -413,6 +413,8 @@ describe('PeopleList toolbar and shared employee creation', () => {
   /**
    * Zakládání osoby vyžaduje jen jméno, druh vztahu a datum nástupu — a formulář
    * to teď říká rovnou, místo aby to uživatel zkoušel podle chybových hlášek.
+   * Jméno jsou dvě pole, protože historická identita chce křestní a příjmení
+   * zvlášť; celé jméno se z nich složí, takže třetí pole nepřibylo.
    */
   it('u zakládání osoby značí hvězdičkou jen povinná pole', async () => {
     const wrapper = mountPage()
@@ -421,7 +423,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
     await nextTick()
 
     const form = wrapper.get('[data-test="new-employee-form"]')
-    expect(form.findAll('[data-test="required-mark"]')).toHaveLength(3)
+    expect(form.findAll('[data-test="required-mark"]')).toHaveLength(4)
     expect(wrapper.get('[data-test="new-employee-required-hint"]').text())
       .toContain('payroll.people.create.required_hint')
     expect(form.get('[data-test="new-employee-birth-number"]').attributes('required'))
@@ -471,7 +473,8 @@ describe('PeopleList toolbar and shared employee creation', () => {
     // Výchozí pojišťovna zaměstnavatele se předvyplní.
     expect((wrapper.get('[data-test="new-employee-insurer"]').element as HTMLSelectElement).value)
       .toBe('111')
-    await wrapper.get('[data-test="new-employee-name"]').setValue('Delta Nová')
+    await wrapper.get('[data-test="new-employee-first-name"]').setValue('Delta')
+    await wrapper.get('[data-test="new-employee-last-name"]').setValue('Nová')
     await wrapper.get('[data-test="new-employee-planned-start"]').setValue('2026-09-01')
     await wrapper.get('[data-test="new-employee-weekly-hours"]').setValue('20.00')
     wrapper.findAllComponents({ name: 'SearchableSelect' })
@@ -643,13 +646,17 @@ describe('PeopleList toolbar and shared employee creation', () => {
       'payroll.people.relations.partner_dependent',
       'payroll.people.relations.statutory_body',
     ])
-    await wrapper.get('[data-test="new-employee-name"]').setValue(' Delta Nová ')
+    await wrapper.get('[data-test="new-employee-first-name"]').setValue(' Delta ')
+    await wrapper.get('[data-test="new-employee-last-name"]').setValue(' Nová ')
     await wrapper.get('[data-test="new-employee-birth-number"]').setValue('0001010009')
     await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
     await flushPromises()
 
     expect(m.createPerson).toHaveBeenCalledWith({
+      // Celé jméno vzniklo spojením zadaných částí, ne opisem třetího pole.
       full_name: 'Delta Nová',
+      first_name: 'Delta',
+      last_name: 'Nová',
       birth_date: null,
       birth_number: '0001010009',
       relation_type: 'employment',
@@ -697,7 +704,8 @@ describe('PeopleList toolbar and shared employee creation', () => {
     const callsBeforeSubmit = m.peoplePage.mock.calls.length
 
     await wrapper.get('[data-test="add-employee"]').trigger('click')
-    await wrapper.get('[data-test="new-employee-name"]').setValue('Delta Nová')
+    await wrapper.get('[data-test="new-employee-first-name"]').setValue('Delta')
+    await wrapper.get('[data-test="new-employee-last-name"]').setValue('Nová')
     await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
     await flushPromises()
 
@@ -727,7 +735,8 @@ describe('PeopleList toolbar and shared employee creation', () => {
     await flushPromises()
 
     await wrapper.get('[data-test="add-employee"]').trigger('click')
-    await wrapper.get('[data-test="new-employee-name"]').setValue('Duplicitní')
+    await wrapper.get('[data-test="new-employee-first-name"]').setValue('Duplicitní')
+    await wrapper.get('[data-test="new-employee-last-name"]').setValue('Osoba')
     await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
     await flushPromises()
 
@@ -736,6 +745,46 @@ describe('PeopleList toolbar and shared employee creation', () => {
     )
     expect(wrapper.get('[data-test="new-employee-error"]').text())
       .toContain('Použijte existujícího zaměstnance.')
+  })
+
+  /*
+   * Bez křestního jména a příjmení hlásí měsíční JMHZ „Historická identita
+   * nemá explicitní jméno a příjmení" a účetní je musí doplnit ručně na kartě
+   * osoby. Zakládací formulář je proto vybírá ZVLÁŠŤ a bez obou neodešle nic —
+   * dřív posílal jen celé jméno a obě části zůstaly v identitě prázdné.
+   */
+  it('sends the separately entered first and last name into the seeded identity', async () => {
+    roster = []
+    m.createPerson.mockImplementation(() => {
+      roster = [person(5, 'Jan Novák', true, true)]
+      return Promise.resolve({
+        id: 5,
+        full_name: 'Jan Novák',
+        employments: [{ id: 55, employee_id: 5, relation_type: 'employment' }],
+      })
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="add-employee"]').trigger('click')
+
+    // Samotné příjmení osobu nezaloží — server by dostal identitu bez jména.
+    await wrapper.get('[data-test="new-employee-last-name"]').setValue('Novák')
+    await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createPerson).not.toHaveBeenCalled()
+    expect(m.toastError).toHaveBeenCalledWith('payroll.people.create.name_required')
+
+    await wrapper.get('[data-test="new-employee-first-name"]').setValue('Jan')
+    expect(wrapper.get('[data-test="new-employee-full-name-preview"]').text())
+      .toContain('payroll.people.create.full_name_preview')
+    await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.createPerson).toHaveBeenCalledWith(expect.objectContaining({
+      full_name: 'Jan Novák',
+      first_name: 'Jan',
+      last_name: 'Novák',
+    }))
   })
 
   /*

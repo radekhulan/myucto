@@ -448,8 +448,9 @@ final class PayrollPeopleApiTest extends TestCase
         $identity->execute([$this->supplierId, $personId]);
         self::assertSame([[
             'full_name' => 'Historická Identita',
-            // Rozpad na křestní a příjmení se NEDOMÝŠLÍ (migrace 1272) — doplní
-            // ho účetní do této verze a do té doby osoba svítí „vyžaduje doplnění".
+            // Rozpad na křestní a příjmení se NEDOMÝŠLÍ (migrace 1272) — kdo je
+            // ve svém požadavku nepošle (starší klient, API token), dostane NULL
+            // a osoba svítí „vyžaduje doplnění", dokud je účetní nedoplní.
             'first_name' => null,
             'last_name' => null,
             'birth_date' => '1988-06-01',
@@ -467,6 +468,54 @@ final class PayrollPeopleApiTest extends TestCase
         self::assertNotNull($card);
         self::assertNull($card['identity_history'][0]['first_name']);
         self::assertNull($card['identity_history'][0]['last_name']);
+    }
+
+    /**
+     * Zakládací formulář vybírá křestní jméno a příjmení ZVLÁŠŤ a musí dojít až
+     * do historické identity.
+     *
+     * Dřív sem šlo jen celé jméno, obě části zůstaly NULL a měsíční JMHZ hlásilo
+     * „Historická identita nemá explicitní jméno a příjmení" — účetní je musela
+     * u každé nové osoby doplňovat ručně na kartě. Rozpad `full_name` na serveru
+     * je pořád zakázaný (migrace 1272), zapisuje se JEN to, co přišlo.
+     */
+    public function testCreateSeedsIdentityWithTheSubmittedFirstAndLastName(): void
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    ...$this->validCreatePayload('Jan Novák'),
+                    'first_name' => ' Jan ',
+                    'last_name' => ' Novák ',
+                ],
+            ),
+            new Response(),
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $personId = $this->json($response)['person']['id'];
+
+        $identity = $this->db->pdo()->prepare(
+            'SELECT full_name, first_name, last_name
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $identity->execute([$this->supplierId, $personId]);
+        self::assertSame([[
+            'full_name' => 'Jan Novák',
+            'first_name' => 'Jan',
+            'last_name' => 'Novák',
+        ]], $identity->fetchAll(\PDO::FETCH_ASSOC));
+
+        // Karta osoby vidí totéž — účetní už nemá co doplňovat.
+        $card = $this->profiles->get($this->supplierId, $personId);
+        self::assertNotNull($card);
+        self::assertSame('Jan', $card['identity_history'][0]['first_name']);
+        self::assertSame('Novák', $card['identity_history'][0]['last_name']);
     }
 
     /** Verze identity nesmí začít v budoucnu, i když je nástup naplánovaný dopředu. */

@@ -69,11 +69,18 @@ final class PayrollPersonCreateService
              * `jmhz_identity_incomplete` a účetní z toho nepozná, že chybí
              * právě ona; rodné číslo zadané ve formuláři zase nemělo kam
              * dopadnout, protože legacy sloupec na kartě se nepoužívá.
+             *
+             * Křestní jméno a příjmení jdou stejnou cestou, protože měsíční
+             * JMHZ je vyžaduje zvlášť (`Historická identita nemá explicitní
+             * jméno a příjmení`) a rozpadnout si `full_name` sám nesmí nikdo
+             * (migrace 1272) — předává se JEN to, co uživatel zadal.
              */
             $this->profiles->seedInitialPersonalData(
                 $supplierId,
                 $employeeId,
                 $validated['employee']['full_name'],
+                $validated['first_name'],
+                $validated['last_name'],
                 $validated['employee']['birth_date'],
                 $validated['birth_number'],
                 (string) $employment['terms']['planned_start_on'],

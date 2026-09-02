@@ -385,12 +385,18 @@ final class PayrollPersonProfileRepository
      * nemá kam jinam — legacy sloupec na kartě je otevřený a nepoužívá se
      * (W1/P-02), šifruje ho až `saveIdentifiers()`.
      *
-     * Jméno se NEROZPADÁ na křestní a příjmení: `full_name` je zdroj pravdy a
-     * odvozovat z něj strukturu aplikace nesmí (migrace 1272). `first_name` a
-     * `last_name` proto zůstávají NULL, dokud je účetní nedoplní — osoba do té
-     * doby svítí v seznamu jako „vyžaduje doplnění" a karta jméno doplní do
-     * TÉTO verze, ne do nové.
+     * Jméno se pořád NEROZPADÁ na křestní a příjmení: `full_name` je zdroj
+     * pravdy a odvozovat z něj strukturu aplikace nesmí (migrace 1272).
+     * `$firstName` a `$lastName` se proto berou jen tak, jak je uživatel ZADAL
+     * — zakládací formulář je vybírá vlastními poli, protože bez nich měsíční
+     * JMHZ hlásí `Historická identita nemá explicitní jméno a příjmení`.
+     * Nedostane-li je (starší klient, API token), zůstanou NULL a osoba svítí
+     * v seznamu jako „vyžaduje doplnění"; karta pak jméno doplní do TÉTO
+     * verze, ne do nové.
      *
+     * @param ?string $firstName křestní jméno tak, jak ho uživatel zadal —
+     *     NIKDY ne kus rozpadlého `$fullName`.
+     * @param ?string $lastName příjmení tak, jak ho uživatel zadal.
      * @param string $effectiveFrom plánovaný nástup. Verze identity nikdy
      *     nezačíná v budoucnu (totéž pravidlo vynucuje
      *     `PayrollPersonProfileValidator::identityHistory()`), u dopředu
@@ -401,6 +407,8 @@ final class PayrollPersonProfileRepository
         int $supplierId,
         int $employeeId,
         string $fullName,
+        ?string $firstName,
+        ?string $lastName,
         ?string $birthDate,
         ?string $birthNumber,
         string $effectiveFrom,
@@ -409,8 +417,8 @@ final class PayrollPersonProfileRepository
             $this->saveIdentityHistory($supplierId, $employeeId, [[
                 'id' => null,
                 'full_name' => $fullName,
-                'first_name' => null,
-                'last_name' => null,
+                'first_name' => $firstName,
+                'last_name' => $lastName,
                 'title_prefix_present' => false,
                 'title_prefix' => null,
                 'title_suffix_present' => false,

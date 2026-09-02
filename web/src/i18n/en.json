@@ -2907,12 +2907,15 @@
         "title": "New employee",
         "subtitle": "One save creates the shared employee record, first employment relationship and regular gross pay.",
         "full_name": "Full name",
+        "first_name": "First name",
+        "last_name": "Last name",
+        "full_name_preview": "Recorded as {name}.",
         "birth_number": "Birth number",
         "birth_date": "Date of birth",
         "relation_type": "Employment relationship",
         "planned_start": "Planned start",
         "monthly_gross": "Regular gross salary (CZK)",
-        "name_required": "Enter the employee's full name.",
+        "name_required": "Enter both the employee's first and last name.",
         "created": "The employee has been added to the shared payroll records.",
         "failed": "The employee could not be added.",
         "permission_required": "You do not have permission to add an employee.",
@@ -3532,6 +3535,9 @@
           "social_foreign_insurance_confirmation": "Confirmation of insurance in another state",
           "social_posting_contract": "Posting agreement to another state",
           "a1_certificate_issued": "Issued A1 form",
+          "credit_38k_taxpayer_claim": "Signed taxpayer declaration (Section 38k)",
+          "credit_disability_pension_decision": "Disability pension award decision",
+          "credit_ztp_p_card": "ZTP/P card",
           "pension_award_decision": "Old-age pension award decision",
           "pension_employee_claim": "Employee notice claiming the discount",
           "health_s1_form": "S1 form or European health insurance card",
@@ -3580,6 +3586,7 @@
         "remove_row": "Remove",
         "row_frozen": "Closed by approved payroll",
         "current_missing": "Not recorded",
+        "current_none_claimed": "No credit",
         "current_from": "valid from {day}",
         "current_none": "nothing applies to the selected month",
         "history": "History and records — none yet | History and records (1) | History and records ({count}) | History and records ({count})",
@@ -3610,6 +3617,7 @@
         "section": {
           "tax_declarations": "Taxpayer's tax declaration",
           "tax_residences": "Tax residence",
+          "tax_credit_claims": "Tax credits (Section 35ba)",
           "social_jurisdictions": "Social insurance jurisdiction",
           "social_discount_claims": "Working pensioner discount",
           "health_coverages": "Health insurance jurisdiction",
@@ -3618,6 +3626,7 @@
         "section_hint": {
           "tax_declarations": "Decides whether monthly credits and allowances apply, or tax is withheld without them.",
           "tax_residences": "A non-resident is taxed differently than a resident; a supporting reference can be stored optionally.",
+          "tax_credit_claims": "Monthly tax credits for the taxpayer, disability and ZTP/P card holders. They apply only with a signed declaration; without a record the credit is not deducted and the tax advance is higher by its amount. Each kind of credit is its own series, so they may apply concurrently.",
           "social_jurisdictions": "Whether the person is subject to Czech social insurance. A foreign regime needs a country; a supporting reference is optional.",
           "social_discount_claims": "Insurance discount for an employee drawing an old-age pension. If it is not claimed, pick “not claimed”.",
           "health_coverages": "Whether the person is subject to Czech health insurance and which insurer they are registered with.",
@@ -3626,6 +3635,8 @@
         "field": {
           "status": "Status",
           "evidence_reference": "Supporting reference (optional)",
+          "credit_kind": "Credit kind",
+          "evidence_status": "Documented",
           "residence": "Residence",
           "country_code": "Country",
           "jurisdiction": "Regime",
@@ -3650,6 +3661,16 @@
             "unverified": "Unverified",
             "not_claimed": "Not claimed",
             "verified": "Documented"
+          },
+          "credit_kind": {
+            "taxpayer": "Taxpayer",
+            "disability-basic": "First- and second-degree disability",
+            "disability-extended": "Third-degree disability",
+            "ztp-p": "ZTP/P card holder"
+          },
+          "evidence_status": {
+            "verified": "Documented",
+            "unverified": "Unverified"
           },
           "residence": {
             "czech-resident": "Czech tax resident",
