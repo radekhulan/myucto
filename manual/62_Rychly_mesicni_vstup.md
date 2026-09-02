@@ -53,6 +53,31 @@ složky mimo hrubý příjem se zobrazí zvlášť a do součtu se nepřičtou. 
 s neuzavřeným daňovým zařazením vytvoří ruční kontrolu. Jde pouze o náhled
 hrubých složek, nikoli o výpočet čisté mzdy; ten vznikne až ve mzdovém běhu.
 
+**Nabídnutá měsíční mzda je už zkrácená o evidované absence.** Mzda přísluší za
+vykonanou práci (§ 109 odst. 1 zákoníku práce), takže neodpracovaná doba do ní
+nepatří. Poměr se počítá z **naplánovaných hodin individuálního rozvrhu**, ne
+z počtu pracovních dnů: při nerovnoměrném rozvržení by deset zameškaných dnů
+vyšlo stejně jako deset jiných dnů téhož měsíce, i když je za nimi jiný počet
+hodin. Pod polem je vidět, kolik hodin bylo odečteno a z jakého měsíčního fondu.
+Zkrácený úvazek se počítá ze svého vlastního fondu, ne z obecného
+čtyřicetihodinového týdne.
+
+Odečtené hodiny nezůstanou nezaplacené — nahradí je vlastní složka podle titulu:
+[náhrada za dovolenou](59_Absence_a_dovolena.md) podle § 222, náhrada při
+dočasné pracovní neschopnosti podle § 192, nebo náhrada za jinou placenou
+překážku. Dobu krytou dávkou nemocenského pojištění a neplacené volno
+zaměstnavatel neplatí. Každá naplánovaná hodina je tak vyplacena právě jednou.
+
+Svátek, který připadl na obvyklý pracovní den, měsíční mzdu **nekrátí**
+(§ 115 odst. 3 zákoníku práce) a do fondu se proto nezapočítává. Výjimkou je
+svátek v době nemoci: za ten náleží náhrada podle § 192 odst. 1, takže se z
+základní mzdy odečte, aby nebyl zaplacen dvakrát.
+
+Když si aplikace jistá není, **žádnou částku nenabídne** a vyžádá ruční zadání:
+chybí pracovní kalendář, o absenci v měsíci se ještě nerozhodlo, nemoc nemá
+zmrazený výpočet náhrady, nebo si evidence odporuje. Nabídnout v takové chvíli
+celou sjednanou mzdu by vypadalo hotově a nikdo by to už nezkontroloval.
+
 Přesčas lze zadat celkovou částkou. Zadání v hodinách je dostupné pouze tehdy,
 když má vztah pro dané čtvrtletí schválený průměrný hodinový výdělek. Bez
 schváleného podkladu aplikace hodinovou sazbu neodhaduje a vyžádá celkovou

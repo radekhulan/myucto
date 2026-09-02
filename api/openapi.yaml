@@ -17129,7 +17129,11 @@ paths:
     post:
       tags: [Payroll]
       summary: Zadat mzdový vstup
-      description: Vytvoří vstup ve stavu `draft`. Neschvaluje ho ani nespouští výpočet mzdy.
+      description: >-
+        Vytvoří vstup ve stavu `draft`. Neschvaluje ho ani nespouští výpočet mzdy.
+        Složky `NAHRADA_MZDY_DPN` a `NAHRADA_MZDY_DOVOLENA` tudy zadat nelze —
+        vznikají výhradně ze schválené absence, protože jejich částka je vázaná
+        na zákonný nárok a na zmrazený průměrný výdělek.
       requestBody:
         required: true
         content:

@@ -58,6 +58,7 @@ final class PayrollComponentJmhzMappingDefaults
         'PRIPLATEK_ZTIZENE_PROSTREDI' => '10332',
         // Náhrady mzdy zúčtované; náhrada při DPN má vlastní detailní uzel.
         'NAHRADA_MZDY' => '10337',
+        'NAHRADA_MZDY_DOVOLENA' => '10338',
         'NAHRADA_MZDY_DPN' => '10342',
     ];
 

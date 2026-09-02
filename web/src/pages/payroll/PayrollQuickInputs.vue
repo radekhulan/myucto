@@ -87,7 +87,7 @@ const MAX_OVERTIME_HOURS_MILLI = 1_000_000
  * vždycky překlep, ne směna.
  */
 const MAX_SURCHARGE_HOURS_MILLI = 744_000
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
@@ -449,6 +449,24 @@ function incomeLabel(row: UiRow): string {
     return t('payroll.quick_inputs.income_labels.agreement')
   }
   return t('payroll.quick_inputs.income_labels.employment')
+}
+
+/**
+ * Doklad ke krácení měsíční mzdy za absence. Vidět musí být fond i nahrazené
+ * hodiny — bez nich je v poli jen nižší číslo, ke kterému účetní nedohledá,
+ * proč je nižší.
+ */
+function prorationHint(row: UiRow): string | null {
+  const proration = row.base_proration
+  if (!proration || proration.replaced_minutes <= 0) return null
+  return t('payroll.quick_inputs.base_proration', {
+    replaced: minutesToHours(proration.replaced_minutes),
+    fund: minutesToHours(proration.fund_minutes),
+  })
+}
+
+function minutesToHours(minutes: number): string {
+  return (minutes / 60).toLocaleString(locale.value, { maximumFractionDigits: 2 })
 }
 
 function additionalIncomeLabel(row: UiRow): string {
@@ -1212,6 +1230,13 @@ onMounted(() => {
                   >
                     {{ fieldStateMessage(row, 'base') }}
                   </p>
+                  <p
+                    v-if="prorationHint(row)"
+                    :data-testid="`quick-base-proration-${row.employment_id}`"
+                    class="mt-1 max-w-48 text-xs text-neutral-600"
+                  >
+                    {{ prorationHint(row) }}
+                  </p>
                 </td>
                 <td v-if="tbl.isVisible('overtime')" class="px-4 py-4">
                   <p class="mb-1 text-xs font-medium text-neutral-600">{{ additionalIncomeLabel(row) }}</p>
@@ -1537,6 +1562,13 @@ onMounted(() => {
                   :class="['mt-1 block text-xs', fieldStateClass(fieldState(row, 'base'))]"
                 >
                   {{ fieldStateMessage(row, 'base') }}
+                </span>
+                <span
+                  v-if="prorationHint(row)"
+                  :data-testid="`quick-base-proration-mobile-${row.employment_id}`"
+                  class="mt-1 block text-xs text-neutral-600"
+                >
+                  {{ prorationHint(row) }}
                 </span>
               </label>
               <label class="block">

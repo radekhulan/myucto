@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Absence\PayrollWageProrationService;
 use MyInvoice\Service\Payroll\Component\PayrollRecurringAmountCalculator;
 use MyInvoice\Service\Payroll\Calculation\DecimalRate;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
@@ -89,6 +90,7 @@ final class PayrollQuickInputRepository
         private readonly PayrollRulesetProvider $rulesets,
         private readonly PayrollQuickSurchargeCalculator $quickSurcharges,
         private readonly PayrollSurchargeClaimRepository $surchargeClaims,
+        private readonly PayrollWageProrationService $wageProration,
     ) {}
 
     /**
@@ -567,6 +569,8 @@ final class PayrollQuickInputRepository
         foreach ($rows as $row) {
             $employmentId = PayrollTimeValue::int($row['employment_id'] ?? null, 'employment_id');
             $items[] = $this->buildItem(
+                $supplierId,
+                $period,
                 $row,
                 $byEmployment[$employmentId] ?? [],
                 $recurringByEmployment[$employmentId] ?? [],
@@ -1025,6 +1029,8 @@ final class PayrollQuickInputRepository
      * @return array<string,mixed>
      */
     private function buildItem(
+        int $supplierId,
+        string $period,
         array $employment,
         array $inputs,
         array $recurring,
@@ -1227,13 +1233,45 @@ final class PayrollQuickInputRepository
                 $employment['suspended_in_month'] ?? null,
                 'suspended_in_month',
             ) === 1;
-        $baseRequiresEntry = ($partialMonth || $suspendedInMonth)
+        $awayInMonth = PayrollTimeValue::int(
+            $employment['away_in_month'] ?? null,
+            'away_in_month',
+        ) === 1;
+        // Mzda přísluší za vykonanou práci (§ 109 odst. 1 ZP), takže návrh
+        // měsíční mzdy nesmí ignorovat evidované absence. Poměr se počítá
+        // z HODIN individuálního rozvrhu, ne z pracovních dnů — viz
+        // {@see \MyInvoice\Service\Payroll\Calculation\MonthlyWageProration}.
+        // Dotaz se pouští jen u vztahu, který v měsíci nějakou absenci má;
+        // `away_in_month` to ví už z hlavního dotazu, takže běžný řádek
+        // nic navíc nestojí.
+        $proration = null;
+        if ($awayInMonth
+            && !$partialMonth
+            && !$suspendedInMonth
+            && !$managed['base']
+            && $employment['monthly_gross_minor'] !== null
+        ) {
+            $proration = $this->wageProration->forMonth(
+                $supplierId,
+                PayrollTimeValue::int($employment['employment_id'] ?? null, 'employment_id'),
+                $period,
+                PayrollTimeValue::int(
+                    $employment['monthly_gross_minor'],
+                    'monthly_gross_minor',
+                ),
+            );
+        }
+        $prorationUnsupported = $proration !== null && $proration['supported'] === false;
+
+        $baseRequiresEntry = ($partialMonth || $suspendedInMonth || $prorationUnsupported)
             && !$managed['base']
             && $quick['base'] === null;
         if ($baseRequiresEntry) {
-            $blockers[] = $suspendedInMonth
-                ? 'suspended_month_base_required'
-                : 'partial_month_base_required';
+            $blockers[] = match (true) {
+                $suspendedInMonth => 'suspended_month_base_required',
+                $partialMonth => 'partial_month_base_required',
+                default => 'absence_month_base_required',
+            };
         }
 
         $base = $managed['base']
@@ -1241,10 +1279,10 @@ final class PayrollQuickInputRepository
             : ($quick['base']['amount_minor'] ?? (
                 $baseRequiresEntry || $employment['monthly_gross_minor'] === null
                     ? 0
-                    : PayrollTimeValue::int(
+                    : ($proration['amount_minor'] ?? PayrollTimeValue::int(
                         $employment['monthly_gross_minor'],
                         'monthly_gross_minor',
-                    )
+                    ))
             ));
         $overtimeWage = $quick['overtime_wage']['amount_minor'] ?? 0;
         $overtimePremium = $quick['overtime_premium']['amount_minor'] ?? 0;
@@ -1390,15 +1428,26 @@ final class PayrollQuickInputRepository
             'relation_type' => $relationType,
             'effective_status' => $effectiveStatus,
             'suspended_in_month' => $suspendedInMonth,
-            'away_in_month' => PayrollTimeValue::int(
-                $employment['away_in_month'] ?? null,
-                'away_in_month',
-            ) === 1,
+            'away_in_month' => $awayInMonth,
             'base_amount_minor' => $base,
             'base_managed_elsewhere' => $managed['base'],
             'base_conflict' => $conflicts['base'],
             'partial_month' => $partialMonth,
             'base_requires_entry' => $baseRequiresEntry,
+            // Doklad ke krácení: fond měsíce, hodiny ponechané v základní mzdě
+            // a hodiny nahrazené jiným titulem. `null` = vztah v měsíci žádnou
+            // absenci nemá a krátit není za co.
+            'base_proration' => $proration === null || $proration['trace'] === null
+                ? null
+                : [
+                    'fund_minutes' => $proration['fund_minutes'],
+                    'replaced_minutes' => $proration['replaced_minutes'],
+                    'replaced_minutes_by_title' => $proration['replaced_minutes_by_title'],
+                    'amount_minor' => $proration['amount_minor'],
+                ],
+            'base_proration_unsupported_reason' => $prorationUnsupported
+                ? $proration['reason']
+                : null,
             'overtime_mode' => ($overtimeCarrier['quantity_milliunits'] ?? null) === null
                 ? 'amount'
                 : 'hours',
