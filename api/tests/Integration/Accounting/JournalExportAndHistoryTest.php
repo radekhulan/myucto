@@ -173,6 +173,51 @@ final class JournalExportAndHistoryTest extends TestCase
         self::assertSame('debit', $row['amount_side']);
     }
 
+    public function testFulltextRecognizesExistingAccountCodeAndKeepsUnknownCodeAsText(): void
+    {
+        $parentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '221'"
+        )->fetchColumn();
+        $this->db->pdo()->prepare(
+            "INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active)
+             VALUES (?, '221.400', 'Testovací bankovní účet', 'asset', 'debit', 0, ?, 1)"
+        )->execute([$this->supplierId, $parentId]);
+
+        $matchedId = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '221.400', 'side' => 'debit', 'amount' => 432.10],
+            ['account_code' => '311', 'side' => 'credit', 'amount' => 432.10],
+        ], [
+            'entry_date' => self::YEAR . '-04-03',
+            'description' => 'Pohyb na analytickém účtu',
+            'user_id' => $this->userId,
+            'posted_by' => $this->userId,
+        ]);
+        $otherId = $this->manualEntry('Jiný zápis', self::YEAR . '-04-04', 50.0);
+
+        $byAccount = $this->call('list', 'GET', 'accountant', [], [], [], ['q' => '221.400']);
+        self::assertNotNull($this->findItem($byAccount['body']['items'], $matchedId));
+        self::assertNull($this->findItem($byAccount['body']['items'], $otherId));
+        $accountRow = $this->findItem($byAccount['body']['items'], $matchedId);
+        self::assertEqualsWithDelta(432.10, (float) $accountRow['amount'], 0.001);
+        self::assertSame('debit', $accountRow['amount_side']);
+
+        $withoutSeparator = $this->call('list', 'GET', 'accountant', [], [], [], ['q' => '221400']);
+        self::assertNotNull($this->findItem($withoutSeparator['body']['items'], $matchedId));
+
+        $textId = $this->manualEntry('Kontrola účtu 999.999', self::YEAR . '-04-05', 60.0);
+        $asText = $this->call('list', 'GET', 'accountant', [], [], [], ['q' => '999.999']);
+        self::assertNotNull($this->findItem($asText['body']['items'], $textId));
+
+        $explicitTextId = $this->manualEntry('Textový odkaz 221.400', self::YEAR . '-04-06', 70.0);
+        $withExplicitRange = $this->call('list', 'GET', 'accountant', [], [], [], [
+            'q' => '221.400',
+            'account_from' => '211',
+        ]);
+        self::assertNotNull($this->findItem($withExplicitRange['body']['items'], $explicitTextId));
+        self::assertNull($this->findItem($withExplicitRange['body']['items'], $matchedId));
+    }
+
     public function testListEnrichesBankDrillDownWithStatementId(): void
     {
         $statementId = $this->bankStatement();

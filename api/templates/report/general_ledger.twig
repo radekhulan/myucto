@@ -57,7 +57,7 @@
         </td>
         <td style="width:40%;">
             <div class="header-title">Hlavní kniha</div>
-            <div class="header-period">Fiskální rok {{ period.fiscal_year }}</div>
+            <div class="header-period">{% if all_periods %}Všechna účetní období{% else %}Fiskální rok {{ period.fiscal_year }}{% endif %}</div>
             <div class="header-sub">Za období: {{ from|cz_date }} – {{ to|cz_date }}{% if analytics %} · rozpad po analytikách{% endif %}</div>
         </td>
         <td style="width:30%;"></td>

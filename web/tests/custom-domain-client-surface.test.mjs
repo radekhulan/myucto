@@ -16,8 +16,8 @@ const client = await readFile(new URL('api/client.ts', src), 'utf8')
 test('shared manifest persists the audited client surface and legacy aliases', () => {
   // Přesný počet je brána proti nechtěnému rozšíření klientské plochy, ne
   // konstanta — s každou novou auditovanou routou se vědomě posouvá.
-  assert.equal(manifest.routes.length, 37)
-  assert.equal(new Set(manifest.routes.map(route => route.name)).size, 37)
+  assert.equal(manifest.routes.length, 39)
+  assert.equal(new Set(manifest.routes.map(route => route.name)).size, 39)
   assert.deepEqual(
     manifest.routes.slice(-3).map(route => route.name),
     ['data-exchange', 'admin-export', 'admin-import'],

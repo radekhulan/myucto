@@ -792,7 +792,8 @@ export interface ReportPeriod {
 }
 
 export interface LedgerReportParams {
-  period_id: number
+  period_id?: number
+  all_periods?: 1
   from?: string
   to?: string
   analytics?: 0 | 1
@@ -827,7 +828,8 @@ export interface GeneralLedgerAccount {
 }
 
 export interface GeneralLedgerReport {
-  period: ReportPeriod
+  period: ReportPeriod | null
+  all_periods: boolean
   from: string
   to: string
   analytics: boolean

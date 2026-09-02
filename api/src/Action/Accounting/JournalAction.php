@@ -220,10 +220,24 @@ final class JournalAction
         if (in_array(($q['automation'] ?? null), ['auto', 'approved', 'manual'], true)) {
             $filters['automation'] = (string) $q['automation'];
         }
-        // Fulltext (popis + čísla dokladů) — Featura D (audit 2026-07 follow-up).
-        if (!empty($q['q'])) $filters['q'] = mb_substr(trim((string) $q['q']), 0, 100);
         if (!empty($q['account_from'])) $filters['account_from'] = mb_substr(trim((string) $q['account_from']), 0, 20);
         if (!empty($q['account_to']))   $filters['account_to'] = mb_substr(trim((string) $q['account_to']), 0, 20);
+        // Jedno vyhledávací pole přijímá i přesný kód účtu. Překládá se na tentýž
+        // rozsah jako explicitní účetní filtr, takže částka i export zůstanou na
+        // společné cestě. Explicitní rozsah má přednost a q pak zůstává fulltextem.
+        if (!empty($q['q'])) {
+            $query = mb_substr(trim((string) $q['q']), 0, 100);
+            $account = !isset($filters['account_from']) && !isset($filters['account_to'])
+                ? $this->findAccountFromSearch($supplierId, $query)
+                : null;
+            if ($account !== null) {
+                $code = (string) $account['account_code'];
+                $filters['account_from'] = $code;
+                $filters['account_to'] = (bool) $account['is_synthetic'] ? $code . '999999' : $code;
+            } else {
+                $filters['q'] = $query;
+            }
+        }
         if (isset($q['amount_from']) && $q['amount_from'] !== '' && is_numeric($q['amount_from'])) {
             $filters['amount_from'] = (float) $q['amount_from'];
         }
@@ -231,6 +245,22 @@ final class JournalAction
             $filters['amount_to'] = (float) $q['amount_to'];
         }
         return $filters;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function findAccountFromSearch(int $supplierId, string $query): ?array
+    {
+        $exact = $this->accounts->findByCode($supplierId, $query);
+        if ($exact !== null) return $exact;
+
+        $normalized = preg_replace('/[.\s_-]+/u', '', $query) ?? '';
+        if ($normalized === '' || !ctype_digit($normalized)) return null;
+
+        $matches = array_values(array_filter(
+            $this->accounts->listForTenant($supplierId, true),
+            static fn (array $account): bool => preg_replace('/[.\s_-]+/u', '', (string) $account['account_code']) === $normalized,
+        ));
+        return count($matches) === 1 ? $matches[0] : null;
     }
 
     public function get(Request $request, Response $response, array $args): Response

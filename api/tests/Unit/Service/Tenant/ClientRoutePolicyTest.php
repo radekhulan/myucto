@@ -24,9 +24,9 @@ final class ClientRoutePolicyTest extends TestCase
         $names = array_column($routes, 'name');
         $patterns = array_column($routes, 'path_pattern');
 
-        self::assertCount(37, $routes);
-        self::assertCount(37, array_unique($names));
-        self::assertCount(37, array_unique($patterns));
+        self::assertCount(39, $routes);
+        self::assertCount(39, array_unique($names));
+        self::assertCount(39, array_unique($patterns));
         self::assertContains('data-exchange', $names);
         self::assertContains('admin-export', $names);
         self::assertContains('admin-import', $names);

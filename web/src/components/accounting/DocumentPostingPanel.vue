@@ -87,7 +87,7 @@ function isReversal(entry: JournalEntryWithLines): boolean {
             {{ t('accounting.journal.document_posting.open_in_journal') }}
           </RouterLink>
         </div>
-        <JournalLinesTable :lines="entry.lines" />
+        <JournalLinesTable :lines="entry.lines" :context-date="entry.entry_date" />
         <!-- Souvisí: protějšky v grafu doklad ↔ úhrada. Panel si data tahá sám
              podle entry-id a když nic nenajde, nevykreslí se. -->
         <JournalRelatedPanel class="mt-3 block" :entry-id="entry.id" />

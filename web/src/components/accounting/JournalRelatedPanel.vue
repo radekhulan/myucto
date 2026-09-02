@@ -211,7 +211,7 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
            úhrada ověřuje nejčastěji a dosud kvůli tomu musel odskočit do deníku.
            Tatáž komponenta jako u prohlíženého zápisu, jen kompaktní. -->
       <JournalLinesTable v-if="it.entry_id !== null && relatedLines[it.entry_id]?.length"
-        class="mt-2" dense :lines="relatedLines[it.entry_id]!" />
+        class="mt-2" dense :lines="relatedLines[it.entry_id]!" :context-date="it.date" />
       </li>
 
       <li v-if="truncated" class="bg-neutral-50 px-3 py-1.5 text-xs text-neutral-500">

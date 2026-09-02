@@ -17,6 +17,7 @@ import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { findAccountingPeriod } from '@/utils/accountingPeriod'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -54,6 +55,14 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function onPeriodChange() {
+  const period = findAccountingPeriod(periods.value, filters.period_id)
+  if (!period) return
+  filters.from = period.starts_on
+  filters.to = period.ends_on
+  void load()
 }
 
 function statementLink(row: TrialBalanceRow) {
@@ -150,7 +159,7 @@ onMounted(async () => {
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.trial_balance.filter_period') }}</label>
-          <select v-model="filters.period_id" @change="load"
+          <select v-model="filters.period_id" @change="onPeriodChange"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
             <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.fiscal_year }}</option>
           </select>

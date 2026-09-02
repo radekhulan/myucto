@@ -30,6 +30,7 @@ import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue
 import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue'
 import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
 import { journalSourceLink } from '@/utils/journalSourceLink'
+import { findAccountingPeriod } from '@/utils/accountingPeriod'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -136,6 +137,18 @@ function applyFilters() {
   syncFiltersToUrl()
   load()
 }
+
+function onPeriodChange() {
+  const period = findAccountingPeriod(periods.value, filters.period_id)
+  if (period) {
+    filters.date_from = period.starts_on
+    filters.date_to = period.ends_on
+  } else {
+    filters.date_from = ''
+    filters.date_to = ''
+  }
+  applyFilters()
+}
 function resetFilters() {
   filters.document_no = ''
   filters.period_id = ''
@@ -190,6 +203,34 @@ function syncFiltersToUrl() {
   void router.replace({ query: buildQuery() })
 }
 
+function hydrateFilters(q: Record<string, unknown>) {
+  const value = (key: string) => typeof q[key] === 'string' ? q[key] : ''
+  const numberValue = (key: string): number | '' => {
+    const parsed = Number(value(key))
+    return value(key) !== '' && Number.isFinite(parsed) ? parsed : ''
+  }
+  filters.document_no = value('document_no')
+  const periodId = numberValue('period_id')
+  filters.period_id = periodId !== '' && periodId > 0 ? periodId : ''
+  filters.date_from = value('date_from')
+  filters.date_to = value('date_to')
+  filters.source_type = (SOURCE_TYPES as readonly string[]).includes(value('source_type'))
+    ? (value('source_type') as typeof filters.source_type) : ''
+  const posted = value('posted')
+  filters.posted = posted === 'posted' || posted === '1'
+    ? 'posted'
+    : (posted === 'draft' || posted === '0' ? 'draft' : '')
+  const automation = value('automation')
+  filters.automation = automation === 'auto' || automation === 'approved' || automation === 'manual'
+    ? automation : ''
+  filters.q = value('q')
+  filters.account_from = value('account_from')
+  filters.account_to = value('account_to')
+  filters.amount_from = numberValue('amount_from')
+  filters.amount_to = numberValue('amount_to')
+  filters.integrity = value('integrity') === 'amount_mismatch' ? 'amount_mismatch' : ''
+}
+
 function applyQueryToPage(q: Record<string, string>) {
   // Uložený filtr přepisuje URL sám — sync i reset watcher se na ten jeden tick uspí,
   // ať se nepřepíšou navzájem (prázdný uložený filtr by se jinak vyhodnotil jako
@@ -197,21 +238,7 @@ function applyQueryToPage(q: Record<string, string>) {
   suppressUrlSync = true
   setTimeout(() => { suppressUrlSync = false }, 0)
   void router.replace({ query: q })
-  filters.document_no = q.document_no ?? ''
-  filters.period_id = q.period_id ? Number(q.period_id) : ''
-  filters.date_from = q.date_from ?? ''
-  filters.date_to = q.date_to ?? ''
-  filters.source_type = (SOURCE_TYPES as readonly string[]).includes(q.source_type ?? '')
-    ? (q.source_type as typeof filters.source_type) : ''
-  filters.posted = q.posted === 'posted' || q.posted === 'draft' ? q.posted : ''
-  filters.automation = q.automation === 'auto' || q.automation === 'approved' || q.automation === 'manual'
-    ? q.automation : ''
-  filters.q = q.q ?? ''
-  filters.account_from = q.account_from ?? ''
-  filters.account_to = q.account_to ?? ''
-  filters.amount_from = q.amount_from ? Number(q.amount_from) : ''
-  filters.amount_to = q.amount_to ? Number(q.amount_to) : ''
-  filters.integrity = q.integrity === 'amount_mismatch' ? 'amount_mismatch' : ''
+  hydrateFilters(q)
   applyFilters()
 }
 
@@ -382,18 +409,7 @@ onMounted(async () => {
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
   // Osnova jen pro našeptávání filtru — výpadek nesmí zabránit načtení deníku.
   accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] })
-  // Předvyplnění filtrů z query (drill-down z uzávěrky / sestav / karty účtu).
-  const qPeriod = Number(route.query.period_id || 0)
-  if (qPeriod > 0) filters.period_id = qPeriod
-  // Rozsah účtu + datumu — proklik „Deník" z karty účtu a z opisu účtu.
-  for (const key of ['account_from', 'account_to', 'date_from', 'date_to'] as const) {
-    const v = route.query[key]
-    if (typeof v === 'string' && v) filters[key] = v
-  }
-  const qSource = String(route.query.source_type || '')
-  if ((SOURCE_TYPES as readonly string[]).includes(qSource)) {
-    filters.source_type = qSource as typeof filters.source_type
-  }
+  hydrateFilters(route.query)
   const qSourceId = Number(route.query.source_id || 0)
   if (qSourceId > 0) sourceIdFilter.value = qSourceId
   const entryId = Number(route.query.entry_id || 0)
@@ -595,6 +611,15 @@ function sourceLabel(type: string): string {
 function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
   return journalSourceLink(entry)
 }
+
+function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
+  const period = periods.value.find(item => item.id === entry.period_id)
+  const year = entry.entry_date.slice(0, 4)
+  return {
+    from: filters.date_from || period?.starts_on || `${year}-01-01`,
+    to: filters.date_to || period?.ends_on || `${year}-12-31`,
+  }
+}
 </script>
 
 <template>
@@ -690,7 +715,7 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_period') }}</label>
-          <select v-model="filters.period_id" @change="applyFilters"
+          <select v-model="filters.period_id" @change="onPeriodChange"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
             <option value="">{{ t('common.all') }}</option>
             <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.fiscal_year }}</option>
@@ -888,7 +913,8 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
                   <div v-else-if="details[e.id]">
                     <!-- Rozpad na účty — sdílená karta, tutéž ukazuje panel Souvisí
                          u protějšku, aby je účetní poznal jako stejnou věc. -->
-                    <JournalLinesTable class="mb-3" :lines="details[e.id]!.lines" />
+                    <JournalLinesTable class="mb-3" :lines="details[e.id]!.lines"
+                      :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to" />
                     <!-- Souvisí hned za kontacemi: protějšek zápisu (doklad ↔ úhrada)
                          je to první, co účetní po rozpadu na účty hledá. Dřív byl až
                          pod přílohami, poznámkami a historií, tedy o obrazovku níž. -->

@@ -35,10 +35,59 @@ final class GeneralLedgerService
         }
         $from = ($from === null || $from === '') ? (string) $period['starts_on'] : $from;
         $to   = ($to === null || $to === '') ? (string) $period['ends_on'] : $to;
-        $periodStart = (string) $period['starts_on'];
+        return $this->buildRange(
+            $supplierId,
+            $period,
+            $from,
+            $to,
+            (string) $period['starts_on'],
+            $analytics,
+            $filters,
+            $afterClosing,
+            false,
+        );
+    }
 
-        $rows    = $this->ledger->trialBalanceRows($supplierId, $from, $to, $periodStart, $analytics, $filters, !$afterClosing);
-        $monthly = $this->ledger->monthlyTurnovers($supplierId, $from, $to, $analytics, $filters, !$afterClosing);
+    /**
+     * @param array{vendor?:string, client?:string, item?:string} $filters
+     * @return array<string,mixed>
+     */
+    public function buildAllPeriods(int $supplierId, ?string $from = null, ?string $to = null, bool $analytics = false, array $filters = [], bool $afterClosing = false): array
+    {
+        $periods = $this->periods->listForTenant($supplierId);
+        if ($periods === []) {
+            throw new ReportException('period_not_found', 'Firma nemá žádné účetní období.', 404);
+        }
+
+        $starts = array_column($periods, 'starts_on');
+        $ends = array_column($periods, 'ends_on');
+        $rangeStart = (string) min($starts);
+        $rangeEnd = (string) max($ends);
+
+        return $this->buildRange(
+            $supplierId,
+            null,
+            ($from === null || $from === '') ? $rangeStart : $from,
+            ($to === null || $to === '') ? $rangeEnd : $to,
+            $rangeStart,
+            $analytics,
+            $filters,
+            $afterClosing,
+            true,
+        );
+    }
+
+    /**
+     * @param array<string,mixed>|null $period
+     * @param array{vendor?:string, client?:string, item?:string} $filters
+     * @return array<string,mixed>
+     */
+    private function buildRange(int $supplierId, ?array $period, string $from, string $to, string $periodStart, bool $analytics, array $filters, bool $afterClosing, bool $allPeriods): array
+    {
+        $excludeAllOpenings = $allPeriods && !$afterClosing;
+
+        $rows    = $this->ledger->trialBalanceRows($supplierId, $from, $to, $periodStart, $analytics, $filters, !$afterClosing, $excludeAllOpenings);
+        $monthly = $this->ledger->monthlyTurnovers($supplierId, $from, $to, $analytics, $filters, !$afterClosing, $excludeAllOpenings);
         $months  = $this->monthsBetween($from, $to);
 
         $monthlyByAccount = [];
@@ -90,12 +139,13 @@ final class GeneralLedgerService
         }
 
         return [
-            'period' => [
+            'period' => $period === null ? null : [
                 'id'          => (int) $period['id'],
                 'fiscal_year' => (int) $period['fiscal_year'],
                 'starts_on'   => (string) $period['starts_on'],
                 'ends_on'     => (string) $period['ends_on'],
             ],
+            'all_periods' => $allPeriods,
             'from'        => $from,
             'to'          => $to,
             'analytics'   => $analytics,

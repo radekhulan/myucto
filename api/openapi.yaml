@@ -8721,8 +8721,15 @@ paths:
         - { in: query, name: date_to, schema: { type: string, format: date } }
         - { in: query, name: source_type, schema: { type: string, enum: [invoice, purchase_invoice, bank, cash, asset, manual, closing, opening, depreciation, asset_disposal, fx_revaluation, stock, provision, income_tax, profit_distribution, offset, small_asset_accrual, prepaid_expense_accrual, settlement, deferred_tax, payroll, vat_clearing] } }
         - { in: query, name: source_id, schema: { type: integer } }
+        - { in: query, name: entry_id, description: Přesný identifikátor účetního zápisu, schema: { type: integer } }
         - { in: query, name: posted, description: "true = jen zaúčtované, false = jen koncepty", schema: { type: boolean } }
         - { in: query, name: automation, description: Původ zápisu, schema: { type: string, enum: [auto, approved, manual] } }
+        - { in: query, name: q, description: "Fulltext v popisu a čísle dokladu. Pokud hodnota jednoznačně odpovídá existujícímu kódu účtu, filtruje pohyby tohoto účtu; syntetický účet zahrne své analytiky.", schema: { type: string, maxLength: 100 } }
+        - { in: query, name: account_from, description: Dolní mez rozsahu kódů účtů, schema: { type: string, maxLength: 20 } }
+        - { in: query, name: account_to, description: Horní mez rozsahu kódů účtů, schema: { type: string, maxLength: 20 } }
+        - { in: query, name: amount_from, description: Minimální částka účetního zápisu, schema: { type: number, format: double } }
+        - { in: query, name: amount_to, description: Maximální částka účetního zápisu, schema: { type: number, format: double } }
+        - { in: query, name: integrity, description: Jen aktuální nálezy kontroly integrity deníku, schema: { type: string, enum: [amount_mismatch] } }
       responses:
         '200':
           description: OK
@@ -9423,13 +9430,18 @@ paths:
     get:
       tags: [Accounting]
       summary: Hlavní kniha (PS, měsíční obraty, KS per účet)
-      description: Jen zaúčtované zápisy; `draft_count` informuje o konceptech v rozsahu.
+      description: Jen zaúčtované zápisy; `draft_count` informuje o konceptech v rozsahu. Vyžaduje buď `period_id`, nebo `all_periods=1` pro rozsah všech účetních období firmy.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: query, name: period_id, required: true, schema: { type: integer } }
-        - { in: query, name: from, description: "Zúžení rozsahu uvnitř období", schema: { type: string, format: date } }
+        - { in: query, name: period_id, description: "Konkrétní účetní období; povinné bez all_periods=1", schema: { type: integer } }
+        - { in: query, name: all_periods, description: "1 = všechna účetní období firmy", schema: { type: boolean } }
+        - { in: query, name: from, description: "Zúžení rozsahu uvnitř vybraného období nebo celkového rozsahu období", schema: { type: string, format: date } }
         - { in: query, name: to, schema: { type: string, format: date } }
         - { in: query, name: analytics, description: "1 = rozpad po analytikách", schema: { type: boolean } }
+        - { in: query, name: after_closing, description: "1 = zahrnout technické uzavírací a otevírací zápisy", schema: { type: boolean } }
+        - { in: query, name: vendor, schema: { type: string, maxLength: 100 } }
+        - { in: query, name: client, schema: { type: string, maxLength: 100 } }
+        - { in: query, name: item, schema: { type: string, maxLength: 100 } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -9441,10 +9453,15 @@ paths:
       summary: Export hlavní knihy (PDF / XLSX)
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: query, name: period_id, required: true, schema: { type: integer } }
+        - { in: query, name: period_id, description: "Konkrétní účetní období; povinné bez all_periods=1", schema: { type: integer } }
+        - { in: query, name: all_periods, description: "1 = všechna účetní období firmy", schema: { type: boolean } }
         - { in: query, name: from, schema: { type: string, format: date } }
         - { in: query, name: to, schema: { type: string, format: date } }
         - { in: query, name: analytics, schema: { type: boolean } }
+        - { in: query, name: after_closing, schema: { type: boolean } }
+        - { in: query, name: vendor, schema: { type: string, maxLength: 100 } }
+        - { in: query, name: client, schema: { type: string, maxLength: 100 } }
+        - { in: query, name: item, schema: { type: string, maxLength: 100 } }
         - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
       responses:
         '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }

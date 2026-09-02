@@ -21,7 +21,11 @@ majetku, mezd, uzávěrky nebo ručního zápisu. Hlavní kniha mezi těmito zdr
 ## 48.2 Období, rozsah a filtry
 
 - **Období** určuje fiskální rok. Předvyplní se nejnovější otevřené období,
-  jinak první dostupné.
+  jinak první dostupné. Při změně období se **Od / Do** nastaví na jeho hranice;
+  ostatní filtry i rozbalený účet zůstanou zachované. Volba **Vše** spojí všechna
+  účetní období firmy do jednoho víceletého rozsahu. Ve výchozím pohledu přitom
+  vynechá technické uzavírací a navazující otevírací zápisy, aby nepřifukovaly
+  obraty mezi roky.
 - **Od / Do** omezí sestavu uvnitř zvoleného období. Prázdné hodnoty znamenají
   první a poslední den období. Datum mimo období nebo `Od > Do` server odmítne.
 - **Rozpad po analytikách** vypíše jednotlivé analytické účty. Bez něj se

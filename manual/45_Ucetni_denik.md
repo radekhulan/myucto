@@ -162,8 +162,11 @@ jako *Navázaný doklad*, u zaúčtování dokladu jako *Navázaný zápis*.
 Nad tabulkou je filtrační lišta:
 
 - **Číslo dokladu** — hledá částečnou shodu v celém deníku, ne jen na aktuální stránce,
-- **Fulltext** — hledá v čísle dokladu, popisu a dostupných údajích zdroje,
-- **Období** — výběr účetního období (fiskální rok) ze seznamu založených období,
+- **Fulltext** - hledá v čísle dokladu, popisu a dostupných údajích zdroje; pokud
+  zadáš existující kód účtu, například `221.400` nebo `221400`, omezí výsledky na
+  pohyby tohoto účtu,
+- **Období** - výběr účetního období (fiskální rok) ze seznamu založených období;
+  změna období zároveň nastaví **Datum od / Datum do** na jeho hranice,
 - **Datum od / Datum do** — rozsah data účetního případu,
 - **Zdroj** — omezení na jeden typ zdroje, včetně **Banka** a **Pokladna** (drill-down
   z [Banky](28_Banka.md)/[Pokladny](30_Pokladna.md) i tento filtr vedou ke stejnému
@@ -179,6 +182,9 @@ Odkaz **„Zrušit filtry"** vrátí výchozí (prázdný) stav. Když do strán
 prokliknutím z jiného místa aplikace (detail dokladu, uzávěrka, sestavy), filtry se
 předvyplní automaticky podle parametrů v URL — typicky se rovnou rozbalí konkrétní zápis
 a rozsah data se zúží přesně na den daného zápisu, aby ses v dlouhém deníku neztratil(a).
+
+V rozbaleném zápisu lze kliknout na kód nebo název účtu. Otevře se jeho opis pohybů
+v aktuálně zvoleném rozsahu; bez datového filtru se použije účetní období zápisu.
 
 ### 45.2.4 Export PDF / XLSX
 

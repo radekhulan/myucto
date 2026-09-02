@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   accountingApi,
   type AccountingPeriod,
@@ -23,10 +23,12 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { usePaneDom } from '@/composables/usePaneDom'
+import { allAccountingPeriodsRange, findAccountingPeriod } from '@/utils/accountingPeriod'
 
 const { t } = useI18n()
 const toast = useToast()
 const route = useRoute()
+const router = useRouter()
 const paneDom = usePaneDom()
 
 const periods = ref<AccountingPeriod[]>([])
@@ -47,7 +49,9 @@ const filters = reactive({
 
 function queryParams() {
   return {
-    period_id: Number(filters.period_id),
+    ...(filters.period_id === ''
+      ? { all_periods: 1 as const }
+      : { period_id: Number(filters.period_id) }),
     from: filters.from || undefined,
     to: filters.to || undefined,
     analytics: filters.analytics ? (1 as const) : undefined,
@@ -66,7 +70,7 @@ function resetFilters() {
 }
 
 async function load() {
-  if (!filters.period_id) return
+  if (periods.value.length === 0) return
   loading.value = true
   expandedId.value = null
   closeMonth()
@@ -166,6 +170,10 @@ function monthStatementLink(a: GeneralLedgerAccount, ym: string) {
  */
 async function focusAccountFromQuery() {
   const id = Number(route.query.account_id || 0)
+  await focusAccount(id)
+}
+
+async function focusAccount(id: number) {
   if (id <= 0 || !report.value) return
   if (!report.value.accounts.some(a => a.account_id === id)) return
   expandedId.value = id
@@ -175,11 +183,12 @@ async function focusAccountFromQuery() {
 
 const exporting = ref(false)
 async function exportFile(format: 'pdf' | 'xlsx') {
-  if (!filters.period_id || !report.value) return
+  if (!report.value) return
   exporting.value = true
   try {
     const r = await accountingApi.exportReport('/accounting/reports/general-ledger/export', { ...queryParams(), format })
-    downloadBlob(r.data as unknown as Blob, `hlavni-kniha-${report.value.period.fiscal_year}.${format}`)
+    const label = report.value.all_periods ? 'vse' : report.value.period?.fiscal_year
+    downloadBlob(r.data as unknown as Blob, `hlavni-kniha-${label}.${format}`)
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -196,12 +205,14 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-function buildQuery(): Record<string, string> {
+function buildQuery(includeAfterClosing = false): Record<string, string> {
   const q: Record<string, string> = {}
-  if (filters.period_id !== '') q.period_id = String(filters.period_id)
+  if (filters.period_id === '') q.all_periods = '1'
+  else q.period_id = String(filters.period_id)
   if (filters.from) q.from = filters.from
   if (filters.to) q.to = filters.to
   if (filters.analytics) q.analytics = '1'
+  if (includeAfterClosing && filters.after_closing) q.after_closing = '1'
   if (filters.vendor) q.vendor = filters.vendor
   if (filters.client) q.client = filters.client
   if (filters.item) q.item = filters.item
@@ -209,10 +220,11 @@ function buildQuery(): Record<string, string> {
 }
 
 function applyQueryToPage(q: Record<string, string>) {
-  filters.period_id = q.period_id ? Number(q.period_id) : ''
+  filters.period_id = q.all_periods === '1' ? '' : (q.period_id ? Number(q.period_id) : '')
   filters.from = q.from ?? ''
   filters.to = q.to ?? ''
   filters.analytics = q.analytics === '1'
+  filters.after_closing = q.after_closing === '1'
   filters.vendor = q.vendor ?? ''
   filters.client = q.client ?? ''
   filters.item = q.item ?? ''
@@ -260,6 +272,22 @@ function onAnalyticsToggle() {
   return load()
 }
 
+async function onPeriodChange() {
+  const period = findAccountingPeriod(periods.value, filters.period_id)
+  const allRange = allAccountingPeriodsRange(periods.value)
+  const accountId = expandedId.value ?? Number(route.query.account_id || 0)
+  filters.from = period?.starts_on ?? allRange.from ?? ''
+  filters.to = period?.ends_on ?? allRange.to ?? ''
+  await router.replace({
+    query: {
+      ...buildQuery(true),
+      ...(accountId > 0 ? { account_id: String(accountId) } : {}),
+    },
+  })
+  await load()
+  await focusAccount(accountId)
+}
+
 onMounted(async () => {
   await ensurePrefsLoaded()
   filters.analytics = tbl.flag('analytics')
@@ -272,12 +300,20 @@ onMounted(async () => {
   // Drill-down z karty účtu / jiné sestavy — období, rozsah i rozpad analytik
   // z URL mají přednost před výchozím otevřeným obdobím.
   const q = route.query
-  const periodId = typeof q.period_id === 'string' && q.period_id ? Number(q.period_id) : (def?.id ?? 0)
-  if (!periodId) return
+  const periodId: number | '' = q.all_periods === '1'
+    ? ''
+    : (typeof q.period_id === 'string' && q.period_id ? Number(q.period_id) : (def?.id ?? 0))
+  if (periodId === 0 || periods.value.length === 0) return
   filters.period_id = periodId
   if (typeof q.from === 'string' && q.from) filters.from = q.from
   if (typeof q.to === 'string' && q.to) filters.to = q.to
+  if (periodId === '') {
+    const allRange = allAccountingPeriodsRange(periods.value)
+    if (!filters.from) filters.from = allRange.from ?? ''
+    if (!filters.to) filters.to = allRange.to ?? ''
+  }
   if (q.analytics === '1') filters.analytics = true
+  if (q.after_closing === '1') filters.after_closing = true
   await load()
   await focusAccountFromQuery()
 })
@@ -348,8 +384,9 @@ onMounted(async () => {
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.general_ledger.filter_period') }}</label>
-          <select v-model="filters.period_id" @change="load"
+          <select v-model="filters.period_id" @change="onPeriodChange"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('accounting.general_ledger.all_periods') }}</option>
             <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.fiscal_year }}</option>
           </select>
         </div>
