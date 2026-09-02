@@ -30,6 +30,8 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { usePaneDom } from '@/composables/usePaneDom'
 import { fieldSelector, revealField } from '@/utils/revealField'
+import { accountPickerOptions } from '@/utils/chartAccountOptions'
+import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { todayIso } from './employmentLifecycleUi'
 
 const props = defineProps<{
@@ -277,6 +279,50 @@ const partnerSettlementAvailable = computed(() =>
   (props.relationTypes ?? []).some(type => PARTNER_SETTLEMENT_RELATIONS.includes(type)),
 )
 const isPartnerSettlement = computed(() => form.payout_method === 'partner_settlement')
+
+/*
+ * U zápočtu se čistá mzda NEVYPLÁCÍ — přeúčtuje se. Server proto vyžaduje
+ * nulový podíl hotovosti i nulové bankovní cíle. Formulář ale nechával
+ * v poli výchozích 10000, takže uložení padalo na „rozdělení není přesně
+ * 100 %" a nedalo se z toho poznat, co se po uživateli chce.
+ *
+ * Podíl se proto při přepnutí na zápočet vynuluje a pole se skryje: není
+ * co rozdělovat.
+ */
+watch(isPartnerSettlement, (settlement) => {
+  if (settlement) form.cash_allocation_basis_points = 0
+})
+
+/** Účtová osnova pro našeptávač účtu zápočtu. */
+const chartAccounts = ref<ChartAccount[]>([])
+const settlementAccountOptions = computed(
+  // Zápočet proti společníkovi patří na 365; nabízet celou osnovu by znamenalo
+  // nabízet i účty, na kterých ten zápočet nemá co dělat.
+  () => accountPickerOptions(chartAccounts.value, a => a.account_code.startsWith('365')),
+)
+const settlementAccountListId = `settlement-account-${Math.random().toString(36).slice(2, 9)}`
+
+async function loadChartAccounts(): Promise<void> {
+  if (chartAccounts.value.length > 0) return
+  try {
+    chartAccounts.value = await accountingApi.listAccounts()
+  } catch {
+    // Bez osnovy zůstane pole prostým textem — našeptávač je pohodlí, ne
+    // podmínka uložení.
+  }
+}
+/*
+ * Nabídka se natáhne, jakmile je zápočet kdekoli — ve způsobu výplaty NEBO
+ * v některém pravidle. Sledovat jen způsob výplaty by nechalo pole v pravidle
+ * bez našeptávače přesně tam, kde je zápočet nastavený jen pravidlem.
+ */
+const needsSettlementAccounts = computed(
+  () => isPartnerSettlement.value
+    || payoutRuleRows.value.some(row => row.destination_kind === 'partner_settlement'),
+)
+watch(needsSettlementAccounts, (needed) => {
+  if (needed) void loadChartAccounts()
+}, { immediate: true })
 const payoutOptions = computed<SelectOption<PayrollPayoutMethod>[]>(() => [
   { value: 'cash', label: t('payroll.people.profile.payout.cash') },
   { value: 'bank', label: t('payroll.people.profile.payout.bank') },
@@ -1215,14 +1261,25 @@ onMounted(load)
 
       <div v-else class="space-y-6">
         <section class="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <label :class="labelClass">{{ t('payroll.people.profile.payout_method') }}<SearchableSelect v-model="form.payout_method" class="mt-1" :options="payoutOptions" :clearable="false" :disabled="!canWrite" accent="payroll" /></label>
-          <label :class="labelClass">{{ t('payroll.people.profile.cash_allocation') }} <RequiredMark /><input v-model.number="form.cash_allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass"></label>
+          <label :class="labelClass">{{ t('payroll.people.profile.payout_method') }}<SearchableSelect v-model="form.payout_method" class="mt-1" :options="payoutOptions" :clearable="false" :disabled="!canWrite" accent="payroll" data-test="payout-method" /></label>
+          <!-- U zápočtu se nic nevyplácí, takže není co rozdělovat. -->
+          <label v-if="!isPartnerSettlement" :class="labelClass">{{ t('payroll.people.profile.cash_allocation') }} <RequiredMark /><input v-model.number="form.cash_allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass" data-test="cash-allocation"></label>
+          <p v-else :class="labelClass">
+            {{ t('payroll.people.profile.cash_allocation') }}
+            <span class="mt-1 block font-normal text-neutral-500">{{ t('payroll.people.profile.cash_allocation_settlement') }}</span>
+          </p>
           <label :class="labelClass">{{ t('payroll.people.profile.payout_effective_on') }} <RequiredMark /><input v-model="form.payout_effective_on" required type="date" :disabled="!canWrite" :class="inputClass"></label>
         </section>
 
         <section v-if="isPartnerSettlement" class="rounded-lg border border-payroll-200 bg-payroll-50/40 p-3 sm:p-4">
           <p class="text-xs text-neutral-600">{{ t('payroll.people.profile.partner_settlement_hint') }}</p>
-          <label :class="[labelClass, 'mt-3 block max-w-xs']">{{ t('payroll.people.profile.partner_settlement_account') }} <RequiredMark /><input v-model="form.partner_settlement_account_code" required type="text" maxlength="10" :placeholder="t('payroll.people.profile.partner_settlement_account_placeholder')" :disabled="!canWrite" :class="[inputClass, 'font-mono uppercase']"></label>
+          <label :class="[labelClass, 'mt-3 block max-w-xs']">{{ t('payroll.people.profile.partner_settlement_account') }} <RequiredMark /><input v-model="form.partner_settlement_account_code" required type="text" maxlength="10" :list="settlementAccountListId" :placeholder="t('payroll.people.profile.partner_settlement_account_placeholder')" :disabled="!canWrite" :class="[inputClass, 'font-mono uppercase']" data-test="partner-settlement-account"></label>
+          <!-- Analytiky před svou syntetikou: účtuje se na list, ne na hlavičku. -->
+          <datalist :id="settlementAccountListId">
+            <option v-for="a in settlementAccountOptions" :key="a.id" :value="a.account_code">
+              {{ a.account_code }} — {{ a.name }}
+            </option>
+          </datalist>
           <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.people.profile.partner_settlement_account_hint') }}</p>
         </section>
         <p v-else-if="!partnerSettlementAvailable" class="text-xs text-neutral-500">{{ t('payroll.people.profile.partner_settlement_unavailable') }}</p>
@@ -1400,7 +1457,7 @@ onMounted(load)
                 </label>
                 <label v-else-if="row.destination_kind === 'partner_settlement'" :class="[labelClass, 'lg:col-span-2']">
                   {{ t('payroll.people.profile.payout_rules.settlement_account') }}
-                  <input v-model="row.settlement_account_code" required type="text" maxlength="10" :disabled="!canWrite" :class="[inputClass, 'font-mono uppercase']">
+                  <input v-model="row.settlement_account_code" required type="text" maxlength="10" :list="settlementAccountListId" :disabled="!canWrite" :class="[inputClass, 'font-mono uppercase']" data-test="payout-rule-settlement-account">
                 </label>
                 <label :class="labelClass">
                   {{ t('payroll.people.profile.payout_rules.allocation') }}
