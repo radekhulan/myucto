@@ -140,4 +140,59 @@ final class PayrollPersonCreateValidatorTest extends TestCase
 
         self::validator()->validate(['weekly_hours' => '200.00'] + self::baseInput());
     }
+
+    /** @return iterable<string,array{?string,int}> */
+    public static function workloads(): iterable
+    {
+        yield 'plný úvazek' => ['40.00', 10_000];
+        yield 'poloviční úvazek' => ['20.00', 5_000];
+        yield 'třicetisedmiapůlhodinový týden' => ['37.50', 9_375];
+        yield 'bez zadané doby' => [null, 10_000];
+        // Delší sjednaná doba než stanovená není přesčasový úvazek — strop je 100 %.
+        yield 'delší než stanovená doba' => ['45.00', 10_000];
+    }
+
+    /**
+     * Úvazek se dosazoval natvrdo na 10 000 bazických bodů, takže zkrácený úvazek
+     * měl hned po založení v historii verzi se 100 %. Na tom čísle přitom stojí
+     * zákaz nařízeného přesčasu podle § 78 odst. 1 písm. i) ZP.
+     */
+    #[DataProvider('workloads')]
+    public function testDerivesWorkloadFromWeeklyHours(?string $weeklyHours, int $expected): void
+    {
+        $result = self::validator()->validate(
+            ['weekly_hours' => $weeklyHours] + self::baseInput(),
+        );
+
+        self::assertSame($expected, $result['employment']['terms']['workload_basis_points']);
+    }
+
+    /**
+     * Rodné číslo míří jen do šifrovaného `payroll_person_identifiers`, ne na
+     * kartu zaměstnance — a v kanonickém tvaru, jak ho čekají podání.
+     */
+    public function testNormalizesBirthNumberOutsideTheLegacyEmployeeProjection(): void
+    {
+        $result = self::validator()->validate(
+            ['birth_number' => ' 900412 1236 '] + self::baseInput(),
+        );
+
+        self::assertSame('900412/1236', $result['birth_number']);
+        self::assertArrayNotHasKey('birth_number', $result['employee']);
+    }
+
+    public function testBirthNumberStaysOptional(): void
+    {
+        self::assertNull(self::validator()->validate(self::baseInput())['birth_number']);
+        self::assertNull(
+            self::validator()->validate(['birth_number' => '  '] + self::baseInput())['birth_number'],
+        );
+    }
+
+    public function testRejectsBirthNumberThatSubmissionsWouldRefuse(): void
+    {
+        $this->expectExceptionMessage('Rodné číslo neprošlo kontrolou modulo 11.');
+
+        self::validator()->validate(['birth_number' => '9004121234'] + self::baseInput());
+    }
 }

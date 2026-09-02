@@ -9,7 +9,6 @@ namespace MyInvoice\Service\Payroll;
  * @phpstan-type SharedEmployeeCreateInput array{
  *   full_name:string,
  *   birth_date:?string,
- *   birth_number:?string,
  *   address:null,
  *   taxpayer_type:string,
  *   employment_type:string,
@@ -24,12 +23,20 @@ namespace MyInvoice\Service\Payroll;
  * @phpstan-type PayrollPersonCreateInput array{
  *   employee:SharedEmployeeCreateInput,
  *   employment:EmploymentCreateInput,
+ *   birth_number:?string,
  *   health_insurer_code:?string
  * }
  */
 final class PayrollPersonCreateValidator
 {
     private const MAX_MONTHLY_GROSS = 10_000_000;
+
+    /**
+     * Obecná stanovená týdenní pracovní doba (§ 79 odst. 1 ZP, 40 hodin)
+     * v setinách hodiny — týž základ, ze kterého vychází i výchozích `40.00`
+     * u týdenní doby níž.
+     */
+    private const STATUTORY_WEEKLY_CENTI_HOURS = 4_000;
 
     public function __construct(
         private readonly PayrollEmploymentValidator $employmentValidator,
@@ -53,11 +60,19 @@ final class PayrollPersonCreateValidator
             $input['birth_date'] ?? null,
             'Datum narození musí být ve formátu YYYY-MM-DD.',
         );
-        $birthNumber = $this->optionalText(
-            $input['birth_number'] ?? null,
-            20,
-            'Rodné číslo může mít nejvýše 20 znaků.',
-        );
+        /*
+         * Rodné číslo NEPATŘÍ na kartu zaměstnance — `payroll_employees.birth_number`
+         * je otevřený legacy sloupec (W1/P-02, migrace 1611) a repozitář ho
+         * záměrně ani nečte, ani nezapisuje. Jediné legální úložiště je šifrovaný
+         * `payroll_person_identifiers`, odkud ho čtou podání i mzdový list, a ten
+         * drží kanonický tvar RRMMDD/XXXX. Kontroluje ho proto tentýž
+         * `CzechBirthNumber` jako osobní karta: číslo, které by podání odmítlo,
+         * nemá do evidence propadnout jen proto, že se zadává při založení.
+         */
+        $birthNumber = trim($this->string($input['birth_number'] ?? null));
+        $birthNumber = $birthNumber === ''
+            ? null
+            : CzechBirthNumber::normalize($birthNumber);
 
         $monthlyGross = $input['monthly_gross'] ?? null;
         if ($monthlyGross !== null
@@ -104,7 +119,14 @@ final class PayrollPersonCreateValidator
                 'actual_start_on' => null,
                 'fixed_term_end_on' => null,
                 'weekly_hours' => $weeklyHours ?? '40.00',
-                'workload_basis_points' => 10_000,
+                /*
+                 * Úvazek se dosazoval natvrdo na 10 000 bazických bodů, takže
+                 * dvacetihodinový úvazek platil hned po založení za plný. Na tom
+                 * čísle přitom stojí zákaz nařízeného přesčasu u kratší pracovní
+                 * doby podle § 78 odst. 1 písm. i) ZP — viz
+                 * {@see \MyInvoice\Service\Payroll\Time\Overtime\OvertimeEmploymentProfile::partTimeOn()}.
+                 */
+                'workload_basis_points' => self::workloadBasisPoints($weeklyHours ?? '40.00'),
                 'work_place' => null,
                 'regular_workplace' => null,
                 'jmhz_workplace_municipality_code' => null,
@@ -132,7 +154,6 @@ final class PayrollPersonCreateValidator
             'employee' => [
                 'full_name' => $fullName,
                 'birth_date' => $birthDate,
-                'birth_number' => $birthNumber,
                 'address' => null,
                 'taxpayer_type' => in_array(
                     $relationType,
@@ -162,8 +183,36 @@ final class PayrollPersonCreateValidator
                 'is_active' => true,
             ],
             'employment' => $employment,
+            'birth_number' => $birthNumber,
             'health_insurer_code' => $insurerCode === '' ? null : $insurerCode,
         ];
+    }
+
+    /**
+     * Úvazek v bazických bodech jako poměr sjednané a stanovené týdenní doby.
+     *
+     * Tvar i meze týdenní doby hlídá `PayrollEmploymentValidator::terms()` —
+     * zůstává tak JEDEN validátor. Co se sem nevejde do vzoru, projde s plným
+     * úvazkem a shodí to až on, se svou hláškou.
+     */
+    private static function workloadBasisPoints(mixed $weeklyHours): int
+    {
+        if ((!is_string($weeklyHours) && !is_int($weeklyHours))
+            || preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/', (string) $weeklyHours, $parts) !== 1
+        ) {
+            return 10_000;
+        }
+        $centiHours = ((int) $parts[1] * 100) + (int) str_pad($parts[2] ?? '', 2, '0');
+        if ($centiHours <= 0) {
+            return 10_000;
+        }
+
+        // Delší sjednaná doba než stanovená není přesčasový úvazek — sloupec
+        // `payroll_employment_terms.workload_basis_points` končí na 100 %.
+        return min(
+            10_000,
+            (int) round($centiHours * 10_000 / self::STATUTORY_WEEKLY_CENTI_HOURS),
+        );
     }
 
     private function string(mixed $value): string
@@ -175,15 +224,6 @@ final class PayrollPersonCreateValidator
             return '';
         }
         throw new \InvalidArgumentException('Textové pole má neplatný typ.');
-    }
-
-    private function optionalText(mixed $value, int $maxLength, string $error): ?string
-    {
-        $text = trim($this->string($value));
-        if (mb_strlen($text) > $maxLength) {
-            throw new \InvalidArgumentException($error);
-        }
-        return $text === '' ? null : $text;
     }
 
     private function optionalDate(mixed $value, string $error): ?string

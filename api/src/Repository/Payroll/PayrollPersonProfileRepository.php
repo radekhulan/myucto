@@ -82,8 +82,15 @@ final class PayrollPersonProfileRepository
             fn (array $item): array => [
                 'id' => (int) $item['id'],
                 'full_name' => (string) $item['full_name'],
-                'first_name' => (string) $item['first_name'],
-                'last_name' => (string) $item['last_name'],
+                /*
+                 * Nerozdělené jméno musí ven jako NULL, ne jako prázdný řetězec.
+                 * Karta na tom pozná verzi, do které se jméno DOPLŇUJE, od verze,
+                 * kterou má nahradit novou (`appendIdentityVersion`) — a u osoby
+                 * založené se zpětným nástupem by nová verze nechala celé období
+                 * do dneška bez jména, tedy s neprůchodným měsíčním hlášením.
+                 */
+                'first_name' => $item['first_name'] === null ? null : (string) $item['first_name'],
+                'last_name' => $item['last_name'] === null ? null : (string) $item['last_name'],
                 'title_prefix' => $item['title_prefix'] === null
                     ? null
                     : (string) $item['title_prefix'],
@@ -364,6 +371,86 @@ final class PayrollPersonProfileRepository
         }
 
         return $saved;
+    }
+
+    /**
+     * Počáteční osobní karta nově zakládané osoby — historická identita a rodné číslo.
+     *
+     * Obojí patří do TÉHOŽ zápisu jako zaměstnanec, ze stejného důvodu jako
+     * zdravotní pojišťovna (viz
+     * {@see \MyInvoice\Service\Payroll\PayrollPersonHealthInsurerSeedService}):
+     * bez identity účinné k rozhodnému dni skončí prvotní registrace i měsíční
+     * hlášení na `K rozhodnému datu chybí historická identita osoby.` a druhý
+     * požadavek by po svém selhání nechal osobu bez ní. Rodné číslo přitom
+     * nemá kam jinam — legacy sloupec na kartě je otevřený a nepoužívá se
+     * (W1/P-02), šifruje ho až `saveIdentifiers()`.
+     *
+     * Jméno se NEROZPADÁ na křestní a příjmení: `full_name` je zdroj pravdy a
+     * odvozovat z něj strukturu aplikace nesmí (migrace 1272). `first_name` a
+     * `last_name` proto zůstávají NULL, dokud je účetní nedoplní — osoba do té
+     * doby svítí v seznamu jako „vyžaduje doplnění" a karta jméno doplní do
+     * TÉTO verze, ne do nové.
+     *
+     * @param string $effectiveFrom plánovaný nástup. Verze identity nikdy
+     *     nezačíná v budoucnu (totéž pravidlo vynucuje
+     *     `PayrollPersonProfileValidator::identityHistory()`), u dopředu
+     *     zadaného nástupu se proto posune na dnešek — k datu nástupu je pak
+     *     účinná tak jako tak.
+     */
+    public function seedInitialPersonalData(
+        int $supplierId,
+        int $employeeId,
+        string $fullName,
+        ?string $birthDate,
+        ?string $birthNumber,
+        string $effectiveFrom,
+    ): void {
+        try {
+            $this->saveIdentityHistory($supplierId, $employeeId, [[
+                'id' => null,
+                'full_name' => $fullName,
+                'first_name' => null,
+                'last_name' => null,
+                'title_prefix_present' => false,
+                'title_prefix' => null,
+                'title_suffix_present' => false,
+                'title_suffix' => null,
+                'birth_surname_present' => false,
+                'birth_surname' => null,
+                'birth_surname_source_id' => null,
+                'birth_date_present' => $birthDate !== null,
+                'birth_date' => $birthDate,
+                'birth_place_present' => false,
+                'birth_place' => null,
+                'birth_country_code_present' => false,
+                'birth_country_code' => null,
+                'citizenship_country_code_present' => false,
+                'citizenship_country_code' => null,
+                'sex_present' => false,
+                'sex' => null,
+                'effective_from' => min($effectiveFrom, date('Y-m-d')),
+                'effective_to' => null,
+            ]]);
+
+            if ($birthNumber !== null) {
+                $this->saveIdentifiers($supplierId, $employeeId, [[
+                    'id' => null,
+                    'identifier_type' => 'birth_number',
+                    'value' => $birthNumber,
+                ]]);
+            }
+        } catch (\PDOException $e) {
+            // `uq_payroll_identifier_tenant_hash` drží rodné číslo v rámci firmy
+            // jedinečné — dvakrát zadaná táž osoba je chyba zadání, ne serveru.
+            if ((string) $e->getCode() === '23000' && (int) ($e->errorInfo[1] ?? 0) === 1062) {
+                throw new \InvalidArgumentException(
+                    'Zaměstnance se stejným rodným číslem už evidujete.',
+                    0,
+                    $e,
+                );
+            }
+            throw $e;
+        }
     }
 
     private function lockEmployee(int $supplierId, int $employeeId): void

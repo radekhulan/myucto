@@ -9,8 +9,11 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -24,6 +27,8 @@ final class PayrollPeopleApiTest extends TestCase
 
     private Connection $db;
     private PayrollPeopleAction $action;
+    private PayrollSensitiveData $sensitiveData;
+    private PayrollPersonProfileRepository $profiles;
     private int $userId;
     private int $supplierId;
     private int $otherSupplierId;
@@ -42,6 +47,8 @@ final class PayrollPeopleApiTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollPeopleAction::class);
+            $this->sensitiveData = $container->get(PayrollSensitiveData::class);
+            $this->profiles = $container->get(PayrollPersonProfileRepository::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -288,7 +295,7 @@ final class PayrollPeopleApiTest extends TestCase
                 [
                     'full_name' => 'Nová Testovací',
                     'birth_date' => '1990-04-12',
-                    'birth_number' => '9004121234',
+                    'birth_number' => '9004121236',
                     'relation_type' => 'dpp',
                     'planned_start_on' => '2026-08-10',
                     'monthly_gross' => 12_500,
@@ -328,6 +335,208 @@ final class PayrollPeopleApiTest extends TestCase
             'employment_type' => 'dpp',
             'monthly_gross' => 12_500,
         ], $employee->fetch(\PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Rodné číslo zadané při založení se dřív zahodilo: validátor ho vrátil, ale
+     * `PayrollEmployeeRepository::insert()` ho (správně) nezná a nikdo jiný ho
+     * nezapisoval. Patří výhradně do šifrovaného `payroll_person_identifiers`,
+     * odkud ho čtou podání i mzdový list — legacy sloupec na kartě zůstává prázdný.
+     */
+    public function testCreateSealsBirthNumberIntoEncryptedIdentifier(): void
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    ...$this->validCreatePayload('Rodné Číslo'),
+                    // Nekanonický tvar z formuláře musí dojít jako RRMMDD/XXXX.
+                    'birth_number' => '900412 1236',
+                ],
+            ),
+            new Response(),
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $personId = $this->json($response)['person']['id'];
+
+        $identifier = $this->db->pdo()->prepare(
+            'SELECT id, identifier_type, value_ciphertext, value_hash, value_masked
+               FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $identifier->execute([$this->supplierId, $personId]);
+        $rows = $identifier->fetchAll(\PDO::FETCH_ASSOC);
+        self::assertCount(1, $rows);
+        self::assertSame('birth_number', $rows[0]['identifier_type']);
+        self::assertStringStartsWith('enc:v2:', $rows[0]['value_ciphertext']);
+        self::assertStringNotContainsString('1236', $rows[0]['value_masked']);
+        self::assertSame(
+            $this->sensitiveData->lookupHash(
+                '900412/1236',
+                PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                $this->supplierId,
+            ),
+            $rows[0]['value_hash'],
+        );
+
+        // Otevřený legacy sloupec se nesmí naplnit ani omylem (W1/P-02).
+        $legacy = $this->db->pdo()->prepare(
+            'SELECT birth_number FROM payroll_employees WHERE supplier_id = ? AND id = ?'
+        );
+        $legacy->execute([$this->supplierId, $personId]);
+        self::assertNull($legacy->fetchColumn());
+    }
+
+    public function testCreateRejectsBirthNumberThatSubmissionsWouldRefuse(): void
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    ...$this->validCreatePayload('Neplatné Číslo'),
+                    'birth_number' => '9004121234',
+                ],
+            ),
+            new Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'Rodné číslo neprošlo kontrolou modulo 11.',
+            $this->json($response)['error']['message'],
+        );
+    }
+
+    /**
+     * Nová osoba dřív neměla jedinou verzi historické identity, takže měsíční
+     * hlášení i prvotní registrace končily na „K rozhodnému datu chybí historická
+     * identita osoby." — účetní to musela ručně doplnit na kartě.
+     */
+    public function testCreateSeedsIdentityHistoryEffectiveFromTheHireDate(): void
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    ...$this->validCreatePayload('Historická Identita'),
+                    'birth_date' => '1988-06-01',
+                    'planned_start_on' => '2026-08-10',
+                ],
+            ),
+            new Response(),
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $personId = $this->json($response)['person']['id'];
+
+        $identity = $this->db->pdo()->prepare(
+            'SELECT full_name, first_name, last_name, birth_date,
+                    effective_from, effective_to
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $identity->execute([$this->supplierId, $personId]);
+        self::assertSame([[
+            'full_name' => 'Historická Identita',
+            // Rozpad na křestní a příjmení se NEDOMÝŠLÍ (migrace 1272) — doplní
+            // ho účetní do této verze a do té doby osoba svítí „vyžaduje doplnění".
+            'first_name' => null,
+            'last_name' => null,
+            'birth_date' => '1988-06-01',
+            'effective_from' => '2026-08-10',
+            'effective_to' => null,
+        ]], $identity->fetchAll(\PDO::FETCH_ASSOC));
+
+        /*
+         * Nerozdělené jméno musí projít na kartu jako NULL, ne jako prázdný
+         * řetězec — karta podle toho pozná, že se jméno doplňuje do TÉTO verze,
+         * místo aby ji nahradila novou od dneška a nechala celé období od
+         * nástupu bez jména.
+         */
+        $card = $this->profiles->get($this->supplierId, $personId);
+        self::assertNotNull($card);
+        self::assertNull($card['identity_history'][0]['first_name']);
+        self::assertNull($card['identity_history'][0]['last_name']);
+    }
+
+    /** Verze identity nesmí začít v budoucnu, i když je nástup naplánovaný dopředu. */
+    public function testCreateClampsSeededIdentityToTodayForAFutureHire(): void
+    {
+        $futureStart = (new \DateTimeImmutable('today'))->modify('+30 days')->format('Y-m-d');
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    ...$this->validCreatePayload('Budoucí Nástup'),
+                    'planned_start_on' => $futureStart,
+                ],
+            ),
+            new Response(),
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $identity = $this->db->pdo()->prepare(
+            'SELECT effective_from FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $identity->execute([$this->supplierId, $this->json($response)['person']['id']]);
+        self::assertSame(date('Y-m-d'), $identity->fetchColumn());
+    }
+
+    /**
+     * Úvazek se dosazoval natvrdo na 100 %, takže dvacetihodinový úvazek platil
+     * hned po založení za plný — a na tom stojí zákaz nařízeného přesčasu
+     * u kratší pracovní doby (§ 78 odst. 1 písm. i) ZP).
+     */
+    public function testCreateDerivesWorkloadFromTheAgreedWeeklyHours(): void
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    ...$this->validCreatePayload('Zkrácený Úvazek'),
+                    'weekly_hours' => '20.00',
+                ],
+            ),
+            new Response(),
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $terms = $this->db->pdo()->prepare(
+            'SELECT term.weekly_hours, term.workload_basis_points
+               FROM payroll_employment_terms term
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = term.supplier_id
+                AND employment.id = term.employment_id
+              WHERE term.supplier_id = ? AND employment.employee_id = ?'
+        );
+        $terms->execute([$this->supplierId, $this->json($response)['person']['id']]);
+        self::assertSame([[
+            'weekly_hours' => '20.00',
+            'workload_basis_points' => 5000,
+        ]], array_map(
+            static fn (array $row): array => [
+                'weekly_hours' => (string) $row['weekly_hours'],
+                'workload_basis_points' => (int) $row['workload_basis_points'],
+            ],
+            $terms->fetchAll(\PDO::FETCH_ASSOC),
+        ));
     }
 
     public function testCreateRollsBackSharedEmployeeWhenEmploymentOfficeIsForeign(): void

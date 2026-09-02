@@ -9,8 +9,12 @@ use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
 
 /**
+ * `first_name` a `last_name` jsou nullable, protože strukturované jméno přidala
+ * až migrace 1272 a rozpadat `full_name` aplikace nesmí. Z formuláře přijde vždy
+ * vyplněné; NULL nese verze, u které jméno zatím nikdo nerozdělil.
+ *
  * @phpstan-type IdentityInput array{
- *   id:?int,full_name:string,first_name:string,last_name:string,
+ *   id:?int,full_name:string,first_name:?string,last_name:?string,
  *   title_prefix_present:bool,title_prefix:?string,
  *   title_suffix_present:bool,title_suffix:?string,
  *   birth_surname_present:bool,birth_surname:?string,birth_surname_source_id:?int,

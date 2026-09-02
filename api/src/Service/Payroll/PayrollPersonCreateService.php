@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
+use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
 use MyInvoice\Repository\PayrollEmployeeRepository;
 use MyInvoice\Service\ActivityLogger;
 
@@ -18,6 +19,7 @@ final class PayrollPersonCreateService
         private readonly PayrollEmployeeRepository $employees,
         private readonly PayrollEmploymentRepository $employments,
         private readonly PayrollPeopleRepository $people,
+        private readonly PayrollPersonProfileRepository $profiles,
         private readonly ActivityLogger $activityLogger,
         private readonly PayrollPersonHealthInsurerSeedService $healthInsurer,
     ) {}
@@ -59,6 +61,24 @@ final class PayrollPersonCreateService
                 $ip,
                 $userAgent,
             );
+
+            /*
+             * Historická identita a rodné číslo jdou týmž zápisem jako osoba —
+             * stejný argument jako u zdravotní pojišťovny níž. Bez identity
+             * účinné k rozhodnému dni hlásí měsíční JMHZ jen obecné
+             * `jmhz_identity_incomplete` a účetní z toho nepozná, že chybí
+             * právě ona; rodné číslo zadané ve formuláři zase nemělo kam
+             * dopadnout, protože legacy sloupec na kartě se nepoužívá.
+             */
+            $this->profiles->seedInitialPersonalData(
+                $supplierId,
+                $employeeId,
+                $validated['employee']['full_name'],
+                $validated['employee']['birth_date'],
+                $validated['birth_number'],
+                (string) $employment['terms']['planned_start_on'],
+            );
+
             $this->activityLogger->log(
                 'payroll.person.created',
                 $userId,
