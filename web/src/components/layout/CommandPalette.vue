@@ -5,6 +5,7 @@ import { useHotkey } from '@/composables/useHotkey'
 import { markTipUsed } from '@/composables/useTips'
 import { searchApi, type SearchResults } from '@/api/search'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
+import { formatShortcut } from '@/composables/useKeyboardShortcuts'
 
 /**
  * Paleta příkazů (Ctrl/⌘ + K).
@@ -41,6 +42,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const workspaceNavigation = useWorkspaceNavigation()
+const paletteShortcutLabel = formatShortcut('ctrl+k')
 
 const open = ref(false)
 const q = ref('')
@@ -330,7 +332,7 @@ defineExpose({ show })
         <div class="flex items-center gap-4 border-t border-neutral-200 bg-neutral-50 px-4 py-2 text-[11px] text-neutral-500">
           <span><kbd class="font-mono">↑↓</kbd> {{ t('command.hint_move') }}</span>
           <span><kbd class="font-mono">↵</kbd> {{ t('command.hint_open') }}</span>
-          <span class="ml-auto"><kbd class="font-mono">Ctrl+K</kbd></span>
+          <span class="ml-auto"><kbd class="font-mono">{{ paletteShortcutLabel }}</kbd></span>
         </div>
       </div>
     </div>

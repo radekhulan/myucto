@@ -107,7 +107,9 @@ Nad formulářem je **drag & drop zóna** pro PDF, fotku, ISDOC nebo ISDOCX:
 > z prostého PDF (nebo fotky) editor náhled otevře rovnou, ať máš originál na očích při
 > kontrole vytěžených hodnot (sazba DPH, plátcovství dodavatele apod.). Jakmile doklad
 > jednou potvrdíš (přejde z konceptu dál), náhled se při dalším otevření editoru
-> nevnucuje — panel si můžeš kdykoli sbalit/otevřít tlačítkem nad ním.
+> nevnucuje. Panel si můžeš kdykoli sbalit nebo otevřít tlačítkem nad ním.
+> Na široké obrazovce se v detailu i editoru otevře vpravo vedle dokladu a při
+> posouvání formuláře zůstává viditelný. Na užší obrazovce zůstane pod formulářem.
 
 Limity:
 - Max 20 MiB per soubor

@@ -13,7 +13,6 @@ import {
   type ImportBatch,
 } from '@/api/purchaseInvoices'
 import { formatMoney, formatDate, formatMonth, formatNumber, taxDateClass } from '@/composables/useFormat'
-import { useHotkey } from '@/composables/useHotkey'
 import { useRowLink } from '@/composables/useRowLink'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
@@ -48,8 +47,6 @@ const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
-
-useHotkey('ctrl+n', (e) => { e.preventDefault(); router.push('/purchase-invoices/new') })
 
 const groups = ref<PurchaseMonthGroup[]>([])
 const total = ref(0)

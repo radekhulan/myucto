@@ -1,6 +1,7 @@
 import { computed, readonly, ref } from 'vue'
 import { preferencesApi } from '@/api/preferences'
 import { useAuthStore } from '@/stores/auth'
+import { isApplePlatform } from '@/utils/clientPlatform'
 
 export type ShortcutGroup = 'general' | 'menu' | 'create'
 
@@ -53,6 +54,14 @@ const DEFAULT_SHORTCUTS: Record<string, string> = {
   'new:/logbook?tab=trips&new=trip': 'alt+z',   // jíZda — J drží Kniha jízd, T tankování
 }
 
+export function defaultShortcutFor(id: string, apple = isApplePlatform()): string {
+  // Paleta příkazů pod Cmd+K už umí hledat v menu, klientech i dokladech.
+  // Samostatný Option+Q default by na Macu nebyl obvyklý a zvyšoval riziko
+  // nechtěného Cmd+Q. Uživatel si přímé hledání může přesto namapovat.
+  if (apple && id === 'search.global') return ''
+  return DEFAULT_SHORTCUTS[id] ?? ''
+}
+
 const actions = ref<ShortcutAction[]>([])
 const overrides = ref<Record<string, string | null>>({})
 const loaded = ref(false)
@@ -82,6 +91,13 @@ function shortcutKeyFromEvent(event: KeyboardEvent): string {
   const numpadMatch = /^Numpad([0-9])$/.exec(event.code)
   if (numpadMatch) return numpadMatch[1]
 
+  // Option+písmeno na macOS vrací v `key` speciální znak nebo dead key. Fyzický
+  // kód zachová zkratky Option+V, Option+P atd. funkční a zachytitelné.
+  const letterMatch = /^Key([A-Z])$/.exec(event.code)
+  if (letterMatch && (event.altKey || event.ctrlKey || event.metaKey)) {
+    return letterMatch[1].toLowerCase()
+  }
+
   return normalizeKey(event.key)
 }
 
@@ -110,11 +126,11 @@ export function shortcutFromEvent(event: KeyboardEvent): string {
   ].filter(Boolean).join('+')
 }
 
-export function formatShortcut(combo: string): string {
+export function formatShortcut(combo: string, apple = isApplePlatform()): string {
   if (!combo) return '—'
   const labels: Record<string, string> = {
-    ctrl: 'Ctrl',
-    alt: 'Alt',
+    ctrl: apple ? 'Cmd' : 'Ctrl',
+    alt: apple ? 'Option' : 'Alt',
     shift: 'Shift',
     escape: 'Esc',
     space: 'Space',
@@ -140,7 +156,7 @@ export function useKeyboardShortcuts() {
     for (const action of actions.value) {
       result[action.id] = Object.prototype.hasOwnProperty.call(overrides.value, action.id)
         ? (overrides.value[action.id] ?? '')
-        : (DEFAULT_SHORTCUTS[action.id] ?? '')
+        : defaultShortcutFor(action.id)
     }
     return result
   })
@@ -175,7 +191,7 @@ export function useKeyboardShortcuts() {
     const nextOverrides: Record<string, string | null> = { ...overrides.value }
     for (const action of actions.value) {
       const value = normalizeShortcut(bindings[action.id] ?? '')
-      const defaultValue = DEFAULT_SHORTCUTS[action.id] ?? ''
+      const defaultValue = defaultShortcutFor(action.id)
       if (value === defaultValue) {
         delete nextOverrides[action.id]
       } else {

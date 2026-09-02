@@ -9,6 +9,7 @@ import {
   useKeyboardShortcuts,
   type ShortcutGroup,
 } from '@/composables/useKeyboardShortcuts'
+import { isApplePlatform } from '@/utils/clientPlatform'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), {
@@ -17,6 +18,7 @@ const props = withDefaults(defineProps<{ embedded?: boolean }>(), {
 const { t } = useI18n()
 const toast = useToast()
 const shortcuts = useKeyboardShortcuts()
+const applePlatform = isApplePlatform()
 const draft = reactive<Record<string, string>>({})
 const saving = reactive({ value: false })
 
@@ -74,7 +76,10 @@ function capture(event: KeyboardEvent, id: string): void {
   if (!combo) return
   const problem = shortcutProblem(combo)
   if (problem) {
-    toast.error(t(`keyboard_shortcuts.${problem}`))
+    toast.error(t(`keyboard_shortcuts.${problem}`, {
+      primary: applePlatform ? 'Cmd' : 'Ctrl',
+      alternate: applePlatform ? 'Option' : 'Alt',
+    }))
     return
   }
   draft[id] = combo

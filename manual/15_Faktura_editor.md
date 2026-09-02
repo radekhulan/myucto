@@ -526,7 +526,8 @@ Pokud zjistíš, že vystavená faktura je špatně:
 
 ## 15.10 Tipy
 
-- **Vždy uložené jako koncept** — Ctrl+S kdykoli uloží rozpracovanou fakturu.
+- **Vždy uložené jako koncept** - Ctrl+S na Windows/Linuxu nebo Cmd+S na
+  macOS kdykoli uloží rozpracovanou fakturu.
 - **Klonování zachová položky i výkaz víceprací** — datum se aktualizuje na
   dnešní, popis položky inkrementuje měsíc.
 - **Sleva v procentech** se počítá z mezisoučtu **před** DPH.

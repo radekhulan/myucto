@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  defaultShortcutFor,
   formatShortcut,
   normalizeShortcut,
   shortcutFromEvent,
@@ -13,7 +14,15 @@ describe('keyboard shortcut helpers', () => {
   })
 
   it('formats a shortcut for display', () => {
-    expect(formatShortcut('alt+shift+a')).toBe('Alt + Shift + A')
+    expect(formatShortcut('alt+shift+a', false)).toBe('Alt + Shift + A')
+    expect(formatShortcut('ctrl+k', true)).toBe('Cmd + K')
+    expect(formatShortcut('alt+1', true)).toBe('Option + 1')
+  })
+
+  it('omits the risky direct-search default on Apple platforms', () => {
+    expect(defaultShortcutFor('search.global', true)).toBe('')
+    expect(defaultShortcutFor('search.global', false)).toBe('alt+q')
+    expect(defaultShortcutFor('new:/invoices/new', true)).toBe('alt+1')
   })
 
   it('requires a safe modifier and rejects browser or fixed app shortcuts', () => {
@@ -53,5 +62,13 @@ describe('keyboard shortcut helpers', () => {
     })
     vi.spyOn(event, 'getModifierState').mockImplementation(modifier => modifier === 'AltGraph')
     expect(shortcutFromEvent(event)).toBe('')
+  })
+
+  it('uses the physical letter for macOS Option shortcuts', () => {
+    expect(shortcutFromEvent(new KeyboardEvent('keydown', {
+      key: 'œ',
+      code: 'KeyQ',
+      altKey: true,
+    }))).toBe('alt+q')
   })
 })
