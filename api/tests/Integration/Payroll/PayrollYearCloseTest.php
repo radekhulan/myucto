@@ -439,7 +439,16 @@ final class PayrollYearCloseTest extends TestCase
         self::assertSame(1, $blockers['open_leave']['count'] ?? null);
     }
 
-    public function testUnpaidLiabilityBlocksClose(): void
+    /**
+     * Nedoložený odvod je VAROVÁNÍ, ne závora.
+     *
+     * Platební příkaz odchází v den výplaty, ABO výpis dorazí o týdny
+     * později. Jako blokátor to znamenalo, že se rok nedal zavřít kvůli
+     * papíru, který ještě nedošel, a jediná cesta ven vedla přes ruční
+     * párování. Rok proto musí jít zavřít i s nespárovanými odvody — jen
+     * se vypíšou i s částkou a obdobím.
+     */
+    public function testUnpaidLiabilityWarnsButDoesNotBlockClose(): void
     {
         $this->seedClosedMonths($this->supplierId, 2026);
         $run = $this->db->pdo()->prepare(
@@ -486,8 +495,31 @@ final class PayrollYearCloseTest extends TestCase
             $this->userId,
         ]);
 
-        $blockers = array_column($this->service->status($this->supplierId, 2026)['blockers'], null, 'code');
-        self::assertSame(1, $blockers['open_liabilities']['count'] ?? null);
+        $status = $this->service->status($this->supplierId, 2026);
+        $blockers = array_column($status['blockers'], null, 'code');
+        self::assertArrayNotHasKey('open_liabilities', $blockers);
+
+        $warnings = array_column($status['warnings'], null, 'code');
+        self::assertSame(1, $warnings['open_liabilities']['count'] ?? null);
+        self::assertFalse($warnings['open_liabilities']['truncated']);
+        $item = $warnings['open_liabilities']['items'][0] ?? null;
+        self::assertIsArray($item);
+        self::assertSame('2026-11', $item['period']);
+        self::assertSame('health_insurance', $item['liability_kind']);
+        self::assertSame(10000, $item['uncovered_minor']);
+
+        // A hlavně: uzavření to nesmí zastavit. Když uzávěrku drží něco
+        // jiného (v téhle fixtuře nedopočítaná rekonciliace), nesmí to být
+        // nedoložená úhrada.
+        try {
+            $closure = $this->service->close($this->supplierId, 2026, 0, $this->userId);
+            self::assertSame('closed', $closure['status']);
+        } catch (PayrollYearCloseBlockedException $exception) {
+            self::assertNotContains(
+                'open_liabilities',
+                array_column($exception->blockers, 'code'),
+            );
+        }
     }
 
     public function testSettledIncomingLiabilityDoesNotBlockClose(): void

@@ -418,12 +418,23 @@ sama.
 
 Ve stejné verzi podmínek je skupina **JMHZ – vykonávaná pozice**. Eviduje
 strukturovanou obec pracoviště, kód obce a stát, druh činnosti, bližší určení
-pracovněprávního vztahu, příspěvek a nástroj APZ, funkční požitky a dočasné
-přidělení. Druh činnosti i bližší určení se vybírají z připnutých číselníků
+pracovněprávního vztahu, příspěvek od úřadu práce (aktivní politika
+zaměstnanosti) a jeho nástroj, funkční požitky podle § 6 odst. 10 zákona
+o daních z příjmů a dočasné přidělení k jinému zaměstnavateli. Druh činnosti
+i bližší určení se vybírají z připnutých číselníků
 JMHZ. U druhů 1 až 9 je bližší určení povinným podkladem pro výběr scénáře;
-chybějící hodnota se nikdy nevykládá jako „Žádné“. Příznaky používají tři stavy **Neověřeno**,
-**Ne** a **Ano**; chybějící historický údaj se nikdy automaticky nepovažuje za
-„ne“. Obec, její kód a stát se ukládají jen jako úplná trojice. Dokud nejsou
+chybějící hodnota se nikdy nevykládá jako „Žádné“.
+
+Na příspěvek od úřadu práce, funkční požitky a dočasné přidělení se aplikace ptá
+už při zakládání zaměstnance i pracovního vztahu, celou větou a s předvybraným
+**Ne** — u drtivé většiny firem je odpověď třikrát ne. Otázky jsou ve sbalitelné
+sekci a povinné nejsou. Na kartě vztahu mají tři stavy **Nevyplněno**, **Ne**
+a **Ano**. Nevyplněno měsíční hlášení pro ČSSZ **nezastaví**: vyloží si ho jako
+„ne“. Uložená hodnota se přitom nepřepisuje — v evidenci zůstane nevyplněná, aby
+bylo zpětně poznat, že ji nikdo výslovně nepotvrdil, a zmrazený snímek podání si
+u ní poznamená, že vznikla výkladem výchozího stavu, ne prohlášením. Ostatní
+údaje skupiny se nadále nedomýšlejí: obec, její kód a stát se ukládají jen jako
+úplná trojice. Dokud nejsou
 údaje vybrané z autoritativních číselníků CISOB a CZEM, aplikace kontroluje
 shodu názvu obce s kódem i platnost státu. Obec se vybírá našeptávačem; stát z
 připnuté nabídky. Podmínky před začátkem účinnosti připnutých číselníků nelze

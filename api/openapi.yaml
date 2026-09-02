@@ -16980,7 +16980,16 @@ paths:
       summary: Seznam zaměstnanců
       description: Vrací stránkovaný seznam osob včetně pracovních vztahů a sjednané hrubé mzdy v detailu vztahu.
       parameters:
-        - { name: filter, in: query, schema: { type: string, enum: [all, active, needs_setup], default: active } }
+        - name: filter
+          in: query
+          description: |
+            `needs_setup` je starší, užší pohled (pětice podmínek uložení
+            profilu). `needs_data` = osobě chybí cokoli z katalogu zákonných
+            údajů, `blocking_data` = chybí něco, bez čeho měsíc neprojde.
+          schema:
+            type: string
+            enum: [all, active, needs_setup, needs_data, blocking_data]
+            default: active
         - { name: q, in: query, description: Hledání podle jména, schema: { type: string, maxLength: 100 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
@@ -17464,6 +17473,51 @@ components:
           type: array
           items: { type: string }
         needs_setup: { type: boolean }
+        data_gaps:
+          type: array
+          description: |
+            Zákonné údaje, které osobě chybí, v pořadí, ve kterém se mají
+            doplňovat. Širší pohled než `setup_gaps` — sahá i na zákonnou
+            evidenci a ověřený výplatní účet. Nic z toho neblokuje uložení.
+          items: { $ref: '#/components/schemas/PayrollPersonDataGap' }
+        data_gap_counts:
+          type: object
+          description: Počty mezer podle naléhavosti, pro značku v seznamu.
+          required: [blocking, advisory]
+          properties:
+            blocking: { type: integer, minimum: 0 }
+            advisory: { type: integer, minimum: 0 }
+
+    PayrollPersonDataGap:
+      type: object
+      required: [key, severity, panel, field]
+      properties:
+        key:
+          type: string
+          enum:
+            - employment
+            - name
+            - identifier
+            - residence
+            - health_insurance
+            - tax_residence
+            - payout_account
+            - contact
+            - citizenship
+            - birth_date
+            - tax_declaration
+        severity:
+          type: string
+          description: |
+            `blocking` = bez toho měsíc neprojde (podání se neodešle nebo se
+            nespočítá), `advisory` = doplní se, až bude čas.
+          enum: [blocking, advisory]
+        panel:
+          type: [string, "null"]
+          description: Panel karty osoby, kde se údaj vyplňuje; `null` = nemá panel.
+        field:
+          type: [string, "null"]
+          description: Konkrétní položka formuláře, na kterou umí klient doskočit.
 
     PayrollPersonCreateRequest:
       type: object

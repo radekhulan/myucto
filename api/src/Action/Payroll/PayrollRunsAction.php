@@ -20,6 +20,7 @@ use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Payroll\PayrollLegacyRecapitulationService;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Payment\PayrollPaydayResolver;
+use MyInvoice\Service\Payroll\Run\PayrollRunAutoSettlementService;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommand;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
@@ -47,6 +48,13 @@ final class PayrollRunsAction
         // Doplňuje prokazatelně nulové počáteční stavy kumulací při založení
         // běhu — viz komentář v create().
         private readonly \MyInvoice\Service\Payroll\PayrollOpeningBalanceService $openingBalances,
+        /*
+         * Stav úhrady není rozhodnutí účetní, ale fakt z platebního ledgeru.
+         * Po `prepare_payments` se rovnou zkusí, jestli je pokrytí úplné
+         * (běh, kde není co platit, jím je hned), a do seznamu běhů se
+         * doplní přehled „doloženo / čeká na výpis".
+         */
+        private readonly PayrollRunAutoSettlementService $autoSettlement,
     ) {}
 
     /**
@@ -385,12 +393,25 @@ final class PayrollRunsAction
                     $item['revision_id'],
                     'run.revision_id',
                 );
-            $item['available_commands'] = self::withCombinedCommand(array_map(
-                static fn ($command): string => $command->value,
-                $this->workflow->availableCommands(
-                    PayrollRunStatus::from($status),
-                ),
-            ));
+            $item['available_commands'] = self::offeredCommands(
+                self::withCombinedCommand(array_map(
+                    static fn ($command): string => $command->value,
+                    $this->workflow->availableCommands(
+                        PayrollRunStatus::from($status),
+                    ),
+                )),
+            );
+            /*
+             * Kolik závazků je doložených bankou nebo pokladnou a kolik ještě
+             * čeká na výpis. Informace, ne úkol: obrazovka běhu z toho píše
+             * stav, tlačítko z toho nevzniká. `null` znamená, že za běh ještě
+             * nejsou platební závazky (před `prepare_payments`) nebo že není
+             * co platit.
+             */
+            $item['payment_coverage'] = $this->autoSettlement->coverageSummary(
+                $this->currentSupplierId($request),
+                $revisionId,
+            );
             $item['validations'] = $revisionId === null
                 ? []
                 : $this->runs->validations(
@@ -515,6 +536,31 @@ final class PayrollRunsAction
     }
 
     /**
+     * Příkazy, které se nabízejí ČLOVĚKU.
+     *
+     * `mark_paid` mezi ně nepatří: úhrada není rozhodnutí účetní, ale fakt.
+     * Buď peníze odešly, nebo ne — a to aplikace pozná z platebního ledgeru
+     * sama ({@see PayrollRunAutoSettlementService}). Tlačítko po účetní chtělo
+     * potvrdit něco, co ví banka, a dokud to sama nespárovala, drželo i
+     * `close`. Platební příkaz přitom odchází hned, ABO výpis o měsíc později.
+     *
+     * Samotný příkaz ve workflow ZŮSTÁVÁ — používá ho automatické překlopení,
+     * starší data ho mají v historii a přes API se dá zavolat ručně. Mizí jen
+     * z nabídky na obrazovce.
+     *
+     * @param list<string> $commands
+     * @return list<string>
+     */
+    private static function offeredCommands(array $commands): array
+    {
+        return array_values(array_filter(
+            $commands,
+            static fn (string $command): bool
+                => $command !== PayrollRunCommand::MARK_PAID->value,
+        ));
+    }
+
+    /**
      * Detail běhu s CELÝM výsledkovým snapshotem — objemná data, která seznam
      * záměrně neposílá. Frontend si je dotahuje pro jeden rozbalený běh.
      *
@@ -538,6 +584,12 @@ final class PayrollRunsAction
         if ($run === null) {
             return Json::error($response, 'not_found', 'Mzdový běh neexistuje.', 404);
         }
+        $run['payment_coverage'] = $this->autoSettlement->coverageSummary(
+            $this->currentSupplierId($request),
+            ($run['revision_id'] ?? null) === null
+                ? null
+                : (int) $run['revision_id'],
+        );
 
         return Json::ok($response, ['run' => $run]);
     }
@@ -817,7 +869,24 @@ final class PayrollRunsAction
         } catch (\InvalidArgumentException|\DomainException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
-        return Json::ok($response, $this->serialize($result));
+        $payload = $this->serialize($result);
+        if ($command === PayrollRunCommand::PREPARE_PAYMENTS->value) {
+            /*
+             * Běh, kde není co platit (celá čistá mzda je zápočet na účet
+             * společníka), by na tlačítko čekal marně — pokrytí je úplné hned.
+             * Stejně tak běh, jehož závazky se stihly spárovat dřív, než se
+             * platební dávka připravila. Ostatní zůstanou v `payment_ready`
+             * a překlopí je až spárovaný výpis.
+             */
+            $settlement = $this->autoSettlement->settleRun(
+                $this->currentSupplierId($request),
+                $runId,
+                $this->requiredUserId($request),
+            );
+            $payload['run_settlement'] = $settlement->toArray();
+        }
+
+        return Json::ok($response, $payload);
     }
 
     private function dispatch(

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
 use PDO;
 
 final class PayrollPeopleRepository
@@ -28,8 +29,19 @@ final class PayrollPeopleRepository
     /**
      * Povolené zúžení seznamu. `all` je jediná hodnota, která nic neschovává —
      * proto je i výchozí pro volající, kteří filtr neřeší.
+     *
+     * `needs_setup` je STARŠÍ, užší pohled (pět podmínek uložení profilu);
+     * zůstává, aby staré odkazy nespadly. Nové obrazovky zužují přes
+     * `needs_data` (cokoli chybí) a `blocking_data` (chybí něco, bez čeho
+     * měsíc neprojde) — obojí nad {@see PayrollPersonDataGapCatalog}.
      */
-    public const LIST_FILTERS = ['all', 'active', 'needs_setup'];
+    public const LIST_FILTERS = [
+        'all',
+        'active',
+        'needs_setup',
+        'needs_data',
+        'blocking_data',
+    ];
 
     public const LIST_DEFAULT_FILTER = 'all';
 
@@ -114,6 +126,12 @@ final class PayrollPeopleRepository
             $sql .= ' AND employee.is_active = 1';
         } elseif ($filter === 'needs_setup') {
             $sql .= ' AND ' . self::needsSetupExpression();
+        } elseif ($filter === 'needs_data') {
+            $sql .= ' AND ' . PayrollPersonDataGapCatalog::gapExpression();
+        } elseif ($filter === 'blocking_data') {
+            $sql .= ' AND ' . PayrollPersonDataGapCatalog::gapExpression(
+                PayrollPersonDataGapCatalog::SEVERITY_BLOCKING,
+            );
         }
 
         $search = trim($search);
@@ -149,56 +167,23 @@ final class PayrollPeopleRepository
      * „Vyžaduje doplnění" jen proto, že nikdo přepínač nepřehodil, a štítek
      * neuměl říct co chybí, protože nevěděl nic než že hodnota není `ready`.
      *
-     * Podmínky jsou schválně TYTÉŽ čtyři, které vynucuje
-     * {@see PayrollPersonProfileRepository::assertReadyProfile()}. Kdyby se
-     * rozešly, jedna obrazovka by nabízela doplnit něco, co druhá odmítne uložit.
+     * Podmínky BYLY opsané tady; teď je drží {@see PayrollPersonDataGapCatalog}
+     * spolu se zbytkem toho, co osobě může chybět. Užší pohled `setup_gaps`
+     * zůstává (a je pořád tatáž pětice, kterou vynucuje
+     * {@see PayrollPersonProfileRepository::assertReadyProfile()}), jen se
+     * vybírá z katalogu, aby existoval jeden seznam pravidel místo dvou.
      *
      * @return array<string,string>
      */
     private static function setupGapExpressions(): array
     {
-        return [
-            'name' => "NOT EXISTS (
-                SELECT 1 FROM payroll_person_identity_history gap
-                 WHERE gap.supplier_id = employee.supplier_id
-                   AND gap.employee_id = employee.id
-                   AND gap.first_name IS NOT NULL AND gap.first_name <> ''
-                   AND gap.last_name IS NOT NULL AND gap.last_name <> ''
-                   AND gap.effective_from <= CURRENT_DATE
-                   AND (gap.effective_to IS NULL OR gap.effective_to >= CURRENT_DATE))",
-            'residence' => "NOT EXISTS (
-                SELECT 1 FROM payroll_person_addresses gap
-                 WHERE gap.supplier_id = employee.supplier_id
-                   AND gap.employee_id = employee.id
-                   AND gap.address_type = 'residence'
-                   AND gap.effective_from <= CURRENT_DATE
-                   AND (gap.effective_to IS NULL OR gap.effective_to >= CURRENT_DATE))",
-            'contact' => 'NOT EXISTS (
-                SELECT 1 FROM payroll_person_contacts gap
-                 WHERE gap.supplier_id = employee.supplier_id
-                   AND gap.employee_id = employee.id
-                   AND gap.is_active = 1 AND gap.is_primary = 1)',
-            'identifier' => "NOT EXISTS (
-                SELECT 1 FROM payroll_person_identifiers gap
-                 WHERE gap.supplier_id = employee.supplier_id
-                   AND gap.employee_id = employee.id
-                   AND gap.identifier_type IN ('birth_number', 'ecp', 'vcp'))",
-            'employment' => 'NOT EXISTS (
-                SELECT 1 FROM payroll_employments gap
-                 WHERE gap.supplier_id = employee.supplier_id
-                   AND gap.employee_id = employee.id)',
-        ];
-    }
-
-    /** Sloupce `setup_gap_*`, ze kterých karta poskládá výčet chybějícího. */
-    private static function setupGapColumns(): string
-    {
-        $columns = [];
-        foreach (self::setupGapExpressions() as $key => $expression) {
-            $columns[] = "({$expression}) AS setup_gap_{$key}";
+        $expressions = PayrollPersonDataGapCatalog::expressions();
+        $legacy = [];
+        foreach (PayrollPersonDataGapCatalog::legacySetupKeys() as $key) {
+            $legacy[$key] = $expressions[$key];
         }
 
-        return implode(",\n                   ", $columns);
+        return $legacy;
     }
 
     /**
@@ -228,6 +213,51 @@ final class PayrollPeopleRepository
      *
      * @return list<array{id:int,full_name:string,is_active:bool,needs_setup:bool}>
      */
+    /**
+     * Aktivní osoby, kterým chybí něco, bez čeho měsíc neprojde.
+     *
+     * Čte se z TÝCHŽ výrazů jako štítek v seznamu ({@see PayrollPersonDataGapCatalog}),
+     * takže kontrola před zahájením běhu nemůže tvrdit něco jiného než seznam
+     * lidí. Vrací jen jména a identifikátory — nález má člověka JMENOVAT, ne
+     * hlásit číslo, se kterým se nedá nic dělat.
+     *
+     * Neaktivní osoby se vynechávají: za toho, kdo odešel, se nic nepodává, a
+     * jeho nedodělaná karta by nález zaplevelila navždycky.
+     *
+     * @return list<array{id:int,full_name:string}>
+     */
+    public function listActiveWithBlockingDataGaps(int $supplierId, int $limit = 25): array
+    {
+        $limit = max(1, $limit);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee.id,
+                    ' . self::fullNameExpression() . ' AS full_name'
+            . ' ' . self::fromClause()
+            . ' WHERE employee.supplier_id = ?
+                AND employee.is_active = 1
+                AND ' . PayrollPersonDataGapCatalog::gapExpression(
+                PayrollPersonDataGapCatalog::SEVERITY_BLOCKING,
+            )
+            . ' ORDER BY full_name ASC, employee.id ASC
+               LIMIT ?',
+        );
+        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue(2, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue(3, $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $people = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $person = $this->normalizeRow($row);
+            $people[] = [
+                'id' => $this->intValue($person, 'id'),
+                'full_name' => $this->stringValue($person, 'full_name'),
+            ];
+        }
+
+        return $people;
+    }
+
     public function listOptionsForTenant(int $supplierId): array
     {
         // Tentýž výraz jako stránkovaný seznam — jinak by nabídka značila jiné
@@ -429,7 +459,7 @@ final class PayrollPeopleRepository
                    COALESCE(relations.relation_types, '') AS relation_types,
                    COALESCE(relations.employment_refs, '') AS employment_refs,
             SQL
-            . "\n                   " . self::setupGapColumns()
+            . "\n                   " . PayrollPersonDataGapCatalog::selectColumns()
             . ' ' . self::fromClause() . ' WHERE employee.supplier_id = ?';
         if ($single) {
             $sql .= ' AND employee.id = ?';
@@ -456,12 +486,21 @@ final class PayrollPeopleRepository
         $relationTypes = $row['relation_types'] === ''
             ? []
             : explode(',', $this->stringValue($row, 'relation_types'));
-        // Štítek „Vyžaduje doplnění" má JMENOVAT, co chybí — prázdný štítek
-        // uživatele jen posílal hádat po celé kartě.
+        /*
+         * Štítek má JMENOVAT, co chybí — prázdný štítek uživatele jen posílal
+         * hádat po celé kartě. Mezery i jejich naléhavost čte KATALOG, ne tenhle
+         * repozitář: seznam, karta osoby i kontrola před během tak mluví o téže
+         * množině údajů. Starší `setup_gaps` je jeho podmnožina (pětice, kterou
+         * vynucuje uložení profilu), takže se obě pole nemůžou rozejít.
+         */
+        $dataGaps = PayrollPersonDataGapCatalog::fromRow(
+            fn (string $column): bool => $this->boolValue($row, $column),
+        );
+        $legacyKeys = PayrollPersonDataGapCatalog::legacySetupKeys();
         $setupGaps = [];
-        foreach (array_keys(self::setupGapExpressions()) as $gap) {
-            if ($this->boolValue($row, "setup_gap_{$gap}")) {
-                $setupGaps[] = $gap;
+        foreach ($dataGaps as $gap) {
+            if (in_array($gap['key'], $legacyKeys, true)) {
+                $setupGaps[] = $gap['key'];
             }
         }
 
@@ -477,6 +516,8 @@ final class PayrollPeopleRepository
             'employment_refs' => $this->employmentRefs($this->stringValue($row, 'employment_refs')),
             'setup_gaps' => $setupGaps,
             'needs_setup' => $setupGaps !== [],
+            'data_gaps' => $dataGaps,
+            'data_gap_counts' => PayrollPersonDataGapCatalog::counts($dataGaps),
         ];
     }
 

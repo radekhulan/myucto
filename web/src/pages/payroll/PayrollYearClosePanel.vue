@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { payrollApi, type PayrollYearCloseBlocker, type PayrollYearCloseStatusResponse } from '@/api/payroll'
+import {
+  payrollApi,
+  type PayrollYearCloseBlocker,
+  type PayrollYearCloseStatusResponse,
+  type PayrollYearCloseWarning,
+  type PayrollYearCloseWarningItem,
+} from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
-import { formatDateTime, formatPeriod } from '@/composables/useFormat'
+import { formatDateTime, formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 import { useRoute } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 
@@ -46,6 +52,30 @@ const canApprove = computed(() => auth.canWrite('payroll.approve'))
 const canReopen = computed(() => auth.canWrite('payroll.reopen'))
 const closed = computed(() => data.value?.closure.status === 'closed')
 const blockers = computed(() => data.value?.blockers ?? [])
+/*
+ * Nálezy, které rok NEDRŽÍ. Nedoložený odvod není chyba účetnictví: příkaz
+ * odešel do banky v den výplaty, ABO výpis dorazí o týdny později a spáruje
+ * se až při importu. Jako blokátor to znamenalo, že se rok nedal zavřít kvůli
+ * papíru, který ještě nedošel. Účetní to má vidět i s jmenným seznamem
+ * a rozhodnout se sama.
+ */
+const warnings = computed<PayrollYearCloseWarning[]>(
+  () => data.value?.warnings ?? [],
+)
+
+function warningText(warning: PayrollYearCloseWarning): string {
+  const key = `payroll.year_close.warning.${warning.code}`
+  return te(key)
+    ? t(key, { count: warning.count })
+    : t('payroll.year_close.warning.unknown', { count: warning.count })
+}
+
+function warningItemText(item: PayrollYearCloseWarningItem): string {
+  const kindKey = `payroll.payments.kind.${item.liability_kind}`
+  const kind = te(kindKey) ? t(kindKey) : item.liability_kind
+  const who = item.employee_name === null ? '' : ` — ${item.employee_name}`
+  return `${formatPeriod(item.period)}: ${kind}${who} · ${formatMoneyMinor(item.uncovered_minor, item.currency_code)}`
+}
 
 function blockerText(blocker: PayrollYearCloseBlocker): string {
   if (blocker.code === 'missing_months') {
@@ -107,6 +137,7 @@ async function close(): Promise<void> {
   try {
     data.value.closure = await payrollApi.closeYear(year.value, data.value.closure.row_version)
     data.value.blockers = []
+    data.value.warnings = []
     toast.success(t('payroll.year_close.closed'))
   } catch (error: any) {
     if (error?.response?.data?.error?.code === 'year_close_blocked') {
@@ -203,6 +234,43 @@ onMounted(load)
               </svg>
               {{ t('payroll.year_close.blocker_open') }}
             </RouterLink>
+          </li>
+        </ul>
+      </div>
+
+      <!--
+        Varování, ne závora. Odvod bez doloženého výpisu rok nedrží — účetní
+        vidí, o co jde, a rozhodne se sama.
+      -->
+      <div
+        v-if="!closed && warnings.length > 0"
+        class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3"
+        data-test="year-close-warnings"
+      >
+        <p class="text-sm font-medium text-neutral-800">{{ t('payroll.year_close.warnings_title') }}</p>
+        <ul class="mt-2 space-y-2 text-sm text-neutral-700">
+          <li
+            v-for="warning in warnings"
+            :key="warning.code"
+            :data-test="`year-close-warning-${warning.code}`"
+          >
+            <div class="flex flex-wrap items-center gap-2">
+              <span>{{ warningText(warning) }}</span>
+              <RouterLink
+                :to="{ name: 'payroll-payments' }"
+                :class="btnOutlineSm('neutral')"
+                :data-test="`year-close-warning-link-${warning.code}`"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.edit" />
+                </svg>
+                {{ t('payroll.year_close.blocker_open') }}
+              </RouterLink>
+            </div>
+            <ul class="mt-1 space-y-0.5 pl-4 text-xs text-neutral-600">
+              <li v-for="item in warning.items" :key="item.liability_id">{{ warningItemText(item) }}</li>
+              <li v-if="warning.truncated">{{ t('payroll.year_close.warning_truncated', { count: warning.count - warning.items.length }) }}</li>
+            </ul>
           </li>
         </ul>
       </div>

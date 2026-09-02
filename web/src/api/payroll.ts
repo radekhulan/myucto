@@ -129,6 +129,55 @@ export type PayrollPersonSetupGap =
   | 'employment'
 
 /**
+ * Zákonný údaj, který osobě chybí. Širší pohled než `setup_gaps` — sahá i na
+ * zákonnou evidenci a výplatní účet, tedy na věci, o kterých se účetní dosud
+ * dozvídala až u podání nebo u plateb.
+ *
+ * Server je jediná autorita: seznam, karta osoby i kontrola před během čtou
+ * TÝŽ katalog (`PayrollPersonDataGapCatalog`). Klíč se překládá přes
+ * `payroll.people.data_gap.*`, texty se sem neposílají.
+ *
+ * Poslední tři klíče (`jmhz_*`) leží na PRACOVNÍM VZTAHU, ne na osobě. Hlásí se
+ * agregovaně za člověka — seznam má jeden řádek na osobu; kdo má vztahů víc,
+ * dohledá je na kartě.
+ */
+export type PayrollPersonDataGapKey =
+  | 'employment'
+  | 'name'
+  | 'identifier'
+  | 'residence'
+  | 'health_insurance'
+  | 'tax_residence'
+  | 'payout_account'
+  | 'contact'
+  | 'citizenship'
+  | 'birth_date'
+  | 'tax_declaration'
+  | 'jmhz_person_identifier'
+  | 'jmhz_employment_identifier'
+  | 'jmhz_activity_code'
+
+/**
+ * `blocking` = bez toho měsíc neprojde (podání se neodešle nebo se nespočítá),
+ * `advisory` = doplní se, až bude čas. Nic z toho neblokuje uložení.
+ */
+export type PayrollPersonDataGapSeverity = 'blocking' | 'advisory'
+
+export interface PayrollPersonDataGap {
+  key: PayrollPersonDataGapKey
+  severity: PayrollPersonDataGapSeverity
+  /** Panel karty osoby pro povel `?person=&panel=&field=`; `null` = nemá panel. */
+  panel: string | null
+  /** `data-a1-field` cílové položky pro `revealField()`. */
+  field: string | null
+}
+
+export interface PayrollPersonDataGapCounts {
+  blocking: number
+  advisory: number
+}
+
+/**
  * Pracovní vztah tak, jak ho vidí seznam osob — jen na výběr cíle rychlé akce.
  * Řazeno hlavním vztahem napřed, aby u osoby s jedním použitelným vztahem šlo
  * kliknout rovnou.
@@ -160,6 +209,12 @@ export interface PayrollPersonListItem {
   employment_refs: PayrollPersonEmploymentRef[]
   setup_gaps: PayrollPersonSetupGap[]
   needs_setup: boolean
+  /**
+   * Všechno, co osobě chybí — v pořadí, ve kterém se to má doplňovat. Značka
+   * v seznamu z toho kreslí počty, karta osoby výčet s doskokem na pole.
+   */
+  data_gaps: PayrollPersonDataGap[]
+  data_gap_counts: PayrollPersonDataGapCounts
   can_delete: boolean
   delete_blocker: PayrollDeleteBlocker | null
   delete_cascade: PayrollDeleteCascade
@@ -392,8 +447,20 @@ export interface PayrollPeopleResponse {
   offset: number
 }
 
-/** Zúžení seznamu osob. Zužuje server, aby hledání nekončilo na hraně stránky. */
-export type PayrollPeopleFilter = 'all' | 'active' | 'needs_setup'
+/**
+ * Zúžení seznamu osob. Zužuje server, aby hledání nekončilo na hraně stránky.
+ *
+ * `needs_setup` je starší, užší pohled (pětice podmínek uložení profilu);
+ * server ho pořád přijímá kvůli odkazům zvenčí, ale nabídka na obrazovce ho
+ * už neukazuje. `needs_data` = cokoli z katalogu chybí, `blocking_data` =
+ * chybí něco, bez čeho měsíc neprojde.
+ */
+export type PayrollPeopleFilter =
+  | 'all'
+  | 'active'
+  | 'needs_setup'
+  | 'needs_data'
+  | 'blocking_data'
 
 /** Osoba v rozbalovací nabídce — jen to, čím se dá vybrat. */
 export interface PayrollPersonOption {
@@ -436,6 +503,16 @@ export interface PayrollPersonCreatePayload {
    * nezaloží ani osobu.
    */
   health_insurer_code?: string | null
+  /**
+   * Tři tri-state údaje pro měsíční hlášení ČSSZ. Formulář se na ně ptá celou
+   * větou a s předvybraným „ne"; když je klient nepošle, zůstane v evidenci
+   * `unverified` — hlášení si to vyloží jako „ne", ale zpětně je poznat, že to
+   * nikdo výslovně nepotvrdil.
+   */
+  jmhz_apz_contribution_status?: PayrollVerifiedTriState
+  jmhz_apz_instrument_code?: string | null
+  jmhz_functional_benefits_status?: PayrollVerifiedTriState
+  jmhz_temporary_assignment_status?: PayrollVerifiedTriState
 }
 
 export type PayrollPersonProfileStatus = 'missing' | 'legacy' | 'setup' | 'ready'
@@ -4245,10 +4322,35 @@ export type PayrollYearCloseBlockerCode =
   | 'missing_months'
   | 'open_corrections'
   | 'open_submissions'
-  | 'open_liabilities'
   | 'open_leave'
   | 'open_enforcement'
   | 'reconciliation_differences'
+
+/**
+ * Nález, který se ukáže, ale rok nedrží. `open_liabilities` = odvod bez
+ * doloženého bankovního pohybu; příkaz odešel v den výplaty, výpis dorazí
+ * o týdny později. Rozhodnutí zavřít rok patří účetní.
+ */
+export type PayrollYearCloseWarningCode = 'open_liabilities'
+
+export interface PayrollYearCloseWarningItem {
+  liability_id: number
+  period: string
+  liability_kind: string
+  direction: 'outgoing' | 'incoming'
+  employee_name: string | null
+  currency_code: string
+  amount_minor: number
+  settled_minor: number
+  uncovered_minor: number
+}
+
+export interface PayrollYearCloseWarning {
+  code: PayrollYearCloseWarningCode
+  count: number
+  items: PayrollYearCloseWarningItem[]
+  truncated: boolean
+}
 
 export interface PayrollYearCloseBlocker {
   code: PayrollYearCloseBlockerCode
@@ -4274,6 +4376,7 @@ export interface PayrollYearClose {
 export interface PayrollYearCloseStatusResponse {
   closure: PayrollYearClose
   blockers: PayrollYearCloseBlocker[]
+  warnings?: PayrollYearCloseWarning[]
 }
 
 export interface PayrollAnnualReportMonth {
@@ -5059,6 +5162,34 @@ export interface PayrollRunResultSnapshot {
   people?: PayrollRunResultPerson[]
 }
 
+/**
+ * Kolik mzdových závazků běhu je doložených skutečným bankovním pohybem nebo
+ * zaúčtovaným pokladním dokladem. Není to úkol pro účetní: běh se do stavu
+ * `paid` překlopí sám, jakmile `uncovered_count` klesne na nulu. `null`
+ * znamená, že za běh ještě nejsou platební závazky, nebo není co platit.
+ */
+export interface PayrollRunPaymentCoverage {
+  liability_count: number
+  settled_count: number
+  uncovered_count: number
+  required_minor: number
+  settled_minor: number
+  uncovered_minor: number
+  incoming_unsettled_count: number
+}
+
+/** Výsledek automatického překlopení běhu do `paid` po pohybu v ledgeru. */
+export interface PayrollRunAutoSettlement {
+  state: 'settled' | 'pending' | 'skipped' | 'failed'
+  coverage?: {
+    liability_count: number
+    uncovered_count: number
+    required_minor: number
+    settled_minor: number
+  }
+  reason?: string
+}
+
 export interface PayrollRun {
   id: number
   supplier_id: number
@@ -5079,6 +5210,7 @@ export interface PayrollRun {
   result_snapshot: PayrollRunResultSnapshot | null
   available_commands: PayrollRunCommand[]
   validations: PayrollRunValidation[]
+  payment_coverage?: PayrollRunPaymentCoverage | null
 }
 
 export type PayrollRunHistoryTotalKey =
@@ -5140,11 +5272,25 @@ export interface PayrollRunHistory {
 export interface PayrollRunReadinessFinding {
   code: string
   severity: 'blocker' | 'warning' | 'info'
+  /**
+   * Odpověď na jedinou otázku, která účetní zajímá: dá se to opravit potom?
+   *
+   * - `anytime`  — dá, a nic to nestojí. Informace, ne závora.
+   * - `revision` — dá, ale po zamknutí vstupů to stojí opravnou revizi.
+   * - `blocking` — nedá; výpočet nemá z čeho vyjít.
+   */
+  impact: 'anytime' | 'revision' | 'blocking'
+  /**
+   * `setup` = nastavení firmy, dořeší se při rozjezdu a pak je pokoj.
+   * `monthly` = práce, která se opakuje každý měsíc.
+   */
+  scope: 'setup' | 'monthly'
   message: string
   remediation_path: string | null
   /** Kolika vztahů/položek se nález týká. */
   count: number
-  entities: { entity_type: string, entity_id: number | null }[]
+  /** `label` je lidský název konkrétní věci — nález MUSÍ jmenovat, čeho se týká. */
+  entities: { entity_type: string, entity_id: number | null, label: string | null }[]
 }
 
 /**
@@ -5156,7 +5302,9 @@ export interface PayrollRunReadiness {
   period_start: string
   payment_date: string
   office_id: number | null
+  /** `true` = nic nezastaví. NEznamená „nic nechybí" — od toho je `has_findings`. */
   ready: boolean
+  has_findings: boolean
   findings: PayrollRunReadinessFinding[]
 }
 

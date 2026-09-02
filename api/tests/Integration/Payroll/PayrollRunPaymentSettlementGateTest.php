@@ -14,6 +14,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReversalCommand;
+use MyInvoice\Service\Payroll\Run\PayrollRunAutoSettlementService;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome;
 use MyInvoice\Service\Payroll\Run\PayrollRunPaymentSettlementService;
@@ -38,6 +39,7 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
     private PayrollPaymentReconciliationQueryService $reconciliationQueries;
     private PayrollPaymentBatchBuilder $batchBuilder;
     private PayrollRunPaymentSettlementService $settlement;
+    private PayrollRunAutoSettlementService $autoSettlement;
     private int $supplierId;
     private int $actorId;
     private int $runId;
@@ -60,6 +62,9 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
         $settlement = $container->get(
             PayrollRunPaymentSettlementService::class,
         );
+        $autoSettlement = $container->get(
+            PayrollRunAutoSettlementService::class,
+        );
         self::assertInstanceOf(Connection::class, $connection);
         self::assertInstanceOf(PayrollRunCommandService::class, $commands);
         self::assertInstanceOf(PayrollRunRepository::class, $runs);
@@ -75,6 +80,10 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
         self::assertInstanceOf(
             PayrollRunPaymentSettlementService::class,
             $settlement,
+        );
+        self::assertInstanceOf(
+            PayrollRunAutoSettlementService::class,
+            $autoSettlement,
         );
         foreach ([
             'payroll_runs',
@@ -94,6 +103,7 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
         $this->reconciliationQueries = $reconciliationQueries;
         $this->batchBuilder = $batchBuilder;
         $this->settlement = $settlement;
+        $this->autoSettlement = $autoSettlement;
         $this->pdo->beginTransaction();
 
         $sourceSupplierId = (int) $this->pdo
@@ -186,6 +196,108 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
             'payment_ready',
             (string) $this->runs->find($this->supplierId, $this->runId)['status'],
         );
+    }
+
+    /**
+     * Stav běhu plyne ze skutečnosti, ne z kliknutí.
+     *
+     * Účetní nemá tlačítko „Označit za uhrazené" — úhrada není její
+     * rozhodnutí, je to fakt z výpisu. Jakmile poslední závazek dosedne na
+     * bankovní pohyb, běh se do `paid` překlopí sám a rovnou jde uzavřít.
+     */
+    public function testRunSettlesItselfWhenTheStatementArrives(): void
+    {
+        $autoSettlement = $this->autoSettlement;
+
+        // Dokud výpis nedorazil, běh čeká — a NENÍ to chyba.
+        $waiting = $autoSettlement->settleRun(
+            $this->supplierId,
+            $this->runId,
+            $this->actorId,
+        );
+        self::assertSame('pending', $waiting->state);
+        self::assertFalse($waiting->didSettle());
+        self::assertSame(
+            'payment_ready',
+            (string) $this->runs->find($this->supplierId, $this->runId)['status'],
+        );
+
+        $statementId = $this->seedBankStatement(
+            $this->pdo,
+            $this->supplierId,
+            'settlement-gate-auto',
+        );
+        $transactionId = $this->insertBankTransaction(
+            $statementId,
+            '-1000.00',
+            'settlement-gate-auto',
+        );
+        $this->reconciliation->match(
+            new PayrollPaymentReconciliationCommand(
+                $this->supplierId,
+                $this->allocationId,
+                100_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $statementId,
+                    $transactionId,
+                ),
+                'settlement-gate-auto-payment',
+                $this->actorId,
+            ),
+        );
+
+        $settled = $autoSettlement->settleForAllocation(
+            $this->supplierId,
+            $this->allocationId,
+            $this->actorId,
+        );
+        self::assertTrue($settled->didSettle());
+        $run = $this->runs->find($this->supplierId, $this->runId);
+        self::assertSame('paid', (string) $run['status']);
+
+        // Druhý pohyb v ledgeru už jen potvrdí, co platí. Žádný druhý přechod.
+        $again = $autoSettlement->settleForAllocation(
+            $this->supplierId,
+            $this->allocationId,
+            $this->actorId,
+        );
+        self::assertSame('skipped', $again->state);
+        self::assertSame('already_paid', $again->reason);
+
+        $closed = $this->commands->close(
+            $this->supplierId,
+            $this->runId,
+            (int) $run['row_version'],
+            'settlement-gate-auto-close',
+            $this->actorId,
+        );
+        self::assertSame('closed', $closed->run['status']);
+    }
+
+    /**
+     * Měsíc jde uzavřít i bez doloženého výpisu.
+     *
+     * Bez toho by odstranění tlačítka „Označit za uhrazené" vyrobilo horší
+     * past než tu, kterou ruší: běh by v `payment_ready` uvázl a mzdový rok
+     * by se nedal zavřít nikdy — `missingMonths()` počítá jen běhy ve stavu
+     * `closed`. Doložení sleduje platební ledger dál.
+     */
+    public function testMonthClosesWithoutDocumentedPayment(): void
+    {
+        $closed = $this->commands->close(
+            $this->supplierId,
+            $this->runId,
+            1,
+            'settlement-gate-close-undocumented',
+            $this->actorId,
+        );
+        self::assertSame('closed', $closed->run['status']);
+
+        $coverage = $this->settlement->inspect(
+            $this->supplierId,
+            $this->revisionId,
+        );
+        self::assertNotSame([], $coverage['uncovered']);
     }
 
     public function testOneAccountantCanCloseRunAfterRealBankPayment(): void

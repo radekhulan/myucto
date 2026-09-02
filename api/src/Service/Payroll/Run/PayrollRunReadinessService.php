@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
 use PDO;
 
@@ -52,6 +53,8 @@ final class PayrollRunReadinessService
         private readonly Connection $db,
         private readonly PayrollRunSnapshotBuilder $snapshotBuilder,
         private readonly PayrollEmployerPolicyRepository $employerPolicies,
+        private readonly PayrollPeopleRepository $people,
+        private readonly PayrollRunJmhzReadinessProbe $jmhzProbe,
     ) {}
 
     /**
@@ -99,17 +102,16 @@ final class PayrollRunReadinessService
             // nerozbila — jen se z ní stane nález. Duplicitní hlášku o politice
             // (kterou už máme výš) sem znovu netaháme.
             if ($policyFinding === null) {
-                $findings[] = [
-                    'code' => 'readiness_check_failed',
-                    'severity' => 'warning',
-                    'message' => 'Předběžnou kontrolu se nepodařilo dokončit: '
-                        . $e->getMessage()
-                        . ' Mzdový běh tím není zablokovaný — po zahájení se '
-                        . 'kontroly spustí znovu nad zmrazenými vstupy.',
-                    'remediation_path' => null,
-                    'count' => 1,
-                    'entities' => [],
-                ];
+                $findings[] = self::finding(
+                    'readiness_check_failed',
+                    'Předběžnou kontrolu se nepodařilo dokončit: '
+                    . $e->getMessage()
+                    . ' Mzdový běh tím není zablokovaný — po zahájení se '
+                    . 'kontroly spustí znovu nad zmrazenými vstupy.',
+                    null,
+                    1,
+                    [],
+                );
             }
         }
 
@@ -124,15 +126,139 @@ final class PayrollRunReadinessService
             ) as $finding) {
                 $findings[] = $finding;
             }
+            /*
+             * Nálezy, které se dosud ozvaly až u ZMRAZENÍ měsíčního hlášení.
+             * Nepíšou se tu znovu — volá se tatáž cesta, jen nasucho. Bez toho
+             * účetní prošla celý měsíc, aby na konci narazila na chybějící
+             * zařazení složky nebo na identifikátor od ČSSZ, které mohla
+             * doplnit hned první den.
+             */
+            foreach ($this->jmhzProbe->inspect(
+                $supplierId,
+                $periodStart,
+                $snapshot->data,
+            ) as $finding) {
+                $findings[] = $finding;
+            }
+        }
+
+        $peopleFinding = $this->personDataGapFinding($supplierId);
+        if ($peopleFinding !== null) {
+            $findings[] = $peopleFinding;
         }
 
         return [
             'period_start' => $periodStart,
             'payment_date' => $paymentDate,
             'office_id' => $officeId,
-            'ready' => $findings === [],
+            // `ready` znamená „nic nezastaví", ne „nic nechybí". Nález skupiny 1
+            // je informace, ne závora — kdyby shazoval `ready`, byla by z něj
+            // závora zpátky.
+            'ready' => self::blockingFindings($findings) === [],
+            'has_findings' => $findings !== [],
             'findings' => $findings,
         ];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $findings
+     * @return list<array<string,mixed>>
+     */
+    private static function blockingFindings(array $findings): array
+    {
+        return array_values(array_filter(
+            $findings,
+            static fn (array $finding): bool =>
+                ($finding['impact'] ?? null) === PayrollRunReadinessImpact::IMPACT_BLOCKING,
+        ));
+    }
+
+    /**
+     * Nález doplněný o zařazení („dá se to opravit potom?") a o to, jestli jde
+     * o jednorázové nastavení firmy, nebo o měsíční práci.
+     *
+     * @param list<array{entity_type:string,entity_id:?int,label:?string}> $entities
+     * @return array<string,mixed>
+     */
+    private static function finding(
+        string $code,
+        string $message,
+        ?string $remediationPath,
+        int $count,
+        array $entities,
+    ): array {
+        $classification = PayrollRunReadinessImpact::describe($code);
+
+        return [
+            'code' => $code,
+            'severity' => $classification['severity'],
+            'impact' => $classification['impact'],
+            'scope' => $classification['scope'],
+            'message' => $message,
+            'remediation_path' => $remediationPath,
+            'count' => $count,
+            'entities' => $entities,
+        ];
+    }
+
+    /**
+     * Lidé, kterým chybí údaj, bez kterého měsíc neprojde.
+     *
+     * Je to TÝŽ seznam pravidel, jaký kreslí značku v seznamu zaměstnanců
+     * ({@see \MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog}) —
+     * kontrola před během se s ním tedy
+     * nemůže rozejít. Sem patří proto, že chybějící pojišťovna nebo daňová
+     * rezidence se dosud ozvaly až u výpočtu nebo u podání, tedy o několik
+     * kroků později, než se s tím dalo něco dělat.
+     *
+     * Neblokuje, jako nic v téhle službě: kdo chce běh zahájit i tak, zahájí ho.
+     *
+     * @return array{
+     *   code:string,severity:string,message:string,remediation_path:?string,
+     *   count:int,entities:list<array{entity_type:string,entity_id:?int}>
+     * }|null
+     */
+    private function personDataGapFinding(int $supplierId): ?array
+    {
+        try {
+            $people = $this->people->listActiveWithBlockingDataGaps(
+                $supplierId,
+                self::MAX_ENTITIES,
+            );
+        } catch (\Throwable) {
+            // Kontrola je pomocná; její pád nesmí přebít nálezy, kvůli kterým
+            // se sem chodí.
+            return null;
+        }
+        if ($people === []) {
+            return null;
+        }
+
+        $names = array_map(
+            static fn (array $person): string => $person['full_name'],
+            $people,
+        );
+
+        return self::finding(
+            'person_data_gap',
+            sprintf(
+                'Chybí zákonné údaje u těchto zaměstnanců: %s. Bez nich se '
+                . 'nedá podat hlášení ani spočítat odvody. Otevřete Mzdy → '
+                . 'Zaměstnanci, zapněte filtr „Mám doplnit údaje" a doplňte je; '
+                . 'karta osoby nahoře vypíše, co konkrétně chybí.',
+                implode(', ', $names),
+            ),
+            '/payroll/people?filter=blocking_data',
+            count($people),
+            array_map(
+                static fn (array $person): array => [
+                    'entity_type' => 'employee',
+                    'entity_id' => $person['id'],
+                    'label' => $person['full_name'],
+                ],
+                $people,
+            ),
+        );
     }
 
     /**
@@ -161,14 +287,13 @@ final class PayrollRunReadinessService
             $message = $e->getMessage();
         }
 
-        return [
-            'code' => 'employer_policy_missing',
-            'severity' => 'blocker',
-            'message' => $message,
-            'remediation_path' => '/payroll/settings',
-            'count' => 1,
-            'entities' => [],
-        ];
+        return self::finding(
+            'employer_policy_missing',
+            $message,
+            '/payroll/settings',
+            1,
+            [],
+        );
     }
 
     /**
@@ -192,25 +317,31 @@ final class PayrollRunReadinessService
             }
             $code = $validation->code;
             if (!isset($groups[$code])) {
+                /*
+                 * Závažnost se PŘEBÍJÍ zařazením, ne přebírá z validace.
+                 * Validace hlásí, jak vážně to zní; tady se rozhoduje podle
+                 * jediné otázky, která účetní zajímá — dá se to opravit potom?
+                 * Skutečné brány (zamknutí, schválení, příprava plateb) zůstávají
+                 * tam, kde byly; tohle je jen předběžný přehled.
+                 */
+                $classification = PayrollRunReadinessImpact::describe($code);
                 $groups[$code] = [
                     'code' => $code,
-                    'severity' => $validation->severity,
+                    'severity' => $classification['severity'],
+                    'impact' => $classification['impact'],
+                    'scope' => $classification['scope'],
                     'message' => $validation->message,
                     'remediation_path' => $validation->remediationPath,
                     'count' => 0,
                     'entities' => [],
                 ];
             }
-            // Blocker přebíjí warning: sloučená skupina má nést tu horší
-            // závažnost, ne tu, která přišla první.
-            if ($validation->severity === 'blocker') {
-                $groups[$code]['severity'] = 'blocker';
-            }
             ++$groups[$code]['count'];
             if (count($groups[$code]['entities']) < self::MAX_ENTITIES) {
                 $groups[$code]['entities'][] = [
                     'entity_type' => $validation->entityType,
                     'entity_id' => $validation->entityId,
+                    'label' => null,
                 ];
             }
         }
@@ -269,20 +400,26 @@ final class PayrollRunReadinessService
             return [];
         }
 
-        return [[
-            'code' => 'institution_account_unverified',
-            'severity' => 'warning',
-            'message' => sprintf(
+        return [self::finding(
+            'institution_account_unverified',
+            sprintf(
                 'Bez ověřeného účinného účtu je zatím: %s. Spočítat a schválit '
                 . 'mzdy jde i tak, ale příprava plateb se o tenhle účet zastaví. '
                 . 'Doplňte ho v Mzdy → Nastavení zaměstnavatele → Účty '
                 . 'institucí a označte ho jako ověřený.',
                 implode(', ', $missing),
             ),
-            'remediation_path' => '/payroll/settings',
-            'count' => count($missing),
-            'entities' => [],
-        ]];
+            '/payroll/settings',
+            count($missing),
+            array_map(
+                static fn (string $name): array => [
+                    'entity_type' => 'institution',
+                    'entity_id' => null,
+                    'label' => $name,
+                ],
+                $missing,
+            ),
+        )];
     }
 
     /**

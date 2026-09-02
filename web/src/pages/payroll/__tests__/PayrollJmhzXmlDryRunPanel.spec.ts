@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   dryRun: vi.fn(),
   offices: vi.fn(),
   context: vi.fn(),
+  components: vi.fn(() => Promise.resolve([])),
   canWrite: vi.fn(() => true),
 }))
 
@@ -14,6 +15,7 @@ vi.mock('@/api/payroll', () => ({
     freezeJmhzPreparation: m.freeze,
     jmhzXmlDryRun: m.dryRun,
     jmhzPvpojOffices: m.offices,
+    components: m.components,
   },
 }))
 

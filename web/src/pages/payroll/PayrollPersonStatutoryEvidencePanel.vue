@@ -695,9 +695,10 @@ onMounted(() => {
           <section
             v-for="section in SECTIONS"
             :key="section.key"
-            class="rounded-md border border-neutral-200"
+            class="scroll-mt-24 rounded-md border border-neutral-200"
             :data-test="`section-${section.key}`"
             :ref="element => setSectionRef(section.key, element)"
+            :data-a1-field="`statutory.${section.key}`"
           >
             <!--
               Přehled stavu je jediný řádek a stojí NAD historií: „co teď platí"

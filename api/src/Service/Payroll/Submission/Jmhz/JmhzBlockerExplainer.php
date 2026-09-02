@@ -13,9 +13,20 @@ final class JmhzBlockerExplainer
         'component_jmhz_manual_review' => 'Zařazení mzdových složek do JMHZ vyžaduje kontrolu.',
         'component_jmhz_treatment_invalid' => 'Mzdové složky mají neplatné nastavení pro JMHZ.',
         'jmhz_average_hourly_earning_missing' => 'Chybí ověřený průměrný hodinový výdělek.',
-        'jmhz_identity_incomplete' => 'Chybí povinné identifikační údaje zaměstnance.',
-        'jmhz_identity_oic_missing' => 'Chybí ověřený identifikátor pojištěnce pro ČSSZ.',
-        'jmhz_identity_id_ppv_missing' => 'Chybí identifikátor pracovního vztahu pro ČSSZ.',
+        /*
+         * Názvy polí jsou DOSLOVA ty z formuláře (`payroll.people.jmhz_identity`
+         * v `web/src/i18n/cs.json`) a ze slovníku
+         * {@see \MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationFieldVocabulary}.
+         * Účetní ten popisek hledá očima na obrazovce; když se liší byť slovem,
+         * nenajde ho. „Chybí 10051" jí neřekne vůbec nic.
+         */
+        'jmhz_identity_incomplete' => 'Pracovní vztah nemá uložené „OIČ / IK MPSV '
+            . 'osoby" ani „ID PPV pracovního vztahu". Obě čísla přiděluje ČSSZ '
+            . 'při registraci zaměstnance, aplikace je vymyslet nemůže.',
+        'jmhz_identity_oic_missing' => 'Chybí „OIČ / IK MPSV osoby" — osobní '
+            . 'identifikační číslo, které zaměstnanci přiděluje ČSSZ při registraci.',
+        'jmhz_identity_id_ppv_missing' => 'Chybí „ID PPV pracovního vztahu" — '
+            . 'identifikátor zaměstnání, který přiděluje ČSSZ při registraci.',
         'jmhz_scenario_activity_code_missing' => 'Chybí kód druhu činnosti pro JMHZ.',
         'jmhz_scenario_relationship_detail_missing' => 'Chybí upřesnění druhu pracovního vztahu pro JMHZ.',
         'jmhz_scenario1_scope_unsupported' => 'Příprava obsahuje smíšené nebo zvláštní scénáře JMHZ, které nelze vydat za běžné hlášení.',
@@ -24,7 +35,10 @@ final class JmhzBlockerExplainer
         'jmhz_scenario2_frozen_resolution_invalid' => 'Zmrazené zařazení odměny pěstouna neodpovídá připnutému katalogu nebo XSD.',
         'jmhz_scenario2_frozen_resolution_missing' => 'Příprava označuje odměnu pěstouna, ale neobsahuje její zmrazený pracovní vztah.',
         'jmhz_scenario2_evidence_gap' => 'Zmrazená příprava nenese ověřený zdroj všech povinných údajů odměny pěstouna.',
-        'jmhz_verified_boolean_missing' => 'Chybí potvrzení povinných voleb ano/ne.',
+        // Nevyplněno (`unverified`) sem UŽ NESPADNE — vykládá se jako „ne",
+        // viz JmhzPreparationSnapshotBuilder::DEFAULTED_TRISTATES. Zůstává
+        // jen pro poškozený nebo úplně chybějící údaj v evidenci.
+        'jmhz_verified_boolean_missing' => 'Údaj o příspěvku APZ, funkčních požitcích nebo dočasném přidělení má v evidenci neplatnou hodnotu.',
         'jmhz_work_month_not_approved' => 'Pracovní doba za vykazovaný měsíc není schválená.',
         'jmhz_workplace_codebooks_unverified' => 'Chybí ověřené číselníkové údaje pracoviště.',
         'jmhz_preparation_not_ready' => 'Zdroje měsíčního hlášení nejsou úplné.',
@@ -78,16 +92,39 @@ final class JmhzBlockerExplainer
         'jmhz_employer_part_time_discount_working_time_missing' => 'Chybí sjednaná kratší týdenní pracovní doba.',
         'jmhz_employer_part_time_discount_working_time_unresolved' => 'Sjednanou kratší týdenní pracovní dobu nelze vykázat.',
         'jmhz_employer_part_time_discount_activity_unsupported' => 'Sleva za kratší úvazek neodpovídá druhu pracovního vztahu.',
+        'jmhz_xml_identity_name_incomplete' => 'Zaměstnanec se hlásí jménem, protože mu ČSSZ zatím nepřidělila OIČ ani ID PPV, a k tomu chybí příjmení, jméno, datum narození, datum nástupu nebo druh činnosti.',
     ];
 
     /** @var array<string,string> */
     private const ACTIONS = [
         'jmhz_scenario1_scope_unsupported' => 'Zkontrolujte druhy činnosti v přípravě a nepodporované vztahy zpracujte individuálně.',
         'jmhz_scenario2_evidence_gap' => 'Tento scénář zatím zpracujte individuálně podle podkladů ČSSZ; hodnoty nelze bezpečně doplnit odhadem.',
-        'component_jmhz_mapping_missing' => 'Otevřete Mzdy → Mzdové složky a doplňte zařazení.',
+        'component_jmhz_mapping_missing' => 'Otevřete Mzdy → Mzdové složky a doplňte zařazení. '
+            . 'Týká se jen složek, které se v období použily — nezařazená složka bez pohybu '
+            . 'hlášení nebrání.',
+        /*
+         * Dvě různé nápravy podle toho, jestli zaměstnanec u ČSSZ registrovaný
+         * je, nebo není. Rada „doplňte údaj" je u obou k ničemu: to číslo se
+         * nevyplňuje, ono se OPISUJE odjinud, a když ho ještě nikdo nepřidělil,
+         * musí se nejdřív podat přihláška.
+         */
+        'jmhz_identity_incomplete' => 'Když zaměstnanec u ČSSZ registrovaný ještě není, '
+            . 'podejte nejdřív přihlášku (PREZEC/REGZEC A1) — čísla přijdou v protokolu '
+            . 'a doplní se sama. Když registrovaný je (typicky u firmy, která běží roky), '
+            . 'opište je z protokolu ČSSZ nebo z ePortálu na kartě pracovního vztahu '
+            . 'v části „Identifikátory přidělené ČSSZ pro JMHZ".',
+        'jmhz_identity_oic_missing' => 'Opište ho z protokolu o přijetí přihlášky nebo '
+            . 'z ePortálu ČSSZ na kartě pracovního vztahu v části „Identifikátory přidělené '
+            . 'ČSSZ pro JMHZ". Když zaměstnanec registrovaný ještě není, podejte nejdřív '
+            . 'přihlášku (PREZEC/REGZEC A1) a číslo se doplní z protokolu samo.',
+        'jmhz_identity_id_ppv_missing' => 'Opište ho z protokolu o přijetí přihlášky nebo '
+            . 'z ePortálu ČSSZ na kartě pracovního vztahu v části „Identifikátory přidělené '
+            . 'ČSSZ pro JMHZ". Když zaměstnanec registrovaný ještě není, podejte nejdřív '
+            . 'přihlášku (PREZEC/REGZEC A1) a číslo se doplní z protokolu samo.',
         'component_jmhz_manual_review' => 'Otevřete Mzdy → Mzdové složky a potvrďte zařazení.',
         'component_jmhz_treatment_invalid' => 'Otevřete Mzdy → Mzdové složky a opravte nastavení.',
         'jmhz_average_hourly_earning_missing' => 'Otevřete Mzdy → Absence a průměry a doplňte výdělek.',
+        'jmhz_verified_boolean_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního vztahu v části Evidence pro ČSSZ zvolte u všech tří otázek Ano nebo Ne a uložte.',
         'jmhz_work_month_not_approved' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
         'jmhz_work_summary_v2_missing' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
         'jmhz_scenario1_earnings_vector_incomplete' => 'Otevřete Mzdy → Mzdové složky a doplňte zařazení.',
@@ -117,6 +154,7 @@ final class JmhzBlockerExplainer
         'jmhz_annual_request_status_unresolved' => 'Otevřete Mzdy → Roční zúčtování a rozhodněte stav žádosti.',
         'jmhz_annual_settlement_performance_source_missing' => 'Obnovte přípravu JMHZ nad uzamčenou evidencí výsledků ročního zúčtování.',
         'jmhz_preparation_not_ready' => 'Otevřete test JMHZ a postupně doplňte zvýrazněné skupiny údajů.',
+        'jmhz_xml_identity_name_incomplete' => 'Otevřete Mzdy → Zaměstnanci a na kartě zaměstnance a jeho pracovního vztahu doplňte jméno, příjmení, datum narození, den nástupu a druh činnosti; OIČ ani ID PPV shánět nemusíte, ta přidělí ČSSZ až v protokolu o přijetí.',
     ];
 
     /** @param list<JmhzScenario1Blocker> $blockers */

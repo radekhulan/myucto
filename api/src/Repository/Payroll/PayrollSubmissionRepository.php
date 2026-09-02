@@ -1710,6 +1710,108 @@ final class PayrollSubmissionRepository
     }
 
     /**
+     * Formuláře JMHZ, u kterých ověřený protokol ČSSZ doložil OBA zákonné
+     * identifikátory — OIČ / IK MPSV (10051) a ID PPV (10228).
+     *
+     * ── Proč tak úzké síto ──────────────────────────────────────────────────
+     * Z těchhle řádků se přebírá identita do evidence, tedy do údaje, kterým
+     * pak jede každé další hlášení. Proto musí platit všechno najednou:
+     * protokol je `trusted` (podepsaný ČSSZ a spárovaný přes CorrelationID),
+     * jeho třída je `CSSZ_JMHZ`, hlášení jako celek ČSSZ přijala aspoň
+     * částečně a KONKRÉTNÍ formulář je přijatý. Zamítnutý formulář uvnitř
+     * přijatého podání identifikátor nezakládá — ČSSZ ho v takovém případě
+     * jen opisuje zpět z toho, co jsme poslali.
+     *
+     * `EXISTS` místo `JOIN` na části podání je záměr: outcome s `part_id`
+     * NULL by se přes JOIN vynásobil počtem částí a tentýž identifikátor by
+     * se zpracoval vícekrát.
+     *
+     * Datum přijetí protokolu je jediné datum, které tahle tabulka zná;
+     * `datumProtokolu` z těla protokolu se u výsledků formulářů neukládá.
+     * Slouží proto jako platnost od — je to den, kdy nám ČSSZ číslo doložila.
+     *
+     * @return list<array{
+     *   form_guid:string,receipt_reference:?string,effective_on:string,
+     *   external_person_reference:string,external_employment_reference:string
+     * }>
+     */
+    public function acceptedJmhzFormIdentityOutcomes(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT outcome.form_guid, receipt.receipt_reference,
+                    DATE(receipt.received_at) AS effective_on,
+                    outcome.external_person_reference,
+                    outcome.external_employment_reference
+               FROM payroll_submission_receipts receipt
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = receipt.supplier_id
+                AND submission.environment = receipt.environment
+                AND submission.id = receipt.submission_id
+               JOIN payroll_jmhz_protocol_form_outcomes outcome
+                 ON outcome.supplier_id = receipt.supplier_id
+                AND outcome.environment = receipt.environment
+                AND outcome.submission_id = receipt.submission_id
+                AND outcome.receipt_id = receipt.id
+              WHERE receipt.supplier_id = ?
+                AND receipt.environment = ?
+                AND receipt.submission_id = ?
+                AND receipt.id = ?
+                AND receipt.protocol_code = "CSSZ_JMHZ"
+                AND receipt.verification_status = "trusted"
+                AND receipt.remote_status IN ("accepted", "partially_accepted")
+                AND submission.status IN ("accepted", "partially_accepted")
+                AND outcome.remote_status = "accepted"
+                AND outcome.external_person_reference IS NOT NULL
+                AND outcome.external_employment_reference IS NOT NULL
+                AND EXISTS (
+                    SELECT 1
+                      FROM payroll_submission_parts part
+                     WHERE part.supplier_id = submission.supplier_id
+                       AND part.environment = submission.environment
+                       AND part.submission_id = submission.id
+                       AND part.agenda_code = "JMHZ25"
+                       AND (
+                           outcome.part_id IS NULL
+                           OR outcome.part_id = part.id
+                       )
+                )
+              ORDER BY outcome.id',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $submissionId,
+            $receiptId,
+        ]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row = self::associativeRow($row, 'identita formuláře JMHZ');
+            $rows[] = [
+                'form_guid' => self::string($row, 'form_guid'),
+                'receipt_reference' => self::nullableString(
+                    $row,
+                    'receipt_reference',
+                ),
+                'effective_on' => self::string($row, 'effective_on'),
+                'external_person_reference' => self::string(
+                    $row,
+                    'external_person_reference',
+                ),
+                'external_employment_reference' => self::string(
+                    $row,
+                    'external_employment_reference',
+                ),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
      * @return list<array{
      *   receipt_id:int,verification_status:string,remote_status:?string,
      *   protocol_code:string,form_guid:?string,form_remote_status:?string,

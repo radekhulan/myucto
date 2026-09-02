@@ -27,7 +27,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v11',
+            'payroll-jmhz-preparation-source.v13',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
@@ -77,6 +77,107 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertFalse($snapshot->readiness()['official_submission_supported']);
     }
 
+    /**
+     * Nevyplněné tri-state údaje (příspěvek APZ, funkční požitky, dočasné
+     * přidělení) hlášení NEBLOKUJÍ — vykládají se jako „ne". Uložená hodnota
+     * se přitom nepřepisuje: v termu zůstane `unverified` a snímek vedle něj
+     * nese doklad, že hodnota v podání vznikla výkladem, ne prohlášením.
+     */
+    public function testUnverifiedTristatesAreReadAsNoAndRecordedAsInterpretation(): void
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $this->source(),
+            [],
+            [],
+        );
+
+        self::assertNotContains(
+            'jmhz_verified_boolean_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+
+        $employment = $snapshot->payload['people'][0]['employments'][0];
+        foreach ([
+            'jmhz_apz_contribution_status',
+            'jmhz_functional_benefits_status',
+            'jmhz_temporary_assignment_status',
+        ] as $field) {
+            self::assertSame('unverified', $employment['term'][$field]);
+        }
+        self::assertSame(
+            [
+                [
+                    'field' => 'jmhz_apz_contribution_status',
+                    'attribute_id' => '10232',
+                    'stored_value' => 'unverified',
+                    'applied_value' => 'no',
+                    'basis' => JmhzPreparationSnapshotBuilder::DEFAULT_TRISTATE_BASIS,
+                ],
+                [
+                    'field' => 'jmhz_functional_benefits_status',
+                    'attribute_id' => '10247',
+                    'stored_value' => 'unverified',
+                    'applied_value' => 'no',
+                    'basis' => JmhzPreparationSnapshotBuilder::DEFAULT_TRISTATE_BASIS,
+                ],
+                [
+                    'field' => 'jmhz_temporary_assignment_status',
+                    'attribute_id' => '10251',
+                    'stored_value' => 'unverified',
+                    'applied_value' => 'no',
+                    'basis' => JmhzPreparationSnapshotBuilder::DEFAULT_TRISTATE_BASIS,
+                ],
+            ],
+            $employment['jmhz_default_interpretations'],
+        );
+    }
+
+    /**
+     * Vědomé „ne" se od nevyplnění musí lišit: nic se nedomýšlí a snímek
+     * o žádném výkladu nemluví.
+     */
+    public function testExplicitAnswersLeaveNoInterpretationRecord(): void
+    {
+        $source = $this->source();
+        $input = json_decode(
+            (string) $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        foreach ([
+            'jmhz_apz_contribution_status',
+            'jmhz_functional_benefits_status',
+            'jmhz_temporary_assignment_status',
+        ] as $field) {
+            $input['people'][0]['employments'][0]['term'][$field] = 'no';
+        }
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] =
+            hash('sha256', $source['revision']['input_snapshot_json']);
+        $result = json_decode(
+            (string) $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] =
+            hash('sha256', $source['revision']['result_snapshot_json']);
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(7, 'test', $source, [], []);
+
+        self::assertSame(
+            [],
+            $snapshot->payload['people'][0]['employments'][0]['jmhz_default_interpretations'],
+        );
+        self::assertNotContains(
+            'jmhz_verified_boolean_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+    }
+
     public function testMandatoryEarningsVectorContainsZerosWithoutArtificialInputs(): void
     {
         $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
@@ -115,7 +216,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
 
         $snapshot = (new JmhzPreparationSnapshotBuilder())->build(7, 'test', $source, [], []);
 
-        self::assertSame('payroll-jmhz-preparation-source.v11', $snapshot->payload['schema_reference']);
+        self::assertSame('payroll-jmhz-preparation-source.v13', $snapshot->payload['schema_reference']);
         self::assertArrayNotHasKey('scenario_key', $snapshot->payload['scope']);
         self::assertSame(['scenario_1', 'scenario_2'], $snapshot->payload['scope']['scenario_set']);
         self::assertSame(

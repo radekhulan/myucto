@@ -141,6 +141,8 @@ function person(primary = employment()): PayrollPerson {
     delete_cascade: {},
     setup_gaps: [],
     needs_setup: false,
+    data_gaps: [],
+    data_gap_counts: { blocking: 0, advisory: 0 },
     employments: [primary],
   }
 }

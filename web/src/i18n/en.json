@@ -984,7 +984,7 @@
     "load_failed": "The payroll module could not be loaded.",
     "year_close": {
       "title": "Payroll year close",
-      "description": "Close the year only after all twelve payroll periods, corrections, submissions and payment liabilities are complete.",
+      "description": "Close the year only after all twelve payroll periods, corrections and submissions are complete. Liabilities still waiting for a bank statement do not prevent closing — they are only listed.",
       "year": "Year",
       "status": {
         "open": "Open",
@@ -1003,6 +1003,12 @@
         "open_enforcement": "{count} enforcement cases or claims remain unresolved.",
         "reconciliation_differences": "{count} payroll periods still differ from accounting or payment records."
       },
+      "warnings_title": "Worth knowing (does not prevent closing)",
+      "warning": {
+        "unknown": "{count} findings remain that this version cannot name.",
+        "open_liabilities": "{count} payroll liabilities have no bank movement on record yet. They settle themselves once the statement arrives and is matched."
+      },
+      "warning_truncated": "and {count} more",
       "close": "Close payroll year",
       "close_confirm": "Do you really want to close payroll year {year}? Reopening requires an audit reason.",
       "blocked_hint": "Resolve every listed blocker first.",
@@ -1747,6 +1753,11 @@
         "payments_not_applicable": "Nothing to pay — the whole net pay is settled by offset. The run moved forward.",
         "payments_settled": "Every liability of the run is covered by payments."
       },
+      "coverage": {
+        "settled": "Payments evidenced by a statement: all {count} liabilities.",
+        "waiting": "Payments evidenced by a statement: {settled} of {total} liabilities. {amount} outstanding — it settles itself once the statement arrives and is matched.",
+        "open_payments": "Open payments"
+      },
       "status": {
         "draft": "Draft",
         "inputs_locked": "Inputs locked",
@@ -1794,7 +1805,26 @@
         "close": "Closes the run for the period. A closed run can only be reopened by requesting a correction.",
         "reopen": "Opens a new revision over corrected inputs. The original revision stays in the history together with the documents already issued."
       },
+      "next_steps": {
+        "title": "What comes next",
+        "subtitle": "Payroll is calculated and posted — filing comes next. Each obligation shows its deadline, its status and a link to where it is filed; anything already done is marked as done."
+      },
       "readiness": {
+        "affected": "Affects: {names}",
+        "impact": {
+          "blocking": "Payroll cannot be calculated without this",
+          "revision": "Fixing this later requires a correction revision",
+          "anytime": "Can be added any time, the run is not held up"
+        },
+        "impact_hint": {
+          "blocking": "The calculation has nothing to work from. Resolve this before anything else.",
+          "revision": "The run can start now, but this value goes into the frozen snapshot — after inputs are locked it can only be fixed with a new revision.",
+          "anytime": "No effect on the payroll calculation. It just has to be filled in before filing."
+        },
+        "scope": {
+          "setup": "Company setup — one-off, then it is done.",
+          "monthly": "Monthly work."
+        },
         "title": "Pre-flight check",
         "subtitle": "You would see these after starting the run anyway — we show them now, while the inputs can still be fixed. None of it blocks the run: payroll can be calculated with these findings.",
         "clear": "The pre-flight check found nothing that would stop you from calculating payroll for this period.",
@@ -2953,7 +2983,9 @@
       "filters": {
         "active": "Active",
         "all": "All",
-        "needs_setup": "Setup required"
+        "needs_setup": "Setup required",
+        "needs_data": "Data to add",
+        "blocking_data": "Blocks filing"
       },
       "create": {
         "action": "Add employee",
@@ -3001,12 +3033,58 @@
         "identifier": "birth number (or ECP/VCP)",
         "employment": "employment relationship"
       },
+      "data_gap": {
+        "jmhz_person_identifier": "personal identifier OIC / IK MPSV (assigned by the social security administration)",
+        "jmhz_employment_identifier": "employment identifier ID PPV (assigned by the social security administration)",
+        "jmhz_activity_code": "activity type for the social security administration",
+        "employment": "employment relationship",
+        "name": "first and last name",
+        "identifier": "birth number (or ECP/VCP)",
+        "residence": "permanent residence address",
+        "health_insurance": "health insurer",
+        "tax_residence": "tax residency",
+        "payout_account": "verified payout account",
+        "contact": "email address or phone number",
+        "citizenship": "citizenship",
+        "birth_date": "date of birth",
+        "tax_declaration": "taxpayer declaration"
+      },
+      "data_gap_where": {
+        "employment": "create one at the bottom of the card, in Employment relationships",
+        "name": "More details → Identity → Name history",
+        "identifier": "More details → Contacts → Identifiers",
+        "residence": "More details → Identity → Addresses, type residence",
+        "health_insurance": "Statutory evidence → Health insurance, status must be verified",
+        "tax_residence": "Statutory evidence → Tax residency",
+        "payout_account": "More details → Payout → Payout accounts; the account must also be verified",
+        "contact": "More details → Contacts, mark one as primary",
+        "citizenship": "More details → Identity → Employee registration data",
+        "birth_date": "More details → Identity → Employee registration data",
+        "tax_declaration": "Statutory evidence → Taxpayer declaration"
+      },
+      "data_gap_badge": {
+        "blocking": "nothing missing | 1 item blocks filing | {count} items block filing",
+        "advisory": "nothing missing | 1 item to add | {count} items to add"
+      },
+      "data_gap_summary": {
+        "blocking_title": "Nothing missing | 1 item is missing that the month cannot go through without | {count} items are missing that the month cannot go through without",
+        "blocking_hint": "Filings cannot be submitted and contributions cannot be calculated without them. You can still save the card and add them any time.",
+        "advisory_title": "Nothing missing | 1 item left to add | {count} items left to add",
+        "advisory_hint": "None of this stops the month. Add them when there is time.",
+        "open": "Add →"
+      },
       "next_step": {
         "name": "Next step: add the first and last name.",
-        "residence": "Next step: add the residential address.",
+        "residence": "Next step: add the permanent residence address.",
         "contact": "Next step: add an email address or phone number.",
         "identifier": "Next step: add the birth number, ECP or VCP.",
         "employment": "Next step: create an employment relationship.",
+        "health_insurance": "Next step: add a verified health insurer.",
+        "tax_residence": "Next step: add the tax residency.",
+        "payout_account": "Next step: add and verify the payout account.",
+        "citizenship": "Next step: add the citizenship.",
+        "birth_date": "Next step: add the date of birth.",
+        "tax_declaration": "Next step: decide the taxpayer declaration.",
         "ready": "The employee card is ready.",
         "action": {
           "name": "Add name",
@@ -3014,6 +3092,12 @@
           "contact": "Add contact",
           "identifier": "Add identifier",
           "employment": "Add relationship",
+          "health_insurance": "Add insurer",
+          "tax_residence": "Add residency",
+          "payout_account": "Add payout account",
+          "citizenship": "Add citizenship",
+          "birth_date": "Add date of birth",
+          "tax_declaration": "Add declaration",
           "ready": "Open card"
         }
       },
@@ -3426,10 +3510,10 @@
         "municipality_name": "Workplace municipality",
         "municipality_code": "Municipality code (CISOB)",
         "country_code": "Country code",
-        "apz_status": "APZ contribution",
-        "apz_instrument": "APZ instrument",
-        "functional_benefits": "Functional benefits",
-        "temporary_assignment": "Temporary assignment",
+        "apz_status": "Labour office contribution (active employment policy)",
+        "apz_instrument": "Active employment policy instrument",
+        "functional_benefits": "Functional benefits under Section 6(10) of the Income Tax Act",
+        "temporary_assignment": "Temporary assignment to another employer",
         "relationship_detail": "Employment relationship detail",
         "select_apz": "Select an instrument",
         "options_failed": "The pinned JMHZ codebooks could not be loaded. Saving validated evidence is blocked.",
@@ -3439,10 +3523,20 @@
         "external_codebook_verified": "Municipality and country are checked against pinned codebooks verified through {date}.",
         "temporary_assignment_blocker": "A yes temporary assignment still requires the identity of at least one user. JMHZ cannot be prepared until it is completed.",
         "state": {
-          "unverified": "Unverified",
+          "unverified": "Not filled in (counts as no)",
           "no": "No",
           "yes": "Yes"
-        }
+        },
+        "default_no_hint": "Unanswered questions count as “no” in the monthly CSSZ report and never block the submission. They stay unanswered in the records so it remains visible that nobody confirmed them explicitly; the submission notes that the value came from reading the default state."
+      },
+      "jmhz_questions": {
+        "title": "Questions for the monthly CSSZ report",
+        "hint": "For the vast majority of employees the answer is no three times. You do not need to open this section.",
+        "apz": "Do you receive a labour office contribution for this job (active employment policy)?",
+        "apz_instrument": "Which active employment policy instrument is it?",
+        "functional_benefits": "Are these functional benefits under Section 6(10) of the Income Tax Act?",
+        "temporary_assignment": "Is the employee temporarily assigned to another employer?",
+        "default_no_hint": "You can change the answers any time on the employment card. Leaving them unanswered is fine: the monthly CSSZ report reads it as “no”."
       },
       "jmhz_ordinary_profile": {
         "title": "JMHZ – exceptional situations",
@@ -5025,6 +5119,16 @@
         "jmhz_dry_run_technical_detail": "Technical details for support",
         "jmhz_dry_run_attribute_ids": "CSSZ fields: {ids}",
         "jmhz_dry_run_entity_ids": "Internal records: {ids}",
+        "jmhz_dry_run_affected": "Affects: {names}",
+        "jmhz_attribute_glossary": {
+          "10051": "personal identifier (OIC / IK MPSV), assigned by the social security administration",
+          "10053": "employee surname",
+          "10054": "employee given name",
+          "10056": "date of birth",
+          "10223": "employment start date",
+          "10228": "employment identifier (ID PPV), assigned by the social security administration",
+          "10239": "activity type"
+        },
         "jmhz_dry_run_actions": {
           "employment": "Complete employment",
           "person": "Complete employee",
@@ -5039,6 +5143,11 @@
           "record": "Open record {number}"
         },
         "jmhz_dry_run_action_codes": {
+          "jmhz_identity_incomplete": "Add social security identifiers",
+          "jmhz_identity_oic_missing": "Add personal identifier",
+          "jmhz_identity_id_ppv_missing": "Add employment identifier",
+          "jmhz_identity_unresolved": "Finish identity task",
+          "component_jmhz_mapping_missing": "Add component mapping",
           "jmhz_attribute_10116_unresolved": "Confirm legal facts",
           "jmhz_attribute_10546_unresolved": "Confirm legal facts",
           "jmhz_interaction_in13_unresolved": "Confirm legal facts",
@@ -5084,14 +5193,16 @@
         "jmhz_gateway_continue": "Sign in and approve in ISDS",
         "jmhz_gateway_start_failed": "The data message is queued, but ISDS sign-in could not be started. Continue from the ISDS outbox.",
         "jmhz_dry_run_blockers": {
+          "jmhz_identity_id_ppv_missing": "The employment identifier (ID PPV) is missing. It is assigned by the social security administration when the employee is registered — copy it from the registration receipt or the portal. It is filled in on the employment card, section \"Identifiers assigned by the social security administration\".",
+          "jmhz_identity_unresolved": "The employment has an unresolved identity task towards the social security administration. Finish it on the employment card; the report cannot be built until then.",
           "unknown": "Some statutory data required for JMHZ is missing. Open the employment record and complete the highlighted fields.",
           "effective_term_missing": "The effective employment terms for this month are missing.",
-          "component_jmhz_mapping_missing": "A payroll component has not been assigned to a JMHZ category.",
+          "component_jmhz_mapping_missing": "A payroll component used in this period has no monthly report mapping. Add it in Payroll → Components. Components not used in the period do not block the report.",
           "component_jmhz_manual_review": "A payroll component's JMHZ classification requires manual review.",
           "component_jmhz_treatment_invalid": "A payroll component has an invalid JMHZ setting.",
           "jmhz_average_hourly_earning_missing": "The verified average hourly earnings are missing.",
-          "jmhz_identity_incomplete": "Some mandatory employee identification data is missing.",
-          "jmhz_identity_oic_missing": "The verified CSSZ insured-person identifier is missing.",
+          "jmhz_identity_incomplete": "The employment has no stored personal identifier (OIC / IK MPSV) or employment identifier (ID PPV). Both numbers are assigned by the social security administration when the employee is registered. If the employee is not registered yet, file the registration first (PREZEC/REGZEC A1); the numbers arrive in the receipt. Otherwise copy them from the receipt or the social security portal. They are filled in on the employment card, section \"Identifiers assigned by the social security administration\".",
+          "jmhz_identity_oic_missing": "The personal identifier (OIC / IK MPSV) is missing. It is assigned by the social security administration when the employee is registered — copy it from the registration receipt or the portal. It is filled in on the employment card, section \"Identifiers assigned by the social security administration\".",
           "jmhz_scenario_activity_code_missing": "The JMHZ activity type code is missing.",
           "jmhz_verified_boolean_missing": "A mandatory yes/no choice has not been confirmed.",
           "jmhz_work_month_not_approved": "The month's working time has not been approved.",

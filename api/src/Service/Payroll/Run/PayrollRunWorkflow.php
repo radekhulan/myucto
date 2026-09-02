@@ -46,8 +46,20 @@ final class PayrollRunWorkflow
                 PayrollRunCommand::PREPARE_PAYMENTS,
                 PayrollRunCommand::REQUEST_CORRECTION,
             ],
+            // `MARK_PAID` tu zůstává pro AUTOMATICKÉ překlopení z platebního
+            // ledgeru ({@see PayrollRunAutoSettlementService}) a pro API;
+            // účetní ho jako tlačítko nedostane (viz `PayrollRunsAction`).
+            //
+            // `CLOSE` je tu proto, že úhrada mezd a uzavření měsíce jsou dva
+            // nezávislé děje. Platební příkaz odchází hned, ABO výpis dorazí
+            // o týdny později. Kdyby šlo zavřít jen běh v `PAID`, měsíc bez
+            // doloženého výpisu by se nezavřel NIKDY a s ním ani mzdový rok
+            // (`missingMonths()` počítá jen běhy ve stavu `closed`). Uzavřít
+            // měsíc je rozhodnutí účetní; nedoložené úhrady jsou k němu
+            // varování v přehledu uzávěrky, ne závora.
             PayrollRunStatus::PAYMENT_READY => [
                 PayrollRunCommand::MARK_PAID,
+                PayrollRunCommand::CLOSE,
                 PayrollRunCommand::REQUEST_CORRECTION,
             ],
             PayrollRunStatus::PAID => [

@@ -117,6 +117,10 @@ final class PayrollEnumContractTest extends TestCase
             => 'db:payroll_year_closures.status',
         'payroll.ts::PayrollYearCloseBlockerCode'
             => 'const:MyInvoice\Service\Payroll\PayrollYearCloseService::BLOCKER_CODES',
+        // Nález, který uzávěrku nedrží. Klient, který kód nezná, by nedoložené
+        // odvody vykreslil jako prázdný stav — tedy jako „nic se neděje".
+        'payroll.ts::PayrollYearCloseWarningCode'
+            => 'const:MyInvoice\Service\Payroll\PayrollYearCloseService::WARNING_CODES',
         'payroll.ts::PayrollBenefitExemptionBasket'
             => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
         // Čím je nezdanění složky podložené. Klient hodnotu vybírá ve formuláři
@@ -399,6 +403,13 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin',
         'payroll.ts::PayrollPeopleFilter'
             => 'const:MyInvoice\Repository\Payroll\PayrollPeopleRepository::LIST_FILTERS',
+        // Chybějící zákonné údaje osoby. Klíč navíc na klientovi = štítek, který
+        // nikdy nesvítí; klíč navíc na serveru = mezera, pro kterou seznam ani
+        // karta nemají lidský název, takže se vypíše syrový klíč.
+        'payroll.ts::PayrollPersonDataGapKey'
+            => 'const:MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog::KEYS',
+        'payroll.ts::PayrollPersonDataGapSeverity'
+            => 'const:MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog::SEVERITIES',
         // Navazující agendy karty zaměstnance. Klíč navíc na klientovi = řádek
         // souhrnu bez popisku, klíč navíc na serveru = agenda, na kterou karta
         // neumí odkázat.

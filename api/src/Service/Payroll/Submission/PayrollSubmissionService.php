@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReceiptIdentityService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationReceiptIdentityService;
 use Psr\Clock\ClockInterface;
 
@@ -75,6 +76,14 @@ final class PayrollSubmissionService
         private readonly SecretEncryption $encryption,
         private readonly ClockInterface $clock,
         private readonly ?PayrollRegistrationReceiptIdentityService $registrationReceiptIdentities = null,
+        /**
+         * Převzetí OIČ a ID PPV z protokolu k hlášení JMHZ.
+         *
+         * Volitelná stejně jako registrační sourozenec: testy platformy
+         * podání staví službu bez ní a nesmí kvůli tomu tahat celý mzdový
+         * kontejner.
+         */
+        private readonly ?JmhzReceiptIdentityService $jmhzReceiptIdentities = null,
     ) {}
 
     /**
@@ -1372,6 +1381,30 @@ final class PayrollSubmissionService
                         $receiptId,
                         $importedBy,
                     );
+            }
+            /*
+             * Identita z protokolu JMHZ. Běží ve stejné transakci jako zbytek
+             * importu záměrně: buď je protokol uložený i s tím, co z něj
+             * plyne pro evidenci, nebo není uložený vůbec. Půl importu by
+             * znamenalo, že evidence tvrdí něco, co v žádném uloženém
+             * protokolu nestojí.
+             */
+            if ($trusted
+                && $protocolCode === 'CSSZ_JMHZ'
+                && in_array(
+                    $remoteStatus,
+                    ['accepted', 'partially_accepted'],
+                    true,
+                )
+                && $this->jmhzReceiptIdentities !== null
+            ) {
+                $this->jmhzReceiptIdentities->applyAcceptedFormIdentities(
+                    $supplierId,
+                    $submission['environment'],
+                    $submissionId,
+                    $receiptId,
+                    $importedBy,
+                );
             }
 
             return [

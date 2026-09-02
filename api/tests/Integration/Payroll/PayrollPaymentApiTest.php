@@ -576,6 +576,9 @@ final class PayrollPaymentApiTest extends TestCase
             $this->container->get(
                 \MyInvoice\Service\Payroll\Net\PayrollPayoutRuleDefaultsService::class,
             ),
+            $this->container->get(
+                \MyInvoice\Service\Payroll\Run\PayrollRunAutoSettlementService::class,
+            ),
         );
 
         try {

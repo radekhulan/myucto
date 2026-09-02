@@ -207,6 +207,116 @@ final class PayrollYearCloseRepository
         return (int) $statement->fetchColumn();
     }
 
+    /**
+     * Jmenný seznam nedoložených závazků k varování v přehledu uzávěrky.
+     *
+     * Stejná podmínka jako {@see self::openLiabilityCount()} — kdyby se
+     * rozešly, účetní by viděla jiné číslo než seznam. Řadí od nejstaršího
+     * období, protože právě ta jsou při uzávěrce podstatná.
+     *
+     * @return list<array{
+     *   liability_id:int,
+     *   period:string,
+     *   liability_kind:string,
+     *   direction:string,
+     *   employee_name:?string,
+     *   currency_code:string,
+     *   amount_minor:int,
+     *   settled_minor:int,
+     *   uncovered_minor:int
+     * }>
+     */
+    public function openLiabilities(int $supplierId, int $year, int $limit): array
+    {
+        $limit = max(1, min(200, $limit));
+        $statement = $this->db->pdo()->prepare(
+            "SELECT liability.id AS liability_id,
+                    DATE_FORMAT(run.period_start, '%Y-%m') AS period,
+                    liability.liability_kind,
+                    liability.direction,
+                    liability.currency_code,
+                    liability.amount_minor,
+                    employee.full_name AS employee_name,
+                    CASE liability.direction
+                        WHEN 'incoming' THEN (
+                            SELECT COALESCE(SUM(payment_match.amount_minor), 0)
+                              FROM payroll_payment_matches payment_match
+                             WHERE payment_match.supplier_id = liability.supplier_id
+                               AND payment_match.liability_id = liability.id
+                               AND payment_match.allocation_id IS NULL
+                        )
+                        ELSE (
+                            SELECT COALESCE(SUM(payment_match.amount_minor), 0)
+                              FROM payroll_payment_allocations allocation
+                              JOIN payroll_payment_matches payment_match
+                                ON payment_match.supplier_id = allocation.supplier_id
+                               AND payment_match.allocation_id = allocation.id
+                             WHERE allocation.supplier_id = liability.supplier_id
+                               AND allocation.liability_id = liability.id
+                        )
+                    END AS settled_minor
+               FROM payroll_payment_liabilities liability
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id AND run.id = revision.run_id
+          LEFT JOIN payroll_employees employee
+                 ON employee.supplier_id = liability.supplier_id
+                AND employee.id = liability.employee_id
+              WHERE liability.supplier_id = ?
+                AND run.period_start >= ? AND run.period_start < ?
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM payroll_payment_liabilities newer
+                     WHERE newer.supplier_id = liability.supplier_id
+                       AND newer.previous_liability_id = liability.id
+                )
+                AND liability.amount_minor > CASE liability.direction
+                    WHEN 'incoming' THEN (
+                        SELECT COALESCE(SUM(payment_match.amount_minor), 0)
+                          FROM payroll_payment_matches payment_match
+                         WHERE payment_match.supplier_id = liability.supplier_id
+                           AND payment_match.liability_id = liability.id
+                           AND payment_match.allocation_id IS NULL
+                    )
+                    ELSE (
+                        SELECT COALESCE(SUM(payment_match.amount_minor), 0)
+                          FROM payroll_payment_allocations allocation
+                          JOIN payroll_payment_matches payment_match
+                            ON payment_match.supplier_id = allocation.supplier_id
+                           AND payment_match.allocation_id = allocation.id
+                         WHERE allocation.supplier_id = liability.supplier_id
+                           AND allocation.liability_id = liability.id
+                    )
+                END
+           ORDER BY run.period_start, liability.liability_kind, liability.id
+              LIMIT {$limit}",
+        );
+        $statement->execute([$supplierId, "{$year}-01-01", ($year + 1) . '-01-01']);
+        $items = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $amount = (int) $row['amount_minor'];
+            $settled = (int) $row['settled_minor'];
+            $name = $row['employee_name'] ?? null;
+            $items[] = [
+                'liability_id' => (int) $row['liability_id'],
+                'period' => (string) $row['period'],
+                'liability_kind' => (string) $row['liability_kind'],
+                'direction' => (string) $row['direction'],
+                'employee_name' => is_string($name) && trim($name) !== ''
+                    ? trim($name)
+                    : null,
+                'currency_code' => (string) $row['currency_code'],
+                'amount_minor' => $amount,
+                'settled_minor' => $settled,
+                'uncovered_minor' => $amount - $settled,
+            ];
+        }
+
+        return $items;
+    }
+
     public function openLeaveCount(int $supplierId, int $year): int
     {
         $statement = $this->db->pdo()->prepare(

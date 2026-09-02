@@ -348,6 +348,13 @@ final class JmhzScenario1DocumentResolver
                 $employmentIdentifier = $this->object(
                     $identity['jmhz_employment_external_identifier'] ?? null,
                 );
+                // Jmenná větev `identifikaceType`: uplatní se, dokud ČSSZ
+                // nepřidělila OIČ a ID PPV. Historie identity osoby je v
+                // zmrazeném snímku pod `identity.identity`, den nástupu na
+                // zdrojovém řádku vztahu — skutečný má přednost před
+                // sjednaným stejně jako v evidenci důchodového pojištění
+                // (viz JmhzEldpEvidenceBuilder).
+                $personFacts = $this->object($identity['identity'] ?? null);
                 $average = $this->object($employment['average_earning'] ?? null);
                 $normalizedEmployments[] = [
                     'employment_id' => $employmentId,
@@ -366,9 +373,21 @@ final class JmhzScenario1DocumentResolver
                     'identity' => [
                         'person_external_identifier' => $personIdentifier['value'] ?? null,
                         'employment_external_identifier' => $employmentIdentifier['value'] ?? null,
+                        'family_name' => $personFacts['last_name'] ?? null,
+                        'given_name' => $personFacts['first_name'] ?? null,
+                        'birth_date' => $personFacts['birth_date'] ?? null,
+                        'employment_start_date' =>
+                            $employmentSource['actual_start_date']
+                                ?? $employmentSource['start_date']
+                                ?? null,
                     ],
                     'selector' => $employment['scenario_resolution'] ?? null,
                     'term' => $employment['term'] ?? null,
+                    // Doklad, že se nevyplněné „ano/ne" vyložilo jako „ne".
+                    // Bez něj serializér nic nedomýšlí (viz
+                    // JmhzScenario1XmlSerializer::tristate()).
+                    'jmhz_default_interpretations' =>
+                        $employment['jmhz_default_interpretations'] ?? null,
                     'work_month' => $employment['work_month'] ?? null,
                     'eldp' => $employment['eldp'] ?? null,
                     'average_hourly' => [

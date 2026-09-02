@@ -259,6 +259,23 @@ function overrideEditable(run: PayrollRun): boolean {
   return OVERRIDE_EDITABLE_STATUSES.includes(run.status)
 }
 
+/**
+ * Stavy, od kterých má smysl ukazovat, co po běhu následuje.
+ *
+ * Zaúčtováním se čísla přestávají hýbat, takže od té chvíle je podání reálný
+ * další krok. Dřív by rozcestník byl šum — účetní ještě počítá.
+ */
+const NEXT_STEP_STATUSES: PayrollRun['status'][] = [
+  'posted',
+  'payment_ready',
+  'paid',
+  'closed',
+]
+
+function showsNextSteps(run: PayrollRun): boolean {
+  return NEXT_STEP_STATUSES.includes(run.status)
+}
+
 /** Varování, na které se čeká: bez rozhodnutí člověka běh dál nepostoupí. */
 function awaitsOverride(validation: PayrollRunValidation): boolean {
   return validation.requires_override && validation.overridden_at === null
@@ -327,7 +344,7 @@ const PRIMARY_COMMAND: Partial<Record<PayrollRun['status'], PayrollRunCommand>> 
   reviewed: 'approve',
   approved: 'post',
   posted: 'prepare_payments',
-  payment_ready: 'mark_paid',
+  payment_ready: 'close',
   paid: 'close',
   correction_pending: 'reopen',
   cancelled: 'reopen',
@@ -337,6 +354,12 @@ const PRIMARY_COMMAND: Partial<Record<PayrollRun['status'], PayrollRunCommand>> 
  * Příkazy, které obrazovka umí nabídnout. `review` tu schválně NENÍ: stav
  * `reviewed` i příkaz zůstávají v datech a v API, jen se nenabízejí jako
  * samostatné tlačítko.
+ *
+ * `mark_paid` tu NENÍ ze stejného důvodu, ale ostřejšího: úhrada není
+ * rozhodnutí účetní, je to fakt. Buď peníze odešly, nebo ne — a to server
+ * pozná z platebního ledgeru sám a běh do stavu „Uhrazeno" překlopí bez
+ * kliknutí. Server ho v `available_commands` už neposílá; seznam ho vynechává
+ * i pro jistotu, aby se tlačítko nevrátilo starým payloadem.
  */
 const KNOWN_COMMANDS: PayrollRunCommand[] = [
   'lock_and_calculate',
@@ -345,7 +368,6 @@ const KNOWN_COMMANDS: PayrollRunCommand[] = [
   'approve',
   'post',
   'prepare_payments',
-  'mark_paid',
   'request_correction',
   'reopen',
   'cancel',
@@ -375,7 +397,6 @@ function commandIcon(command: PayrollRunCommand): string {
   if (command === 'calculate' || command === 'lock_and_calculate') return ICONS.cycle
   if (command === 'post') return ICONS.doc
   if (command === 'prepare_payments') return ICONS.coin
-  if (command === 'mark_paid') return ICONS.checkCircle
   if (command === 'review' || command === 'approve' || command === 'close') {
     return ICONS.check
   }
@@ -393,10 +414,29 @@ const COMMAND_HINTS: PayrollRunCommand[] = [
   'approve',
   'post',
   'prepare_payments',
-  'mark_paid',
   'close',
   'reopen',
 ]
+
+/**
+ * Věta o stavu úhrady. Není to výzva k akci — jen fakt: kolik závazků je
+ * doložených bankou nebo pokladnou a kolik čeká na výpis. Běh se do stavu
+ * „Uhrazeno" překlopí sám, jakmile poslední závazek dosedne.
+ */
+function coverageLabel(run: PayrollRun): string {
+  const coverage = run.payment_coverage
+  if (!coverage) return ''
+  if (coverage.uncovered_count === 0) {
+    return t('payroll.runs.coverage.settled', {
+      count: coverage.liability_count,
+    })
+  }
+  return t('payroll.runs.coverage.waiting', {
+    settled: coverage.settled_count,
+    total: coverage.liability_count,
+    amount: money(coverage.uncovered_minor),
+  })
+}
 
 function commandHint(run: PayrollRun): string {
   const primary = PRIMARY_COMMAND[run.status]
@@ -421,9 +461,7 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
     if (command === 'approve') return auth.canWrite('payroll.approve')
     if (command === 'reopen') return auth.canWrite('payroll.reopen')
     if (command === 'post') return auth.canWrite('payroll.post')
-    if (command === 'prepare_payments' || command === 'mark_paid') {
-      return auth.canWrite('payroll.payments')
-    }
+    if (command === 'prepare_payments') return auth.canWrite('payroll.payments')
     return canWrite.value
   }).sort((a, b) => commandWeight(run, a) - commandWeight(run, b))
 }
@@ -678,12 +716,17 @@ async function recheckReadiness() {
 }
 
 /**
- * Jména osob k nálezu — server posílá ID, obrazovka má číselník po ruce.
- * Jen u `employee`: ID pracovního vztahu do číselníku osob nepatří a náhodná
- * shoda čísel by k nálezu přilepila cizí jméno.
+ * Jména konkrétních věcí, kterých se nález týká.
+ *
+ * Server posílá `label` u všech typů (mzdová složka s kódem, zaměstnanec,
+ * instituce) — nález MUSÍ jmenovat, čeho se týká, jinak posílá účetní hádat.
+ * Číselník osob je záloha pro nálezy, které label nenesou; jen u `employee`,
+ * protože ID pracovního vztahu do něj nepatří a náhodná shoda čísel by
+ * k nálezu přilepila cizí jméno.
  */
 function findingEntityLabels(finding: PayrollRunReadinessFinding): string[] {
   return Array.from(new Set(finding.entities.flatMap((entity) => {
+    if (entity.label) return [entity.label]
     if (entity.entity_type !== 'employee' || entity.entity_id === null) return []
     const name = personNames.value[entity.entity_id]
     return name ? [name] : []
@@ -691,10 +734,27 @@ function findingEntityLabels(finding: PayrollRunReadinessFinding): string[] {
 }
 
 function findingClass(finding: PayrollRunReadinessFinding): string {
-  return finding.severity === 'blocker'
-    ? 'border-danger-500/30 bg-danger-50 text-danger-700'
-    : 'border-warning-200 bg-warning-50 text-warning-800'
+  if (finding.impact === 'blocking') {
+    return 'border-danger-500/30 bg-danger-50 text-danger-700'
+  }
+
+  return finding.impact === 'revision'
+    ? 'border-warning-200 bg-warning-50 text-warning-800'
+    : 'border-neutral-200 bg-neutral-50 text-neutral-700'
 }
+
+/**
+ * Nálezy rozdělené podle toho, CO ZNAMENAJÍ — ne podle toho, jak vážně znějí.
+ *
+ * Účetní potřebuje odlišit tři věci: co ji zastaví, co půjde opravit jen za
+ * cenu opravné revize, a co se doplní kdykoli. Bez toho vypadá chybějící
+ * identifikátor od ČSSZ stejně naléhavě jako chybějící mzdová politika.
+ */
+const readinessGroups = computed(() => ([
+  { impact: 'blocking' as const, findings: readinessFindings.value.filter(f => f.impact === 'blocking') },
+  { impact: 'revision' as const, findings: readinessFindings.value.filter(f => f.impact === 'revision') },
+  { impact: 'anytime' as const, findings: readinessFindings.value.filter(f => f.impact === 'anytime') },
+]).filter(group => group.findings.length > 0))
 
 async function submitCommand(
   run: PayrollRun,
@@ -734,19 +794,12 @@ async function submitCommand(
     }
   } catch (error: any) {
     const failure = error?.response?.data?.error
-    const paymentFailureKey = failure?.code === 'payroll_payments_unsettled'
-      ? 'payroll.runs.payments_unsettled'
-      : failure?.code === 'payroll_incoming_refund_unresolved'
-        ? 'payroll.runs.incoming_refund_unresolved'
-        : null
-    const message = command === 'mark_paid' && paymentFailureKey !== null
-      ? t(paymentFailureKey)
-      : failure?.message || t('payroll.runs.command_failed')
+    const message = failure?.message || t('payroll.runs.command_failed')
     if (pendingCommand.value) commandError.value = message
     // Blokující důvod u zaúčtování a plateb je celá věta („komu chybí výplatní
     // pravidlo", „kolik zbývá uhradit"). V toastu se ztratí dřív, než se podle
     // ní dá jednat — proto zůstane viset u konkrétního běhu.
-    else if (['post', 'prepare_payments', 'mark_paid'].includes(command)) {
+    else if (['post', 'prepare_payments'].includes(command)) {
       commandBlockers.value = { ...commandBlockers.value, [run.id]: message }
     } else toast.error(message)
     if (error?.response?.status === 409) {
@@ -991,7 +1044,15 @@ onMounted(load)
           </svg>
           {{ t('payroll.runs.quick_inputs') }}
         </RouterLink>
-        <div v-if="canWrite" class="flex flex-col items-start gap-1.5">
+        <!--
+          Když za období běh UŽ JE, tlačítko se nekreslí vůbec — ani zašedlé,
+          ani s vysvětlivkou vedle. Zakázané tlačítko s poznámkou „za tohle
+          období už mzdový běh existuje" zabíralo nejvýraznější místo obrazovky
+          a nešlo s ním nic dělat; ten běh je přitom vidět hned pod tím, takže
+          i ta informace byla zbytečná. Hlavní akce patří ke konkrétnímu běhu,
+          ne do hlavičky.
+        -->
+        <div v-if="canWrite && periodRun === null" class="flex flex-col items-start gap-1.5">
           <button
             :class="btnFilled('primary')"
             :disabled="saving || createBlockedReason !== null"
@@ -1122,32 +1183,54 @@ onMounted(load)
           <p class="mt-1 max-w-3xl text-sm text-neutral-600">
             {{ t('payroll.runs.readiness.subtitle') }}
           </p>
-          <ul class="mt-3 space-y-2">
-            <li
-              v-for="finding in readinessFindings"
-              :key="finding.code"
-              class="rounded-lg border p-3 text-sm"
-              :class="findingClass(finding)"
-              :data-testid="`run-readiness-${finding.code}`"
-            >
-              <p>
-                <span v-if="finding.count > 1" class="font-semibold">{{ finding.count }}× </span>{{ finding.message }}
-              </p>
-              <p v-if="findingEntityLabels(finding).length" class="mt-1 text-xs opacity-80">
-                {{ entityLabelSummary(findingEntityLabels(finding)) }}
-              </p>
-              <a
-                v-if="finding.remediation_path"
-                :href="finding.remediation_path"
-                :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+          <div
+            v-for="group in readinessGroups"
+            :key="group.impact"
+            class="mt-3"
+            :data-test="`run-readiness-group-${group.impact}`"
+          >
+            <h4 class="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              {{ t(`payroll.runs.readiness.impact.${group.impact}`) }}
+            </h4>
+            <p class="mt-0.5 text-xs text-neutral-500">
+              {{ t(`payroll.runs.readiness.impact_hint.${group.impact}`) }}
+            </p>
+            <ul class="mt-2 space-y-2">
+              <li
+                v-for="finding in group.findings"
+                :key="finding.code"
+                class="rounded-lg border p-3 text-sm"
+                :class="findingClass(finding)"
+                :data-testid="`run-readiness-${finding.code}`"
               >
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path :d="ICONS.link" />
-                </svg>
-                {{ t('payroll.runs.validation.open_remediation') }}
-              </a>
-            </li>
-          </ul>
+                <p>
+                  <span v-if="finding.count > 1" class="font-semibold">{{ finding.count }}× </span>{{ finding.message }}
+                </p>
+                <p
+                  v-if="findingEntityLabels(finding).length"
+                  class="mt-1 text-xs font-semibold"
+                  :data-test="`run-readiness-affected-${finding.code}`"
+                >
+                  {{ t('payroll.runs.readiness.affected', {
+                    names: entityLabelSummary(findingEntityLabels(finding)),
+                  }) }}
+                </p>
+                <p class="mt-1 text-xs opacity-70">
+                  {{ t(`payroll.runs.readiness.scope.${finding.scope}`) }}
+                </p>
+                <a
+                  v-if="finding.remediation_path"
+                  :href="finding.remediation_path"
+                  :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.link" />
+                  </svg>
+                  {{ t('payroll.runs.validation.open_remediation') }}
+                </a>
+              </li>
+            </ul>
+          </div>
         </template>
       </div>
 
@@ -1263,6 +1346,25 @@ onMounted(load)
           {{ commandHint(run) }}
         </p>
         <!--
+          Stav úhrady, ne úkol. Účetní tu nemá co potvrzovat — příkaz do banky
+          poslala a výpis dorazí, až dorazí. Vidí jen, kolik závazků je
+          doložených a kolik ještě čeká, s prokliknutím do plateb.
+        -->
+        <p
+          v-if="run.payment_coverage"
+          :data-testid="`payroll-run-${run.id}-coverage`"
+          class="mt-3 flex max-w-3xl flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+          :class="run.payment_coverage.uncovered_count > 0 ? 'text-neutral-600' : 'text-success-700'"
+        >
+          <span>{{ coverageLabel(run) }}</span>
+          <RouterLink
+            :to="{ name: 'payroll-payments', query: { period: run.period_start.slice(0, 7), run: String(run.id) } }"
+            class="font-medium text-primary-600 hover:underline"
+          >
+            {{ t('payroll.runs.coverage.open_payments') }}
+          </RouterLink>
+        </p>
+        <!--
           Když smazat nejde, tlačítko dřív jen zmizelo a účetní nevěděla
           proč. Důvod rozhodnutí zná, tak ho ukaž — i kdyby to mělo být
           jen „běh má účetní stopu".
@@ -1316,6 +1418,34 @@ onMounted(load)
             </dd>
           </div>
         </dl>
+
+        <!--
+          „Co následuje" — rozcestník z běhu do podání.
+
+          Mzdový běh doběhne, obrazovka vypadá hotově, a přitom tou chvílí
+          teprve začíná to podstatné: měsíční hlášení ČSSZ a přehledy pro
+          zdravotní pojišťovny. Účetní si dosud musela sama pamatovat, že má
+          jít jinam — a hlavně DO KDY.
+
+          Není to druhá fronta „K odeslání": je to TÝŽ panel, jaký běží
+          v Podáních a nad přípravou vstupů, jen řízený obdobím tohohle běhu.
+          Druhá kopie by se s ním dřív nebo později rozešla v termínech
+          i ve stavech. Panel sám ukazuje lhůtu konkrétním datem, stav podání
+          z evidence, po lhůtě zvýrazní a u každé položky vede odkazem tam,
+          kde se to reálně dělá; co je hotové, se kreslí jako hotové.
+        -->
+        <div v-if="showsNextSteps(run)" class="mt-5" :data-test="`payroll-run-${run.id}-next-steps`">
+          <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+            {{ t('payroll.runs.next_steps.title') }}
+          </h4>
+          <p class="mb-3 max-w-3xl text-sm text-neutral-600">
+            {{ t('payroll.runs.next_steps.subtitle') }}
+          </p>
+          <PayrollMonthlyChecklistPanel
+            v-model:environment="checklistEnvironment"
+            :period="run.period_start.slice(0, 7)"
+          />
+        </div>
 
         <div class="mt-4 flex flex-wrap gap-2">
           <button
@@ -1682,21 +1812,33 @@ onMounted(load)
         <p class="text-sm text-neutral-700">
           {{ t('payroll.runs.readiness.confirm_intro') }}
         </p>
-        <ul class="space-y-2">
-          <li
-            v-for="finding in readinessFindings"
-            :key="finding.code"
-            class="rounded-lg border p-3 text-sm"
-            :class="findingClass(finding)"
-          >
-            <p>
-              <span v-if="finding.count > 1" class="font-semibold">{{ finding.count }}× </span>{{ finding.message }}
-            </p>
-            <p v-if="findingEntityLabels(finding).length" class="mt-1 text-xs opacity-80">
-              {{ entityLabelSummary(findingEntityLabels(finding)) }}
-            </p>
-          </li>
-        </ul>
+        <!--
+          Dialog není seznam chyb, ale SOUPIS TOHO, CO JEŠTĚ ČEKÁ. Napřed to,
+          co po zamknutí vstupů půjde opravit jen přes opravnou revizi — jen
+          u toho má rozhodnutí „zahájit teď" následek.
+        -->
+        <div v-for="group in readinessGroups" :key="group.impact" class="space-y-2">
+          <h4 class="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+            {{ t(`payroll.runs.readiness.impact.${group.impact}`) }}
+          </h4>
+          <ul class="space-y-2">
+            <li
+              v-for="finding in group.findings"
+              :key="finding.code"
+              class="rounded-lg border p-3 text-sm"
+              :class="findingClass(finding)"
+            >
+              <p>
+                <span v-if="finding.count > 1" class="font-semibold">{{ finding.count }}× </span>{{ finding.message }}
+              </p>
+              <p v-if="findingEntityLabels(finding).length" class="mt-1 text-xs font-semibold">
+                {{ t('payroll.runs.readiness.affected', {
+                  names: entityLabelSummary(findingEntityLabels(finding)),
+                }) }}
+              </p>
+            </li>
+          </ul>
+        </div>
         <p class="text-sm text-neutral-500">
           {{ t('payroll.runs.readiness.confirm_note') }}
         </p>

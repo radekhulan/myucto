@@ -19,6 +19,7 @@ const m = vi.hoisted(() => ({
   total: vi.fn(),
   suggestedPaymentDate: vi.fn(),
   readiness: vi.fn(),
+  monthlyChecklist: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
 }))
@@ -54,6 +55,9 @@ vi.mock('@/api/payroll', () => ({
     overrideRunValidation: m.overrideValidation,
     revokeRunValidationOverride: m.revokeOverride,
     approveInputsBatch: m.approveInputsBatch,
+    // Rozcestník „Co následuje“ v kartě zaúčtovaného běhu je TÝŽ panel
+    // jako v Podáních; scénáře, které ho neřeší, dostanou prázdný přehled.
+    monthlyChecklist: m.monthlyChecklist,
   },
 }))
 vi.mock('@/stores/auth', () => ({
@@ -121,6 +125,12 @@ describe('PayrollRuns', () => {
     m.total.mockReturnValue(undefined)
     m.suggestedPaymentDate.mockReturnValue(null)
     m.readiness.mockReturnValue(null)
+    m.monthlyChecklist.mockResolvedValue({
+      period: "2026-08",
+      environment: "production",
+      items: [],
+      summary: { total: 0, send: 0, generate: 0, manual: 0, done: 0 },
+    })
     m.runDetail.mockResolvedValue(run())
     m.runHistory.mockResolvedValue({ run_id: 15, revisions: [], events: [] })
     m.peopleOptions.mockResolvedValue([])
@@ -163,6 +173,9 @@ describe('PayrollRuns', () => {
   })
 
   it('names the missing field when a run cannot be created', async () => {
+    // Bez běhu za období — tlačítko se kreslí jen tehdy, když má co dělat.
+    m.runs.mockResolvedValue([])
+
     const wrapper = mount(PayrollRuns)
     await flushPromises()
 
@@ -179,7 +192,7 @@ describe('PayrollRuns', () => {
   it.each([
     ['approved', 'post'],
     ['posted', 'prepare_payments'],
-    ['payment_ready', 'mark_paid'],
+    ['payment_ready', 'close'],
     ['paid', 'close'],
   ] as const)(
     'nabízí ve stavu %s jedinou plnou akci %s',
@@ -228,58 +241,47 @@ describe('PayrollRuns', () => {
       .toContain('nemá nastavené výplatní pravidlo')
   })
 
-  it('lokalizuje blokaci skutečné úhrady místo české serverové věty', async () => {
+  /*
+   * Úhrada není rozhodnutí účetní, je to fakt. Tlačítko po ní chtělo potvrdit
+   * něco, co ví banka — a dokud to sama nespárovala, drželo i uzavření běhu.
+   * Server ho v `available_commands` už neposílá; kdyby ho přesto poslal
+   * (starší payload), obrazovka ho nesmí vykreslit.
+   */
+  it('nenabízí tlačítko „Označit za uhrazené", ani když ho server pošle', async () => {
     m.runs.mockResolvedValue([run({
       status: 'payment_ready',
       can_delete: false,
-      available_commands: ['mark_paid'],
+      available_commands: ['mark_paid', 'close'],
     })])
-    m.commandRun.mockRejectedValue({
-      response: {
-        status: 422,
-        data: {
-          error: {
-            code: 'payroll_payments_unsettled',
-            message: 'Mzdový běh nelze označit za uhrazený.',
-          },
-        },
-      },
-    })
 
     const wrapper = mount(PayrollRuns)
     await flushPromises()
-    await wrapper.get('[data-testid="payroll-run-15-mark_paid"]').trigger('click')
-    await flushPromises()
 
-    expect(wrapper.get('[data-testid="payroll-run-15-blocker"]').text())
-      .toBe('payroll.runs.payments_unsettled')
+    expect(wrapper.find('[data-testid="payroll-run-15-mark_paid"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payroll-run-15-close"]').exists()).toBe(true)
   })
 
-  it('odliší nepodporovanou příchozí opravnou vratku', async () => {
+  it('místo tlačítka ukáže, kolik úhrad ještě čeká na výpis', async () => {
     m.runs.mockResolvedValue([run({
       status: 'payment_ready',
       can_delete: false,
-      available_commands: ['mark_paid'],
-    })])
-    m.commandRun.mockRejectedValue({
-      response: {
-        status: 422,
-        data: {
-          error: {
-            code: 'payroll_incoming_refund_unresolved',
-            message: 'Mzdový běh nelze označit za uhrazený.',
-          },
-        },
+      available_commands: ['close'],
+      payment_coverage: {
+        liability_count: 4,
+        settled_count: 1,
+        uncovered_count: 3,
+        required_minor: 400_000,
+        settled_minor: 100_000,
+        uncovered_minor: 300_000,
+        incoming_unsettled_count: 0,
       },
-    })
+    })])
 
     const wrapper = mount(PayrollRuns)
     await flushPromises()
-    await wrapper.get('[data-testid="payroll-run-15-mark_paid"]').trigger('click')
-    await flushPromises()
 
-    expect(wrapper.get('[data-testid="payroll-run-15-blocker"]').text())
-      .toBe('payroll.runs.incoming_refund_unresolved')
+    expect(wrapper.get('[data-testid="payroll-run-15-coverage"]').text())
+      .toContain('payroll.runs.coverage.waiting')
   })
 
   it('po přípravě plateb otevře mzdové příkazy ve správném období', async () => {
@@ -1083,22 +1085,44 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
   /*
-   * Za období smí být jeden běh. Server to hlídá, ale s jiným datem výplaty
-   * vrátí 422 do toastu — a obrazovka existující běh zná, takže požadavek,
-   * o kterém se ví, že neprojde, nemá co odesílat.
+   * Za období smí být jeden běh. Zakázané tlačítko s vysvětlivkou vedle sebe
+   * ale zabíralo nejvýraznější místo obrazovky a nedalo se s ním nic dělat —
+   * a informace „běh existuje" je zbytečná, protože ten běh je vidět hned pod
+   * tím. Tlačítko se proto nekreslí vůbec; hlavní akce patří ke konkrétnímu
+   * běhu, ne do hlavičky.
    */
-  it('nenabídne založit běh, který za období už existuje, a převezme jeho datum výplaty', async () => {
+  it('tlačítko na nový běh vůbec nekreslí, když za období běh existuje', async () => {
     m.runs.mockResolvedValue([run({ status: 'calculated', payment_date: '2026-09-20' })])
 
     const wrapper = mount(PayrollRuns)
     await flushPromises()
 
-    expect(wrapper.get('[data-test="run-create"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-test="run-create-blocked"]').text())
-      .toContain('payroll.runs.create_blocked_exists')
+    expect(wrapper.find('[data-test="run-create"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="run-create-blocked"]').exists()).toBe(false)
 
     const paymentDate = wrapper.findAll('input[type="date"]')[0]!
     expect((paymentDate.element as HTMLInputElement).value).toBe('2026-09-20')
+
+    wrapper.unmount()
+  })
+
+  /*
+   * Mzdový běh doběhne, obrazovka vypadá hotově — a přitom tou chvílí teprve
+   * začíná to podstatné, tedy podání. Rozcestník proto patří do karty běhu,
+   * ale až od zaúčtování; dřív by to byl šum, protože účetní ještě počítá.
+   */
+  it.each([
+    ['calculated', false],
+    ['posted', true],
+    ['closed', true],
+  ] as const)('rozcestník na podání u běhu ve stavu %s: %s', async (status, visible) => {
+    m.runs.mockResolvedValue([run({ status, can_delete: false })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payroll-run-15-next-steps"]').exists())
+      .toBe(visible)
 
     wrapper.unmount()
   })
@@ -1185,13 +1209,16 @@ describe('PayrollRuns', () => {
       payment_date: '2026-09-15',
       office_id: null,
       ready: false,
+      has_findings: true,
       findings: [{
         code: 'time_month_not_approved',
-        severity: 'blocker',
+        severity: 'warning',
+        impact: 'revision',
+        scope: 'monthly',
         message: 'Docházka pracovního vztahu není schválena.',
         remediation_path: '/payroll/time',
         count: 2,
-        entities: [{ entity_type: 'employment', entity_id: 3 }],
+        entities: [{ entity_type: 'employment', entity_id: 3, label: null }],
       }],
     }
     m.readiness.mockReturnValue(readiness)
@@ -1235,6 +1262,7 @@ describe('PayrollRuns', () => {
       payment_date: '2026-09-15',
       office_id: null,
       ready: true,
+      has_findings: false,
       findings: [],
     } satisfies PayrollRunReadiness)
     m.runs.mockResolvedValue([run({
