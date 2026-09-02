@@ -47,10 +47,18 @@ final class GarnishmentCalculator
             // výsledek musí říct, na čem se zastavil. Teprve když datum nepokrývá
             // žádná sada, zbývá identita výchozí sady z kódu.
             $shipped = EnforcementDeductionPolicy2026::shipped();
-
-            return $this->manualReview(
+            $issues = [...$this->validateInput($input, $shipped, $scope), ...$rulesetIssues];
+            $nothingWithheld = $this->nothingWithheldResult(
                 $input,
-                [...$this->validateInput($input, $shipped, $scope), ...$rulesetIssues],
+                $issues,
+                $rulesetId ?? $shipped->rulesetId(),
+                $rulesetHash ?? $shipped->rulesetHash(),
+                $scope,
+            );
+
+            return $nothingWithheld ?? $this->manualReview(
+                $input,
+                $issues,
                 $rulesetId ?? $shipped->rulesetId(),
                 $rulesetHash ?? $shipped->rulesetHash(),
                 $scope,
@@ -59,7 +67,15 @@ final class GarnishmentCalculator
 
         $issues = $this->validateInput($input, $policy, $scope);
         if ($issues !== []) {
-            return $this->manualReview(
+            $nothingWithheld = $this->nothingWithheldResult(
+                $input,
+                $issues,
+                $policy->rulesetId(),
+                $policy->rulesetHash(),
+                $scope,
+            );
+
+            return $nothingWithheld ?? $this->manualReview(
                 $input,
                 $issues,
                 $policy->rulesetId(),
@@ -1091,6 +1107,91 @@ final class GarnishmentCalculator
     {
         return $this->priorities->orderedActiveClaims($claims);
     }
+
+    /**
+     * Chybějící nebo vnitroročně účinná sada nezabavitelných částek u člověka,
+     * ze kterého se stejně nic nesráží.
+     *
+     * ── Proč to nesmí blokovat běh ──────────────────────────────────────────
+     *
+     * § 4 nař. vlády č. 595/2006 Sb. žádá hodnoty platné k 1. lednu roku, do
+     * něhož připadá DEN VÝPLATY. Prosincová mzda se ale podle § 141 odst. 1
+     * zákoníku práce běžně vyplácí až v lednu, takže KAŽDÝ prosincový běh sahá
+     * po sadě příštího roku — a ta v době zpracování legitimně existovat
+     * nemusí (vláda nařízení vydává na přelomu roku). Do téhle opravy skončil
+     * takový běh nepřebitelným blokátorem `enforcement_manual_review`
+     * u každé osoby, i ve firmě, kde není jediná exekuce. Prosinec tím nešlo
+     * zaúčtovat vůbec.
+     *
+     * Nezabavitelná částka je vstupem JEDINÉHO výpočtu — kolik se smí srazit.
+     * Kde se nesráží nic (žádná aktivní pohledávka, žádné oddlužení a žádná
+     * dohoda o srážkách ze mzdy), nemá co ovlivnit a její neznalost nemá co
+     * zastavit. Je to totéž zúžení, jaké už drží {@see evidenceScope()}
+     * u měsíčních evidencí.
+     *
+     * Fail-closed zůstává tam, kde na částce záleží: s pohledávkou,
+     * v oddlužení i s dohodou o srážkách (jejíž strop se podle § 148 odst. 2
+     * zákoníku práce odvozuje z TÉŽE nezabavitelné částky) se dál vrací ruční
+     * posouzení. A vrací se i tehdy, když je ve výsledku jakákoli JINÁ výtka
+     * než nedostupnost sady — ta se tímhle nepřebíjí.
+     *
+     * @param list<string> $issues
+     */
+    private function nothingWithheldResult(
+        GarnishmentInput $input,
+        array $issues,
+        string $rulesetId,
+        string $rulesetHash,
+        EnforcementEvidenceScope $scope,
+    ): ?GarnishmentResult {
+        $remaining = array_values(array_diff($issues, self::RULESET_AVAILABILITY_ISSUES));
+        if ($remaining !== []) {
+            return null;
+        }
+        if ($this->activeClaims($input->claims) !== []
+            || $input->insolvency->mode !== InsolvencyMode::None
+            || $input->voluntaryAgreements !== []
+        ) {
+            return null;
+        }
+        $income = $input->income->garnishableMinorUnits;
+
+        return new GarnishmentResult(
+            $input->period,
+            GarnishmentStatus::Supported,
+            $income,
+            0,
+            0,
+            0,
+            0,
+            0,
+            $income,
+            false,
+            false,
+            [],
+            [],
+            [[
+                'step' => 'nothing_withheld_without_ruleset',
+                'payment_date' => $input->paymentDate,
+                'january_first_of_payment_year' =>
+                    self::januaryFirstOfPaymentYear($input->paymentDate),
+                'ruleset_id' => $rulesetId,
+            ]],
+            $rulesetId,
+            $rulesetHash,
+            $scope,
+        );
+    }
+
+    /**
+     * Výtky, které mluví JEN o dostupnosti a účinnosti sady nezabavitelných
+     * částek — tedy o vstupu, který je bez srážky bez vlivu.
+     */
+    private const RULESET_AVAILABILITY_ISSUES = [
+        'payment_date_outside_ruleset_2026',
+        'enforcement_ruleset_incomplete',
+        'enforcement_ruleset_not_effective_for_whole_year',
+    ];
 
     /** @param list<string> $issues */
     private function manualReview(

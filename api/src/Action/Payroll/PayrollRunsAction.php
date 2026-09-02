@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnedException;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
+use MyInvoice\Service\Payroll\Payment\PayrollPaydayResolver;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunPaymentsUnsettledException;
@@ -36,6 +37,7 @@ final class PayrollRunsAction
         private readonly PayrollModuleAccess $access,
         private readonly PayrollPeriodOwnershipService $ownership,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollPaydayResolver $payday,
     ) {}
 
     /**
@@ -219,11 +221,24 @@ final class PayrollRunsAction
 
         // Klíč `runs` zůstává, aby stávající volající nespadli; `total`/`limit`/`offset`
         // přibyly vedle něj, protože seznam už nemusí být úplný.
+        //
+        // `suggested_payment_date` je návrh výplatního termínu ze sjednané
+        // mzdové politiky. Bez něj nabízel zakládací formulář natvrdo
+        // patnáctého následujícího měsíce a uloženou politiku ignoroval —
+        // a datum výplaty není kosmetika: visí na něm splatnost odvodů, lhůty
+        // hlášení i mez podle § 141 odst. 1 zákoníku práce. Počítá se na
+        // serveru, protože posun na pracovní den musí znát státní svátky.
         return Json::ok($response, [
             'runs' => $items,
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,
+            'suggested_payment_date' => $period === null
+                ? null
+                : $this->payday->suggest(
+                    $this->currentSupplierId($request),
+                    "{$period}-01",
+                ),
         ]);
     }
 

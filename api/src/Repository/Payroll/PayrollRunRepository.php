@@ -1483,7 +1483,64 @@ final class PayrollRunRepository
             $snapshot->hash,
             $idempotencyKeyHash,
         ]);
-        return (int) $this->db->pdo()->lastInsertId();
+        $revisionId = (int) $this->db->pdo()->lastInsertId();
+        $this->supersedeAbandonedRevisions($supplierId, $runId, $revisionId);
+
+        return $revisionId;
+    }
+
+    /**
+     * Starší NEschválené revize téhož běhu se založením nové ODSUNOU.
+     *
+     * Běh má právě jednu živou revizi — tu, na kterou ukazuje
+     * `payroll_runs.current_revision_no` ({@see currentRevision()}). Každá
+     * starší revize, která se nikdy neschválila, je tím pádem mrtvá: žádný
+     * příkaz už na ni nesáhne a dokončit ji nejde.
+     *
+     * Do téhle opravy takové revize zůstávaly navždy ve stavu `calculated`.
+     * U opravné revize (`correction`) to mělo tvrdý následek: uzávěrka roku
+     * počítá otevřené korekce právě přes `revision_kind = "correction"` se
+     * stavem `snapshot`/`calculated`/`reviewed`
+     * ({@see PayrollYearCloseRepository::openCorrectionCount()}), takže jedna
+     * zahozená rozpracovaná korekce zablokovala uzávěrku roku NATRVALO —
+     * a z aplikace z toho nevedla cesta ven, protože běh mezitím pokračoval
+     * jinou revizí a tuhle už nešlo ani schválit, ani zrušit.
+     *
+     * Stav je `abandoned`, ne `superseded` (migrace 1715): `superseded` čte
+     * celá řada cest jako „tohle kdysi platilo“
+     * (`status IN ("approved","superseded")` u dokumentů, ročních tiskopisů
+     * a exportů období) a zahozená revize neplatila nikdy.
+     *
+     * Zahazuje se jen to, co bylo opravdu opuštěné: nižší číslo revize a stav
+     * před schválením. Schválené revize řeší
+     * {@see supersedePreviousApprovedRevisions()} až při schválení nové —
+     * do té doby musí platit ta stará, protože z ní jede účetnictví i JMHZ.
+     *
+     * @return int počet zahozených revizí
+     */
+    public function supersedeAbandonedRevisions(
+        int $supplierId,
+        int $runId,
+        int $currentRevisionId,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_revisions abandoned
+               JOIN payroll_run_revisions current
+                 ON current.supplier_id = abandoned.supplier_id
+                AND current.run_id = abandoned.run_id
+                AND current.id = ?
+                SET abandoned.status = "abandoned",
+                    abandoned.superseded_at = NOW(),
+                    abandoned.superseded_by_revision_id = current.id
+              WHERE abandoned.supplier_id = ?
+                AND abandoned.run_id = ?
+                AND abandoned.id <> current.id
+                AND abandoned.revision_no < current.revision_no
+                AND abandoned.status IN ("snapshot", "calculated", "reviewed")'
+        );
+        $stmt->execute([$currentRevisionId, $supplierId, $runId]);
+
+        return $stmt->rowCount();
     }
 
     public function insertSnapshotGraph(
@@ -1720,6 +1777,47 @@ final class PayrollRunRepository
         if ($stmt->rowCount() !== 1) {
             throw new \DomainException('Revizi nelze schválit.');
         }
+    }
+
+    /**
+     * Schválená revize UZAVÍRÁ příznak „absence čeká na opravu běhu".
+     *
+     * `payroll_absences.correction_pending` se rozsvítí, když se už schválená
+     * absence zruší nebo změní — je to poznámka „tenhle měsíc se musí přepočítat".
+     * Nikde se ale NEZHASÍNAL, ani po opravné revizi, která přesně tohle udělala.
+     *
+     * Následek byl trvalý: uzávěrka mzdového roku počítá nevyřízenou dovolenou
+     * přes `status = 'requested' OR correction_pending = 1`
+     * ({@see PayrollYearCloseRepository::openLeaveCount()}), takže jedna zrušená
+     * dovolená držela rok neuzavíratelný napořád — a shodit ten příznak nešlo
+     * odnikud, protože zrušená absence se už znovu rozhodnout nedá. Stejný
+     * příznak přitom vyřazuje absenci z podkladů JMHZ
+     * ({@see \MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder}),
+     * takže po opravě chyběla i tam.
+     *
+     * Zhasíná se jen tam, kde je oprava PROKAZATELNĚ hotová: absence musí celá
+     * ležet uvnitř období schváleného běhu. Absenci přesahující do dalšího
+     * měsíce příznak zůstane, dokud se neschválí i ten — dřív by to tvrdilo, že
+     * je opravený měsíc, který se ještě nepočítal.
+     *
+     * @return int počet uzavřených absencí
+     */
+    public function clearAbsenceCorrectionPending(
+        int $supplierId,
+        string $periodStart,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_absences
+                SET correction_pending = 0,
+                    row_version = row_version + 1
+              WHERE supplier_id = ?
+                AND correction_pending = 1
+                AND date_from >= ?
+                AND date_to < DATE_ADD(?, INTERVAL 1 MONTH)'
+        );
+        $stmt->execute([$supplierId, $periodStart, $periodStart]);
+
+        return $stmt->rowCount();
     }
 
     /**
