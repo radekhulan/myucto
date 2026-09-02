@@ -5923,6 +5923,16 @@ export const payrollApi = {
     'effective_from' | 'social_security_variable_symbol' | 'source_reference'>) =>
     api.post<{ registration: PayrollOfficeRegistration }>(`/payroll/settings/offices/${officeId}/registrations`, payload)
       .then(response => response.data.registration),
+  /**
+   * Vezme zpět poslední uloženou registraci účtárny.
+   *
+   * Existuje kvůli špatně zadanému datu účinnosti: dřívější účinnost už
+   * doplnit nejde, protože nová verze musí navazovat až za poslední uloženou.
+   */
+  deleteOfficeRegistration: (officeId: number, registrationId: number) =>
+    api.delete<{ deleted: boolean }>(
+      `/payroll/settings/offices/${officeId}/registrations/${registrationId}`,
+    ).then(response => response.data.deleted),
   accidentInsuranceRates: () =>
     api.get<{ rates: PayrollAccidentInsuranceRate[] }>('/payroll/settings/accident-insurance-rates')
       .then(response => response.data.rates),

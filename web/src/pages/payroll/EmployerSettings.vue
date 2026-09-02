@@ -14,7 +14,8 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnFilled, btnIconSm, btnOutline, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
+import { apiErrorMessage } from '@/api/errors'
+import { btnFilled, btnIconSm, btnOutline, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import Modal from '@/components/ui/Modal.vue'
@@ -288,9 +289,49 @@ async function save() {
   }
 }
 
+/**
+ * Odkdy firma vede mzdy. Slouží jako výchozí účinnost registrace u ČSSZ —
+ * variabilní symbol platí od té doby, ne ode dneška.
+ */
+const payrollStartDate = ref<string | null>(null)
+const newestRegistrationIndex = computed(() => {
+  if (registrationHistory.value.length === 0) return -1
+  let newest = 0
+  registrationHistory.value.forEach((version, index) => {
+    if (version.effective_from > registrationHistory.value[newest].effective_from) newest = index
+  })
+
+  return newest
+})
+
+async function undoRegistration(version: PayrollOfficeRegistration): Promise<void> {
+  if (registrationOffice.value === null || registrationSaving.value) return
+  registrationSaving.value = true
+  try {
+    await payrollApi.deleteOfficeRegistration(registrationOffice.value.id, version.id)
+    registrationHistory.value = await payrollApi.officeRegistrations(registrationOffice.value.id)
+    toast.success(t('payroll.employer.registration_undone'))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.employer.registration_undo_failed')))
+  } finally {
+    registrationSaving.value = false
+  }
+}
+
 async function openRegistration(office: PayrollOffice) {
   registrationOffice.value = office
-  registrationForm.effective_from = new Date().toISOString().slice(0, 10)
+  /*
+   * Výchozí datum NENÍ dnešek. Variabilní symbol přiděluje ČSSZ při registraci
+   * zaměstnavatele, ne v den, kdy ho účetní opíše do aplikace. Dnešek jako
+   * výchozí hodnota proto zneplatnil registraci pro všechny předchozí měsíce
+   * a mzdy za ně pak nešlo spustit — a protože nová verze musí navazovat až
+   * za poslední uloženou, nedalo se to ani opravit.
+   *
+   * Bere se tedy datum, odkdy firma vede mzdy v aplikaci; na dnešek se to
+   * vrátí jen tehdy, když ho neznáme.
+   */
+  registrationForm.effective_from = payrollStartDate.value
+    ?? new Date().toISOString().slice(0, 10)
   registrationForm.social_security_variable_symbol = ''
   registrationForm.source_reference = ''
   try {
@@ -481,6 +522,19 @@ function accountHelp(key: AccountKey): string {
 
 onMounted(async () => {
   await load()
+  /*
+   * Datum, odkdy firma vede mzdy. Slouží jako výchozí účinnost registrace
+   * u ČSSZ; když ho neznáme, zůstane null a dialog spadne na dnešek.
+   * Selhání se schválně mlčí — je to pohodlí, ne podmínka.
+   */
+  try {
+    const period = (await payrollApi.activation()).state.start_period
+    payrollStartDate.value = period === null
+      ? null
+      : (period.length === 7 ? `${period}-01` : period)
+  } catch {
+    payrollStartDate.value = null
+  }
   // Skok na kotvu až po načtení: sekce se vykreslí teprve s daty, takže hned
   // po připojení komponenty by cíl v DOM ještě nebyl a odkaz z průvodce by
   // skončil na začátku stránky.
@@ -982,9 +1036,24 @@ onMounted(async () => {
         </label>
         <p v-if="registrationHistory.length === 0" class="text-sm text-warning-700">{{ t('payroll.employer.registration_history_empty') }}</p>
         <ul v-else class="divide-y divide-neutral-200 rounded-md border border-neutral-200 text-sm">
-          <li v-for="version in registrationHistory" :key="version.id" class="px-3 py-2">
-            <span class="font-mono">{{ version.effective_from }} · {{ version.social_security_variable_symbol }}</span>
-            <span class="ml-2 text-neutral-500">{{ version.source_reference }}</span>
+          <li v-for="(version, index) in registrationHistory" :key="version.id" class="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+            <span>
+              <span class="font-mono">{{ version.effective_from }} · {{ version.social_security_variable_symbol }}</span>
+              <span class="ml-2 text-neutral-500">{{ version.source_reference }}</span>
+            </span>
+            <!--
+              Vzít zpět jde jen POSLEDNÍ verze, a jen dokud se o ni nic neopírá.
+              Bez toho se špatné datum účinnosti nedalo opravit vůbec: starší
+              verze doplnit nejde a novější to nespraví.
+            -->
+            <button
+              v-if="index === newestRegistrationIndex"
+              type="button"
+              :class="btnOutlineSm('danger')"
+              :disabled="registrationSaving"
+              data-registration-undo
+              @click="undoRegistration(version)"
+            >{{ t('payroll.employer.registration_undo') }}</button>
           </li>
         </ul>
       </div>

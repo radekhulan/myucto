@@ -75,6 +75,63 @@ final class PayrollOfficeRegistrationRepository
             ?? throw new \RuntimeException('Registrace mzdové účtárny nebyla nalezena.');
     }
 
+    /**
+     * Smaže NEJNOVĚJŠÍ verzi registrace účtárny.
+     *
+     * PROČ to jde: variabilní symbol přiděluje ČSSZ při registraci
+     * zaměstnavatele, ne v den, kdy ho účetní opíše. Kdo ho uložil
+     * s dnešním datem, zablokoval si tím mzdy za předchozí měsíce a
+     * dřívější účinnost už doplnit nešlo, protože nová verze musí
+     * navazovat až za poslední uloženou.
+     *
+     * Starší verze chráněné zůstávají — podle nich se už mohlo počítat
+     * a podávat. Že na mazané verzi nevisí podání ani mzdový běh, hlídá
+     * volající; tady se drží jen zámek a pravidlo „jen nejnovější".
+     *
+     * @return bool false, když verze neexistuje nebo patří jiné firmě
+     */
+    public function deleteNewest(
+        int $supplierId,
+        int $officeId,
+        int $registrationId,
+    ): bool {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $lock = $pdo->prepare(
+                'SELECT id FROM payroll_office_registration_versions
+                  WHERE supplier_id = ? AND office_id = ? AND id = ?
+                  FOR UPDATE',
+            );
+            $lock->execute([$supplierId, $officeId, $registrationId]);
+            if ($lock->fetchColumn() === false) {
+                if ($ownsTransaction) {
+                    $pdo->rollBack();
+                }
+
+                return false;
+            }
+            $delete = $pdo->prepare(
+                'DELETE FROM payroll_office_registration_versions
+                  WHERE supplier_id = ? AND office_id = ? AND id = ?',
+            );
+            $delete->execute([$supplierId, $officeId, $registrationId]);
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
+        }
+
+        return true;
+    }
+
     /** @return array<string,mixed>|null */
     public function effective(int $supplierId, int $officeId, string $onDate): ?array
     {

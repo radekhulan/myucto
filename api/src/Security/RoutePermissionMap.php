@@ -223,6 +223,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/reports/tax-statement(/preview)?$#', 'payroll.reports', AccessLevel::READ],
         ['GET', '#^/api/payroll/settings/offices/[0-9]+/registrations$#', 'payroll.settings', AccessLevel::READ],
         ['POST', '#^/api/payroll/settings/offices/[0-9]+/registrations$#', 'payroll.settings', AccessLevel::WRITE],
+        ['DELETE', '#^/api/payroll/settings/offices/[0-9]+/registrations/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/accident-insurance-rates$#', 'payroll.settings', AccessLevel::READ],
         ['POST', '#^/api/payroll/settings/accident-insurance-rates$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/accident-insurance-rate-schedule$#', 'payroll.settings', AccessLevel::READ],

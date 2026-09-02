@@ -60,6 +60,46 @@ final class PayrollOfficeRegistrationAction
         return Json::ok($response, ['registration' => $registration], 201);
     }
 
+    /**
+     * Vezme zpět nejnovější verzi registrace.
+     *
+     * Existuje kvůli jediné, ale zákeřné chybě: variabilní symbol přiděluje
+     * ČSSZ při registraci zaměstnavatele, ne v den, kdy ho účetní opíše.
+     * Kdo ho uložil s dnešním datem, zablokoval si mzdy za předchozí měsíce
+     * a dřívější účinnost už doplnit nešlo. Bez téhle cesty z toho aplikace
+     * ven nevedla vůbec.
+     *
+     * @param array{officeId:string,registrationId:string} $args
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->guard($request, $response, AccessLevel::WRITE)) !== null) return $error;
+        $supplierId = $this->currentSupplierId($request);
+        $officeId = (int) $args['officeId'];
+        $registrationId = (int) $args['registrationId'];
+        try {
+            $removed = $this->registrations->deleteNewest($supplierId, $officeId, $registrationId);
+        } catch (\PDOException $exception) {
+            if (!in_array((string) $exception->getCode(), ['23000', '45000'], true)) {
+                throw $exception;
+            }
+            // Trigger pustí jen nejnovější verzi. Starší se opravují novou
+            // verzí, ne přepsáním — podle nich se už mohlo počítat a podávat.
+            return Json::error(
+                $response,
+                'office_registration_not_newest',
+                'Vzít zpět jde jen poslední uloženou registraci. Starší verze '
+                    . 'opravte tím, že přidáte novou s pozdějším datem účinnosti.',
+                409,
+            );
+        }
+        if (!$removed) {
+            return Json::error($response, 'not_found', 'Registrace nebyla nalezena.', 404);
+        }
+
+        return Json::ok($response, ['deleted' => true]);
+    }
+
     private function guard(Request $request, Response $response, AccessLevel $level): ?Response
     {
         $error = null;
