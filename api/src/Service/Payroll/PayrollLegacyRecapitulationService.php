@@ -33,7 +33,7 @@ use PDO;
  *  1. STORNUJE účetní zápis rekapitulace ({@see PostingService::reverse()}).
  *     Původní zápis v deníku zůstává i s protizápisem — § 35 odst. 6 ZoÚ
  *     opravu mazáním nezná.
- *  2. ODLOŽÍ mzdový list za období (`retired_at`, migrace 1718). Taky se
+ *  2. ODLOŽÍ mzdový list za období (`retired_at`, migrace 1719). Taky se
  *     nemaže: je to evidence podle § 38j ZDP. Jen přestane platit, aby měsíc
  *     nešel do ročního listu i do kumulovaných základů dvakrát.
  *  3. UVOLNÍ rezervaci období, takže si ho může vzít mzdový běh.

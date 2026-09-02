@@ -16,7 +16,7 @@ use Psr\Container\ContainerInterface;
 /**
  * Převzetí měsíce od ruční mzdové rekapitulace modulem Mzdy.
  *
- * Do migrace 1718 nešlo řádek mzdového listu odstranit odnikud než ruční
+ * Do migrace 1719 nešlo řádek mzdového listu odstranit odnikud než ruční
  * editací databáze, takže `releaseLegacy()` období nikdy neuvolnila a rok, který
  * začal ruční rekapitulací, zůstal navždy rozpůlený mezi dvě agendy.
  */
