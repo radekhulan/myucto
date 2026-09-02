@@ -282,6 +282,44 @@ describe('Roční zúčtování', () => {
       .toBe('payroll.annual_settlement.blocker.declaration_not_signed')
   })
 
+  /**
+   * Regrese: seznam překážek končil větou „Doplňte odpověď" nad formulářem
+   * o dvanácti polích a neřekl, které z nich to je. Překážka, jejíž pole je
+   * na téhle obrazovce, je proto klikací a pole se otevře a vysvítí.
+   * Překážka mířící jinam (karta zaměstnance) zůstává větou.
+   */
+  it('u překážky se zdejším polem nabídne proklik, u cizí ne', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      result: result({
+        performed: false,
+        outcome: null,
+        blockers: ['filing_obligation_unknown', 'declaration_unverified'],
+        payable_minor_units: 0,
+      }),
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    const link = wrapper.find(
+      '[data-test="annual-settlement-blocker-link-filing_obligation_unknown"]',
+    )
+    expect(link.exists()).toBe(true)
+    expect(
+      wrapper.find('[data-test="annual-settlement-blocker-link-declaration_unverified"]').exists(),
+    ).toBe(false)
+
+    const field = wrapper.find('[data-test="annual-settlement-filing-obligation"]')
+    expect(field.exists()).toBe(true)
+    const element = field.element as HTMLSelectElement
+    element.scrollIntoView = vi.fn()
+    await link.trigger('click')
+
+    expect(element.scrollIntoView).toHaveBeenCalled()
+    expect(element.classList.contains('ring-2')).toBe(true)
+  })
+
   /*
    * Dvě překážky, které do enumu přibyly později. Kód, pro který obrazovka nemá
    * větu, se nevykreslí jako chyba — vykreslí se jako holý klíč přesně tam, kde

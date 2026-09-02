@@ -35,22 +35,65 @@ const HEADCOUNT_PATTERN = /^\d{1,7}(?:[.,]\d{1,2})?$/
  * proto zůstává KLIKATELNÉ a chybějící pole vypíše — zašedlé tlačítko bez věty
  * byla slepá ulička, ze které účetní neviděla, co doplnit.
  */
-const problems = computed<string[]>(() => {
-  const list: string[] = []
+/*
+ * Chybějící pole nese vedle věty i to, KDE se vyplňuje.
+ *
+ * Souhrn pod formulářem uměl říct „chybí průměrný přepočtený počet
+ * zaměstnanců", ale ne kam jít — pole jsou čtyři a jedno z nich je fieldset
+ * zaškrtávátek. Roční evidence se vyplňuje jednou za rok, takže si formulář
+ * nikdo nepamatuje. Položka souhrnu je proto klikací a pole se otevře
+ * a vysvítí.
+ */
+const collectiveField = ref<HTMLFieldSetElement | null>(null)
+const ownershipField = ref<HTMLSelectElement | null>(null)
+const headcountField = ref<HTMLInputElement | null>(null)
+const disabledHeadcountField = ref<HTMLInputElement | null>(null)
+
+const problems = computed<Array<{ key: string, text: string }>>(() => {
+  const list: Array<{ key: string, text: string }> = []
   if (collectiveTypes.value.length === 0) {
-    list.push(t('payroll.employer.jmhz_annual.validation.collective_types'))
+    list.push({
+      key: 'collective_types',
+      text: t('payroll.employer.jmhz_annual.validation.collective_types'),
+    })
   }
   if (ownershipForm.value === '') {
-    list.push(t('payroll.employer.jmhz_annual.validation.ownership'))
+    list.push({
+      key: 'ownership',
+      text: t('payroll.employer.jmhz_annual.validation.ownership'),
+    })
   }
   if (!HEADCOUNT_PATTERN.test(averageHeadcount.value.trim())) {
-    list.push(t('payroll.employer.jmhz_annual.validation.average_headcount'))
+    list.push({
+      key: 'average_headcount',
+      text: t('payroll.employer.jmhz_annual.validation.average_headcount'),
+    })
   }
   if (!HEADCOUNT_PATTERN.test(averageDisabledHeadcount.value.trim())) {
-    list.push(t('payroll.employer.jmhz_annual.validation.average_disabled_headcount'))
+    list.push({
+      key: 'average_disabled_headcount',
+      text: t('payroll.employer.jmhz_annual.validation.average_disabled_headcount'),
+    })
   }
   return list
 })
+
+function focusProblem(key: string): void {
+  const element = ({
+    collective_types: collectiveField.value,
+    ownership: ownershipField.value,
+    average_headcount: headcountField.value,
+    average_disabled_headcount: disabledHeadcountField.value,
+  } as Record<string, HTMLElement | null>)[key] ?? null
+  if (element === null) return
+  element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  element.focus()
+  element.classList.add('ring-2', 'ring-payroll-500', 'ring-offset-1')
+  window.setTimeout(
+    () => element.classList.remove('ring-2', 'ring-payroll-500', 'ring-offset-1'),
+    2000,
+  )
+}
 
 const valid = computed(() => problems.value.length === 0)
 
@@ -190,7 +233,7 @@ onMounted(load)
         <span>{{ t('payroll.employer.jmhz_annual.disabled_share', { value: decimal(view.evidence.disabled_share_hundredths) }) }}</span>
       </div>
 
-      <fieldset class="mt-4">
+      <fieldset ref="collectiveField" class="mt-4" tabindex="-1">
         <legend class="text-sm font-medium text-neutral-800">
           {{ t('payroll.employer.jmhz_annual.collective_types') }}
         </legend>
@@ -219,6 +262,7 @@ onMounted(load)
             {{ t('payroll.employer.jmhz_annual.ownership') }}
           </span>
           <select
+            ref="ownershipField"
             v-model="ownershipForm"
             :disabled="!canWrite"
             data-test="jmhz-annual-ownership"
@@ -235,6 +279,7 @@ onMounted(load)
             {{ t('payroll.employer.jmhz_annual.average_headcount') }}
           </span>
           <input
+            ref="headcountField"
             v-model="averageHeadcount"
             type="text"
             inputmode="decimal"
@@ -249,6 +294,7 @@ onMounted(load)
             {{ t('payroll.employer.jmhz_annual.average_disabled_headcount') }}
           </span>
           <input
+            ref="disabledHeadcountField"
             v-model="averageDisabledHeadcount"
             type="text"
             inputmode="decimal"
@@ -302,7 +348,16 @@ onMounted(load)
       >
         <p class="font-medium">{{ t('payroll.employer.jmhz_annual.validation.title') }}</p>
         <ul class="mt-2 list-disc space-y-1 pl-5">
-          <li v-for="problem in problems" :key="problem">{{ problem }}</li>
+          <li v-for="problem in problems" :key="problem.key">
+            <button
+              type="button"
+              class="text-left underline decoration-dotted underline-offset-2 hover:text-danger-900"
+              :data-test="`jmhz-annual-validation-link-${problem.key}`"
+              @click="focusProblem(problem.key)"
+            >
+              {{ problem.text }}
+            </button>
+          </li>
         </ul>
       </div>
 

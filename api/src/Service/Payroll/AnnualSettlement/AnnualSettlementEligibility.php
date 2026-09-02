@@ -38,6 +38,13 @@ final class AnnualSettlementEligibility
         $blockers = $externalBlockers;
         $taxYear = $request->taxYear;
 
+        // Neúplné dvojice pole+datum. Dřív je odmítal konstruktor žádosti a
+        // evidence se kvůli nim vůbec neuložila; posouzení je jediné správné
+        // místo — uložit jde cokoli, provést jen to doložené.
+        foreach ($request->incompletenessBlockers() as $blocker) {
+            $blockers[] = $blocker;
+        }
+
         // § 38ch odst. 1: o zúčtování musí být požádáno, a to do 15. února.
         $blockers = match ($request->status) {
             AnnualSettlementRequestStatus::Requested => $blockers,

@@ -134,7 +134,6 @@ const canPrepare = computed(() =>
   && excludedDaysConfirmed.value
   && deductedDaysNone.value
   && (!requestedByAuthority.value || authorityRequestReceivedOn.value !== '')
-  && note.value.trim().length >= 5
   && note.value.trim().length <= 500)
 
 /**
@@ -144,10 +143,11 @@ const canPrepare = computed(() =>
  * Přípustnost (`standaloneAllowed`) tady schválně není — ta má vlastní panel
  * nad formulářem a opakovat ji u tlačítka by znamenalo říct dvakrát totéž.
  *
- * Poznámka je NAŠE podmínka, ne požadavek ČSSZ (vynucuje ji
- * `EldpAnnualStatementBuilder`, 5-500 znaků). Zůstává, protože samostatný
- * evidenční list je od roku 2026 výjimka a zápis o tom, PROČ se vyhotovil,
- * je jediné, co po letech odliší doloženou výjimku od omylu.
+ * Poznámka NENÍ podmínka. ČSSZ ji nepřijímá, do XML se nedostane a byla to
+ * jen naše evidence — držet kvůli ní zhasnuté tlačítko znamenalo blokovat
+ * zákonnou povinnost kvůli internímu zápisu. Předvyplňuje se z důvodu
+ * přípustnosti (viz `noteSuggestion`), takže doložení výjimky nezmizí, jen
+ * přestalo být překážkou. Zbývá horní mez, aby se text vešel do sloupce.
  */
 const prepareBlockers = computed<string[]>(() => {
   if (!canWrite.value) return [t('payroll.eldp.blockers.readOnly')]
@@ -158,9 +158,7 @@ const prepareBlockers = computed<string[]>(() => {
   if (requestedByAuthority.value && authorityRequestReceivedOn.value === '') {
     missing.push(t('payroll.eldp.blockers.authorityDate'))
   }
-  const length = note.value.trim().length
-  if (length < 5) missing.push(t('payroll.eldp.blockers.note'))
-  else if (length > 500) missing.push(t('payroll.eldp.blockers.noteTooLong'))
+  if (note.value.trim().length > 500) missing.push(t('payroll.eldp.blockers.noteTooLong'))
   return missing
 })
 
@@ -195,6 +193,25 @@ async function loadEmployments(id: number): Promise<void> {
   }
 }
 
+/**
+ * Důvod, proč list vzniká, zná server (`eligibility.reason`) dřív, než ho
+ * účetní stihne opsat. Poznámka se proto předvyplní z něj — je to jediná
+ * hodnota, kterou by účetní stejně jen přepsala z panelu o kus výš.
+ *
+ * Přepisuje se jen prázdné pole a dřívější návrh; jakmile do poznámky někdo
+ * napsal vlastní text, další načtení mu ho nesmí přemazat.
+ */
+const suggestedNote = ref('')
+
+function applyNoteSuggestion(): void {
+  const reason = eligibility.value?.reason?.trim() ?? ''
+  if (reason === '') return
+  const suggestion = reason.slice(0, 500)
+  if (note.value.trim() !== '' && note.value !== suggestedNote.value) return
+  note.value = suggestion
+  suggestedNote.value = suggestion
+}
+
 async function loadStatement(): Promise<void> {
   statement.value = null
   eligibility.value = null
@@ -213,6 +230,7 @@ async function loadStatement(): Promise<void> {
     // nenabízí, protože bychom nevěděli, jestli povinnost vůbec vznikla.
     eligibility.value = response.eligibility ?? null
     manualCompletion.value = response.manual_completion
+    applyNoteSuggestion()
   } catch (exception) {
     // Fail-closed ANO, ale ne mlčky. Dokud se chyba zahazovala, obrazovka po
     // výběru vztahu jen zhasla: žádný přehled, tlačítko Připravit zhasnuté,
@@ -554,6 +572,9 @@ watch(requestedByAuthority, value => {
             class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
             data-test="eldp-note"
           />
+          <span class="mt-1 block text-xs text-neutral-500" data-test="eldp-note-hint">
+            {{ t('payroll.eldp.noteOptionalHint') }}
+          </span>
         </label>
       </div>
 

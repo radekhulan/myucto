@@ -4201,6 +4201,12 @@ export type PayrollAnnualSettlementOutcome =
  * Proč zúčtování provést nelze. Kód je klíč do slovníku
  * (`payroll.annual_settlement.blocker.*`), nikdy se nezobrazuje syrový.
  */
+/*
+ * `request_date_missing` a `prior_documents_date_missing` jsou neúplné
+ * dvojice pole+datum. Dřív je odmítal konstruktor žádosti, takže se evidence
+ * vůbec neuložila; teď se uloží a chybějící datum je překážka PROVEDENÍ — je
+ * to jediné, čím se doloží lhůta podle § 38ch odst. 1 a 3.
+ */
 export type PayrollAnnualSettlementBlocker =
   | 'not_requested'
   | 'requested_after_deadline'
@@ -4226,6 +4232,8 @@ export type PayrollAnnualSettlementBlocker =
   | 'child_jmhz_evidence_incomplete'
   | 'already_settled'
   | 'ruleset_year_not_covered'
+  | 'request_date_missing'
+  | 'prior_documents_date_missing'
 
 export interface PayrollAnnualSettlementRequest {
   id?: number

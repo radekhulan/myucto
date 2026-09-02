@@ -164,6 +164,16 @@ final class PayrollEnforcementApiTest extends TestCase
 
         self::assertSame(409, $response->getStatusCode());
         self::assertSame('payroll_year_closed', $this->errorCode($response));
+
+        /*
+         * Regrese: odpověď nesla jen větu „rok 2026 je uzavřený, nejprve ho
+         * znovu otevřete". Kde se to dělá, musela účetní uhodnout — uzávěrka
+         * je na jiné obrazovce a dělá se jednou za rok. Rok proto jede jako
+         * údaj, ať z něj frontend postaví proklik na tu uzávěrku.
+         */
+        $error = PayrollTimeValue::row($this->json($response)['error'] ?? null, 'error');
+        self::assertArrayHasKey('year', $error);
+        self::assertSame(2026, $error['year']);
     }
 
     public function testTenantIsolationSessionGuardAndLifecycleEvidenceGates(): void

@@ -228,6 +228,61 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Regrese: poznámka bývala povinná (5–500 znaků) a bez ní se evidenční list
+     * nedal sestavit vůbec. ČSSZ ji přitom nikde nepřijímá — do XML se
+     * nedostane — takže zákonná povinnost stála na našem interním zápisu.
+     */
+    public function testStatementIsBuiltWithoutAnyNote(): void
+    {
+        $confirmation = $this->confirmation();
+        unset($confirmation['note']);
+
+        $statement = (new EldpAnnualStatementBuilder())->build(
+            self::SUPPLIER_ID,
+            self::EMPLOYMENT_ID,
+            2025,
+            $this->wholeYear(2025),
+            $confirmation,
+        );
+
+        self::assertSame('', $statement->payload['confirmation']['note']);
+        self::assertCount(1, $statement->sections());
+    }
+
+    public function testShortNoteNoLongerBlocksTheStatement(): void
+    {
+        $confirmation = $this->confirmation();
+        $confirmation['note'] = 'ok';
+
+        $statement = (new EldpAnnualStatementBuilder())->build(
+            self::SUPPLIER_ID,
+            self::EMPLOYMENT_ID,
+            2025,
+            $this->wholeYear(2025),
+            $confirmation,
+        );
+
+        self::assertSame('ok', $statement->payload['confirmation']['note']);
+    }
+
+    /** Horní mez zůstává — text se musí vejít do sloupce. */
+    public function testOverlongNoteIsStillRefused(): void
+    {
+        $confirmation = $this->confirmation();
+        $confirmation['note'] = str_repeat('a', 501);
+
+        $this->expectException(EldpValidationException::class);
+        $this->expectExceptionMessage('nejvýše 500 znaků');
+        (new EldpAnnualStatementBuilder())->build(
+            self::SUPPLIER_ID,
+            self::EMPLOYMENT_ID,
+            2025,
+            $this->wholeYear(2025),
+            $confirmation,
+        );
+    }
+
     public function testYearFrom2026IsAssembledByCsszUnlessTransitionalRuleApplies(): void
     {
         $this->expectException(EldpValidationException::class);

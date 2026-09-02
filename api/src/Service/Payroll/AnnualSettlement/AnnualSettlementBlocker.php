@@ -187,4 +187,22 @@ enum AnnualSettlementBlocker: string
 
     /** Ruleset daně z příjmů nepokrývá celý rok, takže roční sazby nejsou odvoditelné. */
     case RulesetYearNotCovered = 'ruleset_year_not_covered';
+
+    /**
+     * Žádost je vedená jako podaná, ale bez data podání.
+     *
+     * § 38ch odst. 1 váže žádost na lhůtu do 15. února; bez data se dodržení
+     * lhůty nedá doložit, takže zúčtování neproběhne. Evidence se ale uloží —
+     * datum je typicky to poslední, co účetní opisuje z papírové žádosti, a
+     * odmítnout kvůli němu celý formulář znamenalo zahodit i to, co je
+     * vyplněné správně.
+     */
+    case RequestDateMissing = 'request_date_missing';
+
+    /**
+     * Doklady předchozích plátců jsou vedené jako doložené, ale bez data
+     * převzetí. § 38ch odst. 3 je váže na tutéž lhůtu — bez data se nedá
+     * rozhodnout, jestli došly včas. Viz {@see RequestDateMissing}.
+     */
+    case PriorDocumentsDateMissing = 'prior_documents_date_missing';
 }

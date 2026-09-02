@@ -55,6 +55,8 @@ const data = ref<PayrollTaxStatementPreview | null>(null)
 const loading = ref(false)
 const downloading = ref<PayrollTaxStatementForm | null>(null)
 const loadError = ref<string | null>(null)
+/** Výsledek kontroly staženého XML proti XSD; `null` dokud se nestahovalo. */
+const validationIssue = ref<string | null>(null)
 
 const canRead = computed(() => auth.canRead('payroll.reports'))
 const canExport = computed(() => auth.canRead('reports.export'))
@@ -133,7 +135,7 @@ async function load(): Promise<void> {
 async function download(form: PayrollTaxStatementForm): Promise<void> {
   downloading.value = form
   try {
-    await downloadApiFile(
+    const headers = await downloadApiFile(
       payrollApi.taxStatementXmlUrl(
         year.value,
         form,
@@ -142,7 +144,29 @@ async function download(form: PayrollTaxStatementForm): Promise<void> {
       ),
       `${form}-${year.value}.xml`,
     )
-    toast.success(t('payroll.tax_statement.download_done'))
+    /*
+     * Server soubor kontroluje proti XSD, ale výsledek dosud končil jen
+     * v archivu. Vadné XML se tak stáhlo jako každé jiné a účetní se to
+     * dozvěděla až od EPO. Soubor se pořád uloží — jen se rovnou řekne, že
+     * ho podatelna odmítne, a čím.
+     */
+    const status = (headers ?? {})['x-submission-validation'] ?? ''
+    if (status !== '' && status !== 'valid') {
+      const raw = (headers ?? {})['x-submission-validation-errors'] ?? ''
+      let detail = ''
+      try {
+        detail = decodeURIComponent(raw)
+      } catch {
+        detail = raw
+      }
+      validationIssue.value = detail === ''
+        ? t('payroll.tax_statement.validation_failed')
+        : `${t('payroll.tax_statement.validation_failed')} ${detail}`
+      toast.error(t('payroll.tax_statement.validation_failed'))
+    } else {
+      validationIssue.value = null
+      toast.success(t('payroll.tax_statement.download_done'))
+    }
   } catch {
     toast.error(t('payroll.tax_statement.download_failed'))
   } finally {
@@ -151,6 +175,23 @@ async function download(form: PayrollTaxStatementForm): Promise<void> {
 }
 
 watch([year, variant], () => void load())
+
+/*
+ * Datum zjištění důvodů pro dodatečné vyúčtování. Tiskopis ho u variant D a E
+ * očekává, ale pole se zjevovalo prázdné — účetní tak stáhla XML bez `d_zjist`
+ * a dozvěděla se to až z varování pod sestavou. Zjištění je v drtivé většině
+ * „dneska, když to zapisuju", takže se datum předvyplní na dnešek. Ručně
+ * přepsaná nebo vymazaná hodnota se nepřepisuje zpět.
+ */
+const suggestedDiscoveredOn = ref('')
+
+watch(isAdditional, (additional) => {
+  if (!additional) return
+  if (discoveredOn.value !== '' && discoveredOn.value !== suggestedDiscoveredOn.value) return
+  const today = new Date().toLocaleDateString('sv-SE')
+  discoveredOn.value = today
+  suggestedDiscoveredOn.value = today
+}, { immediate: true })
 
 /*
  * Proklik z hlídače termínů míří na TUTÉŽ stránku (oba panely jsou na mzdovém
@@ -250,6 +291,13 @@ onMounted(load)
       {{ loadError }}
     </p>
     <template v-else-if="dpz && dps">
+      <p
+        v-if="validationIssue"
+        class="mt-4 rounded-lg bg-danger-50 p-3 text-sm text-danger-800"
+        data-test="tax-statement-validation"
+      >
+        {{ validationIssue }}
+      </p>
       <ul
         v-if="warnings.length"
         class="mt-4 space-y-1 rounded-lg bg-warning-50 p-3 text-sm text-warning-800"

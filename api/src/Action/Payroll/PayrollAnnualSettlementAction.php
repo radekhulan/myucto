@@ -267,7 +267,7 @@ final class PayrollAnnualSettlementAction
 
         $caregiverStatus = (string) ($body['other_household_caregiver_status'] ?? 'unknown');
         try {
-            $caregivers = self::caregivers(
+            ['rows' => $caregivers, 'warnings' => $caregiverWarnings] = self::caregivers(
                 $caregiverStatus,
                 $body['other_household_caregivers'] ?? [],
             );
@@ -340,7 +340,12 @@ final class PayrollAnnualSettlementAction
             );
         }
 
-        return Json::ok($response, ['request' => $saved]);
+        // Uložení proběhlo. Co se do něj nevešlo, se říká vedle výsledku —
+        // nikdy místo něj, aby rozdělaná práce nezmizela kvůli hlášce.
+        return Json::ok($response, [
+            'request' => $saved,
+            'warnings' => $caregiverWarnings,
+        ]);
     }
 
     /** @param array<string,string> $args */
@@ -534,7 +539,22 @@ final class PayrollAnnualSettlementAction
     }
 
     /**
-     * @return list<array{given_name:string,family_name:string,birth_date:string,months_mask:string}>
+     * Jiní pečující ve společné domácnosti — rozdělaný seznam se ukládá.
+     *
+     * Dřív stačil jediný nedopsaný řádek (chybějící datum narození, prázdné
+     * příjmení) a odmítlo se ULOŽENÍ CELÉHO formuláře ročního zúčtování,
+     * včetně všeho ostatního, co účetní vyplnila. Stejně dopadla odpověď
+     * „ano, uplatňovala i jiná osoba“, dokud k ní nebyl dopsaný celý člověk.
+     *
+     * Nově se uloží, co je úplné, a o zbytku se řekne. Úplnost hlídá až
+     * provedení zúčtování: `child_jmhz_evidence_incomplete` je překážka, která
+     * nepustí zmrazení ročního podkladu s děravou evidencí — kontrola je tedy
+     * krok před provedením, ne podmínka uložení.
+     *
+     * @return array{
+     *     rows:list<array{given_name:string,family_name:string,birth_date:string,months_mask:string}>,
+     *     warnings:list<string>
+     * }
      */
     private static function caregivers(string $status, mixed $value): array
     {
@@ -551,44 +571,73 @@ final class PayrollAnnualSettlementAction
         }
 
         $rows = [];
-        foreach (array_values($value) as $row) {
+        $warnings = [];
+        foreach (array_values($value) as $index => $row) {
+            $position = $index + 1;
             if (!is_array($row)) {
-                throw new \InvalidArgumentException('Údaj o jiném pečujícím není platný.');
+                $warnings[] = sprintf(
+                    '%d. jiný pečující se neuložil — údaj nemá očekávaný tvar.',
+                    $position,
+                );
+                continue;
             }
             $givenName = self::text($row['given_name'] ?? null);
             $familyName = self::text($row['family_name'] ?? null);
             $birthDate = self::date($row['birth_date'] ?? null);
             $monthsMask = strtoupper(trim((string) ($row['months_mask'] ?? '')));
-            if ($givenName === null || mb_strlen($givenName) > 100
-                || $familyName === null || mb_strlen($familyName) > 100
-                || $birthDate === null
-                || preg_match('/^[AN]{12}$/D', $monthsMask) !== 1
+
+            $missing = [];
+            if ($givenName === null) {
+                $missing[] = 'jméno';
+            } elseif (mb_strlen($givenName) > 100) {
+                $missing[] = 'jméno kratší než 100 znaků';
+            }
+            if ($familyName === null) {
+                $missing[] = 'příjmení';
+            } elseif (mb_strlen($familyName) > 100) {
+                $missing[] = 'příjmení kratší než 100 znaků';
+            }
+            if ($birthDate === null) {
+                $missing[] = 'datum narození';
+            }
+            if (preg_match('/^[AN]{12}$/D', $monthsMask) !== 1
                 || !str_contains($monthsMask, 'A')
             ) {
-                throw new \InvalidArgumentException(
-                    'Jméno, datum narození nebo měsíce jiného pečujícího nejsou platné.',
-                );
+                $missing[] = 'aspoň jeden měsíc uplatnění';
             }
+            if ($missing !== []) {
+                $warnings[] = sprintf(
+                    '%d. jiný pečující se neuložil, chybí: %s.',
+                    $position,
+                    implode(', ', $missing),
+                );
+                continue;
+            }
+
             $rows[] = [
-                'given_name' => $givenName,
-                'family_name' => $familyName,
+                'given_name' => (string) $givenName,
+                'family_name' => (string) $familyName,
                 'birth_date' => $birthDate->format('Y-m-d'),
                 'months_mask' => $monthsMask,
             ];
         }
 
+        // Odpověď „ano“ bez jediné osoby je legitimní rozdělaná práce: účetní
+        // ví, že někdo další dítě uplatňoval, a jméno dohledá. Uloží se, jen
+        // se zúčtování neprovede, dokud osoba nepřibude.
         if ($status === 'present' && $rows === []) {
-            throw new \InvalidArgumentException(
-                'Při stavu „ano“ zadejte alespoň jednoho jiného pečujícího.',
-            );
+            $warnings[] = 'U odpovědi „ano“ zatím není uvedený žádný jiný pečující. '
+                . 'Podklady jsou uložené, ale zúčtování bez něj neproběhne.';
         }
+        // Přepnutí odpovědi zpět na „ne“ nesmí uložení odmítnout — řádky se
+        // jen nezapíšou, protože k téhle odpovědi nepatří.
         if ($status !== 'present' && $rows !== []) {
-            throw new \InvalidArgumentException(
-                'Seznam jiných pečujících smí být vyplněný jen při stavu „ano“.',
-            );
+            $warnings[] = 'Seznam jiných pečujících patří jen k odpovědi „ano“, '
+                . 'proto se neuložil. Přepněte odpověď, pokud tam osoby patří.';
+            $rows = [];
         }
 
-        return $rows;
+        return ['rows' => $rows, 'warnings' => $warnings];
     }
 
     /** @return array<string,mixed> */
