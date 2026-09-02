@@ -9,7 +9,9 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Payroll\Absence\PayrollLeaveInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
+use MyInvoice\Service\Payroll\Absence\PayrollWageProrationService;
 use MyInvoice\Service\Payroll\Run\PayrollRunCalculator;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -25,6 +27,7 @@ final class PayrollAbsenceApiTest extends TestCase
     private Connection $db;
     private PayrollAbsenceAction $action;
     private PayrollSicknessInputMaterializer $sicknessInputs;
+    private PayrollLeaveInputMaterializer $leaveInputs;
     private PayrollRunCalculator $runCalculator;
     private int $userId;
     private int $supplierId;
@@ -42,6 +45,7 @@ final class PayrollAbsenceApiTest extends TestCase
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollAbsenceAction::class);
             $this->sicknessInputs = $container->get(PayrollSicknessInputMaterializer::class);
+            $this->leaveInputs = $container->get(PayrollLeaveInputMaterializer::class);
             $this->runCalculator = $container->get(PayrollRunCalculator::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
@@ -263,7 +267,8 @@ final class PayrollAbsenceApiTest extends TestCase
         self::assertTrue($this->json($cancelled)['absence']['correction_pending']);
 
         $reversal = $this->db->pdo()->prepare(
-            'SELECT reversal_input.amount_minor, reversal_input.status,
+            'SELECT reversal_input.id, reversal_input.amount_minor, reversal_input.status,
+                    reversal_input.period_start, reversal_input.source_period_start,
                     original_input.component_snapshot_hash = reversal_input.component_snapshot_hash
                         AS keeps_component_snapshot
                FROM payroll_sickness_input_materializations reversal
@@ -286,6 +291,39 @@ final class PayrollAbsenceApiTest extends TestCase
         self::assertSame(-(int) $input['amount_minor'], (int) $reversalInput['amount_minor']);
         self::assertSame('approved', $reversalInput['status']);
         self::assertSame(1, (int) $reversalInput['keeps_component_snapshot']);
+        // Oprava nároku patří MĚSÍCI, ve kterém nárok vznikl. Přesunout korekci
+        // do dalšího období by zkreslilo oba měsíce i měsíční hlášení, které se
+        // za původní měsíc podává opravným hlášením.
+        self::assertSame((string) $input['period_start'], (string) $reversalInput['period_start']);
+        self::assertSame((string) $input['period_start'], (string) $reversalInput['source_period_start']);
+
+        // Původní vstup a jeho reverzace ve stejné revizi se vyruší do nuly
+        // a nezanechají ani vyměřovací základ, ani závazek k výplatě.
+        $corrective = $this->runCalculator->calculate([
+            'schema_version' => 'payroll-run-input.v2',
+            'people' => [[
+                'employee' => ['id' => (int) $input['employee_id']],
+                'employments' => [[
+                    'employment' => ['id' => $this->employmentId],
+                    'inputs' => [
+                        [
+                            'id' => (int) $input['id'],
+                            'amount_minor' => (int) $input['amount_minor'],
+                            'component' => $component,
+                        ],
+                        [
+                            'id' => (int) $reversalInput['id'],
+                            'amount_minor' => (int) $reversalInput['amount_minor'],
+                            'component' => $component,
+                        ],
+                    ],
+                ]],
+            ]],
+        ]);
+        self::assertSame(0, $corrective['totals']['cash_payable_minor']);
+        self::assertSame(0, $corrective['totals']['tax_base_minor']);
+        self::assertSame(0, $corrective['totals']['social_base_minor']);
+        self::assertSame(0, $corrective['totals']['health_base_minor']);
 
         try {
             $this->db->pdo()->prepare(
@@ -297,6 +335,181 @@ final class PayrollAbsenceApiTest extends TestCase
         } catch (\PDOException $exception) {
             self::assertStringContainsString('append-only', $exception->getMessage());
         }
+    }
+
+    /**
+     * § 222 odst. 1 ZP — za dobu čerpání dovolené náleží náhrada mzdy ve výši
+     * průměrného výdělku. Dřív z ní na pásce nebylo nic: kniha dovolené odepsala
+     * hodiny a peněžní půlka schválení chyběla úplně.
+     *
+     * Průměr testu je 12 000 000 h / 9 600 minut = 750 Kč/h, směna 480 minut,
+     * takže náhrada je 6 000 Kč. Zrušení dovolené vytvoří zápornou korekci ve
+     * STEJNÉM měsíci — oprava nároku patří období, ve kterém nárok vznikl.
+     */
+    public function testApprovedVacationMaterializesCompensationInputAndReversesIt(): void
+    {
+        $averageId = $this->createApprovedAverage();
+        $this->insertPublishedShift('2026-06-15 06:00:00', '2026-06-15 14:30:00', 30);
+
+        $created = $this->createAbsence($averageId);
+        self::assertSame(201, $created->getStatusCode());
+        $absence = $this->json($created)['absence'];
+
+        $approved = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+
+        $input = $this->leaveInput("leave:{$absence['id']}:2026-06-01:original");
+        self::assertIsArray($input, 'Schválená dovolená nezaložila mzdový vstup náhrady.');
+        self::assertSame('absence', $input['source_kind']);
+        self::assertSame('approved', $input['status']);
+        self::assertSame('2026-06-01', (string) $input['period_start']);
+        self::assertSame(600_000, (int) $input['amount_minor']);
+        self::assertSame(8_000, (int) $input['quantity_milliunits']);
+
+        $source = json_decode((string) $input['source_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('leave_compensation.v1', $source['kind']);
+        self::assertSame(480, $source['minutes']);
+        self::assertSame(75_000, $source['average_hourly_minor']);
+        self::assertSame($averageId, $source['average_snapshot_id']);
+        self::assertSame('zp-222-1', $source['entitlement_basis']);
+
+        $component = json_decode((string) $input['component_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('NAHRADA_MZDY_DOVOLENA', $component['code']);
+        self::assertSame('included', $component['tax_treatment']);
+        // § 353 ZP — průměrný výdělek se zjišťuje z hrubé mzdy za ODPRACOVANOU
+        // dobu, takže náhrada za dovolenou do dalšího průměru nevstupuje.
+        self::assertSame('excluded', $component['average_earning_treatment']);
+
+        $run = $this->runCalculator->calculate([
+            'schema_version' => 'payroll-run-input.v2',
+            'people' => [[
+                'employee' => ['id' => (int) $input['employee_id']],
+                'employments' => [[
+                    'employment' => ['id' => $this->employmentId],
+                    'inputs' => [[
+                        'id' => (int) $input['id'],
+                        'amount_minor' => (int) $input['amount_minor'],
+                        'component' => $component,
+                    ]],
+                ]],
+            ]],
+        ]);
+        self::assertSame(600_000, $run['totals']['tax_base_minor']);
+        self::assertSame(600_000, $run['totals']['social_base_minor']);
+        self::assertSame(600_000, $run['totals']['health_base_minor']);
+
+        $replay = $this->leaveInputs->materialize(
+            $this->supplierId,
+            $this->db->pdo()->query(
+                'SELECT * FROM payroll_absences WHERE id = ' . (int) $absence['id'],
+            )->fetch(\PDO::FETCH_ASSOC) + ['average_hourly_minor' => 75_000],
+            $this->userId,
+        );
+        self::assertSame([], $replay['created']);
+        self::assertCount(1, $replay['replayed']);
+
+        $approvedAbsence = $this->json($approved)['absence'];
+        $cancelled = $this->action->cancel(
+            $this->request('POST')->withParsedBody(['row_version' => $approvedAbsence['row_version']]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $cancelled->getStatusCode(), (string) $cancelled->getBody());
+
+        $reversal = $this->leaveInput("leave:{$absence['id']}:2026-06-01:reversal");
+        self::assertIsArray($reversal, 'Zrušená dovolená nezaložila korekci náhrady.');
+        self::assertSame('correction', $reversal['source_kind']);
+        self::assertSame('approved', $reversal['status']);
+        self::assertSame('2026-06-01', (string) $reversal['period_start']);
+        self::assertSame('2026-06-01', (string) $reversal['source_period_start']);
+        self::assertSame(-600_000, (int) $reversal['amount_minor']);
+        self::assertSame(
+            (string) $input['component_snapshot_hash'],
+            (string) $reversal['component_snapshot_hash'],
+        );
+    }
+
+    /**
+     * Svátek uvnitř okna náhrady při DPN musí ze základní mzdy vypadnout.
+     *
+     * § 192 odst. 1 ZP za něj náhradu přiznává, i když na něj směna rozvržená
+     * není. Kdyby zůstal i v základní mzdě, byl by zaplacený dvakrát. Fond ho
+     * naopak neobsahuje — mzda se za svátek jinak nekrátí (§ 115 odst. 3 ZP) —
+     * takže nahrazené minuty jsou širší než fond o právě ten svátek.
+     *
+     * Červenec 2026 má 23 rozvržených dnů; 6. 7. je svátek, takže fond je
+     * 22 x 480 = 10 560 minut. Nemoc 6. až 7. 7. vezme 960 minut (svátek
+     * i směnu), zbývá 9 600 a 42 000 x 9 600/10 560 = 38 181,81 → 38 182 Kč.
+     */
+    public function testHolidayInsideSicknessLeavesTheBaseWageByTheObligationFund(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $proration = $container->get(PayrollWageProrationService::class);
+        $this->workCalendar();
+        $this->insertPublishedShift('2026-07-07 06:00:00', '2026-07-07 14:30:00', 30);
+
+        $averageId = $this->createApprovedAverage(3);
+        $payload = $this->absencePayload($averageId);
+        $payload['absence_type'] = 'dpn';
+        $payload['date_from'] = '2026-07-06';
+        $payload['date_to'] = '2026-07-07';
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+        $approved = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+                'first_day_fully_worked' => false,
+                'insurance_eligibility_confirmed' => true,
+                'conflicting_benefit_excluded' => true,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+
+        $result = $proration->forMonth($this->supplierId, $this->employmentId, '2026-07', 4_200_000);
+
+        self::assertTrue($result['supported']);
+        self::assertSame(10_560, $result['fund_minutes']);
+        self::assertSame(['sickness_compensation' => 960], $result['replaced_minutes_by_title']);
+        self::assertSame(3_818_200, $result['amount_minor']);
+    }
+
+    private function workCalendar(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_work_calendars
+                (supplier_id, employment_id, name, week_pattern, weekly_minutes, valid_from)
+             VALUES (?, ?, "Pondělí až pátek", ?, 2400, "2026-01-01")'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            json_encode([1 => 480, 2 => 480, 3 => 480, 4 => 480, 5 => 480, 6 => 0, 7 => 0]),
+        ]);
+    }
+
+    /** @return array<string,mixed>|null */
+    private function leaveInput(string $externalId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_inputs WHERE supplier_id = ? AND external_id = ?',
+        );
+        $stmt->execute([$this->supplierId, $externalId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
     }
 
     public function testVacationRejectsAverageFromDifferentQuarter(): void
@@ -800,15 +1013,15 @@ final class PayrollAbsenceApiTest extends TestCase
         ]);
     }
 
-    private function createApprovedAverage(): int
+    private function createApprovedAverage(int $quarter = 2): int
     {
         $response = $this->action->createAverage(
             $this->request('POST')->withParsedBody([
                 'employment_id' => $this->employmentId,
                 'applicable_year' => 2026,
-                'applicable_quarter' => 2,
-                'decisive_from' => '2026-01-01',
-                'decisive_to' => '2026-03-31',
+                'applicable_quarter' => $quarter,
+                'decisive_from' => $quarter === 3 ? '2026-04-01' : '2026-01-01',
+                'decisive_to' => $quarter === 3 ? '2026-06-30' : '2026-03-31',
                 'gross_earnings_minor' => 12_000_000,
                 'longer_period_allocated_minor' => 0,
                 'worked_minutes' => 9_600,

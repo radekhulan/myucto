@@ -113,6 +113,22 @@ final class PayrollComponentDefaults
                 ['PRIPLATEK_ZTIZENE_PROSTREDI', 'Příplatek za práci ve ztíženém pracovním prostředí', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['PROVIZE', 'Provize', 'commission', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['NAHRADA_MZDY', 'Náhrada mzdy', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                // Dovolená není odpracovaná doba ani část základní mzdy: za dobu
+                // jejího čerpání přísluší podle § 222 odst. 1 ZP NÁHRADA mzdy ve
+                // výši průměrného výdělku. Vlastní kód, ne obecná `NAHRADA_MZDY`,
+                // ze dvou důvodů. Zaprvé § 142 odst. 5 ZP chce doklad o
+                // JEDNOTLIVÝCH složkách mzdy, takže hodiny, sazba i částka musí
+                // na pásce stát na vlastním řádku. Zadruhé měsíční hlášení má pro
+                // ni samostatný atribut 10338 `mzda.nahrady.dovolena`, který
+                // sběrná složka naplnit nedokáže.
+                //
+                // Klasifikace je shodná s obecnou náhradou mzdy: zdaňuje se,
+                // vstupuje do obou vyměřovacích základů a podléhá exekučním
+                // srážkám. `average_earning` je `excluded` — § 353 zjišťuje
+                // průměrný výdělek z hrubé mzdy ZA ODPRACOVANOU DOBU, a náhrada
+                // odpracovanou dobou není; zahrnout ji by znamenalo počítat
+                // průměr z průměru.
+                ['NAHRADA_MZDY_DOVOLENA', 'Náhrada mzdy za dovolenou', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 // Náhrada mzdy při DPN je zákonem osvobozená a není vyměřovacím
                 // základem pojistného. JMHZ a exekuční model zůstávají shodné
                 // s obecnou náhradou mzdy; jejich odlišný režim by vyžadoval

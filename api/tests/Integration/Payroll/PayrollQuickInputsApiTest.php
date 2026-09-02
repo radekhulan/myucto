@@ -929,6 +929,138 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertStringContainsString('nelze přesčas zadat podle hodin', $error['message']);
     }
 
+    /**
+     * Mzda přísluší za vykonanou práci (§ 109 odst. 1 ZP), takže návrh měsíční
+     * mzdy musí evidované absence odečíst. Dřív se nabízela celá sjednaná
+     * částka: zaměstnanec na celoměsíční nemocenské dostal plnou mzdu A K TOMU
+     * náhradu při DPN.
+     *
+     * Červen 2026 má 22 pracovních dnů bez svátku, tedy 10 560 minut fondu.
+     * Jednodenní dovolená ubere 480 minut, takže 42 000 × 21/22 = 40 090,90 Kč
+     * a § 142 odst. 2 ZP to zaokrouhlí nahoru na 40 091 Kč.
+     */
+    public function testMonthlyBaseIsProratedByScheduledHoursOfRecordedAbsence(): void
+    {
+        $this->workCalendar('2026-01-01');
+        $this->publishedShift($this->employmentId, '2026-06-15 06:00:00', '2026-06-15 14:30:00', 30);
+        $this->approvedAbsence($this->employmentId, 'vacation', '2026-06-15', '2026-06-15');
+
+        $row = $this->firstRow('2026-06');
+
+        self::assertTrue($row['away_in_month']);
+        self::assertFalse($row['base_requires_entry']);
+        self::assertSame(4_009_100, $row['base_amount_minor']);
+        self::assertNotContains('absence_month_base_required', $row['blockers']);
+
+        $proration = PayrollTimeValue::row($row['base_proration'] ?? null, 'base_proration');
+        self::assertSame(10_560, $proration['fund_minutes']);
+        self::assertSame(480, $proration['replaced_minutes']);
+        self::assertSame(['vacation' => 480], $proration['replaced_minutes_by_title']);
+        self::assertSame(4_009_100, $proration['amount_minor']);
+    }
+
+    /**
+     * Fail-closed: bez pracovního kalendáře není z čeho krátit. Nabídnout celou
+     * sjednanou mzdu by vypadalo hotově a nikdo by to už nezkontroloval, proto
+     * se místo čísla vrátí blokátor a pole zůstane na účetní.
+     */
+    public function testAbsenceWithoutWorkCalendarBlocksTheProposalInsteadOfPayingFullWage(): void
+    {
+        $this->publishedShift($this->employmentId, '2026-06-15 06:00:00', '2026-06-15 14:30:00', 30);
+        $this->approvedAbsence($this->employmentId, 'vacation', '2026-06-15', '2026-06-15');
+
+        $row = $this->firstRow('2026-06');
+
+        self::assertTrue($row['base_requires_entry']);
+        self::assertSame(0, $row['base_amount_minor']);
+        self::assertContains('absence_month_base_required', $row['blockers']);
+        self::assertSame('missing_work_calendar', $row['base_proration_unsupported_reason']);
+    }
+
+    /**
+     * Neschválená absence částku nemění, ale ani se nepřehlíží: po schválení by
+     * se návrh změnil, takže se místo něj vrátí blokátor.
+     */
+    public function testPendingAbsenceBlocksTheProposal(): void
+    {
+        $this->workCalendar('2026-01-01');
+        $this->publishedShift($this->employmentId, '2026-06-15 06:00:00', '2026-06-15 14:30:00', 30);
+        $this->approvedAbsence($this->employmentId, 'vacation', '2026-06-15', '2026-06-15', 'requested');
+
+        $row = $this->firstRow('2026-06');
+
+        self::assertTrue($row['base_requires_entry']);
+        self::assertContains('absence_month_base_required', $row['blockers']);
+        self::assertSame('absence_pending_decision', $row['base_proration_unsupported_reason']);
+    }
+
+    /** Měsíc bez absence se nezměnil a nestojí ani dotaz navíc. */
+    public function testMonthWithoutAbsenceKeepsTheAgreedAmount(): void
+    {
+        $this->workCalendar('2026-01-01');
+
+        $row = $this->firstRow('2026-06');
+
+        self::assertFalse($row['away_in_month']);
+        self::assertSame(4_200_000, $row['base_amount_minor']);
+        self::assertNull($row['base_proration']);
+    }
+
+    /** @return array<string,mixed> */
+    private function firstRow(string $period): array
+    {
+        $response = $this->action->list(
+            $this->request('GET')->withQueryParams(['period' => $period]),
+            new Response(),
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $month = PayrollTimeValue::row($this->json($response)['month'] ?? null, 'month');
+        $items = $month['items'] ?? null;
+        self::assertIsArray($items);
+        self::assertNotSame([], $items);
+
+        return PayrollTimeValue::row($items[0], 'quick_input_row');
+    }
+
+    private function publishedShift(
+        int $employmentId,
+        string $from,
+        string $to,
+        int $breakMinutes,
+    ): void {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_shifts
+                (supplier_id, employment_id, series_key, starts_at_utc, ends_at_utc,
+                 timezone_name, break_minutes, status, published_by, published_at)
+             VALUES (?, ?, ?, ?, ?, 'Europe/Prague', ?, 'published', ?, NOW())"
+        )->execute([
+            $this->supplierId,
+            $employmentId,
+            md5($from . '|' . $to . '|' . $employmentId),
+            $from,
+            $to,
+            $breakMinutes,
+            $this->userId,
+        ]);
+    }
+
+    private function approvedAbsence(
+        int $employmentId,
+        string $type,
+        string $from,
+        string $to,
+        string $status = 'approved',
+    ): int {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_absences
+                (supplier_id, employment_id, absence_type, date_from, date_to,
+                 timezone_name, compensation_policy, status)
+             VALUES (?, ?, ?, ?, ?, "Europe/Prague", "none", ?)'
+        )->execute([$this->supplierId, $employmentId, $type, $from, $to, $status]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
     private function employment(
         int $supplierId,
         string $name,

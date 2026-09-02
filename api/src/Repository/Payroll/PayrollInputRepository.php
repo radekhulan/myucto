@@ -1661,6 +1661,26 @@ final class PayrollInputRepository
     }
 
     /**
+     * Složky náhrad, které smí založit VÝHRADNĚ materializace schválené absence.
+     *
+     * Ruční částka na nich je daňová vada, ne jen nepořádek:
+     *
+     *  - `NAHRADA_MZDY_DPN` je klasifikovaná jako osvobozená, ale § 6 odst. 9
+     *    písm. p) ZDP osvobozuje náhradu při dočasné pracovní neschopnosti jen
+     *    DO VÝŠE MINIMÁLNÍHO NÁROKU podle § 192 odst. 2 ZP. Vyšší náhradu, kterou
+     *    § 192 odst. 3 ZP dovoluje sjednat, by bylo nutné rozdělit na osvobozenou
+     *    zákonnou část a zdanitelný nadlimit; aplikace to zatím neumí, a ručně
+     *    zadaná částka by se tiše celá neodvedla. Nadstandardní část proto patří
+     *    na běžnou zdanitelnou složku, dokud rozpad neexistuje.
+     *  - `NAHRADA_MZDY_DOVOLENA` musí sedět na hodiny odepsané z knihy dovolené
+     *    a na zmrazený průměrný výdělek. Ruční částka by obojí rozešla a na
+     *    pásce by zůstal řádek, ke kterému nevede žádný podklad.
+     *
+     * Materializace jde přes `absence` (původní vstup) a `correction` (reverzace).
+     */
+    private const ABSENCE_ONLY_CODES = ['NAHRADA_MZDY_DPN', 'NAHRADA_MZDY_DOVOLENA'];
+
+    /**
      * Kontrola referencí mzdového vstupu.
      *
      * Kromě příslušnosti k firmě hlídá i stav vztahu: na `archived` ani `no_show`
@@ -1672,7 +1692,7 @@ final class PayrollInputRepository
     public function assertValidReferences(int $supplierId, array $data): void
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT employment.status
+            'SELECT employment.status, component.code
                FROM payroll_employments employment
                JOIN payroll_component_definitions component
                  ON component.supplier_id = employment.supplier_id
@@ -1692,15 +1712,22 @@ final class PayrollInputRepository
             $data['employment_id'],
             $data['employee_id'],
         ]);
-        $status = $stmt->fetchColumn();
-        if ($status === false) {
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
             throw new \InvalidArgumentException(
                 'Zaměstnanec, vztah nebo účinná mzdová složka nepatří této firmě.'
             );
         }
-        if (in_array((string) $status, ['archived', 'no_show'], true)) {
+        if (in_array((string) $row['status'], ['archived', 'no_show'], true)) {
             throw new \InvalidArgumentException(
                 'Pracovní vztah je archivovaný nebo nenastoupil; mzdový vstup na něj založit nelze.'
+            );
+        }
+        if (in_array((string) $row['code'], self::ABSENCE_ONLY_CODES, true)
+            && !in_array((string) ($data['source_kind'] ?? ''), ['absence', 'correction'], true)
+        ) {
+            throw new \InvalidArgumentException(
+                'Náhradu mzdy při DPN ani za dovolenou nelze zadat ručně; vzniká ze schválené absence.'
             );
         }
     }

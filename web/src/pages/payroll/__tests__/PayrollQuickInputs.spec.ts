@@ -357,6 +357,37 @@ describe('PayrollQuickInputs', () => {
     }
   })
 
+  it('explains a base wage reduced by recorded absence', async () => {
+    m.load.mockImplementation(async period => ({
+      period,
+      items: [fixture({
+        away_in_month: true,
+        base_amount_minor: 4_009_100,
+        base_proration: {
+          fund_minutes: 10_560,
+          replaced_minutes: 480,
+          replaced_minutes_by_title: { vacation: 480 },
+          amount_minor: 4_009_100,
+        },
+      })],
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="quick-base-12"]').element)
+      .toHaveProperty('value', '40091,00')
+    expect(wrapper.get('[data-testid="quick-base-proration-12"]').text())
+      .toContain('payroll.quick_inputs.base_proration')
+  })
+
+  it('keeps the base explanation away when the month has no absence', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="quick-base-proration-12"]').exists()).toBe(false)
+  })
+
   it('shows effective suspended status and requires an explicit base', async () => {
     m.load.mockImplementation(async period => ({
       period,

@@ -1802,6 +1802,22 @@ export interface PayrollQuickSurchargeState {
   unavailable_reason: string | null
 }
 
+/**
+ * Titul, kterým je nahrazena doba vyňatá ze základní měsíční mzdy: dovolená
+ * (§ 222 ZP), náhrada při DPN od zaměstnavatele (§ 192 ZP), dávka nemocenského
+ * pojištění, jiná placená překážka (§ 199 a § 208 ZP) a neplacená doba.
+ */
+export type PayrollWageReplacementTitle = 'vacation' | 'sickness_compensation'
+  | 'state_benefit' | 'paid_obstacle' | 'unpaid'
+
+export interface PayrollQuickInputProration {
+  fund_minutes: number
+  replaced_minutes: number
+  /** Titul náhrady → minuty. Titul bez minut se nevrací. */
+  replaced_minutes_by_title: Partial<Record<PayrollWageReplacementTitle, number>>
+  amount_minor: number
+}
+
 export interface PayrollQuickInputRow {
   employee_id: number
   employment_id: number
@@ -1819,6 +1835,14 @@ export interface PayrollQuickInputRow {
   base_conflict: boolean
   partial_month: boolean
   base_requires_entry: boolean
+  /**
+   * Doklad ke krácení měsíční mzdy za absence (§ 109 odst. 1 ZP): fond měsíce
+   * podle individuálního rozvrhu a minuty nahrazené jiným titulem. `null`
+   * znamená, že vztah v měsíci žádnou absenci nemá.
+   */
+  base_proration?: PayrollQuickInputProration | null
+  /** Vyplněné jen tehdy, když krácení nešlo spočítat a základ musí zadat účetní. */
+  base_proration_unsupported_reason?: string | null
   overtime_mode: 'hours' | 'amount'
   overtime_hours_milli: number | null
   overtime_amount_minor: number

@@ -111,6 +111,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
             'PRIPLATEK_SVATEK' => '10336',
             'PRIPLATEK_ZTIZENE_PROSTREDI' => '10332',
             'NAHRADA_MZDY' => '10337',
+            'NAHRADA_MZDY_DOVOLENA' => '10338',
             'NAHRADA_MZDY_DPN' => '10342',
         ];
         self::assertSame($expected, PayrollComponentJmhzMappingDefaults::all());
