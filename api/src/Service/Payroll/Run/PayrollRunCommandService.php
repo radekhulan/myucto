@@ -83,6 +83,19 @@ final class PayrollRunCommandService
                 (int) $run['id'],
                 $actorUserId,
             );
+            /*
+             * Druhý běh za totéž období není zakázaný — rozdělení na účtárny
+             * je legitimní. Ale musí se o něm vědět HNED: běh je klíčovaný
+             * i na rozsah účtárny, takže s jiným `office_id` vznikne za jeden
+             * měsíc druhý a rezervace období tomu nebrání. Uzávěrka roku se
+             * pak dívá jen na to, jestli existuje aspoň jeden uzavřený, takže
+             * druhý, rozdělaný, projde bez povšimnutí.
+             */
+            $run['warnings'] = $this->duplicatePeriodWarnings(
+                $supplierId,
+                $periodStart,
+                $officeId,
+            );
             if ($ownsTransaction) {
                 $pdo->commit();
             }
@@ -91,6 +104,39 @@ final class PayrollRunCommandService
             $this->rollbackOwnedTransaction($pdo, $ownsTransaction);
             throw $e;
         }
+    }
+
+    /** @return list<array{code:string,message:string}> */
+    private function duplicatePeriodWarnings(
+        int $supplierId,
+        string $periodStart,
+        ?int $officeId,
+    ): array {
+        $siblings = $this->runs->siblingRunsInOtherOfficeScope(
+            $supplierId,
+            $periodStart,
+            $officeId,
+        );
+        if ($siblings === []) {
+            return [];
+        }
+        $ids = implode(', ', array_map(
+            static fn (array $row): string => '#' . $row['id'],
+            $siblings,
+        ));
+
+        return [[
+            'code' => 'payroll_run_duplicate_period_scope',
+            'message' => sprintf(
+                'Za období %s už existuje jiný mzdový běh (%s) s jiným '
+                . 'rozsahem účtárny. Pokud jste nechtěla vést měsíc po '
+                . 'účtárnách zvlášť, jeden z běhů zrušte — uzávěrka roku se '
+                . 'dívá jen na to, jestli je aspoň jeden uzavřený, takže '
+                . 'rozdělaný druhý běh by si nikdo nevšiml.',
+                substr($periodStart, 0, 7),
+                $ids,
+            ),
+        ]];
     }
 
     public function lockInputs(

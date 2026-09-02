@@ -294,6 +294,44 @@ final class PayrollRunRepository
         return $run;
     }
 
+    /**
+     * Běhy za TOTÉŽ období, ale s jiným rozsahem účtárny.
+     *
+     * PROČ: běh je klíčovaný na `(firma, období, office_scope_id)`, takže
+     * s jiným `office_id` vznikne za jeden měsíc druhý běh a rezervace období
+     * tomu nebrání. Takhle vznikl duplicitní běh při průchodu rokem 2026.
+     * Uzávěrka roku se pak dívá jen na to, jestli existuje aspoň jeden
+     * uzavřený — druhý, rozdělaný, projde bez povšimnutí.
+     *
+     * Rozdělení na účtárny je legitimní, takže se to nezakazuje. Účetní se to
+     * ale musí dozvědět v okamžiku, kdy druhý běh zakládá, ne až u uzávěrky.
+     *
+     * @return list<array{id:int,office_scope_id:int,status:string}>
+     */
+    public function siblingRunsInOtherOfficeScope(
+        int $supplierId,
+        string $periodStart,
+        ?int $officeId,
+    ): array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, office_scope_id, status
+               FROM payroll_runs
+              WHERE supplier_id = ?
+                AND period_start = ?
+                AND office_scope_id <> COALESCE(?, 0)
+              ORDER BY id'
+        );
+        $stmt->execute([$supplierId, $periodStart, $officeId]);
+        /** @var list<array{id:int,office_scope_id:int,status:string}> $rows */
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        return array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'office_scope_id' => (int) $row['office_scope_id'],
+            'status' => (string) $row['status'],
+        ], $rows);
+    }
+
     /** @return array<string,mixed>|null */
     public function find(int $supplierId, int $runId): ?array
     {
