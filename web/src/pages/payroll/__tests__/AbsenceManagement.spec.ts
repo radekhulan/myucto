@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   context: vi.fn(),
   absencesPage: vi.fn(),
   averages: vi.fn(),
+  averageSuggestion: vi.fn(),
   leaveLedger: vi.fn(),
   decide: vi.fn(),
   createAbsence: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('@/api/payrollAbsences', () => ({
     context: m.context,
     absencesPage: m.absencesPage,
     averages: m.averages,
+    averageSuggestion: m.averageSuggestion,
     leaveLedger: m.leaveLedger,
     decide: m.decide,
     createAbsence: m.createAbsence,
@@ -84,6 +86,31 @@ function absence(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/*
+ * Návrh vstupů průměru z uzavřených běhů. Výchozí je NEODVODITELNÝ: syntetická
+ * firma v testech žádné uzavřené běhy nemá, takže formulář zůstává prázdný —
+ * přesně jako v aplikaci.
+ */
+function averageSuggestion(overrides: Record<string, unknown> = {}) {
+  return {
+    employment_id: 12,
+    applicable_year: 2026,
+    applicable_quarter: 2,
+    decisive_from: '2026-01-01',
+    decisive_to: '2026-03-31',
+    minimum_worked_days: 21,
+    ready: false,
+    blockers: ['run_missing'],
+    gross_earnings_minor: null,
+    longer_period_allocated_minor: null,
+    worked_minutes: null,
+    worked_days: null,
+    months: [],
+    input_version: 'a'.repeat(64),
+    ...overrides,
+  }
+}
+
 function absencesPage(absences: unknown[], total = absences.length) {
   return { absences, total, limit: 12, offset: 0 }
 }
@@ -136,6 +163,7 @@ describe('AbsenceManagement', () => {
       status: 'approved',
       row_version: 2,
     }])
+    m.averageSuggestion.mockResolvedValue(averageSuggestion())
     m.leaveLedger.mockResolvedValue({ entries: [], balance_minutes: 0 })
     m.decide.mockResolvedValue({ id: 44, status: 'approved' })
     m.createAbsence.mockResolvedValue({ id: 45 })
@@ -431,6 +459,92 @@ describe('AbsenceManagement', () => {
     expect(wrapper.find('[data-test="average-error"]').text())
       .toBe('Přesná zpráva validační chyby z API.')
     expect(m.toastError).not.toHaveBeenCalledWith('Přesná zpráva validační chyby z API.')
+    wrapper.unmount()
+  })
+
+  /*
+   * Průměr se dřív celý opisoval ručně z čísel, která aplikace už má
+   * v uzavřených bězích. Předvyplnění je proto celý smysl obrazovky — ale
+   * potvrzení se nepřeskakuje: snapshot vzniká až odesláním formuláře.
+   */
+  it('prefills the average form from closed payroll runs and still requires confirmation', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: true,
+      blockers: [],
+      gross_earnings_minor: 14_000_000,
+      worked_minutes: 27_600,
+      worked_days: 61,
+    }))
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+
+    expect(m.averageSuggestion).toHaveBeenCalledWith(12, expect.any(Number), expect.any(Number))
+    expect(wrapper.find('[data-test="average-suggestion-ready"]').exists()).toBe(true)
+    expect((wrapper.find('[data-test="average-gross-czk"]').element as HTMLInputElement).value)
+      .toBe('140000')
+    expect((wrapper.find('[data-test="average-worked-hours"]').element as HTMLInputElement).value)
+      .toBe('460')
+    expect((wrapper.find('[data-test="average-worked-days"]').element as HTMLInputElement).value)
+      .toBe('61')
+    // Poměrnou část za období delší než čtvrtletí (§ 358 ZP) návrh nezná, takže
+    // se nepředvyplňuje a pole u sebe nese vysvětlení.
+    expect(wrapper.text()).toContain('payroll_absence.averages.source_allocated')
+    // Nic se neuložilo samo.
+    expect(m.createAverage).not.toHaveBeenCalled()
+
+    await wrapper.find('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAverage).toHaveBeenCalledWith(expect.objectContaining({
+      gross_earnings_minor: 14_000_000,
+      worked_minutes: 27_600,
+      worked_days: 61,
+      longer_period_allocated_minor: 0,
+    }))
+    wrapper.unmount()
+  })
+
+  it('drops the provenance note once the accountant overwrites a derived number', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: true,
+      blockers: [],
+      gross_earnings_minor: 14_000_000,
+      worked_minutes: 27_600,
+      worked_days: 61,
+    }))
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+    expect(wrapper.find('[data-test="average-suggestion-edited"]').exists()).toBe(false)
+
+    await wrapper.find('[data-test="average-gross-czk"]').setValue('150000')
+    expect(wrapper.find('[data-test="average-suggestion-edited"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  /*
+   * Nedá-li se odvodit, formulář zůstane prázdný a řekne proč. Napůl vyplněné
+   * číslo by vypadalo jako hotový podklad — a z průměru se počítá náhrada mzdy
+   * i údaj do hlášení ČSSZ.
+   */
+  it('leaves the form empty with a reason when the quarter cannot be derived', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      blockers: ['run_missing', 'probable_earning_required'],
+    }))
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.find('[data-test="average-suggestion-ready"]').exists()).toBe(false)
+    const blocked = wrapper.get('[data-test="average-suggestion-blocked"]')
+    expect(blocked.text()).toContain('payroll_absence.averages.blockers.run_missing')
+    expect(blocked.text()).toContain('payroll_absence.averages.blockers.probable_earning_required')
+    expect((wrapper.find('[data-test="average-gross-czk"]').element as HTMLInputElement).value)
+      .toBe('0')
+    expect(wrapper.text()).not.toContain('payroll_absence.averages.source_gross')
     wrapper.unmount()
   })
 

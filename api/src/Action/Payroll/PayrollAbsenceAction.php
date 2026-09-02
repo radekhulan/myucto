@@ -21,6 +21,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Absence\AbsenceHolidayTreatment;
 use MyInvoice\Service\Payroll\Absence\AverageEarningCalculator;
+use MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementConflictException;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
 use MyInvoice\Service\Payroll\Absence\LeaveEntitlementCalculator;
@@ -47,6 +48,7 @@ final class PayrollAbsenceAction
         private readonly PayrollSicknessRepository $sickness,
         private readonly PayrollAbsenceValidator $validator,
         private readonly AverageEarningCalculator $averageCalculator,
+        private readonly AverageEarningDerivationService $averageDerivation,
         private readonly LeaveEntitlementCalculator $leaveCalculator,
         private readonly AutomaticLeaveEntitlementService $automaticLeaveEntitlements,
         private readonly SicknessCompensationCalculator $sicknessCalculator,
@@ -326,6 +328,33 @@ final class PayrollAbsenceAction
                 $employmentId,
             ),
         ]);
+    }
+
+    /**
+     * Návrh vstupů průměru odvozený z uzavřených mzdových běhů.
+     *
+     * Jen ČTE — nic neukládá a schválení nenahrazuje. Formulář navržená čísla
+     * předvyplní, účetní je smí přepsat a teprve její odeslání průměr založí.
+     * Odpověď je proto pod právem `READ`, ne `WRITE`.
+     */
+    public function averageSuggestion(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ, true)) !== null) {
+            return $error;
+        }
+        try {
+            $query = $request->getQueryParams();
+            $suggestion = $this->averageDerivation->suggest(
+                $this->currentSupplierId($request),
+                $this->requiredPositiveInt($query['employment_id'] ?? null, 'employment_id'),
+                $this->requiredPositiveInt($query['applicable_year'] ?? null, 'applicable_year'),
+                $this->requiredPositiveInt($query['applicable_quarter'] ?? null, 'applicable_quarter'),
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, ['suggestion' => $suggestion]);
     }
 
     public function createAverage(Request $request, Response $response): Response

@@ -18,6 +18,7 @@ import {
   payrollAbsenceApi,
   type AbsencePayload,
   type AbsenceType,
+  type AverageEarningSuggestion,
   type AverageSnapshot,
   type LeaveEntry,
   type LeaveEntitlementCandidate,
@@ -130,6 +131,17 @@ const averageForm = reactive({
   probable_hourly_czk: null as number | null,
   rationale: '',
 })
+/*
+ * Návrh vstupů průměru z uzavřených běhů. Formulář ho jen PŘEDVYPLNÍ — účetní
+ * čísla vidí, smí je přepsat a teprve jejím odesláním průměr vznikne. Proto se
+ * vedle návrhu drží i to, co se doopravdy předvyplnilo (`averagePrefill`):
+ * podle něj se pozná, které pole už člověk ručně změnil, a poznámka „odvozeno
+ * z běhů" u něj přestane platit.
+ */
+const averageSuggestion = ref<AverageEarningSuggestion | null>(null)
+const averageSuggestionLoading = ref(false)
+const averageSuggestionError = ref('')
+const averagePrefill = ref<{ gross: number, hours: number, days: number } | null>(null)
 const entitlementForm = reactive({
   employment_id: 0,
   leave_year: year,
@@ -154,6 +166,20 @@ const dpnReviews = reactive<Record<number, {
 }>>({})
 
 const approvedAverages = computed(() => averages.value.filter(item => item.status === 'approved'))
+/*
+ * Poznámka „odvozeno z uzavřených běhů" smí u čísla stát jen do chvíle, než ho
+ * účetní přepíše. Pak už neplatí a musí to být vidět — jinak by potvrzovala
+ * původ, který ta hodnota nemá.
+ */
+const averageSuggestionEdited = computed(() => {
+  const prefill = averagePrefill.value
+  if (prefill === null) return false
+  return prefill.gross !== averageForm.gross_earnings_czk
+    || prefill.hours !== averageForm.worked_hours
+    || prefill.days !== averageForm.worked_days
+})
+const averageSuggestionBlockers = computed(() => (averageSuggestion.value?.blockers ?? [])
+  .map(code => t(`payroll_absence.averages.blockers.${code}`)))
 /*
  * Firma bez jediného pracovního vztahu. Celá stránka stojí na výběru
  * zaměstnance, takže filtr ani záložky nemají co ukazovat — místo prázdných
@@ -626,6 +652,62 @@ async function cancel(item: PayrollAbsence) {
   }
 }
 
+/**
+ * Načte návrh vstupů průměru pro právě vybraný vztah a čtvrtletí.
+ *
+ * Odpověď na jiný vztah nebo jiné čtvrtletí, než na které se uživatel mezitím
+ * přepnul, se ZAHODÍ. Bez toho by pomalejší dřívější požadavek přepsal
+ * formulář čísly cizího zaměstnance — a průměrný výdělek jsou peníze
+ * a údaj do hlášení ČSSZ, takže tichá záměna je tady to nejhorší, co se může stát.
+ */
+async function loadAverageSuggestion() {
+  const employmentId = averageForm.employment_id
+  const requestedYear = averageForm.applicable_year
+  const requestedQuarter = averageForm.applicable_quarter
+  averageSuggestion.value = null
+  averagePrefill.value = null
+  averageSuggestionError.value = ''
+  if (!employmentId
+    || !Number.isInteger(requestedYear)
+    || !Number.isInteger(requestedQuarter)
+    || requestedQuarter < 1 || requestedQuarter > 4
+  ) return
+  averageSuggestionLoading.value = true
+  try {
+    const suggestion = await payrollAbsenceApi.averageSuggestion(
+      employmentId,
+      requestedYear,
+      requestedQuarter,
+    )
+    if (averageForm.employment_id !== employmentId
+      || averageForm.applicable_year !== requestedYear
+      || averageForm.applicable_quarter !== requestedQuarter
+    ) return
+    averageSuggestion.value = suggestion
+    applyAverageSuggestion(suggestion)
+  } catch (error: any) {
+    averageSuggestionError.value = exactError(error, 'payroll_absence.averages.suggestion_failed')
+  } finally {
+    averageSuggestionLoading.value = false
+  }
+}
+
+/*
+ * Nedá-li se odvodit, formulář se VYPRÁZDNÍ (nuly, tedy výchozí stav) — nechat
+ * v něm čísla z předchozího vztahu nebo čtvrtletí by bylo horší než prázdno.
+ */
+function applyAverageSuggestion(suggestion: AverageEarningSuggestion) {
+  averageForm.decisive_from = suggestion.decisive_from
+  averageForm.decisive_to = suggestion.decisive_to
+  const gross = (suggestion.gross_earnings_minor ?? 0) / 100
+  const hours = (suggestion.worked_minutes ?? 0) / 60
+  const days = suggestion.worked_days ?? 0
+  averageForm.gross_earnings_czk = gross
+  averageForm.worked_hours = hours
+  averageForm.worked_days = days
+  averagePrefill.value = suggestion.ready ? { gross, hours, days } : null
+}
+
 async function createAverage() {
   averageError.value = ''
   saving.value = true
@@ -821,8 +903,15 @@ watch(
     const startMonth = (selectedQuarter - 1) * 3
     averageForm.decisive_from = localDate(new Date(selectedYear, startMonth - 3, 1))
     averageForm.decisive_to = localDate(new Date(selectedYear, startMonth, 0))
+    void loadAverageSuggestion()
   },
 )
+// Vztah se do formuláře dosazuje až v `loadData()`, takže se hlídá pole
+// formuláře, ne výběr v hlavičce — jinak by návrh odešel dřív, než se ví,
+// pro koho je.
+watch(() => averageForm.employment_id, () => {
+  void loadAverageSuggestion()
+})
 onMounted(async () => {
   try {
     await loadContext()
@@ -1245,15 +1334,87 @@ onMounted(async () => {
     <template v-else-if="tab === 'averages'">
       <section v-if="canWrite" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll_absence.averages.new') }}</h2>
+        <p
+          v-if="averageSuggestionLoading"
+          data-test="average-suggestion-loading"
+          class="mt-3 text-sm text-neutral-500"
+        >
+          {{ t('payroll_absence.averages.suggestion_loading') }}
+        </p>
+        <p
+          v-else-if="averageSuggestionError"
+          data-test="average-suggestion-error"
+          role="alert"
+          class="mt-3 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700"
+        >
+          {{ averageSuggestionError }}
+        </p>
+        <div
+          v-else-if="averageSuggestion?.ready"
+          data-test="average-suggestion-ready"
+          class="mt-3 rounded-lg border border-success-200 bg-success-50 p-3 text-sm text-success-800"
+        >
+          <p>
+            {{ t('payroll_absence.averages.suggestion_ready', {
+              from: averageSuggestion.decisive_from,
+              to: averageSuggestion.decisive_to,
+            }) }}
+          </p>
+          <p class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_sources') }}</p>
+          <p class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_confirm') }}</p>
+          <p
+            v-if="averageSuggestionEdited"
+            data-test="average-suggestion-edited"
+            class="mt-2 font-medium text-warning-800"
+          >
+            {{ t('payroll_absence.averages.suggestion_edited') }}
+          </p>
+          <button
+            type="button"
+            :class="btnOutline('neutral')"
+            class="mt-3"
+            data-test="average-suggestion-reload"
+            @click="loadAverageSuggestion"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
+            {{ t('payroll_absence.averages.suggestion_reload') }}
+          </button>
+        </div>
+        <div
+          v-else-if="averageSuggestion"
+          data-test="average-suggestion-blocked"
+          class="mt-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+        >
+          <p>{{ t('payroll_absence.averages.suggestion_blocked') }}</p>
+          <ul class="mt-2 list-disc space-y-1 pl-5 text-xs">
+            <li v-for="(reason, index) in averageSuggestionBlockers" :key="index">{{ reason }}</li>
+          </ul>
+        </div>
         <form data-test="average-form" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createAverage">
           <label><span class="form-label">{{ t('payroll_absence.averages.year') }}</span><input v-model.number="averageForm.applicable_year" data-test="average-year" :min="minimumFormYear" :max="maximumFormYear" type="number" :class="fieldClass"></label>
           <label><span class="form-label">{{ t('payroll_absence.averages.quarter') }}</span><input v-model.number="averageForm.applicable_quarter" min="1" max="4" type="number" :class="fieldClass"></label>
           <label><span class="form-label">{{ t('payroll_absence.averages.decisive_from') }}</span><input v-model="averageForm.decisive_from" type="date" :class="fieldClass"></label>
           <label><span class="form-label">{{ t('payroll_absence.averages.decisive_to') }}</span><input v-model="averageForm.decisive_to" type="date" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.gross_minor') }}</span><input v-model.number="averageForm.gross_earnings_czk" data-test="average-gross-czk" min="0" step="0.01" type="number" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.allocated_minor') }}</span><input v-model.number="averageForm.longer_period_allocated_czk" data-test="average-allocated-czk" min="0" step="0.01" type="number" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.worked_minutes') }}</span><input v-model.number="averageForm.worked_hours" data-test="average-worked-hours" min="0" step="0.25" type="number" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.worked_days') }}</span><input v-model.number="averageForm.worked_days" data-test="average-worked-days" min="0" step="1" type="number" :class="fieldClass"></label>
+          <label>
+            <span class="form-label">{{ t('payroll_absence.averages.gross_minor') }}</span>
+            <input v-model.number="averageForm.gross_earnings_czk" data-test="average-gross-czk" min="0" step="0.01" type="number" :class="fieldClass">
+            <span v-if="averagePrefill" class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.source_gross') }}</span>
+          </label>
+          <label>
+            <span class="form-label">{{ t('payroll_absence.averages.allocated_minor') }}</span>
+            <input v-model.number="averageForm.longer_period_allocated_czk" data-test="average-allocated-czk" min="0" step="0.01" type="number" :class="fieldClass">
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.source_allocated') }}</span>
+          </label>
+          <label>
+            <span class="form-label">{{ t('payroll_absence.averages.worked_minutes') }}</span>
+            <input v-model.number="averageForm.worked_hours" data-test="average-worked-hours" min="0" step="0.25" type="number" :class="fieldClass">
+            <span v-if="averagePrefill" class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.source_worked_hours') }}</span>
+          </label>
+          <label>
+            <span class="form-label">{{ t('payroll_absence.averages.worked_days') }}</span>
+            <input v-model.number="averageForm.worked_days" data-test="average-worked-days" min="0" step="1" type="number" :class="fieldClass">
+            <span v-if="averagePrefill" class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.source_worked_days') }}</span>
+          </label>
           <label><span class="form-label">{{ t('payroll_absence.averages.probable_minor') }}</span><input v-model.number="averageForm.probable_hourly_czk" data-test="average-probable-czk" min="0.01" step="0.01" type="number" :class="fieldClass"></label>
           <label class="sm:col-span-2 lg:col-span-3"><span class="form-label">{{ t('payroll_absence.averages.rationale') }}</span><input v-model="averageForm.rationale" maxlength="1000" type="text" :class="fieldClass"></label>
           <div class="flex flex-wrap justify-end sm:col-span-2 lg:col-span-4">
