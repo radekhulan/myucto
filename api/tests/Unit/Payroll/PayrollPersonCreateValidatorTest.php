@@ -195,4 +195,40 @@ final class PayrollPersonCreateValidatorTest extends TestCase
 
         self::validator()->validate(['birth_number' => '9004121234'] + self::baseInput());
     }
+
+    /**
+     * Křestní jméno a příjmení projdou tak, jak přišla — měsíční JMHZ je hlásí
+     * zvlášť a bez nich zůstane identita neúplná. Rozpad `full_name` je pořád
+     * zakázaný (migrace 1272), takže se z něj nic nedoplňuje.
+     */
+    public function testKeepsTheSubmittedNamePartsForTheIdentitySeed(): void
+    {
+        $result = self::validator()->validate(
+            ['first_name' => ' Jan ', 'last_name' => ' Novák '] + self::baseInput(),
+        );
+
+        self::assertSame('Jan', $result['first_name']);
+        self::assertSame('Novák', $result['last_name']);
+        // Do legacy projekce karty zaměstnance nepatří, ta zná jen `full_name`.
+        self::assertArrayNotHasKey('first_name', $result['employee']);
+        self::assertArrayNotHasKey('last_name', $result['employee']);
+    }
+
+    public function testDoesNotSplitFullNameWhenTheNamePartsAreMissing(): void
+    {
+        $result = self::validator()->validate(self::baseInput());
+
+        self::assertNull($result['first_name']);
+        self::assertNull($result['last_name']);
+        self::assertNull(
+            self::validator()->validate(['first_name' => '   '] + self::baseInput())['first_name'],
+        );
+    }
+
+    public function testRejectsANamePartLongerThanTheIdentityColumn(): void
+    {
+        $this->expectExceptionMessage('Příjmení může mít nejvýše 96 znaků.');
+
+        self::validator()->validate(['last_name' => str_repeat('a', 97)] + self::baseInput());
+    }
 }

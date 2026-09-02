@@ -2907,12 +2907,15 @@
         "title": "Nový zaměstnanec",
         "subtitle": "Jedním uložením založí společnou kartu zaměstnance, první pracovní vztah a pravidelnou hrubou mzdu.",
         "full_name": "Jméno a příjmení",
+        "first_name": "Křestní jméno",
+        "last_name": "Příjmení",
+        "full_name_preview": "Na kartě se povede jako {name}.",
         "birth_number": "Rodné číslo",
         "birth_date": "Datum narození",
         "relation_type": "Druh pracovního vztahu",
         "planned_start": "Plánovaný nástup",
         "monthly_gross": "Pravidelná hrubá mzda (Kč)",
-        "name_required": "Zadejte jméno a příjmení zaměstnance.",
+        "name_required": "Zadejte křestní jméno i příjmení zaměstnance.",
         "created": "Zaměstnanec byl přidán do společné mzdové evidence.",
         "failed": "Zaměstnance se nepodařilo přidat.",
         "permission_required": "Pro založení zaměstnance nemáte oprávnění.",
@@ -3532,6 +3535,9 @@
           "social_foreign_insurance_confirmation": "Potvrzení o pojištění v jiném státě",
           "social_posting_contract": "Smlouva o vyslání do jiného státu",
           "a1_certificate_issued": "Vydaný formulář A1",
+          "credit_38k_taxpayer_claim": "Podepsané prohlášení poplatníka (§ 38k)",
+          "credit_disability_pension_decision": "Rozhodnutí o přiznání invalidního důchodu",
+          "credit_ztp_p_card": "Průkaz ZTP/P",
           "pension_award_decision": "Rozhodnutí o přiznání starobního důchodu",
           "pension_employee_claim": "Oznámení zaměstnance o uplatnění slevy",
           "health_s1_form": "Formulář S1 nebo evropský průkaz pojištěnce",
@@ -3559,7 +3565,7 @@
           "multiple_open_rows": "Otevřený zůstat může jen jeden záznam. Staršímu doplňte „Platí do“ (poslední den měsíce)."
         },
         "title": "Zákonná evidence osoby",
-        "subtitle": "Prohlášení k dani, daňová rezidence, příslušnost k sociálnímu a zdravotnímu pojištění a sleva pracujícího důchodce.",
+        "subtitle": "Prohlášení k dani, daňová rezidence, slevy na dani, příslušnost k sociálnímu a zdravotnímu pojištění a sleva pracujícího důchodce.",
         "blocked_badge": "vše doplněno | 1 chybějící údaj | {count} chybějící údaje | {count} chybějících údajů",
         "blockers_title": "K tomuto měsíci chybí:",
         "blockers_consequence": "Dokud tyto údaje chybí, mzdový běh zákonný výpočet této osoby nespočítá a skončí v ručním posouzení.",
@@ -3580,6 +3586,7 @@
         "remove_row": "Odebrat",
         "row_frozen": "Uzavřeno schválenou mzdou",
         "current_missing": "Nezadáno",
+        "current_none_claimed": "Žádná sleva",
         "current_from": "platí od {day}",
         "current_none": "k vybranému měsíci nic neplatí",
         "history": "Historie a záznamy — zatím žádný | Historie a záznamy (1) | Historie a záznamy ({count}) | Historie a záznamy ({count})",
@@ -3610,6 +3617,7 @@
         "section": {
           "tax_declarations": "Prohlášení poplatníka k dani",
           "tax_residences": "Daňová rezidence",
+          "tax_credit_claims": "Slevy na dani (§ 35ba)",
           "social_jurisdictions": "Příslušnost k sociálnímu pojištění",
           "social_discount_claims": "Sleva pracujícího důchodce",
           "health_coverages": "Příslušnost ke zdravotnímu pojištění",
@@ -3618,6 +3626,7 @@
         "section_hint": {
           "tax_declarations": "Rozhoduje o tom, zda se uplatní měsíční slevy a zvýhodnění, nebo se sráží daň bez nich.",
           "tax_residences": "Nerezident se zdaňuje jinak než rezident; odkaz na podklad lze uložit nepovinně.",
+          "tax_credit_claims": "Měsíční slevy na dani na poplatníka, na invaliditu a na držitele ZTP/P. Uplatní se jen s podepsaným prohlášením; bez záznamu se sleva neodečte a záloha na daň je o ni vyšší. Každý druh slevy se vede jako vlastní řada, takže mohou platit souběžně.",
           "social_jurisdictions": "Zda osoba podléhá českému sociálnímu pojištění. U cizího režimu je nutná země; odkaz na podklad je nepovinný.",
           "social_discount_claims": "Sleva na pojistném u zaměstnance pobírajícího starobní důchod. Neuplatňuje-li se, zvolte „neuplatňuje se“.",
           "health_coverages": "Zda osoba podléhá českému zdravotnímu pojištění a u které pojišťovny je vedená.",
@@ -3626,6 +3635,8 @@
         "field": {
           "status": "Stav",
           "evidence_reference": "Odkaz na podklad (volitelné)",
+          "credit_kind": "Druh slevy",
+          "evidence_status": "Doloženo",
           "residence": "Rezidence",
           "country_code": "Stát",
           "jurisdiction": "Režim",
@@ -3650,6 +3661,16 @@
             "unverified": "Neověřeno",
             "not_claimed": "Neuplatňuje se",
             "verified": "Doloženo"
+          },
+          "credit_kind": {
+            "taxpayer": "Na poplatníka",
+            "disability-basic": "Na invaliditu I. a II. stupně",
+            "disability-extended": "Na invaliditu III. stupně",
+            "ztp-p": "Na držitele ZTP/P"
+          },
+          "evidence_status": {
+            "verified": "Doloženo",
+            "unverified": "Neověřeno"
           },
           "residence": {
             "czech-resident": "Český daňový rezident",

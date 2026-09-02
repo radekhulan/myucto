@@ -16975,6 +16975,36 @@ paths:
               schema: { $ref: '#/components/schemas/PayrollPeoplePage' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+    post:
+      tags: [Payroll]
+      summary: Založit zaměstnance
+      description: |
+        Založí osobu, její první pracovní vztah, počáteční historickou identitu
+        a případně rodné číslo i zdravotní pojišťovnu — vše v JEDNÉ transakci.
+
+        `first_name` a `last_name` se zapisují do historické identity přesně
+        tak, jak přijdou. Server si je z `full_name` NEODVOZUJE (migrace 1272);
+        bez nich měsíční JMHZ hlásí `Historická identita nemá explicitní jméno
+        a příjmení` a doplňují se ručně na kartě osoby.
+
+        Zápis přes API token není dostupný (`403 token_write_forbidden`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayrollPersonCreateRequest' }
+      responses:
+        '201':
+          description: Založený zaměstnanec
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [person]
+                properties:
+                  person: { $ref: '#/components/schemas/PayrollPerson' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/payroll/people/{id}:
     parameters:
@@ -17413,6 +17443,32 @@ components:
           type: array
           items: { type: string }
         needs_setup: { type: boolean }
+
+    PayrollPersonCreateRequest:
+      type: object
+      required: [full_name, relation_type, planned_start_on]
+      properties:
+        full_name: { type: string, maxLength: 191, description: Celé jméno, jak se vede na kartě osoby. }
+        first_name:
+          type: string
+          nullable: true
+          maxLength: 96
+          description: |
+            Křestní jméno do historické identity. Server ho z `full_name`
+            neodvozuje — bez něj chybí měsíčnímu JMHZ.
+        last_name:
+          type: string
+          nullable: true
+          maxLength: 96
+          description: Příjmení do historické identity; platí totéž co u `first_name`.
+        birth_date: { type: string, format: date, nullable: true }
+        birth_number: { type: string, nullable: true, description: 'Rodné číslo; ukládá se šifrovaně mezi identifikátory osoby, ne na kartu.' }
+        relation_type: { type: string, enum: [employment, small_scale_employment, dpp, dpc, partner_dependent, statutory_body] }
+        planned_start_on: { type: string, format: date }
+        monthly_gross: { type: integer, minimum: 0, maximum: 10000000, nullable: true, description: Sjednaná měsíční hrubá mzda v korunách. }
+        office_id: { type: integer, format: int64, nullable: true }
+        weekly_hours: { type: string, nullable: true, description: 'Sjednaná týdenní doba, např. `20.00`; bez ní se dosadí 40.00.' }
+        health_insurer_code: { type: string, nullable: true, description: Kód zdravotní pojišťovny — zapíše se jako zákonná evidence v téže transakci. }
 
     PayrollPeoplePage:
       type: object

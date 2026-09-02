@@ -412,7 +412,16 @@ export interface PayrollPersonResponse {
 }
 
 export interface PayrollPersonCreatePayload {
+  /** Celé jméno na kartě osoby; formulář ho skládá z `first_name` a `last_name`. */
   full_name: string
+  /**
+   * Křestní jméno a příjmení do historické identity osoby. Server si je
+   * z `full_name` NEODVOZUJE (migrace 1272), takže bez nich měsíční JMHZ hlásí
+   * „Historická identita nemá explicitní jméno a příjmení" a účetní je musí
+   * doplnit ručně na kartě. Zakládací formulář je proto vyžaduje.
+   */
+  first_name: string
+  last_name: string
   birth_date: string | null
   birth_number: string | null
   relation_type: PayrollRelationType
@@ -556,9 +565,9 @@ export interface PayrollOpeningBalances {
 }
 
 /**
- * Zákonná evidence osoby — prohlášení k dani, daňová rezidence, sociální
- * a zdravotní příslušnost, sleva pracujícího důchodce a měsíční evidence
- * zdravotního minima.
+ * Zákonná evidence osoby — prohlášení k dani, daňová rezidence, slevy na dani
+ * podle § 35ba, sociální a zdravotní příslušnost, sleva pracujícího důchodce
+ * a měsíční evidence zdravotního minima.
  *
  * Řádky jsou časové řady, takže se posílají a vrací jako celé kolekce; server
  * si z cílového stavu spočítá rozdíl. Hodnoty jsou úmyslně `string | null` —
@@ -578,6 +587,7 @@ export interface PayrollStatutoryEvidenceRow {
 export type PayrollStatutoryEvidenceSection =
   | 'tax_declarations'
   | 'tax_residences'
+  | 'tax_credit_claims'
   | 'social_jurisdictions'
   | 'social_discount_claims'
   | 'health_coverages'
@@ -943,6 +953,23 @@ export interface PayrollJmhzWorkSummaryPreview {
     weekly_work_hours: string | null
     evidence_days: number
     worked_hours: string | null
+    /*
+     * Podmíněné bloky 10275–10280 a 10471/10472 dopočítané z evidovaných
+     * absencí. `null` znamená „nenavrhuje se" — buď je hodnota nulová (nula
+     * je v hlášení tvrzení, ne prázdno), nebo měsíc obsahuje absenci, kterou
+     * modul neumí doložit; pak jsou `null` i obě odpovědi IN07/IN08 a účetní
+     * je vyplní ručně jako dosud.
+     */
+    unworked_hours_occurred: boolean | null
+    work_obstacles_occurred: boolean | null
+    unworked_total_hours: string | null
+    unworked_paid_hours: string | null
+    dpn_without_employer_compensation_hours: string | null
+    dpn_with_employer_compensation_hours: string | null
+    vacation_hours: string | null
+    care_hours: string | null
+    employee_obstacle_paid_hours: string | null
+    employer_obstacle_hours: string | null
   }
   issues: Array<{ code: string; message: string }>
   requires_unworked_hours_followup: boolean

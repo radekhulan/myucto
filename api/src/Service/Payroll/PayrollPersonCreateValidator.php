@@ -23,6 +23,8 @@ namespace MyInvoice\Service\Payroll;
  * @phpstan-type PayrollPersonCreateInput array{
  *   employee:SharedEmployeeCreateInput,
  *   employment:EmploymentCreateInput,
+ *   first_name:?string,
+ *   last_name:?string,
  *   birth_number:?string,
  *   health_insurer_code:?string
  * }
@@ -30,6 +32,13 @@ namespace MyInvoice\Service\Payroll;
 final class PayrollPersonCreateValidator
 {
     private const MAX_MONTHLY_GROSS = 10_000_000;
+
+    /**
+     * Délka `payroll_person_identity_history.first_name` / `last_name` —
+     * shodná mez jako na osobní kartě (`PayrollPersonProfileValidator`), aby
+     * jméno, které projde založením, prošlo i editací karty.
+     */
+    private const MAX_NAME_PART = 96;
 
     /**
      * Obecná stanovená týdenní pracovní doba (§ 79 odst. 1 ZP, 40 hodin)
@@ -55,6 +64,23 @@ final class PayrollPersonCreateValidator
         if (mb_strlen($fullName) > 191) {
             throw new \InvalidArgumentException('Jméno a příjmení může mít nejvýše 191 znaků.');
         }
+
+        /*
+         * Křestní jméno a příjmení jdou ZVLÁŠŤ, protože měsíční JMHZ je hlásí
+         * odděleně a nad `full_name` si je domýšlet nesmí nikdo (migrace 1272).
+         * Zakládací formulář obě pole vyžaduje a `full_name` z nich skládá;
+         * na úrovni API zůstávají nepovinná, aby starší klient ani API token
+         * nepřestal osoby zakládat — bez nich pak osoba svítí jako „vyžaduje
+         * doplnění" přesně jako dřív.
+         */
+        $firstName = $this->optionalNamePart(
+            $input['first_name'] ?? null,
+            'Křestní jméno může mít nejvýše ' . self::MAX_NAME_PART . ' znaků.',
+        );
+        $lastName = $this->optionalNamePart(
+            $input['last_name'] ?? null,
+            'Příjmení může mít nejvýše ' . self::MAX_NAME_PART . ' znaků.',
+        );
 
         $birthDate = $this->optionalDate(
             $input['birth_date'] ?? null,
@@ -183,6 +209,8 @@ final class PayrollPersonCreateValidator
                 'is_active' => true,
             ],
             'employment' => $employment,
+            'first_name' => $firstName,
+            'last_name' => $lastName,
             'birth_number' => $birthNumber,
             'health_insurer_code' => $insurerCode === '' ? null : $insurerCode,
         ];
@@ -224,6 +252,23 @@ final class PayrollPersonCreateValidator
             return '';
         }
         throw new \InvalidArgumentException('Textové pole má neplatný typ.');
+    }
+
+    /**
+     * Část jména tak, jak ji uživatel zadal — jen ořez a mez, žádné dělení
+     * ani skládání. Řídicí znaky odmítá až karta, tady stačí táž délka.
+     */
+    private function optionalNamePart(mixed $value, string $error): ?string
+    {
+        $text = trim($this->string($value));
+        if ($text === '') {
+            return null;
+        }
+        if (mb_strlen($text) > self::MAX_NAME_PART) {
+            throw new \InvalidArgumentException($error);
+        }
+
+        return $text;
     }
 
     private function optionalDate(mixed $value, string $error): ?string
