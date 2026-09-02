@@ -690,11 +690,16 @@ final class PayrollRegistrationA1SnapshotBuilder
 
     /**
      * Kam se údaj zadává. `null` znamená „přímo v tomhle formuláři".
+     *
+     * ZÁLOŽKA PATŘÍ DO CESTY. Bez ní popis mířil na sekci, kterou jiná záložka
+     * karty vůbec nevykresluje — účetní ji hledala a nenašla, protože stála na
+     * „Kontaktech". Tlačítko u hlášky sice doskočí samo, ale text musí sedět
+     * i pro toho, kdo si cestu proklikává ručně.
      */
-    private const WHERE_IDENTITY =
-        'kartě osoby → Historie jména → Údaje pro registraci zaměstnance';
-    private const WHERE_NAMES = 'kartě osoby → Historie jména';
-    private const WHERE_ADDRESSES = 'kartě osoby → Historie adres';
+    private const WHERE_IDENTITY = 'kartě osoby → Identita a adresy → '
+        . 'Historie jména → Údaje pro registraci zaměstnance';
+    private const WHERE_NAMES = 'kartě osoby → Identita a adresy → Historie jména';
+    private const WHERE_ADDRESSES = 'kartě osoby → Identita a adresy → Historie adres';
 
     /**
      * Lidský název a MÍSTO, kde se údaj doplňuje.

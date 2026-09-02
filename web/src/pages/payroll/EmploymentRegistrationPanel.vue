@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
@@ -30,6 +31,7 @@ import CzIscoPicker from '@/components/payroll/CzIscoPicker.vue'
 import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { loadPayrollJmhzOptions } from '@/composables/usePayrollJmhzOptions'
 import { healthInsurerOptions, isHealthInsurerCode } from '@/utils/healthInsurers'
+import { fieldSelector, revealField } from '@/utils/revealField'
 
 const props = defineProps<{
   employmentId: number
@@ -363,6 +365,18 @@ function a1FieldClass(path: string): string {
   return a1Problem(path) === null
     ? a1InputClass
     : `${a1InputClass} border-danger-500 ring-1 ring-danger-500/30`
+}
+
+/**
+ * Vstup i jeho adresa pro doskok.
+ *
+ * `data-a1-field` je jediný způsob, jak z hlášky „tenhle údaj chybí" trefit
+ * konkrétní ovladač: `data-test` se jmenuje pokaždé jinak a hledat podle
+ * `v-model` z DOMu nejde. Drží se proto na každém poli, ne jen na těch,
+ * na která dnes něco odkazuje — jinak by další hláška zase mířila naprázdno.
+ */
+function a1FieldAttrs(path: string): Record<string, string> {
+  return { class: a1FieldClass(path), 'data-a1-field': path }
 }
 
 /** Totéž pro komponenty, které si vlastní třídu vstupu řídí samy. */
@@ -707,26 +721,51 @@ const a1PersonCardTarget = computed(() => {
 })
 
 /**
- * Kde se položka z „Co aplikace o osobě nevede" doplňuje.
+ * Doskok na položku z „Co aplikace o osobě nevede".
  *
- * Slovní popis cesty účetní přečte, ale kartu osoby pak stejně hledá ručně.
- * Panely karty osoby mají v seznamu osob povel `?person=&panel=`, který cíl
- * rovnou rozbalí — položky, které se vyplňují tady, odkaz naopak nemají,
- * protože poslat účetní jinam by ji od pole odvedlo.
+ * PROČ TAKHLE: dřív tu byly dvě varianty — odkaz na kartu osoby, nebo text
+ * „vyplňuje se zde". Ten text nebyl klikací, takže vypadal jako akce a nedělal
+ * nic; a odkaz doručil účetní na kartu, kde pak hledala očima. Obojí je pro
+ * uživatele totéž jako žádná navigace.
+ *
+ * Teď je tlačítko jedno a rozhoduje se AŽ PŘI KLIKNUTÍ, ne při vykreslení:
+ * pole jako `foreign_worker.*` nebo `proof_identity.*` se na formuláři objevují
+ * a mizí podle vyplněných hodnot, takže cokoli rozhodnutého dopředu by chvíli
+ * po překreslení lhalo. Když položka na tomhle formuláři je, skočí se na ni
+ * rovnou; když není, teprve pak se otevře karta osoby — s povelem, který
+ * konkrétní pole tam vysvítit.
  */
+const router = useRouter()
+
+/**
+ * Kam skočit, když gap nemá pole se stejnou adresou.
+ *
+ * `pension` je celý blok (aplikace důchodové údaje nevede vůbec) — kotvou je
+ * jeho první pole; kdyby se skákalo na blok, kurzor by nedostal nikdo.
+ */
+const A1_GAP_ALIAS: Record<string, string> = {
+  pension: 'pension.type_code',
+  foreign_worker: 'foreign_worker.permit_type_code',
+  proof_identity: 'proof_identity.type_code',
+  tax_residency: 'tax_residency.identifier_type',
+  employment: 'employment.activity_code',
+  facts: 'facts.highest_education_code',
+  permanent_address: 'permanent_address.street',
+}
+
+/** Panel karty osoby pro položky, které na tomhle formuláři nejsou. */
 function a1GapPanel(field: string): string | null {
   if (field === 'identity' || field.startsWith('identity.')) {
     return 'registration_identity'
   }
   if (field === 'permanent_address' || field.startsWith('permanent_address.')) {
-    // Číslo popisné aplikace nevede vůbec — adresu drží jedním řádkem, takže
-    // odkaz na Historii adres by vedl na pole, které tam není.
-    return field === 'permanent_address.house_number' ? null : 'addresses'
+    return 'addresses'
   }
   if (field === 'tax_residency.country_code' || field === 'health_insurance_code') {
     return 'statutory_evidence'
   }
   if (field === 'foreign_worker.permit') return 'foreign_permit'
+
   return null
 }
 
@@ -736,9 +775,32 @@ function a1GapTarget(field: string) {
   const query: Record<string, string> = {
     employment: String(props.employmentId),
     panel,
+    field,
   }
   if (props.personId !== undefined) query.person = String(props.personId)
+
   return { name: 'payroll-people', query }
+}
+
+/**
+ * Hláška, když se doskočit nepodařilo. Tiché nic je horší než přiznání —
+ * účetní by klikala dál a myslela si, že je rozbité tlačítko.
+ */
+const a1GapFailure = ref<string | null>(null)
+
+async function focusA1Gap(field: string): Promise<void> {
+  a1GapFailure.value = null
+  const local = A1_GAP_ALIAS[field] ?? field
+  await nextTick()
+  if (revealField(fieldSelector(local))) return
+
+  const target = a1GapTarget(field)
+  if (target !== null) {
+    await router.push(target)
+
+    return
+  }
+  a1GapFailure.value = t('payroll.people.registration.a1.gap_unreachable', { field })
 }
 
 const deltaFieldOptions = computed(() => eventInteraction.value === 'correction'
@@ -1584,23 +1646,23 @@ async function copyXml(): Promise<void> {
           <ul class="mt-1 space-y-1.5 text-xs text-warning-800">
             <li v-for="gap in a1Draft?.missing ?? []" :key="gap.field">
               <span class="font-mono">{{ gap.field }}</span> — {{ gap.message }}
-              <RouterLink
-                v-if="a1GapTarget(gap.field) !== null"
-                :to="a1GapTarget(gap.field)!"
-                class="ml-1 whitespace-nowrap font-medium underline underline-offset-2 hover:text-warning-900"
+              <button
+                type="button"
+                class="ml-1 whitespace-nowrap rounded-full bg-warning-100 px-2 py-0.5 font-medium underline underline-offset-2 hover:bg-warning-200 hover:text-warning-900 focus:outline-none focus:ring-2 focus:ring-warning-500/40"
                 :data-test="`registration-a1-gap-link-${gap.field}`"
+                @click="focusA1Gap(gap.field)"
               >
                 {{ t('payroll.people.registration.a1.gap_open') }}
-              </RouterLink>
-              <span
-                v-else
-                class="ml-1 whitespace-nowrap rounded-full bg-warning-100 px-2 py-0.5 font-medium"
-                :data-test="`registration-a1-gap-here-${gap.field}`"
-              >
-                {{ t('payroll.people.registration.a1.gap_here') }}
-              </span>
+              </button>
             </li>
           </ul>
+          <p
+            v-if="a1GapFailure !== null"
+            class="mt-2 text-xs font-medium text-danger-700"
+            data-test="registration-a1-gap-failure"
+          >
+            {{ a1GapFailure }}
+          </p>
         </div>
 
         <!-- Výsledek tlačítka „Kontrola". Souhrn je jen rozcestník: co brání
@@ -1668,6 +1730,7 @@ async function copyXml(): Promise<void> {
               <SearchableSelect
                 v-if="field.key === 'country_code'"
                 :class="['mt-1', a1FieldRing('permanent_address.country_code')]"
+                :data-a1-field="'permanent_address.country_code'"
                 :model-value="a1Form.permanent_address.country_code"
                 :options="a1CodeOptions(jmhzOptions?.countries, a1Form.permanent_address.country_code)"
                 :placeholder="t('payroll.people.registration.a1.country_select')"
@@ -1681,7 +1744,7 @@ async function copyXml(): Promise<void> {
                 v-else
                 v-model="a1Form.permanent_address[field.key]"
                 type="text"
-                :class="a1FieldClass(`permanent_address.${field.key}`)"
+                v-bind="a1FieldAttrs(`permanent_address.${field.key}`)"
                 :disabled="a1Busy"
                 :data-test="`a1-permanent-${field.key}`"
               >
@@ -1724,6 +1787,7 @@ async function copyXml(): Promise<void> {
               <SearchableSelect
                 v-if="field.key === 'country_code'"
                 :class="['mt-1', a1FieldRing('czech_residence_address.country_code')]"
+                :data-a1-field="'czech_residence_address.country_code'"
                 :model-value="a1Form.czech_residence_address.country_code"
                 :options="a1CodeOptions(jmhzOptions?.countries, a1Form.czech_residence_address.country_code)"
                 :placeholder="t('payroll.people.registration.a1.country_select')"
@@ -1737,7 +1801,7 @@ async function copyXml(): Promise<void> {
                 v-else
                 v-model="a1Form.czech_residence_address[field.key]"
                 type="text"
-                :class="a1FieldClass(`czech_residence_address.${field.key}`)"
+                v-bind="a1FieldAttrs(`czech_residence_address.${field.key}`)"
                 :disabled="a1Busy"
                 :data-test="`a1-czech-residence-${field.key}`"
               >
@@ -1768,6 +1832,7 @@ async function copyXml(): Promise<void> {
               <SearchableSelect
                 v-if="field.key === 'country_code'"
                 :class="['mt-1', a1FieldRing('contact_address.country_code')]"
+                :data-a1-field="'contact_address.country_code'"
                 :model-value="a1Form.contact_address.country_code"
                 :options="a1CodeOptions(jmhzOptions?.countries, a1Form.contact_address.country_code)"
                 :placeholder="t('payroll.people.registration.a1.country_select')"
@@ -1781,7 +1846,7 @@ async function copyXml(): Promise<void> {
                 v-else
                 v-model="a1Form.contact_address[field.key]"
                 type="text"
-                :class="a1FieldClass(`contact_address.${field.key}`)"
+                v-bind="a1FieldAttrs(`contact_address.${field.key}`)"
                 :disabled="a1Busy"
                 :data-test="`a1-contact-${field.key}`"
               >
@@ -1806,6 +1871,7 @@ async function copyXml(): Promise<void> {
               </span>
               <SearchableSelect
                 :class="['mt-1', a1FieldRing('tax_residency.country_code')]"
+                :data-a1-field="'tax_residency.country_code'"
                 :model-value="a1Form.tax_residency.country_code"
                 :options="a1CodeOptions(jmhzOptions?.countries, a1Form.tax_residency.country_code)"
                 :placeholder="t('payroll.people.registration.a1.country_select')"
@@ -1828,7 +1894,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.tax_residency.identifier_type"
-                :class="a1FieldClass('tax_residency.identifier_type')"
+                v-bind="a1FieldAttrs('tax_residency.identifier_type')"
                 :disabled="a1Busy"
                 data-test="a1-tax-residency-identifier-type"
               >
@@ -1853,7 +1919,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.tax_residency.identifier"
                 type="text"
-                :class="a1FieldClass('tax_residency.identifier')"
+                v-bind="a1FieldAttrs('tax_residency.identifier')"
                 :disabled="a1Busy"
                 data-test="a1-tax-residency-identifier"
               >
@@ -1892,6 +1958,7 @@ async function copyXml(): Promise<void> {
               <SearchableSelect
                 v-if="field.key === 'country_code'"
                 :class="['mt-1', a1FieldRing('tax_residency.residence_address.country_code')]"
+                :data-a1-field="'tax_residency.residence_address.country_code'"
                 :model-value="a1Form.tax_residency.residence_address.country_code"
                 :options="a1CodeOptions(jmhzOptions?.countries, a1Form.tax_residency.residence_address.country_code)"
                 :placeholder="t('payroll.people.registration.a1.country_select')"
@@ -1905,7 +1972,7 @@ async function copyXml(): Promise<void> {
                 v-else
                 v-model="a1Form.tax_residency.residence_address[field.key]"
                 type="text"
-                :class="a1FieldClass(`tax_residency.residence_address.${field.key}`)"
+                v-bind="a1FieldAttrs(`tax_residency.residence_address.${field.key}`)"
                 :disabled="a1Busy"
                 :data-test="`a1-tax-residence-address-${field.key}`"
               >
@@ -1924,7 +1991,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.employment.activity_code"
-                :class="a1FieldClass('employment.activity_code')"
+                v-bind="a1FieldAttrs('employment.activity_code')"
                 :disabled="a1Busy"
                 data-test="a1-employment-activity-code"
               >
@@ -1948,7 +2015,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.employment.relationship_detail_code"
-                :class="a1FieldClass('employment.relationship_detail_code')"
+                v-bind="a1FieldAttrs('employment.relationship_detail_code')"
                 :disabled="a1Busy"
                 data-test="a1-employment-relationship-detail-code"
               >
@@ -1973,7 +2040,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.employment.actual_start_on"
                 type="date"
-                :class="a1FieldClass('employment.actual_start_on')"
+                v-bind="a1FieldAttrs('employment.actual_start_on')"
                 disabled
                 data-test="a1-employment-actual-start-on"
               >
@@ -1991,7 +2058,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.employment.contract_start_on"
                 type="date"
-                :class="a1FieldClass('employment.contract_start_on')"
+                v-bind="a1FieldAttrs('employment.contract_start_on')"
                 :disabled="a1Busy"
                 data-test="a1-employment-contract-start-on"
               >
@@ -2008,7 +2075,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.employment.small_scale"
-                :class="a1FieldClass('employment.small_scale')"
+                v-bind="a1FieldAttrs('employment.small_scale')"
                 :disabled="a1Busy"
                 data-test="a1-employment-small-scale"
               >
@@ -2030,7 +2097,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.employment.employment_status_code"
                 type="text"
-                :class="a1FieldClass('employment.employment_status_code')"
+                v-bind="a1FieldAttrs('employment.employment_status_code')"
                 :disabled="a1Busy"
                 data-test="a1-employment-status-code"
               >
@@ -2058,7 +2125,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.employment.work_mode_code"
-                :class="a1FieldClass('employment.work_mode_code')"
+                v-bind="a1FieldAttrs('employment.work_mode_code')"
                 :disabled="a1Busy"
                 data-test="a1-employment-work-mode-code"
               >
@@ -2082,7 +2149,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.employment.continuous_operation"
-                :class="a1FieldClass('employment.continuous_operation')"
+                v-bind="a1FieldAttrs('employment.continuous_operation')"
                 :disabled="a1Busy"
                 data-test="a1-employment-continuous-operation"
               >
@@ -2103,7 +2170,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.employment.prevailing_workplace_code"
-                :class="a1FieldClass('employment.prevailing_workplace_code')"
+                v-bind="a1FieldAttrs('employment.prevailing_workplace_code')"
                 :disabled="a1Busy"
                 data-test="a1-employment-prevailing-workplace-code"
               >
@@ -2128,7 +2195,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.employment.expected_workplaces"
                 type="text"
-                :class="a1FieldClass('employment.expected_workplaces')"
+                v-bind="a1FieldAttrs('employment.expected_workplaces')"
                 :disabled="a1Busy"
                 data-test="a1-employment-expected-workplaces"
               >
@@ -2140,7 +2207,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.employment.contract_workplace"
                 type="text"
-                :class="a1FieldClass('employment.contract_workplace')"
+                v-bind="a1FieldAttrs('employment.contract_workplace')"
                 :disabled="a1Busy"
                 data-test="a1-employment-contract-workplace"
               >
@@ -2158,7 +2225,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.employment.workplace_city"
                 type="text"
-                :class="a1FieldClass('employment.workplace_city')"
+                v-bind="a1FieldAttrs('employment.workplace_city')"
                 :disabled="a1Busy"
                 data-test="a1-employment-workplace-city"
               >
@@ -2175,6 +2242,7 @@ async function copyXml(): Promise<void> {
               </span>
               <SearchableSelect
                 :class="['mt-1', a1FieldRing('employment.workplace_municipality_code')]"
+                :data-a1-field="'employment.workplace_municipality_code'"
                 :model-value="a1Form.employment.workplace_municipality_code"
                 :options="municipalityOptions.map(option => ({ value: option.code, label: option.label, secondary: option.code }))"
                 :selected-option="selectedMunicipality"
@@ -2203,6 +2271,7 @@ async function copyXml(): Promise<void> {
               <CzIscoPicker
                 v-model="a1Form.employment.profession_code"
                 :class="a1FieldRing('employment.profession_code')"
+                :data-a1-field="'employment.profession_code'"
                 :disabled="a1Busy"
                 data-test="a1-employment-profession-code"
               />
@@ -2219,7 +2288,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.employment.required_education_code"
-                :class="a1FieldClass('employment.required_education_code')"
+                v-bind="a1FieldAttrs('employment.required_education_code')"
                 :disabled="a1Busy"
                 data-test="a1-employment-required-education-code"
               >
@@ -2238,7 +2307,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.employment.position_name"
                 type="text"
-                :class="a1FieldClass('employment.position_name')"
+                v-bind="a1FieldAttrs('employment.position_name')"
                 :disabled="a1Busy"
                 data-test="a1-employment-position-name"
               >
@@ -2255,7 +2324,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.employment.leadership"
-                :class="a1FieldClass('employment.leadership')"
+                v-bind="a1FieldAttrs('employment.leadership')"
                 :disabled="a1Busy"
                 data-test="a1-employment-leadership"
               >
@@ -2284,6 +2353,7 @@ async function copyXml(): Promise<void> {
               </span>
               <SearchableSelect
                 :class="['mt-1', a1FieldRing('health_insurance_code')]"
+                :data-a1-field="'health_insurance_code'"
                 :model-value="a1Form.health_insurance_code || null"
                 :options="a1InsurerOptions"
                 :placeholder="t('payroll.people.registration.a1.health_insurance_select')"
@@ -2306,7 +2376,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.facts.highest_education_code"
-                :class="a1FieldClass('facts.highest_education_code')"
+                v-bind="a1FieldAttrs('facts.highest_education_code')"
                 :disabled="a1Busy"
                 data-test="a1-facts-highest-education-code"
               >
@@ -2330,7 +2400,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.facts.disability_card"
-                :class="a1FieldClass('facts.disability_card')"
+                v-bind="a1FieldAttrs('facts.disability_card')"
                 :disabled="a1Busy"
                 data-test="a1-facts-disability-card"
               >
@@ -2418,7 +2488,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.pension.type_code"
-                :class="a1FieldClass('pension.type_code')"
+                v-bind="a1FieldAttrs('pension.type_code')"
                 :disabled="a1Busy"
                 data-test="a1-pension-type-code"
               >
@@ -2437,7 +2507,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.pension.received_from"
                 type="date"
-                :class="a1FieldClass('pension.received_from')"
+                v-bind="a1FieldAttrs('pension.received_from')"
                 :disabled="a1Busy"
                 data-test="a1-pension-received-from"
               >
@@ -2448,7 +2518,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.pension.early_retirement"
-                :class="a1FieldClass('pension.early_retirement')"
+                v-bind="a1FieldAttrs('pension.early_retirement')"
                 :disabled="a1Busy"
                 data-test="a1-pension-early-retirement"
               >
@@ -2462,7 +2532,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.pension.reduced_retirement_age"
-                :class="a1FieldClass('pension.reduced_retirement_age')"
+                v-bind="a1FieldAttrs('pension.reduced_retirement_age')"
                 :disabled="a1Busy"
                 data-test="a1-pension-reduced-retirement-age"
               >
@@ -2484,7 +2554,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.foreign_legislation.applies"
-                :class="a1FieldClass('foreign_legislation.applies')"
+                v-bind="a1FieldAttrs('foreign_legislation.applies')"
                 :disabled="a1Busy"
                 data-test="a1-foreign-legislation-applies"
               >
@@ -2504,6 +2574,7 @@ async function copyXml(): Promise<void> {
               </span>
               <SearchableSelect
                 :class="['mt-1', a1FieldRing('foreign_legislation.country_code')]"
+                :data-a1-field="'foreign_legislation.country_code'"
                 :model-value="a1Form.foreign_legislation.country_code"
                 :options="a1CodeOptions(jmhzOptions?.countries, a1Form.foreign_legislation.country_code)"
                 :placeholder="t('payroll.people.registration.a1.country_select')"
@@ -2534,7 +2605,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.proof_identity.type_code"
-                :class="a1FieldClass('proof_identity.type_code')"
+                v-bind="a1FieldAttrs('proof_identity.type_code')"
                 :disabled="a1Busy"
                 data-test="a1-proof-identity-type-code"
               >
@@ -2559,7 +2630,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.proof_identity.number"
                 type="text"
-                :class="a1FieldClass('proof_identity.number')"
+                v-bind="a1FieldAttrs('proof_identity.number')"
                 :disabled="a1Busy"
                 data-test="a1-proof-identity-number"
               >
@@ -2577,7 +2648,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.proof_identity.foreign_issuer"
                 type="text"
-                :class="a1FieldClass('proof_identity.foreign_issuer')"
+                v-bind="a1FieldAttrs('proof_identity.foreign_issuer')"
                 :disabled="a1Busy"
                 data-test="a1-proof-identity-foreign-issuer"
               >
@@ -2588,6 +2659,7 @@ async function copyXml(): Promise<void> {
               </span>
               <SearchableSelect
                 :class="['mt-1', a1FieldRing('proof_identity.country_code')]"
+                :data-a1-field="'proof_identity.country_code'"
                 :model-value="a1Form.proof_identity.country_code"
                 :options="a1CodeOptions(jmhzOptions?.countries, a1Form.proof_identity.country_code)"
                 :placeholder="t('payroll.people.registration.a1.country_select')"
@@ -2621,7 +2693,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.foreign_worker.free_access"
-                :class="a1FieldClass('foreign_worker.free_access')"
+                v-bind="a1FieldAttrs('foreign_worker.free_access')"
                 :disabled="a1Busy"
                 data-test="a1-foreign-worker-free-access"
               >
@@ -2642,6 +2714,7 @@ async function copyXml(): Promise<void> {
               </span>
               <SearchableSelect
                 :class="['mt-1', a1FieldRing('foreign_worker.free_access_reason_code')]"
+                :data-a1-field="'foreign_worker.free_access_reason_code'"
                 :model-value="a1Form.foreign_worker.free_access_reason_code"
                 :options="a1CodeOptions(
                   jmhzOptions?.foreign_worker_free_access_reason_codes,
@@ -2661,7 +2734,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.foreign_worker.permit_type_code"
-                :class="a1FieldClass('foreign_worker.permit_type_code')"
+                v-bind="a1FieldAttrs('foreign_worker.permit_type_code')"
                 :disabled="a1Busy"
                 data-test="a1-foreign-worker-permit-type-code"
               >
@@ -2679,7 +2752,7 @@ async function copyXml(): Promise<void> {
               </span>
               <select
                 v-model="a1Form.foreign_worker.issuing_labour_office_code"
-                :class="a1FieldClass('foreign_worker.issuing_labour_office_code')"
+                v-bind="a1FieldAttrs('foreign_worker.issuing_labour_office_code')"
                 :disabled="a1Busy"
                 data-test="a1-foreign-worker-issuing-labour-office-code"
               >
@@ -2698,7 +2771,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.foreign_worker.permit_identifier"
                 type="text"
-                :class="a1FieldClass('foreign_worker.permit_identifier')"
+                v-bind="a1FieldAttrs('foreign_worker.permit_identifier')"
                 :disabled="a1Busy"
                 data-test="a1-foreign-worker-permit-identifier"
               >
@@ -2716,7 +2789,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.foreign_worker.permit_from"
                 type="date"
-                :class="a1FieldClass('foreign_worker.permit_from')"
+                v-bind="a1FieldAttrs('foreign_worker.permit_from')"
                 :disabled="a1Busy"
                 data-test="a1-foreign-worker-permit-from"
               >
@@ -2734,7 +2807,7 @@ async function copyXml(): Promise<void> {
               <input
                 v-model="a1Form.foreign_worker.permit_to"
                 type="date"
-                :class="a1FieldClass('foreign_worker.permit_to')"
+                v-bind="a1FieldAttrs('foreign_worker.permit_to')"
                 :disabled="a1Busy"
                 data-test="a1-foreign-worker-permit-to"
               >

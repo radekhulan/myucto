@@ -271,6 +271,30 @@ describe('PayrollPersonProfilePanel', () => {
     ).toBe(true)
   })
 
+  /**
+   * Nejčastější stěžovaná díra: hláška z A1 tvrdí „státní občanství doplňte
+   * tady", jenže Historie jména je SEZNAM a osoba nemá ani jeden záznam.
+   * Sekce je pak prázdná — nadpis a tlačítko Přidat — a účetní hlásí, že to
+   * pole „nikde není". Doskok proto řádek založí, ať je co vyplnit.
+   */
+  it('založí řádek historie jména, když se skáče na občanství a žádný není', async () => {
+    mocks.personProfile.mockResolvedValue({ ...profile(), identity_history: [] })
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+    // Prázdná sekce: jen nadpis a tlačítko Přidat, žádný řádek k vyplnění.
+    expect(wrapper.findAll('[data-test="registration-identity-details"]')).toHaveLength(0)
+    expect(
+      wrapper.find('[data-a1-field="identity.citizenship_country_code"]').exists(),
+    ).toBe(false)
+
+    await wrapper.vm.focusSection('registration_identity', 'identity.citizenship_country_code')
+    await flushPromises()
+
+    expect(
+      wrapper.find('[data-a1-field="identity.citizenship_country_code"]').exists(),
+    ).toBe(true)
+  })
+
   it('zpřístupní registrační identitu v rozbalitelné části a odešle ji s historií', async () => {
     const loaded = profile()
     Object.assign(loaded.identity_history[0], {
