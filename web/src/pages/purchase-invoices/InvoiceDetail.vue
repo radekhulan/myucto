@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PurchaseDmsDocumentsPanel from '@/components/purchase/PurchaseDmsDocumentsPanel.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
@@ -22,6 +23,7 @@ import StockReceiptModal from '@/components/stock/StockReceiptModal.vue'
 import { stockApi, type StockReceiptProposal } from '@/api/stock'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import WhyChip from '@/components/automation/WhyChip.vue'
+import { useSidePreview } from '@/composables/useSidePreview'
 import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
@@ -52,7 +54,14 @@ function displayUnitPriceNet(it: { quantity: number; unit_price_without_vat: num
   }
   return it.unit_price_without_vat
 }
-const pdfPreviewOpen = ref(false) // default collapsed — user explicitně otevře (Edge blokuje attachment inline)
+// Default collapsed — user explicitně otevře (Edge blokuje attachment inline). Volba je
+// lepkavá (user_preferences), aby při procházení dokladů nemusel klikat u každého znovu.
+const pdfPreview = useSidePreview('purchase_invoices')
+const pdfPreviewOpen = pdfPreview.open
+// Nad prahem (viz useSidePreview) jde náhled do sloupce vpravo, pod prahem zůstává pod
+// dokladem. Bez archivovaného PDF se sloupec nevykreslí vůbec a doklad má celou šířku.
+const pdfSideBySide = computed(() => !!invoice.value?.pdf_path && pdfPreviewOpen.value && pdfPreview.wide.value)
+const pdfInlineUrl = computed(() => (invoice.value ? `${purchaseInvoicesApi.pdfUrl(invoice.value.id, true)}#view=FitH` : ''))
 const dismissingWarning = ref(false)
 
 async function dismissWarning() {
@@ -654,902 +663,914 @@ const purchaseActions = computed<ActionItem[]>(() => {
     <div class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
   </div>
 
-  <div v-else-if="invoice" class="max-w-5xl space-y-4">
-    <RouterLink to="/purchase-invoices" class="text-sm text-neutral-600 hover:text-neutral-900">
-      {{ t('purchase_invoice.back_to_list') }}
-    </RouterLink>
-
-    <!-- AI extraction warning — uživatel by měl řádky ověřit proti PDF před zaúčtováním. -->
-    <div v-if="invoice.extraction_warning" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md flex gap-3 items-start">
-      <svg class="w-5 h-5 shrink-0 text-warning-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-      </svg>
-      <div class="text-sm flex-1 min-w-0">
-        <div class="font-medium text-warning-700">{{ t('purchase_invoice.extraction.warning_title') }}</div>
-        <div class="text-warning-700/90 mt-1">{{ invoice.extraction_warning }}</div>
-      </div>
-      <button
-        type="button"
-        @click="dismissWarning"
-        :disabled="dismissingWarning"
-        class="cursor-pointer text-xs px-2 py-1 border border-warning-500/50 rounded text-warning-700 hover:bg-warning-100 disabled:opacity-50 shrink-0"
-      >
-        {{ t('purchase_invoice.extraction.dismiss') }}
-      </button>
-    </div>
-
-    <!-- ═══ Hlavička: varsymbol + status + akce ═══ -->
-    <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
-      <h1 class="text-2xl font-semibold flex items-center gap-3 flex-wrap min-w-0">
-        <span v-if="invoice.varsymbol" class="font-mono">{{ invoice.varsymbol }}</span>
-        <span v-else class="text-neutral-400 font-mono">#{{ invoice.id }}</span>
-        <span class="text-xs px-2 py-0.5 rounded font-normal" :class="statusBadgeClass(invoice.status)">
-          {{ t(`purchase_invoice.status.${invoice.status}`) }}
-        </span>
-        <span class="text-xs px-2 py-0.5 rounded font-normal bg-neutral-100 text-neutral-600">
-          {{ t(`purchase_invoice.document_kind.${invoice.document_kind}`) }}
-        </span>
-        <PostingBadge v-if="invoice.locked?.journal_entry_id"
-          :booked-at="invoice.booked_at" :journal-entry-id="invoice.locked.journal_entry_id" with-label />
-        <LockedBadge v-else-if="invoice.locked" :lock="invoice.locked" />
-        <WhyChip v-if="!invoice.locked?.journal_entry_id && invoice.ai_posting_suggestion" :provenance="{
-          source: 'ai',
-          mode: 'approved',
-          confidence: invoice.ai_posting_suggestion.confidence,
-          detector: null,
-          rule_id: null,
-          rule_name: null,
-          suggestion_id: invoice.ai_posting_suggestion.id,
-          decided_at: '',
-          decided_by: null,
-        }" />
-        <span v-if="stockProposal && stockRequestedTotal > 0" class="text-xs px-2 py-0.5 rounded font-normal"
-          :class="stockFullyReceived ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">
-          {{ t('stock.receipt.received_badge', { received: stockReceivedTotal, total: stockRequestedTotal }) }}
-        </span>
-        <span v-if="stockProposal?.pf_changed_after_receipt" class="text-xs px-2 py-0.5 rounded font-normal bg-warning-50 text-warning-600"
-          :title="t('stock.receipt.pf_changed_warning')">
-          ⚠ {{ t('stock.receipt.pf_changed_warning') }}
-        </span>
-        <a
-          v-if="invoice.source_format"
-          :href="purchaseInvoicesApi.sourceUrl(invoice.id)"
-          class="text-xs px-2 py-0.5 rounded font-normal bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
-          :title="t('purchase_invoice.source.badge_title')"
-        >{{ invoice.source_format.toUpperCase() }}</a>
-      </h1>
-      <ActionBar :actions="purchaseActions" />
-    </div>
-
-    <div v-if="invoice.document_kind === 'advance' && isDoubleEntry"
-      class="mt-3 rounded-md border border-primary-200 bg-primary-50 px-4 py-2.5 text-sm text-primary-700">
-      {{ t('purchase_invoice.advance_posting_hint') }}
-    </div>
-
-    <!-- ═══ Vendor + číslo dokladu (řádek pod headerem, paralel s vystavenou InvoiceDetail) ═══ -->
-    <div class="flex items-start justify-between gap-4">
-      <div class="flex-1 min-w-0 space-y-1">
-        <div class="text-lg font-semibold text-neutral-900">
-          <RouterLink v-if="invoice.vendor_id" :to="`/purchase-invoices?vendor=${invoice.vendor_id}`"
-            class="text-primary-700 hover:text-primary-800 hover:underline"
-            :title="t('purchase_invoice.show_invoices_for_vendor')">
-            {{ invoice.vendor_company_name }}
-          </RouterLink>
-          <template v-else>{{ invoice.vendor_company_name }}</template>
-        </div>
-        <div class="text-sm text-neutral-600 font-mono">
-          {{ t('purchase_invoice.fields.vendor_invoice_number') }}: {{ invoice.vendor_invoice_number }}
-        </div>
-      </div>
-      <div v-if="invoice.vendor_ic || invoice.vendor_dic" class="text-xs font-mono text-neutral-500 text-right whitespace-nowrap">
-        <span v-if="invoice.vendor_ic">{{ t('common.ic') }} {{ invoice.vendor_ic }}</span>
-        <span v-if="invoice.vendor_ic && invoice.vendor_dic">, </span>
-        <span v-if="invoice.vendor_dic">{{ t('common.dic') }} {{ invoice.vendor_dic }}</span>
-      </div>
-    </div>
-
-    <!-- ═══ Propojení se zálohou — banner pod headerem (sjednoceno s vydanou fakturou) ═══ -->
-    <!-- Tento doklad JE záloha → odkaz na vyúčtovací fakturu (+ odpojení) -->
-    <div v-if="invoice.settled_by"
-      class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm">
-      <span class="text-primary-700 min-w-0">
-        {{ t('purchase_invoice.advance_link.settled_by') }}
-        <RouterLink :to="`/purchase-invoices/${invoice.settled_by.id}`" class="font-mono font-medium hover:underline">
-          {{ invoice.settled_by.varsymbol || invoice.settled_by.vendor_invoice_number || ('#' + invoice.settled_by.id) }}
-        </RouterLink>
-      </span>
-      <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="unlinkAdvance(invoice.settled_by.id)" :disabled="linkingAdvance"
-        class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
-        {{ t('purchase_invoice.advance_link.unlink') }}
-      </button>
-    </div>
-    <!-- Vyúčtovací faktura → odkaz na započtenou zálohu (+ odpojení) -->
-    <div v-else-if="invoice.linked_advance"
-      class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm">
-      <span class="text-primary-700 min-w-0">
-        {{ t('purchase_invoice.advance_link.linked_to') }}
-        <RouterLink :to="`/purchase-invoices/${invoice.linked_advance.id}`" class="font-mono font-medium hover:underline">
-          {{ invoice.linked_advance.varsymbol || invoice.linked_advance.vendor_invoice_number || ('#' + invoice.linked_advance.id) }}
-        </RouterLink>
-        <span class="text-primary-700/70 font-mono">(−{{ formatMoney(invoice.linked_advance.total_with_vat, invoice.linked_advance.currency) }})</span>
-      </span>
-      <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
-        class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
-        {{ t('purchase_invoice.advance_link.unlink') }}
-      </button>
-    </div>
-
-    <!-- ═══ Vazba dobropisu ↔ opravovaná faktura (migrace 1096) — čti-only banner ═══ -->
-    <!-- Tento doklad JE dobropis → odkaz na opravovanou fakturu -->
-    <div v-if="invoice.document_kind === 'credit_note' && invoice.linked_parent"
-      class="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm">
-      <span class="text-amber-800 min-w-0">
-        {{ t('purchase_invoice.credit_note_link.corrects') }}
-        <RouterLink :to="`/purchase-invoices/${invoice.linked_parent.id}`" class="font-mono font-medium hover:underline">
-          {{ invoice.linked_parent.varsymbol || invoice.linked_parent.vendor_invoice_number || ('#' + invoice.linked_parent.id) }}
-        </RouterLink>
-        <span class="text-amber-800/70 font-mono">({{ formatMoney(invoice.linked_parent.total_with_vat, invoice.linked_parent.currency) }})</span>
-      </span>
-      <RouterLink :to="`/purchase-invoices/${invoice.id}/edit`" v-if="auth.canWrite('purchase_invoices') && !lockedForMe"
-        class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 shrink-0 bg-surface">
-        {{ t('common.edit') }}
+  <!-- Nad prahem (useSidePreview) jde náhled originálu do sloupce vpravo, jinak
+       zůstává rozbalený pod dokladem. Bez PDF se sloupec nevykreslí a doklad má
+       celou šířku - proto je vnější div v ostatních případech jen průhledný obal. -->
+  <div v-else-if="invoice" :class="pdfSideBySide ? 'flex items-start gap-4' : ''">
+    <div class="max-w-5xl space-y-4 min-w-0" :class="pdfSideBySide ? 'flex-1' : ''">
+      <RouterLink to="/purchase-invoices" class="text-sm text-neutral-600 hover:text-neutral-900">
+        {{ t('purchase_invoice.back_to_list') }}
       </RouterLink>
-    </div>
-    <!-- Tento doklad je opravovaná faktura → odkaz na dobropis(y) -->
-    <div v-if="(invoice.corrected_by?.length ?? 0) > 0"
-      class="flex items-start justify-between gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm">
-      <span class="text-amber-800 min-w-0">
-        {{ t('purchase_invoice.credit_note_link.corrected_by') }}
-        <template v-for="(cn, i) in invoice.corrected_by" :key="cn.id">
-          <span v-if="i > 0">, </span>
-          <RouterLink :to="`/purchase-invoices/${cn.id}`" class="font-mono font-medium hover:underline">
-            {{ cn.varsymbol || cn.vendor_invoice_number || ('#' + cn.id) }}
-          </RouterLink>
-          <span class="text-amber-800/70 font-mono">({{ formatMoney(cn.total_with_vat, cn.currency) }})</span>
-        </template>
-      </span>
-    </div>
 
-    <!-- ═══ DDKP (daňový doklad k platbě §28 ZDPH) → vazba na uhrazenou zálohu ═══ -->
-    <div v-if="invoice.document_kind === 'tax_document' && invoice.linked_parent"
-      class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm">
-      <span class="text-primary-700 min-w-0">
-        {{ t('purchase_invoice.tax_document_link.for_advance') }}
-        <RouterLink :to="`/purchase-invoices/${invoice.linked_parent.id}`" class="font-mono font-medium hover:underline">
-          {{ invoice.linked_parent.varsymbol || invoice.linked_parent.vendor_invoice_number || ('#' + invoice.linked_parent.id) }}
-        </RouterLink>
-        <span class="text-primary-700/70 font-mono">({{ formatMoney(invoice.linked_parent.total_with_vat, invoice.linked_parent.currency) }})</span>
-      </span>
-      <RouterLink :to="`/purchase-invoices/${invoice.id}/edit`" v-if="auth.canWrite('purchase_invoices') && !lockedForMe"
-        class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 shrink-0 bg-surface">
-        {{ t('common.edit') }}
-      </RouterLink>
-    </div>
-    <!-- DDKP bez navázané zálohy i finální faktury → upozorni, že vazba chybí -->
-    <div v-else-if="invoice.document_kind === 'tax_document' && !invoice.settled_by"
-      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
-      {{ t('purchase_invoice.tax_document_link.missing') }}
-    </div>
-
-    <!-- ═══ Záloha/DDKP nespárovaná, ale zůstatek na 314 + pravděpodobná faktura existuje (task #17) ═══ -->
-    <div v-if="invoice.unsettled_notice"
-      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm flex gap-3 items-start">
-      <svg class="w-5 h-5 shrink-0 text-amber-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-      </svg>
-      <div class="text-amber-800 min-w-0">
-        <div class="font-medium">{{ t('purchase_invoice.unsettled_notice.title') }}</div>
-        <div class="mt-1">{{ invoice.unsettled_notice.message }}</div>
-        <RouterLink :to="`/purchase-invoices/${invoice.unsettled_notice.candidate.id}`" class="inline-block mt-1 font-medium hover:underline">
-          {{ t('purchase_invoice.unsettled_notice.open_candidate') }} →
-        </RouterLink>
-      </div>
-    </div>
-
-    <!-- ═══ Varování: vyúčtovací faktura na zálohu s DDKP → hrozí dvojí odpočet DPH ═══ -->
-    <div v-if="invoice._warnings?.includes('advance_has_tax_document')"
-      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
-      ⚠ {{ t('purchase_invoice.warning.advance_has_tax_document') }}
-    </div>
-
-    <!-- ═══ Varování: účtenka vypadá jako doklad k přijaté záloze → nejspíš má být DDKP ═══ -->
-    <div v-if="invoice._warnings?.includes('receipt_looks_like_prepayment')"
-      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
-      ⚠ {{ t('purchase_invoice.warning.receipt_looks_like_prepayment') }}
-    </div>
-
-    <!-- ═══ Info: poplatek orgánu veřejné moci → plnění mimo předmět daně (§ 5/4 ZDPH) ═══ -->
-    <div v-if="invoice._warnings?.includes('public_authority_fee_out_of_scope')"
-      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
-      ⚠ {{ t('purchase_invoice.warning.public_authority_fee_out_of_scope') }}
-    </div>
-
-    <!-- ═══ Varování: doklad s daní bez klasifikace → tiše mimo přiznání i KH ═══ -->
-    <div v-if="invoice._warnings?.includes('missing_vat_classification')"
-      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
-      ⚠ {{ t('purchase_invoice.warning.missing_vat_classification') }}
-    </div>
-
-    <!-- ═══ Úhrady dokladu → provenience (banka + pokladna + zaúčtování úhrady) ═══ -->
-    <div v-if="(invoice.bank_payments && invoice.bank_payments.length) || (invoice.cash_payments && invoice.cash_payments.length) || (invoice.settlement_payments && invoice.settlement_payments.length)"
-      class="bg-success-50 dark:bg-success-500/[0.06] border border-success-200 dark:border-success-500/20 rounded-lg px-4 py-2.5 text-sm">
-      <div class="text-success-700 dark:text-success-400/90 font-medium mb-1.5">{{ t('purchase_invoice.payment_provenance.title') }}</div>
-      <ul class="space-y-1.5">
-        <!-- Bankovní úhrady → proklik na výpis + na zaúčtování úhrady (deník) -->
-        <li v-for="pay in (invoice.bank_payments || [])" :key="`b-${pay.bank_transaction_id}`"
-          class="flex items-center justify-between gap-3">
-          <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
-            <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_bank') }}</span>
-            <span class="font-mono">{{ formatDate(pay.posted_at) }}</span>
-            <span class="font-mono ml-2">{{ formatMoney(pay.amount, pay.currency) }}</span>
-            <span v-if="pay.counterparty" class="text-success-700/70 ml-2">{{ pay.counterparty }}</span>
-          </span>
-          <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
-            <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
-              class="text-primary-600 hover:underline">
-              {{ t('purchase_invoice.payment_provenance.open_journal') }} →
-            </RouterLink>
-            <RouterLink :to="{ name: 'bank-detail', params: { id: pay.statement_id } }"
-              class="text-primary-600 hover:underline">
-              {{ t('purchase_invoice.bank_payment.open_statement') }} →
-            </RouterLink>
-          </span>
-        </li>
-        <!-- Hotovostní úhrady → proklik na pokladnu + na zaúčtování úhrady (deník) -->
-        <li v-for="pay in (invoice.cash_payments || [])" :key="`c-${pay.cash_document_id}`"
-          class="flex items-center justify-between gap-3">
-          <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
-            <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_cash') }}</span>
-            <span class="font-mono">{{ formatDate(pay.date) }}</span>
-            <span class="font-mono ml-2">{{ formatMoney(pay.amount, pay.currency) }}</span>
-            <span v-if="pay.doc_number" class="text-success-700/70 ml-2 font-mono">{{ pay.doc_number }}</span>
-            <span v-if="pay.register_name" class="text-success-700/70 ml-2">{{ pay.register_name }}</span>
-          </span>
-          <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
-            <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
-              class="text-primary-600 hover:underline">
-              {{ t('purchase_invoice.payment_provenance.open_journal') }} →
-            </RouterLink>
-            <RouterLink :to="{ name: 'accounting-cash', query: { register_id: String(pay.register_id), q: pay.doc_number || '' } }"
-              class="text-primary-600 hover:underline">
-              {{ t('purchase_invoice.payment_provenance.open_cash') }} →
-            </RouterLink>
-          </span>
-        </li>
-        <!-- Úhrady zápočtem → proklik na zaúčtování zápočtu (deník) -->
-        <li v-for="pay in (invoice.settlement_payments || [])" :key="`s-${pay.settlement_id}`"
-          class="flex items-center justify-between gap-3">
-          <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
-            <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_settlement') }}</span>
-            <span class="font-mono">{{ formatDate(pay.date) }}</span>
-            <span class="font-mono ml-2">{{ formatMoney(pay.amount) }}</span>
-            <span class="text-success-700/70 ml-2 font-mono">{{ pay.account_code }}</span>
-            <span class="text-success-700/70 ml-1">{{ pay.account_name }}</span>
-            <span v-if="pay.note" class="text-success-700/70 ml-2">{{ pay.note }}</span>
-          </span>
-          <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
-            <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
-              class="text-primary-600 hover:underline">
-              {{ t('purchase_invoice.payment_provenance.open_journal') }} →
-            </RouterLink>
-            <!--
-              Zápočet bez zápisu: úhrada je evidovaná, ale deník o ní neví — 321 zůstává
-              otevřený a uzávěrková kontrola to hlásí. Vzniká přeúčtováním deníku
-              (FK ON DELETE SET NULL) nebo zápočtem pořízeným v daňové evidenci. Doúčtovat
-              to musí jít odsud: účetní má doklad před sebou a nemá důvod hledat opravu
-              v aktivaci účetnictví.
-            -->
-            <template v-else>
-              <span class="text-warning-700 bg-warning-50 rounded px-1.5 py-0.5 text-xs font-medium">
-                {{ t('purchase_invoice.payment_provenance.settlement_unposted') }}
-              </span>
-              <button v-if="auth.canWrite('accounting')" type="button"
-                :disabled="postingSettlementId === pay.settlement_id"
-                @click="postSettlement(pay.settlement_id)"
-                class="cursor-pointer text-primary-600 hover:underline disabled:opacity-50">
-                {{ t('purchase_invoice.payment_provenance.post_settlement') }} →
-              </button>
-            </template>
-          </span>
-        </li>
-      </ul>
-    </div>
-
-    <!-- ═══ Ručně/legacy uhrazeno BEZ zaúčtované úhrady → 321 zůstává otevřený ═══ -->
-    <div v-if="invoice.mark_paid_unposted"
-      class="bg-danger-50 border border-danger-500/40 rounded-lg px-4 py-2.5 text-sm flex gap-3 items-start">
-      <svg class="w-5 h-5 shrink-0 text-danger-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-      </svg>
-      <div class="text-danger-600 min-w-0">
-        {{ t('purchase_invoice.payment_provenance.mark_paid_unposted', { date: invoice.paid_at ? formatDate(invoice.paid_at) : '—' }) }}
-      </div>
-    </div>
-
-    <!-- ═══ Datumy & metadata (3 sloupce ala vystavená InvoiceDetail) ═══ -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <!-- Datumy -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.fields.issue_date') }} / {{ t('purchase_invoice.fields.tax_date') }} / {{ t('purchase_invoice.fields.due_date') }}</h3>
-        <dl class="space-y-2 text-sm">
-          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.issue_date') }}</dt><dd class="font-mono">{{ formatDate(invoice.issue_date) }}</dd></div>
-          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.tax_date') }}</dt><dd class="font-mono">{{ invoice.tax_date ? formatDate(invoice.tax_date) : '—' }}</dd></div>
-          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.due_date') }}</dt><dd class="font-mono">{{ formatDate(invoice.due_date) }}</dd></div>
-          <!-- Zdroj data přijetí rozhoduje o období odpočtu podle § 73 odst. 1 písm. a):
-               otisk dne importu není totéž co datum, které účetní vědomě zadala. -->
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.fields.received_at') }}</dt>
-            <dd class="text-right">
-              <span class="font-mono">{{ formatDate(invoice.received_at) }}</span>
-              <span v-if="invoice.received_at_source === 'import'" class="ml-1 text-xs text-warning-600">{{ t('purchase_invoice.fields.received_at_source_import') }}</span>
-            </dd>
-          </div>
-          <div v-if="invoice.paid_at" class="flex justify-between pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.status.paid') }}</dt><dd class="font-mono text-success-600">{{ formatDate(invoice.paid_at) }}</dd></div>
-        </dl>
-      </div>
-
-      <!-- Měna & úhrada — platební účet je tady s měnou v jedné kartě schválně:
-           samostatně byl skoro prázdný a grid se lámal do druhé řady. -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.currency_payment_section') }}</h3>
-        <dl class="space-y-2 text-sm">
-          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.currency') }}</dt><dd class="font-mono">{{ invoice.currency }}</dd></div>
-          <div v-if="invoice.exchange_rate" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }}</dt><dd class="font-mono">{{ invoice.exchange_rate }}</dd></div>
-          <div v-if="invoice.exchange_rate_date" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }} ({{ t('purchase_invoice.fields.exchange_rate_source') }})</dt><dd class="font-mono text-xs">{{ formatDate(invoice.exchange_rate_date) }} / {{ t(`purchase_invoice.exchange_rate_source.${invoice.exchange_rate_source}`) }}</dd></div>
-          <div class="flex justify-between">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.fields.prices_include_vat') }}</dt>
-            <dd class="font-medium">{{ invoice.prices_include_vat ? t('common.yes') : t('common.no') }}</dd>
-          </div>
-          <template v-if="hasStoredAccount">
-            <div v-if="invoice.payment_iban" class="flex justify-between gap-2 pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.iban') }}</dt><dd class="font-mono text-xs">{{ invoice.payment_iban }}</dd></div>
-            <div v-else class="flex justify-between gap-2 pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.account') }}</dt><dd class="font-mono text-xs">{{ invoice.payment_account_number }}/{{ invoice.payment_bank_code }}</dd></div>
-            <div v-if="invoice.payment_bic" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.bic') }}</dt><dd class="font-mono">{{ invoice.payment_bic }}</dd></div>
-            <div v-if="invoice.payment_variable_symbol" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.variable_symbol') }}</dt><dd class="font-mono">{{ invoice.payment_variable_symbol }}</dd></div>
-            <div v-if="invoice.payment_account_source" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.source_label') }}</dt><dd>{{ t('purchase_invoice.qr.source.' + invoice.payment_account_source) }}</dd></div>
-          </template>
-          <!-- Způsob úhrady. U jiného než převodu zvýrazněný — je to důvod, proč se
-               faktura neobjeví v platebních příkazech, a to musí být na první pohled vidět. -->
-          <div class="flex justify-between gap-2 pt-2 border-t border-neutral-100">
-            <dt class="text-neutral-500">{{ t('payment_method.label') }}</dt>
-            <dd>
-              <span v-if="isNonTransferPayment"
-                class="inline-block text-xs font-medium px-2 py-0.5 rounded bg-warning-50 text-warning-600">
-                {{ t('payment_method.' + (invoice.payment_method || 'bank_transfer')) }}
-              </span>
-              <span v-else>{{ t('payment_method.bank_transfer') }}</span>
-            </dd>
-          </div>
-        </dl>
-        <button v-if="canPayWithQr" type="button" @click="openQr"
-          class="mt-3 cursor-pointer text-sm text-primary-700 hover:underline inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4h6v6H4V4zm0 10h6v6H4v-6zM14 4h6v6h-6V4zm2 10h2m2 0v2m-4 2v2m4 0h2m-2-6h.01M14 18h.01"/></svg>
-          {{ t('purchase_invoice.qr.button') }}
+      <!-- AI extraction warning — uživatel by měl řádky ověřit proti PDF před zaúčtováním. -->
+      <div v-if="invoice.extraction_warning" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md flex gap-3 items-start">
+        <svg class="w-5 h-5 shrink-0 text-warning-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        </svg>
+        <div class="text-sm flex-1 min-w-0">
+          <div class="font-medium text-warning-700">{{ t('purchase_invoice.extraction.warning_title') }}</div>
+          <div class="text-warning-700/90 mt-1">{{ invoice.extraction_warning }}</div>
+        </div>
+        <button
+          type="button"
+          @click="dismissWarning"
+          :disabled="dismissingWarning"
+          class="cursor-pointer text-xs px-2 py-1 border border-warning-500/50 rounded text-warning-700 hover:bg-warning-100 disabled:opacity-50 shrink-0"
+        >
+          {{ t('purchase_invoice.extraction.dismiss') }}
         </button>
       </div>
 
-      <!-- Daňové zařazení — rychlý přehled údajů, které přímo rozhodují o DPH.
-           Účetní klasifikace dokladu je ve sbalené sekci Zaúčtování níže. -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.classification.section') }}</h3>
-        <dl class="space-y-2 text-sm">
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.fields.reverse_charge') }}</dt>
-            <dd class="font-medium text-right" :class="invoice.reverse_charge ? 'text-warning-600' : 'text-neutral-700'">
-              {{ invoice.reverse_charge ? t('common.yes') : t('common.no') }}
-            </dd>
-          </div>
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.fields.vendor_is_vat_payer') }}</dt>
-            <dd class="font-medium text-right" :class="invoice.vendor_is_vat_payer === false ? 'text-warning-600' : 'text-neutral-700'">
-              {{ invoice.vendor_is_vat_payer === false ? t('common.no') : t('common.yes') }}
-            </dd>
-          </div>
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_deduction') }}</dt>
-            <dd class="font-medium text-right" :class="invoice.vat_deduction === 'none' ? 'text-danger-600' : (invoice.vat_deduction === 'proportional' ? 'text-warning-600' : 'text-neutral-700')">
-              {{ t('purchase_invoice.vat_deduction.' + (invoice.vat_deduction || 'full')) }}<span v-if="invoice.vat_deduction === 'proportional'"> ({{ invoice.vat_deduction_percent }} %)</span>
-            </dd>
-          </div>
-        </dl>
-      </div>
-
-      <!-- Platba v jiné měně -->
-      <div v-if="invoice.payment_currency_id" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.payment_currency.toggle') }}</h3>
-        <dl class="space-y-2 text-sm">
-          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.currency') }}</dt><dd class="font-mono">{{ invoice.payment_currency || '—' }}</dd></div>
-          <div v-if="invoice.payment_exchange_rate" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.rate') }}</dt><dd class="font-mono">{{ invoice.payment_exchange_rate }}</dd></div>
-          <div v-if="invoice.paid_amount_payment_ccy" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.paid_payment_ccy') }}</dt><dd class="font-mono">{{ formatMoney(invoice.paid_amount_payment_ccy, invoice.payment_currency || '') }}</dd></div>
-          <div v-if="invoice.exchange_diff_base !== null" class="flex justify-between pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.exchange_diff') }}</dt><dd class="font-mono" :class="(invoice.exchange_diff_base ?? 0) < 0 ? 'text-danger-500' : 'text-success-600'">{{ formatMoney(invoice.exchange_diff_base, 'CZK') }}</dd></div>
-        </dl>
-      </div>
-    </div>
-
-    <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
-         samotná kontace se dál načítá na pozadí. -->
-    <DocumentPostingPanel source="purchase-invoices" :doc-id="invoice.id" always-visible>
-      <dl class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-3 text-sm">
-        <div class="flex justify-between gap-3">
-          <dt class="text-neutral-500">{{ t('purchase_invoice.fields.document_kind') }}</dt>
-          <dd class="font-medium text-right text-neutral-700">{{ t('purchase_invoice.document_kind.' + (invoice.document_kind || 'invoice')) }}</dd>
-        </div>
-        <div class="flex justify-between gap-3">
-          <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_classification') }}</dt>
-          <dd class="font-medium text-right text-neutral-700">
-            <template v-if="invoice.vat_classification_code">
-              <span class="font-mono">{{ invoice.vat_classification_code }}</span>
-              <span v-if="vatClassificationLabel" class="ml-1 text-neutral-400">{{ vatClassificationLabel }}</span>
-            </template>
-            <span v-else class="text-neutral-400">—</span>
-          </dd>
-        </div>
-        <div class="flex justify-between gap-3">
-          <dt class="text-neutral-500">{{ t('purchase_invoice.classification.tax_deductible') }}</dt>
-          <dd class="font-medium text-right" :class="invoice.tax_deductible === false ? 'text-danger-600' : 'text-success-600'">
-            {{ invoice.tax_deductible === false ? t('common.no') : t('common.yes') }}
-          </dd>
-        </div>
-        <div class="flex justify-between gap-3">
-          <dt class="text-neutral-500">{{ t('purchase_invoice.fields.is_fixed_asset') }}</dt>
-          <dd class="font-medium text-right" :class="invoice.is_fixed_asset ? 'text-warning-600' : 'text-neutral-700'">
-            {{ invoice.is_fixed_asset ? t('common.yes') : t('common.no') }}
-          </dd>
-        </div>
-        <div class="flex justify-between gap-3">
-          <dt class="text-neutral-500">{{ t('purchase_invoice.classification.expense_category') }}</dt>
-          <dd class="font-medium text-right text-neutral-700">
-            <template v-if="invoice.expense_category_label">
-              {{ invoice.expense_category_label }}
-              <span class="text-neutral-400">({{ invoice.expense_category_code }})</span>
-            </template>
-            <span v-else class="text-neutral-400">—</span>
-          </dd>
-        </div>
-        <!-- Zakázka (issue #29) — proklik na ekonomiku akce (výnos/náklad/marže). -->
-        <div class="flex justify-between gap-3">
-          <dt class="text-neutral-500">{{ t('purchase_invoice.classification.project') }}</dt>
-          <dd class="font-medium text-right text-neutral-700">
-            <RouterLink v-if="invoice.project_id" :to="`/projects/${invoice.project_id}`" class="text-primary-600 hover:underline">
-              {{ invoice.project_name }}
-            </RouterLink>
-            <span v-else class="text-neutral-400">—</span>
-          </dd>
-        </div>
-      </dl>
-    </DocumentPostingPanel>
-
-    <!-- ═══ Položky ═══ -->
-    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-      <h3 class="text-sm font-medium text-neutral-700 px-5 py-3 border-b border-neutral-100">{{ t('purchase_invoice.items.title') }}</h3>
-      <table class="w-full text-sm">
-        <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
-          <tr>
-            <th class="text-left py-2 px-5 font-medium">{{ t('purchase_invoice.items.description') }}</th>
-            <th class="text-right py-2 px-2 font-medium">{{ t('purchase_invoice.items.quantity') }}</th>
-            <th class="text-left py-2 px-2 font-medium">{{ t('purchase_invoice.items.unit') }}</th>
-            <th class="text-right py-2 px-2 font-medium">{{ t('purchase_invoice.items.unit_price') }}</th>
-            <th class="text-right py-2 px-2 font-medium">{{ t('purchase_invoice.items.vat_rate') }}</th>
-            <th class="text-right py-2 px-5 font-medium">{{ t('purchase_invoice.items.total_with_vat') }}</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-neutral-100">
-          <tr v-for="it in invoice.items" :key="it.id">
-            <td class="py-2 px-5">
-              {{ it.description }}
-              <!-- Daňové zařazení položky: druh nákladu (§DM — z něj se odvozuje
-                   dlouhodobý/drobný majetek), klasifikace plnění a časové rozlišení
-                   (§DČR). Všechno jde v editoru nastavit, ale v detailu to dřív
-                   nebylo vidět, takže se nedalo zkontrolovat bez otevření editoru. -->
-              <div v-if="it.expense_kind || it.vat_classification_code || it.accrual_from" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                <span v-if="it.expense_kind" class="inline-block px-1.5 py-0.5 rounded"
-                  :class="it.expense_kind === 'fixed_asset' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">
-                  {{ t('purchase_invoice.expense_kind.' + it.expense_kind) }}
-                </span>
-                <span v-if="it.vat_classification_code" class="inline-block px-1.5 py-0.5 rounded bg-neutral-100 font-mono text-neutral-600"
-                  :title="t('purchase_invoice.classification.vat_classification')">
-                  {{ it.vat_classification_code }}
-                </span>
-                <span v-if="it.accrual_from" class="text-neutral-500" :title="t('purchase_invoice.items.accrual_hint')">
-                  {{ t('purchase_invoice.items.accrual_from') }} {{ formatDate(it.accrual_from) }}–{{ it.accrual_to ? formatDate(it.accrual_to) : '—' }}
-                </span>
-              </div>
-              <!-- Karta drobného majetku vzniklá z téhle položky (§DM) — proklik + nabídka
-                   vyřazení prodejem, ať se karta nemusí dohledávat ručně (task #17). -->
-              <div v-if="it.small_asset" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                <span class="inline-block px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">
-                  {{ t('accounting.small_assets.title') }}: {{ it.small_asset.name }}
-                </span>
-                <RouterLink v-if="it.small_asset.status === 'in_use'"
-                  :to="{ name: 'accounting-small-assets', query: { sell: String(it.small_asset.id) } }"
-                  class="text-primary-600 hover:underline">
-                  {{ t('purchase_invoice.items.small_asset_sell') }}
-                </RouterLink>
-                <RouterLink v-else :to="{ name: 'accounting-small-assets' }" class="text-neutral-500 hover:underline">
-                  {{ t(`accounting.small_assets.status_${it.small_asset.status}`) }}
-                </RouterLink>
-              </div>
-            </td>
-            <td class="py-2 px-2 text-right font-mono">{{ it.quantity }}</td>
-            <td class="py-2 px-2">{{ it.unit }}</td>
-            <td class="py-2 px-2 text-right font-mono">{{ formatMoney(displayUnitPriceNet(it), invoice.currency) }}</td>
-            <td class="py-2 px-2 text-right">{{ it.vat_rate_snapshot }}%</td>
-            <td class="py-2 px-5 text-right font-mono">{{ formatMoney(it.total_with_vat, invoice.currency) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- ═══ Totals + VAT breakdown ═══ -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h3 class="text-sm font-medium text-neutral-700 mb-3 flex items-center gap-2">
-          {{ t('purchase_invoice.vat_breakdown.title') }}
-          <span v-if="invoice.vat_overrides && invoice.vat_overrides.length"
-            class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-warning-50 text-warning-700 border border-warning-500/40"
-            :title="t('purchase_invoice.vat_recap.overridden_note')">
-            {{ t('purchase_invoice.vat_breakdown.per_document') }}
+      <!-- ═══ Hlavička: varsymbol + status + akce ═══ -->
+      <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
+        <h1 class="text-2xl font-semibold flex items-center gap-3 flex-wrap min-w-0">
+          <span v-if="invoice.varsymbol" class="font-mono">{{ invoice.varsymbol }}</span>
+          <span v-else class="text-neutral-400 font-mono">#{{ invoice.id }}</span>
+          <span class="text-xs px-2 py-0.5 rounded font-normal" :class="statusBadgeClass(invoice.status)">
+            {{ t(`purchase_invoice.status.${invoice.status}`) }}
           </span>
-        </h3>
+          <span class="text-xs px-2 py-0.5 rounded font-normal bg-neutral-100 text-neutral-600">
+            {{ t(`purchase_invoice.document_kind.${invoice.document_kind}`) }}
+          </span>
+          <PostingBadge v-if="invoice.locked?.journal_entry_id"
+            :booked-at="invoice.booked_at" :journal-entry-id="invoice.locked.journal_entry_id" with-label />
+          <LockedBadge v-else-if="invoice.locked" :lock="invoice.locked" />
+          <WhyChip v-if="!invoice.locked?.journal_entry_id && invoice.ai_posting_suggestion" :provenance="{
+            source: 'ai',
+            mode: 'approved',
+            confidence: invoice.ai_posting_suggestion.confidence,
+            detector: null,
+            rule_id: null,
+            rule_name: null,
+            suggestion_id: invoice.ai_posting_suggestion.id,
+            decided_at: '',
+            decided_by: null,
+          }" />
+          <span v-if="stockProposal && stockRequestedTotal > 0" class="text-xs px-2 py-0.5 rounded font-normal"
+            :class="stockFullyReceived ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">
+            {{ t('stock.receipt.received_badge', { received: stockReceivedTotal, total: stockRequestedTotal }) }}
+          </span>
+          <span v-if="stockProposal?.pf_changed_after_receipt" class="text-xs px-2 py-0.5 rounded font-normal bg-warning-50 text-warning-600"
+            :title="t('stock.receipt.pf_changed_warning')">
+            ⚠ {{ t('stock.receipt.pf_changed_warning') }}
+          </span>
+          <a
+            v-if="invoice.source_format"
+            :href="purchaseInvoicesApi.sourceUrl(invoice.id)"
+            class="text-xs px-2 py-0.5 rounded font-normal bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
+            :title="t('purchase_invoice.source.badge_title')"
+          >{{ invoice.source_format.toUpperCase() }}</a>
+        </h1>
+        <ActionBar :actions="purchaseActions" />
+      </div>
+
+      <div v-if="invoice.document_kind === 'advance' && isDoubleEntry"
+        class="mt-3 rounded-md border border-primary-200 bg-primary-50 px-4 py-2.5 text-sm text-primary-700">
+        {{ t('purchase_invoice.advance_posting_hint') }}
+      </div>
+
+      <!-- ═══ Vendor + číslo dokladu (řádek pod headerem, paralel s vystavenou InvoiceDetail) ═══ -->
+      <div class="flex items-start justify-between gap-4">
+        <div class="flex-1 min-w-0 space-y-1">
+          <div class="text-lg font-semibold text-neutral-900">
+            <RouterLink v-if="invoice.vendor_id" :to="`/purchase-invoices?vendor=${invoice.vendor_id}`"
+              class="text-primary-700 hover:text-primary-800 hover:underline"
+              :title="t('purchase_invoice.show_invoices_for_vendor')">
+              {{ invoice.vendor_company_name }}
+            </RouterLink>
+            <template v-else>{{ invoice.vendor_company_name }}</template>
+          </div>
+          <div class="text-sm text-neutral-600 font-mono">
+            {{ t('purchase_invoice.fields.vendor_invoice_number') }}: {{ invoice.vendor_invoice_number }}
+          </div>
+        </div>
+        <div v-if="invoice.vendor_ic || invoice.vendor_dic" class="text-xs font-mono text-neutral-500 text-right whitespace-nowrap">
+          <span v-if="invoice.vendor_ic">{{ t('common.ic') }} {{ invoice.vendor_ic }}</span>
+          <span v-if="invoice.vendor_ic && invoice.vendor_dic">, </span>
+          <span v-if="invoice.vendor_dic">{{ t('common.dic') }} {{ invoice.vendor_dic }}</span>
+        </div>
+      </div>
+
+      <!-- ═══ Propojení se zálohou — banner pod headerem (sjednoceno s vydanou fakturou) ═══ -->
+      <!-- Tento doklad JE záloha → odkaz na vyúčtovací fakturu (+ odpojení) -->
+      <div v-if="invoice.settled_by"
+        class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm">
+        <span class="text-primary-700 min-w-0">
+          {{ t('purchase_invoice.advance_link.settled_by') }}
+          <RouterLink :to="`/purchase-invoices/${invoice.settled_by.id}`" class="font-mono font-medium hover:underline">
+            {{ invoice.settled_by.varsymbol || invoice.settled_by.vendor_invoice_number || ('#' + invoice.settled_by.id) }}
+          </RouterLink>
+        </span>
+        <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="unlinkAdvance(invoice.settled_by.id)" :disabled="linkingAdvance"
+          class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
+          {{ t('purchase_invoice.advance_link.unlink') }}
+        </button>
+      </div>
+      <!-- Vyúčtovací faktura → odkaz na započtenou zálohu (+ odpojení) -->
+      <div v-else-if="invoice.linked_advance"
+        class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm">
+        <span class="text-primary-700 min-w-0">
+          {{ t('purchase_invoice.advance_link.linked_to') }}
+          <RouterLink :to="`/purchase-invoices/${invoice.linked_advance.id}`" class="font-mono font-medium hover:underline">
+            {{ invoice.linked_advance.varsymbol || invoice.linked_advance.vendor_invoice_number || ('#' + invoice.linked_advance.id) }}
+          </RouterLink>
+          <span class="text-primary-700/70 font-mono">(−{{ formatMoney(invoice.linked_advance.total_with_vat, invoice.linked_advance.currency) }})</span>
+        </span>
+        <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
+          class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
+          {{ t('purchase_invoice.advance_link.unlink') }}
+        </button>
+      </div>
+
+      <!-- ═══ Vazba dobropisu ↔ opravovaná faktura (migrace 1096) — čti-only banner ═══ -->
+      <!-- Tento doklad JE dobropis → odkaz na opravovanou fakturu -->
+      <div v-if="invoice.document_kind === 'credit_note' && invoice.linked_parent"
+        class="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm">
+        <span class="text-amber-800 min-w-0">
+          {{ t('purchase_invoice.credit_note_link.corrects') }}
+          <RouterLink :to="`/purchase-invoices/${invoice.linked_parent.id}`" class="font-mono font-medium hover:underline">
+            {{ invoice.linked_parent.varsymbol || invoice.linked_parent.vendor_invoice_number || ('#' + invoice.linked_parent.id) }}
+          </RouterLink>
+          <span class="text-amber-800/70 font-mono">({{ formatMoney(invoice.linked_parent.total_with_vat, invoice.linked_parent.currency) }})</span>
+        </span>
+        <RouterLink :to="`/purchase-invoices/${invoice.id}/edit`" v-if="auth.canWrite('purchase_invoices') && !lockedForMe"
+          class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 shrink-0 bg-surface">
+          {{ t('common.edit') }}
+        </RouterLink>
+      </div>
+      <!-- Tento doklad je opravovaná faktura → odkaz na dobropis(y) -->
+      <div v-if="(invoice.corrected_by?.length ?? 0) > 0"
+        class="flex items-start justify-between gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm">
+        <span class="text-amber-800 min-w-0">
+          {{ t('purchase_invoice.credit_note_link.corrected_by') }}
+          <template v-for="(cn, i) in invoice.corrected_by" :key="cn.id">
+            <span v-if="i > 0">, </span>
+            <RouterLink :to="`/purchase-invoices/${cn.id}`" class="font-mono font-medium hover:underline">
+              {{ cn.varsymbol || cn.vendor_invoice_number || ('#' + cn.id) }}
+            </RouterLink>
+            <span class="text-amber-800/70 font-mono">({{ formatMoney(cn.total_with_vat, cn.currency) }})</span>
+          </template>
+        </span>
+      </div>
+
+      <!-- ═══ DDKP (daňový doklad k platbě §28 ZDPH) → vazba na uhrazenou zálohu ═══ -->
+      <div v-if="invoice.document_kind === 'tax_document' && invoice.linked_parent"
+        class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm">
+        <span class="text-primary-700 min-w-0">
+          {{ t('purchase_invoice.tax_document_link.for_advance') }}
+          <RouterLink :to="`/purchase-invoices/${invoice.linked_parent.id}`" class="font-mono font-medium hover:underline">
+            {{ invoice.linked_parent.varsymbol || invoice.linked_parent.vendor_invoice_number || ('#' + invoice.linked_parent.id) }}
+          </RouterLink>
+          <span class="text-primary-700/70 font-mono">({{ formatMoney(invoice.linked_parent.total_with_vat, invoice.linked_parent.currency) }})</span>
+        </span>
+        <RouterLink :to="`/purchase-invoices/${invoice.id}/edit`" v-if="auth.canWrite('purchase_invoices') && !lockedForMe"
+          class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 shrink-0 bg-surface">
+          {{ t('common.edit') }}
+        </RouterLink>
+      </div>
+      <!-- DDKP bez navázané zálohy i finální faktury → upozorni, že vazba chybí -->
+      <div v-else-if="invoice.document_kind === 'tax_document' && !invoice.settled_by"
+        class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+        {{ t('purchase_invoice.tax_document_link.missing') }}
+      </div>
+
+      <!-- ═══ Záloha/DDKP nespárovaná, ale zůstatek na 314 + pravděpodobná faktura existuje (task #17) ═══ -->
+      <div v-if="invoice.unsettled_notice"
+        class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm flex gap-3 items-start">
+        <svg class="w-5 h-5 shrink-0 text-amber-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        </svg>
+        <div class="text-amber-800 min-w-0">
+          <div class="font-medium">{{ t('purchase_invoice.unsettled_notice.title') }}</div>
+          <div class="mt-1">{{ invoice.unsettled_notice.message }}</div>
+          <RouterLink :to="`/purchase-invoices/${invoice.unsettled_notice.candidate.id}`" class="inline-block mt-1 font-medium hover:underline">
+            {{ t('purchase_invoice.unsettled_notice.open_candidate') }} →
+          </RouterLink>
+        </div>
+      </div>
+
+      <!-- ═══ Varování: vyúčtovací faktura na zálohu s DDKP → hrozí dvojí odpočet DPH ═══ -->
+      <div v-if="invoice._warnings?.includes('advance_has_tax_document')"
+        class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+        ⚠ {{ t('purchase_invoice.warning.advance_has_tax_document') }}
+      </div>
+
+      <!-- ═══ Varování: účtenka vypadá jako doklad k přijaté záloze → nejspíš má být DDKP ═══ -->
+      <div v-if="invoice._warnings?.includes('receipt_looks_like_prepayment')"
+        class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+        ⚠ {{ t('purchase_invoice.warning.receipt_looks_like_prepayment') }}
+      </div>
+
+      <!-- ═══ Info: poplatek orgánu veřejné moci → plnění mimo předmět daně (§ 5/4 ZDPH) ═══ -->
+      <div v-if="invoice._warnings?.includes('public_authority_fee_out_of_scope')"
+        class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+        ⚠ {{ t('purchase_invoice.warning.public_authority_fee_out_of_scope') }}
+      </div>
+
+      <!-- ═══ Varování: doklad s daní bez klasifikace → tiše mimo přiznání i KH ═══ -->
+      <div v-if="invoice._warnings?.includes('missing_vat_classification')"
+        class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+        ⚠ {{ t('purchase_invoice.warning.missing_vat_classification') }}
+      </div>
+
+      <!-- ═══ Úhrady dokladu → provenience (banka + pokladna + zaúčtování úhrady) ═══ -->
+      <div v-if="(invoice.bank_payments && invoice.bank_payments.length) || (invoice.cash_payments && invoice.cash_payments.length) || (invoice.settlement_payments && invoice.settlement_payments.length)"
+        class="bg-success-50 dark:bg-success-500/[0.06] border border-success-200 dark:border-success-500/20 rounded-lg px-4 py-2.5 text-sm">
+        <div class="text-success-700 dark:text-success-400/90 font-medium mb-1.5">{{ t('purchase_invoice.payment_provenance.title') }}</div>
+        <ul class="space-y-1.5">
+          <!-- Bankovní úhrady → proklik na výpis + na zaúčtování úhrady (deník) -->
+          <li v-for="pay in (invoice.bank_payments || [])" :key="`b-${pay.bank_transaction_id}`"
+            class="flex items-center justify-between gap-3">
+            <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
+              <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_bank') }}</span>
+              <span class="font-mono">{{ formatDate(pay.posted_at) }}</span>
+              <span class="font-mono ml-2">{{ formatMoney(pay.amount, pay.currency) }}</span>
+              <span v-if="pay.counterparty" class="text-success-700/70 ml-2">{{ pay.counterparty }}</span>
+            </span>
+            <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
+              <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
+                class="text-primary-600 hover:underline">
+                {{ t('purchase_invoice.payment_provenance.open_journal') }} →
+              </RouterLink>
+              <RouterLink :to="{ name: 'bank-detail', params: { id: pay.statement_id } }"
+                class="text-primary-600 hover:underline">
+                {{ t('purchase_invoice.bank_payment.open_statement') }} →
+              </RouterLink>
+            </span>
+          </li>
+          <!-- Hotovostní úhrady → proklik na pokladnu + na zaúčtování úhrady (deník) -->
+          <li v-for="pay in (invoice.cash_payments || [])" :key="`c-${pay.cash_document_id}`"
+            class="flex items-center justify-between gap-3">
+            <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
+              <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_cash') }}</span>
+              <span class="font-mono">{{ formatDate(pay.date) }}</span>
+              <span class="font-mono ml-2">{{ formatMoney(pay.amount, pay.currency) }}</span>
+              <span v-if="pay.doc_number" class="text-success-700/70 ml-2 font-mono">{{ pay.doc_number }}</span>
+              <span v-if="pay.register_name" class="text-success-700/70 ml-2">{{ pay.register_name }}</span>
+            </span>
+            <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
+              <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
+                class="text-primary-600 hover:underline">
+                {{ t('purchase_invoice.payment_provenance.open_journal') }} →
+              </RouterLink>
+              <RouterLink :to="{ name: 'accounting-cash', query: { register_id: String(pay.register_id), q: pay.doc_number || '' } }"
+                class="text-primary-600 hover:underline">
+                {{ t('purchase_invoice.payment_provenance.open_cash') }} →
+              </RouterLink>
+            </span>
+          </li>
+          <!-- Úhrady zápočtem → proklik na zaúčtování zápočtu (deník) -->
+          <li v-for="pay in (invoice.settlement_payments || [])" :key="`s-${pay.settlement_id}`"
+            class="flex items-center justify-between gap-3">
+            <span class="text-success-700/90 dark:text-success-300/85 min-w-0 truncate">
+              <span class="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-500/15 text-success-700 dark:text-success-300 mr-1">{{ t('purchase_invoice.payment_provenance.source_settlement') }}</span>
+              <span class="font-mono">{{ formatDate(pay.date) }}</span>
+              <span class="font-mono ml-2">{{ formatMoney(pay.amount) }}</span>
+              <span class="text-success-700/70 ml-2 font-mono">{{ pay.account_code }}</span>
+              <span class="text-success-700/70 ml-1">{{ pay.account_name }}</span>
+              <span v-if="pay.note" class="text-success-700/70 ml-2">{{ pay.note }}</span>
+            </span>
+            <span class="flex items-center gap-3 whitespace-nowrap shrink-0">
+              <RouterLink v-if="pay.journal_entry_id" :to="{ name: 'accounting-journal', query: { entry_id: String(pay.journal_entry_id) } }"
+                class="text-primary-600 hover:underline">
+                {{ t('purchase_invoice.payment_provenance.open_journal') }} →
+              </RouterLink>
+              <!--
+                Zápočet bez zápisu: úhrada je evidovaná, ale deník o ní neví — 321 zůstává
+                otevřený a uzávěrková kontrola to hlásí. Vzniká přeúčtováním deníku
+                (FK ON DELETE SET NULL) nebo zápočtem pořízeným v daňové evidenci. Doúčtovat
+                to musí jít odsud: účetní má doklad před sebou a nemá důvod hledat opravu
+                v aktivaci účetnictví.
+              -->
+              <template v-else>
+                <span class="text-warning-700 bg-warning-50 rounded px-1.5 py-0.5 text-xs font-medium">
+                  {{ t('purchase_invoice.payment_provenance.settlement_unposted') }}
+                </span>
+                <button v-if="auth.canWrite('accounting')" type="button"
+                  :disabled="postingSettlementId === pay.settlement_id"
+                  @click="postSettlement(pay.settlement_id)"
+                  class="cursor-pointer text-primary-600 hover:underline disabled:opacity-50">
+                  {{ t('purchase_invoice.payment_provenance.post_settlement') }} →
+                </button>
+              </template>
+            </span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- ═══ Ručně/legacy uhrazeno BEZ zaúčtované úhrady → 321 zůstává otevřený ═══ -->
+      <div v-if="invoice.mark_paid_unposted"
+        class="bg-danger-50 border border-danger-500/40 rounded-lg px-4 py-2.5 text-sm flex gap-3 items-start">
+        <svg class="w-5 h-5 shrink-0 text-danger-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        </svg>
+        <div class="text-danger-600 min-w-0">
+          {{ t('purchase_invoice.payment_provenance.mark_paid_unposted', { date: invoice.paid_at ? formatDate(invoice.paid_at) : '—' }) }}
+        </div>
+      </div>
+
+      <!-- ═══ Datumy & metadata (3 sloupce ala vystavená InvoiceDetail) ═══ -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- Datumy -->
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.fields.issue_date') }} / {{ t('purchase_invoice.fields.tax_date') }} / {{ t('purchase_invoice.fields.due_date') }}</h3>
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.issue_date') }}</dt><dd class="font-mono">{{ formatDate(invoice.issue_date) }}</dd></div>
+            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.tax_date') }}</dt><dd class="font-mono">{{ invoice.tax_date ? formatDate(invoice.tax_date) : '—' }}</dd></div>
+            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.due_date') }}</dt><dd class="font-mono">{{ formatDate(invoice.due_date) }}</dd></div>
+            <!-- Zdroj data přijetí rozhoduje o období odpočtu podle § 73 odst. 1 písm. a):
+                 otisk dne importu není totéž co datum, které účetní vědomě zadala. -->
+            <div class="flex justify-between gap-3">
+              <dt class="text-neutral-500">{{ t('purchase_invoice.fields.received_at') }}</dt>
+              <dd class="text-right">
+                <span class="font-mono">{{ formatDate(invoice.received_at) }}</span>
+                <span v-if="invoice.received_at_source === 'import'" class="ml-1 text-xs text-warning-600">{{ t('purchase_invoice.fields.received_at_source_import') }}</span>
+              </dd>
+            </div>
+            <div v-if="invoice.paid_at" class="flex justify-between pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.status.paid') }}</dt><dd class="font-mono text-success-600">{{ formatDate(invoice.paid_at) }}</dd></div>
+          </dl>
+        </div>
+
+        <!-- Měna & úhrada — platební účet je tady s měnou v jedné kartě schválně:
+             samostatně byl skoro prázdný a grid se lámal do druhé řady. -->
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.currency_payment_section') }}</h3>
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.currency') }}</dt><dd class="font-mono">{{ invoice.currency }}</dd></div>
+            <div v-if="invoice.exchange_rate" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }}</dt><dd class="font-mono">{{ invoice.exchange_rate }}</dd></div>
+            <div v-if="invoice.exchange_rate_date" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.fields.exchange_rate') }} ({{ t('purchase_invoice.fields.exchange_rate_source') }})</dt><dd class="font-mono text-xs">{{ formatDate(invoice.exchange_rate_date) }} / {{ t(`purchase_invoice.exchange_rate_source.${invoice.exchange_rate_source}`) }}</dd></div>
+            <div class="flex justify-between">
+              <dt class="text-neutral-500">{{ t('purchase_invoice.fields.prices_include_vat') }}</dt>
+              <dd class="font-medium">{{ invoice.prices_include_vat ? t('common.yes') : t('common.no') }}</dd>
+            </div>
+            <template v-if="hasStoredAccount">
+              <div v-if="invoice.payment_iban" class="flex justify-between gap-2 pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.iban') }}</dt><dd class="font-mono text-xs">{{ invoice.payment_iban }}</dd></div>
+              <div v-else class="flex justify-between gap-2 pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.account') }}</dt><dd class="font-mono text-xs">{{ invoice.payment_account_number }}/{{ invoice.payment_bank_code }}</dd></div>
+              <div v-if="invoice.payment_bic" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.bic') }}</dt><dd class="font-mono">{{ invoice.payment_bic }}</dd></div>
+              <div v-if="invoice.payment_variable_symbol" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.variable_symbol') }}</dt><dd class="font-mono">{{ invoice.payment_variable_symbol }}</dd></div>
+              <div v-if="invoice.payment_account_source" class="flex justify-between gap-2"><dt class="text-neutral-500">{{ t('purchase_invoice.qr.source_label') }}</dt><dd>{{ t('purchase_invoice.qr.source.' + invoice.payment_account_source) }}</dd></div>
+            </template>
+            <!-- Způsob úhrady. U jiného než převodu zvýrazněný — je to důvod, proč se
+                 faktura neobjeví v platebních příkazech, a to musí být na první pohled vidět. -->
+            <div class="flex justify-between gap-2 pt-2 border-t border-neutral-100">
+              <dt class="text-neutral-500">{{ t('payment_method.label') }}</dt>
+              <dd>
+                <span v-if="isNonTransferPayment"
+                  class="inline-block text-xs font-medium px-2 py-0.5 rounded bg-warning-50 text-warning-600">
+                  {{ t('payment_method.' + (invoice.payment_method || 'bank_transfer')) }}
+                </span>
+                <span v-else>{{ t('payment_method.bank_transfer') }}</span>
+              </dd>
+            </div>
+          </dl>
+          <button v-if="canPayWithQr" type="button" @click="openQr"
+            class="mt-3 cursor-pointer text-sm text-primary-700 hover:underline inline-flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4h6v6H4V4zm0 10h6v6H4v-6zM14 4h6v6h-6V4zm2 10h2m2 0v2m-4 2v2m4 0h2m-2-6h.01M14 18h.01"/></svg>
+            {{ t('purchase_invoice.qr.button') }}
+          </button>
+        </div>
+
+        <!-- Daňové zařazení — rychlý přehled údajů, které přímo rozhodují o DPH.
+             Účetní klasifikace dokladu je ve sbalené sekci Zaúčtování níže. -->
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.classification.section') }}</h3>
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between gap-3">
+              <dt class="text-neutral-500">{{ t('purchase_invoice.fields.reverse_charge') }}</dt>
+              <dd class="font-medium text-right" :class="invoice.reverse_charge ? 'text-warning-600' : 'text-neutral-700'">
+                {{ invoice.reverse_charge ? t('common.yes') : t('common.no') }}
+              </dd>
+            </div>
+            <div class="flex justify-between gap-3">
+              <dt class="text-neutral-500">{{ t('purchase_invoice.fields.vendor_is_vat_payer') }}</dt>
+              <dd class="font-medium text-right" :class="invoice.vendor_is_vat_payer === false ? 'text-warning-600' : 'text-neutral-700'">
+                {{ invoice.vendor_is_vat_payer === false ? t('common.no') : t('common.yes') }}
+              </dd>
+            </div>
+            <div class="flex justify-between gap-3">
+              <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_deduction') }}</dt>
+              <dd class="font-medium text-right" :class="invoice.vat_deduction === 'none' ? 'text-danger-600' : (invoice.vat_deduction === 'proportional' ? 'text-warning-600' : 'text-neutral-700')">
+                {{ t('purchase_invoice.vat_deduction.' + (invoice.vat_deduction || 'full')) }}<span v-if="invoice.vat_deduction === 'proportional'"> ({{ invoice.vat_deduction_percent }} %)</span>
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <!-- Platba v jiné měně -->
+        <div v-if="invoice.payment_currency_id" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.payment_currency.toggle') }}</h3>
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.currency') }}</dt><dd class="font-mono">{{ invoice.payment_currency || '—' }}</dd></div>
+            <div v-if="invoice.payment_exchange_rate" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.rate') }}</dt><dd class="font-mono">{{ invoice.payment_exchange_rate }}</dd></div>
+            <div v-if="invoice.paid_amount_payment_ccy" class="flex justify-between"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.paid_payment_ccy') }}</dt><dd class="font-mono">{{ formatMoney(invoice.paid_amount_payment_ccy, invoice.payment_currency || '') }}</dd></div>
+            <div v-if="invoice.exchange_diff_base !== null" class="flex justify-between pt-2 border-t border-neutral-100"><dt class="text-neutral-500">{{ t('purchase_invoice.payment_currency.exchange_diff') }}</dt><dd class="font-mono" :class="(invoice.exchange_diff_base ?? 0) < 0 ? 'text-danger-500' : 'text-success-600'">{{ formatMoney(invoice.exchange_diff_base, 'CZK') }}</dd></div>
+          </dl>
+        </div>
+      </div>
+
+      <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
+           samotná kontace se dál načítá na pozadí. -->
+      <DocumentPostingPanel source="purchase-invoices" :doc-id="invoice.id" always-visible>
+        <dl class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-3 text-sm">
+          <div class="flex justify-between gap-3">
+            <dt class="text-neutral-500">{{ t('purchase_invoice.fields.document_kind') }}</dt>
+            <dd class="font-medium text-right text-neutral-700">{{ t('purchase_invoice.document_kind.' + (invoice.document_kind || 'invoice')) }}</dd>
+          </div>
+          <div class="flex justify-between gap-3">
+            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_classification') }}</dt>
+            <dd class="font-medium text-right text-neutral-700">
+              <template v-if="invoice.vat_classification_code">
+                <span class="font-mono">{{ invoice.vat_classification_code }}</span>
+                <span v-if="vatClassificationLabel" class="ml-1 text-neutral-400">{{ vatClassificationLabel }}</span>
+              </template>
+              <span v-else class="text-neutral-400">—</span>
+            </dd>
+          </div>
+          <div class="flex justify-between gap-3">
+            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.tax_deductible') }}</dt>
+            <dd class="font-medium text-right" :class="invoice.tax_deductible === false ? 'text-danger-600' : 'text-success-600'">
+              {{ invoice.tax_deductible === false ? t('common.no') : t('common.yes') }}
+            </dd>
+          </div>
+          <div class="flex justify-between gap-3">
+            <dt class="text-neutral-500">{{ t('purchase_invoice.fields.is_fixed_asset') }}</dt>
+            <dd class="font-medium text-right" :class="invoice.is_fixed_asset ? 'text-warning-600' : 'text-neutral-700'">
+              {{ invoice.is_fixed_asset ? t('common.yes') : t('common.no') }}
+            </dd>
+          </div>
+          <div class="flex justify-between gap-3">
+            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.expense_category') }}</dt>
+            <dd class="font-medium text-right text-neutral-700">
+              <template v-if="invoice.expense_category_label">
+                {{ invoice.expense_category_label }}
+                <span class="text-neutral-400">({{ invoice.expense_category_code }})</span>
+              </template>
+              <span v-else class="text-neutral-400">—</span>
+            </dd>
+          </div>
+          <!-- Zakázka (issue #29) — proklik na ekonomiku akce (výnos/náklad/marže). -->
+          <div class="flex justify-between gap-3">
+            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.project') }}</dt>
+            <dd class="font-medium text-right text-neutral-700">
+              <RouterLink v-if="invoice.project_id" :to="`/projects/${invoice.project_id}`" class="text-primary-600 hover:underline">
+                {{ invoice.project_name }}
+              </RouterLink>
+              <span v-else class="text-neutral-400">—</span>
+            </dd>
+          </div>
+        </dl>
+      </DocumentPostingPanel>
+
+      <!-- ═══ Položky ═══ -->
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <h3 class="text-sm font-medium text-neutral-700 px-5 py-3 border-b border-neutral-100">{{ t('purchase_invoice.items.title') }}</h3>
         <table class="w-full text-sm">
-          <thead>
-            <tr class="text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-100">
-              <th class="text-left py-1.5 font-medium">{{ t('purchase_invoice.vat_breakdown.rate') }}</th>
-              <th class="text-right py-1.5 font-medium">{{ t('purchase_invoice.vat_breakdown.base') }}</th>
-              <th class="text-right py-1.5 font-medium">{{ t('purchase_invoice.vat_breakdown.vat') }}</th>
-              <th class="text-right py-1.5 font-medium">{{ t('purchase_invoice.vat_breakdown.with_vat') }}</th>
+          <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
+            <tr>
+              <th class="text-left py-2 px-5 font-medium">{{ t('purchase_invoice.items.description') }}</th>
+              <th class="text-right py-2 px-2 font-medium">{{ t('purchase_invoice.items.quantity') }}</th>
+              <th class="text-left py-2 px-2 font-medium">{{ t('purchase_invoice.items.unit') }}</th>
+              <th class="text-right py-2 px-2 font-medium">{{ t('purchase_invoice.items.unit_price') }}</th>
+              <th class="text-right py-2 px-2 font-medium">{{ t('purchase_invoice.items.vat_rate') }}</th>
+              <th class="text-right py-2 px-5 font-medium">{{ t('purchase_invoice.items.total_with_vat') }}</th>
             </tr>
           </thead>
-          <tbody>
-            <tr v-for="b in invoice.vat_breakdown" :key="b.vat_rate" class="border-b border-neutral-50">
-              <td class="py-1.5">{{ b.vat_rate }}%</td>
-              <td class="py-1.5 text-right font-mono">{{ formatMoney(b.without_vat, invoice.currency) }}</td>
-              <td class="py-1.5 text-right font-mono">{{ formatMoney(b.vat, invoice.currency) }}</td>
-              <td class="py-1.5 text-right font-mono">{{ formatMoney(b.with_vat, invoice.currency) }}</td>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="it in invoice.items" :key="it.id">
+              <td class="py-2 px-5">
+                {{ it.description }}
+                <!-- Daňové zařazení položky: druh nákladu (§DM — z něj se odvozuje
+                     dlouhodobý/drobný majetek), klasifikace plnění a časové rozlišení
+                     (§DČR). Všechno jde v editoru nastavit, ale v detailu to dřív
+                     nebylo vidět, takže se nedalo zkontrolovat bez otevření editoru. -->
+                <div v-if="it.expense_kind || it.vat_classification_code || it.accrual_from" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                  <span v-if="it.expense_kind" class="inline-block px-1.5 py-0.5 rounded"
+                    :class="it.expense_kind === 'fixed_asset' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600'">
+                    {{ t('purchase_invoice.expense_kind.' + it.expense_kind) }}
+                  </span>
+                  <span v-if="it.vat_classification_code" class="inline-block px-1.5 py-0.5 rounded bg-neutral-100 font-mono text-neutral-600"
+                    :title="t('purchase_invoice.classification.vat_classification')">
+                    {{ it.vat_classification_code }}
+                  </span>
+                  <span v-if="it.accrual_from" class="text-neutral-500" :title="t('purchase_invoice.items.accrual_hint')">
+                    {{ t('purchase_invoice.items.accrual_from') }} {{ formatDate(it.accrual_from) }}–{{ it.accrual_to ? formatDate(it.accrual_to) : '—' }}
+                  </span>
+                </div>
+                <!-- Karta drobného majetku vzniklá z téhle položky (§DM) — proklik + nabídka
+                     vyřazení prodejem, ať se karta nemusí dohledávat ručně (task #17). -->
+                <div v-if="it.small_asset" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                  <span class="inline-block px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">
+                    {{ t('accounting.small_assets.title') }}: {{ it.small_asset.name }}
+                  </span>
+                  <RouterLink v-if="it.small_asset.status === 'in_use'"
+                    :to="{ name: 'accounting-small-assets', query: { sell: String(it.small_asset.id) } }"
+                    class="text-primary-600 hover:underline">
+                    {{ t('purchase_invoice.items.small_asset_sell') }}
+                  </RouterLink>
+                  <RouterLink v-else :to="{ name: 'accounting-small-assets' }" class="text-neutral-500 hover:underline">
+                    {{ t(`accounting.small_assets.status_${it.small_asset.status}`) }}
+                  </RouterLink>
+                </div>
+              </td>
+              <td class="py-2 px-2 text-right font-mono">{{ it.quantity }}</td>
+              <td class="py-2 px-2">{{ it.unit }}</td>
+              <td class="py-2 px-2 text-right font-mono">{{ formatMoney(displayUnitPriceNet(it), invoice.currency) }}</td>
+              <td class="py-2 px-2 text-right">{{ it.vat_rate_snapshot }}%</td>
+              <td class="py-2 px-5 text-right font-mono">{{ formatMoney(it.total_with_vat, invoice.currency) }}</td>
             </tr>
           </tbody>
         </table>
-        <div v-if="invoice.vat_allocations?.length" class="mt-4 pt-3 border-t border-neutral-200">
-          <h4 class="text-xs font-medium text-neutral-600 mb-2">{{ t('purchase_invoice.vat_allocation.enable') }}</h4>
-          <div class="space-y-2">
-            <div v-for="a in invoice.vat_allocations" :key="a.id"
-              class="flex flex-wrap items-center justify-between gap-2 text-xs rounded bg-neutral-50 px-3 py-2">
-              <div>
-                <span class="font-medium">{{ a.description }}</span>
-                <span class="text-neutral-500 ml-2">{{ t('purchase_invoice.vat_allocation.usage_' + a.usage_type) }}</span>
-              </div>
-              <div class="flex flex-wrap items-center gap-3 whitespace-nowrap">
-                <span class="font-mono">{{ formatMoney(a.total_amount, invoice.currency) }}</span>
-                <span>{{ t('purchase_invoice.vat_deduction.' + a.vat_deduction) }}</span>
-                <span class="font-mono">MD {{ a.account_code }}</span>
+      </div>
+
+      <!-- ═══ Totals + VAT breakdown ═══ -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <h3 class="text-sm font-medium text-neutral-700 mb-3 flex items-center gap-2">
+            {{ t('purchase_invoice.vat_breakdown.title') }}
+            <span v-if="invoice.vat_overrides && invoice.vat_overrides.length"
+              class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-warning-50 text-warning-700 border border-warning-500/40"
+              :title="t('purchase_invoice.vat_recap.overridden_note')">
+              {{ t('purchase_invoice.vat_breakdown.per_document') }}
+            </span>
+          </h3>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-100">
+                <th class="text-left py-1.5 font-medium">{{ t('purchase_invoice.vat_breakdown.rate') }}</th>
+                <th class="text-right py-1.5 font-medium">{{ t('purchase_invoice.vat_breakdown.base') }}</th>
+                <th class="text-right py-1.5 font-medium">{{ t('purchase_invoice.vat_breakdown.vat') }}</th>
+                <th class="text-right py-1.5 font-medium">{{ t('purchase_invoice.vat_breakdown.with_vat') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="b in invoice.vat_breakdown" :key="b.vat_rate" class="border-b border-neutral-50">
+                <td class="py-1.5">{{ b.vat_rate }}%</td>
+                <td class="py-1.5 text-right font-mono">{{ formatMoney(b.without_vat, invoice.currency) }}</td>
+                <td class="py-1.5 text-right font-mono">{{ formatMoney(b.vat, invoice.currency) }}</td>
+                <td class="py-1.5 text-right font-mono">{{ formatMoney(b.with_vat, invoice.currency) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="invoice.vat_allocations?.length" class="mt-4 pt-3 border-t border-neutral-200">
+            <h4 class="text-xs font-medium text-neutral-600 mb-2">{{ t('purchase_invoice.vat_allocation.enable') }}</h4>
+            <div class="space-y-2">
+              <div v-for="a in invoice.vat_allocations" :key="a.id"
+                class="flex flex-wrap items-center justify-between gap-2 text-xs rounded bg-neutral-50 px-3 py-2">
+                <div>
+                  <span class="font-medium">{{ a.description }}</span>
+                  <span class="text-neutral-500 ml-2">{{ t('purchase_invoice.vat_allocation.usage_' + a.usage_type) }}</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-3 whitespace-nowrap">
+                  <span class="font-mono">{{ formatMoney(a.total_amount, invoice.currency) }}</span>
+                  <span>{{ t('purchase_invoice.vat_deduction.' + a.vat_deduction) }}</span>
+                  <span class="font-mono">MD {{ a.account_code }}</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.totals.with_vat') }}</h3>
-        <dl class="space-y-2 text-sm">
-          <div class="flex justify-between"><dt class="text-neutral-600">{{ t('purchase_invoice.totals.without_vat') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_without_vat, invoice.currency) }}</dd></div>
-          <div class="flex justify-between"><dt class="text-neutral-600">{{ t('purchase_invoice.totals.vat') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_vat, invoice.currency) }}</dd></div>
-          <div class="flex justify-between font-semibold border-t border-neutral-100 pt-2"><dt>{{ t('purchase_invoice.totals.with_vat') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_with_vat, invoice.currency) }}</dd></div>
-          <template v-if="invoice.rounding && Math.abs(invoice.rounding) > 0.001">
-            <div class="flex justify-between text-neutral-500"><dt>{{ t('purchase_invoice.totals.rounding') }}</dt><dd class="font-mono">{{ invoice.rounding > 0 ? '+' : '' }}{{ formatMoney(invoice.rounding, invoice.currency) }}</dd></div>
-            <div class="flex justify-between font-semibold border-t border-neutral-100 pt-2"><dt>{{ t('purchase_invoice.totals.with_vat_rounded') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_with_vat + invoice.rounding, invoice.currency) }}</dd></div>
-          </template>
-          <div v-if="invoice.advance_paid_amount > 0" class="flex justify-between text-neutral-500"><dt>{{ t('purchase_invoice.totals.advance_paid') }}</dt><dd class="font-mono">−{{ formatMoney(invoice.advance_paid_amount, invoice.currency) }}</dd></div>
-          <div class="flex justify-between font-semibold text-lg border-t border-neutral-200 pt-2"><dt>{{ t('purchase_invoice.totals.to_pay') }}</dt><dd class="font-mono">{{ formatMoney((invoice.amount_to_pay ?? invoice.total_with_vat) + (invoice.rounding || 0), invoice.currency) }}</dd></div>
-          <!-- CZK přepočet (jen pokud faktura není CZK + má exchange_rate) -->
-          <template v-if="invoice.currency !== 'CZK' && invoice.exchange_rate">
-            <div class="border-t border-neutral-200 pt-3 mt-3">
-              <h4 class="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">{{ t('invoice.czk_recap.title') }}</h4>
-              <p class="text-xs text-neutral-500 mb-2">
-                {{ t('invoice.czk_recap.rate_info', {
-                  rate: Number(invoice.exchange_rate).toFixed(3),
-                  currency: invoice.currency,
-                  date: invoice.exchange_rate_date ? formatDate(invoice.exchange_rate_date) : formatDate(invoice.tax_date || invoice.issue_date),
-                }) }}
-              </p>
-              <div class="flex justify-between text-sm"><dt class="text-neutral-600">{{ t('purchase_invoice.totals.without_vat') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_without_vat * Number(invoice.exchange_rate), 'CZK') }}</dd></div>
-              <div class="flex justify-between text-sm"><dt class="text-neutral-600">{{ t('purchase_invoice.totals.vat') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_vat * Number(invoice.exchange_rate), 'CZK') }}</dd></div>
-              <div class="flex justify-between text-sm font-semibold border-t border-neutral-100 pt-1.5"><dt>{{ t('purchase_invoice.totals.with_vat') }}</dt><dd class="font-mono">{{ formatMoney((invoice.total_with_vat + (invoice.rounding || 0)) * Number(invoice.exchange_rate), 'CZK') }}</dd></div>
-            </div>
-          </template>
-        </dl>
-      </div>
-    </div>
-
-    <!-- ═══ Správa propojení se zálohou — jen nelinkované stavy (linkované jsou v banneru pod headerem) ═══ -->
-    <div v-if="!invoice.settled_by && !invoice.linked_advance"
-      class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
-      <h3 class="text-sm font-medium text-neutral-700 mb-3">
-        {{ invoice.document_kind === 'advance'
-            ? t('purchase_invoice.advance_link.title')
-            : t('purchase_invoice.advance_link.title_settlement') }}
-      </h3>
-
-      <!-- Záloha zatím nevyúčtovaná → nabídka spárovat s fakturou (opačný směr) -->
-      <div v-if="invoice.document_kind === 'advance'" class="flex items-center justify-between gap-3">
-        <p class="text-sm text-neutral-500">{{ t('purchase_invoice.advance_link.not_settled') }}</p>
-        <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe && invoice.has_settlement_candidates" type="button" @click="openPairModal('final')"
-          class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
-          {{ t('purchase_invoice.advance_link.pair_settlement') }}
-        </button>
-      </div>
-
-      <!-- Vyúčtovací faktura bez propojení → AI návrh / spárovat -->
-      <template v-else>
-        <div v-if="invoice.advance_link_suggestion" class="p-3 bg-primary-50 border border-primary-500/30 rounded-md flex gap-3 items-start">
-          <div class="text-sm flex-1 min-w-0">
-            <div class="font-medium text-primary-700">{{ t('purchase_invoice.advance_link.ai_suggestion_title') }}</div>
-            <div class="text-neutral-600 mt-1">
-              {{ t('purchase_invoice.advance_link.ai_suggestion_body') }}
-              <span class="font-mono">{{ invoice.advance_link_suggestion.varsymbol || invoice.advance_link_suggestion.vendor_invoice_number || ('#' + invoice.advance_link_suggestion.id) }}</span>
-              <span class="text-neutral-500 font-mono">({{ formatMoney(invoice.advance_link_suggestion.total_with_vat, invoice.advance_link_suggestion.currency) }})</span>
-            </div>
-          </div>
-          <div v-if="auth.canWrite('purchase_invoices') && !lockedForMe" class="flex gap-2 shrink-0">
-            <button type="button" @click="linkAdvance(invoice.advance_link_suggestion.id)" :disabled="linkingAdvance"
-              class="cursor-pointer text-xs px-2 py-1 bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50">
-              {{ t('purchase_invoice.advance_link.confirm') }}
-            </button>
-            <button type="button" @click="dismissAdvanceSuggestion" :disabled="linkingAdvance"
-              class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50">
-              {{ t('purchase_invoice.advance_link.dismiss') }}
-            </button>
-          </div>
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.totals.with_vat') }}</h3>
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between"><dt class="text-neutral-600">{{ t('purchase_invoice.totals.without_vat') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_without_vat, invoice.currency) }}</dd></div>
+            <div class="flex justify-between"><dt class="text-neutral-600">{{ t('purchase_invoice.totals.vat') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_vat, invoice.currency) }}</dd></div>
+            <div class="flex justify-between font-semibold border-t border-neutral-100 pt-2"><dt>{{ t('purchase_invoice.totals.with_vat') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_with_vat, invoice.currency) }}</dd></div>
+            <template v-if="invoice.rounding && Math.abs(invoice.rounding) > 0.001">
+              <div class="flex justify-between text-neutral-500"><dt>{{ t('purchase_invoice.totals.rounding') }}</dt><dd class="font-mono">{{ invoice.rounding > 0 ? '+' : '' }}{{ formatMoney(invoice.rounding, invoice.currency) }}</dd></div>
+              <div class="flex justify-between font-semibold border-t border-neutral-100 pt-2"><dt>{{ t('purchase_invoice.totals.with_vat_rounded') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_with_vat + invoice.rounding, invoice.currency) }}</dd></div>
+            </template>
+            <div v-if="invoice.advance_paid_amount > 0" class="flex justify-between text-neutral-500"><dt>{{ t('purchase_invoice.totals.advance_paid') }}</dt><dd class="font-mono">−{{ formatMoney(invoice.advance_paid_amount, invoice.currency) }}</dd></div>
+            <div class="flex justify-between font-semibold text-lg border-t border-neutral-200 pt-2"><dt>{{ t('purchase_invoice.totals.to_pay') }}</dt><dd class="font-mono">{{ formatMoney((invoice.amount_to_pay ?? invoice.total_with_vat) + (invoice.rounding || 0), invoice.currency) }}</dd></div>
+            <!-- CZK přepočet (jen pokud faktura není CZK + má exchange_rate) -->
+            <template v-if="invoice.currency !== 'CZK' && invoice.exchange_rate">
+              <div class="border-t border-neutral-200 pt-3 mt-3">
+                <h4 class="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">{{ t('invoice.czk_recap.title') }}</h4>
+                <p class="text-xs text-neutral-500 mb-2">
+                  {{ t('invoice.czk_recap.rate_info', {
+                    rate: Number(invoice.exchange_rate).toFixed(3),
+                    currency: invoice.currency,
+                    date: invoice.exchange_rate_date ? formatDate(invoice.exchange_rate_date) : formatDate(invoice.tax_date || invoice.issue_date),
+                  }) }}
+                </p>
+                <div class="flex justify-between text-sm"><dt class="text-neutral-600">{{ t('purchase_invoice.totals.without_vat') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_without_vat * Number(invoice.exchange_rate), 'CZK') }}</dd></div>
+                <div class="flex justify-between text-sm"><dt class="text-neutral-600">{{ t('purchase_invoice.totals.vat') }}</dt><dd class="font-mono">{{ formatMoney(invoice.total_vat * Number(invoice.exchange_rate), 'CZK') }}</dd></div>
+                <div class="flex justify-between text-sm font-semibold border-t border-neutral-100 pt-1.5"><dt>{{ t('purchase_invoice.totals.with_vat') }}</dt><dd class="font-mono">{{ formatMoney((invoice.total_with_vat + (invoice.rounding || 0)) * Number(invoice.exchange_rate), 'CZK') }}</dd></div>
+              </div>
+            </template>
+          </dl>
         </div>
+      </div>
 
-        <div v-else class="flex items-center justify-between gap-3">
-          <p class="text-sm text-neutral-500">{{ t('purchase_invoice.advance_link.none') }}</p>
-          <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe && invoice.has_advance_candidates" type="button" @click="openPairModal('advance')"
+      <!-- ═══ Správa propojení se zálohou — jen nelinkované stavy (linkované jsou v banneru pod headerem) ═══ -->
+      <div v-if="!invoice.settled_by && !invoice.linked_advance"
+        class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
+        <h3 class="text-sm font-medium text-neutral-700 mb-3">
+          {{ invoice.document_kind === 'advance'
+              ? t('purchase_invoice.advance_link.title')
+              : t('purchase_invoice.advance_link.title_settlement') }}
+        </h3>
+
+        <!-- Záloha zatím nevyúčtovaná → nabídka spárovat s fakturou (opačný směr) -->
+        <div v-if="invoice.document_kind === 'advance'" class="flex items-center justify-between gap-3">
+          <p class="text-sm text-neutral-500">{{ t('purchase_invoice.advance_link.not_settled') }}</p>
+          <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe && invoice.has_settlement_candidates" type="button" @click="openPairModal('final')"
             class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
-            {{ t('purchase_invoice.advance_link.pair') }}
+            {{ t('purchase_invoice.advance_link.pair_settlement') }}
           </button>
         </div>
-      </template>
-    </div>
 
-    <!-- Modal výběru zálohy k propojení -->
-    <div v-if="advanceModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="advanceModalOpen = false">
-      <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
-        <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between">
-          <h3 class="font-medium">{{ pairMode === 'advance' ? t('purchase_invoice.advance_link.modal_title') : t('purchase_invoice.advance_link.modal_title_settlement') }}</h3>
-          <button type="button" @click="advanceModalOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
-        </div>
-        <div class="p-4 overflow-y-auto">
-          <div v-if="loadingCandidates" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
-          <div v-else-if="advanceCandidates.length === 0" class="text-sm text-neutral-500">{{ pairMode === 'advance' ? t('purchase_invoice.advance_link.no_candidates') : t('purchase_invoice.advance_link.no_candidates_settlement') }}</div>
-          <ul v-else class="space-y-2">
-            <li v-for="cand in advanceCandidates" :key="cand.id">
-              <button type="button" @click="pickCandidate(cand.id)" :disabled="linkingAdvance"
-                class="cursor-pointer w-full text-left px-3 py-2 border border-neutral-200 rounded-md hover:border-primary-400 hover:bg-primary-50 disabled:opacity-50 flex justify-between items-center gap-3">
-                <span class="font-mono text-sm">{{ cand.varsymbol || cand.vendor_invoice_number || ('#' + cand.id) }}</span>
-                <span class="text-sm text-neutral-500">{{ cand.issue_date ? formatDate(cand.issue_date) : '' }} · {{ formatMoney(cand.total_with_vat, cand.currency) }}</span>
+        <!-- Vyúčtovací faktura bez propojení → AI návrh / spárovat -->
+        <template v-else>
+          <div v-if="invoice.advance_link_suggestion" class="p-3 bg-primary-50 border border-primary-500/30 rounded-md flex gap-3 items-start">
+            <div class="text-sm flex-1 min-w-0">
+              <div class="font-medium text-primary-700">{{ t('purchase_invoice.advance_link.ai_suggestion_title') }}</div>
+              <div class="text-neutral-600 mt-1">
+                {{ t('purchase_invoice.advance_link.ai_suggestion_body') }}
+                <span class="font-mono">{{ invoice.advance_link_suggestion.varsymbol || invoice.advance_link_suggestion.vendor_invoice_number || ('#' + invoice.advance_link_suggestion.id) }}</span>
+                <span class="text-neutral-500 font-mono">({{ formatMoney(invoice.advance_link_suggestion.total_with_vat, invoice.advance_link_suggestion.currency) }})</span>
+              </div>
+            </div>
+            <div v-if="auth.canWrite('purchase_invoices') && !lockedForMe" class="flex gap-2 shrink-0">
+              <button type="button" @click="linkAdvance(invoice.advance_link_suggestion.id)" :disabled="linkingAdvance"
+                class="cursor-pointer text-xs px-2 py-1 bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50">
+                {{ t('purchase_invoice.advance_link.confirm') }}
               </button>
+              <button type="button" @click="dismissAdvanceSuggestion" :disabled="linkingAdvance"
+                class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50">
+                {{ t('purchase_invoice.advance_link.dismiss') }}
+              </button>
+            </div>
+          </div>
+
+          <div v-else class="flex items-center justify-between gap-3">
+            <p class="text-sm text-neutral-500">{{ t('purchase_invoice.advance_link.none') }}</p>
+            <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe && invoice.has_advance_candidates" type="button" @click="openPairModal('advance')"
+              class="cursor-pointer text-sm px-3 h-9 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md shrink-0">
+              {{ t('purchase_invoice.advance_link.pair') }}
+            </button>
+          </div>
+        </template>
+      </div>
+
+      <!-- Modal výběru zálohy k propojení -->
+      <div v-if="advanceModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="advanceModalOpen = false">
+        <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
+          <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between">
+            <h3 class="font-medium">{{ pairMode === 'advance' ? t('purchase_invoice.advance_link.modal_title') : t('purchase_invoice.advance_link.modal_title_settlement') }}</h3>
+            <button type="button" @click="advanceModalOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
+          </div>
+          <div class="p-4 overflow-y-auto">
+            <div v-if="loadingCandidates" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
+            <div v-else-if="advanceCandidates.length === 0" class="text-sm text-neutral-500">{{ pairMode === 'advance' ? t('purchase_invoice.advance_link.no_candidates') : t('purchase_invoice.advance_link.no_candidates_settlement') }}</div>
+            <ul v-else class="space-y-2">
+              <li v-for="cand in advanceCandidates" :key="cand.id">
+                <button type="button" @click="pickCandidate(cand.id)" :disabled="linkingAdvance"
+                  class="cursor-pointer w-full text-left px-3 py-2 border border-neutral-200 rounded-md hover:border-primary-400 hover:bg-primary-50 disabled:opacity-50 flex justify-between items-center gap-3">
+                  <span class="font-mono text-sm">{{ cand.varsymbol || cand.vendor_invoice_number || ('#' + cand.id) }}</span>
+                  <span class="text-sm text-neutral-500">{{ cand.issue_date ? formatDate(cand.issue_date) : '' }} · {{ formatMoney(cand.total_with_vat, cand.currency) }}</span>
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Zaplatit pomocí QR -->
+      <div v-if="qrOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="qrOpen = false">
+        <div class="bg-surface rounded-lg shadow-xl max-w-sm w-full max-h-[90vh] overflow-y-auto">
+          <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between">
+            <h3 class="font-medium">{{ t('purchase_invoice.qr.title') }}</h3>
+            <button type="button" @click="qrOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
+          </div>
+          <div class="p-5 space-y-4">
+            <!-- Loading / probíhá lazy extrakce účtu -->
+            <div v-if="qrLoading" class="py-10 text-center text-sm text-neutral-500">
+              <svg class="animate-spin w-6 h-6 mx-auto mb-2 text-primary-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+              {{ t('purchase_invoice.qr.scanning') }}
+            </div>
+
+            <!-- Editace účtu (ruční) -->
+            <template v-else-if="qrEditing">
+              <div class="space-y-3">
+                <label class="block">
+                  <span class="text-xs text-neutral-500">{{ t('purchase_invoice.qr.account') }}</span>
+                  <input v-model="qrForm.account_number" type="text" placeholder="19-2000145399"
+                    class="w-full mt-0.5 px-3 h-9 text-sm border border-neutral-300 rounded-md font-mono" />
+                </label>
+                <label class="block">
+                  <span class="text-xs text-neutral-500">{{ t('purchase_invoice.qr.bank_code') }}</span>
+                  <input v-model="qrForm.bank_code" type="text" placeholder="0800"
+                    class="w-full mt-0.5 px-3 h-9 text-sm border border-neutral-300 rounded-md font-mono" />
+                </label>
+                <label class="block">
+                  <span class="text-xs text-neutral-500">{{ t('purchase_invoice.qr.iban') }}</span>
+                  <input v-model="qrForm.iban" type="text" placeholder="CZ65 0800 0000 1920 0014 5399"
+                    class="w-full mt-0.5 px-3 h-9 text-sm border border-neutral-300 rounded-md font-mono" />
+                </label>
+                <label class="block">
+                  <span class="text-xs text-neutral-500">{{ t('purchase_invoice.qr.bic') }}</span>
+                  <input v-model="qrForm.bic" type="text" placeholder="GIBACZPX"
+                    class="w-full mt-0.5 px-3 h-9 text-sm border border-neutral-300 rounded-md font-mono" />
+                </label>
+                <label class="block">
+                  <span class="text-xs text-neutral-500">{{ t('purchase_invoice.qr.variable_symbol') }}</span>
+                  <input v-model="qrForm.variable_symbol" type="text"
+                    class="w-full mt-0.5 px-3 h-9 text-sm border border-neutral-300 rounded-md font-mono" />
+                </label>
+              </div>
+              <div class="flex justify-end gap-2">
+                <button type="button" @click="qrEditing = false"
+                  class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md">{{ t('common.cancel') }}</button>
+                <button type="button" @click="saveQrAccount" :disabled="qrSaving"
+                  class="cursor-pointer px-3 h-9 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">{{ t('purchase_invoice.qr.save') }}</button>
+              </div>
+            </template>
+
+            <!-- QR k dispozici -->
+            <template v-else-if="qrData && qrData.qr_data_uri">
+              <div class="flex flex-col items-center gap-2">
+                <img :src="qrData.qr_data_uri" alt="QR" class="w-48 h-48 rounded bg-white p-2 border border-neutral-200" />
+                <div class="text-lg font-semibold">{{ formatMoney(qrData.amount, qrData.currency) }}</div>
+                <p class="text-xs text-neutral-500 text-center">{{ t('purchase_invoice.qr.scan_hint') }}</p>
+              </div>
+              <dl class="text-sm space-y-1">
+                <div v-if="qrData.account.iban" class="flex justify-between gap-2">
+                  <dt class="text-neutral-500">{{ t('purchase_invoice.qr.iban') }}</dt><dd class="font-mono">{{ qrData.account.iban }}</dd>
+                </div>
+                <div v-else-if="qrData.account.account_number" class="flex justify-between gap-2">
+                  <dt class="text-neutral-500">{{ t('purchase_invoice.qr.account') }}</dt><dd class="font-mono">{{ qrData.account.account_number }}/{{ qrData.account.bank_code }}</dd>
+                </div>
+                <div v-if="qrData.account.variable_symbol" class="flex justify-between gap-2">
+                  <dt class="text-neutral-500">{{ t('purchase_invoice.qr.variable_symbol') }}</dt><dd class="font-mono">{{ qrData.account.variable_symbol }}</dd>
+                </div>
+                <div v-if="qrData.source" class="flex justify-between gap-2">
+                  <dt class="text-neutral-500">{{ t('purchase_invoice.qr.source_label') }}</dt><dd>{{ t('purchase_invoice.qr.source.' + qrData.source) }}</dd>
+                </div>
+              </dl>
+              <p v-if="qrData.source === 'qr_image'" class="text-xs text-warning-600">{{ t('purchase_invoice.qr.image_fallback_note') }}</p>
+              <button v-if="auth.canWrite('purchase_invoices')" type="button" @click="qrEditing = true"
+                class="cursor-pointer w-full px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md">{{ t('purchase_invoice.qr.edit') }}</button>
+            </template>
+
+            <!-- Účet chybí -->
+            <template v-else>
+              <p class="text-sm text-neutral-600">{{ t('purchase_invoice.qr.no_account') }}</p>
+              <div v-if="auth.canWrite('purchase_invoices')" class="flex flex-col gap-2">
+                <button v-if="qrData && qrData.can_extract" type="button" @click="runExtract"
+                  class="cursor-pointer px-3 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md inline-flex items-center justify-center gap-1.5">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                  {{ t('purchase_invoice.qr.extract') }}
+                </button>
+                <button type="button" @click="qrEditing = true"
+                  class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md">{{ t('purchase_invoice.qr.enter_manually') }}</button>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ Originální PDF od dodavatele ═══ -->
+      <div v-if="invoice.pdf_path" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-neutral-100">
+          <div class="flex items-center gap-3">
+            <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
+              <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+              <path fill="#ffffff" opacity="0.35" d="M20 2v8h8z"/>
+              <text x="16" y="26" fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-size="8" font-weight="700" text-anchor="middle" letter-spacing="0.3">PDF</text>
+            </svg>
+            <div>
+              <div class="font-medium text-sm">{{ invoice.pdf_original_name || 'invoice.pdf' }}</div>
+              <div class="text-xs text-neutral-500">{{ Math.round((Number(invoice.pdf_size_bytes) || 0) / 1024) }} KiB · {{ invoice.pdf_uploaded_at ? formatDate(invoice.pdf_uploaded_at.slice(0,10)) : '' }}</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <button type="button" @click="pdfPreview.toggle()"
+              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              </svg>
+              {{ pdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
+            </button>
+            <a :href="purchaseInvoicesApi.pdfUrl(invoice.id)" target="_blank"
+               class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5">
+              <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              {{ t('purchase_invoice.pdf.download') }}
+            </a>
+            <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="deletePdf"
+              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
+              {{ t('purchase_invoice.pdf.delete') }}
+            </button>
+          </div>
+        </div>
+        <!-- Inline PDF preview přes browser PDF viewer. Musí být ?inline=1 (jinak
+             Content-Disposition: attachment a Edge/IE blokují embed). Nad prahem se
+             tenhle blok nevykresluje — náhled je vedle dokladu (DocumentSidePreview). -->
+        <div v-if="pdfPreviewOpen && !pdfSideBySide" class="bg-neutral-100">
+          <iframe
+            :src="pdfInlineUrl"
+            class="w-full h-[80vh] border-0"
+            :title="invoice.pdf_original_name || 'PDF'"
+          ></iframe>
+        </div>
+      </div>
+      <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
+        <PdfDropzone v-if="auth.canWrite('purchase_invoices') && !lockedForMe" :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
+        <p v-else class="text-sm text-neutral-500">{{ t('purchase_invoice.pdf.no_pdf') }}</p>
+      </div>
+
+      <!-- ═══ Poznámky (jen pokud existují) ═══ -->
+      <div v-if="invoice.note_above_items || invoice.note_below_items" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.fields.note_above_items') }} / {{ t('purchase_invoice.fields.note_below_items') }}</h3>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <div v-if="invoice.note_above_items">
+            <div class="text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.fields.note_above_items') }}</div>
+            <p class="whitespace-pre-line">{{ invoice.note_above_items }}</p>
+          </div>
+          <div v-if="invoice.note_below_items">
+            <div class="text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.fields.note_below_items') }}</div>
+            <p class="whitespace-pre-line">{{ invoice.note_below_items }}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ Activity log (paralel s /invoices) ═══ -->
+      <div v-if="activity.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <button type="button" @click="activityOpen = !activityOpen"
+          class="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-neutral-50 cursor-pointer"
+          :class="activityOpen ? 'border-b border-neutral-200' : ''">
+          <span class="flex items-center gap-2">
+            <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.activity') }}</h3>
+            <span class="text-xs text-neutral-400">{{ activity.length }}</span>
+          </span>
+          <svg class="w-4 h-4 text-neutral-400 transition-transform" :class="activityOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        <div v-show="activityOpen">
+          <!-- Desktop: tabulka -->
+          <div class="hidden md:block overflow-x-auto">
+            <table class="w-full text-sm">
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="a in activity" :key="a.id" class="hover:bg-neutral-50 align-top">
+                  <td class="px-5 py-2 whitespace-nowrap">
+                    <span class="text-xs px-2 py-0.5 rounded font-medium" :class="actionBadgeClass(a.action)">{{ actionShortLabel(a.action) }}</span>
+                  </td>
+                  <td class="px-3 py-2 text-xs text-neutral-500 whitespace-nowrap">{{ a.user_name || a.user_email || '—' }}</td>
+                  <td class="px-3 py-2 font-mono text-xs text-neutral-400 whitespace-nowrap">{{ a.created_at.replace('T', ' ').slice(0, 19) }}</td>
+                  <td class="px-3 py-2 text-xs text-neutral-600 break-all whitespace-pre-wrap leading-snug">{{ payloadText(a.payload) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- Mobil: karty (payload na plnou šířku, jinak se zmáčkne do úzkého sloupce) -->
+          <ul class="md:hidden divide-y divide-neutral-100">
+            <li v-for="a in activity" :key="`m-${a.id}`" class="px-4 py-3 space-y-1.5">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs px-2 py-0.5 rounded font-medium" :class="actionBadgeClass(a.action)">{{ actionShortLabel(a.action) }}</span>
+                <span class="font-mono text-xs text-neutral-400 whitespace-nowrap">{{ a.created_at.replace('T', ' ').slice(0, 19) }}</span>
+              </div>
+              <div class="text-xs text-neutral-500">{{ a.user_name || a.user_email || '—' }}</div>
+              <div v-if="a.payload" class="text-xs text-neutral-600 break-all whitespace-pre-wrap leading-snug">{{ payloadText(a.payload) }}</div>
             </li>
           </ul>
         </div>
       </div>
+
+      <!-- Označit jako uhrazené — evidenčně / pokladnou / zápočtem -->
+      <PaymentMethodModal v-if="markPaidOpen && invoice" doc-type="purchase_invoice"
+        :doc-id="invoice.id" :doc-number="invoice.vendor_invoice_number || `#${invoice.id}`"
+        :amount="Number(invoice.total_with_vat ?? 0)" :partner-name="invoice.vendor_snapshot?.company_name"
+        :busy="acting"
+        @close="markPaidOpen = false" @done="onAltPayDone"
+        @mark-paid="p => transition('paid', p.date)" />
+
+      <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="purchase_invoice" :entity-id="invoice.id" />
+
+      <!-- Přílohy: link/unlink DMS dokumentů (Epic F7) -->
+      <PurchaseDmsDocumentsPanel v-if="invoice" class="mt-4 block" :invoice-id="invoice.id" />
+
+      <StockReceiptModal v-if="stockReceiptOpen && invoice" :purchase-invoice-id="invoice.id"
+        @close="stockReceiptOpen = false" @created="onStockReceiptCreated" />
     </div>
-
-    <!-- Modal: Zaplatit pomocí QR -->
-    <div v-if="qrOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="qrOpen = false">
-      <div class="bg-surface rounded-lg shadow-xl max-w-sm w-full max-h-[90vh] overflow-y-auto">
-        <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between">
-          <h3 class="font-medium">{{ t('purchase_invoice.qr.title') }}</h3>
-          <button type="button" @click="qrOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
-        </div>
-        <div class="p-5 space-y-4">
-          <!-- Loading / probíhá lazy extrakce účtu -->
-          <div v-if="qrLoading" class="py-10 text-center text-sm text-neutral-500">
-            <svg class="animate-spin w-6 h-6 mx-auto mb-2 text-primary-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
-            {{ t('purchase_invoice.qr.scanning') }}
-          </div>
-
-          <!-- Editace účtu (ruční) -->
-          <template v-else-if="qrEditing">
-            <div class="space-y-3">
-              <label class="block">
-                <span class="text-xs text-neutral-500">{{ t('purchase_invoice.qr.account') }}</span>
-                <input v-model="qrForm.account_number" type="text" placeholder="19-2000145399"
-                  class="w-full mt-0.5 px-3 h-9 text-sm border border-neutral-300 rounded-md font-mono" />
-              </label>
-              <label class="block">
-                <span class="text-xs text-neutral-500">{{ t('purchase_invoice.qr.bank_code') }}</span>
-                <input v-model="qrForm.bank_code" type="text" placeholder="0800"
-                  class="w-full mt-0.5 px-3 h-9 text-sm border border-neutral-300 rounded-md font-mono" />
-              </label>
-              <label class="block">
-                <span class="text-xs text-neutral-500">{{ t('purchase_invoice.qr.iban') }}</span>
-                <input v-model="qrForm.iban" type="text" placeholder="CZ65 0800 0000 1920 0014 5399"
-                  class="w-full mt-0.5 px-3 h-9 text-sm border border-neutral-300 rounded-md font-mono" />
-              </label>
-              <label class="block">
-                <span class="text-xs text-neutral-500">{{ t('purchase_invoice.qr.bic') }}</span>
-                <input v-model="qrForm.bic" type="text" placeholder="GIBACZPX"
-                  class="w-full mt-0.5 px-3 h-9 text-sm border border-neutral-300 rounded-md font-mono" />
-              </label>
-              <label class="block">
-                <span class="text-xs text-neutral-500">{{ t('purchase_invoice.qr.variable_symbol') }}</span>
-                <input v-model="qrForm.variable_symbol" type="text"
-                  class="w-full mt-0.5 px-3 h-9 text-sm border border-neutral-300 rounded-md font-mono" />
-              </label>
-            </div>
-            <div class="flex justify-end gap-2">
-              <button type="button" @click="qrEditing = false"
-                class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md">{{ t('common.cancel') }}</button>
-              <button type="button" @click="saveQrAccount" :disabled="qrSaving"
-                class="cursor-pointer px-3 h-9 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">{{ t('purchase_invoice.qr.save') }}</button>
-            </div>
-          </template>
-
-          <!-- QR k dispozici -->
-          <template v-else-if="qrData && qrData.qr_data_uri">
-            <div class="flex flex-col items-center gap-2">
-              <img :src="qrData.qr_data_uri" alt="QR" class="w-48 h-48 rounded bg-white p-2 border border-neutral-200" />
-              <div class="text-lg font-semibold">{{ formatMoney(qrData.amount, qrData.currency) }}</div>
-              <p class="text-xs text-neutral-500 text-center">{{ t('purchase_invoice.qr.scan_hint') }}</p>
-            </div>
-            <dl class="text-sm space-y-1">
-              <div v-if="qrData.account.iban" class="flex justify-between gap-2">
-                <dt class="text-neutral-500">{{ t('purchase_invoice.qr.iban') }}</dt><dd class="font-mono">{{ qrData.account.iban }}</dd>
-              </div>
-              <div v-else-if="qrData.account.account_number" class="flex justify-between gap-2">
-                <dt class="text-neutral-500">{{ t('purchase_invoice.qr.account') }}</dt><dd class="font-mono">{{ qrData.account.account_number }}/{{ qrData.account.bank_code }}</dd>
-              </div>
-              <div v-if="qrData.account.variable_symbol" class="flex justify-between gap-2">
-                <dt class="text-neutral-500">{{ t('purchase_invoice.qr.variable_symbol') }}</dt><dd class="font-mono">{{ qrData.account.variable_symbol }}</dd>
-              </div>
-              <div v-if="qrData.source" class="flex justify-between gap-2">
-                <dt class="text-neutral-500">{{ t('purchase_invoice.qr.source_label') }}</dt><dd>{{ t('purchase_invoice.qr.source.' + qrData.source) }}</dd>
-              </div>
-            </dl>
-            <p v-if="qrData.source === 'qr_image'" class="text-xs text-warning-600">{{ t('purchase_invoice.qr.image_fallback_note') }}</p>
-            <button v-if="auth.canWrite('purchase_invoices')" type="button" @click="qrEditing = true"
-              class="cursor-pointer w-full px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md">{{ t('purchase_invoice.qr.edit') }}</button>
-          </template>
-
-          <!-- Účet chybí -->
-          <template v-else>
-            <p class="text-sm text-neutral-600">{{ t('purchase_invoice.qr.no_account') }}</p>
-            <div v-if="auth.canWrite('purchase_invoices')" class="flex flex-col gap-2">
-              <button v-if="qrData && qrData.can_extract" type="button" @click="runExtract"
-                class="cursor-pointer px-3 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md inline-flex items-center justify-center gap-1.5">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-                {{ t('purchase_invoice.qr.extract') }}
-              </button>
-              <button type="button" @click="qrEditing = true"
-                class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md">{{ t('purchase_invoice.qr.enter_manually') }}</button>
-            </div>
-          </template>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══ Originální PDF od dodavatele ═══ -->
-    <div v-if="invoice.pdf_path" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-      <div class="flex items-center justify-between px-5 py-3 border-b border-neutral-100">
-        <div class="flex items-center gap-3">
-          <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
-            <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
-            <path fill="#ffffff" opacity="0.35" d="M20 2v8h8z"/>
-            <text x="16" y="26" fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-size="8" font-weight="700" text-anchor="middle" letter-spacing="0.3">PDF</text>
-          </svg>
-          <div>
-            <div class="font-medium text-sm">{{ invoice.pdf_original_name || 'invoice.pdf' }}</div>
-            <div class="text-xs text-neutral-500">{{ Math.round((Number(invoice.pdf_size_bytes) || 0) / 1024) }} KiB · {{ invoice.pdf_uploaded_at ? formatDate(invoice.pdf_uploaded_at.slice(0,10)) : '' }}</div>
-          </div>
-        </div>
-        <div class="flex items-center gap-2 flex-wrap">
-          <button type="button" @click="pdfPreviewOpen = !pdfPreviewOpen"
-            class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
-              <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-            </svg>
-            {{ pdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
-          </button>
-          <a :href="purchaseInvoicesApi.pdfUrl(invoice.id)" target="_blank"
-             class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5">
-            <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-            {{ t('purchase_invoice.pdf.download') }}
-          </a>
-          <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="deletePdf"
-            class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
-            {{ t('purchase_invoice.pdf.delete') }}
-          </button>
-        </div>
-      </div>
-      <!-- Inline PDF preview přes browser PDF viewer. Musí být ?inline=1 (jinak
-           Content-Disposition: attachment a Edge/IE blokují embed). -->
-      <div v-if="pdfPreviewOpen" class="bg-neutral-100">
-        <iframe
-          :src="purchaseInvoicesApi.pdfUrl(invoice.id, true) + '#view=FitH'"
-          class="w-full h-[80vh] border-0"
-          :title="invoice.pdf_original_name || 'PDF'"
-        ></iframe>
-      </div>
-    </div>
-    <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-      <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
-      <PdfDropzone v-if="auth.canWrite('purchase_invoices') && !lockedForMe" :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
-      <p v-else class="text-sm text-neutral-500">{{ t('purchase_invoice.pdf.no_pdf') }}</p>
-    </div>
-
-    <!-- ═══ Poznámky (jen pokud existují) ═══ -->
-    <div v-if="invoice.note_above_items || invoice.note_below_items" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-      <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.fields.note_above_items') }} / {{ t('purchase_invoice.fields.note_below_items') }}</h3>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-        <div v-if="invoice.note_above_items">
-          <div class="text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.fields.note_above_items') }}</div>
-          <p class="whitespace-pre-line">{{ invoice.note_above_items }}</p>
-        </div>
-        <div v-if="invoice.note_below_items">
-          <div class="text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.fields.note_below_items') }}</div>
-          <p class="whitespace-pre-line">{{ invoice.note_below_items }}</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══ Activity log (paralel s /invoices) ═══ -->
-    <div v-if="activity.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-      <button type="button" @click="activityOpen = !activityOpen"
-        class="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-neutral-50 cursor-pointer"
-        :class="activityOpen ? 'border-b border-neutral-200' : ''">
-        <span class="flex items-center gap-2">
-          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.activity') }}</h3>
-          <span class="text-xs text-neutral-400">{{ activity.length }}</span>
-        </span>
-        <svg class="w-4 h-4 text-neutral-400 transition-transform" :class="activityOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      <div v-show="activityOpen">
-        <!-- Desktop: tabulka -->
-        <div class="hidden md:block overflow-x-auto">
-          <table class="w-full text-sm">
-            <tbody class="divide-y divide-neutral-100">
-              <tr v-for="a in activity" :key="a.id" class="hover:bg-neutral-50 align-top">
-                <td class="px-5 py-2 whitespace-nowrap">
-                  <span class="text-xs px-2 py-0.5 rounded font-medium" :class="actionBadgeClass(a.action)">{{ actionShortLabel(a.action) }}</span>
-                </td>
-                <td class="px-3 py-2 text-xs text-neutral-500 whitespace-nowrap">{{ a.user_name || a.user_email || '—' }}</td>
-                <td class="px-3 py-2 font-mono text-xs text-neutral-400 whitespace-nowrap">{{ a.created_at.replace('T', ' ').slice(0, 19) }}</td>
-                <td class="px-3 py-2 text-xs text-neutral-600 break-all whitespace-pre-wrap leading-snug">{{ payloadText(a.payload) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <!-- Mobil: karty (payload na plnou šířku, jinak se zmáčkne do úzkého sloupce) -->
-        <ul class="md:hidden divide-y divide-neutral-100">
-          <li v-for="a in activity" :key="`m-${a.id}`" class="px-4 py-3 space-y-1.5">
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-xs px-2 py-0.5 rounded font-medium" :class="actionBadgeClass(a.action)">{{ actionShortLabel(a.action) }}</span>
-              <span class="font-mono text-xs text-neutral-400 whitespace-nowrap">{{ a.created_at.replace('T', ' ').slice(0, 19) }}</span>
-            </div>
-            <div class="text-xs text-neutral-500">{{ a.user_name || a.user_email || '—' }}</div>
-            <div v-if="a.payload" class="text-xs text-neutral-600 break-all whitespace-pre-wrap leading-snug">{{ payloadText(a.payload) }}</div>
-          </li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- Označit jako uhrazené — evidenčně / pokladnou / zápočtem -->
-    <PaymentMethodModal v-if="markPaidOpen && invoice" doc-type="purchase_invoice"
-      :doc-id="invoice.id" :doc-number="invoice.vendor_invoice_number || `#${invoice.id}`"
-      :amount="Number(invoice.total_with_vat ?? 0)" :partner-name="invoice.vendor_snapshot?.company_name"
-      :busy="acting"
-      @close="markPaidOpen = false" @done="onAltPayDone"
-      @mark-paid="p => transition('paid', p.date)" />
-
-    <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="purchase_invoice" :entity-id="invoice.id" />
-
-    <!-- Přílohy: link/unlink DMS dokumentů (Epic F7) -->
-    <PurchaseDmsDocumentsPanel v-if="invoice" class="mt-4 block" :invoice-id="invoice.id" />
-
-    <StockReceiptModal v-if="stockReceiptOpen && invoice" :purchase-invoice-id="invoice.id"
-      @close="stockReceiptOpen = false" @created="onStockReceiptCreated" />
+    <DocumentSidePreview
+      v-if="pdfSideBySide"
+      :src="pdfInlineUrl"
+      :file-name="invoice.pdf_original_name"
+      @close="pdfPreview.close()"
+    />
   </div>
     <PostingPreviewModal
       v-if="invoice"
