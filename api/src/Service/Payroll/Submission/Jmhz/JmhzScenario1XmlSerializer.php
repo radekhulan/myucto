@@ -36,6 +36,24 @@ final class JmhzScenario1XmlSerializer
         'c' => 'form:pismenoC',
     ];
 
+    /**
+     * Složky vyloučených dob v pořadí sekvence `vylouceneDnyType`.
+     *
+     * Klíč je název elementu i klíč rozpadu z
+     * {@see \MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver::COMPONENTS},
+     * hodnota je ID atributu datového slovníku — v chybové hlášce má být to,
+     * na co se odvolávají kontroly ČSSZ.
+     *
+     * @var array<string, string>
+     */
+    private const ELDP_EXCLUDED_DAYS = [
+        'docasNeschopnost' => '10358',
+        'penezitaPomocMaterstvi' => '10359',
+        'osetrovaniClenaRodiny' => '10360',
+        'otcovska' => '10362',
+        'vyloucenePar16' => '10536',
+    ];
+
     public function serialize(
         JmhzScenario1NormalizedDocument $document,
         JmhzSubmissionEnvelope $envelope,
@@ -1233,6 +1251,7 @@ final class JmhzScenario1XmlSerializer
                     (string) $this->int($section['assessment_base_czk'], '10245'),
                 );
             }
+            $this->appendEldpExcludedDays($dom, $entry, $section, $code);
             $list->appendChild($entry);
         }
         $node->appendChild($list);
@@ -1585,6 +1604,87 @@ final class JmhzScenario1XmlSerializer
         }
 
         return $values;
+    }
+
+    /**
+     * Vyloučené doby ELDP podle § 16 odst. 4 písm. a) zákona č. 155/1995 Sb.
+     *
+     * Blok se zapisuje jen tam, kde sekce nese kód ELDP: bez kódu ho kontrola
+     * ČSSZ (atributy 10357 a 10358–10536 bez 10240) odmítne — vyloučená doba
+     * bez doby pojištění nedává smysl.
+     *
+     * Rozpad na složky se uvádí jen při nenulovém úhrnu. Kontrola 329 říká, že
+     * při 10357 = 0 nesmí být složky vyplněné nenulově, a nulový rozpad nenese
+     * žádnou informaci; kontrola 121 pak při kladném úhrnu vyžaduje
+     * 10357 = 10358 + 10359 + 10360 + 10362 + 10536, což se tady ověří dřív,
+     * než se cokoliv zapíše.
+     *
+     * Chybějící `excluded_days_total` znamená sekci zmrazenou starším
+     * builderem, který vyloučené doby vůbec neodvozoval — takový řez uměl
+     * vzniknout jen bez nepřítomnosti nebo s dovolenou, tedy vždy s nulou.
+     * Blok se pro něj nezapíše (element je v XSD nepovinný), místo aby se
+     * doplnila nula, kterou zdroj netvrdí.
+     *
+     * Odečítané doby (10375, 10462–10469) se nezapisují vůbec: týkají se dob
+     * po dosažení důchodového věku, který aplikace nezná, a builder je proto
+     * nechává neuvedené.
+     *
+     * @param array<string,mixed> $section
+     */
+    private function appendEldpExcludedDays(
+        DOMDocument $dom,
+        DOMElement $entry,
+        array $section,
+        mixed $code,
+    ): void {
+        $total = $section['excluded_days_total'] ?? null;
+        $components = $section['excluded_days'] ?? null;
+        if ($total === null && ($components === null || $components === [])) {
+            return;
+        }
+        if (!is_string($code) || $code === '') {
+            $this->invalid(
+                'jmhz_xml_eldp_excluded_days_without_code',
+                'Vyloučené doby nelze vykázat v ELDP sekci bez kódu ELDP.',
+            );
+        }
+        $total = $this->int($total, '10357');
+        if (!is_array($components) || array_is_list($components)) {
+            $this->unresolved('10357');
+        }
+        $sum = 0;
+        $values = [];
+        foreach (self::ELDP_EXCLUDED_DAYS as $key => $attributeId) {
+            $values[$key] = $this->int($components[$key] ?? null, $attributeId);
+            $sum += $values[$key];
+        }
+        if ($sum !== $total || count($components) !== count($values)) {
+            $this->invalid(
+                'jmhz_xml_eldp_excluded_days_sum_mismatch',
+                'Úhrn vyloučených dob neodpovídá rozpadu podle § 16 odst. 4'
+                    . ' zákona č. 155/1995 Sb.',
+            );
+        }
+        $block = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vylouceneDny');
+        $this->text(
+            $dom,
+            $block,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:vylouceneDobyCelkem',
+            (string) $total,
+        );
+        if ($total > 0) {
+            foreach ($values as $key => $value) {
+                $this->text(
+                    $dom,
+                    $block,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:' . $key,
+                    (string) $value,
+                );
+            }
+        }
+        $entry->appendChild($block);
     }
 
     private function node(

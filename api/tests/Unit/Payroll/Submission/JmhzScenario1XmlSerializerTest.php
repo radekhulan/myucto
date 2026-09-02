@@ -87,6 +87,104 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertStringContainsString('<form:vymerovaciZaklad>1000</form:vymerovaciZaklad>', $result['xml']);
     }
 
+    /**
+     * Vyloučené doby § 16 odst. 4 písm. a) zákona č. 155/1995 Sb.
+     *
+     * Nemoc dobu pojištění nepřerušuje — 10356 zůstává celý měsíc — a do
+     * evidenčního listu jde jako vyloučená doba. Kdyby v hlášení chyběla,
+     * dvanáct dnů bez příjmu by ČSSZ započetla do osobního vyměřovacího
+     * základu jako vydělané nula a snížila by tím důchod.
+     */
+    public function testSicknessIsReportedAsEldpExcludedDays(): void
+    {
+        $payload = $this->payload();
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        $section['excluded_days'] = [
+            'docasNeschopnost' => 12,
+            'penezitaPomocMaterstvi' => 0,
+            'osetrovaniClenaRodiny' => 0,
+            'otcovska' => 0,
+            'vyloucenePar16' => 0,
+        ];
+        $section['excluded_days_total'] = 12;
+        $section['deducted_days_total'] = null;
+        unset($section);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString('<form:pocetDnu>31</form:pocetDnu>', $result['xml']);
+        self::assertStringContainsString(
+            '<form:vylouceneDny><form:vylouceneDobyCelkem>12</form:vylouceneDobyCelkem>'
+                . '<form:docasNeschopnost>12</form:docasNeschopnost>'
+                . '<form:penezitaPomocMaterstvi>0</form:penezitaPomocMaterstvi>'
+                . '<form:osetrovaniClenaRodiny>0</form:osetrovaniClenaRodiny>'
+                . '<form:otcovska>0</form:otcovska>'
+                . '<form:vyloucenePar16>0</form:vyloucenePar16></form:vylouceneDny>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+        // Odečítané doby po důchodovém věku modul neodvozuje, a proto je
+        // neuvádí — nula by tvrdila víc, než čím je doložená.
+        self::assertStringNotContainsString('<form:odecitaneDny>', $result['xml']);
+    }
+
+    /**
+     * Nulový úhrn se uvádí bez rozpadu: kontrola 329 ČSSZ zakazuje vyplněné
+     * složky při 10357 = 0 a nulový rozpad nenese žádnou informaci.
+     */
+    public function testZeroExcludedDaysAreReportedWithoutBreakdown(): void
+    {
+        $payload = $this->payload();
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        $section['excluded_days'] = [
+            'docasNeschopnost' => 0,
+            'penezitaPomocMaterstvi' => 0,
+            'osetrovaniClenaRodiny' => 0,
+            'otcovska' => 0,
+            'vyloucenePar16' => 0,
+        ];
+        $section['excluded_days_total'] = 0;
+        unset($section);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:vylouceneDny><form:vylouceneDobyCelkem>0</form:vylouceneDobyCelkem></form:vylouceneDny>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+        self::assertStringNotContainsString('<form:docasNeschopnost>', $result['xml']);
+    }
+
+    public function testExcludedDaysSumMismatchBlocksSubmission(): void
+    {
+        $payload = $this->payload();
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        $section['excluded_days'] = [
+            'docasNeschopnost' => 12,
+            'penezitaPomocMaterstvi' => 0,
+            'osetrovaniClenaRodiny' => 0,
+            'otcovska' => 0,
+            'vyloucenePar16' => 0,
+        ];
+        $section['excluded_days_total'] = 11;
+        unset($section);
+
+        try {
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            );
+            self::fail('Rozporný úhrn vyloučených dob musel podání zablokovat.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_xml_eldp_excluded_days_sum_mismatch', $exception->validationCode);
+        }
+    }
+
     public function testContentCorrectionHasNoLocalBlockingControlCoverageGap(): void
     {
         $result = (new JmhzScenario1XmlValidator())->dryRunCorrection(

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEldpEvidenceBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEldpEvidenceException;
 use PHPUnit\Framework\TestCase;
@@ -24,8 +25,18 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertSame('1++', $snapshot->payload['eldp_sections'][0]['code']);
         self::assertSame(31, $snapshot->payload['eldp_sections'][0]['insurance_days']);
         self::assertSame(10_000, $snapshot->payload['eldp_sections'][0]['assessment_base_czk']);
-        self::assertNull($snapshot->payload['eldp_sections'][0]['excluded_days']);
-        self::assertNull($snapshot->payload['eldp_sections'][0]['deducted_days']);
+        self::assertSame(
+            [
+                'docasNeschopnost' => 0,
+                'penezitaPomocMaterstvi' => 0,
+                'osetrovaniClenaRodiny' => 0,
+                'otcovska' => 0,
+                'vyloucenePar16' => 0,
+            ],
+            $snapshot->payload['eldp_sections'][0]['excluded_days'],
+        );
+        self::assertSame(0, $snapshot->payload['eldp_sections'][0]['excluded_days_total']);
+        self::assertNull($snapshot->payload['eldp_sections'][0]['deducted_days_total']);
         self::assertSame(
             'b78f8fef6e2b4c54b33d1ce5116c89b1ac229458c38e5d5dc482fb955f0d476f',
             $snapshot->payload['specification']['eldp_code_row_sha256'],
@@ -297,10 +308,131 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
             $builder->deriveOrdinaryConfirmation(7, 101, $source),
         );
 
-        self::assertNull($snapshot->payload['eldp_sections'][0]['excluded_days']);
-        self::assertNull($snapshot->payload['eldp_sections'][0]['deducted_days']);
+        self::assertSame(0, $snapshot->payload['eldp_sections'][0]['excluded_days_total']);
+        self::assertSame(
+            0,
+            $snapshot->payload['eldp_sections'][0]['excluded_days']['docasNeschopnost'],
+        );
+        self::assertSame([], $snapshot->payload['eldp_sections'][0]['excluded_days_provenance']);
+        self::assertNull($snapshot->payload['eldp_sections'][0]['deducted_days_total']);
         self::assertFalse($snapshot->payload['confirmation']['in03_active']);
         self::assertFalse($snapshot->payload['confirmation']['in04_active']);
+    }
+
+    public function testDerivesSicknessAsExcludedDaysAgainstFrozenWorkSummary(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->sicknessSource();
+
+        $snapshot = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        );
+        $section = $snapshot->payload['eldp_sections'][0];
+
+        // Doba pojištění nemocí nepřerušená: 10356 zůstává celý měsíc a nemoc
+        // se vykáže jen jako vyloučená doba podle § 16 odst. 4 písm. a).
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame('1++', $section['code']);
+        self::assertSame(12, $section['excluded_days_total']);
+        self::assertSame(
+            [
+                'docasNeschopnost' => 12,
+                'penezitaPomocMaterstvi' => 0,
+                'osetrovaniClenaRodiny' => 0,
+                'otcovska' => 0,
+                'vyloucenePar16' => 0,
+            ],
+            $section['excluded_days'],
+        );
+        self::assertNull($section['deducted_days_total']);
+        self::assertSame(
+            [[
+                'absence_id' => 903,
+                'absence_type' => 'dpn',
+                'attribute' => 'docasNeschopnost',
+                'absence_from' => '2026-07-07',
+                'absence_to' => '2026-07-18',
+                'counted_from' => '2026-07-07',
+                'counted_to' => '2026-07-18',
+                'days' => 12,
+            ]],
+            $section['excluded_days_provenance'],
+        );
+    }
+
+    public function testMonthlyAndAnnualEldpDeriveTheSameSicknessDays(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->sicknessSource();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+
+        $snapshot = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        );
+        $annual = (new EldpExcludedPeriodDeriver())->derive(
+            $input['people'][0]['employments'][0]['absences'],
+            '2026-07-01',
+            '2026-07-31',
+            '2026-07',
+        );
+
+        self::assertSame(
+            $annual['components'],
+            $snapshot->payload['eldp_sections'][0]['excluded_days'],
+        );
+        self::assertSame(
+            $annual['total'],
+            $snapshot->payload['eldp_sections'][0]['excluded_days_total'],
+        );
+    }
+
+    public function testKeepsSicknessFailClosedWhenWorkSummaryReportsNoSickHours(): void
+    {
+        $source = $this->sicknessSource();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $summary = &$input['people'][0]['employments'][0]['time_month']['jmhz_work_summary'];
+        $summary['values']['dpn_with_employer_compensation_millihours'] = null;
+        unset($summary);
+        $source = $this->withInput($source, $input);
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('nedokládá žádné neodpracované hodiny');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
+    public function testKeepsSicknessFailClosedWhenUnworkedTotalsDisagree(): void
+    {
+        $source = $this->sicknessSource();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']
+            ['values']['unworked_paid_millihours'] = 0;
+        $source = $this->withInput($source, $input);
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('Úhrny neodpracovaných hodin');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
+    public function testKeepsMaternityLeaveFailClosedEvenThoughItHasAnExcludedAttribute(): void
+    {
+        $source = $this->sicknessSource();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['absences'][0]['absence_type'] = 'ppm';
+        $source = $this->withInput($source, $input);
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('dovolenou, nemoc, karanténu a ošetřovné');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
     }
 
     public function testKeepsUnpaidLeaveFailClosedWithoutEldpInteractionEvidence(): void
@@ -317,7 +449,7 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $source = $this->withInput($source, $input);
 
         $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('placenou dovolenou');
+        $this->expectExceptionMessage('dovolenou, nemoc, karanténu a ošetřovné');
         (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
     }
 
@@ -358,6 +490,37 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $this->expectException(JmhzEldpEvidenceException::class);
         $this->expectExceptionMessage('kladné celé číslo');
         (new JmhzEldpEvidenceBuilder())->build(7, 101, $source, $confirmation);
+    }
+
+    /**
+     * Měsíc s dočasnou pracovní neschopností 7.–18. 7. 2026.
+     *
+     * Dvanáct kalendářních dnů nemoci proti čtyřiceti neodpracovaným hodinám
+     * v pracovním souhrnu — hodiny drží směny, dny kalendář, a ordinary řez
+     * musí obojí spárovat.
+     *
+     * @return array<string,mixed>
+     */
+    private function sicknessSource(): array
+    {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $entry = &$input['people'][0]['employments'][0];
+        $entry['absences'] = [[
+            'id' => 903,
+            'absence_type' => 'dpn',
+            'date_from' => '2026-07-07',
+            'date_to' => '2026-07-18',
+        ]];
+        $summary = &$entry['time_month']['jmhz_work_summary'];
+        $summary['interactions']['IN07'] = true;
+        $summary['values']['unworked_total_millihours'] = 40_000;
+        $summary['values']['unworked_paid_millihours'] = 40_000;
+        $summary['values']['dpn_with_employer_compensation_millihours'] = 40_000;
+        unset($summary, $entry);
+
+        return $this->withInput($source, $input);
     }
 
     /**

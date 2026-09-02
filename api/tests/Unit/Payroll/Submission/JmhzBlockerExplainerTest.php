@@ -67,7 +67,10 @@ final class JmhzBlockerExplainerTest extends TestCase
             ),
         ]);
 
-        self::assertStringContainsString('Měsíc obsahuje absenci', $message);
+        self::assertStringContainsString('Měsíc obsahuje nepřítomnost', $message);
+        // Účetní se má z hlášky dozvědět, co se odbaví samo, aby nehledala
+        // chybu tam, kde je jen nepodporovaný druh nepřítomnosti.
+        self::assertStringContainsString('dovolená, nemoc, karanténa a ošetřovné', $message);
         self::assertStringContainsString('Mzdy → Pracovní doba', $message);
         self::assertStringContainsString('zpracujte jej individuálně', $message);
         self::assertStringNotContainsString('10228', $message);
