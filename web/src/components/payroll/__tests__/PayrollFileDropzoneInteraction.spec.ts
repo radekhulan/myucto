@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import PayrollFileDropzone from './PayrollFileDropzone.vue'
+
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
+  useI18n: () => ({
+    t: (key: string, params?: Record<string, unknown>) =>
+      params ? `${key}:${JSON.stringify(params)}` : key,
+  }),
+}))
+
+import PayrollFileDropzone from '@/components/payroll/PayrollFileDropzone.vue'
 
 function mountDropzone(maxSizeBytes = 5_000_000) {
   return mount(PayrollFileDropzone, {
