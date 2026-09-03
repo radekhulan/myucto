@@ -360,11 +360,25 @@ final class PohodaXmlParser
         $taxDate   = $this->text($xpath, 'inv:dateTax', $hdr) ?: null;
         $dueDate   = $this->text($xpath, 'inv:dateDue', $hdr) ?: $issueDate;
 
-        // Reverse charge (přenesená daň. povinnost) = Pohoda <inv:classificationVAT> kód PDP
-        // (Pohoda: PN*, náš export: PNAR). <inv:isExecuted> je posting příznak („zlikvidováno"),
-        // NE reverse charge (issue #41). textContent zahrne i vnořené <typ:ids>.
-        $vatClass = strtoupper(trim($this->text($xpath, 'inv:classificationVAT', $hdr)));
-        $reverseCharge = str_starts_with($vatClass, 'PN');
+        // Režim přenesené daňové povinnosti / samovyměření podle klasifikace DPH.
+        //
+        // Čte se VÝHRADNĚ `typ:ids`, ne textContent celého elementu: ten obsahuje i vnořené
+        // `<typ:id>`, takže z „PDslRegEU" vyjde „216PDslRegEU" a jakékoli porovnání prefixu
+        // minulo. `<inv:isExecuted>` je posting příznak („zlikvidováno"), NE reverse charge
+        // (issue #41).
+        //
+        // Kódy se porovnávají PROTI SEZNAMU, ne podle prefixu. Prefix `PN` znamená
+        // v Pohodě „Přijaté Nezdanitelné plnění" — běžný nákup od neplátce, kterých je
+        // v reálném exportu většina — a označit je za přenesenou povinnost by vyrobilo
+        // samovyměření k plnění, u kterého žádné není. Samovyměření zakládá teprve původ
+        // plnění (služba/zboží z EU, ze třetí země, dovoz) nebo tuzemský § 92a.
+        $vatClass = strtoupper(trim($this->text($xpath, 'inv:classificationVAT/typ:ids', $hdr)));
+        $reverseCharge = $vatClass !== '' && (
+            str_contains($vatClass, 'REGEU')     // služba/zboží z jiného členského státu
+            || str_contains($vatClass, '3ZEME')  // plnění ze třetí země
+            || str_contains($vatClass, 'DOVOZ')  // dovoz zboží
+            || str_contains($vatClass, 'PDP')    // tuzemský § 92a (Pohoda: *PDP*)
+        );
         $noteAbove = $this->text($xpath, 'inv:text', $hdr) ?: null;
         // Pohoda může mít inv:numberOrder (číslo objednávky odběratele) nebo inv:contract/typ:ids
         $projectNumber = $this->text($xpath, 'inv:numberOrder', $hdr) ?: null;
@@ -916,7 +930,15 @@ final class PohodaXmlParser
         }
 
         if ($lines === []) {
-            return [];
+            // Cizoměnový doklad bez rozpisu položek. Pohoda píše rozpad podle sazeb JEN do
+            // `homeCurrency`; `foreignCurrency` nese pouhý součet (`typ:priceSum`), takže se
+            // tady nenajde ani jedna přihrádka a doklad by vznikl NULOVÝ. V testovaném
+            // exportu se to týkalo všech přijatých služeb z EU (licence, reklama) —
+            // zmizel náklad i podklad pro samovyměření.
+            //
+            // Dopočte se z korunové rekapitulace a přepočte kurzem dokladu. Poslední řádek
+            // se dorovná na `priceSum`, aby se součet dokladu trefil na haléř i po dělení.
+            return $this->itemsFromHomeCurrency($xpath, $invEl, $description);
         }
 
         // Zaokrouhlení si svoje znaménko NESE (umí doklad snížit i zvýšit), ale musí být
@@ -938,6 +960,92 @@ final class PohodaXmlParser
                 'unit_price_with_vat'    => null,
                 'vat_rate'               => $rate,
                 'vat_rate_source'        => 'summary_recap',
+                'vat_rate_enum'          => null,
+                'vat_rate_level'         => null,
+                'prices_included_vat'    => false,
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Položky cizoměnového dokladu dopočtené z KORUNOVÉ rekapitulace.
+     *
+     * Poslední záchrana pro doklad, který nemá rozpis položek a jehož `foreignCurrency`
+     * blok nese jen součet. Korunový rozpad se přepočte kurzem dokladu
+     * (`typ:rate` / `typ:amount`) a poslední řádek se dorovná na `typ:priceSum`, takže
+     * doklad sedí na haléř bez ohledu na zaokrouhlení jednotlivých řádků.
+     *
+     * Vrací `[]`, když kurz ani součet nejsou k dispozici — dopočet naslepo by vyrobil
+     * doklad s vymyšlenou částkou, což je horší než doklad odmítnutý s hláškou.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function itemsFromHomeCurrency(\DOMXPath $xpath, \DOMElement $invEl, string $description): array
+    {
+        $home = $xpath->query('inv:invoiceSummary/inv:homeCurrency', $invEl)->item(0);
+        $foreign = $xpath->query('inv:invoiceSummary/inv:foreignCurrency', $invEl)->item(0);
+        if (!$home instanceof \DOMElement || !$foreign instanceof \DOMElement) {
+            return [];
+        }
+
+        $rate = (float) $this->text($xpath, 'typ:rate', $foreign);
+        $amount = (float) ($this->text($xpath, 'typ:amount', $foreign) ?: '1');
+        $priceSum = $this->text($xpath, 'typ:priceSum', $foreign);
+        if ($rate <= 0.0 || $amount <= 0.0 || !is_numeric($priceSum)) {
+            return [];
+        }
+        $perUnit = $rate / $amount;
+        $orientation = $this->summaryOrientation($xpath, $home);
+
+        /** @var list<array{0:float,1:float}> $lines [základ v měně dokladu, sazba] */
+        $lines = [];
+        $none = $this->text($xpath, 'typ:priceNone', $home);
+        if (is_numeric($none) && abs((float) $none) > 0.0) {
+            $lines[] = [round(((float) $none * $orientation) / $perUnit, 2), 0.0];
+        }
+        foreach (self::RECAP_BUCKETS as $suffix => $defaultRate) {
+            $base = $this->text($xpath, 'typ:price' . $suffix, $home);
+            if (!is_numeric($base) || abs((float) $base) <= 0.0) {
+                continue;
+            }
+            $vatEl = $xpath->query('typ:price' . $suffix . 'VAT', $home)->item(0);
+            $stated = $vatEl instanceof \DOMElement && $vatEl->hasAttribute('rate')
+                ? (float) str_replace(',', '.', $vatEl->getAttribute('rate'))
+                : $defaultRate;
+            if ($stated === null) {
+                // Přihrádka s částkou, ale bez určitelné sazby — stejné pravidlo jako
+                // u korunového dokladu: radši nic než vymyšlená sazba.
+                return [];
+            }
+            $lines[] = [round(((float) $base * $orientation) / $perUnit, 2), (float) $stated];
+        }
+        if ($lines === []) {
+            return [];
+        }
+
+        // Dorovnání na součet dokladu: dělení kurzem po řádcích se od `priceSum` liší
+        // o haléře a doklad by proti originálu neseděl.
+        $target = round((float) $priceSum * $orientation, 2);
+        $sum = 0.0;
+        foreach ($lines as [$base, $_]) $sum += $base;
+        $diff = round($target - $sum, 2);
+        if (abs($diff) > 0.0 && abs($diff) < 1.0) {
+            $lastIndex = count($lines) - 1;
+            $lines[$lastIndex][0] = round($lines[$lastIndex][0] + $diff, 2);
+        }
+
+        $items = [];
+        foreach ($lines as [$base, $vatRate]) {
+            $items[] = [
+                'description'            => $description,
+                'quantity'               => 1.0,
+                'unit'                   => 'ks',
+                'unit_price_without_vat' => $base,
+                'unit_price_with_vat'    => null,
+                'vat_rate'               => $vatRate,
+                'vat_rate_source'        => 'summary_recap_home',
                 'vat_rate_enum'          => null,
                 'vat_rate_level'         => null,
                 'prices_included_vat'    => false,
