@@ -15,7 +15,7 @@ import {
 import { formatMoney, formatDate, formatMonth, formatNumber, taxDateClass } from '@/composables/useFormat'
 import { useRowLink } from '@/composables/useRowLink'
 import { useToast } from '@/composables/useToast'
-import { apiErrorMessage } from '@/api/errors'
+import { ACCOUNTING_PERIOD_MISSING_CODES, accountingPeriodRoute, apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -712,7 +712,19 @@ async function bulkPost() {
     selectedIds.value = []
     if (r.failed.length) {
       const detail = r.failed.map(f => `#${f.id}: ${t(postingErrorI18nKey(f.error_code))}`).join('\n')
-      toast.warning(t('purchase_invoice.bulk.post_partial', { ok: r.posted.length, err: r.failed.length }) + '\n' + detail)
+      // Viz vydané faktury: chybějící období se řeší jinde než na seznamu dokladů,
+      // takže hláška musí nést i cestu tam.
+      const missingPeriod = r.failed.some(f =>
+        (ACCOUNTING_PERIOD_MISSING_CODES as readonly string[]).includes(f.error_code))
+      toast.warning(
+        t('purchase_invoice.bulk.post_partial', { ok: r.posted.length, err: r.failed.length }) + '\n' + detail,
+        missingPeriod
+          ? {
+              label: t('accounting.posting_errors.open_periods_action'),
+              handler: () => void router.push(accountingPeriodRoute()),
+            }
+          : undefined,
+      )
     } else {
       toast.success(t('purchase_invoice.bulk.post_success', { n: r.posted.length }))
     }

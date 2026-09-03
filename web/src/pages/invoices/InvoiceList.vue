@@ -31,6 +31,7 @@ import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
+import { ACCOUNTING_PERIOD_MISSING_CODES, accountingPeriodRoute } from '@/api/errors'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
 import { appIsoDate } from '@/utils/date'
 
@@ -755,7 +756,19 @@ async function bulkPost() {
     selectedIds.value = []
     if (r.failed.length) {
       const detail = r.failed.map(f => `#${f.id}: ${t(postingErrorI18nKey(f.error_code))}`).join('\n')
-      toast.warning(t('invoice.bulk_post_partial', { ok: r.posted.length, err: r.failed.length }) + '\n' + detail)
+      // Propadlo-li to na chybějící účetní období, přidej proklik na Uzávěrku —
+      // jinak uživatel ví, co se stalo, ale ne kam jít (nejčastěji import historie).
+      const missingPeriod = r.failed.some(f =>
+        (ACCOUNTING_PERIOD_MISSING_CODES as readonly string[]).includes(f.error_code))
+      toast.warning(
+        t('invoice.bulk_post_partial', { ok: r.posted.length, err: r.failed.length }) + '\n' + detail,
+        missingPeriod
+          ? {
+              label: t('accounting.posting_errors.open_periods_action'),
+              handler: () => void router.push(accountingPeriodRoute()),
+            }
+          : undefined,
+      )
     } else {
       toast.success(t('invoice.bulk_post_success', { n: r.posted.length }))
     }

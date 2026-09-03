@@ -13,6 +13,7 @@ use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -91,10 +92,20 @@ final class JournalTransferAction
         $description = $this->nullableString($body['description'] ?? null)
             ?? "Převod mezi účty {$accountFrom} → {$accountTo} (261)";
 
-        // Řada `transfer` se čísluje podle roku odchozí nohy (R14).
-        $period = $this->periods->findForDate($supplierId, $dateOut);
+        // Řada `transfer` se čísluje podle roku odchozí nohy (R14). Chybí-li období,
+        // doplní ho tentýž provisioner jako u účtování dokladu — jinak by převod končil
+        // na `no_accounting_period` DŘÍV, než se vůbec dostane k PostingService, který
+        // by si období otevřel sám. Uzavřeného období se to nedotkne (vrátí ho beze změny).
+        $period = (new AccountingPeriodProvisioner($this->db, $this->periods, $this->logger))
+            ->ensureOpenPeriodForDate(
+                $supplierId,
+                $dateOut,
+                AccountingPeriodProvisioner::REASON_POSTING,
+                $this->userId($request),
+            );
         if ($period === null) {
-            return Json::error($response, 'no_accounting_period', "Pro datum {$dateOut} neexistuje účetní období.", 422);
+            return Json::error($response, 'no_accounting_period', "Pro datum {$dateOut} neexistuje účetní období.", 422,
+                ['fiscal_year' => (int) substr($dateOut, 0, 4)]);
         }
         $fiscalYear = (int) $period['fiscal_year'];
 

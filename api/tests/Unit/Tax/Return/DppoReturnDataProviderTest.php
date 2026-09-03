@@ -57,7 +57,7 @@ final class DppoReturnDataProviderTest extends TestCase
 
     public function testDisposalBridgeDoesNotDoubleTaxGiftOrDamageAndAdjustsSaleBothWays(): void
     {
-        $this->pdo->exec("INSERT INTO accounting_periods VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)");
+        $this->pdo->exec("INSERT INTO accounting_periods (id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at, row_version) VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1)");
         $this->pdo->exec("INSERT INTO chart_of_accounts VALUES
             (1,'543','expense','non_deductible','Dary'),(2,'549','expense','non_deductible','Manka a škody'),
             (3,'541','expense','deductible','ZC prodaného majetku'),(4,'551','expense','deductible','Odpisy'),(5,'082','asset','deductible','Oprávky')");
@@ -92,9 +92,9 @@ final class DppoReturnDataProviderTest extends TestCase
      */
     public function testProfitBeforeTaxIsIsolatedToTheSelectedFiscalYear(): void
     {
-        $this->pdo->exec("INSERT INTO accounting_periods VALUES
-            (1,1,2024,'2024-01-01','2024-12-31','open',NULL,'2024-01-01',1,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),
-            (2,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)");
+        $this->pdo->exec("INSERT INTO accounting_periods (id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at, row_version) VALUES
+            (1,1,2024,'2024-01-01','2024-12-31','open',NULL,'2024-01-01',1),
+            (2,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1)");
         $this->pdo->exec("INSERT INTO chart_of_accounts VALUES
             (10,'602','revenue','deductible','Tržby'),(11,'501','expense','deductible','Spotřeba'),(12,'591','expense','non_deductible','Daň z příjmů')");
 
@@ -123,7 +123,7 @@ final class DppoReturnDataProviderTest extends TestCase
      */
     public function testSuggestionsSurfaceLikelyAddbacksAndDonationDeduction(): void
     {
-        $this->pdo->exec("INSERT INTO accounting_periods VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)");
+        $this->pdo->exec("INSERT INTO accounting_periods (id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at, row_version) VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1)");
         $this->pdo->exec("INSERT INTO chart_of_accounts VALUES
             (20,'513','expense','deductible','Reprezentace'),
             (21,'543','expense','non_deductible','Dary'),
@@ -170,7 +170,7 @@ final class DppoReturnDataProviderTest extends TestCase
     public function testStockClosingSlotsCountIntoVhWhileCloseBooksIsExcluded(): void
     {
         $periodId = 1;
-        $this->pdo->exec("INSERT INTO accounting_periods VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)");
+        $this->pdo->exec("INSERT INTO accounting_periods (id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at, row_version) VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1)");
         $this->pdo->exec("INSERT INTO chart_of_accounts VALUES
             (40,'602','revenue','deductible','Tržby'),
             (41,'501','expense','deductible','Spotřeba materiálu'),
@@ -209,7 +209,7 @@ final class DppoReturnDataProviderTest extends TestCase
     /** Bez ClosingService (unit test / autowire fallback) je projekce prázdná: vh_projected == vh_posted. */
     public function testProjectionIsEmptyWithoutClosingService(): void
     {
-        $this->pdo->exec("INSERT INTO accounting_periods VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)");
+        $this->pdo->exec("INSERT INTO accounting_periods (id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at, row_version) VALUES (1,1,2025,'2025-01-01','2025-12-31','open',NULL,'2025-01-01',1)");
         $this->pdo->exec("INSERT INTO chart_of_accounts VALUES (30,'602','revenue','deductible','Tržby')");
         $this->plEntry(1, '2025-06-30', 'invoice', 30, 'credit', 7000);
 
@@ -248,7 +248,7 @@ final class DppoReturnDataProviderTest extends TestCase
 
     private function createSchema(): void
     {
-        $this->pdo->exec('CREATE TABLE accounting_periods (id INTEGER, supplier_id INTEGER, fiscal_year INTEGER, starts_on TEXT, ends_on TEXT, status TEXT, closed_at TEXT, created_at TEXT, row_version INTEGER, closed_by INTEGER, approved_at TEXT, approved_by INTEGER, reviewed_at TEXT, reviewed_by INTEGER, approval_body TEXT, approval_decision_ref TEXT, approval_document_hash TEXT)');
+        $this->pdo->exec('CREATE TABLE accounting_periods (id INTEGER, supplier_id INTEGER, fiscal_year INTEGER, starts_on TEXT, ends_on TEXT, status TEXT, closed_at TEXT, created_at TEXT, row_version INTEGER, closed_by INTEGER, approved_at TEXT, approved_by INTEGER, reviewed_at TEXT, reviewed_by INTEGER, approval_body TEXT, approval_decision_ref TEXT, approval_document_hash TEXT, created_reason TEXT)');
         $this->pdo->exec('CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT, tax_deductibility TEXT, name TEXT)');
         $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER)');
         $this->pdo->exec('CREATE TABLE journal_entry_lines (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_id INTEGER, account_id INTEGER, side TEXT, amount REAL)');

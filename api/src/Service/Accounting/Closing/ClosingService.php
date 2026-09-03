@@ -4898,12 +4898,13 @@ final class ClosingService
             return $next;
         }
 
-        $nextStart = (new \DateTimeImmutable($endsOn))->modify('+1 day');
-        $nextEnd = $nextStart
-            ->add(new \DateInterval('P1Y'))
-            ->sub(new \DateInterval('P1D'));
-        $startStr = $nextStart->format('Y-m-d');
-        $endStr = $nextEnd->format('Y-m-d');
+        // Hranice počítá repozitář — týž výpočet potřebuje i automatické otevření
+        // navazujícího období na přelomu roku (AccountingPeriodRepository::
+        // AccountingPeriodProvisioner). Dva opisy „ends_on + 1 den, délka rok" by se
+        // rozešly na první výjimce (přestupný rok, hospodářský rok).
+        $bounds = AccountingPeriodRepository::nextPeriodBounds($endsOn);
+        $startStr = $bounds['starts_on'];
+        $endStr = $bounds['ends_on'];
 
         // Existuje pozdější období, které nenavazuje přesně → díra v řadě (R5).
         $stmt = $this->db->pdo()->prepare(
@@ -4921,7 +4922,7 @@ final class ClosingService
             throw new ClosingException('period_overlap', 'Nové období ' . $startStr . '–' . $endStr . ' se překrývá s existujícím.');
         }
 
-        $fiscalYear = (int) $nextStart->format('Y');
+        $fiscalYear = $bounds['fiscal_year'];
         $newId = $this->periods->create($supplierId, $fiscalYear, $startStr, $endStr);
         $created = $this->periods->findById($supplierId, $newId);
         if ($created === null) {

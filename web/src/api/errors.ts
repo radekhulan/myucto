@@ -51,6 +51,39 @@ export function yearClosedTarget(err: any):
     : { name: 'payroll-dashboard', hash: '#payroll-year-close' }
 }
 
+/**
+ * Chybějící účetní období — kam se jde založit.
+ *
+ * Hláška uměla říct jen „pro datum X neexistuje účetní období", případně poslat
+ * do sekce menu, která se tak nejmenuje („Účetnictví → Období"). Skutečné místo
+ * je položka menu **Uzávěrka** (routa `/accounting/periods`) — tam to ale nikdo
+ * nehledá, protože „uzávěrka" zní jako konec roku, ne jako jeho otevření.
+ *
+ * Vrací cíl prokliku s předvyplněným rokem (server ho posílá v `error.fiscal_year`,
+ * viz `PostingService::noPeriodException`); odpověď bez roku proklik nezruší, jen
+ * nechá stránku na jejím výchozím stavu. `period_missing` je táž věc hlášená
+ * odpisy majetku u hospodářského roku.
+ */
+export const ACCOUNTING_PERIOD_MISSING_CODES = ['no_accounting_period', 'period_missing'] as const
+
+/** Cíl prokliku na Uzávěrku, volitelně s předvyplněným rokem k založení. */
+export function accountingPeriodRoute(fiscalYear?: number | null):
+  | { name: 'accounting-periods', query: { fiscal_year: string } }
+  | { name: 'accounting-periods' } {
+  return Number.isInteger(fiscalYear)
+    ? { name: 'accounting-periods', query: { fiscal_year: String(fiscalYear) } }
+    : { name: 'accounting-periods' }
+}
+
+export function accountingPeriodTarget(err: any):
+  | { name: 'accounting-periods', query: { fiscal_year: string } }
+  | { name: 'accounting-periods' }
+  | null {
+  const code = apiErrorCode(err)
+  if (!(ACCOUNTING_PERIOD_MISSING_CODES as readonly string[]).includes(code)) return null
+  return accountingPeriodRoute(err?.response?.data?.error?.fiscal_year)
+}
+
 export function apiErrorMessage(err: any, fallback = 'Operace selhala'): string {
   const data = err?.response?.data?.error
   if (!data) return err?.message || fallback

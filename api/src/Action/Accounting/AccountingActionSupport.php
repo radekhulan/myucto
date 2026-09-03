@@ -131,7 +131,11 @@ trait AccountingActionSupport
             ]);
         }
         if ($e instanceof PostingException) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            // `context` je strojová příloha chyby (viz docblock PostingException) —
+            // rozhraní z ní staví proklik na místo nápravy (např. `fiscal_year`
+            // u `no_accounting_period` → Uzávěrka s tím rokem). Doteď se zahazovala,
+            // takže smluvená příloha nikdy nedorazila na klienta.
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
         }
         throw $e;
     }

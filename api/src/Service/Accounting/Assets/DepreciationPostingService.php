@@ -79,10 +79,16 @@ final class DepreciationPostingService
         } else {
             // Hospodářský rok bez založeného období — nezakládat omylem kalendářní
             // období přes ensureOpenPeriodFor (F4). Uživatel založí období nejdřív.
+            // Navigace v hlášce musí sedět na SKUTEČNOU položku menu: „Účetnictví →
+            // Uzávěrka" (routa /accounting/periods). Dřív tu stálo „Účetnictví →
+            // Období", což je sekce, která v rozhraní neexistuje — uživatel ji hledal
+            // marně. `fiscal_year` v kontextu chyby staví proklik na FE.
             throw new PostingException(
                 'period_missing',
                 'Účetní období ' . $fiscalYear . ' (hospodářský rok) není založeno — '
-                . 'nejdřív ho vytvořte v sekci Účetnictví → Období.',
+                . 'nejdřív ho vytvořte v Účetnictví → Uzávěrka.',
+                422,
+                ['fiscal_year' => $fiscalYear],
             );
         }
 

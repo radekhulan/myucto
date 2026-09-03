@@ -21,18 +21,22 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
+import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
-import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
+import { accountingApi } from '@/api/accounting'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { useSidePreview } from '@/composables/useSidePreview'
 import { appIsoDate } from '@/utils/date'
 
 const { t, te, locale } = useI18n()
 const toast = useToast()
+// Chybějící účetní období = nejčastější důvod, proč „Zaúčtovat" neprojde (import
+// historie). Toast k němu nese proklik na Uzávěrku, ne jen konstatování.
+const postingErrorToast = useAccountingPeriodToast()
 
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.isSuperadmin)
@@ -1420,7 +1424,7 @@ async function postToJournal() {
       toast.success(t('common.post_document_success'))
     }
   } catch (e: any) {
-    toast.error(t(postingErrorI18nKey(e?.response?.data?.error?.code)))
+    postingErrorToast(e)
   } finally {
     busy.value = null
   }

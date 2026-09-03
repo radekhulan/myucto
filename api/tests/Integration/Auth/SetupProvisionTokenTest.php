@@ -276,6 +276,8 @@ final class SetupProvisionTokenTest extends TestCase
             $this->container->get(\MyInvoice\Service\Vat\VatStatusService::class),
             $this->container->get(\Psr\Log\LoggerInterface::class),
             $this->container->get(\MyInvoice\Repository\AccountingModeRepository::class),
+            $this->container->get(\MyInvoice\Service\Accounting\AccountingPeriodProvisioner::class),
+            $this->container->get(\MyInvoice\Service\Accounting\AutoPostingPolicyService::class),
         );
     }
 
