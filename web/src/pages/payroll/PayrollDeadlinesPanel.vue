@@ -11,6 +11,7 @@ import {
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
+import { usePayrollLabels } from '@/composables/usePayrollLabels'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate, formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 
@@ -49,6 +50,7 @@ import { formatDate, formatMoneyMinor, formatPeriod } from '@/composables/useFor
  */
 
 const { t, te } = useI18n()
+const { submissionAgendaLabel } = usePayrollLabels()
 const auth = useAuthStore()
 
 const loading = ref(true)
@@ -133,22 +135,25 @@ async function load(): Promise<void> {
 }
 
 /**
- * Název řádku. Prameny mají tři různé číselníky a žádný z nich není v i18n
- * úplný (agendy podání přibývají), takže se nepřeložený kód ukáže tak, jak je —
- * to je pořád srozumitelnější než prázdno nebo cesta k překladovému klíči.
+ * Název řádku. Agendové kódy jdou přes sdílený slovník
+ * ({@link usePayrollLabels}), ať panel neříká o téže povinnosti něco jiného než
+ * přehled podání; ostatní prameny mají vlastní číselníky a nepřeložený kód se
+ * ukáže tak, jak je — pořád srozumitelnější než prázdno nebo cesta ke klíči.
  */
 function itemTitle(item: PayrollDeadlineItem): string {
-  // `sickness_case` nese v `title` také `agenda_code` (NEMPRI / HZUPN), takže
-  // se překládá stejným číselníkem jako pramen podání.
-  const path = item.source === 'submission' || item.source === 'sickness_case'
-    ? `payroll.submissions.statutory.agenda.${item.title}`
-    : item.source === 'levy'
-      ? `payroll.payments.kind.${item.title}`
-      : item.source === 'registration_change'
-        ? `payroll.people.registration.changes.duty_short.${item.title}`
-        : item.source === 'tax_statement'
-          ? `payroll.dashboard.deadlines.tax_statement.form.${item.title}`
-          : `payroll.people.checklist.${item.title}`
+  // `sickness_case` nese v `title` také agendový kód (NEMPRI / HZUPN), takže
+  // se překládá stejně jako podání. Vlastní cesta tu ukazovala syrové kódy
+  // (`PPZ_2026`), které slovník podání zná.
+  if (item.source === 'submission' || item.source === 'sickness_case') {
+    return submissionAgendaLabel(item.title)
+  }
+  const path = item.source === 'levy'
+    ? `payroll.payments.kind.${item.title}`
+    : item.source === 'registration_change'
+      ? `payroll.people.registration.changes.duty_short.${item.title}`
+      : item.source === 'tax_statement'
+        ? `payroll.dashboard.deadlines.tax_statement.form.${item.title}`
+        : `payroll.people.checklist.${item.title}`
   return te(path) ? t(path) : item.title
 }
 
@@ -422,9 +427,19 @@ defineExpose({ reload: load })
                     {{ t(`payroll.dashboard.deadlines.source.${item.source}`) }}
                   </span>
                 </div>
-                <p class="mt-0.5 text-xs break-words text-neutral-500">
+                <!--
+                  Předmět umí být prázdný (povinnost bez rozpoznaného subjektu),
+                  proto se oddělovač tiskne jen tehdy, když je co oddělovat —
+                  jinak by řádek začínal osiřelou tečkou.
+                -->
+                <p
+                  v-if="itemSubject(item) || item.period"
+                  class="mt-0.5 text-xs break-words text-neutral-500"
+                >
                   {{ itemSubject(item) }}
-                  <template v-if="item.period"> · {{ formatPeriod(item.period) }}</template>
+                  <template v-if="item.period">
+                    {{ itemSubject(item) ? '· ' : '' }}{{ formatPeriod(item.period) }}
+                  </template>
                 </p>
                 <p v-if="amountLabel(item)" class="mt-0.5 font-mono text-xs text-neutral-600">
                   {{ amountLabel(item) }}

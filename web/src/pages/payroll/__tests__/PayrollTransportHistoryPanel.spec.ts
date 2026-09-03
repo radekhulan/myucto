@@ -868,8 +868,10 @@ describe('PayrollTransportHistoryPanel', () => {
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
 
+    // Ledger drží časy v UTC (`UTC_TIMESTAMP()`), panel je ukazuje v pásmu
+    // prohlížeče — v srpnu tedy o dvě hodiny později než syrová hodnota.
     const automation = wrapper.get('[data-test="transport-automation-12"]')
-    expect(automation.text()).toContain('payroll.submissions.transport.automation.next_poll 11. 08. 2026 10:00')
+    expect(automation.text()).toContain('payroll.submissions.transport.automation.next_poll 11. 08. 2026 12:00')
     expect(automation.text()).toContain('payroll.submissions.transport.automation.polls 3')
     expect(wrapper.get('[data-test="transport-poll-error-12"]').text())
       .toContain('Brána VREP neodpověděla.')
@@ -897,7 +899,7 @@ describe('PayrollTransportHistoryPanel', () => {
 
     expect(wrapper.find('[data-test="transport-close-13"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="transport-closed-13"]').text())
-      .toContain('payroll.submissions.transport.automation.closed 11. 08. 2026 10:05')
+      .toContain('payroll.submissions.transport.automation.closed 11. 08. 2026 12:05')
   })
 
   /**
