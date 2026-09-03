@@ -503,6 +503,11 @@ final class RoutePermissionMap
         ['*', '#^/api/accounting/periods/[0-9]+/(closing|close|open-next|revert)(/|$)#', 'accounting.periods.close', AccessLevel::WRITE],
         ['*', '#^/api/accounting/periods(/|$)#', 'accounting.periods.manage', AccessLevel::WRITE],
         ['*', '#^/api/accounting/journal/(post|transfer)|^/api/accounting/journal/post-(invoice|purchase)/#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Doúčtování nezaúčtovaných dokladů na pozadí — TOTÉŽ právo jako hromadné
+        // zaúčtování z výběru (PostingBackfillAction). Explicitně, ať o něm nerozhoduje
+        // obecné `/api/accounting` níž: je to zápis do deníku, ne čtení nastavení.
+        ['GET', '#^/api/accounting/posting-backfill(/|$)#', 'accounting', AccessLevel::READ],
+        ['*', '#^/api/accounting/posting-backfill(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/journal-templates(/|$)#', 'accounting.templates', AccessLevel::READ],
         ['*', '#^/api/accounting/journal-templates(/|$)#', 'accounting.templates', AccessLevel::WRITE],
         // Mzdová rekapitulace: náhled je POST (nese vstupy v těle), ale nic nemění →
@@ -659,6 +664,9 @@ final class RoutePermissionMap
         // Tatáž dávka na pozadí (StartFileImportAction) — stejné oprávnění jako
         // synchronní cesta, liší se jen tím, kdo import odbaví.
         ['POST',   '#^/api/admin/import/start$#', 'utilities.import', AccessLevel::WRITE],
+        // Zahození importní dávky je MAZÁNÍ dokladů, ne import — proto právo mazat
+        // faktury, ne `utilities.import`. Kdo smí nahrát, nesmí tím pádem i smazat.
+        ['POST',   '#^/api/admin/import/batches/[A-Za-z0-9]+/delete$#', 'invoices.delete', AccessLevel::WRITE],
         ['POST',   '#^/api/admin/imports/(idoklad|fakturoid)/start$#', 'utilities.import', AccessLevel::WRITE],
         ['GET',    '#^/api/admin/imports/[0-9]+$#', 'utilities.import', AccessLevel::READ],
         ['GET',    '#^/api/admin/imports/[0-9]+/report$#', 'utilities.import', AccessLevel::READ],

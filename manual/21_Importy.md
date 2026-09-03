@@ -48,6 +48,18 @@ Stránku můžeš zavřít, import doběhne i bez ní. Report se zobrazí po dok
 > Bez toho by seznam klientů ukazoval stará čísla a další vystavená faktura by
 > dostala číslo, které v importu už je.
 
+### 21.1.1 Naimportované doklady nejsou zaúčtované
+
+**Import do deníku neúčtuje.** Doklady vznikají nezaúčtované, a to i když máte
+zapnutou plnou automatiku účtování: automatika je háček na **vznik** dokladu
+(vystavení faktury, přijetí přijaté faktury, opakovaná fakturace), ne zametač
+dokladů, které už v systému leží.
+
+Do deníku je dostanete v **Účetnictví → Doúčtovat doklady**. Úloha projde všechny
+nezaúčtované faktury najednou, běží na pozadí a jde zastavit; každý doklad se účtuje
+samostatně, takže jeden vadný dávku nezastaví. Hromadné zaúčtování z výběru v seznamu
+faktur zůstává pro menší zásahy — má strop 500 dokladů na dávku.
+
 ## 21.2 Co se založí
 
 Pro každou fakturu v souboru:

@@ -373,6 +373,11 @@ final class InvoiceImportService
         // ne po každém dokladu (import umí mít stovky dokladů nad týmiž klienty).
         $touchedClientIds = [];
         $touchedProjectIds = [];
+        // Doklady založené TÍMHLE během — dostanou značku dávky, aby šly hromadně
+        // zahodit, když se zákazník s exportem ze zdrojového systému netrefil.
+        $batchId = bin2hex(random_bytes(8));
+        $createdInvoiceIds = [];
+        $createdPurchaseIds = [];
 
         // Celkem dokladů, ne souborů: jeden Pohoda dataPack nese tisíce dokladů, takže
         // „1 z 1" by při běhu na pozadí neřeklo vůbec nic. Nečitelný soubor se počítá
@@ -466,7 +471,13 @@ final class InvoiceImportService
                         $duplicates++;
                     } elseif ($r['status'] === 'created') {
                         $created++;
+                        if ($route === 'purchase' && (int) ($r['purchase_invoice_id'] ?? 0) > 0) {
+                            $createdPurchaseIds[] = (int) $r['purchase_invoice_id'];
+                        }
                         if ($route === 'issued') {
+                            if ((int) ($r['invoice_id'] ?? 0) > 0) {
+                                $createdInvoiceIds[] = (int) $r['invoice_id'];
+                            }
                             $type = (string) ($inv['invoice_type'] ?? 'invoice');
                             $cli  = (int) ($r['client_id'] ?? 0);
                             $cat  = (int) ($r['revenue_category_id'] ?? 0);
@@ -529,16 +540,52 @@ final class InvoiceImportService
             }
         }
 
+        // Značka dávky na doklady, které tenhle běh založil. Bez ní nejde „to, co jsem
+        // právě naimportoval" znovu najít, a zákazník s vadnou dávkou nemá jak ji zahodit
+        // ({@see ImportBatchEraser}). Zapisuje se AŽ TEĎ jedním UPDATE po tisícovkách,
+        // ne u každého dokladu zvlášť.
+        $this->stampBatch($supplierId, $batchId, $createdInvoiceIds, $createdPurchaseIds);
+
         // Zbytek dávky, ke kterému se běh po zrušení nedostal. Bez tohohle čísla vypadá
         // zrušený import v reportu jako hotový — jen s menším počtem dokladů.
         $remaining = max(0, $totalDocs - $processedDocs);
 
         return [
+            'batch_id' => $batchId,
             'summary' => ['created' => $created, 'duplicates' => $duplicates, 'skipped' => $skipped, 'failed' => $failed] + $totals,
             'results' => $results,
             'cancelled' => $cancelled,
             'not_processed' => $cancelled ? $remaining : 0,
         ];
+    }
+
+    /**
+     * Označí doklady založené tímhle během jednou značkou dávky.
+     *
+     * Jedním UPDATE po blocích, ne u každého dokladu při vzniku: import s tisíci doklady
+     * by jinak zaplatil další zápis na každý z nich. Selhání označení nesmí shodit import,
+     * který už proběhl — jen se zaloguje, protože bez značky nepůjde dávku hromadně
+     * zahodit a uživatel by to jinak zjistil až ve chvíli, kdy to potřebuje.
+     *
+     * @param list<int> $invoiceIds
+     * @param list<int> $purchaseIds
+     */
+    private function stampBatch(int $supplierId, string $batchId, array $invoiceIds, array $purchaseIds): void
+    {
+        foreach ([['invoices', $invoiceIds], ['purchase_invoices', $purchaseIds]] as [$table, $ids]) {
+            foreach (array_chunk($ids, 500) as $chunk) {
+                $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+                try {
+                    $this->db->pdo()->prepare(
+                        "UPDATE {$table} SET import_batch_id = ?
+                          WHERE supplier_id = ? AND id IN ({$placeholders})"
+                    )->execute(array_merge([$batchId, $supplierId], $chunk));
+                } catch (\Throwable $e) {
+                    error_log('InvoiceImportService: označení importní dávky selhalo: ' . $e->getMessage());
+                    return;
+                }
+            }
+        }
     }
 
     /**

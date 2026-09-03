@@ -72,9 +72,31 @@ export interface ImportSummary {
   with_warnings?: number
 }
 
+export interface ImportBatchDeleteResult {
+  deleted: number
+  deleted_invoices: number
+  deleted_purchase_invoices: number
+  skipped: Array<{ kind: string; id: number; varsymbol: string | null; reason: string }>
+  retention_overridden: number
+}
+
+/**
+ * Zahodí doklady jedné importní dávky. První dávka se při migraci téměř nikdy
+ * nenahraje správně a mazat tisíce dokladů po jednom nejde. Zaúčtovaný, zamčený nebo
+ * uhrazený doklad se přeskočí — ten patří na jednodokladovou cestu, kde je vidět
+ * storno zápisu.
+ */
+export async function deleteImportBatch(batchId: string, ackRetention = false): Promise<ImportBatchDeleteResult> {
+  const qs = ackRetention ? '?ack_retention=1' : ''
+  const r = await api.post<ImportBatchDeleteResult>(`/admin/import/batches/${batchId}/delete${qs}`, {})
+  return r.data
+}
+
 export interface ImportReport {
   summary: ImportSummary
   results: ImportResultRow[]
+  /** Značka dávky — pod ní jdou právě naimportované doklady hromadně zahodit. */
+  batch_id?: string
   /** Běh na pozadí zrušil uživatel — doklady založené do té chvíle v systému zůstávají. */
   cancelled?: boolean
   /** Kolik dokladů z dávky se po zrušení nezpracovalo. */
