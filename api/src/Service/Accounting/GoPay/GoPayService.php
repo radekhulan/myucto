@@ -6,9 +6,11 @@ namespace MyInvoice\Service\Accounting\GoPay;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
 use PDO;
 use PDOException;
 
@@ -20,6 +22,8 @@ final class GoPayService
         private readonly PostingService $posting,
         private readonly BankPostingService $bankPosting,
         private readonly JournalEntryRepository $journal,
+        private readonly InvoicePaymentService $invoicePayments,
+        private readonly ActivityLogger $activity,
     ) {}
 
     /** @return array<string,mixed> */
@@ -387,6 +391,8 @@ final class GoPayService
                 )->execute([$transactionId, $supplierId]);
             }
 
+            // Smazání importu neruší obchodní fakt platby ani vratky. Stejně jako u úhrady
+            // faktury se odstraňuje účetní import a vazby, nikoli platební stav dokladu.
             $deleteClearing = $pdo->prepare('DELETE FROM gopay_clearings WHERE id=? AND supplier_id=?');
             $deleteClearing->execute([$clearingId, $supplierId]);
             if ($deleteClearing->rowCount() !== 1) {
@@ -507,6 +513,7 @@ final class GoPayService
         foreach ($ids->fetchAll(PDO::FETCH_COLUMN) as $movementId) {
             $this->processMovement($supplierId, (int) $movementId, $userId);
         }
+        $this->reconcileCreditNoteStatuses($supplierId, $clearingId, $userId);
         $this->matchPayout($supplierId, $clearingId, $userId);
         $this->refreshClearingStatus($supplierId, $clearingId);
         return $this->detail($supplierId, $clearingId);
@@ -711,6 +718,37 @@ final class GoPayService
         $match = $this->matchCreditNote($supplierId, $movement);
         $links['credit_note_id'] = (int) $match['id'];
         return [$receivable, $gopay, 'GoPay vratka k dobropisu ' . (string) $match['varsymbol'] . ' (' . (string) $movement['order_id'] . ')'];
+    }
+
+    private function reconcileCreditNoteStatuses(int $supplierId, int $clearingId, ?int $userId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT gm.credit_note_id, MAX(gm.performed_on) refunded_on
+               FROM gopay_movements gm
+               JOIN invoices i ON i.id = gm.credit_note_id AND i.supplier_id = gm.supplier_id
+                AND i.invoice_type = 'credit_note' AND i.amount_to_pay <= 0
+                AND i.status IN ('issued', 'sent', 'reminded', 'paid')
+              WHERE gm.supplier_id = ? AND gm.clearing_id = ? AND gm.movement_type = 'storno'
+                AND gm.status = 'posted' AND gm.credit_note_id IS NOT NULL
+              GROUP BY gm.credit_note_id"
+        );
+        $stmt->execute([$supplierId, $clearingId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $creditNoteId = (int) $row['credit_note_id'];
+            $refundedOn = (string) $row['refunded_on'];
+            $changed = $this->invoicePayments->markCreditNoteRefunded(
+                $creditNoteId,
+                $supplierId,
+                $refundedOn,
+            );
+            if ($changed) {
+                $this->activity->log('invoice.paid', $userId, 'invoice', $creditNoteId, [
+                    'paid_at' => $refundedOn,
+                    'source' => 'gopay',
+                    'clearing_id' => $clearingId,
+                ], supplierId: $supplierId);
+            }
+        }
     }
 
     /** @param array<string,mixed> $movement @return array<string,mixed> */

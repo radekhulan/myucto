@@ -68,7 +68,17 @@ final class MarkPaidAction
         // zůstává konzistentní (paid_total = amount_to_pay) a označení lze vrátit
         // smazáním platby. Status flip + PDF invalidace + stats řeší service.
         $remaining = round((float) ($invoice['amount_to_pay'] ?? 0) - (float) ($invoice['paid_total'] ?? 0), 2);
-        if ($remaining > 0) {
+        if ((string) ($invoice['invoice_type'] ?? '') === 'credit_note') {
+            try {
+                $this->payments->markCreditNoteRefunded(
+                    $id,
+                    (int) $invoice['supplier_id'],
+                    $paidAt,
+                );
+            } catch (\RuntimeException $e) {
+                return Json::error($response, 'invalid_payment', $e->getMessage(), 409);
+            }
+        } elseif ($remaining > 0) {
             try {
                 $this->payments->recordPayment($id, $remaining, $paidAt, [
                     'source'     => 'mark_paid',
