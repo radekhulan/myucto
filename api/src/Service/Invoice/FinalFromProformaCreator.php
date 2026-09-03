@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Invoice;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Oss\OssItemCarryOver;
+use MyInvoice\Service\Stats\StatsRecomputer;
 
 /**
  * Vytvoří DRAFT finální faktury (typu `invoice`) k zaplacené proformě.
@@ -41,6 +42,7 @@ final class FinalFromProformaCreator
         private readonly InvoiceCalculator $calc,
         private readonly AdvanceCycleLock $cycleLock,
         private readonly OssItemCarryOver $ossCarry,
+        private readonly StatsRecomputer $stats,
     ) {}
 
     /**
@@ -328,6 +330,28 @@ final class FinalFromProformaCreator
         }
 
         $this->calc->recompute($finalId);
+
+        // Cache je jen cache — selhání přepočtu nesmí shodit už vytvořený doklad, jen
+        // se zaloguje (jinak by se seznam klientů tiše rozešel s reálným stavem).
+        // Nové vyúčtování vzniká jako DRAFT, takže do agregace `client_revenue_cache`
+        // (jen status issued/sent/reminded/paid) samo o sobě zatím nic nepřidá — pokryje
+        // ho až vystavení (IssueInvoiceAction volá recomputeForInvoiceId() samo). Přesto
+        // přepočet voláme i tady (obrat proformy se mohl zvýšenou zálohou/vyúčtováním
+        // zdroje pohnout), a to jen když neběžíme v CIZÍ transakci — StatsRecomputer si
+        // otevírá vlastní (vnořené PDO transakce nejdou; volá-li tuhle metodu
+        // InvoicePaymentService uvnitř své transakce, přepočet se přeskočí a doběhne
+        // stejně skrz navazující vystavení).
+        if (!$pdo->inTransaction()) {
+            try {
+                $this->stats->recomputeMany(
+                    [(int) $proforma['client_id']],
+                    $proforma['project_id'] !== null ? [(int) $proforma['project_id']] : [],
+                );
+            } catch (\Throwable $e) {
+                error_log('FinalFromProformaCreator: recompute stats cache selhal: ' . $e->getMessage());
+            }
+        }
+
         return $finalId;
     }
 

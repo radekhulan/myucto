@@ -9617,7 +9617,7 @@
       "document_not_postable": "Doklad nemá řádky k zaúčtování (např. proforma, záloha nebo storno se neúčtují).",
       "advance_payment_only": "Zálohový doklad se neúčtuje jako předpis. Zaúčtuj jeho úhradu z banky nebo pokladny na účet 314.",
       "missing_exchange_rate": "Doklad v cizí měně nemá vyplněný směnný kurz — doplň kurz k datu účetního případu.",
-      "no_accounting_period": "Pro datum dokladu neexistuje účetní období — nejdřív ho založ v sekci Účetnictví → Období.",
+      "no_accounting_period": "Pro datum dokladu neexistuje účetní období — nejdřív ho založte v Účetnictví → Uzávěrka.",
       "period_not_open": "Účetní období je uzavřené — do něj nelze účtovat.",
       "unbalanced_entry": "Účetní zápis není vyvážený (MD ≠ Dal) — zkontroluj předkontaci a částky dokladu.",
       "unknown_account": "V účtové osnově chybí potřebný účet — zkontroluj předkontaci nebo naseeduj osnovu.",
