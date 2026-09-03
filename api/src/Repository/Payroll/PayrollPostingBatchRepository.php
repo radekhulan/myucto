@@ -238,8 +238,11 @@ final class PayrollPostingBatchRepository
         if (!is_array($row)) {
             $year = (int) $minimum->format('Y');
             throw new \DomainException(sprintf(
+                // „Účetnictví → Uzávěrka" je skutečný název položky menu (routa
+                // /accounting/periods); dřívější „Účetnictví → Účetní období" byl
+                // název stránky, ne cesty, a v menu se tak nikde nejmenuje.
                 'Účetní období roku %d je uzavřené, takže do něj mzdový předpis nejde zaúčtovat.'
-                . ' Otevřete období v Účetnictví → Účetní období, nebo mzdu zaúčtujte'
+                . ' Otevřete období v Účetnictví → Uzávěrka, nebo mzdu zaúčtujte'
                 . ' do následujícího otevřeného roku.',
                 $year,
             ));

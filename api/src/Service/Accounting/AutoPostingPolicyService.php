@@ -224,6 +224,33 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
         )->execute([$supplierId, $preset]);
     }
 
+    /**
+     * Výchozí nastavení účetní jednotky ve chvíli, kdy se ZAPÍNÁ podvojné účetnictví:
+     * automatické účtování vydaných i přijatých faktur a preset `full` („plná
+     * automatika").
+     *
+     * Proč zrovna tohle: účetní jednotka, která si zapnula deník, ho chce mít vedený —
+     * a s výchozím `suggest` u všeho zůstane deník prázdný, dokud někdo ručně neprojde
+     * frontu návrhů. Nový zákazník tenhle stav nepozná jako nastavení, pozná ho jako
+     * „nefunguje to". Preset `full` přitom neznamená, že se odklikne všechno: nejisté
+     * a AI návrhy v něm zůstávají na `suggest` (viz {@see applyPreset()}), takže se samy
+     * účtují jen deterministické operace.
+     *
+     * NEPŘEPISUJE si už zvolené: volá se jedině z přechodu do podvojného účetnictví
+     * (aktivační průvodce, zřízení nové firmy), a to jen tehdy, když v něm jednotka
+     * ještě nebyla. Opakovaný běh aktivace po neúspěchu tak nesmaže, co si mezitím
+     * účetní nastavila. Rozhodnutí „byla už v podvojném?" patří volajícímu — ten ho
+     * zjistí ze stavu PŘED svým UPDATE, kdežto odsud už by bylo pozdě.
+     */
+    public function applyAccountingUnitDefaults(int $supplierId, ?int $userId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE supplier SET auto_post_invoices = 1, auto_post_purchases = 1 WHERE id = ?'
+        )->execute([$supplierId]);
+
+        $this->applyPreset($supplierId, 'full', $userId);
+    }
+
     /** @return array{automation_level:string,automation_daily_limit_czk:?float,automation_digest_enabled:bool,automation_digest_hour:int,rows:list<array<string,mixed>>} */
     public function listPolicy(int $supplierId): array
     {

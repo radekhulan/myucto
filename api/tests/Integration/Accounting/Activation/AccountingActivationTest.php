@@ -136,6 +136,70 @@ final class AccountingActivationTest extends TestCase
     }
 
     /**
+     * Účetní jednotka odchází z aktivace s automatikou ZAPNUTOU: automatické účtování
+     * vydaných i přijatých faktur a preset „plná automatika". S výchozím `suggest`
+     * u všeho totiž zůstane deník prázdný, dokud někdo ručně neprojde frontu návrhů —
+     * a to nový zákazník nepozná jako nastavení, ale jako „nefunguje to".
+     *
+     * Druhá polovina testu hlídá opak: opakovaná aktivace (běžná po neúspěchu) už
+     * NESMÍ přepsat, co si účetní mezitím nastavila. Rozhodnutí stojí na stavu PŘED
+     * přepnutím režimu, takže se to pozná jedině tady, kde běží execute dvakrát.
+     */
+    public function testFirstActivationTurnsAutomationOnAndSecondKeepsUserChoice(): void
+    {
+        $draft = $this->opening->saveDraft($this->supplierId, [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 100.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 100.00],
+        ]);
+
+        $firstId = $this->jobs->create($this->supplierId, 'execute', [
+            'starts_on' => self::STARTS_ON,
+            'opening_hash' => $draft['hash'],
+            'with_rules' => false,
+        ], $this->userId);
+        $this->backfill->run($firstId);
+
+        self::assertSame('completed', $this->jobs->find($firstId, $this->supplierId)['status']);
+        self::assertSame(1, $this->supplierFlag('auto_post_invoices'), 'Vydané faktury se mají účtovat samy.');
+        self::assertSame(1, $this->supplierFlag('auto_post_purchases'), 'Přijaté faktury se mají účtovat samy.');
+        self::assertSame('full', $this->automationLevel());
+
+        // Účetní si automatiku ztlumí.
+        $this->db->pdo()->prepare('UPDATE supplier SET auto_post_purchases = 0 WHERE id = ?')
+            ->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            "UPDATE accounting_supplier_settings SET automation_level = 'suggest' WHERE supplier_id = ?"
+        )->execute([$this->supplierId]);
+
+        $secondId = $this->jobs->create($this->supplierId, 'execute', [
+            'starts_on' => self::STARTS_ON,
+            'opening_hash' => $draft['hash'],
+            'with_rules' => false,
+        ], $this->userId);
+        $this->backfill->run($secondId);
+
+        self::assertSame('completed', $this->jobs->find($secondId, $this->supplierId)['status']);
+        self::assertSame(0, $this->supplierFlag('auto_post_purchases'), 'Opakovaná aktivace přepsala volbu účetní.');
+        self::assertSame('suggest', $this->automationLevel(), 'Opakovaná aktivace přepsala preset účetní.');
+    }
+
+    private function supplierFlag(string $column): int
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT $column FROM supplier WHERE id = ?");
+        $stmt->execute([$this->supplierId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function automationLevel(): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT automation_level FROM accounting_supplier_settings WHERE supplier_id = ?'
+        );
+        $stmt->execute([$this->supplierId]);
+        return (string) $stmt->fetchColumn();
+    }
+
+    /**
      * Kontrola nanečisto má ostrému běhu předejít, ne ho pustit do chyby. Nad zavřeným
      * obdobím zahájení hlásila `failed_total: 0` a teprve execute skončil `failed`
      * s hláškou „Období zahájení účetnictví není otevřené."

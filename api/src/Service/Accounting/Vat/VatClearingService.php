@@ -488,11 +488,20 @@ final class VatClearingService
      */
     private function assertWritable(int $supplierId, string $entryDate): void
     {
+        // ⚠️ Chybějící období se tady ZÁMĚRNĚ nezakládá, na rozdíl od účtování dokladu
+        // ({@see \MyInvoice\Service\Accounting\AccountingPeriodProvisioner}). Tahle metoda
+        // je PREDIKÁT, ne zápis: její výsledek plní `writable_reason` v přehledu DPH
+        // (DphPriznaniReport.vue), takže by se účetní období zakládala jako vedlejší
+        // efekt otevření sestavy. Doklad zúčtování DPH vzniká ke KONCI zdaňovacího
+        // období, do kterého se celý měsíc účtovalo — období tedy v praxi dávno existuje
+        // (otevřel ho první zaúčtovaný doklad).
         $period = $this->periods->findForDate($supplierId, $entryDate);
         if ($period === null) {
             throw new PostingException(
                 'no_accounting_period',
                 'Pro datum ' . $entryDate . ' neexistuje účetní období.',
+                422,
+                ['fiscal_year' => (int) substr($entryDate, 0, 4)],
             );
         }
         if ((string) $period['status'] !== 'open') {

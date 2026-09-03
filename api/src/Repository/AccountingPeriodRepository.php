@@ -23,7 +23,8 @@ final class AccountingPeriodRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at,
                     row_version, closed_by, approved_at, approved_by,
-                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash
+                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash,
+                    created_reason
                FROM accounting_periods
               WHERE supplier_id = ?
               ORDER BY fiscal_year DESC'
@@ -37,7 +38,8 @@ final class AccountingPeriodRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at,
                     row_version, closed_by, approved_at, approved_by,
-                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash
+                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash,
+                    created_reason
                FROM accounting_periods
               WHERE supplier_id = ? AND id = ?'
         );
@@ -51,7 +53,8 @@ final class AccountingPeriodRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at,
                     row_version, closed_by, approved_at, approved_by,
-                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash
+                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash,
+                    created_reason
                FROM accounting_periods
               WHERE supplier_id = ? AND fiscal_year = ?'
         );
@@ -70,7 +73,8 @@ final class AccountingPeriodRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at,
                     row_version, closed_by, approved_at, approved_by,
-                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash
+                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash,
+                    created_reason
                FROM accounting_periods
               WHERE supplier_id = ? AND ? BETWEEN starts_on AND ends_on
               ORDER BY starts_on DESC, id DESC
@@ -81,7 +85,13 @@ final class AccountingPeriodRepository
         return $row === false ? null : $this->cast($row);
     }
 
-    public function create(int $supplierId, int $fiscalYear, string $startsOn, string $endsOn): int
+    /**
+     * @param string|null $createdReason proč období vzniklo (migrace 1733):
+     *        `posting`/`import`/`maintenance` u automatického založení
+     *        ({@see \MyInvoice\Service\Accounting\AccountingPeriodProvisioner}),
+     *        NULL u ručního (API, průvodce, uzávěrkový krok `open_next`).
+     */
+    public function create(int $supplierId, int $fiscalYear, string $startsOn, string $endsOn, ?string $createdReason = null): int
     {
         $pdo = $this->db->pdo();
         try {
@@ -91,13 +101,14 @@ final class AccountingPeriodRepository
             $pdo->prepare(
                 'INSERT INTO accounting_periods
                     (supplier_id, fiscal_year, starts_on, ends_on,
-                     small_asset_accrual_mode, small_asset_accrual_pct)
+                     small_asset_accrual_mode, small_asset_accrual_pct, created_reason)
                  SELECT ?, ?, ?, ?,
                         COALESCE(s.small_asset_accrual_mode, ?),
-                        CASE WHEN s.small_asset_accrual_mode = ? THEN s.small_asset_accrual_pct ELSE NULL END
+                        CASE WHEN s.small_asset_accrual_mode = ? THEN s.small_asset_accrual_pct ELSE NULL END,
+                        ?
                    FROM (SELECT ? AS sid) x
                    LEFT JOIN accounting_supplier_settings s ON s.supplier_id = x.sid'
-            )->execute([$supplierId, $fiscalYear, $startsOn, $endsOn, 'none', 'flat_pct', $supplierId]);
+            )->execute([$supplierId, $fiscalYear, $startsOn, $endsOn, 'none', 'flat_pct', $createdReason, $supplierId]);
         } catch (\PDOException $e) {
             // Souběžné založení téhož roku (UNIQUE supplier×fiscal_year) → vrátit existující.
             if (($e->errorInfo[0] ?? null) !== '23000') {
@@ -140,7 +151,8 @@ final class AccountingPeriodRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at,
                     row_version, closed_by, approved_at, approved_by,
-                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash
+                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash,
+                    created_reason
                FROM accounting_periods
               WHERE supplier_id = ? AND ? BETWEEN starts_on AND ends_on
               ORDER BY starts_on DESC, id DESC
@@ -233,7 +245,8 @@ final class AccountingPeriodRepository
     {
         $sql = 'SELECT id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at,
                        row_version, closed_by, approved_at, approved_by,
-                       reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash
+                       reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash,
+                       created_reason
                   FROM accounting_periods
                  WHERE supplier_id = ? AND NOT (ends_on < ? OR starts_on > ?)';
         $params = [$supplierId, $startsOn, $endsOn];
@@ -256,7 +269,8 @@ final class AccountingPeriodRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at,
                     row_version, closed_by, approved_at, approved_by,
-                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash
+                    reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash,
+                    created_reason
                FROM accounting_periods
               WHERE supplier_id = ? AND starts_on = DATE_ADD(?, INTERVAL 1 DAY)
               LIMIT 1'
@@ -289,6 +303,29 @@ final class AccountingPeriodRepository
             throw new \RuntimeException('Nepodařilo se zajistit účetní období pro ' . $date . '.');
         }
         return $period;
+    }
+
+    /**
+     * Hranice bezprostředně navazujícího období (R5): starts_on = endsOn + 1 den,
+     * délka jeden rok, label = kalendářní rok začátku. SSOT pro obě cesty, které
+     * další období zakládají — uzávěrkový krok `open_next`
+     * ({@see \MyInvoice\Service\Accounting\Closing\ClosingService::ensureNextPeriod})
+     * i automatické otevření chybějícího období
+     * ({@see \MyInvoice\Service\Accounting\AccountingPeriodProvisioner}).
+     * Tvar období (kalendář vs. hospodářský rok §21a ZDP) se tím dědí z předchozího
+     * období, takže hospodářskému roku nikdy nevznikne kalendářní pokračování.
+     *
+     * @return array{fiscal_year:int, starts_on:string, ends_on:string}
+     */
+    public static function nextPeriodBounds(string $endsOn): array
+    {
+        $start = (new \DateTimeImmutable($endsOn))->modify('+1 day');
+        $end = $start->add(new \DateInterval('P1Y'))->sub(new \DateInterval('P1D'));
+        return [
+            'fiscal_year' => (int) $start->format('Y'),
+            'starts_on'   => $start->format('Y-m-d'),
+            'ends_on'     => $end->format('Y-m-d'),
+        ];
     }
 
     /**

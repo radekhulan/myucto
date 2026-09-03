@@ -220,7 +220,8 @@ onMounted(async () => {
           <RouterLink v-for="b in item.breakdown" :key="b.key" :to="b.link"
             class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-neutral-100 hover:bg-primary-50 text-xs text-neutral-600 hover:text-primary-700 whitespace-nowrap">
             <span>{{ t('crm.action_items.breakdown_' + b.key) }}</span>
-            <span class="font-semibold">{{ b.count }}</span>
+            <!-- Bez počtu jde o nabídku cesty (průvodce), ne o rozpad čísla — „0" by tam lhala. -->
+            <span v-if="b.count !== undefined && b.count !== null" class="font-semibold">{{ b.count }}</span>
           </RouterLink>
         </div>
       </div>

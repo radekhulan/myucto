@@ -28,9 +28,15 @@ use PDO;
  *   porovnání součtů proto vždy přes (int) round($amount * 100). Nevyváženost →
  *   {@see UnbalancedEntryException}.
  * - Období: zápis se zařadí do období obsahujícího entry_date. Období MUSÍ být
- *   'open' — 'closing'/'closed' i chybějící období → {@see PostingException}
- *   (§35 ZoÚ: uzavřené období je neměnné). Automaticky se nic nezakládá; volající
- *   si období připraví přes AccountingPeriodRepository::ensureOpenPeriodFor().
+ *   'open' — 'closing'/'closed' → {@see PostingException} (§35 ZoÚ: uzavřené období
+ *   je neměnné). Chybí-li období ÚPLNĚ, založí se otevřené
+ *   ({@see AccountingPeriodProvisioner}) — a to i do minulosti, protože přesně tak
+ *   vypadá migrace historických dokladů z jiného systému do instalace, která má
+ *   účetnictví aktivované od letoška. Existujícím obdobím se automat nedotkne, takže
+ *   §35 ZoÚ platí dál: nad uzavřeným obdobím zápis skončí na 'period_not_open'.
+ *   Neotevře se rok mimo rozsah 2000–2200 a rok, jehož dopočtené hranice by se
+ *   překryly s existující (nepravidelnou) řadou — tam skončí zápis na
+ *   'no_accounting_period' a rozhodne účetní.
  * - Idempotence (source_type + source_id): opakované postDocument téhož dokladu
  *   NEDUPLIKUJE. Existující zápis se přepočítá a přepíše IN-PLACE (smaž řádky +
  *   přepiš hlavičku i řádky, row_version++), zachová se stejné entry.id. Přechod
@@ -126,6 +132,35 @@ final class PostingService
     ) {}
 
     /**
+     * Zakladatel chybějících období. Staví se tady, ne v konstruktoru: potřebuje jen
+     * závislosti, které tahle služba už má, a přidání devátého parametru do ctoru by
+     * se protáhlo do každého místa, které PostingService skládá ručně. Stejný vzor
+     * jako `new UnbookedDocumentsCounter($this->db)` v CrmAggregationService.
+     */
+    private function provisioner(): AccountingPeriodProvisioner
+    {
+        return new AccountingPeriodProvisioner($this->db, $this->periods, $this->activity);
+    }
+
+    /**
+     * Chybějící účetní období → chyba, která uživatele DOVEDE tam, kde se období
+     * zakládá. Doteď hláška končila u konstatování „období neexistuje", případně
+     * odkazovala na sekci menu, která se tak nejmenuje (viz
+     * {@see \MyInvoice\Service\Accounting\AccountingPeriodHealthService}) — účetní
+     * pak hledala po záložkách. `entry_date`/`fiscal_year` v kontextu chyby jsou
+     * strojová část: rozhraní z nich staví proklik na Uzávěrku s předvyplněným
+     * rokem (`web/src/api/errors.ts::accountingPeriodTarget`), stejným vzorem jako
+     * `payroll_year_closed`.
+     */
+    private static function noPeriodException(string $date, string $message): PostingException
+    {
+        return new PostingException('no_accounting_period', $message, 422, [
+            'entry_date'  => $date,
+            'fiscal_year' => (int) substr($date, 0, 4),
+        ]);
+    }
+
+    /**
      * Sestaví a zapíše vyvážený účetní zápis. Vrací id zápisu (existující při
      * re-postu, nový jinak).
      *
@@ -185,10 +220,22 @@ final class PostingService
         try {
             $period = $this->periods->findForDateForUpdate($supplierId, $entryDate);
             if ($period === null) {
-                throw new PostingException(
-                    'no_accounting_period',
-                    'Pro datum ' . $entryDate . ' neexistuje účetní období.',
+                // Chybějící období (zapomenutý přelom roku, naimportovaná historie) se
+                // založí otevřené — jediné pravidlo pro to má
+                // {@see AccountingPeriodProvisioner}, sdílené s importem. Nedotýká se
+                // ničeho existujícího, takže §35 ZoÚ zůstává v platnosti: pokrývá-li
+                // datum UZAVŘENÉ období, provisioner ho jen vrátí a kontrola stavu níž
+                // zápis odmítne. Znovu pod zámkem, ať se souběh serializuje jako dřív.
+                $this->provisioner()->ensureOpenPeriodForDate(
+                    $supplierId,
+                    $entryDate,
+                    AccountingPeriodProvisioner::REASON_POSTING,
+                    isset($meta['user_id']) ? (int) $meta['user_id'] : null,
                 );
+                $period = $this->periods->findForDateForUpdate($supplierId, $entryDate);
+            }
+            if ($period === null) {
+                throw self::noPeriodException($entryDate, 'Pro datum ' . $entryDate . ' neexistuje účetní období.');
             }
             if (!in_array($period['status'], $allowedStatuses, true)) {
                 throw new PostingException(
@@ -364,9 +411,14 @@ final class PostingService
         // R7 (Epic F4): storno dohadu/čas. rozlišení z uzávěrkového průvodce ve stavu 'closing'.
         $allowedStatuses = !empty($meta['allow_closing_period']) ? ['open', 'closing'] : ['open'];
 
-        $period = $this->periods->findForDate($supplierId, $reversalDate);
+        $period = $this->provisioner()->ensureOpenPeriodForDate(
+            $supplierId,
+            $reversalDate,
+            AccountingPeriodProvisioner::REASON_POSTING,
+            isset($meta['user_id']) ? (int) $meta['user_id'] : null,
+        );
         if ($period === null) {
-            throw new PostingException('no_accounting_period', 'Pro datum storna ' . $reversalDate . ' neexistuje účetní období.');
+            throw self::noPeriodException($reversalDate, 'Pro datum storna ' . $reversalDate . ' neexistuje účetní období.');
         }
         $periodOpen = in_array($period['status'], $allowedStatuses, true);
 
@@ -388,16 +440,22 @@ final class PostingService
                 );
             }
             $reversalDate = $today;
-            $period = $this->periods->findForDate($supplierId, $reversalDate);
+            $period = $this->provisioner()->ensureOpenPeriodForDate(
+                $supplierId,
+                $reversalDate,
+                AccountingPeriodProvisioner::REASON_POSTING,
+                isset($meta['user_id']) ? (int) $meta['user_id'] : null,
+            );
             if ($period === null) {
                 // Auto-posun protizápisu na dnešek, ale pro dnešní datum není založené
-                // účetní období (typicky nový fiskální rok ještě nevytvořen — přelom roku).
-                throw new PostingException(
-                    'no_accounting_period',
+                // účetní období a ani ho nelze automaticky otevřít (řada dnešek přeskakuje
+                // nebo firma nemá jediné období).
+                throw self::noPeriodException(
+                    $reversalDate,
                     'Storno zamčeného zápisu se má zaúčtovat k dnešku (' . $reversalDate
                         . '), ale pro toto datum neexistuje otevřené účetní období — '
-                        . 'založ účetní období pro aktuální rok, nebo zadej datum storna do '
-                        . 'otevřeného (nezamčeného) období ručně.',
+                        . 'založ účetní období pro aktuální rok v Účetnictví → Uzávěrka, nebo zadej '
+                        . 'datum storna do otevřeného (nezamčeného) období ručně.',
                 );
             }
             $periodOpen = in_array($period['status'], $allowedStatuses, true);

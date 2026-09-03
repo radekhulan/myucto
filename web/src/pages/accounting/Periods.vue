@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { accountingApi } from '@/api/accounting'
 import {
   closingApi,
@@ -33,7 +33,22 @@ async function load() {
   try { periods.value = await accountingApi.listPeriods() as unknown as ClosingPeriod[] }
   finally { loading.value = false }
 }
-onMounted(load)
+
+/*
+ * `?fiscal_year=YYYY` — proklik z hlášky „pro tohle datum neexistuje účetní
+ * období" (toast u zaúčtování, karta „Akce pro tebe"). Rovnou otevře formulář
+ * s tím rokem, aby náprava byla jedno kliknutí, ne hledání tlačítka na stránce,
+ * kterou uživatel vidí poprvé. Existuje-li rok už teď, formulář se neotevírá —
+ * uživatel se sem dostal z zastaralé hlášky a má vidět seznam.
+ */
+const route = useRoute()
+onMounted(async () => {
+  await load()
+  const requested = Number(route.query.fiscal_year)
+  if (!Number.isInteger(requested) || requested <= 0) return
+  if (periods.value.some(p => p.fiscal_year === requested)) return
+  openCreate(requested)
+})
 
 const showForm = ref(false)
 useHotkey('escape', () => {
@@ -49,14 +64,35 @@ const form = reactive({
   ends_on: `${currentYear}-12-31`,
 })
 
-function openCreate() {
+function openCreate(year: number = currentYear) {
   error.value = ''
-  Object.assign(form, {
-    fiscal_year: currentYear,
-    starts_on: `${currentYear}-01-01`,
-    ends_on: `${currentYear}-12-31`,
-  })
+  Object.assign(form, defaultBounds(year))
   showForm.value = true
+}
+
+/*
+ * Předvyplněné hranice nového období. Kalendářní rok je default, ale firma
+ * s hospodářským rokem (§21a ZDP) by dostala špatné datum — proto se tvar dědí
+ * z NAVAZUJÍCÍHO existujícího období, když nějaké je: starts_on = konec
+ * předchozího + 1 den, délka rok. Stejné pravidlo jako na serveru
+ * (AccountingPeriodRepository::nextPeriodBounds).
+ */
+function defaultBounds(year: number): { fiscal_year: number, starts_on: string, ends_on: string } {
+  const previous = periods.value
+    .filter(p => p.ends_on && p.ends_on < `${year + 1}-01-01`)
+    .sort((a, b) => String(b.ends_on).localeCompare(String(a.ends_on)))[0]
+  if (previous?.ends_on) {
+    const start = new Date(`${previous.ends_on}T00:00:00Z`)
+    start.setUTCDate(start.getUTCDate() + 1)
+    const end = new Date(start)
+    end.setUTCFullYear(end.getUTCFullYear() + 1)
+    end.setUTCDate(end.getUTCDate() - 1)
+    const iso = (d: Date) => d.toISOString().slice(0, 10)
+    if (start.getUTCFullYear() === year) {
+      return { fiscal_year: year, starts_on: iso(start), ends_on: iso(end) }
+    }
+  }
+  return { fiscal_year: year, starts_on: `${year}-01-01`, ends_on: `${year}-12-31` }
 }
 
 async function save() {
@@ -207,7 +243,7 @@ function statusBadge(status: string): string {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
           {{ t('accounting.closing.settings.title') }}
         </button>
-        <button v-if="auth.canWrite('accounting.periods.manage')" @click="openCreate" :class="btnFilled('primary')">
+        <button v-if="auth.canWrite('accounting.periods.manage')" @click="openCreate()" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('accounting.periods.new') }}
         </button>
@@ -219,7 +255,7 @@ function statusBadge(status: string): string {
     <EmptyState v-else-if="periods.length === 0" boxed icon="clipboardCheck"
       :title="t('accounting.periods.empty')"
       :cta="auth.canWrite('accounting.periods.manage') ? t('accounting.periods.new') : undefined"
-      @action="openCreate" />
+      @action="openCreate()" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop -->
@@ -236,7 +272,15 @@ function statusBadge(status: string): string {
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="p in periods" :key="p.id">
-              <td class="px-3 py-2 font-semibold">{{ p.fiscal_year }}</td>
+              <td class="px-3 py-2 font-semibold">
+                {{ p.fiscal_year }}
+                <!-- Období, které nezaložila účetní, ale automat (import historie,
+                     přelom roku) — jinak by v seznamu svítil rok bez vysvětlení. -->
+                <span v-if="p.created_reason" class="ml-1.5 align-middle text-[10px] font-medium px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500"
+                  :title="t('accounting.periods.auto_created_hint_' + p.created_reason)">
+                  {{ t('accounting.periods.auto_created') }}
+                </span>
+              </td>
               <td class="px-3 py-2">{{ formatDate(p.starts_on) }}</td>
               <td class="px-3 py-2">{{ formatDate(p.ends_on) }}</td>
               <td class="px-3 py-2 text-center">

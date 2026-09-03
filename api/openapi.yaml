@@ -7071,6 +7071,11 @@ paths:
         Položka `journal_integrity` (též jen podvojné účetnictví) nese `breakdown[]`
         s typy nálezů `{ key: orphan_entry|unbalanced_entry|booked_without_entry|entry_without_booked|amount_mismatch, count, link }`
         z posledního běhu nočního integrity jobu. Plus `total` a `dismissed_count`.
+        Položka `accounting_period_missing` (podvojné účetnictví) hlásí chybějící
+        účetní období — nemá řadu vůbec, řada nepokrývá dnešek, nebo existují doklady
+        s datem mimo ni. Její `breakdown[]` nese NABÍDKU CEST, ne rozpad počtu, takže
+        položky jsou `{ key: accounting_activation|bank_posting_wizard|accounting_periods, link }`
+        BEZ `count`.
       parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
       responses: { '200': { description: 'items + total + dismissed_count' } }
 
@@ -19138,6 +19143,10 @@ components:
         approved_at: { type: [string, "null"] }
         approved_by: { type: [integer, "null"] }
         row_version: { type: integer, description: "Optimistická konkurence — posílá se zpět v mutacích" }
+        created_reason:
+          type: [string, "null"]
+          enum: [posting, import, maintenance, setup, null]
+          description: "Proč období vzniklo. `null` = založeno ručně (API / průvodce / uzávěrkový krok `open_next`); ostatní hodnoty = automaticky doplněné chybějící období při účtování, importu dokladů nebo kontrolním CLI."
 
     JournalEntry:
       type: object

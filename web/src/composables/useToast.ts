@@ -35,7 +35,12 @@ export function useToast() {
      */
     error:   (t: string, action?: Toast['action']) => push('error', t, action ? 12000 : 8000, action),
     info:    (t: string) => push('info', t),
-    warning: (t: string) => push('warning', t, 6000),
+    /*
+     * Varování akci nese ze stejného důvodu jako chyba: hromadné zaúčtování,
+     * kterému část dokladů propadla na chybějící účetní období, je varování
+     * (zbytek prošel) — ale bez prokliku na Uzávěrku je to pořád slepá ulička.
+     */
+    warning: (t: string, action?: Toast['action']) => push('warning', t, action ? 12000 : 6000, action),
     dismiss,
   }
 }

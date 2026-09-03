@@ -23,6 +23,7 @@ final class BackfillService
         private readonly AccountingModeRepository $accountingModes,
         private readonly \MyInvoice\Service\Accounting\InvoiceSettlementService $settlements,
         private readonly ActivityLogger $logger,
+        private readonly \MyInvoice\Service\Accounting\AutoPostingPolicyService $autoPosting,
     ) {}
 
     public function run(int $jobId): void
@@ -256,6 +257,16 @@ final class BackfillService
             }
 
             $pdo = $this->db->pdo();
+            // Byla jednotka v podvojném účetnictví UŽ PŘED tímhle během? Odpověď musí
+            // padnout před UPDATE níž — potom už je nerozeznatelný první průchod
+            // průvodcem od opakovaného po neúspěchu, a výchozí nastavení by přepsalo,
+            // co si účetní mezitím nastavila ({@see AutoPostingPolicyService::applyAccountingUnitDefaults()}).
+            $wasDoubleEntry = $pdo->prepare(
+                "SELECT 1 FROM supplier WHERE id = ? AND accounting_mode = 'double_entry'"
+            );
+            $wasDoubleEntry->execute([$supplierId]);
+            $isFirstActivation = $wasDoubleEntry->fetchColumn() === false;
+
             $ownTx = !$pdo->inTransaction();
             if ($ownTx) $pdo->beginTransaction();
             try {
@@ -270,6 +281,9 @@ final class BackfillService
                             accounting_activation_status = 'completed'
                       WHERE id = ?"
                 )->execute([$supplierId]);
+                if ($isFirstActivation) {
+                    $this->autoPosting->applyAccountingUnitDefaults($supplierId, $userId);
+                }
                 $this->accountingModes->record($supplierId, $startsOn, 'double_entry');
                 $this->logger->log(
                     'supplier.accounting_activated',

@@ -223,7 +223,11 @@ export interface SupplierBankAccount {
 const ERROR_KEYS: Record<string, string> = {
   period_closed:          'bank.posting.err_period_closed',
   period_not_open:        'bank.posting.err_period_closed',
-  no_accounting_period:   'bank.posting.err_period_closed',
+  // „Období neexistuje" NENÍ „období je uzavřené": náprava je opačná (založit,
+  // ne znovuotevřít) a uživatel podle staré hlášky hledal uzavřený rok, který
+  // v seznamu nebyl. Vlastní klíč s vlastní radou, kam jít.
+  no_accounting_period:   'bank.posting.err_no_accounting_period',
+  period_missing:         'bank.posting.err_no_accounting_period',
   already_posted:         'bank.posting.err_already_posted',
   account_not_found:      'bank.posting.err_account_not_found',
   unknown_account:        'bank.posting.err_account_not_found',

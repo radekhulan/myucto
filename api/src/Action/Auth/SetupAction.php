@@ -69,6 +69,10 @@ final class SetupAction
         private readonly \Psr\Log\LoggerInterface $log,
         // Historie účetního režimu — bez ní firma nemá čím doložit režim k datu.
         private readonly \MyInvoice\Repository\AccountingModeRepository $accountingModes,
+        // Účetní období pro rok založení — viz finalizeSupplierProfile().
+        private readonly \MyInvoice\Service\Accounting\AccountingPeriodProvisioner $periodProvisioner,
+        // Výchozí automatika účtování nové účetní jednotky — viz finalizeSupplierProfile().
+        private readonly \MyInvoice\Service\Accounting\AutoPostingPolicyService $autoPosting,
     ) {}
 
     /**
@@ -180,6 +184,28 @@ final class SetupAction
             // Upsert přes UNIQUE (supplier_id, effective_from) — přepíše řádek
             // z insertSupplier(), pokud se režim mezitím změnil.
             $this->accountingModes->record($supplierId, date('Y-01-01'), (string) $row['accounting_mode']);
+
+            // Účetní období pro rok založení. Firma odsud odcházela s podvojným
+            // účetnictvím, ale BEZ jediného období — a poznala to až u prvního
+            // „Zaúčtovat". U nové instance na hostingu je to zbytečné: rok je znám
+            // (dnešek) a nic se tím nepřepisuje. Až sem, protože účetní režim je
+            // finální teprve po obohacení z ARESu (viz docblock výše) a v daňové
+            // evidenci provisioner správně neudělá nic.
+            $this->periodProvisioner->ensureOpenPeriodForDate(
+                $supplierId,
+                date('Y-m-d'),
+                \MyInvoice\Service\Accounting\AccountingPeriodProvisioner::REASON_SETUP,
+            );
+
+            // Výchozí nastavení účetní jednotky — automatické účtování faktur a plná
+            // automatika. Táž pravidla jako po aktivačním průvodci
+            // ({@see \MyInvoice\Service\Accounting\Activation\BackfillService}), jen
+            // jiná cesta: tahle firma podvojné účetnictví nezapíná, ona v něm rovnou
+            // vzniká. Podmínka na režim tu být musí — daňová evidence deník nevede,
+            // takže by jí automatika nastavovala účtování, které nemá kam zapsat.
+            if ((string) $row['accounting_mode'] === 'double_entry') {
+                $this->autoPosting->applyAccountingUnitDefaults($supplierId, null);
+            }
 
             if ((int) $row['is_vat_payer'] === 1 && ($row['vat_period'] ?? null) === null) {
                 $pdo->prepare("UPDATE supplier SET vat_period = 'monthly' WHERE id = ? AND vat_period IS NULL")

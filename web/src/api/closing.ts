@@ -18,6 +18,13 @@ export interface ClosingPeriod extends Omit<AccountingPeriod, 'status'> {
   closed_by?: number | null
   approved_at?: string | null
   approved_by?: number | null
+  /**
+   * Proč období vzniklo. `null` = založila ho účetní (API / průvodce / krok
+   * „otevřít další rok"). Ostatní hodnoty znamenají, že chybějící období doplnil
+   * automat — účetní tak v seznamu pozná rok, který sama nezaložila, a ví proč
+   * tam je (typicky import historie z jiného systému).
+   */
+  created_reason?: 'posting' | 'import' | 'maintenance' | 'setup' | null
 }
 
 export interface PeriodStatusPayload {

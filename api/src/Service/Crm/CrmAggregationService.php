@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Crm;
 
 use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\AccountingPeriodHealthService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Report\CzechWorkingDays;
@@ -1379,6 +1380,69 @@ final class CrmAggregationService
             } catch (\Throwable $e) {
                 // journal_integrity_findings ještě neexistuje (migrace 1034 nedoběhla)
                 // nebo jiná chyba — dashboard nesmí spadnout kvůli diagnostické kartě.
+            }
+        }
+
+        // 3e. Účetní období — bez něj se nedá zaúčtovat NIC, a doteď se to poznalo až
+        // ve chvíli, kdy někdo klikl na „Zaúčtovat" a dostal hlášku odkazující na sekci
+        // menu, která neexistuje. Tři různé stavy, tři různé nápravy — rozlišuje je
+        // {@see AccountingPeriodHealthService}:
+        //   - `no_periods`        … firma neprošla setupem → pošli ji do PRŮVODCŮ
+        //                           (aktivace účetnictví, případně zaúčtování banky),
+        //                           ne na prázdný seznam období, kde by musela sama
+        //                           uhodnout hranice prvního roku,
+        //   - `current_missing`   … zapomenutý přelom roku → jedno kliknutí na Uzávěrku
+        //                           (období navíc vznikne samo při prvním zaúčtování,
+        //                           viz AccountingPeriodProvisioner),
+        //   - `documents_outside` … naimportovaná historie mimo účetnictví → období pro
+        //                           ně vznikne při zaúčtování, ale účetní má vědět, že
+        //                           jí do knih přibude rok, se kterým nepočítala.
+        // Vysoká závažnost u prvních dvou je záměr: není to fronta práce, je to
+        // zablokované účtování.
+        if ($isDoubleEntry && !$this->isFullyDismissed($dismissals, 'accounting_period_missing')) {
+            $health = (new AccountingPeriodHealthService($this->db))->diagnose($supplierId, $today);
+            if ($health['state'] !== 'ok') {
+                $breakdown = [];
+                if ($health['state'] === 'no_periods') {
+                    $title = 'Založ účetní období';
+                    $hint = 'Bez otevřeného účetního období nejde zaúčtovat žádný doklad — spusť průvodce aktivací účetnictví.';
+                    $link = '/admin/accounting-activation';
+                    $breakdown[] = ['key' => 'accounting_activation', 'link' => '/admin/accounting-activation'];
+                    if ($health['has_bank_data']) {
+                        // Druhý průvodce se nabízí jen firmě, která nějaké bankovní
+                        // pohyby má — odkaz na prázdnou frontu je horší než žádný.
+                        $breakdown[] = ['key' => 'bank_posting_wizard', 'link' => '/automation?wizard=1'];
+                    }
+                    $breakdown[] = ['key' => 'accounting_periods', 'link' => '/accounting/periods'];
+                } elseif ($health['state'] === 'current_missing') {
+                    $title = 'Otevři účetní období pro letošek';
+                    $hint = sprintf(
+                        'Poslední období končí %s a dnešek (%s) do žádného nespadá — otevři navazující rok.',
+                        (string) $health['latest_ends_on'],
+                        $today,
+                    );
+                    $link = '/accounting/periods';
+                } else {
+                    $title = 'Doklady mimo účetní období';
+                    $hint = sprintf(
+                        '%d %s k zaúčtování má datum mimo založená období (%s–%s) — zaúčtování je otevře, zkontroluj rozsah účetnictví.',
+                        $health['outside_count'],
+                        $health['outside_count'] === 1 ? 'doklad' : ($health['outside_count'] < 5 ? 'doklady' : 'dokladů'),
+                        (string) $health['outside_min_date'],
+                        (string) $health['outside_max_date'],
+                    );
+                    $link = '/accounting/periods';
+                    $breakdown[] = ['key' => 'accounting_activation', 'link' => '/admin/accounting-activation'];
+                }
+                $items[] = array_filter([
+                    'type'      => 'accounting_period_missing',
+                    'severity'  => $health['severity'],
+                    'title'     => $title,
+                    'hint'      => $hint,
+                    'link'      => $link,
+                    'count'     => $health['outside_count'] > 0 ? $health['outside_count'] : null,
+                    'breakdown' => $breakdown === [] ? null : $breakdown,
+                ], static fn (mixed $v): bool => $v !== null);
             }
         }
 

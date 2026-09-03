@@ -218,7 +218,12 @@ export const crmApi = {
 // ─── Tier 1 types ─────────────────────────────────────────────────────
 export interface ActionItemBreakdown {
   key: string
-  count: number
+  /**
+   * Rozpad počtu (FV / PF / banka). Chybí u položek, kde druhý řádek nejsou
+   * počty, ale NABÍDKA CEST — chybějící účetní období vede do dvou průvodců
+   * a na seznam období, a číslo u nich nic neznamená.
+   */
+  count?: number
   link: string
 }
 export interface ActionItem {

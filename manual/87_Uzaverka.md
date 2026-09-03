@@ -34,7 +34,29 @@ Systém validuje, že:
 - období se **nepřekrývá** s žádným existujícím obdobím firmy (souvislá řada let bez
   mezer i překryvů je nutná pro navazující uzávěrky a výkazy).
 
-### 87.1.1 Stavy období
+### 87.1.1 Automaticky doplněná období
+
+Chybějící období si systém doplní sám, takže na ně nenarazíš uprostřed práce:
+
+- při **zaúčtování dokladu**, jehož datum do žádného období nespadá (typicky zapomenutý
+  přelom roku, nebo naimportovaná historie z jiného účetního programu),
+- při **importu dokladů** — jednou za dávku pro celý rozsah jejích dat,
+- při **založení firmy** v průvodci prvním spuštěním.
+
+Takové období vzniká jako **Otevřené** a v tabulce má u účetního roku štítek
+**„automaticky"**; najetím myší uvidíš, která cesta ho založila. Období, která založíš
+ručně, štítek nemají.
+
+Hranice se **dědí z existující řady**, takže firmě s hospodářským rokem nevznikne
+kalendářní období. Systém **nikdy nemění existující období** — spadá-li datum dokladu
+do období Uzavíraného, Uzavřeného nebo Schváleného, zaúčtování se odmítne (§ 35 ZoÚ)
+a musíš postupovat podle § 87.2.
+
+Automaticky se nezakládá **první** období firmy, která zatím žádné nemá: jeho hranice
+a počáteční rozvahu je potřeba rozhodnout v průvodci aktivací účetnictví (kapitola
+83). Na tenhle stav upozorní karta **Akce pro tebe** na nástěnce.
+
+### 87.1.2 Stavy období
 
 Každé období prochází stavovým automatem s pěti stavy, zobrazenými jako barevný
 štítek:

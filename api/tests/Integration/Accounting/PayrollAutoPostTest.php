@@ -156,15 +156,29 @@ final class PayrollAutoPostTest extends TestCase
         self::assertSame(0, $this->recordCount($employeeId));
     }
 
-    /** Chybějící období je stejný případ jako uzavřené — hlásí se, neshazuje. */
-    public function testMissingPeriodIsReportedPerEmployee(): void
+    /**
+     * Chybějící období NENÍ stejný případ jako uzavřené: uzavřené je rozhodnutí účetní
+     * (§35 ZoÚ, viz test výše), kdežto chybějící je jen díra v evidenci — ta se doplní
+     * ({@see \MyInvoice\Service\Accounting\AccountingPeriodProvisioner}) a mzda se
+     * zaúčtuje. Dřív tady mzdový běh hlásil chybu, takže mzda za měsíc v roce, pro
+     * který nikdo nezaložil období, propadla bez zaúčtování.
+     *
+     * Že období vzniklo automaticky, je vidět na `created_reason` — účetní tak v seznamu
+     * období pozná rok, který sama nezakládala.
+     */
+    public function testMissingPeriodIsOpenedAutomaticallyAndPayrollPosts(): void
     {
         $this->employee('Jednatel', autoPost: true, monthlyGross: self::GROSS);
 
         $r = $this->autoPost->runForSupplier($this->supplierId, self::YEAR - 1, self::MONTH);
 
-        self::assertSame(1, $r['errors']);
-        self::assertSame(0, $r['posted']);
+        self::assertSame(0, $r['errors'], 'Chybějící období už není chyba běhu.');
+        self::assertSame(1, $r['posted']);
+
+        $opened = $this->periods->findByYear($this->supplierId, self::YEAR - 1);
+        self::assertNotNull($opened, 'Období pro rok mzdy se mělo doplnit.');
+        self::assertSame('open', (string) $opened['status']);
+        self::assertSame('posting', (string) $opened['created_reason']);
     }
 
     /** Daňová evidence deník nevede — takový dodavatel se do běhu vůbec nedostane. */
