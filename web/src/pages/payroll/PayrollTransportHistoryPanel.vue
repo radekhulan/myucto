@@ -174,6 +174,28 @@ const variableSymbol = ref('')
 const variableSymbolTouched = ref(false)
 /** Variabilní symboly z nastavení zaměstnavatele — kandidáti, ne jistota. */
 const variableSymbolOptions = ref<Array<{ value: string; label: string }>>([])
+/**
+ * Ostrý a testovací VS ČSSZ podle účtárny. ČSSZ přiděluje oba odděleně a
+ * testovací prostředí přijímá VÝHRADNĚ svůj vlastní — podání pod ostrým
+ * symbolem zamítne s hláškou, která na záměnu VS vůbec neukazuje. Obojí se
+ * drží zvlášť, aby šlo poznat, kdy uživatel v testu omylem zadal ostrý VS.
+ */
+const knownProductionVariableSymbols = ref<Set<string>>(new Set())
+const knownTestVariableSymbols = ref<Set<string>>(new Set())
+
+/**
+ * ČSSZ podání pod cizím VS v testu jen zamítne, nezablokujeme ho tedy tady —
+ * je to varování, ne validace. Svítí, když je zadaný symbol prokazatelně
+ * ostrý, nebo když máme uložený jiný testovací symbol a uživatel zadal ještě
+ * jiný.
+ */
+const testEnvironmentVariableSymbolWarning = computed(() => {
+  if (environment.value !== 'test') return false
+  const value = variableSymbol.value.trim()
+  if (!variableSymbolValid.value) return false
+  if (knownProductionVariableSymbols.value.has(value)) return true
+  return knownTestVariableSymbols.value.size > 0 && !knownTestVariableSymbols.value.has(value)
+})
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const busy = computed(() =>
@@ -472,29 +494,46 @@ async function copyCorrelation(attempt: PayrollJmhzTransportAttempt) {
   }
 }
 
-/** Nastavení zaměstnavatele zná variabilní symboly pracovišť — jinak se ptáme. */
+/**
+ * Nastavení zaměstnavatele zná variabilní symboly pracovišť — jinak se ptáme.
+ *
+ * Nabídka i předvyplnění se řídí ZVOLENÝM prostředím: produkce a test mají u
+ * ČSSZ oddělené symboly a přepnutí prostředí bez přepnutí nabídky by tiše
+ * nabízelo ostrý VS v testu (a naopak).
+ */
 async function loadVariableSymbols() {
   try {
     const settings = await payrollApi.employerSettings()
-    const seen = new Map<string, string>()
+    const production = new Map<string, string>()
+    const test = new Map<string, string>()
     for (const office of settings.offices ?? []) {
-      const symbol = (office.social_security_variable_symbol ?? '').trim()
-      if (!office.is_active || symbol === '') continue
-      if (!seen.has(symbol)) seen.set(symbol, `${office.code} — ${office.name}`)
+      if (!office.is_active) continue
+      const label = `${office.code} — ${office.name}`
+      const productionSymbol = (office.social_security_variable_symbol ?? '').trim()
+      if (productionSymbol !== '' && !production.has(productionSymbol)) {
+        production.set(productionSymbol, label)
+      }
+      const testSymbol = (office.test_social_security_variable_symbol ?? '').trim()
+      if (testSymbol !== '' && !test.has(testSymbol)) {
+        test.set(testSymbol, label)
+      }
     }
-    variableSymbolOptions.value = [...seen].map(([value, label]) => ({ value, label }))
+    knownProductionVariableSymbols.value = new Set(production.keys())
+    knownTestVariableSymbols.value = new Set(test.keys())
+    const relevant = environment.value === 'test' ? test : production
+    variableSymbolOptions.value = [...relevant].map(([value, label]) => ({ value, label }))
     // Předvyplní se jen jednoznačný případ. Víc různých symbolů znamená volbu,
     // a hádat ji za uživatele by znamenalo ptát se ČSSZ pod cizím symbolem.
-    if (
-      !variableSymbolTouched.value
-      && variableSymbol.value === ''
-      && variableSymbolOptions.value.length === 1
-    ) {
+    // Dokud uživatel do pole nesáhl, drží se to i po přepnutí prostředí —
+    // jinak by po přechodu produkce → test zůstal v poli tiše ostrý VS.
+    if (!variableSymbolTouched.value && variableSymbolOptions.value.length === 1) {
       variableSymbol.value = variableSymbolOptions.value[0]!.value
     }
   } catch {
     // Nabídka je pohodlí, ne podmínka — pole na symbol zůstane k vyplnění ručně.
     variableSymbolOptions.value = []
+    knownProductionVariableSymbols.value = new Set()
+    knownTestVariableSymbols.value = new Set()
   }
 }
 
@@ -1057,6 +1096,13 @@ onMounted(loadVariableSymbols)
         >
           {{ t('payroll.submissions.transport.vs.required') }}
         </p>
+        <p
+          v-if="testEnvironmentVariableSymbolWarning"
+          class="mt-3 rounded-lg border border-warning-500/40 bg-warning-50 p-3 text-xs text-warning-800"
+          data-test="transport-vs-test-mismatch-warning"
+        >
+          {{ t('payroll.submissions.transport.vs.test_mismatch_warning') }}
+        </p>
       </div>
     </div>
 
@@ -1304,6 +1350,9 @@ onMounted(loadVariableSymbols)
             </p>
             <p class="mt-1 text-sm text-warning-800">
               {{ t('payroll.submissions.transport.correction.description') }}
+            </p>
+            <p class="mt-1 text-xs text-warning-700" data-test="transport-correction-deadline-hint">
+              {{ t('payroll.submissions.transport.correction.deadline_hint') }}
             </p>
             <div
               v-if="correctionPreparationLoadingId === entry.group.submissionId"

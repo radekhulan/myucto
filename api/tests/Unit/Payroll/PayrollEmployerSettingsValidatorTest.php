@@ -79,6 +79,48 @@ final class PayrollEmployerSettingsValidatorTest extends TestCase
     }
 
     /**
+     * N-2: testovací VS ČSSZ je na rozdíl od ostrého přímo zapisovatelný odsud
+     * — nemá účinnou historii, je to pevný technický identifikátor sandboxu.
+     */
+    public function testAcceptsTestVariableSymbolWrite(): void
+    {
+        $input = $this->input('205');
+        $input['offices'][0]['test_social_security_variable_symbol'] = '9988776655';
+
+        $result = $this->validator()->validate(1, $input);
+
+        self::assertSame('9988776655', $result['offices'][0]['test_social_security_variable_symbol']);
+    }
+
+    public function testEmptyTestVariableSymbolStaysUnset(): void
+    {
+        $result = $this->validator()->validate(1, $this->input('205'));
+
+        self::assertNull($result['offices'][0]['test_social_security_variable_symbol']);
+    }
+
+    #[DataProvider('malformedTestVariableSymbols')]
+    public function testRejectsMalformedTestVariableSymbol(string $symbol): void
+    {
+        $input = $this->input('205');
+        $input['offices'][0]['test_social_security_variable_symbol'] = $symbol;
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Testovací VS ČSSZ musí být číslo o délce 1 až 10 znaků.');
+        $this->validator()->validate(1, $input);
+    }
+
+    /** @return array<string,array{string}> */
+    public static function malformedTestVariableSymbols(): array
+    {
+        return [
+            'písmena' => ['ABCDEFGHIJ'],
+            'jedenáct číslic' => ['12345678901'],
+            'mezera' => ['1 2'],
+        ];
+    }
+
+    /**
      * Ú-12: typ účtu („expense") propustí do nákladu hrubé mzdy i 524. Zápis by
      * prošel, ale reconciliace by pak trvale končila chybou 422 — kontrola
      * rezervovaných prefixů proto patří už k uložení nastavení.

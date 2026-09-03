@@ -64,6 +64,13 @@ instituce. Pole
 **Registrační číslo zaměstnavatele** slouží pro evidenci a podání; není
 variabilním symbolem platby.
 
+U každé účtárny lze vyplnit **Testovací VS ČSSZ**. Testovací prostředí ČSSZ má
+vlastní přidělený variabilní symbol, jiný než ostrý, a podání poslané pod cizím
+symbolem zamítne. Odmítnutí přitom hlásí chybějící pověření k e-službě nebo
+nezaznamenaný certifikát, takže se snadno splete s problémem podpisu. Jakmile je
+testovací symbol vyplněný, přehled odeslání ho v testovacím prostředí nabídne
+sám a při odesílání pod ostrým symbolem upozorní.
+
 V záložce **Podání** se potvrzuje samostatný profil REGZEL. Obsahuje
 čtyřmístný `kodFU`, povinný `kodPracovisteFU` (kromě Specializovaného
 finančního úřadu s kódem 4000), případné devítimístné VČP

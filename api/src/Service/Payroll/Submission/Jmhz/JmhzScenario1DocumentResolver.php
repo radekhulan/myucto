@@ -25,6 +25,37 @@ final class JmhzScenario1DocumentResolver
     ];
 
     /**
+     * SSOT pro „záporný příjem se do JMHZ hlásí nulou".
+     *
+     * ČSSZ (potvrzeno v úřední diskuzi k JMHZ): čistý příjem (10344) NIKDY
+     * nesmí být záporný — vždy 0. Šířeji (sdělení z jednání ČSSZ s výrobci
+     * mzdového SW, nepotvrzené písemně): u příjmových atributů 10328/10329/
+     * /10330/10331 (mzda a její rozpad) a 10286 (úhrn příjmů) se do
+     * 31. 12. 2026 místo záporné hodnoty vykazuje nula — hlášení se kvůli
+     * přeplatku dovolené nebo doplatku po celoměsíční nemoci nesmí zablokovat.
+     * Interní evidence (mzdový běh, přehled) drží dál skutečnou zápornou
+     * hodnotu; do JMHZ jde jen tahle nula.
+     *
+     * Hranice je záměrně úzká — je i JINÉ atributy, kde je znaménko
+     * legitimní (viz {@see JmhzScenario1XmlSerializer::signedInt()}, např.
+     * 10323), a plošné „záporné číslo = nula" by je tiše rozbilo.
+     *
+     * TODO (od 1. 1. 2027): ČSSZ má podle stejného sdělení záporné hodnoty
+     * u těchto atributů povolit. Bez písemného potvrzení termínu klamp
+     * NEPŘEPÍNAT podle data — až přijde, ořezání tady zrušit.
+     *
+     * @var list<string>
+     */
+    private const NEGATIVE_INCOME_REPORTED_AS_ZERO = [
+        '10286',
+        '10328',
+        '10329',
+        '10330',
+        '10331',
+        '10344',
+    ];
+
+    /**
      * Ordinary evidence přípravy podle `employment_id`.
      *
      * Do v6 včetně nesla příprava JEDNU evidenci (objekt), protože se dala
@@ -1727,7 +1758,13 @@ final class JmhzScenario1DocumentResolver
             );
             return null;
         }
-        return intdiv($minor, 100);
+        $whole = intdiv($minor, 100);
+        if ($whole < 0 && in_array($attributeId, self::NEGATIVE_INCOME_REPORTED_AS_ZERO, true)) {
+            // Viz self::NEGATIVE_INCOME_REPORTED_AS_ZERO — záporný výsledek
+            // se u těchto atributů vykazuje jako 0, ne jako blokace podání.
+            return 0;
+        }
+        return $whole;
     }
 
     /**

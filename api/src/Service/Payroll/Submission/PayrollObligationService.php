@@ -40,6 +40,36 @@ final class PayrollObligationService
     ];
     private const ENVIRONMENTS = ['production', 'test'];
 
+    /**
+     * Agendy, u kterých smí za jedno rozhodné období existovat právě jedna
+     * ŘÁDNÁ povinnost.
+     *
+     * PROČ NE PLOŠNĚ: `regular` tu neznamená „za období", ale „ne oprava".
+     * Oznamovací povinnosti vůči zdravotní pojišťovně se evidují jako řádné
+     * s `period_start` = den vzniku UDÁLOSTI a jeden pracovní poměr může mít
+     * v týž den víc různých povinností (skončení zaměstnání a změna údajů).
+     * Plošné pravidlo by je rozbilo. Jmenovitý seznam je proto správnější
+     * i bezpečnější než dedukce ze `subject_type`.
+     *
+     * PROČ KATALOG V KÓDU: jestli úřad za období přijme jen jedno řádné
+     * podání, je vlastnost agendy daná zákonem a provozem úřadu, ne nastavení
+     * firmy; stejným způsobem a ze stejného důvodu je v kódu
+     * {@see PayrollAgendaCorrectionPolicy}.
+     *
+     * Seznam MUSÍ zůstat shodný s výrazem generovaného sloupce
+     * `payroll_obligations.regular_period_scope_on` (migrace 1731) — rozšíření
+     * o další agendu je tedy vždy dvojice: konstanta tady a nová migrace.
+     * Že se obojí nerozešlo, hlídá
+     * `PayrollObligationRegularPeriodUniquenessTest`.
+     *
+     * @var list<string>
+     */
+    public const UNIQUE_REGULAR_PERIOD_AGENDAS = [
+        // ČSSZ přijme za jedno rozhodné období jediné řádné podání JMHZ;
+        // druhé zamítne kódem 40326 a vzít zpět se to nedá.
+        'JMHZ25',
+    ];
+
     public function __construct(
         private readonly PayrollSubmissionRepository $repository,
         private readonly ClockInterface $clock,
@@ -147,6 +177,14 @@ final class PayrollObligationService
                     'created' => false,
                 ];
             }
+            $this->assertRegularPeriodFree(
+                $supplierId,
+                $environment,
+                $agendaCode,
+                $subjectReference,
+                $periodStart,
+                $obligationKind,
+            );
 
             $obligationId = $this->repository->insertObligation(
                 $supplierId,
@@ -321,6 +359,63 @@ final class PayrollObligationService
                 'created_by' => $createdBy,
             ],
         ];
+    }
+
+    /** Smí u téhle agendy existovat za období jen jedna řádná povinnost? */
+    public static function requiresUniqueRegularPeriod(string $agendaCode): bool
+    {
+        return in_array(
+            $agendaCode,
+            self::UNIQUE_REGULAR_PERIOD_AGENDAS,
+            true,
+        );
+    }
+
+    /**
+     * Pojistka proti DRUHÉMU řádnému hlášení za totéž období.
+     *
+     * Sedí tady, a ne v mostu konkrétní agendy, protože `register()` je jediná
+     * cesta, kterou povinnost vzniká pro VŠECHNY agendy (JMHZ, ELDP, OZUSPOJ,
+     * nemocenská, registrace, zdravotní pojišťovny). Idempotenční klíč to
+     * neuhlídá: nese přípravu a otisk snapshotu, takže druhá příprava za totéž
+     * období je pro něj nový vstup a založí novou povinnost — a pod ní projde
+     * i druhé řádné podání, protože `uq_payroll_submissions_regular` hlídá jen
+     * jedno řádné podání NA POVINNOST.
+     *
+     * Vyhazuje se výjimka a NEVRACÍ se původní povinnost. Vrátit ji by vypadalo
+     * smířlivěji, ale volající by nad ní rovnou stavěl druhé řádné podání a to
+     * by skončilo syrovou chybou duplicity na `uq_payroll_submissions_regular`.
+     * Věta o opravném hlášení je navíc to jediné, co uživatele posune dál.
+     */
+    private function assertRegularPeriodFree(
+        int $supplierId,
+        string $environment,
+        string $agendaCode,
+        string $subjectReference,
+        string $periodStart,
+        string $obligationKind,
+    ): void {
+        if ($obligationKind !== 'regular'
+            || !self::requiresUniqueRegularPeriod($agendaCode)
+        ) {
+            return;
+        }
+        $live = $this->repository->findLiveRegularObligationForUpdate(
+            $supplierId,
+            $environment,
+            $agendaCode,
+            $subjectReference,
+            $periodStart,
+        );
+        if ($live === null) {
+            return;
+        }
+
+        throw new \DomainException(
+            "Za období od {$periodStart} už je evidované řádné hlášení agendy "
+            . "{$agendaCode} (povinnost #{$live['id']}). Další změny za tohle "
+            . 'období se posílají opravným hlášením, ne druhým řádným.',
+        );
     }
 
     public function registerAgendaMatrix(

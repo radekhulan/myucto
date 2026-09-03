@@ -270,6 +270,15 @@ final readonly class JmhzSubmissionBridgeService
         return "jmhz_preparation:{$preparationId}";
     }
 
+    /**
+     * Idempotenční klíč povinnosti nese přípravu i otisk snapshotu, takže DRUHÁ
+     * příprava za totéž období (jiná revize běhu) je pro něj nový vstup. Sám
+     * o sobě proto duplicitní řádné hlášení nezastaví — udělá to
+     * {@see PayrollObligationService::UNIQUE_REGULAR_PERIOD_AGENDAS} a klíč
+     * `uq_payroll_obligations_regular_period`. Guard je schválně tam a ne tady:
+     * `register()` je společná cesta všech agend, kdežto tenhle most vidí jen
+     * JMHZ.
+     */
     private function registerRegularObligation(
         int $supplierId,
         int $preparationId,

@@ -363,13 +363,28 @@ final class JmhzPreparationSnapshotBuilder
                         $this->assertMapping($mapping, $componentId);
                         $componentMappings[] = $mapping;
                         $amount = $inputRow['amount_minor'] ?? null;
-                        if (!is_int($amount) || $amount < 0) {
+                        if (!is_int($amount)) {
+                            // Chybějící/nerozlišená částka zůstává blokací —
+                            // to je jiný problém než záporná částka (viz níže).
+                            // Kód „negative" v názvu je historický: záporná
+                            // částka už se sem NEDOSTANE, ošetřuje ji větev
+                            // pod `else` a klamp v resolveru (viz níže).
                             $issues[] = $this->issue(
                                 'jmhz_negative_or_deferred_income_unsupported',
                                 'component',
                                 $componentId,
                             );
                         } else {
+                            /*
+                             * Záporná částka jedné mzdové složky (např. vratka
+                             * přeplatku dovolené) je legitimní vstup — sčítá
+                             * se normálně do cílového atributu. Když je pak
+                             * SOUČET za atribut záporný, ČSSZ chce místo
+                             * blokace hlášení nulu — to řeší SSOT klamp v
+                             * JmhzScenario1DocumentResolver::wholeCzk() přes
+                             * JmhzScenario1DocumentResolver::NEGATIVE_INCOME_REPORTED_AS_ZERO, ne tady
+                             * na úrovni jednotlivé složky.
+                             */
                             $targets = [
                                 (string) $mapping['target_attribute_id'],
                                 ...$this->stringList(

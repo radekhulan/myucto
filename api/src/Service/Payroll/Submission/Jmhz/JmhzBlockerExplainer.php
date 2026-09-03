@@ -71,6 +71,14 @@ final class JmhzBlockerExplainer
         'jmhz_scenario1_pvpoj_unavailable' => 'Chybí pojistná část měsíčního hlášení.',
         'jmhz_scenario1_pvpoj_source_mismatch' => 'Pojistná část neodpovídá vybrané registraci u OSSZ.',
         'jmhz_scenario1_earnings_vector_incomplete' => 'Mzdové složky nejsou úplně zařazené do polí měsíčního hlášení.',
+        /*
+         * Záporná částka mzdové složky hlášení NEBLOKUJE — sečte se normálně
+         * a výsledný záporný součet se do JMHZ vykáže jako 0 (viz
+         * JmhzScenario1DocumentResolver::NEGATIVE_INCOME_REPORTED_AS_ZERO).
+         * Tenhle nález proto vždycky znamená chybějící nebo neurčenou částku
+         * mzdové složky, ne zápornou hodnotu.
+         */
+        'jmhz_negative_or_deferred_income_unsupported' => 'Mzdová složka nemá určenou částku za vykazovaný měsíc.',
         'jmhz_eldp_evidence_missing' => 'Chybí připravená evidence důchodového pojištění.',
         'jmhz_eldp_absences_unsupported' => 'Měsíc obsahuje nepřítomnost, jejíž zápis do evidence důchodového pojištění nelze bezpečně odvodit; automaticky se zpracuje dovolená, nemoc, karanténa a ošetřovné.',
         'jmhz_eldp_excluded_days_unsupported' => 'Vyloučené doby neodpovídají neodpracovaným hodinám v pracovním souhrnu.',
@@ -128,6 +136,7 @@ final class JmhzBlockerExplainer
         'jmhz_work_month_not_approved' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
         'jmhz_work_summary_v2_missing' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
         'jmhz_scenario1_earnings_vector_incomplete' => 'Otevřete Mzdy → Mzdové složky a doplňte zařazení.',
+        'jmhz_negative_or_deferred_income_unsupported' => 'Otevřete Mzdy → Mzdové běhy a doplňte částku dotčené mzdové složky za měsíc.',
         'jmhz_eldp_evidence_missing' => 'Obnovte test JMHZ; pokud blokace zůstane, postupujte podle konkrétního upozornění u pracovního vztahu.',
         'jmhz_eldp_absences_unsupported' => 'Zkontrolujte Mzdy → Pracovní doba; nestandardní měsíc ponechte blokovaný a zpracujte jej individuálně podle podkladů ČSSZ.',
         'jmhz_eldp_excluded_days_unsupported' => 'Otevřete Mzdy → Pracovní doba a slaďte evidované nepřítomnosti s neodpracovanými hodinami měsíce.',

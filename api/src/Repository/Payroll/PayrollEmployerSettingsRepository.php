@@ -181,6 +181,7 @@ final class PayrollEmployerSettingsRepository
      *     name:string,
      *     social_security_variable_symbol:?string,
      *     social_security_variable_symbol_provided:bool,
+     *     test_social_security_variable_symbol:?string,
      *     is_active:bool
      *   }>
      * } $data
@@ -243,6 +244,7 @@ final class PayrollEmployerSettingsRepository
      *   code:string,
      *   name:string,
      *   social_security_variable_symbol:?string,
+     *   test_social_security_variable_symbol:?string,
      *   is_active:bool,
      *   row_version:int
      * }>
@@ -251,6 +253,7 @@ final class PayrollEmployerSettingsRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, code, name, social_security_variable_symbol,
+                    test_social_security_variable_symbol,
                     is_active, row_version
                FROM payroll_offices
               WHERE supplier_id = ?
@@ -267,6 +270,10 @@ final class PayrollEmployerSettingsRepository
                     $row['social_security_variable_symbol'] === null
                         ? null
                         : (string) $row['social_security_variable_symbol'],
+                'test_social_security_variable_symbol' =>
+                    $row['test_social_security_variable_symbol'] === null
+                        ? null
+                        : (string) $row['test_social_security_variable_symbol'],
                 'is_active' => (bool) $row['is_active'],
                 'row_version' => (int) $row['row_version'],
             ],
@@ -280,6 +287,7 @@ final class PayrollEmployerSettingsRepository
      *   name:string,
      *   social_security_variable_symbol:?string,
      *   social_security_variable_symbol_provided:bool,
+     *   test_social_security_variable_symbol:?string,
      *   is_active:bool
      * }> $offices
      * @return array<string,int>
@@ -300,12 +308,16 @@ final class PayrollEmployerSettingsRepository
             )->execute($params);
         }
 
+        // Testovací VS je na rozdíl od ostrého (viz syncOfficeSymbol()) přímo
+        // zapisovatelný odsud: nemá účinnou historii, je to pevný technický
+        // identifikátor pro sandbox ČSSZ.
         $upsert = $pdo->prepare(
             'INSERT INTO payroll_offices
-                (supplier_id, code, name, is_active)
-             VALUES (?, ?, ?, ?)
+                (supplier_id, code, name, test_social_security_variable_symbol, is_active)
+             VALUES (?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 name = VALUES(name),
+                test_social_security_variable_symbol = VALUES(test_social_security_variable_symbol),
                 is_active = VALUES(is_active),
                 row_version = row_version + 1'
         );
@@ -314,6 +326,7 @@ final class PayrollEmployerSettingsRepository
                 $supplierId,
                 $office['code'],
                 $office['name'],
+                $office['test_social_security_variable_symbol'],
                 (int) $office['is_active'],
             ]);
         }

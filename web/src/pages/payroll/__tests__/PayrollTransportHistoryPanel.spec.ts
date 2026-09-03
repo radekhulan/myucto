@@ -572,6 +572,41 @@ describe('PayrollTransportHistoryPanel', () => {
       .toContain('payroll.submissions.transport.environment.test_note')
   })
 
+  it('N-2: v testu s ostrým VS varuje, ale nezablokuje odeslání', async () => {
+    m.employerSettings.mockResolvedValue({
+      offices: [{
+        id: 42,
+        code: 'MAIN',
+        name: 'Hlavní účtárna',
+        social_security_variable_symbol: '1234567890',
+        test_social_security_variable_symbol: '9988776655',
+        is_active: true,
+      }],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    expect(wrapper.find('[data-test="transport-vs-test-mismatch-warning"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="transport-environment-test"]').trigger('click')
+    await flushPromises()
+
+    // Jednoznačný testovací VS se předvyplní sám, varování tedy nesvítí.
+    expect((wrapper.get('[data-test="transport-variable-symbol"]').element as HTMLInputElement).value)
+      .toBe('9988776655')
+    expect(wrapper.find('[data-test="transport-vs-test-mismatch-warning"]').exists()).toBe(false)
+
+    // Přepis na ostrý VS v testovacím prostředí je stále povolený — je to varování, ne zákaz.
+    const input = wrapper.get('[data-test="transport-variable-symbol"]')
+    await input.setValue('1234567890')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="transport-vs-test-mismatch-warning"]').text())
+      .toContain('payroll.submissions.transport.vs.test_mismatch_warning')
+    expect((wrapper.get('[data-test="transport-variable-symbol"]').element as HTMLInputElement).disabled)
+      .toBe(false)
+  })
+
   it('chybu doptání vypíše a seznam pokusů nevyprázdní', async () => {
     m.pollJmhzTransportAttempt.mockRejectedValue({
       response: { data: { error: { message: 'Brána VREP neodpovídá.' } } },
@@ -1016,6 +1051,9 @@ describe('PayrollTransportHistoryPanel', () => {
     await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
     await flushPromises()
     expect(m.jmhzContentCorrectionCandidates).toHaveBeenCalledWith(70, 125, 'production')
+    // UX: proaktivní varování o tvrdém termínu 20. dne, ne až po odmítnutí ČSSZ.
+    expect(wrapper.get('[data-test="transport-correction-deadline-hint"]').text())
+      .toContain('payroll.submissions.transport.correction.deadline_hint')
     expect(wrapper.get('[data-test="transport-correct-form-70"]').text())
       .toContain('Petr Syntetický')
     expect(wrapper.get('[data-test="transport-correct-form-70"]').text())

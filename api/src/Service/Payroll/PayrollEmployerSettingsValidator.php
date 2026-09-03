@@ -18,6 +18,13 @@ final class PayrollEmployerSettingsValidator
      */
     private const SOCIAL_SECURITY_OFFICE_CODE_PATTERN = '/^[0-9]{3}$/';
 
+    /**
+     * Testovací VS ČSSZ má stejný tvar jako ostrý (JMHZ 1.4.1.6, atribut
+     * 10002), ale na rozdíl od něj je přímo zapisovatelný přes tento
+     * formulář — nemá účinnou historii, ČSSZ ho přiděluje jednou k sandboxu.
+     */
+    private const TEST_VARIABLE_SYMBOL_PATTERN = '/^[0-9]{1,10}$/';
+
     private const OPTIONAL_FIELDS = [
         'employer_registration_number' => 32,
         'social_security_office_code' => 16,
@@ -64,6 +71,7 @@ final class PayrollEmployerSettingsValidator
      *     name:string,
      *     social_security_variable_symbol:?string,
      *     social_security_variable_symbol_provided:bool,
+     *     test_social_security_variable_symbol:?string,
      *     is_active:bool
      *   }>
      * }
@@ -123,6 +131,7 @@ final class PayrollEmployerSettingsValidator
      *   name:string,
      *   social_security_variable_symbol:?string,
      *   social_security_variable_symbol_provided:bool,
+     *   test_social_security_variable_symbol:?string,
      *   is_active:bool
      * }>
      */
@@ -165,6 +174,15 @@ final class PayrollEmployerSettingsValidator
                     'VS ČSSZ spravujte přes účinnou historii registrace mzdové účtárny.'
                 );
             }
+            $testVariableSymbol = trim(
+                (string) ($office['test_social_security_variable_symbol'] ?? '')
+            );
+            if ($testVariableSymbol !== ''
+                && preg_match(self::TEST_VARIABLE_SYMBOL_PATTERN, $testVariableSymbol) !== 1) {
+                throw new \InvalidArgumentException(
+                    'Testovací VS ČSSZ musí být číslo o délce 1 až 10 znaků.'
+                );
+            }
             $seen[$code] = true;
             $hasActive = $hasActive || $office['is_active'];
             $offices[] = [
@@ -174,6 +192,8 @@ final class PayrollEmployerSettingsValidator
                     $socialVariableSymbol === '' ? null : $socialVariableSymbol,
                 'social_security_variable_symbol_provided' =>
                     $socialVariableSymbolProvided,
+                'test_social_security_variable_symbol' =>
+                    $testVariableSymbol === '' ? null : $testVariableSymbol,
                 'is_active' => $office['is_active'],
             ];
         }

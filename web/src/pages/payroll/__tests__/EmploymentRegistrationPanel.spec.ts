@@ -856,6 +856,28 @@ describe('EmploymentRegistrationPanel', () => {
   })
 
   /**
+   * UX: cizinec s uplatněnou slevou potřebuje dvoukrokovou registraci (akce 1
+   * neumí atribut 10459) a změna se u ČSSZ projeví se zpožděním (chyba 40243
+   * u JMHZ odeslaného dřív). Účetní to musí vidět dopředu u téhle změny, ne až
+   * po zamítnutí.
+   */
+  it('shows the two-step and latency hints when editing the tax residency delta', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+    const interaction = wrapper.get('[data-test="registration-event-interaction"]')
+    await interaction.setValue('change')
+
+    const deltaField = wrapper.get('[data-test="registration-event-delta"] select')
+    await deltaField.setValue('tax_residency')
+
+    expect(wrapper.get('[data-test="registration-event-tax-residency-two-step-hint"]').text())
+      .toContain('payroll.people.registration.event.tax_residency_two_step_hint')
+    expect(wrapper.get('[data-test="registration-event-tax-residency-latency-hint"]').text())
+      .toContain('payroll.people.registration.event.tax_residency_latency_hint')
+  })
+
+  /**
    * Číselníková pole A1 (druh činnosti, typ daňového identifikátoru, stát)
    * se vybírají z připnutých JMHZ číselníků, ne píší rukou — a odesílá se
    * pořád jen zvolený kód jako řetězec (stejná záruka jako u pojišťovny).

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlPassability;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolError;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolErrorOrigin;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolKind;
@@ -469,5 +470,73 @@ final class JmhzProtocolParserTest extends TestCase
         } catch (JmhzTransportException $e) {
             self::assertSame('jmhz_protocol_error_not_a_control', $e->errorCode);
         }
+    }
+
+    /**
+     * ČSSZ propustnost jednotlivé chyby nevrací jako strukturovaný element,
+     * ale jako textový prefix v popisu — a katalog kontrol se v čase mění
+     * (ruší se, suspenduje, mění propustnost), takže není spolehlivým zdrojem
+     * pravdy o konkrétním protokolu. Text protistrany má přednost.
+     */
+    public function testPassabilityIsReadFromTheDescriptionPrefix(): void
+    {
+        $passable = JmhzProtocolError::fromCode(
+            20_226,
+            '(Propustnost: propustná) Neodpovídá počet individualizovaných součástí.',
+        );
+        $blocking = JmhzProtocolError::fromCode(
+            20_226,
+            '(Propustnost: nepropustná) Chybějící 1. dílčí podání.',
+        );
+
+        self::assertSame(JmhzControlPassability::Passable, $passable->passability);
+        self::assertSame(JmhzControlPassability::Blocking, $blocking->passability);
+    }
+
+    /**
+     * Starší protokoly prefix nemusí mít vůbec — a to NESMÍ dopadnout jako
+     * tichá „propustná". Parser je záměrně fail-closed: co nerozpozná, je
+     * „neuvedeno".
+     */
+    public function testMissingPassabilityPrefixIsUnspecifiedNotPassable(): void
+    {
+        $error = JmhzProtocolError::fromCode(20_226, 'Neodpovídá počet individualizovaných součástí.');
+
+        self::assertSame(JmhzControlPassability::Unspecified, $error->passability);
+    }
+
+    /** Prefix je tolerantní k mezerám a velikosti písmen, ale nehádá jiné tvary. */
+    public function testPassabilityPrefixParsingIsToleratedButNotGuessed(): void
+    {
+        $extraSpaces = JmhzProtocolError::fromCode(
+            20_226,
+            '(  Propustnost  :   propustná  )   Text chyby.',
+        );
+        $upperCase = JmhzProtocolError::fromCode(
+            20_226,
+            '(PROPUSTNOST: NEPROPUSTNÁ) Text chyby.',
+        );
+        $unrecognizedShape = JmhzProtocolError::fromCode(
+            20_226,
+            'Propustnost: propustná — Text chyby.',
+        );
+
+        self::assertSame(JmhzControlPassability::Passable, $extraSpaces->passability);
+        self::assertSame(JmhzControlPassability::Blocking, $upperCase->passability);
+        self::assertSame(JmhzControlPassability::Unspecified, $unrecognizedShape->passability);
+    }
+
+    /** Text popisu se ZACHOVÁ tak, jak přišel — je to doklad. */
+    public function testDescriptionMessageIsPreservedVerbatim(): void
+    {
+        $error = JmhzProtocolError::fromCode(
+            20_226,
+            '(Propustnost: propustná) Neodpovídá počet individualizovaných součástí.',
+        );
+
+        self::assertSame(
+            '(Propustnost: propustná) Neodpovídá počet individualizovaných součástí.',
+            $error->message,
+        );
     }
 }

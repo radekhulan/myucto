@@ -140,6 +140,67 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    /**
+     * ČSSZ (potvrzeno v úřední diskuzi k JMHZ): čistý příjem (10344) NIKDY
+     * nesmí být záporný, hlásí se jako 0. Šířeji (sdělení ČSSZ výrobcům SW,
+     * do 31. 12. 2026) totéž platí pro mzdu a její rozpad (10328–10331) a
+     * úhrn příjmů (10286) — přeplatek dovolené nebo doplatek zdravotního
+     * pojištění po celoměsíční nemoci nesmí hlášení zablokovat, jen se
+     * vykáže nulou. Viz JmhzScenario1DocumentResolver::wholeCzk() a
+     * self::NEGATIVE_INCOME_REPORTED_AS_ZERO.
+     */
+    public function testNegativeIncomeAttributesAreReportedAsZeroInsteadOfBlocking(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        $payload['schema_reference'] = JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE;
+        $payload['builder_version'] = JmhzPreparationSnapshotBuilder::BUILDER_VERSION;
+        unset($payload['scope']['scenario_key']);
+        $payload['scope']['scenario_set'] = ['scenario_1'];
+        $payload['ordinary_evidence'] = [[
+            'scope' => ['employee_id' => 11, 'employment_id' => 101],
+            'attribute_values' => ['10116' => false, '10546' => false],
+        ]];
+        $payload['source_versions']['ordinary_evidence'] = [[
+            'employment_id' => 101,
+            'id' => 601,
+            'source_manifest_sha256' => str_repeat('4', 64),
+            'snapshot_fingerprint' => str_repeat('5', 64),
+        ]];
+        // Přeplatek dovolené promítnutý do mzdy: rozúčtovaná mzda (10328) i
+        // úhrn příjmů (10286) i čistý příjem (10344) vyjdou záporně.
+        $payload['people'][0]['person_summary']['totals']['jmhz_amount_minor'] = -50_000;
+        $payload['people'][0]['person_summary']['statutory']['net_pay']
+            ['net_before_deductions_minor_units'] = -13_500;
+        $payload['people'][0]['employments'][0]['earnings_by_attribute_minor']['10328'] = -100_000;
+        $preparation = $this->withVersionedPayload(
+            $preparation,
+            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+            $payload,
+        );
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(),
+        );
+
+        self::assertSame('resolved', $resolution->status());
+        self::assertSame([], $resolution->blockers);
+        self::assertSame(
+            0,
+            $resolution->candidate?->payload['people'][0]['summary']['income_total_czk'],
+        );
+        self::assertSame(
+            0,
+            $resolution->candidate?->payload['people'][0]['summary']['net_income_czk'],
+        );
+        self::assertSame(
+            0,
+            $resolution->candidate?->payload['people'][0]['employments'][0]
+                ['earnings_by_attribute_czk']['10328'],
+        );
+    }
+
     public function testV11MixedScenarioPreparationCannotBecomeScenarioOneDocument(): void
     {
         $preparation = $this->preparation();

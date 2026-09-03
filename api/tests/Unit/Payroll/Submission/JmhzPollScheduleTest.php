@@ -61,17 +61,37 @@ final class JmhzPollScheduleTest extends TestCase
     }
 
     /**
-     * Po třech dnech už protokol sám nepřijde. Zpráva musí být věta, podle
-     * které se dá jednat — ne kód a ne „vypršel timeout".
+     * Po uplynutí stropu stáří už protokol sám nepřijde. Zpráva musí být věta,
+     * podle které se dá jednat — ne kód a ne „vypršel timeout".
      */
     public function testAttemptOlderThanTheAgeCapGivesAnActionableReason(): void
     {
         $now = new \DateTimeImmutable('2026-08-15 12:00:00', new \DateTimeZone('UTC'));
-        $reason = JmhzPollSchedule::exhaustedReason($now, '2026-08-12 11:00:00', 3);
+        $sentAt = $now->modify('-' . (JmhzPollSchedule::MAX_AGE_HOURS + 1) . ' hours');
+        $reason = JmhzPollSchedule::exhaustedReason($now, $sentAt->format('Y-m-d H:i:s'), 3);
 
         self::assertIsString($reason);
         self::assertStringContainsString('ePortálu ČSSZ', $reason);
-        self::assertStringContainsString('72', $reason);
+        self::assertStringContainsString((string) JmhzPollSchedule::MAX_AGE_HOURS, $reason);
+    }
+
+    /**
+     * Těsně pod stropem stáří se ještě dotazujeme, těsně nad ním už ne — je
+     * to tahle hranice, ne o hodinu vedle, na kterou se automatika spoléhá.
+     */
+    public function testAgeCapBoundaryIsExact(): void
+    {
+        $now = new \DateTimeImmutable('2026-08-15 12:00:00', new \DateTimeZone('UTC'));
+
+        $justUnder = $now->modify('-' . (JmhzPollSchedule::MAX_AGE_HOURS - 1) . ' hours');
+        self::assertNull(
+            JmhzPollSchedule::exhaustedReason($now, $justUnder->format('Y-m-d H:i:s'), 3),
+        );
+
+        $justOver = $now->modify('-' . (JmhzPollSchedule::MAX_AGE_HOURS + 1) . ' hours');
+        self::assertIsString(
+            JmhzPollSchedule::exhaustedReason($now, $justOver->format('Y-m-d H:i:s'), 3),
+        );
     }
 
     public function testAttemptCountCapIsTheSecondBrake(): void
