@@ -2255,6 +2255,7 @@ export interface PayrollOffice {
   code: string
   name: string
   social_security_variable_symbol: string | null
+  test_social_security_variable_symbol: string | null
   is_active: boolean
   row_version: number
 }
@@ -2380,6 +2381,7 @@ export interface PayrollOfficePayload {
   code: string
   name: string
   social_security_variable_symbol: string | null
+  test_social_security_variable_symbol: string | null
   is_active: boolean
 }
 

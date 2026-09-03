@@ -193,6 +193,30 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         self::assertSame('0012345678', $stored->fetchColumn());
     }
 
+    /**
+     * N-2: na rozdíl od ostrého VS (viz test výše) je testovací VS ČSSZ přímo
+     * zapisovatelný přes hromadné uložení nastavení — nemá účinnou historii.
+     */
+    public function testTestVariableSymbolIsSavedThroughBulkSettings(): void
+    {
+        $created = $this->put($this->supplierId, $this->payload('MAIN', 'Mzdová účtárna'));
+        self::assertSame(200, $created->getStatusCode());
+
+        $withTestVs = $this->payload('MAIN', 'Mzdová účtárna');
+        $withTestVs['row_version'] = 1;
+        $withTestVs['offices'][0]['test_social_security_variable_symbol'] = '9988776655';
+        $updated = $this->put($this->supplierId, $withTestVs);
+        self::assertSame(200, $updated->getStatusCode());
+        $office = $this->json($updated)['settings']['offices'][0];
+        self::assertSame('9988776655', $office['test_social_security_variable_symbol']);
+
+        $stored = $this->db->pdo()->prepare(
+            'SELECT test_social_security_variable_symbol FROM payroll_offices WHERE supplier_id = ? AND code = ?'
+        );
+        $stored->execute([$this->supplierId, 'MAIN']);
+        self::assertSame('9988776655', $stored->fetchColumn());
+    }
+
     public function testEffectiveOfficeRegistrationAcceptsEvidencedPastAndIsSessionTenantScoped(): void
     {
         if (!$this->db->hasTable('payroll_office_registration_versions')) {

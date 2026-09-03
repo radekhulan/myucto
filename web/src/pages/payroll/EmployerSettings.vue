@@ -269,6 +269,9 @@ async function save() {
         // VS has append-only effective history; the bulk profile may never
         // overwrite the legacy live projection.
         social_security_variable_symbol: null,
+        // Testovací VS na rozdíl od ostrého žádnou účinnou historii nemá —
+        // je to pevný technický identifikátor sandboxu ČSSZ, ukládá se přímo.
+        test_social_security_variable_symbol: nullable(office.test_social_security_variable_symbol),
         is_active: office.is_active,
       })),
     })
@@ -383,6 +386,7 @@ function addOffice() {
     code: '',
     name: '',
     social_security_variable_symbol: null,
+    test_social_security_variable_symbol: null,
     is_active: true,
     row_version: 0,
     is_new: true,
@@ -767,6 +771,7 @@ onMounted(async () => {
                 <th class="px-3 py-2">{{ t('payroll.employer.office_name') }}<RequiredMark /></th>
                 <th class="px-3 py-2">{{ t('payroll.employer.office_code') }}<RequiredMark /></th>
                 <th class="px-3 py-2">{{ t('payroll.employer.office_social_security_variable_symbol') }}</th>
+                <th class="px-3 py-2">{{ t('payroll.employer.office_test_social_security_variable_symbol') }}</th>
                 <th class="px-3 py-2">{{ t('payroll.employer.office_status') }}</th>
                 <th class="w-10 px-3 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th>
               </tr>
@@ -793,6 +798,10 @@ onMounted(async () => {
                     {{ t('payroll.employer.manage_registration') }}
                   </button>
                   <span v-else class="text-xs text-neutral-500">{{ t('payroll.employer.registration_after_office_save') }}</span>
+                </td>
+                <td class="px-3 py-3 align-top">
+                  <input v-model="office.test_social_security_variable_symbol" data-office-test-vs type="text" inputmode="numeric" maxlength="10" :disabled="!canWrite" class="h-9 w-36 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
+                  <span class="mt-1 block max-w-40 text-xs text-neutral-500">{{ t('payroll.employer.office_test_social_security_variable_symbol_hint') }}</span>
                 </td>
                 <td class="px-3 py-3 align-top">
                   <label class="inline-flex min-h-9 cursor-pointer items-center gap-2">
@@ -838,6 +847,11 @@ onMounted(async () => {
                   {{ t('payroll.employer.manage_registration') }}
                 </button>
                 <span v-else class="text-xs text-neutral-500">{{ t('payroll.employer.registration_after_office_save') }}</span>
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_test_social_security_variable_symbol') }}</span>
+                <input v-model="office.test_social_security_variable_symbol" type="text" inputmode="numeric" maxlength="10" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
+                <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_test_social_security_variable_symbol_hint') }}</span>
               </label>
               <label class="inline-flex min-h-10 cursor-pointer items-center gap-2">
                 <input v-model="office.is_active" type="checkbox" :disabled="!canWrite" class="h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500" @change="updateOfficeActivity(index)">

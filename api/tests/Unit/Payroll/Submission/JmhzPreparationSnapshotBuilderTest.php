@@ -469,6 +469,61 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
     }
 
+    /**
+     * ČSSZ (sdělení z jednání s výrobci): záporná částka jedné mzdové
+     * složky (typicky vratka přeplatku dovolené) hlášení NEBLOKUJE, sečte
+     * se normálně do cílového atributu — na blokaci NIC nezůstává, sumu
+     * pak ořezává na 0 SSOT klamp v JmhzScenario1DocumentResolver::wholeCzk().
+     * Bez opravy tenhle test padá na `assertNotContains`, protože builder
+     * dřív při záporné částce vždycky vyhodil
+     * `jmhz_negative_or_deferred_income_unsupported`.
+     */
+    public function testNegativeComponentAmountIsSummedInsteadOfBlockingSubmission(): void
+    {
+        $source = $this->source(negativeIncomeComponent: true);
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [502 => $this->negativeIncomeComponentMapping()],
+        );
+
+        self::assertNotContains(
+            'jmhz_negative_or_deferred_income_unsupported',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+        self::assertSame(
+            -50_000,
+            $snapshot->payload['people'][0]['employments'][0]
+                ['earnings_by_attribute_minor']['10328'],
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function negativeIncomeComponentMapping(): array
+    {
+        $mapping = [
+            'supplier_id' => 7,
+            'component_definition_id' => 502,
+            'mapping_id' => 9001,
+            'mapping_row_version' => 1,
+            'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+            'spec_manifest_sha256' => JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+            'target_attribute_id' => '10328',
+            'target_xsd_mapping' => 'form:mzdaZuctovana',
+            'parent_attribute_id' => null,
+            'ancestor_attribute_ids' => [],
+            'aggregation_role' => 'leaf',
+            'aggregation_scope' => 'employment',
+            'topology_hash' => str_repeat('7', 64),
+        ];
+        $mapping['mapping_hash'] = hash('sha256', CanonicalJson::encode($mapping));
+
+        return $mapping;
+    }
+
     public function testRejectsExtraSocialInsuranceRelationship(): void
     {
         $source = $this->source();
@@ -703,8 +758,10 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function source(bool $tamperedComponent = false): array
-    {
+    private function source(
+        bool $tamperedComponent = false,
+        bool $negativeIncomeComponent = false,
+    ): array {
         $inputs = [];
         if ($tamperedComponent) {
             $component = [
@@ -717,6 +774,26 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                 'id' => 601,
                 'amount_minor' => 100_000,
                 'component_snapshot_hash' => str_repeat('0', 64),
+                'component' => $component,
+            ];
+        }
+        if ($negativeIncomeComponent) {
+            // Vratka přeplatku dovolené jedné mzdové složky — záporná
+            // částka, kterou hlášení nesmí zablokovat (viz
+            // JmhzScenario1DocumentResolver::NEGATIVE_INCOME_REPORTED_AS_ZERO).
+            $component = [
+                'component_id' => 502,
+                'component_row_version' => 1,
+                'code' => 'SYNTHETIC_NEGATIVE',
+                'jmhz_treatment' => 'included',
+            ];
+            $inputs[] = [
+                'id' => 602,
+                'amount_minor' => -50_000,
+                'component_snapshot_hash' => hash(
+                    'sha256',
+                    CanonicalJson::encode($component),
+                ),
                 'component' => $component,
             ];
         }

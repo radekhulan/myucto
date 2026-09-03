@@ -36,13 +36,23 @@ final readonly class JmhzPollSchedule
     public const MAX_INTERVAL_SECONDS = 3600;
 
     /**
-     * Tři dny. Do té doby protokol dorazí, nebo je na straně ČSSZ něco, co
-     * opakovaný dotaz nevyřeší.
+     * Deset dní. Původní strop byl tři dny, ale v oficiální diskuzi ČSSZ je
+     * doložené podání, které zůstalo „ve zpracování" sedm dní, a ČSSZ sama
+     * potvrdila, že balík nad 300 formulářů padá do večerní/noční dávky s
+     * odpovědí až druhý den a že testovací služba DZMH umí být mimo provoz i
+     * několik dní. Tři dny tuhle realitu podstřelovaly; deset dní pokrývá
+     * doložené sedmidenní zpracování a nechává rezervu na víkend nebo výpadek
+     * navrch.
      */
-    public const MAX_AGE_HOURS = 72;
+    public const MAX_AGE_HOURS = 240;
 
-    /** Pojistka proti rozbitému rozvrhu, ne provozní strop. */
-    public const MAX_ATTEMPTS = 96;
+    /**
+     * Pojistka proti rozbitému rozvrhu, ne provozní strop. Musí zůstat vyšší,
+     * než kolik dotazů padne do {@see MAX_AGE_HOURS} při ustáleném hodinovém
+     * odstupu (viz {@see JmhzPollScheduleTest}), jinak by tenhle „bezpečnostní"
+     * strop vzdával podání dřív, než mu dá šanci stáří odeslání.
+     */
+    public const MAX_ATTEMPTS = 300;
 
     /** Uzavření transakce je jeden krátký dotaz; víc než pár pokusů nemá smysl. */
     public const MAX_CLOSE_ATTEMPTS = 8;

@@ -4455,6 +4455,8 @@
           },
           "ruian_point": "RÚIAN address point (optional)",
           "residency_changed_on": "Residence change date",
+          "tax_residency_two_step_hint": "A foreign employee claiming a tax relief needs two steps: action 1 (hire) cannot state the tax residence country effective date, so this change must follow with the same date as the hire date — otherwise the report fails with error 40243.",
+          "tax_residency_latency_hint": "The change takes effect at the ČSSZ within hours to days. A monthly report filed sooner will fail with error 40243 — wait a while before sending it.",
           "new_variable_symbol": "New ČSSZ variable symbol",
           "foreign_name": "Foreign insurance institution name",
           "foreign_identifier": "Foreign insurance number",
@@ -4740,7 +4742,8 @@
           "hint": "The VREP gateway identifies the submission by the employer's variable symbol — without it the status cannot be fetched and the transaction cannot be closed. You will find it on the ČSSZ registration decision.",
           "pick": "Take from workplace:",
           "missing": "No active workplace in the employer settings has a social-security variable symbol filled in. Add it in the settings, or type it here manually.",
-          "required": "Enter the variable symbol (at most ten digits) so the status can be fetched or the transaction closed."
+          "required": "Enter the variable symbol (at most ten digits) so the status can be fetched or the transaction closed.",
+          "test_mismatch_warning": "In the test environment, the ČSSZ accepts only its assigned test variable symbol. A submission under a different symbol (e.g. the live one) will be rejected."
         },
         "empty": {
           "title": "Nothing has been sent yet",
@@ -4897,6 +4900,7 @@
           "action": "Correct reported values",
           "title": "Content correction for {period}",
           "description": "Select the current complete preparation after correcting payroll data. An accepted form is filed again in full with the same identity; a rejected or missing form is added as a new form. Summary and PVPOJ are always checked for everyone in the company.",
+          "deadline_hint": "A wrongly claimed relief for this period can only be corrected until the 20th day of the following month. After that deadline, no correction can be filed.",
           "preparation_label": "Current JMHZ preparation",
           "preparation_placeholder": "Search by revision, date or period",
           "preparation_loading": "Finding eligible current preparations for this submission…",
@@ -5670,6 +5674,8 @@
       "office_code_hint": "Prefilled from the name; you can override it.",
       "office_name": "Name",
       "office_social_security_variable_symbol": "Social security variable symbol",
+      "office_test_social_security_variable_symbol": "Test VS (ČSSZ)",
+      "office_test_social_security_variable_symbol_hint": "The ČSSZ test environment has its own assigned VS, different from the live one.",
       "manage_registration": "Manage effective registrations",
       "registration_after_office_save": "Save the new payroll office first.",
       "registration_dialog_title": "Social security registration · {office}",

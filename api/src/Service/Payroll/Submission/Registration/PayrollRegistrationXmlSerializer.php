@@ -9,6 +9,31 @@ use DOMElement;
 
 final class PayrollRegistrationXmlSerializer
 {
+    /**
+     * Atributy bloku `unemplcomp`, které v REGZEC25 stojí na typu
+     * `t:simpleNType_string`. Ten má pattern `[1-9][0-9]*` a na rozdíl od
+     * číselného `t:simpleNType` (`[1-9].*|0`) nemá pro nulu žádnou výjimku —
+     * hodnota `"0"` tedy schématem NEPROJDE, i když je věcně smysluplná
+     * („odstupné se nevyplácelo"). Všechny jsou `use="optional"`, takže
+     * správné chování je atribut vynechat, ne poslat nulu.
+     *
+     * Seznam je pojmenovaný a společný schválně: kdyby zůstal jako výjimka
+     * u jediného atributu, tichá past by u zbylých čtyř žila dál. Ověřeno
+     * proti připnutému schématu `api/xsd/jmhz/regzec-1.4.0.4/REGZEC25.xsd`
+     * (avgmonear :920, replacement :941, goldenhandshake :952,
+     * severancepay :963, disposal :974) a `baseTypes2.xsd` :91-101.
+     * `earlyterm` sem NEPATŘÍ — je na `t:simpleNType`, kde nula projde.
+     *
+     * @var list<string>
+     */
+    private const ZERO_FORBIDDEN_ATTRIBUTES = [
+        'avgmonear',
+        'replacement',
+        'goldenhandshake',
+        'severancepay',
+        'disposal',
+    ];
+
     public function serialize(PayrollRegistrationXmlPayload $payload): string
     {
         // Výjimky v serializéru zůstávají: tady se skládá soubor, který půjde
@@ -533,9 +558,15 @@ final class PayrollRegistrationXmlSerializer
             'severance_pay' => 'severancepay', 'disposal' => 'disposal',
             'early_termination_reason' => 'earlyterm',
         ] as $key => $attribute) {
-            if (isset($data[$key])) {
-                $node->setAttribute($attribute, (string) $data[$key]);
+            if (!isset($data[$key])) {
+                continue;
             }
+            if (in_array($attribute, self::ZERO_FORBIDDEN_ATTRIBUTES, true)
+                && (string) $data[$key] === '0'
+            ) {
+                continue;
+            }
+            $node->setAttribute($attribute, (string) $data[$key]);
         }
         foreach ($data['pension_periods'] ?? [] as $period) {
             if (!is_array($period)) {

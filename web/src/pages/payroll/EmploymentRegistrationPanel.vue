@@ -3491,9 +3491,17 @@ async function copyXml(): Promise<void> {
             <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.address.country_code') }}<input v-model="addressCountryCode" maxlength="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm uppercase text-neutral-900" /></label>
             <label class="text-xs font-medium text-neutral-700 sm:col-span-2">{{ t('payroll.people.registration.event.ruian_point') }}<input v-model="addressRuianPoint" maxlength="12" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
           </div>
-          <div v-else-if="deltaField === 'tax_residency'" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.address.country_code') }}<input v-model="residencyCountryCode" maxlength="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm uppercase text-neutral-900" /></label>
-            <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.residency_changed_on') }}<input v-model="residencyChangedOn" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
+          <div v-else-if="deltaField === 'tax_residency'">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.address.country_code') }}<input v-model="residencyCountryCode" maxlength="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm uppercase text-neutral-900" /></label>
+              <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.residency_changed_on') }}<input v-model="residencyChangedOn" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
+            </div>
+            <p class="mt-2 text-xs text-neutral-500" data-test="registration-event-tax-residency-two-step-hint">
+              {{ t('payroll.people.registration.event.tax_residency_two_step_hint') }}
+            </p>
+            <p class="mt-1 text-xs text-warning-700" data-test="registration-event-tax-residency-latency-hint">
+              {{ t('payroll.people.registration.event.tax_residency_latency_hint') }}
+            </p>
           </div>
           <label v-else class="block text-xs font-medium text-neutral-700">
             {{ t(`payroll.people.registration.event.delta.${deltaField}`) }}

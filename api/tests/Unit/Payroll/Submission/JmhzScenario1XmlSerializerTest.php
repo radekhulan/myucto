@@ -748,6 +748,36 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         }
     }
 
+    /**
+     * ČSSZ potvrdila: atribut 10476 („Vykázaný příjem VČETNĚ nepojištěné
+     * činnosti", `form:prijemNepojistenaCinnost`) se vyplňuje PLNOU
+     * hodnotou, nikdy nulou — a ukázková XML ČSSZ, která mají 10476 = 0,
+     * jsou potvrzeně chybná. U běžného HPP pod maximálním vyměřovacím
+     * základem (žádná nepojištěná činnost, žádné zastropování) proto 10476
+     * vychází STEJNĚ jako 10477 (`form:castkaOdvodPojistneho`) — obě čerpají
+     * ze stejného, nezastropovaného příjmu.
+     *
+     * Nejde o duplicitu k zápisu níž (10476 se liší od 10477 u DPP pod
+     * hranicí účasti): tenhle test kryje opačný a běžnější případ — shodu —
+     * aby ho nikdo „neopravil" podle chybné ukázky ČSSZ zpátky na nulu.
+     */
+    public function testOrdinaryEmploymentBelowCapReportsSameNoninsuredActivityIncomeAsAssessmentBase(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolution(),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:castkaOdvodPojistneho>1000</form:castkaOdvodPojistneho>',
+            $result['xml'],
+        );
+        self::assertStringContainsString(
+            '<form:prijemNepojistenaCinnost>1000</form:prijemNepojistenaCinnost>',
+            $result['xml'],
+        );
+    }
+
     public function testSubthresholdDppSerializesIncomeAndCodeLessZeroDayEldp(): void
     {
         $payload = $this->payload();

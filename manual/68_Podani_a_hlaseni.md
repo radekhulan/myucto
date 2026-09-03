@@ -159,6 +159,12 @@ možnému účinku doručení a spuštění lhůt.
 - Automatické nebo neuvážené otevření inboxu bez potvrzení možného účinku doručení.
 - Uložení hesla, SMS kódu či privátního klíče do poznámky nebo evidence podání.
 
+Vyjde-li příjmový údaj JMHZ záporně — třeba čistý příjem po přeplatku dovolené
+nebo doplatku zdravotního pojištění za celý měsíc nemoci — vykáže se v hlášení
+**nula**. ČSSZ zápornou hodnotu u těchto údajů nepřijímá, takže je to jediný
+průchodný tvar; ve mzdové evidenci zůstává skutečná částka beze změny. Rozdíl
+proti evidenci proto vzniká záměrně a hlášení kvůli němu neblokujeme.
+
 ## 68.7 Návaznosti
 
 Identifikátory nastavte v [Nastavení mezd](73_Nastaveni_mezd.md). Firemní přístupy, ruční inbox a odchozí zprávy popisuje kapitola [Datová schránka](93_Datova_schranka.md), globální registraci pro odesílání správcem systému pak [Odesílací brána ISDS](94_Odesilaci_brana_ISDS.md). Zdrojová data pocházejí z [mzdového běhu](63_Mzdove_behy.md); kontrolní soubory a doručenky uchovávejte podle [retenčních lhůt](76_Retencni_lhuty.md).
@@ -508,6 +514,12 @@ Detekce má dvě hranice, které je dobré znát:
 Testovací a produkční prostředí mají návrhy oddělené a nemíchají se.
 
 ## 68.9 Storno a obsahová oprava JMHZ
+
+Za jedno rozhodné období existuje právě jedno **řádné** hlášení. Druhý pokus
+o řádné hlášení za totéž období — typicky z nové přípravy nad přepočtenou revizí
+běhu — aplikace odmítne a odkáže na opravné hlášení; ČSSZ by takové podání
+stejně zamítla jako duplicitu. Výjimkou je zamítnuté nebo stornované řádné
+hlášení: to se za dané období nahrazuje novým řádným.
 
 Storno JMHZ nevzniká přepsáním původního XML. V **Stavu odeslání** otevřete
 způsobilé předchozí podání a zvolte řízenou akci. **Připravit storno** zruší

@@ -156,6 +156,7 @@ function settings(accounts: PayrollEmployerAccounts = defaultAccounts): PayrollE
       code: 'MAIN',
       name: 'Hlavní účtárna',
       social_security_variable_symbol: '0012345678',
+      test_social_security_variable_symbol: null,
       is_active: true,
       row_version: 1,
     }],
@@ -471,6 +472,25 @@ describe('EmployerSettings — účtová osnova', () => {
       social_security_variable_symbol: null,
     })
     expect(m.saveEmployerSettings.mock.calls[0][0]).not.toHaveProperty('health_insurance_payer_number')
+
+    wrapper.unmount()
+  })
+
+  it('N-2: testovací VS ČSSZ je editovatelný a pošle se hromadně na rozdíl od ostrého', async () => {
+    const wrapper = await mountPage()
+    const testVsInput = wrapper.get('[data-office-test-vs]')
+    await testVsInput.setValue('9988776655')
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].offices[0]).toMatchObject({
+      code: 'MAIN',
+      social_security_variable_symbol: null,
+      test_social_security_variable_symbol: '9988776655',
+    })
 
     wrapper.unmount()
   })

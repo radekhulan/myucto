@@ -4455,6 +4455,8 @@
           },
           "ruian_point": "Adresní bod RÚIAN (nepovinný)",
           "residency_changed_on": "Datum změny rezidence",
+          "tax_residency_two_step_hint": "Cizinec s uplatněnou slevou na dani potřebuje dva kroky: akce 1 (nástup) neumí uvést stát daňové rezidence od, proto musí následovat tahle změna se stejným datem, jako je datum nástupu — jinak hlášení skončí chybou 40243.",
+          "tax_residency_latency_hint": "Změna se u ČSSZ projeví v řádu hodin až dní. Měsíční hlášení odeslané dřív skončí chybou 40243 — s odesláním chvíli počkejte.",
           "new_variable_symbol": "Nový variabilní symbol ČSSZ",
           "foreign_name": "Název zahraničního nositele pojištění",
           "foreign_identifier": "Číslo zahraničního pojištění",
@@ -4740,7 +4742,8 @@
           "hint": "Brána VREP se na výsledek podání ptá pod variabilním symbolem zaměstnavatele — bez něj nelze zjistit stav ani uzavřít transakci. Najdete ho na rozhodnutí o registraci u ČSSZ.",
           "pick": "Převzít z pracoviště:",
           "missing": "V nastavení zaměstnavatele nemá variabilní symbol pro sociální zabezpečení vyplněný žádné aktivní pracoviště. Doplňte ho v nastavení, nebo ho zadejte tady ručně.",
-          "required": "Zadejte variabilní symbol (nejvýše deset číslic), aby šlo zjistit stav nebo uzavřít transakci."
+          "required": "Zadejte variabilní symbol (nejvýše deset číslic), aby šlo zjistit stav nebo uzavřít transakci.",
+          "test_mismatch_warning": "ČSSZ v testovacím prostředí přijímá jen svůj přidělený testovací variabilní symbol. Podání pod jiným symbolem (třeba ostrým) zamítne."
         },
         "empty": {
           "title": "Zatím nebylo nic odesláno",
@@ -4897,6 +4900,7 @@
           "action": "Opravit hodnoty hlášení",
           "title": "Obsahová oprava za období {period}",
           "description": "Vyberte aktuální úplnou přípravu po opravě mzdových údajů. Přijatý formulář se odešle celý znovu se zachovanou identitou; odmítnutý nebo chybějící formulář se doplní jako nový. Souhrn a PVPOJ se vždy kontrolují za všechny osoby firmy.",
+          "deadline_hint": "Chybně uplatněné slevy za tohle období lze opravit jen do 20. dne následujícího měsíce. Po termínu už oprava nejde podat.",
           "preparation_label": "Aktuální příprava JMHZ",
           "preparation_placeholder": "Vyhledejte přípravu podle revize, data nebo období",
           "preparation_loading": "Hledám způsobilé aktuální přípravy pro toto podání…",
@@ -5670,6 +5674,8 @@
       "office_code_hint": "Předvyplní se z názvu, můžete ho přepsat.",
       "office_name": "Název",
       "office_social_security_variable_symbol": "Variabilní symbol ČSSZ",
+      "office_test_social_security_variable_symbol": "Testovací VS ČSSZ",
+      "office_test_social_security_variable_symbol_hint": "Testovací prostředí ČSSZ má vlastní přidělený VS, jiný než ostrý.",
       "manage_registration": "Spravovat účinné registrace",
       "registration_after_office_save": "Nejdřív uložte novou účtárnu.",
       "registration_dialog_title": "Registrace ČSSZ · {office}",

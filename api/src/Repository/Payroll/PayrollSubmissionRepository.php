@@ -398,6 +398,57 @@ final class PayrollSubmissionRepository
     }
 
     /**
+     * Živá ŘÁDNÁ povinnost za dané období, tedy ta, kterou chrání
+     * `uq_payroll_obligations_regular_period` (migrace 1731).
+     *
+     * Filtr se ZÁMĚRNĚ ptá na generovaný sloupec `regular_period_scope_on`
+     * a nepřepisuje jeho podmínky do PHP: co je „živá řádná povinnost"
+     * (druh, agenda, stav, výjimka pro starou duplicitu) definuje výhradně
+     * schéma. Kdyby si to aplikace opsala, rozešlo by se to s klíčem a guard
+     * by buď pouštěl, co klíč zamítne, nebo zamítal, co klíč pustí.
+     *
+     * @return array{id:int,status:string,period_start:string}|null
+     */
+    public function findLiveRegularObligationForUpdate(
+        int $supplierId,
+        string $environment,
+        string $agendaCode,
+        string $subjectReference,
+        string $periodStart,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, status, period_start
+               FROM payroll_obligations
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND agenda_code = ?
+                AND subject_reference = ?
+                AND regular_period_scope_on = ?
+              ORDER BY id
+              LIMIT 1
+              FOR UPDATE',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $agendaCode,
+            $subjectReference,
+            $periodStart,
+        ]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row = self::associativeRow($row, 'mzdovou povinnost');
+
+        return [
+            'id' => self::integer($row, 'id'),
+            'status' => self::string($row, 'status'),
+            'period_start' => self::string($row, 'period_start'),
+        ];
+    }
+
+    /**
      * @param list<string> $sourceReferences
      * @return array<string,array{
      *   id:int,source_event_hash:string,status:string,duplicate_count:int,
