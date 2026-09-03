@@ -11,6 +11,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
+use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Service\Oss\OssClientContext;
 use MyInvoice\Service\Oss\OssDocumentCoherence;
 use MyInvoice\Service\Oss\OssItemDecision;
@@ -153,6 +154,7 @@ final class InvoiceImportService
         private readonly OssRateCodebook $codebook,
         private readonly OssItemPlanner $planner,
         private readonly TaxConstantsRepository $taxConstants,
+        private readonly StatsRecomputer $stats,
     ) {}
 
     /**
@@ -314,6 +316,11 @@ final class InvoiceImportService
         // Scopes vydaných faktur, jejichž číselné řady je po importu třeba dorovnat
         // (counter pozadu za historickými čísly). Klíč = typ|client|datum (idempotentní).
         $counterScopes = [];
+        // Klienti/projekty dotčení VYDANÝMI doklady tohoto běhu — cache seznamu klientů
+        // (`client_revenue_cache`/`project_revenue_cache`) se přepočte dávkově až na konci,
+        // ne po každém dokladu (import umí mít stovky dokladů nad týmiž klienty).
+        $touchedClientIds = [];
+        $touchedProjectIds = [];
 
         foreach ($parsed as $entry) {
             if (isset($entry['error'])) {
@@ -373,6 +380,9 @@ final class InvoiceImportService
                             // rozdvojí podle toho, jestli soubor psal vodicí nuly.
                             $date = OssItemDeriver::canonicalDate($inv['issue_date'] ?? null) ?? '';
                             $counterScopes[$type . '|' . $cli . '|' . $cat . '|' . $date] = [$type, $cli, $cat, $date];
+                            if ($cli > 0) $touchedClientIds[$cli] = true;
+                            $proj = (int) ($r['project_id'] ?? 0);
+                            if ($proj > 0) $touchedProjectIds[$proj] = true;
                         }
                     }
                     elseif ($r['status'] === 'skipped') $skipped++;
@@ -397,6 +407,17 @@ final class InvoiceImportService
                 $this->varsymbol->syncCounter($supplierId, $type, $for, $cli, $cat);
             } catch (\Throwable) {
                 // ignore — best-effort dorovnání
+            }
+        }
+
+        // Cache seznamu klientů (počet faktur/obrat/poslední aktivita) je JEN cache —
+        // import už doběhl a nesmí kvůli jejímu selhání spadnout. Chyba se přesto
+        // nesmí ztratit tiše: zaloguje se, ať je vidět, že cache zůstala stará.
+        if ($touchedClientIds !== [] || $touchedProjectIds !== []) {
+            try {
+                $this->stats->recomputeMany(array_keys($touchedClientIds), array_keys($touchedProjectIds));
+            } catch (\Throwable $e) {
+                error_log('InvoiceImportService: recompute stats cache selhal: ' . $e->getMessage());
             }
         }
 

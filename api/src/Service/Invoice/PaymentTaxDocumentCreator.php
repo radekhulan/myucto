@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Oss\OssItemCarryOver;
+use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Service\Vat\VatStatusService;
 use PDO;
 
@@ -49,6 +50,7 @@ final class PaymentTaxDocumentCreator
         private readonly ExchangeRateApplier $rateApplier,
         private readonly VatStatusService $vatStatus,
         private readonly OssItemCarryOver $ossCarry,
+        private readonly StatsRecomputer $stats,
     ) {}
 
     /**
@@ -365,6 +367,24 @@ final class PaymentTaxDocumentCreator
                 $pdo->exec("RELEASE SAVEPOINT {$savepoint}");
             }
             throw $e;
+        }
+
+        // Cache je jen cache — selhání přepočtu nesmí shodit už vytvořený doklad, jen
+        // se zaloguje. Daňový doklad vzniká jako DRAFT, takže do agregace
+        // `client_revenue_cache` (jen status issued/sent/reminded/paid) sám o sobě zatím
+        // nic nepřidá — pokryje ho až vystavení. Přepočet i tak voláme, ale jen mimo
+        // CIZÍ transakci — StatsRecomputer si otevírá vlastní (vnořené PDO transakce
+        // nejdou); volá-li se tahle metoda uvnitř transakce/savepointu volajícího
+        // (bankovní párování), přepočet se přeskočí a doběhne skrz navazující vystavení.
+        if (!$pdo->inTransaction()) {
+            try {
+                $this->stats->recomputeMany(
+                    [(int) $proforma['client_id']],
+                    $proforma['project_id'] !== null ? [(int) $proforma['project_id']] : [],
+                );
+            } catch (\Throwable $e) {
+                error_log('PaymentTaxDocumentCreator: recompute stats cache selhal: ' . $e->getMessage());
+            }
         }
 
         return $taxDocId;

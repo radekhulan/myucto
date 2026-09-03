@@ -15,6 +15,7 @@ use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Oss\OssItemPlanner;
+use MyInvoice\Service\Stats\StatsRecomputer;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -59,6 +60,7 @@ final class FakturoidImportService
         private readonly SnapshotBuilder $snapshots,
         private readonly ExchangeRateApplier $exchangeRateApplier,
         private readonly OssItemPlanner $planner,
+        private readonly StatsRecomputer $stats,
     ) {}
 
     /**
@@ -68,6 +70,13 @@ final class FakturoidImportService
      * @var list<string>
      */
     private array $ossWarnings = [];
+
+    /**
+     * ID klienta poslední úspěšně založené vydané faktury ({@see createIssued()}) —
+     * `createIssued()` job ID nezná, ale volající potřebuje klienta pro dávkový
+     * přepočet cache seznamu klientů po celém importu (viz `importInvoices()`).
+     */
+    private ?int $lastCreatedClientId = null;
 
     public function run(int $jobId): void
     {
@@ -207,6 +216,9 @@ final class FakturoidImportService
 
         $query = $bookmarkSince !== null ? ['updated_since' => $bookmarkSince] : [];
         $created = 0; $skipped = 0; $failed = 0; $processed = 0;
+        // Klienti dotčení nově založenými fakturami — cache seznamu klientů se přepočte
+        // dávkově až na konci celého importu, ne po každém dokladu.
+        $touchedClientIds = [];
 
         foreach ($this->fakturoid->getAll($supplierId, 'invoices.json', $query) as $inv) {
             $processed++;
@@ -233,6 +245,9 @@ final class FakturoidImportService
                 if ($downloadAttachments) {
                     $this->archiveIssuedPdf($supplierId, $invoiceId, $fakturoidId, $inv);
                 }
+                if ($this->lastCreatedClientId !== null) {
+                    $touchedClientIds[$this->lastCreatedClientId] = true;
+                }
                 $created++;
             } catch (\Throwable $e) {
                 $failed++;
@@ -247,6 +262,16 @@ final class FakturoidImportService
         }
         $this->jobs->updateProgress($jobId, ['processed' => $processed, 'created_count' => $created, 'skipped_count' => $skipped, 'failed_count' => $failed]);
         $this->jobs->appendLog($jobId, "Vydané faktury: vytvořeno {$created}, přeskočeno {$skipped}, chyby {$failed} (z {$processed}).");
+
+        // Cache seznamu klientů je jen cache — selhání přepočtu nesmí shodit dokončený
+        // import, jen se zaloguje do úlohy (jinak by cache tiše zůstala stará).
+        if ($touchedClientIds !== []) {
+            try {
+                $this->stats->recomputeMany(array_keys($touchedClientIds));
+            } catch (\Throwable $e) {
+                $this->jobs->appendLog($jobId, 'Přepočet cache klientů selhal: ' . $e->getMessage());
+            }
+        }
     }
 
     private function createIssued(array $i, int $supplierId, int $userId): int
@@ -256,6 +281,7 @@ final class FakturoidImportService
         if ($clientId === null) {
             throw new \RuntimeException("Klient (subject_id {$subjId}) nenalezen — naimportuj subjekty.");
         }
+        $this->lastCreatedClientId = $clientId;
 
         // Fakturoid kind: "invoice" | "proforma" | "correction" | …
         $kind = (string) ($i['document_type'] ?? $i['kind'] ?? 'invoice');

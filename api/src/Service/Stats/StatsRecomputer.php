@@ -152,4 +152,37 @@ final class StatsRecomputer
         if ($clientId !== null && $clientId > 0) $this->recomputeClient($clientId);
         if ($projectId !== null && $projectId > 0) $this->recomputeProject($projectId);
     }
+
+    /**
+     * Dávkový přepočet po hromadné operaci (import, bulk reissue) — KAŽDÉHO dotčeného
+     * klienta a projektu přepočte PRÁVĚ JEDNOU, bez ohledu na to, kolikrát se v předaných
+     * polích opakuje.
+     *
+     * Volat MÍSTO opakovaného `recomputeForInvoiceId()`/`recomputeClient()` po každém
+     * dokladu — dávka stovek dokladů nad týmiž klienty by jinak znamenala stovky
+     * zbytečných DELETE+INSERT nad stejnými řádky cache.
+     *
+     * @param iterable<int> $clientIds
+     * @param iterable<int> $projectIds
+     */
+    public function recomputeMany(iterable $clientIds, iterable $projectIds = []): void
+    {
+        $uniqueClients = [];
+        foreach ($clientIds as $id) {
+            $id = (int) $id;
+            if ($id > 0) $uniqueClients[$id] = true;
+        }
+        foreach (array_keys($uniqueClients) as $id) {
+            $this->recomputeClient($id);
+        }
+
+        $uniqueProjects = [];
+        foreach ($projectIds as $id) {
+            $id = (int) $id;
+            if ($id > 0) $uniqueProjects[$id] = true;
+        }
+        foreach (array_keys($uniqueProjects) as $id) {
+            $this->recomputeProject($id);
+        }
+    }
 }

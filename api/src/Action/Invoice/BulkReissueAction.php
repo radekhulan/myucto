@@ -14,6 +14,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PaymentDueResolver;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Stats\StatsRecomputer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -44,6 +45,7 @@ final class BulkReissueAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly TaxConstantsRepository $taxConstants,
+        private readonly StatsRecomputer $stats,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -67,19 +69,38 @@ final class BulkReissueAction
 
         $created = [];
         $errors = [];
+        // Klienti/projekty zdrojových faktur — cache seznamu klientů se přepočte
+        // dávkově, jednou za celý požadavek (až 200 faktur najednou), ne po každém klonu.
+        $touchedClientIds = [];
+        $touchedProjectIds = [];
 
         foreach ($ids as $sourceId) {
             $sourceId = (int) $sourceId;
+            $source = $this->repo->find($sourceId);
             // Ownership: nedovol klonovat cizí faktury
-            if (!SupplierGuard::owns($request, $this->repo->find($sourceId))) {
+            if (!SupplierGuard::owns($request, $source)) {
                 $errors[] = ['source_id' => $sourceId, 'error' => 'not_found'];
                 continue;
             }
             try {
                 $newId = $this->cloneOne($sourceId, $issueDate, $incrementMonth, $userId);
                 $created[] = ['source_id' => $sourceId, 'draft_id' => $newId];
+                $cli = (int) ($source['client_id'] ?? 0);
+                if ($cli > 0) $touchedClientIds[$cli] = true;
+                $proj = (int) ($source['project_id'] ?? 0);
+                if ($proj > 0) $touchedProjectIds[$proj] = true;
             } catch (\Throwable $e) {
                 $errors[] = ['source_id' => $sourceId, 'error' => $e->getMessage()];
+            }
+        }
+
+        // Cache je jen cache — selhání přepočtu nesmí shodit dokončenou operaci, jen se
+        // zaloguje (jinak by seznam klientů tiše zůstal se starými čísly).
+        if ($touchedClientIds !== [] || $touchedProjectIds !== []) {
+            try {
+                $this->stats->recomputeMany(array_keys($touchedClientIds), array_keys($touchedProjectIds));
+            } catch (\Throwable $e) {
+                error_log('BulkReissueAction: recompute stats cache selhal: ' . $e->getMessage());
             }
         }
 

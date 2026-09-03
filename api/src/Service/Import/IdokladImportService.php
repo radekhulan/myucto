@@ -16,6 +16,7 @@ use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Oss\OssItemPlanner;
+use MyInvoice\Service\Stats\StatsRecomputer;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -57,6 +58,7 @@ final class IdokladImportService
         private readonly IdokladBankTransactionImporter $bankTransactions,
         private readonly ExchangeRateApplier $exchangeRateApplier,
         private readonly OssItemPlanner $planner,
+        private readonly StatsRecomputer $stats,
     ) {}
 
     /**
@@ -67,6 +69,23 @@ final class IdokladImportService
      * @var list<string>
      */
     private array $ossWarnings = [];
+
+    /**
+     * Klienti dotčení nově založenými vydanými fakturami/dobropisy tohoto běhu
+     * ({@see importIssued()}, {@see importIssuedCorrections()}) — cache seznamu klientů
+     * (`client_revenue_cache`) se přepočte dávkově, jednou za celý běh (viz `run()`),
+     * ne po každém dokladu.
+     *
+     * @var array<int,true>
+     */
+    private array $touchedClientIds = [];
+
+    /**
+     * ID klienta poslední úspěšně založené vydané faktury/dobropisu — `createIssuedFromIdoklad()`
+     * a inline vytváření v `importIssuedCorrections()` nemají snadný přístup k volajícímu
+     * cyklu, takže si klienta předávají tudy (viz `$touchedClientIds` výše).
+     */
+    private ?int $lastCreatedClientId = null;
 
     /**
      * #238: přenes měnový kurz na čerstvě importovaný VYSTAVENÝ doklad (faktura/dobropis).
@@ -135,6 +154,17 @@ final class IdokladImportService
                 $this->checkCancel($jobId);
                 $this->importIssuedCorrections($jobId, $supplierId, $userId, $dryRun, $bookmarkSince, $downloadAttachments);
                 $this->checkCancel($jobId);
+                // Cache seznamu klientů je jen cache — selhání přepočtu nesmí shodit
+                // dokončený import, jen se zaloguje do úlohy (jinak by cache tiše
+                // zůstala stará).
+                if ($this->touchedClientIds !== []) {
+                    try {
+                        $this->stats->recomputeMany(array_keys($this->touchedClientIds));
+                    } catch (\Throwable $e) {
+                        $this->jobs->appendLog($jobId, 'Přepočet cache klientů selhal: ' . $e->getMessage());
+                    }
+                    $this->touchedClientIds = [];
+                }
             }
             if (!empty($params['include_received']) || ($params['include_received'] ?? null) === null) {
                 $this->importReceived($jobId, $supplierId, $userId, $dryRun, $bookmarkSince, $downloadAttachments);
@@ -401,6 +431,9 @@ final class IdokladImportService
                 if ($downloadAttachments) {
                     $this->archiveIssuedPdf($supplierId, $invoiceId, $idokladId, $idoklad);
                 }
+                if ($this->lastCreatedClientId !== null) {
+                    $this->touchedClientIds[$this->lastCreatedClientId] = true;
+                }
                 $created++;
             } catch (\Throwable $e) {
                 $failed++;
@@ -428,6 +461,7 @@ final class IdokladImportService
         if ($clientId === null) {
             throw new \RuntimeException("Klient s iDoklad ID {$partnerId} nenalezen — nejdřív naimportuj kontakty.");
         }
+        $this->lastCreatedClientId = $clientId;
 
         $invoiceType = $this->mapIssuedDocumentType((int) ($i['DocumentType'] ?? 0));
 
@@ -1359,6 +1393,7 @@ final class IdokladImportService
                 if ($clientId === null) {
                     throw new \RuntimeException("Klient #{$partnerId} nenalezen — naimportuj nejdřív kontakty.");
                 }
+                $this->touchedClientIds[$clientId] = true;
 
                 $docDiscountOnDocument = (int) ($i['DiscountType'] ?? 0) === 3;
                 $docDiscountPercent = $docDiscountOnDocument ? (float) ($i['DiscountPercentage'] ?? 0) : 0.0;
