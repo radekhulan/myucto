@@ -138,6 +138,10 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'accounting/journal',       name: 'accounting-journal',       component: () => import('@/pages/accounting/Journal.vue'),         meta: { requiresDoubleEntry: true } },
       { path: 'accounting/journal/new',   name: 'accounting-journal-new',   component: () => import('@/pages/accounting/ManualEntry.vue'),     meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/payroll',       name: 'accounting-payroll',       component: () => import('@/pages/accounting/PayrollRecap.vue'),    meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      // Doúčtování nezaúčtovaných dokladů. Automatika účtování je háček na VZNIK dokladu,
+      // takže doklady, které v systému už leží (typicky naimportované), jí neprojdou —
+      // a schopnost je projít žila do teď jen uvnitř průvodce aktivací.
+      { path: 'accounting/posting-backfill', name: 'accounting-posting-backfill', component: () => import('@/pages/accounting/PostingBackfill.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/posting-rules', name: 'accounting-posting-rules', redirect: '/utilities?section=posting-rules' },
       // Účetní sestavy (Epic F2) — read-only, bez requiresWrite
       { path: 'accounting/general-ledger',   name: 'accounting-general-ledger',   component: () => import('@/pages/accounting/GeneralLedger.vue'),   meta: { requiresDoubleEntry: true } },

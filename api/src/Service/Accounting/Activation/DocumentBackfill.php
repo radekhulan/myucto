@@ -20,6 +20,12 @@ final class DocumentBackfill
         private readonly AccountingPeriodRepository $periods,
     ) {}
 
+    /**
+     * @param (callable(int,int,array<string,array<string,int>>):void)|null $onProgress
+     *        fn(zpracováno, celkem, čítače) — hlášení průběhu pro běh na pozadí
+     *        ({@see \MyInvoice\Service\Accounting\PostingBackfillJobService}). Průvodce
+     *        aktivací ho nepotřebuje: má vlastní fáze a hlásí je po nich.
+     */
     public function run(
         int $supplierId,
         ?string $from,
@@ -29,6 +35,7 @@ final class DocumentBackfill
         ?callable $onLog = null,
         ?callable $isCancelled = null,
         bool $settlementsOnly = false,
+        ?callable $onProgress = null,
     ): array {
         $pdo = $this->db->pdo();
         $emit = static function (string $line) use ($onLog): void {
@@ -118,9 +125,15 @@ final class DocumentBackfill
         );
         $ensuredYears = [];
 
+        $total = count($invoices) + count($purchases);
+        $report = static function () use (&$processed, &$stats, $total, $onProgress): void {
+            if ($onProgress !== null) $onProgress($processed, $total, $stats);
+        };
+        $report();
+
         $process = function (string $sourceType, array $doc) use (
             &$stats, &$skipReasons, &$documentIssues, &$processed, &$ensuredYears, &$cancelled,
-            $supplierId, $dryRun, $asDrafts, $isCancelled, $existsStmt, $pdo, $emit
+            $supplierId, $dryRun, $asDrafts, $isCancelled, $existsStmt, $pdo, $emit, $report
         ): void {
             if ($isCancelled !== null && $isCancelled()) {
                 $cancelled = true;
@@ -208,6 +221,7 @@ final class DocumentBackfill
             $emit("Vydané faktury:\n");
             foreach ($invoices as $doc) {
                 $process('invoice', $doc);
+                $report();
                 if ($cancelled) break;
             }
             $emit("\n");
@@ -216,6 +230,7 @@ final class DocumentBackfill
             $emit("Přijaté faktury:\n");
             foreach ($purchases as $doc) {
                 $process('purchase_invoice', $doc);
+                $report();
                 if ($cancelled) break;
             }
             $emit("\n");

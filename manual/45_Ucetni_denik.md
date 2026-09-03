@@ -21,6 +21,13 @@ nebo ruční — vždy prochází stejnou vnitřní službou, která hlídá pod
 ani duplicitní zaúčtování téhož dokladu, ani kdyby doklad někdo omylem zaúčtoval
 dvakrát rychle po sobě (dvojklik, výpadek sítě a opakování požadavku apod.).
 
+> [!IMPORTANT]
+> **Automatika účtování je háček na VZNIK dokladu**, ne zametač existujících. Spustí se
+> při vystavení faktury, přijetí přijaté faktury nebo opakované fakturaci. Doklad, který
+> už v systému leží — typicky **naimportovaný z jiného systému** — jí neprojde nikdy, ať
+> je nastavená jakkoli. Takové doklady zaúčtuje **Účetnictví → Doúčtovat doklady**
+> ([§ 45.12](#4512-douctovani-nezauctovanych-dokladu)).
+
 ## 45.1 Odkud se zápisy berou
 
 Naprostou většinu zápisů do deníku **nezakládáš ručně** — vznikají automaticky jako
@@ -824,3 +831,31 @@ leží v jiném kalendářním roce, zápis se vytvoří, ale odpověď vrátí 
 > [!TIP]
 > Hledáš zápis ke konkrétní faktuře? Otevři fakturu, klikni na **„Zobrazit v deníku"**
 > — deník se rovnou otevře s filtrem na daný doklad a zápis bude předrozbalený.
+
+## 45.12 Doúčtování nezaúčtovaných dokladů
+
+**Účetnictví → Doúčtovat doklady.**
+
+Kdy to potřebuješ: po [importu historie](21_Importy.md) z jiného systému, po přechodu
+z daňové evidence na podvojné účetnictví, nebo kdykoli, kdy v seznamech leží doklady bez
+zaúčtování. Automatika účtování je háček na vznik dokladu a takové doklady jí neprojdou
+(viz poznámka na začátku kapitoly).
+
+Obrazovka ukazuje, **kolik dokladů čeká** — zvlášť vydané a přijaté faktury, pokladní
+doklady, bankovní pohyby a zápočty. Účtuje vydané a přijaté faktury; pokladna, banka
+a zápočty mají vlastní cesty.
+
+| Akce | Co udělá |
+|---|---|
+| **Doúčtovat** | Projde všechny nezaúčtované faktury a zaúčtuje je. Běží na pozadí, stránku můžeš zavřít. |
+| **Zkusit nanečisto** | Projde totéž a řekne, co by se stalo, ale **nic nezapíše**. |
+| **Zastavit** | Doběhne rozepsaný doklad a skončí. Doklady zaúčtované do té chvíle v deníku zůstávají. |
+
+Každý doklad se účtuje **samostatně**, takže jeden vadný dávku nezastaví — skončí
+v protokolu jako přeskočený nebo chybný s důvodem. Typický důvod přeskočení je uzavřené
+období nebo doklad, který se zaúčtovat nedá (nulová částka, zálohová faktura). Na konci
+běhu se kontroluje **podvojnost celého deníku** a nevyrovnaný stav se hlásí zvlášť.
+
+Účtuje se týmž kódem jako v průvodci aktivací účetnictví, takže výsledek je stejný,
+jako by doklady prošly aktivací. Oproti hromadnému zaúčtování z výběru v seznamu faktur
+tu není strop 500 dokladů na dávku.

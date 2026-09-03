@@ -10,11 +10,44 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ImportReport, ImportResultRow } from '@/api/imports'
+import { deleteImportBatch, type ImportReport, type ImportResultRow } from '@/api/imports'
+import { apiErrorMessage } from '@/api/errors'
+import { useToast } from '@/composables/useToast'
 import { btnFilledSm, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 const props = defineProps<{ report: ImportReport }>()
+const emit = defineEmits<{ (e: 'batch-deleted'): void }>()
 const { t } = useI18n()
+const toast = useToast()
+
+// Zahození právě naimportované dávky. Když se zákazník netrefil s exportem ze
+// zdrojového systému, je tohle jediná cesta, jak dávku vzít zpět — mazat tisíce
+// dokladů po jednom nejde a napříč stránkami je nelze označit.
+const deleting = ref(false)
+const confirmDelete = ref(false)
+const canDeleteBatch = computed(() =>
+  typeof props.report.batch_id === 'string' && props.report.batch_id !== ''
+  && ((props.report.summary.created ?? 0) > 0))
+
+async function eraseBatch() {
+  const batch = props.report.batch_id
+  if (!batch || deleting.value) return
+  deleting.value = true
+  try {
+    const r = await deleteImportBatch(batch)
+    confirmDelete.value = false
+    if (r.skipped.length > 0) {
+      toast.warning(t('imports.batch_deleted_partial', { deleted: r.deleted, skipped: r.skipped.length }))
+    } else {
+      toast.success(t('imports.batch_deleted', { n: r.deleted }))
+    }
+    emit('batch-deleted')
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('imports.batch_delete_failed')))
+  } finally {
+    deleting.value = false
+  }
+}
 
 const rows = computed<ImportResultRow[]>(() => props.report.results ?? [])
 
@@ -81,6 +114,29 @@ function foreignDocNumber(r: ImportResultRow): string | null {
     <div v-if="report.cancelled" class="mb-4 rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
       <strong>{{ t('imports.job_cancelled_title') }}:</strong>
       {{ t('imports.job_cancelled_hint', { n: report.not_processed ?? 0 }) }}
+    </div>
+
+    <!--
+      Netrefil-li se uživatel s exportem ze zdrojového systému, je tohle jediné místo,
+      odkud jde dávka vzít zpět. Zaúčtovaný, zamčený nebo uhrazený doklad zůstane —
+      ten patří na detail dokladu, kde je vidět storno zápisu.
+    -->
+    <div v-if="canDeleteBatch" class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
+      <div class="text-sm text-neutral-600">{{ t('imports.batch_delete_hint') }}</div>
+      <template v-if="!confirmDelete">
+        <button type="button" :class="btnOutlineSm('danger')" class="whitespace-nowrap" @click="confirmDelete = true">
+          {{ t('imports.batch_delete') }}
+        </button>
+      </template>
+      <div v-else class="flex items-center gap-2 flex-wrap">
+        <span class="text-sm text-danger-500">{{ t('imports.batch_delete_confirm') }}</span>
+        <button type="button" :class="btnFilledSm('danger')" class="whitespace-nowrap" :disabled="deleting" @click="eraseBatch">
+          {{ deleting ? t('imports.batch_deleting') : t('common.delete') }}
+        </button>
+        <button type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" :disabled="deleting" @click="confirmDelete = false">
+          {{ t('common.cancel') }}
+        </button>
+      </div>
     </div>
 
     <div class="flex flex-wrap items-center gap-4 mb-4 text-sm">

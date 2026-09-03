@@ -1911,6 +1911,13 @@ final class Routes
             // Hromadné zaúčtování z výběru v seznamu (A2) — tělo { ids: [...] }.
             $g->post  ('/journal/post-invoices-bulk',         [JournalAction::class, 'postInvoicesBulk']);
             $g->post  ('/journal/post-purchases-bulk',        [JournalAction::class, 'postPurchasesBulk']);
+            // Doúčtování VŠECH nezaúčtovaných dokladů na pozadí. Hromadné zaúčtování výš
+            // jede z výběru v seznamu a má strop 500 dokladů; po importu historie jde
+            // o tisíce dokladů, které uživatel nemá jak označit.
+            $g->get   ('/posting-backfill',                   [\MyInvoice\Action\Accounting\PostingBackfillAction::class, 'status']);
+            $g->post  ('/posting-backfill/start',             [\MyInvoice\Action\Accounting\PostingBackfillAction::class, 'start']);
+            $g->get   ('/posting-backfill/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\PostingBackfillAction::class, 'job']);
+            $g->post  ('/posting-backfill/{id:[0-9]+}/cancel',[\MyInvoice\Action\Accounting\PostingBackfillAction::class, 'cancel']);
             $g->post  ('/journal/{id:[0-9]+}/reverse',        [JournalAction::class, 'reverse']);
             $g->delete('/journal/{id:[0-9]+}',                [JournalAction::class, 'delete']);
             // §35 popis + §33a přílohy — KONKRÉTNÍ cesty PŘED generickým /journal/{id}
@@ -2230,6 +2237,10 @@ final class Routes
         // nepřežije a jeho utnutí uprostřed nechá doklady založené, ale nedorovná
         // číselné řady ani nepřepočte statistiky klientů (obojí je až na konci běhu).
         $app->post   ('/api/admin/import/start',    \MyInvoice\Action\Admin\Import\StartFileImportAction::class);
+        // Zahození celé importní dávky — první dávka se téměř nikdy nenahraje správně
+        // a mazat tisíce dokladů po jednom nejde.
+        $app->post   ('/api/admin/import/batches/{batch:[A-Za-z0-9]{4,32}}/delete',
+            \MyInvoice\Action\Admin\Import\DeleteImportBatchAction::class);
 
         // Kompletní export dat firmy (H-14) — DB + PDF doklady + přílohy do jednoho
         // archivu s manifestem a kontrolními součty. Běží na pozadí

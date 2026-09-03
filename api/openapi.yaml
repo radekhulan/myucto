@@ -8620,6 +8620,58 @@ paths:
         '409': { description: "Účet se používá (`account_in_use`) — hláška vyjmenuje agendy, které na něj odkazují." }
         '422': { description: "Syntetický účet (`account_synthetic`) smazat nelze." }
 
+  /api/v1/accounting/posting-backfill:
+    get:
+      tags: [Accounting]
+      summary: Kolik dokladů čeká na zaúčtování
+      description: >
+        Počty dokladů, které v systému leží NEZAÚČTOVANÉ, po druzích. Vzniká jich celá
+        řada po importu historie z jiného systému: automatické účtování je háček na
+        VZNIK dokladu (vystavení, přijetí, opakovaná fakturace), takže doklad, který už
+        v systému je, jím neprojde.
+
+        Samotné spuštění doúčtování je mutace a přes token dostupné není (read-only
+        rozsah `/api/accounting`); dělá se v aplikaci v Účetnictví → Doúčtovat doklady.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pending:
+                    type: object
+                    properties:
+                      invoices: { type: integer, description: 'Vydané faktury bez zápisu v deníku' }
+                      purchase_invoices: { type: integer, description: 'Přijaté faktury bez zápisu (mimo zálohové)' }
+                      cash_documents: { type: integer }
+                      bank_transactions: { type: integer }
+                      settlements: { type: integer }
+                      total: { type: integer }
+                  jobs:
+                    type: array
+                    description: 'Posledních pět běhů doúčtování.'
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        status:
+                          type: string
+                          enum: [queued, running, completed, completed_with_warnings, failed, cancelled]
+                        total_items: { type: [integer, "null"] }
+                        processed: { type: integer }
+                        posted_count: { type: integer }
+                        skipped_count: { type: integer }
+                        failed_count: { type: integer }
+                        dry_run: { type: boolean }
+                        created_at: { type: [string, "null"] }
+                        finished_at: { type: [string, "null"] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/v1/accounting/periods:
     get:
       tags: [Accounting]

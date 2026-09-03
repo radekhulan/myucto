@@ -26,6 +26,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Service\Import\FakturoidImportService;
 use MyInvoice\Service\Import\FileImportJobService;
+use MyInvoice\Service\Accounting\PostingBackfillJobService;
 use MyInvoice\Service\Import\IdokladImportService;
 use MyInvoice\Service\Export\MonthlyExportService;
 use MyInvoice\Service\Export\ClosingPackageService;
@@ -83,6 +84,8 @@ try {
         $container->get(MonthlyExportService::class)->run($jobId);
     } elseif ($source === 'closing_package') {
         $container->get(ClosingPackageService::class)->run($jobId);
+    } elseif ($source === 'document_backfill') {
+        $container->get(PostingBackfillJobService::class)->run($jobId);
     } elseif ($source === 'file_import') {
         $container->get(FileImportJobService::class)->run($jobId);
     } elseif ($source === 'document_zip_import' || $source === 'document_zip_export' || $source === 'document_folder_import') {

@@ -103,7 +103,8 @@ const clear = reset
       </div>
     </div>
 
-    <!-- Report -->
-    <ImportReportPanel v-if="report" :report="report" />
+    <!-- Report. Po zahození dávky se zavře — jinak by dál ukazoval doklady, které
+         už v systému nejsou. -->
+    <ImportReportPanel v-if="report" :report="report" @batch-deleted="clear" />
   </div>
 </template>

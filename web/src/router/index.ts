@@ -95,6 +95,10 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // Čtení = zobrazení rozpadu mzdy; samotné zaúčtování hlídá server (accounting.journal.post).
   // Bez záznamu v téhle mapě guard route zahodí na homepage (deny-by-default, :327).
   'accounting-payroll': ['accounting'],
+  // Doúčtování nezaúčtovaných dokladů: čtení = kolik čeká (stejné právo jako deník),
+  // samotné spuštění hlídá server právem `accounting.journal.post` jako hromadné
+  // zaúčtování z výběru — jedna operace, jedno právo.
+  'accounting-posting-backfill': ['accounting'],
   'payroll-dashboard': ['payroll'],
   'payroll-runs': ['payroll'],
   'payroll-payments': ['payroll.payments'],

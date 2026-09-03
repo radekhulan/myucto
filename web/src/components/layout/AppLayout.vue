@@ -512,6 +512,10 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/journal',        label: t('nav.accounting_journal'),  icon: ICONS.accounting, newTo: '/accounting/journal/new' },
         { to: '/automation',                label: t('nav.automation'),          icon: ICONS.ai, badge: automationStore.actionable, permission: 'accounting' },
         { to: '/accounting/manual-posting-queue', label: t('nav.manual_posting_queue'), icon: ICONS.approvals, permission: 'accounting' },
+        // Doúčtování nezaúčtovaných dokladů — po importu historie je to jediná cesta,
+        // jak je dostat do deníku. Automatika účtování je háček na vznik dokladu, ne
+        // zametač existujících, a hromadné zaúčtování ze seznamu má strop 500 dokladů.
+        { to: '/accounting/posting-backfill', label: t('nav.posting_backfill'), icon: ICONS.accounting, permission: 'accounting' },
         { to: '/accounting/general-ledger',   label: t('nav.accounting_general_ledger'),   icon: ICONS.tax_book },
         { to: '/accounting/trial-balance',    label: t('nav.accounting_trial_balance'),    icon: ICONS.stats },
         { to: '/accounting/balance-sheet',    label: t('nav.accounting_balance_sheet'),    icon: ICONS.reports },
