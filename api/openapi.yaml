@@ -1262,7 +1262,11 @@ paths:
         schema: { type: integer, format: int64 }
     post:
       tags: [Invoices]
-      summary: Označí fakturu jako uhrazenou
+      summary: Označí fakturu nebo vypořádaný dobropis jako uhrazený
+      description: |
+        U faktury doplní platbu na zbývající kladnou částku. U dobropisu
+        zaznamená dokončenou vratku pouze změnou stavu a data, bez kladného
+        záznamu v `invoice_payments`.
       requestBody:
         content:
           application/json:
@@ -1272,7 +1276,7 @@ paths:
                 paid_at:
                   type: string
                   format: date
-                  description: Datum platby (default = dnes)
+                  description: Datum platby nebo vratky (default = dnes)
       responses:
         '200':
           description: OK
@@ -1291,9 +1295,9 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
           description: |
-            Fakturu nelze označit za uhrazenou — není vystavená ani odeslaná
-            (`invalid_state`), nemá kladnou částku k úhradě (`invalid_amount`),
-            nebo platbu odmítla evidence úhrad (`invalid_payment`).
+            Doklad nelze označit za uhrazený, protože není vystavený ani odeslaný
+            (`invalid_state`), běžná faktura nemá kladnou částku k úhradě
+            (`invalid_amount`) nebo operaci odmítla evidence úhrad (`invalid_payment`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

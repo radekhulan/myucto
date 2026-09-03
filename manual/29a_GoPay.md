@@ -48,6 +48,9 @@ Platba se páruje přednostně podle GoPay ID uloženého u úhrady faktury. Pok
 ID není, použije se přesné **Číslo objednávky dodavatele** uložené na dokladu spolu
 s částkou a měnou. U historických dokladů zůstává fallback na řádek
 `Objednávka: MYU...` v poznámce. Vratka se stejným způsobem páruje s dobropisem.
+Po úspěšném spárování vratky se dobropis označí jako zaplacený k datu vratky.
+Volba **Zpracovat znovu** tímto způsobem dorovná i dříve spárovaný dobropis,
+který ještě zůstal ve stavu nezaplaceno.
 
 Doklad musí být před importem zaúčtovaný. Pokud chybí, částka nesouhlasí nebo je
 výsledek nejednoznačný, pohyb zůstane ve stavu **Ke kontrole**. Po opravě dokladu

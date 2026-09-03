@@ -117,6 +117,47 @@ final class GoPayServiceTest extends TestCase
             self::assertNotNull($movement['journal_entry_id']);
         }
 
+        $creditNote = $this->db->pdo()->prepare('SELECT status, paid_at FROM invoices WHERE id=?');
+        $creditNote->execute([$creditNoteId]);
+        self::assertSame(
+            ['status' => 'paid', 'paid_at' => self::YEAR . '-01-20'],
+            $creditNote->fetch(PDO::FETCH_ASSOC),
+        );
+        $audit = $this->db->pdo()->prepare(
+            'SELECT payload FROM activity_log
+              WHERE supplier_id=? AND action="invoice.paid" AND entity_type="invoice" AND entity_id=?'
+        );
+        $audit->execute([$this->supplierId, $creditNoteId]);
+        $auditRows = $audit->fetchAll(PDO::FETCH_COLUMN);
+        self::assertCount(1, $auditRows);
+        self::assertSame([
+            'paid_at' => self::YEAR . '-01-20',
+            'source' => 'gopay',
+            'clearing_id' => (int) $result['clearing']['id'],
+        ], json_decode((string) $auditRows[0], true, 512, JSON_THROW_ON_ERROR));
+
+        $this->db->pdo()->prepare('UPDATE invoices SET status="sent", paid_at=NULL WHERE id=?')
+            ->execute([$creditNoteId]);
+        $reprocessed = $this->service->process($this->supplierId, (int) $result['clearing']['id'], $this->userId);
+        self::assertSame('processed', $reprocessed['status']);
+        $creditNote->execute([$creditNoteId]);
+        self::assertSame(
+            ['status' => 'paid', 'paid_at' => self::YEAR . '-01-20'],
+            $creditNote->fetch(PDO::FETCH_ASSOC),
+        );
+        $audit->execute([$this->supplierId, $creditNoteId]);
+        self::assertCount(2, $audit->fetchAll(PDO::FETCH_COLUMN));
+
+        $this->db->pdo()->prepare('UPDATE invoices SET status="cancelled", paid_at=NULL WHERE id=?')
+            ->execute([$creditNoteId]);
+        $reprocessed = $this->service->process($this->supplierId, (int) $result['clearing']['id'], $this->userId);
+        self::assertSame('processed', $reprocessed['status']);
+        $creditNote->execute([$creditNoteId]);
+        self::assertSame(
+            ['status' => 'cancelled', 'paid_at' => null],
+            $creditNote->fetch(PDO::FETCH_ASSOC),
+        );
+
         $entryCount = $this->db->pdo()->prepare("SELECT COUNT(*) FROM journal_entries WHERE supplier_id=? AND source_type='gopay'");
         $entryCount->execute([$this->supplierId]);
         self::assertSame(5, (int) $entryCount->fetchColumn());

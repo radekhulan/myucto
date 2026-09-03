@@ -243,6 +243,50 @@ final class InvoicePaymentService
         ];
     }
 
+    public function markCreditNoteRefunded(int $invoiceId, int $supplierId, string $paidOn): bool
+    {
+        if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $paidOn, $dm)
+            || !checkdate((int) $dm[2], (int) $dm[3], (int) $dm[1])) {
+            throw new \RuntimeException('Neplatné datum vrácení peněz.');
+        }
+
+        $pdo = $this->db->pdo();
+        $update = $pdo->prepare(
+            "UPDATE invoices
+                SET status = 'paid', paid_at = COALESCE(paid_at, ?)
+              WHERE id = ? AND supplier_id = ? AND invoice_type = 'credit_note'
+                AND amount_to_pay <= 0 AND status IN ('issued', 'sent', 'reminded', 'paid')"
+        );
+        $update->execute([$paidOn, $invoiceId, $supplierId]);
+        if ($update->rowCount() === 0) {
+            $check = $pdo->prepare(
+                'SELECT invoice_type, status, amount_to_pay, paid_at
+                   FROM invoices WHERE id = ? AND supplier_id = ?'
+            );
+            $check->execute([$invoiceId, $supplierId]);
+            $invoice = $check->fetch(PDO::FETCH_ASSOC);
+            if ($invoice === false) {
+                throw new \RuntimeException('Dobropis nenalezen.');
+            }
+            if ((string) $invoice['invoice_type'] !== 'credit_note') {
+                throw new \RuntimeException('Doklad není dobropis.');
+            }
+            if ((float) $invoice['amount_to_pay'] > 0) {
+                throw new \RuntimeException('Dobropis má neplatnou kladnou částku k úhradě.');
+            }
+            if ((string) $invoice['status'] === 'paid' && $invoice['paid_at'] !== null) {
+                return false;
+            }
+            throw new \RuntimeException('Vrácení peněz lze evidovat jen u vystaveného dobropisu.');
+        }
+
+        $this->pdf->invalidate($invoiceId, 'invalidate_mark_paid');
+        if (!$pdo->inTransaction()) {
+            $this->stats->recomputeForInvoiceId($invoiceId);
+        }
+        return true;
+    }
+
     /**
      * Rekonciliace: naváže JIŽ EXISTUJÍCÍ platbu zaplacené faktury na bankovní
      * transakci (sloučená úhrada zaplacených faktur). Použití: faktura už byla
