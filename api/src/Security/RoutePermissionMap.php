@@ -656,8 +656,12 @@ final class RoutePermissionMap
         // Import dokladů (Pohoda XML / ISDOC, iDoklad, Fakturoid) — ImportAction,
         // Start{Idoklad,Fakturoid}ImportAction, ImportJobStatus/Cancel/DeleteImportJobAction.
         ['POST',   '#^/api/admin/import$#', 'utilities.import', AccessLevel::WRITE],
+        // Tatáž dávka na pozadí (StartFileImportAction) — stejné oprávnění jako
+        // synchronní cesta, liší se jen tím, kdo import odbaví.
+        ['POST',   '#^/api/admin/import/start$#', 'utilities.import', AccessLevel::WRITE],
         ['POST',   '#^/api/admin/imports/(idoklad|fakturoid)/start$#', 'utilities.import', AccessLevel::WRITE],
         ['GET',    '#^/api/admin/imports/[0-9]+$#', 'utilities.import', AccessLevel::READ],
+        ['GET',    '#^/api/admin/imports/[0-9]+/report$#', 'utilities.import', AccessLevel::READ],
         ['POST',   '#^/api/admin/imports/[0-9]+/cancel$#', 'utilities.import', AccessLevel::WRITE],
         ['DELETE', '#^/api/admin/imports/[0-9]+$#', 'utilities.import', AccessLevel::WRITE],
         // Credentials importních integrací — {Idoklad,Fakturoid}CredentialsAction hlídají

@@ -21,7 +21,7 @@ use MyInvoice\Service\Oss\OssItemPlanner;
  *
  * Pravidla:
  *   - Buyer (client) IČ != tenant IČ → odmítnutí s reason
- *   - Vendor (supplier) IČ chybí → odmítnutí (potřebujeme vendor identifikaci)
+ *   - Vendor (supplier) nemá IČO ANI DIČ ANI název → odmítnutí (nejde identifikovat)
  *   - Vendor IČ existuje v clients → reuse, nastav is_vendor=1
  *   - Vendor IČ neznámé → vytvořit nového klienta s is_customer=0, is_vendor=1 + ARES lookup
  */
@@ -38,10 +38,18 @@ final class IsdocToPurchaseInvoiceMapper
 
     /**
      * @param array<string,mixed> $parsed  Output z IsdocParser::parse()['invoices'][N]
+     * @param 'draft'|'received' $status   Stav zakládaného dokladu. Strukturovaný zdroj
+     *        (ISDOC, Pohoda XML) nese úplný doklad, takže dávková migrace z jiného
+     *        systému má smysl jen jako `received` — koncepty se do nákladů, závazků ani
+     *        do výkazů nezapočítávají a účetní by je musela otevřít jeden po druhém.
+     *        Výchozí `draft` je ZÁMĚRNÝ rozdíl pro ostatní kanály, ne opomenutí:
+     *        {@see PurchaseInvoiceInboxScanner}, {@see AiPdfExtractor} i dropzone na
+     *        novém dokladu zakládají po jednom a uživatel doklad stejně otevírá —
+     *        u AI extrakce je kontrola dokonce nutná. Stav volí tedy volající.
      * @return array{purchase_invoice_id:int, vendor_id:int, vendor_created:bool}
      * @throws \InvalidArgumentException pokud ISDOC nemá vendor / patří jinému tenantovi
      */
-    public function map(array $parsed, int $supplierId, int $userId): array
+    public function map(array $parsed, int $supplierId, int $userId, string $status = 'draft'): array
     {
         // Cross-tenant guard: buyer (client) v ISDOC musí mít stejné IČ jako tenant supplier.
         // Pokud ne, ISDOC patří jiné firmě a nesmíme ho importovat (data leak prevention).
@@ -49,13 +57,30 @@ final class IsdocToPurchaseInvoiceMapper
         $tenantIc = $this->fetchTenantIc($supplierId);
         if ($tenantIc !== null && $buyerIc !== null && $buyerIc !== $tenantIc) {
             throw new \InvalidArgumentException(
-                "ISDOC patří jinému plátci (buyer IČO: {$buyerIc}, tenant IČO: {$tenantIc})."
+                "Doklad je vystavený na jinou firmu (odběratel IČO: {$buyerIc}, tenant IČO: {$tenantIc})."
             );
         }
 
+        // Dodavatele musí jít IDENTIFIKOVAT — ne nutně podle IČO. Trvat na IČO je přísnější
+        // než {@see ClientResolver::resolveVendor()}, který kartu umí dohledat i podle DIČ
+        // (zahraniční dodavatelé bez českého IČO) a v poslední řadě podle názvu firmy.
+        // Dokud tady stálo `empty($vendor['ic'])`, odmítal se přesně ten doklad, který by
+        // resolver zpracoval — v migraci z Pohody takhle propadaly faktury od fyzických osob
+        // bez IČO i od zahraničních dodavatelů, a to bez náhradní cesty, protože přijaté
+        // faktury se jinak než importem hromadně nezadají.
+        //
+        // Bez jediného identifikátoru se doklad odmítá dál: založit kartu „bezejmenného"
+        // dodavatele znamená vyrobit novou při každé faktuře a rozsypat evidenci závazků.
         $vendor = $parsed['supplier'] ?? null;
-        if (!is_array($vendor) || empty($vendor['ic'])) {
-            throw new \InvalidArgumentException('ISDOC neobsahuje vendor IČO (AccountingSupplierParty).');
+        $vendorIdentified = is_array($vendor) && (
+            !empty($vendor['ic']) || !empty($vendor['dic']) || trim((string) ($vendor['company_name'] ?? '')) !== ''
+        );
+        if (!$vendorIdentified) {
+            throw new \InvalidArgumentException(
+                'Doklad neurčuje dodavatele (chybí IČO, DIČ i název firmy) — nelze ho zařadit '
+                    . 'k žádné kartě dodavatele. Doplňte protistranu ve zdrojovém systému a doklad '
+                    . 'importujte znovu, nebo ho zadejte ručně.',
+            );
         }
 
         // Resolve vendor (najdi nebo vytvoř clients row s is_vendor=1)
@@ -107,9 +132,14 @@ final class IsdocToPurchaseInvoiceMapper
             'issue_date'            => (string) ($parsed['issue_date'] ?? date('Y-m-d')),
             'tax_date'              => $parsed['tax_date'] !== null ? (string) $parsed['tax_date'] : null,
             'due_date'              => (string) ($parsed['due_date'] ?? date('Y-m-d', strtotime('+14 days'))),
-            'received_at'           => date('Y-m-d'),
-            // C6 (§ 73/1/a): received_at je jen otisk data importu, ne skutečné držení
-            // dokladu → 'import', aby VatLedgerService neposunul odpočet do měsíce importu.
+            // Datum vlastního dokladu, ne datum importu. Na období odpočtu to nemá vliv —
+            // o tom rozhoduje `received_at_source` (viz níž) — ale migrace tisíce let
+            // starých dokladů jinak vyrobí sloupec „Datum přijetí", ve kterém má celá
+            // historie firmy dnešek. Dnešní datum zůstává jen tam, kde doklad žádné
+            // vlastní nemá, a budoucí datum se nedosazuje nikdy.
+            'received_at'           => self::receivedAtFromDocument($parsed),
+            // C6 (§ 73/1/a): received_at je jen otisk dat ze souboru, ne vědomé zadání data
+            // držení dokladu účetní → 'import', aby VatLedgerService neposunul odpočet.
             'received_at_source'    => 'import',
             'currency_id'           => $currencyId,
             'exchange_rate'         => isset($parsed['exchange_rate']) && $parsed['exchange_rate'] !== null
@@ -122,6 +152,7 @@ final class IsdocToPurchaseInvoiceMapper
             'language'              => 'cs',
             'note_above_items'      => $parsed['note_above'] ?? null,
             'items'                 => $items,
+            'status'                => $status === 'received' ? 'received' : 'draft',
         ];
 
         // Platební účet dodavatele z ISDOC <PaymentMeans> — pro „Zaplatit pomocí QR".
@@ -247,6 +278,27 @@ final class IsdocToPurchaseInvoiceMapper
         $ic = $stmt->fetchColumn();
         if ($ic === false || $ic === '' || $ic === null) return null;
         return $this->normalizeIc((string) $ic);
+    }
+
+    /**
+     * Datum přijetí odvozené z dokladu: DUZP, jinak datum vystavení, jinak dnešek.
+     * Budoucí datum se nedosazuje — doklad, který ještě nenastal, jsme nemohli převzít.
+     *
+     * @param array<string,mixed> $parsed
+     */
+    private static function receivedAtFromDocument(array $parsed): string
+    {
+        $today = date('Y-m-d');
+        foreach ([$parsed['tax_date'] ?? null, $parsed['issue_date'] ?? null] as $candidate) {
+            $date = trim((string) ($candidate ?? ''));
+            if ($date === '') continue;
+            $date = substr($date, 0, 10);
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) continue;
+
+            return $date <= $today ? $date : $today;
+        }
+
+        return $today;
     }
 
     /**

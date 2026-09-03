@@ -2,8 +2,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, RouterLink } from 'vue-router'
-import { uploadImport, type ImportReport } from '@/api/imports'
 import ImportReportPanel from '@/components/exchange/ImportReportPanel.vue'
+import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
+import { useFileImportJob } from '@/composables/useFileImportJob'
 import { purchaseInvoicesApi, type InboxScanResult } from '@/api/purchaseInvoices'
 import { integrationsApi, type AnthropicCredentialsStatus } from '@/api/integrations'
 import { useToast } from '@/composables/useToast'
@@ -27,46 +28,32 @@ const auth = useAuthStore()
 const isManaged = computed(() => auth.isManagedInstallation)
 
 // ── Upload (multipart, kind=purchase) ───────────────────────────────────────
-const files = ref<File[]>([])
-const uploading = ref(false)
-const error = ref('')
-const report = ref<ImportReport | null>(null)
+// Import běží na pozadí, stejným composablem jako vydaná strana: dávka z Pohody má
+// běžně stovky až tisíce dokladů a synchronní request ji nepřežije.
+const { files, running, cancelling, error, report, job, percent, purchaseStatus, pick, start, cancel, reset } =
+  useFileImportJob('purchase')
+
+// Koncept se nezapočítává do nákladů, závazků ani výkazů. Doklad ze strukturovaného
+// souboru je přitom úplný, takže výchozí je „přijatá"; koncept zůstává pro dávku,
+// kterou chce účetní ještě projít.
+const asDraft = computed({
+  get: () => purchaseStatus.value === 'draft',
+  set: (v: boolean) => { purchaseStatus.value = v ? 'draft' : 'received' },
+})
+
+// Viz ImportIssued.vue: `e.message` u axiosu nese jen HTTP status, kdežto hláška
+// s návodem (chybějící číselník / migrace) je v `response.data.error.message`.
+const failed = (e: unknown) => apiErrorMessage(e, t('imports.upload_failed'))
 
 function onPick(e: Event) {
-  const input = e.target as HTMLInputElement
-  if (!input.files) return
-  files.value = Array.from(input.files)
-  report.value = null
-  error.value = ''
+  pick((e.target as HTMLInputElement).files)
 }
 function onDrop(e: DragEvent) {
   e.preventDefault()
-  const dropped = e.dataTransfer?.files
-  if (!dropped) return
-  files.value = Array.from(dropped)
-  report.value = null
-  error.value = ''
+  pick(e.dataTransfer?.files ?? null)
 }
-async function submit() {
-  if (files.value.length === 0) return
-  uploading.value = true
-  error.value = ''
-  report.value = null
-  try {
-    report.value = await uploadImport(files.value, 'purchase')
-  } catch (e: any) {
-    // Viz ImportIssued.vue: `e.message` u axiosu nese jen HTTP status, kdežto hláška
-    // s návodem (chybějící číselník / migrace) je v `response.data.error.message`.
-    error.value = apiErrorMessage(e, t('imports.upload_failed'))
-  } finally {
-    uploading.value = false
-  }
-}
-function clear() {
-  files.value = []
-  report.value = null
-  error.value = ''
-}
+const submit = () => start(failed)
+const clear = reset
 const statusBadge = (s: string) => {
   if (s === 'created') return 'bg-success-50 text-success-600 border-success-500/40'
   if (s === 'skipped') return 'bg-warning-50 text-warning-600 border-warning-500/40'
@@ -153,23 +140,34 @@ async function runScan() {
           </ul>
         </div>
 
+        <label class="flex items-start gap-2 text-sm text-neutral-700">
+          <input v-model="asDraft" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+          <span>
+            {{ t('imports.purchase_as_draft') }}
+            <span class="block text-xs text-neutral-500">{{ t('imports.purchase_as_draft_hint') }}</span>
+          </span>
+        </label>
+
+        <ImportJobProgress :job="job" :percent="percent" :cancelling="cancelling" @cancel="cancel" />
+
         <div v-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
 
-        <div class="flex gap-2">
+        <div class="flex gap-2 flex-wrap">
           <button
             @click="submit"
-            :disabled="uploading || files.length === 0"
+            :disabled="running || files.length === 0"
             :class="btnFilled('primary')"
-            class="flex-1 justify-center"
+            class="flex-1 justify-center whitespace-nowrap"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload"/></svg>
-            {{ uploading ? t('imports.uploading') : t('imports.upload') }}
+            {{ running ? t('imports.uploading') : t('imports.upload') }}
           </button>
           <button
             v-if="files.length > 0 || report"
             @click="clear"
-            :disabled="uploading"
+            :disabled="running"
             :class="btnOutline('neutral')"
+            class="whitespace-nowrap"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x"/></svg>
             {{ t('common.close') }}

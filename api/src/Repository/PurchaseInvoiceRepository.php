@@ -1095,6 +1095,13 @@ final class PurchaseInvoiceRepository
         $exchangeRateDate = (!$isCzk && !empty($data['exchange_rate_date'])) ? (string) $data['exchange_rate_date'] : null;
         $exchangeRateSource = ExchangeRateSources::normalize($data['exchange_rate_source'] ?? null);
 
+        // Doklad ze strukturovaného zdroje (ISDOC, Pohoda XML) je úplný — dodavatel,
+        // datumy, řádky i rekapitulace DPH přišly ze souboru, není co doplňovat. Volající
+        // proto smí říct, že má vzniknout rovnou jako přijatý; koncept zůstává výchozí,
+        // protože ruční a AI cesta doklad doplňuje až v editoru. Dál než `received` se
+        // odsud nejde: zaúčtování ani úhrada nejsou věc zakládání dokladu.
+        $initialStatus = ((string) ($data['status'] ?? 'draft')) === 'received' ? 'received' : 'draft';
+
         $sql = 'INSERT INTO purchase_invoices
             (supplier_id, vendor_id, vendor_is_vat_payer, varsymbol, vendor_invoice_number, document_kind,
              issue_date, tax_date, due_date, received_at, received_at_source,
@@ -1108,7 +1115,7 @@ final class PurchaseInvoiceRepository
              payment_variable_symbol, payment_account_source, payment_account_checked_at,
              payment_method, payment_method_source,
              status, vat_classification_code, vat_deduction, vat_deduction_percent, tax_deductible, is_fixed_asset, expense_category_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft", ?, ?, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -1145,6 +1152,7 @@ final class PurchaseInvoiceRepository
             ...$this->paymentColumns($data),
             $paymentMethod,
             $paymentMethodSource,
+            $initialStatus,
             isset($data['vat_classification_code']) ? (string) $data['vat_classification_code'] : null,
             in_array($data['vat_deduction'] ?? 'full', ['full', 'none', 'proportional', 'reduced'], true) ? (string) ($data['vat_deduction'] ?? 'full') : 'full',
             max(0.0, min(100.0, (float) ($data['vat_deduction_percent'] ?? 100))),

@@ -74,6 +74,15 @@ function foreignDocNumber(r: ImportResultRow): string | null {
 
 <template>
   <div class="mt-6 bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm max-w-3xl">
+    <!--
+      Zastavený běh vypadá bez tohohle boxu jako hotový, jen s menšími čísly — a to je
+      právě ten případ, kdy uživatel potřebuje vědět, že zbytek dávky nikdo nezpracoval.
+    -->
+    <div v-if="report.cancelled" class="mb-4 rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
+      <strong>{{ t('imports.job_cancelled_title') }}:</strong>
+      {{ t('imports.job_cancelled_hint', { n: report.not_processed ?? 0 }) }}
+    </div>
+
     <div class="flex flex-wrap items-center gap-4 mb-4 text-sm">
       <div><span class="font-semibold text-success-600">{{ report.summary.created }}</span> {{ t('imports.summary_created') }}</div>
       <div v-if="report.summary.duplicates"><span class="font-semibold text-neutral-600">{{ report.summary.duplicates }}</span> {{ t('imports.summary_duplicates') }}</div>
