@@ -44,7 +44,7 @@ import {
 } from '@/api/payroll'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDate, formatDateTime, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatPeriod, formatUtcDateTime } from '@/composables/useFormat'
 
 const props = defineProps<{ environment: PayrollRegzelEnvironment }>()
 const emit = defineEmits<{ 'update:environment': [PayrollRegzelEnvironment] }>()
@@ -538,7 +538,9 @@ void load()
                   data-test="queue-attempt-error"
                 >
                   {{ t('payroll.submissions.queue.last_attempt_failed', {
-                    when: formatDateTime(item.attempt.sent_at ?? item.created_at),
+                    when: item.attempt.sent_at
+                      ? formatUtcDateTime(item.attempt.sent_at)
+                      : formatDateTime(item.created_at),
                     reason: item.attempt.error_message,
                   }) }}
                 </p>

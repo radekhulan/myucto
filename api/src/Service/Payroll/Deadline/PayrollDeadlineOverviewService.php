@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
+use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy;
@@ -286,7 +287,15 @@ final readonly class PayrollDeadlineOverviewService
                 'source' => 'submission',
                 'reference' => 'payroll_obligation:' . (int) $row['obligation_id'],
                 'title' => (string) $row['agenda_code'],
-                'subject' => (string) $row['subject_reference'],
+                // Syrový `subject_reference` (`payroll_run:8:office:4`) je
+                // interní klíč, ne text pro účetní; překládá ho tentýž
+                // formátovač jako přehled podání a inbox. Nerozpoznaný tvar
+                // vrací null a řádek zůstane bez předmětu - to je pořád lepší
+                // než ukázat interní ID.
+                'subject' => PayrollObligationSubjectFormatter::humanSubject(
+                    (string) $row['agenda_code'],
+                    (string) $row['subject_reference'],
+                ) ?? '',
                 'period' => substr((string) $row['period_start'], 0, 7),
                 'due_on' => (string) $row['due_on'],
                 'phase' => $assessment->phase,
@@ -320,7 +329,9 @@ final readonly class PayrollDeadlineOverviewService
                 'source' => 'levy',
                 'reference' => 'payroll_liability:' . (int) $row['liability_id'],
                 'title' => (string) $row['liability_kind'],
-                'subject' => (string) $row['recipient_reference'],
+                // Název instituce z platebního účtu; `recipient_reference`
+                // (`institution:health_insurer:111:account:1`) je interní klíč.
+                'subject' => (string) ($row['recipient_name'] ?? ''),
                 'period' => substr((string) $row['period_start'], 0, 7),
                 'due_on' => $dueOn,
                 'phase' => $this->phase($dueOn),

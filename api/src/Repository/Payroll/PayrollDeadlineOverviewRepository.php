@@ -101,7 +101,7 @@ final readonly class PayrollDeadlineOverviewRepository
      * @return list<array{
      *   liability_id:int,liability_kind:string,due_on:string,
      *   amount_minor:int,settled_minor:int,recipient_reference:string,
-     *   period_start:string,run_id:int
+     *   recipient_name:?string,period_start:string,run_id:int
      * }>
      */
     public function levyDeadlines(
@@ -119,6 +119,7 @@ final readonly class PayrollDeadlineOverviewRepository
                     liability.due_on,
                     liability.amount_minor,
                     liability.recipient_reference,
+                    institution_account.institution_name AS recipient_name,
                     run.period_start,
                     run.id AS run_id,
                     COALESCE(settlement.settled_minor, 0) AS settled_minor
@@ -130,6 +131,16 @@ final readonly class PayrollDeadlineOverviewRepository
                  ON run.supplier_id = revision.supplier_id
                 AND run.id = revision.run_id
                 AND run.current_revision_no = revision.revision_no
+          LEFT JOIN payroll_institution_accounts institution_account
+                 ON institution_account.supplier_id = liability.supplier_id
+                AND institution_account.id = CASE
+                      WHEN liability.recipient_reference
+                           LIKE "institution:%:account:%"
+                      THEN CAST(SUBSTRING_INDEX(
+                             liability.recipient_reference, ":", -1
+                           ) AS UNSIGNED)
+                      ELSE NULL
+                    END
           LEFT JOIN (
                     SELECT supplier_id, liability_id,
                            SUM(amount_minor) AS settled_minor
