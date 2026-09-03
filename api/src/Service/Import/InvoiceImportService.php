@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\ProjectRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
@@ -155,6 +156,7 @@ final class InvoiceImportService
         private readonly OssItemPlanner $planner,
         private readonly TaxConstantsRepository $taxConstants,
         private readonly StatsRecomputer $stats,
+        private readonly AccountingPeriodProvisioner $periodProvisioner,
     ) {}
 
     /**
@@ -211,10 +213,36 @@ final class InvoiceImportService
      * a `oss_credit_note_pending_period` posílá jen `status = 'created'`: u odmítnutého
      * dokladu se nic nezapsalo a číslo „3 řádky v OSS" by tvrdilo opak.
      *
+     * ── Běh na pozadí ───────────────────────────────────────────────────────────────
+     * Dávka z jiného systému má běžně tisíce dokladů, takže synchronní request na ni
+     * nestačí. `$onProgress` a `$shouldCancel` jsou tu proto, aby tentýž kód uměl běžet
+     * i jako job ({@see \MyInvoice\Service\Import\FileImportJobService}) — ne aby vznikla
+     * druhá kopie importu pro pozadí.
+     *
+     * `$shouldCancel` vrátí `true` → smyčka se zastaví, ale **závěrečné kroky doběhnou**
+     * (dorovnání číselných řad, přepočet statistik klientů). Právě tyhle dva kroky
+     * chyběly, když uživateli běh spadl na timeout uprostřed: doklady byly založené,
+     * ale seznam klientů ukazoval stará čísla a další faktura se vystavila s číslem,
+     * které už v importu bylo. Report se vrátí za tu část, která se stihla.
+     *
      * @param list<array{name:string, content:string}> $files Vstupní soubory (rozbalené ze ZIP / single).
-     * @return array{summary:array<string,int>, results:list<array<string,mixed>>}
+     * @param (\Closure(int,int,array<string,int>):void)|null $onProgress fn(zpracováno, celkem, souhrn)
+     * @param (\Closure():bool)|null $shouldCancel Vrátí `true`, má-li se běh ukončit předčasně.
+     * @param 'draft'|'received' $purchaseStatus Stav zakládaných PŘIJATÝCH dokladů. Koncept
+     *        se nezapočítává do nákladů, závazků ani do výkazů, takže dávková migrace
+     *        z jiného systému má smysl jen jako `received` — jinak by účetní musela
+     *        stovky dokladů otevřít jeden po druhém. Vydané strany se netýká.
+     * @return array{summary:array<string,int>, results:list<array<string,mixed>>, cancelled:bool, not_processed:int}
      */
-    public function importBundle(array $files, int $supplierId, int $userId, string $kind = 'auto'): array
+    public function importBundle(
+        array $files,
+        int $supplierId,
+        int $userId,
+        string $kind = 'auto',
+        ?\Closure $onProgress = null,
+        ?\Closure $shouldCancel = null,
+        string $purchaseStatus = 'draft',
+    ): array
     {
         if (!in_array($kind, ['auto', 'issued', 'purchase'], true)) {
             throw new \InvalidArgumentException("Neznámý kind '{$kind}', použij auto|issued|purchase.");
@@ -295,6 +323,30 @@ final class InvoiceImportService
         //    první doklad — jinak by se odmítl každý řádek se sazbou vyšší než 0 %.
         $this->assertRateCodebookAvailable($parsed, $supplierId, $tenantIc, $kind);
 
+        // 3b. Účetní období musí pokrývat data importovaných dokladů.
+        //
+        // Import sám do deníku NEÚČTUJE — doklady vznikají nezaúčtované a na chybějící
+        // období narazí uživatel až ve chvíli, kdy u dokladu klikne „Zaúčtovat". U migrace
+        // z jiného systému to znamená narazit na to měsíce po importu, u jednoho dokladu
+        // z tisíce a bez souvislosti s tím, co dělal: doklady jsou roky staré, kdežto
+        // účetnictví má firma aktivované od letoška. Rozsah dávky je jediné místo, kde se
+        // to dá vyřešit dopředu a JEDNOU za běh místo u každého dokladu zvlášť.
+        //
+        // Zakládá se jen období, které NEEXISTUJE, a jen v podvojném účetnictví — obojí
+        // hlídá provisioner, který je společný s účtováním a údržbovým CLI. Neúspěch
+        // jednoho roku běh nezastaví; na ten zbytek narazí uživatel u „Zaúčtovat"
+        // s hláškou, která ho pošle na Uzávěrku.
+        $span = ImportDateSpan::of($parsed);
+        if ($span !== null) {
+            $this->periodProvisioner->ensureOpenPeriodsForRange(
+                $supplierId,
+                $span[0],
+                $span[1],
+                AccountingPeriodProvisioner::REASON_IMPORT,
+                $userId ?: null,
+            );
+        }
+
         // 4. Cross-batch analýza emailů (jen pro issued cesta).
         $emailMap = $this->buildEmailMap($parsed);
 
@@ -322,13 +374,42 @@ final class InvoiceImportService
         $touchedClientIds = [];
         $touchedProjectIds = [];
 
+        // Celkem dokladů, ne souborů: jeden Pohoda dataPack nese tisíce dokladů, takže
+        // „1 z 1" by při běhu na pozadí neřeklo vůbec nic. Nečitelný soubor se počítá
+        // jako jeden doklad — jinak by se jmenovatel po cestě měnil.
+        $totalDocs = 0;
         foreach ($parsed as $entry) {
+            $totalDocs += isset($entry['error']) ? 1 : count($entry['invoices']);
+        }
+        $processedDocs = 0;
+        $cancelled = false;
+        $report = function () use (&$processedDocs, $totalDocs, &$created, &$duplicates, &$skipped, &$failed, $onProgress): void {
+            if ($onProgress === null) return;
+            $onProgress($processedDocs, $totalDocs, [
+                'created'    => $created,
+                'duplicates' => $duplicates,
+                'skipped'    => $skipped,
+                'failed'     => $failed,
+            ]);
+        };
+        $report();
+
+        foreach ($parsed as $entry) {
+            if ($cancelled) break;
             if (isset($entry['error'])) {
                 $results[] = ['file' => $entry['file'], 'status' => 'failed', 'reason' => $entry['error']];
                 $failed++;
+                $processedDocs++;
+                $report();
                 continue;
             }
             foreach ($entry['invoices'] as $inv) {
+                // Přerušení se ptáme MEZI doklady, ne uvnitř zápisu — rozepsaný doklad
+                // se vždycky dopíše celý, aby po zrušení nezůstala hlavička bez řádků.
+                if ($shouldCancel !== null && $shouldCancel()) {
+                    $cancelled = true;
+                    break;
+                }
                 // Číslo dokladu z původního systému patří do labelu vždy, když se liší od
                 // varsymbolu: u dokladů s dosazeným VS (§ D9) je to jediný údaj, pod kterým
                 // uživatel doklad ve zdrojové aplikaci najde.
@@ -340,6 +421,8 @@ final class InvoiceImportService
                 if (isset($inv['__error'])) {
                     $results[] = ['file' => $label, 'status' => 'failed', 'reason' => $inv['__error']];
                     $failed++;
+                    $processedDocs++;
+                    $report();
                     continue;
                 }
 
@@ -350,10 +433,21 @@ final class InvoiceImportService
                     if ($route === 'issued') {
                         $r = $this->processOne($inv, $supplierId, $userId, $emailMap);
                     } elseif ($route === 'purchase') {
+                        // Zdrojový artefakt: úsek JEN tohoto dokladu, má-li ho parser
+                        // (Pohoda export nese celou agendu v jednom souboru). Teprve
+                        // když ho nemá — ISDOC, kde soubor = jeden doklad — jdou k
+                        // dokladu bajty celého souboru.
+                        $docSource = isset($inv['__source_xml']) && is_string($inv['__source_xml'])
+                            ? $inv['__source_xml']
+                            : ($entry['source'] ?? null);
+                        $docSourceName = isset($inv['__source_xml'])
+                            ? self::fragmentName($entry['source_name'] ?? null, $inv)
+                            : ($entry['source_name'] ?? null);
                         $r = $this->processPurchase(
                             $inv, $supplierId, $userId,
                             $entry['pdf'] ?? null, $entry['pdf_name'] ?? null,
-                            $entry['source'] ?? null, $entry['source_name'] ?? null, $entry['source_format'] ?? null,
+                            $docSource, $docSourceName, $entry['source_format'] ?? null,
+                            $purchaseStatus,
                         );
                     } else {
                         // 'reject' — ISDOC patří jinému plátci (neshoda IČO s tenantem)
@@ -385,12 +479,26 @@ final class InvoiceImportService
                             if ($proj > 0) $touchedProjectIds[$proj] = true;
                         }
                     }
-                    elseif ($r['status'] === 'skipped') $skipped++;
+                    elseif ($r['status'] === 'skipped') {
+                        $skipped++;
+                        // Doklad už v systému je — a právě proto může mít jeho klient
+                        // zastaralou cache po běhu, který nedoběhl do konce. Opakované
+                        // nahrání téže dávky je jediná cesta, kterou má uživatel po ruce,
+                        // takže musí čísla dorovnat, ne je znovu nechat být.
+                        if ($route === 'issued') {
+                            $cli = (int) ($r['client_id'] ?? 0);
+                            if ($cli > 0) $touchedClientIds[$cli] = true;
+                            $proj = (int) ($r['project_id'] ?? 0);
+                            if ($proj > 0) $touchedProjectIds[$proj] = true;
+                        }
+                    }
                     else $failed++;
                 } catch (\Throwable $e) {
                     $results[] = ['file' => $label, 'status' => 'failed', 'reason' => $e->getMessage()];
                     $failed++;
                 }
+                $processedDocs++;
+                $report();
             }
         }
 
@@ -421,9 +529,15 @@ final class InvoiceImportService
             }
         }
 
+        // Zbytek dávky, ke kterému se běh po zrušení nedostal. Bez tohohle čísla vypadá
+        // zrušený import v reportu jako hotový — jen s menším počtem dokladů.
+        $remaining = max(0, $totalDocs - $processedDocs);
+
         return [
             'summary' => ['created' => $created, 'duplicates' => $duplicates, 'skipped' => $skipped, 'failed' => $failed] + $totals,
             'results' => $results,
+            'cancelled' => $cancelled,
+            'not_processed' => $cancelled ? $remaining : 0,
         ];
     }
 
@@ -633,8 +747,21 @@ final class InvoiceImportService
 
     /**
      * Per-soubor detekce: kam (issued / purchase / reject) faktura patří.
-     * `$kind='auto'` — porovná tenant IČO s supplier/customer.
+     * `$kind='auto'` — směr ze souboru, jinak porovnání tenant IČO s supplier/customer.
      * `$kind='issued'|'purchase'` — vynutí směr, jen ověří že tenant je ve správné roli.
+     *
+     * SMĚR ZE SOUBORU MÁ PŘEDNOST před porovnáváním IČO, kdykoli ho soubor uvádí
+     * ({@see PohodaXmlParser::DOCUMENT_TYPES} podle `<inv:invoiceType>`). Odhad podle IČO
+     * je totiž u exportu z Pohody systematicky špatně: soubor má přijaté i vydané doklady
+     * v témže tvaru a `root@ico` je u obou IČO exportující firmy, takže „jsme dodavatel"
+     * vyjde jako pravda i u přijaté faktury. Při `kind=auto` se tak celá dávka přijatých
+     * faktur TICHE založila jako vydané — obrácená strana evidence DPH i přiznání, a to
+     * bez jediné chybové hlášky.
+     *
+     * Ohlášený nesoulad mezi zvoleným tabem a obsahem souboru se hlásí VLASTNÍ hláškou:
+     * „nahrál jsi vydané faktury do přijatých" je jiná vada s jiným řešením než
+     * „tenhle doklad patří jiné firmě", a splynutí obou do cross-tenant hlášky posílalo
+     * uživatele hledat chybu v exportu, který byl v pořádku.
      *
      * @param array<string,mixed> $inv
      * @return string 'issued'|'purchase' nebo error message (reject reason)
@@ -644,27 +771,75 @@ final class InvoiceImportService
         $supplierIc = preg_replace('/\D/', '', (string) ($inv['supplier']['ic'] ?? '')) ?: '';
         $customerIc = preg_replace('/\D/', '', (string) ($inv['client']['ic'] ?? '')) ?: '';
 
-        // Pokud parser nevyplnil supplier (starší Pohoda XML), fallback na top-level
-        // supplier_ic je už ošetřený přes parser → ale jistota:
-        if ($supplierIc === '' && isset($inv['__supplier_ic'])) {
-            $supplierIc = preg_replace('/\D/', '', (string) $inv['__supplier_ic']) ?: '';
+        $declared = $inv['direction'] ?? null;
+        $declared = $declared === 'issued' || $declared === 'purchase' ? $declared : null;
+
+        // `__supplier_ic` je IČO firmy, KTERÁ SOUBOR VYVEZLA (Pohoda `root@ico`) — u vydané
+        // faktury je to dodavatel, u přijaté odběratel. Doplňuje se jen tam, kde stranu
+        // neurčil sám doklad: starší Pohoda XML `<inv:myIdentity>` nepíše, a bez fallbacku
+        // by přijatá faktura z takového souboru spadla na „patří jinému odběrateli"
+        // s prázdným IČO, přestože soubor pochází z účetnictví tenanta.
+        $fileOwnerIc = preg_replace('/\D/', '', (string) ($inv['__supplier_ic'] ?? '')) ?: '';
+        if ($fileOwnerIc !== '') {
+            if ($declared === 'purchase') {
+                $customerIc = $customerIc !== '' ? $customerIc : $fileOwnerIc;
+            } else {
+                $supplierIc = $supplierIc !== '' ? $supplierIc : $fileOwnerIc;
+            }
         }
 
         $weAreSupplier = $supplierIc !== '' && $supplierIc === $tenantIc;
         $weAreCustomer = $customerIc !== '' && $customerIc === $tenantIc;
 
         if ($kind === 'issued') {
-            if (!$weAreSupplier) return "ISDOC patří jinému dodavateli (supplier IČO: {$supplierIc}, tenant: {$tenantIc}).";
+            if ($declared === 'purchase') {
+                return 'Tenhle doklad je v souboru vedený jako PŘIJATÝ (' . self::directionLabel($inv)
+                    . '), ale importuje se mezi vydané faktury. Nahrajte ho v sekci přijatých faktur.';
+            }
+            if (!$weAreSupplier) return "Doklad patří jinému dodavateli (IČO dodavatele: {$supplierIc}, tenant: {$tenantIc}).";
             return 'issued';
         }
         if ($kind === 'purchase') {
-            if (!$weAreCustomer) return "ISDOC patří jinému plátci (buyer IČO: {$customerIc}, tenant: {$tenantIc}).";
+            if ($declared === 'issued') {
+                return 'Tenhle doklad je v souboru vedený jako VYDANÝ (' . self::directionLabel($inv)
+                    . '), ale importuje se mezi přijaté faktury. Nahrajte ho v sekci vydaných faktur.';
+            }
+            if (!$weAreCustomer) return "Doklad patří jinému odběrateli (IČO odběratele: {$customerIc}, tenant: {$tenantIc}).";
             return 'purchase';
         }
-        // auto
+        // auto — směr ze souboru je jistota, porovnání IČO jen dohad (viz docblock).
+        if ($declared !== null) return $declared;
         if ($weAreSupplier)  return 'issued';
         if ($weAreCustomer)  return 'purchase';
         return "Auto-detekce: ani jeden IČO nematchuje tenant (supplier: {$supplierIc}, buyer: {$customerIc}, tenant: {$tenantIc}).";
+    }
+
+    /**
+     * Název archivovaného úseku: jméno zdrojového souboru doplněné o doklad, ke kterému
+     * úsek patří. Bez toho by se stovky úseků z jedné dávky jmenovaly stejně a v seznamu
+     * příloh by nešlo poznat, který je který.
+     *
+     * @param array<string,mixed> $inv
+     */
+    private static function fragmentName(?string $sourceName, array $inv): string
+    {
+        $base = $sourceName !== null && $sourceName !== '' ? $sourceName : 'pohoda.xml';
+        $ext = pathinfo($base, PATHINFO_EXTENSION);
+        $stem = $ext !== '' ? substr($base, 0, -(strlen($ext) + 1)) : $base;
+        $doc = trim((string) ($inv['document_number'] ?? '')) ?: trim((string) ($inv['varsymbol'] ?? ''));
+        $doc = preg_replace('/[^A-Za-z0-9._-]+/', '-', $doc) ?? '';
+
+        return $doc !== ''
+            ? $stem . '-' . $doc . ($ext !== '' ? '.' . $ext : '')
+            : $base;
+    }
+
+    /** Popisek dokladu do hlášky o špatně zvolené sekci — číslo dokladu, jinak varsymbol. */
+    private static function directionLabel(array $inv): string
+    {
+        $number = trim((string) ($inv['document_number'] ?? ''));
+
+        return $number !== '' ? $number : (string) ($inv['varsymbol'] ?? '?');
     }
 
     /**
@@ -684,9 +859,10 @@ final class InvoiceImportService
         ?string $sourceBytes = null,
         ?string $sourceName = null,
         ?string $sourceFormat = null,
+        string $purchaseStatus = 'draft',
     ): array {
         try {
-            $r = $this->purchaseMapper->map($inv, $supplierId, $userId);
+            $r = $this->purchaseMapper->map($inv, $supplierId, $userId, $purchaseStatus);
             $duplicate = !empty($r['duplicate']);
             // Čitelné PDF (z ISDOCX balíčku nebo nahraného PDF/A-3 s embedded ISDOC)
             // zaarchivuj k faktuře pro náhled/stažení (issue #149) — stejná archivace
@@ -761,7 +937,9 @@ final class InvoiceImportService
 
         $topSupplierIc = (string) ($parsed['supplier_ic'] ?? '');
         $invoices = $parsed['invoices'] ?? [];
-        // Inject top-level supplier_ic do každé invoice (Pohoda parser nemá supplier party na invoice úrovni)
+        // IČO firmy, která soubor vyvezla (Pohoda `root@ico`) — u vydané faktury dodavatel,
+        // u přijaté odběratel. Slouží jen jako fallback pro stranu, kterou doklad sám
+        // neuvádí; do které role patří, rozhoduje `detectRoute()` podle směru dokladu.
         foreach ($invoices as &$inv) {
             if (is_array($inv) && !isset($inv['__supplier_ic']) && $topSupplierIc !== '') {
                 $inv['__supplier_ic'] = $topSupplierIc;
@@ -778,6 +956,14 @@ final class InvoiceImportService
     }
 
     /**
+     * Mapa IČO → e-maily odběratelů, kterou se při zakládání klienta doplní kontakt
+     * chybějící na konkrétním dokladu.
+     *
+     * PŘIJATÉ doklady se přeskakují. Jejich `client` je totiž tenant sám (viz
+     * {@see PohodaXmlParser}), takže by mapa spárovala IČO tenanta s jeho vlastní
+     * e-mailovou adresou a ta by se pak dosadila do klientské karty, kdyby si tenant
+     * někdy sám sebe zavedl jako odběratele. Do mapy patří výhradně protistrany.
+     *
      * @param list<array<string,mixed>> $parsedFiles
      * @return array<string, array<string,bool>>  IČO → set emailů
      */
@@ -786,6 +972,7 @@ final class InvoiceImportService
         $map = [];
         foreach ($parsedFiles as $entry) {
             foreach ($entry['invoices'] ?? [] as $inv) {
+                if (($inv['direction'] ?? null) === 'purchase') continue;
                 $ic = preg_replace('/\D/', '', (string) ($inv['client']['ic'] ?? ''));
                 $email = trim((string) ($inv['client']['email'] ?? ''));
                 if ($ic === '' || $email === '') continue;
@@ -979,6 +1166,12 @@ final class InvoiceImportService
                 'status' => 'skipped',
                 'reason' => $reason,
                 'invoice_id' => $existing['id'],
+                // Klient existujícího dokladu patří do přepočtu cache stejně jako klient
+                // nově založeného. Právě tohle chybělo po utnutém importu: opakované
+                // nahrání téže dávky doklady přeskočilo jako duplicitní, takže seznam
+                // klientů zůstal na starých číslech a nešlo to napravit ničím z aplikace.
+                'client_id' => $existing['client_id'] ?? 0,
+                'project_id' => $existing['project_id'] ?? 0,
                 // Poznámka o náhradě se dřív v téhle větvi zahodila, takže se uživatel
                 // u přeskočeného dokladu o dosazeném symbolu vůbec nedozvěděl.
                 'notes' => $notes,
@@ -1172,14 +1365,21 @@ final class InvoiceImportService
     private function findInvoiceByVarsymbol(int $supplierId, string $varsymbol): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, invoice_type FROM invoices WHERE supplier_id = ? AND varsymbol = ? LIMIT 1'
+            'SELECT id, invoice_type, client_id, project_id FROM invoices WHERE supplier_id = ? AND varsymbol = ? LIMIT 1'
         );
         $stmt->execute([$supplierId, $varsymbol]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         return $row === false
             ? null
-            : ['id' => (int) $row['id'], 'invoice_type' => (string) $row['invoice_type']];
+            : [
+                'id'           => (int) $row['id'],
+                'invoice_type' => (string) $row['invoice_type'],
+                // Klient a zakázka existujícího dokladu — přeskočený doklad je díky nim
+                // pořád důvod přepočítat cache ({@see importBundle()}).
+                'client_id'    => (int) ($row['client_id'] ?? 0),
+                'project_id'   => (int) ($row['project_id'] ?? 0),
+            ];
     }
 
     private static function invoiceTypeLabel(string $type): string
@@ -1433,6 +1633,12 @@ final class InvoiceImportService
                     . 'na základ daně, takže se liší od částek na původním dokladu. Celkové částky sedí.';
                 break;
             }
+        }
+
+        if (($inv['items_source'] ?? 'detail') === 'summary_recap') {
+            $notes[] = 'Doklad neměl v souboru rozpis položek — řádky jsme dopočetli z jeho '
+                . 'rekapitulace DPH, jeden na každou sazbu. Základy i daň odpovídají původnímu '
+                . 'dokladu, popis řádku je převzatý z textu hlavičky.';
         }
 
         return ['notes' => $notes, 'warnings' => $warnings];

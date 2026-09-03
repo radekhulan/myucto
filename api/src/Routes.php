@@ -2226,6 +2226,10 @@ final class Routes
         $app->get    ('/api/admin/invoices-zip',    InvoicesZipAction::class);  // legacy — drží se kvůli historickým bookmark URL
         $app->get    ('/api/admin/export',          ExportAction::class);       // generic export (?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv&month=YYYY-MM nebo period=quarterly)
         $app->post   ('/api/admin/import',          ImportAction::class);       // import vystavených faktur z Pohoda XML / ISDOC (single nebo ZIP)
+        // Tatáž dávka na pozadí: tisíce dokladů z jiného systému synchronní request
+        // nepřežije a jeho utnutí uprostřed nechá doklady založené, ale nedorovná
+        // číselné řady ani nepřepočte statistiky klientů (obojí je až na konci běhu).
+        $app->post   ('/api/admin/import/start',    \MyInvoice\Action\Admin\Import\StartFileImportAction::class);
 
         // Kompletní export dat firmy (H-14) — DB + PDF doklady + přílohy do jednoho
         // archivu s manifestem a kontrolními součty. Běží na pozadí
@@ -2449,6 +2453,7 @@ final class Routes
         $app->delete ('/api/reports/submissions/{id:[0-9]+}',     [\MyInvoice\Action\Report\TaxSubmissionAction::class, 'delete']);
 
         $app->get    ('/api/admin/imports/{id:[0-9]+}',         ImportJobStatusAction::class);
+        $app->get    ('/api/admin/imports/{id:[0-9]+}/report',  \MyInvoice\Action\Admin\Import\ImportJobReportAction::class);
         $app->post   ('/api/admin/imports/{id:[0-9]+}/cancel',  CancelImportJobAction::class);
         $app->delete ('/api/admin/imports/{id:[0-9]+}',         \MyInvoice\Action\Admin\Import\DeleteImportJobAction::class);
         $app->get    ('/api/admin/users',           [UserAdminAction::class, 'list']);

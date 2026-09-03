@@ -2,6 +2,13 @@ import { api } from './client'
 
 export type ImportKind = 'auto' | 'issued' | 'purchase'
 
+/**
+ * Stav, ve kterém mají vzniknout PŘIJATÉ doklady. Koncept se nezapočítává do nákladů,
+ * závazků ani do výkazů, takže dávková migrace z jiného systému dává smysl jen jako
+ * `received` — jinak by účetní musela stovky dokladů otevřít jeden po druhém.
+ */
+export type PurchaseImportStatus = 'received' | 'draft'
+
 export interface ImportResultRow {
   file: string
   status: 'created' | 'skipped' | 'failed'
@@ -68,6 +75,68 @@ export interface ImportSummary {
 export interface ImportReport {
   summary: ImportSummary
   results: ImportResultRow[]
+  /** Běh na pozadí zrušil uživatel — doklady založené do té chvíle v systému zůstávají. */
+  cancelled?: boolean
+  /** Kolik dokladů z dávky se po zrušení nezpracovalo. */
+  not_processed?: number
+}
+
+/**
+ * Stav importu běžícího na pozadí. Tvar sdílí s ostatními `import_jobs` (iDoklad,
+ * Fakturoid, dokumenty) — jde o tutéž tabulku i tentýž worker.
+ */
+export interface FileImportJob {
+  id: number
+  status: 'queued' | 'running' | 'completed' | 'completed_with_warnings' | 'failed' | 'cancelled'
+  total_items: number | null
+  processed: number
+  created_count: number
+  skipped_count: number
+  failed_count: number
+  current_step: string | null
+  log_text: string | null
+  last_error: string | null
+}
+
+export interface StartedImportJob {
+  job_id: number
+  status: string
+  files: number
+  kind: ImportKind
+}
+
+/**
+ * Spustí import na pozadí. Dávka z jiného systému má běžně tisíce dokladů —
+ * synchronní {@link uploadImport} na ni nestačí a její utnutí uprostřed nechá doklady
+ * založené, ale nedorovná číselné řady ani nepřepočte statistiky klientů.
+ */
+export async function startImportJob(
+  files: File[],
+  kind: ImportKind = 'auto',
+  purchaseStatus: PurchaseImportStatus = 'received',
+): Promise<StartedImportJob> {
+  const fd = new FormData()
+  for (const f of files) fd.append('files[]', f, f.name)
+  const r = await api.post<StartedImportJob>(
+    `/admin/import/start?kind=${kind}&purchase_status=${purchaseStatus}`, fd,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  )
+  return r.data
+}
+
+export async function fetchImportJob(id: number): Promise<FileImportJob> {
+  const r = await api.get<FileImportJob>(`/admin/imports/${id}`)
+  return r.data
+}
+
+/** Report se stahuje jednou po doběhnutí — u tisíců dokladů má megabajty. */
+export async function fetchImportJobReport(id: number): Promise<ImportReport> {
+  const r = await api.get<ImportReport>(`/admin/imports/${id}/report`)
+  return r.data
+}
+
+export async function cancelImportJob(id: number): Promise<void> {
+  await api.post(`/admin/imports/${id}/cancel`, {})
 }
 
 /**

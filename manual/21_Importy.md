@@ -28,7 +28,25 @@ Formulář:
   - `.isdocx` (ISDOC Package — ZIP balíček se strukturovaným ISDOC + PDF; viz § 21.6)
   - `.pdf` (PDF/A-3 s embedded ISDOC nebo ISDOCX přílohou — viz § 21.6)
   - `.zip` s libovolným počtem těchto souborů uvnitř
-- **Importovat** — odešle a vrátí report (kolik vytvořeno / přeskočeno / chyba).
+- **Importovat** — odešle soubory a spustí import **na pozadí**.
+
+Import běží jako úloha na pozadí, ne v rámci odeslání formuláře. Export z jiného
+systému běžně nese tisíce dokladů a takový běh by se do jednoho požadavku nevešel.
+Během běhu vidíš:
+
+- **ukazatel průběhu** — zpracováno *n* z *N* **dokladů** (ne souborů) a průběžné
+  počty vytvořeno / přeskočeno / chyb,
+- **Zastavit import** — doběhne rozepsaný doklad a skončí. Doklady založené do té
+  chvíle v systému zůstávají a report řekne, kolik dokladů zůstalo nezpracovaných.
+  Tutéž dávku můžeš nahrát znovu — hotové doklady se přeskočí jako duplicitní.
+
+Stránku můžeš zavřít, import doběhne i bez ní. Report se zobrazí po dokončení.
+
+> [!NOTE]
+> Zastavení ani zavření stránky nepřeruší závěrečné kroky importu — dorovnání
+> číselných řad a přepočet statistik klientů proběhnou nad tím, co se stihlo.
+> Bez toho by seznam klientů ukazoval stará čísla a další vystavená faktura by
+> dostala číslo, které v importu už je.
 
 ## 21.2 Co se založí
 
@@ -512,14 +530,27 @@ pro ruční vyplnění; tato jednosouborová cesta nikdy nevolá AI.
 Pro každý platný doklad systém:
 
 1. vyhledá nebo založí dodavatele,
-2. vytvoří **koncept přijaté faktury** a její položky,
+2. vytvoří **přijatou fakturu** a její položky,
 3. u ISDOCX nebo PDF/A-3 uloží čitelný PDF originál k faktuře,
-4. odděleně zaarchivuje původní strojový artefakt ISDOC, ISDOCX nebo Pohoda XML,
-5. vrátí report **Vytvořeno / Přeskočeno / Chyba** s odkazem na nový koncept.
+4. odděleně zaarchivuje původní strojový artefakt ISDOC, ISDOCX nebo Pohoda XML —
+   u vícedokladového souboru (export z Pohody nese celou agendu najednou) se
+   archivuje **úsek právě tohoto dokladu**, ne celý soubor,
+5. vrátí report **Vytvořeno / Přeskočeno / Chyba** s odkazem na nový doklad.
+
+**Stav zakládaných dokladů.** Doklad ze strukturovaného souboru je úplný, takže
+vzniká rovnou jako **přijatý**. Koncept se nezapočítává do nákladů, závazků ani
+do výkazů, takže po migraci z jiného systému by firma vypadala, že žádné náklady
+nemá, a účetní by musela stovky dokladů otevřít jednu po druhé. Zaškrtávátko
+**Založit jako koncept** je pro dávku, kterou chceš ještě projít, než ji pustíš
+do výkazů.
+
+**Datum přijetí** se přebírá z dokladu (DUZP, jinak datum vystavení), ne z data
+importu. Na období nároku na odpočet to vliv nemá — to se u importovaného dokladu
+řídí DUZP (§ 73), protože datum přijetí není vědomé zadání účetní.
 
 Strukturovaný import nepoužívá AI. PDF bez vloženého ISDOC proto patří do
 **Nákup → AI import**, případně je lze zpracovat přes scan inbox. Importovaný
-koncept před zaúčtováním vždy otevři a zkontroluj dodavatele, období, DUZP,
+doklad před zaúčtováním vždy otevři a zkontroluj dodavatele, období, DUZP,
 částky, DPH klasifikaci a nárok na odpočet.
 
 Na stejné stránce je také ruční spuštění **scan inboxu**. Ten projde
@@ -528,5 +559,7 @@ přejít na nastavenou AI bránu. Volba **Nanečisto** vrátí report bez vytvo�
 dokladů. Nezpracované a chybné soubory zůstávají v samostatném seznamu s důvodem,
 aby se neztratily v souhrnných počtech.
 
-Upload je omezen na 50 souborů, nejvýše 20 MiB na soubor a 50 MiB celkem. Zápis
-vyžaduje oprávnění k importu; všechny výsledky jsou omezené na aktuální firmu.
+Upload je omezen na 200 souborů, nejvýše 100 MiB na soubor a 300 MiB celkem —
+právě velké dávky jsou důvod, proč import běží na pozadí. Zápis vyžaduje
+oprávnění k importu; všechny výsledky jsou omezené na aktuální firmu. Souběžně
+běží nejvýše jeden import na firmu; pokus o druhý skončí odkazem na ten běžící.

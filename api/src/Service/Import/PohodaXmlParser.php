@@ -21,6 +21,8 @@ namespace MyInvoice\Service\Import;
  * Output shape per invoice:
  *   [
  *     'invoice_type'          => 'invoice'|'proforma'|'credit_note',
+ *     'direction'             => 'issued'|'purchase'|null,  // SMĚR určený souborem
+
  *     'varsymbol'             => string,
  *     'varsymbol_source'      => 'symVar'|'number'|'number_sanitized',
  *     'varsymbol_original'    => string|null,
@@ -37,12 +39,29 @@ namespace MyInvoice\Service\Import;
  *     'note_above'            => string|null,
  *     'project_number'        => string|null,   // z inv:numberOrder
  *     'client'                => [company_name, ic, dic, street, city, zip, country_iso2, email, phone],
+ *     'supplier'              => tentýž tvar — DODAVATEL dokladu
  *     'items'                 => [[description, quantity, unit, unit_price_without_vat,
  *                                  unit_price_with_vat, vat_rate, vat_rate_source, vat_rate_enum,
  *                                  vat_rate_level, prices_included_vat], ...],
+ *     'items_source'          => 'detail'|'summary_recap',
  *     'vat_recap'             => ['21.00' => ['base' => float, 'vat' => float], ...],
  *     'file_issues'           => list<string>,
  *   ]
+ *
+ * `direction` je SMĚR, který určuje sám soubor přes `<inv:invoiceType>` — viz
+ * {@see self::DOCUMENT_TYPES}. Pohoda vyváží přijaté i vydané doklady do TÉHOŽ tvaru
+ * a `root@ico` je u obou IČO exportující firmy, takže bez tohohle klíče nejde přijatou
+ * fakturu od vydané rozeznat jinak než dohadem. `null` = soubor směr neurčuje (neznámý
+ * nebo chybějící typ) a rozhodnout musí až importní vrstva podle IČO stran.
+ *
+ * `client` je vždy ODBĚRATEL a `supplier` vždy DODAVATEL, bez ohledu na směr; do těchhle
+ * rolí se `<inv:partnerIdentity>` (protistrana) a `<inv:myIdentity>` (exportující firma)
+ * rozdělí právě podle `direction`.
+ *
+ * `items_source` = `'summary_recap'` znamená, že doklad v souboru NEMĚL rozpis položek
+ * a řádky jsou dopočtené z jeho vlastní rekapitulace ({@see self::itemsFromSummary()}).
+ * Částky sedí, ale POPIS řádku je odvozený z hlavičky dokladu — volající to má uvést
+ * v reportu, protože rozpis se od originálu liší.
  *
  * `varsymbol_source` říká, odkud varsymbol pochází, a `varsymbol_original` nese
  * původní `<inv:symVar>`, pokud se musel zahodit kvůli tvaru (viz
@@ -175,6 +194,57 @@ final class PohodaXmlParser
     /** Přihrádky rekapitulace a jejich VÝCHOZÍ české procento (jen jako kotva a fallback). */
     private const RECAP_BUCKETS = ['High' => 21.0, 'Low' => 12.0, '3' => 10.0];
 
+    /**
+     * `<inv:invoiceType>` → [SMĚR dokladu, náš druh dokladu]. Jediná tabulka, ze které se
+     * čte obojí — směr i druh jsou na téže hodnotě a dvě tabulky by se rozešly.
+     *
+     * SMĚR je tu to podstatné a dřív úplně chyběl. Pohoda vyváží přijaté i vydané doklady
+     * do TÉHOŽ tvaru souboru a rozlišuje je JEN tímhle elementem: `root@ico` je v obou
+     * případech IČO firmy, která export pořídila, a `<inv:partnerIdentity>` je v obou
+     * případech PROTISTRANA. Dokud se směr nečetl, mířila přijatá faktura do importu jako
+     * vydaná (protistrana v roli odběratele) — buď spadla na cross-tenant guardu
+     * („patří jinému plátci"), nebo se při `kind=auto` TICHE založila jako vydaná faktura,
+     * což je horší: obrátí stranu evidence DPH a přiznání.
+     *
+     * `issuedCorrectiveTax` / `receivedCorrectiveTax` je OPRAVNÝ DAŇOVÝ DOKLAD podle § 42
+     * ZDPH — to, čemu se běžně říká dobropis, a to, co pod tímhle typem vyváží SuperFaktura
+     * i sama Pohoda. `*CreditNotice` je jen jeho nedaňová varianta. Dokud padaly do
+     * `default`, přišel opravný doklad do systému jako ŘÁDNÁ faktura: kladná daň místo
+     * záporné, jiná sekce kontrolního hlášení a mimo veškerou mechaniku oprav (vč. VetaO
+     * v OSS podání). U migrace se 99 dobropisy je to rozdíl v celé jedné straně přiznání.
+     *
+     * Vrubopis (`*DebitNote`) zůstává fakturou schválně — zvyšuje závazek, znaménka se mu
+     * nesmějí otáčet.
+     *
+     * `receivable` / `penalty` / `commitment` jsou agendy ostatních pohledávek a závazků,
+     * ne faktury. V exportu faktur se neobjeví, ale směr u nich uvádíme, aby ani omylem
+     * nahraný soubor neskončil v opačné evidenci — druh dokladu jim zůstává `invoice`,
+     * protože nic bližšího v systému nemají.
+     *
+     * Neznámá hodnota (i prázdná) dává směr `null` = SOUBOR SMĚR NEURČUJE. Volající pak
+     * musí rozhodnout sám podle IČO, jak to dělal dosud; vymyslet tady `issued` by z každého
+     * nečitelného typu udělalo vydaný doklad.
+     *
+     * @var array<string,array{0:string,1:string}>
+     */
+    private const DOCUMENT_TYPES = [
+        'issuedInvoice'           => ['issued',   'invoice'],
+        'issuedCreditNotice'      => ['issued',   'credit_note'],
+        'issuedCorrectiveTax'     => ['issued',   'credit_note'],
+        'issuedDebitNote'         => ['issued',   'invoice'],
+        'issuedAdvanceInvoice'    => ['issued',   'proforma'],
+        'issuedProformaInvoice'   => ['issued',   'proforma'],
+        'receivable'              => ['issued',   'invoice'],
+        'penalty'                 => ['issued',   'invoice'],
+        'receivedInvoice'         => ['purchase', 'invoice'],
+        'receivedCreditNotice'    => ['purchase', 'credit_note'],
+        'receivedCorrectiveTax'   => ['purchase', 'credit_note'],
+        'receivedDebitNote'       => ['purchase', 'invoice'],
+        'receivedAdvanceInvoice'  => ['purchase', 'proforma'],
+        'receivedProformaInvoice' => ['purchase', 'proforma'],
+        'commitment'              => ['purchase', 'invoice'],
+    ];
+
     public static function isAcceptableVarsymbol(string $value): bool
     {
         return preg_match(self::VARSYMBOL_PATTERN, $value) === 1;
@@ -221,7 +291,13 @@ final class PohodaXmlParser
         /** @var \DOMElement $invEl */
         foreach ($xpath->query('//inv:invoice | //lst:invoice') ?: [] as $invEl) {
             try {
-                $invoices[] = $this->parseInvoice($invEl, $xpath);
+                $parsedInvoice = $this->parseInvoice($invEl, $xpath);
+                // Zdrojový úsek JEN tohoto dokladu. Export z Pohody nese celou agendu
+                // v jednom souboru, takže bez tohohle by se ke každé ze stovek faktur
+                // archivoval celý soubor se všemi ostatními — nafouklé úložiště a
+                // „důkaz", ve kterém doklad musí čtenář teprve najít.
+                $parsedInvoice['__source_xml'] = self::documentFragment($dom, $invEl);
+                $invoices[] = $parsedInvoice;
             } catch (\Throwable $e) {
                 // Skip individual broken invoices — vyšší vrstva to dostane jako null v listu, řeší až InvoiceImportService.
                 $invoices[] = ['__error' => $e->getMessage()];
@@ -229,6 +305,26 @@ final class PohodaXmlParser
         }
 
         return ['supplier_ic' => $supplierIc, 'invoices' => $invoices];
+    }
+
+    /**
+     * Samostatně platné XML jednoho dokladu: původní kořen (`dataPack`/`responsePack`)
+     * i s atributy, uvnitř jen tenhle jeden `invoice`.
+     *
+     * Kořen se zachovává schválně — nese `ico` exportující firmy, bez kterého by úsek
+     * nešel znovu naimportovat a přišel by o údaj, podle kterého se pozná směr dokladu.
+     */
+    private static function documentFragment(\DOMDocument $dom, \DOMElement $invEl): string
+    {
+        $out = new \DOMDocument('1.0', 'UTF-8');
+        $out->formatOutput = false;
+
+        $root = $dom->documentElement;
+        $newRoot = $out->importNode($root->cloneNode(false), true);
+        $out->appendChild($newRoot);
+        $newRoot->appendChild($out->importNode($invEl, true));
+
+        return (string) $out->saveXML();
     }
 
     /**
@@ -241,22 +337,11 @@ final class PohodaXmlParser
             throw new \RuntimeException('Chybí invoiceHeader.');
         }
 
-        // `issuedCorrectiveTax` je OPRAVNÝ DAŇOVÝ DOKLAD podle § 42 ZDPH — to, čemu se
-        // běžně říká dobropis, a to, co pod tímhle typem vyváží SuperFaktura i sama
-        // Pohoda. `issuedCreditNotice` je jen jeho nedaňová varianta. Dokud sem padal
-        // do `default`, přišel opravný doklad do systému jako ŘÁDNÁ faktura: kladná
-        // daň na výstupu místo záporné, jiná sekce kontrolního hlášení a mimo veškerou
-        // mechaniku oprav (vč. VetaO v OSS podání). U migrace se 99 dobropisy je to
-        // rozdíl v celé jedné straně přiznání.
-        //
-        // Vrubopis (`issuedDebitNote`) zůstává fakturou schválně — zvyšuje závazek,
-        // znaménka se mu nesmějí otáčet.
+        // `<inv:invoiceType>` říká DVĚ věci najednou — druh dokladu i jeho SMĚR — a obojí
+        // se čte z jediné tabulky {@see self::DOCUMENT_TYPES}, protože rozdvojit je
+        // znamená mít doklad, který je dobropis podle jedné větve a faktura podle druhé.
         $typeRaw = $this->text($xpath, 'inv:invoiceType', $hdr);
-        $invoiceType = match ($typeRaw) {
-            'issuedAdvanceInvoice'                     => 'proforma',
-            'issuedCreditNotice', 'issuedCorrectiveTax' => 'credit_note',
-            default                                    => 'invoice',
-        };
+        [$direction, $invoiceType] = self::DOCUMENT_TYPES[$typeRaw] ?? [null, 'invoice'];
 
         $documentNumber = $this->text($xpath, 'inv:number/typ:numberRequested', $hdr);
         // Odkaz na OPRAVOVANÝ doklad — viz docblock třídy (`inv:originalDocument` je past).
@@ -284,9 +369,16 @@ final class PohodaXmlParser
         // Pohoda může mít inv:numberOrder (číslo objednávky odběratele) nebo inv:contract/typ:ids
         $projectNumber = $this->text($xpath, 'inv:numberOrder', $hdr) ?: null;
 
-        // Klient: inv:partnerIdentity/typ:address
-        $addressNode = $xpath->query('inv:partnerIdentity/typ:address', $hdr)->item(0);
-        $client = $addressNode instanceof \DOMElement ? $this->parseAddress($xpath, $addressNode) : [];
+        // Strany dokladu. `<inv:partnerIdentity>` je PROTISTRANA a `<inv:myIdentity>` je
+        // firma, která export pořídila — obojí BEZ OHLEDU na směr. Do rolí je proto rozdělí
+        // až směr: u vydané faktury je protistrana odběratel, u přijaté dodavatel.
+        //
+        // `client` znamená v celém výstupu ODBĚRATELE a `supplier` DODAVATELE, ať doklad míří
+        // kamkoli — na téhle dvojici stojí cross-tenant guard importu („je tenant tou stranou,
+        // za kterou se doklad vydává?") i dohledání dodavatele u přijaté faktury.
+        $partner = $this->identity($xpath, $hdr, 'inv:partnerIdentity');
+        $mine    = $this->identity($xpath, $hdr, 'inv:myIdentity');
+        [$client, $supplier] = $direction === 'purchase' ? [$mine, $partner] : [$partner, $mine];
 
         // Currency — z první foreignCurrency v summary (pokud existuje), jinak CZK
         $currency = 'CZK';
@@ -311,8 +403,22 @@ final class PohodaXmlParser
         }
         $recap = self::recapFromBuckets($buckets);
 
+        // Doklad bez rozpisu položek, ale s vyplněnou rekapitulací — viz
+        // {@see self::itemsFromSummary()}. `items_source` říká volajícímu, že řádky
+        // nejsou ze souboru, ale z jeho vlastní rekapitulace.
+        $itemsSource = 'detail';
+        if ($items === []) {
+            $synthesized = $this->itemsFromSummary($xpath, $invEl, $currency, $buckets, $noteAbove, $documentNumber);
+            if ($synthesized !== []) {
+                $items = $synthesized;
+                $itemsSource = 'summary_recap';
+            }
+        }
+
         return [
             'invoice_type'          => $invoiceType,
+            // 'issued' | 'purchase' | null — směr, který určuje SOUBOR (viz DOCUMENT_TYPES).
+            'direction'             => $direction,
             'varsymbol'             => $varsymbol,
             'varsymbol_source'      => $varsymbolSource,
             'varsymbol_original'    => $varsymbolOriginal,
@@ -331,11 +437,16 @@ final class PohodaXmlParser
             'note_above'            => $noteAbove,
             'project_number'        => $projectNumber,
             'client'                => $client,
+            'supplier'              => $supplier,
             'items'                 => $items,
+            // 'detail' = řádky ze souboru, 'summary_recap' = dopočtené z rekapitulace.
+            'items_source'          => $itemsSource,
             // Rekapitulace DPH po sazbách z <invoiceSummary> — pro seed override.
             'vat_recap'             => $recap,
-            // Rozpory MEZI položkami a rekapitulací TÉHOŽ souboru (§ G2).
-            'file_issues'           => self::recapConflicts($items, $recap),
+            // Rozpory MEZI položkami a rekapitulací TÉHOŽ souboru (§ G2). U dopočtených
+            // řádků se kontrola vynechává — položky Z rekapitulace jí odpovídají z definice,
+            // takže by neověřila nic a jen předstírala kontrolu.
+            'file_issues'           => $itemsSource === 'detail' ? self::recapConflicts($items, $recap) : [],
         ];
     }
 
@@ -683,6 +794,184 @@ final class PohodaXmlParser
     /**
      * @return array<string,?string>
      */
+    /**
+     * Adresa jedné strany dokladu (`inv:partnerIdentity` / `inv:myIdentity`).
+     *
+     * Chybějící element vrací prázdné pole, ne `null` — volající se strany ptá indexem
+     * (`$party['ic'] ?? ''`) a druhý tvar by ho nutil rozlišovat „strana chybí" od
+     * „strana nemá IČO", což pro něj nemá jiný následek.
+     *
+     * @return array<string,mixed>
+     */
+    private function identity(\DOMXPath $xpath, \DOMElement $hdr, string $element): array
+    {
+        $addr = $xpath->query($element . '/typ:address', $hdr)->item(0);
+
+        return $addr instanceof \DOMElement ? $this->parseAddress($xpath, $addr) : [];
+    }
+
+    /**
+     * Řádky DOPOČTENÉ z `<inv:invoiceSummary>` u dokladu, který žádné `<inv:invoiceItem>`
+     * nemá — jeden řádek na přihrádku rekapitulace.
+     *
+     * Pohoda takový doklad běžně vyváží: faktura zadaná jen textem a částkou (u daňových
+     * poradců a nájmů většina dokladů) nemá rozpis položek, ale rekapitulaci má úplnou.
+     * Import ji ovšem odmítá — součty vydané faktury se počítají výhradně z řádků, takže
+     * bez nich by vznikl doklad na nulu ({@see \MyInvoice\Service\Import\InvoiceImportService::processOne()}).
+     * V reálné migraci 3 144 faktur takhle propadlo 458 dokladů se základem 2 034 236 Kč
+     * a daní 427 190 Kč, a rozdíl proti původnímu systému nešel vysvětlit jinak než ručním
+     * porovnáním po měsících.
+     *
+     * NEJDE o dohad: základ i daň jsou v TOMTÉŽ souboru a procento se z nich spočítá
+     * (`daň / základ`) — táž aritmetika, jakou už pro sazbu POLOŽKY dělá
+     * {@see self::itemVatRate()} pod zdrojem `summary_recap`. Vymýšlí se jedině POPIS
+     * řádku, a ten na žádný výkaz nemá vliv.
+     *
+     * Sazba se bere z `stated`, tedy z toho, co soubor UVÁDÍ nebo z čeho jde spočítat.
+     * Přihrádka bez určeného procenta (typicky cizoměnový doklad bez daně v přihrádce)
+     * dopočet CELÉHO dokladu ruší a doklad propadne na původní odmítnutí: dosadit tam
+     * české procento by z něj udělalo pozitivní tvrzení „tohle je tuzemská sazba", které
+     * pak invariant proti úniku přečte jako potvrzené tuzemské plnění. Radši nic než
+     * vymyšlená sazba — u částí dokladu to platí dvojnásob, protože chybějící přihrádka
+     * by ho uložila neúplný a tvářil by se přitom kompletně.
+     *
+     * `priceNone` (plnění bez daně — osvobozené, mimo předmět, přenesená povinnost) je
+     * v rekapitulaci samostatně a {@see self::RECAP_BUCKETS} ho nemá, protože z něj sazbu
+     * dopočítat nejde. Tady ale sazbu dopočítávat netřeba: nulová daň k nulovému základu
+     * daně je to, co ta přihrádka ZNAMENÁ. Bez ní by z přijatých faktur od neplátců
+     * (v testovaném souboru 172 ze 409) nezbylo vůbec nic.
+     *
+     * Zaokrouhlení dokladu (`typ:round/typ:priceRound`) dostane vlastní řádek s nulovou
+     * sazbou — jinak by se ztratilo a doklad by nesouhlasil s originálem o koruny.
+     *
+     * @param  array<string,array{base:float,vat:float,rate:?float,stated:?float}> $buckets
+     * @return list<array<string,mixed>>
+     */
+    private function itemsFromSummary(
+        \DOMXPath $xpath,
+        \DOMElement $invEl,
+        string $currency,
+        array $buckets,
+        ?string $headerText,
+        string $documentNumber,
+    ): array {
+        $block = $currency === 'CZK' ? 'inv:homeCurrency' : 'inv:foreignCurrency';
+        $sum = $xpath->query("inv:invoiceSummary/$block", $invEl)->item(0);
+        if (!$sum instanceof \DOMElement) {
+            return [];
+        }
+
+        $description = trim((string) $headerText);
+        if ($description === '') {
+            $description = $documentNumber !== ''
+                ? 'Fakturováno dle dokladu ' . $documentNumber
+                : 'Fakturovaná částka';
+        }
+
+        // Znaménko, ve kterém je rekapitulace NAPSANÁ. Dobropis Pohoda vyváží zápornými
+        // částkami, kdežto {@see self::summaryBuckets()} vrací přihrádky v absolutní
+        // hodnotě. Ostatní částky se proto vyjadřují VŮČI orientaci dokladu, ne absolutně
+        // ani syrově: celý dopočtený doklad tak vyjde ve stejné orientaci jako přihrádky
+        // (u dobropisu kladný) a otočení dobropisu v importní vrstvě
+        // ({@see \MyInvoice\Service\Import\InvoiceImportService::planItems()}) ho pak
+        // otočí celý najednou. Syrové znaménko by dobropisu odečetlo, co mu má přičíst.
+        $orientation = $this->summaryOrientation($xpath, $sum);
+
+        /** @var list<array{0:float,1:float,2:?string}> $lines  [základ, sazba v %, vlastní popis] */
+        $lines = [];
+
+        $taxed = [];
+        foreach (self::RECAP_BUCKETS as $suffix => $_default) {
+            $bucket = $buckets[$suffix] ?? null;
+            if ($bucket === null || $bucket['base'] <= 0.0) {
+                continue;
+            }
+            if ($bucket['stated'] === null) {
+                // Přihrádka s částkou, ale bez určitelné sazby → celý doklad zpět na
+                // odmítnutí. Uložit ho bez ní znamená uložit ho neúplný.
+                return [];
+            }
+            $taxed[] = [$bucket['base'], $bucket['stated'], null];
+        }
+
+        // Plnění BEZ DANĚ. Nulová sazba je význam téhle přihrádky, ne dosazený dohad —
+        // a bez ní by z přijatých faktur od neplátců nezbylo vůbec nic.
+        //
+        // Znaménko si přihrádka NECHÁVÁ (vůči orientaci dokladu, viz výše). Pohoda do ní
+        // totiž parkuje i HALÉŘOVÉ VYROVNÁNÍ při zaokrouhlení dokladu (`roundingDocument`
+        // = `math2one`): faktura na 35 520 Kč základu má `priceNone = -0,20`, kdežto
+        // `typ:round/typ:priceRound` zůstane nulové. Absolutní hodnota by z těch dvaceti
+        // haléřů udělala plus a doklad by proti originálu přebil o čtyřicet.
+        $none = $this->text($xpath, 'typ:priceNone', $sum);
+        if (is_numeric($none) && abs((float) $none) > 0.0) {
+            $noneRelative = (float) $none * $orientation;
+            // Záporný zbytek vedle zdaněného plnění není osvobozené plnění, ale právě to
+            // haléřové vyrovnání — popis hlavičky by u něj byl matoucí.
+            $isRounding = $noneRelative < 0.0 && $taxed !== [];
+            $lines[] = [$noneRelative, 0.0, $isRounding ? 'Zaokrouhlení' : null];
+        }
+
+        foreach ($taxed as $line) {
+            $lines[] = $line;
+        }
+
+        if ($lines === []) {
+            return [];
+        }
+
+        // Zaokrouhlení si svoje znaménko NESE (umí doklad snížit i zvýšit), ale musí být
+        // vyjádřené vůči orientaci dokladu, ne absolutně — na dobropisu psaném zápornými
+        // částkami znamená `-0,40` navýšení jeho velikosti, tedy relativně `+0,40`.
+        $round = $this->text($xpath, 'typ:round/typ:priceRound', $sum);
+        if (is_numeric($round) && abs((float) $round) > 0.0) {
+            $lines[] = [(float) $round * $orientation, 0.0];
+        }
+
+        $items = [];
+        foreach ($lines as [$base, $rate, $ownDescription]) {
+            $items[] = [
+                'description'            => $ownDescription ?? $description,
+                'quantity'               => 1.0,
+                'unit'                   => 'ks',
+                'unit_price_without_vat' => $base,
+                // Základ z rekapitulace je NETTO, přepočítávat se nebude.
+                'unit_price_with_vat'    => null,
+                'vat_rate'               => $rate,
+                'vat_rate_source'        => 'summary_recap',
+                'vat_rate_enum'          => null,
+                'vat_rate_level'         => null,
+                'prices_included_vat'    => false,
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Znaménko, ve kterém je rekapitulace napsaná: `-1.0` u dokladu se zápornými částkami
+     * (tak Pohoda vyváží dobropis), jinak `1.0`.
+     *
+     * Rozhoduje přihrádka s NEJVĚTŠÍ absolutní částkou. První nenulová přihrádka by
+     * nestačila: Pohoda parkuje haléřové vyrovnání dokladu do `priceNone` jako záporných
+     * dvacet haléřů vedle kladného základu 35 520 Kč, takže by se řádná faktura označila
+     * za doklad psaný záporně a vyrovnání by se otočilo na plus. Součet přihrádek by
+     * naopak selhal tam, kde se navzájem ruší.
+     *
+     * Prázdná rekapitulace dává `1.0` — není co otáčet.
+     */
+    private function summaryOrientation(\DOMXPath $xpath, \DOMElement $sum): float
+    {
+        $dominant = 0.0;
+        foreach (['typ:priceNone', 'typ:priceHigh', 'typ:priceLow', 'typ:price3'] as $path) {
+            $raw = $this->text($xpath, $path, $sum);
+            if (is_numeric($raw) && abs((float) $raw) > abs($dominant)) {
+                $dominant = (float) $raw;
+            }
+        }
+
+        return $dominant < 0.0 ? -1.0 : 1.0;
+    }
+
     private function parseAddress(\DOMXPath $xpath, \DOMElement $addr): array
     {
         return [

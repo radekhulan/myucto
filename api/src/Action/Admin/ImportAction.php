@@ -74,8 +74,19 @@ final class ImportAction
             return Json::error($response, 'invalid_kind', "Neznámý kind '{$kind}', použij auto|issued|purchase.", 400);
         }
 
+        // `?purchase_status=received|draft` — v jakém stavu mají vzniknout PŘIJATÉ doklady.
+        // Výchozí `received`: doklad z ISDOC/Pohoda XML je úplný, kdežto koncept se
+        // nezapočítává do nákladů ani závazků, takže po dávkové migraci by účetní musela
+        // stovky dokladů otevřít jeden po druhém. Koncept si lze vyžádat explicitně.
+        $purchaseStatus = ((string) ($request->getQueryParams()['purchase_status'] ?? 'received')) === 'draft'
+            ? 'draft'
+            : 'received';
+
         try {
-            $report = $this->importer->importBundle($files, $supplierId, (int) ($user['id'] ?? 0), $kind);
+            $report = $this->importer->importBundle(
+                $files, $supplierId, (int) ($user['id'] ?? 0), $kind,
+                null, null, $purchaseStatus,
+            );
         } catch (\Throwable $e) {
             return Json::error($response, 'import_failed', $e->getMessage(), 500);
         }
@@ -84,6 +95,7 @@ final class ImportAction
         $this->logger->log('invoices.imported', $user['id'] ?? null, null, null, [
             'files'   => count($files),
             'kind'    => $kind,
+            'purchase_status' => $purchaseStatus,
             'summary' => $report['summary'],
         ], $ip, $request->getHeaderLine('User-Agent'));
 
