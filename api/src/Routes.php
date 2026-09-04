@@ -1936,6 +1936,17 @@ final class Routes
             $g->post  ('/posting-backfill/start',             [\MyInvoice\Action\Accounting\PostingBackfillAction::class, 'start']);
             $g->get   ('/posting-backfill/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\PostingBackfillAction::class, 'job']);
             $g->post  ('/posting-backfill/{id:[0-9]+}/cancel',[\MyInvoice\Action\Accounting\PostingBackfillAction::class, 'cancel']);
+            $g->get   ('/setup-assistant', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'status']);
+            $g->post  ('/setup-assistant/analysis', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'startAnalysis']);
+            $g->get   ('/setup-assistant/runs/{id:[0-9]+}', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'run']);
+            $g->get   ('/setup-assistant/runs/{id:[0-9]+}/proposals', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'proposals']);
+            $g->put   ('/setup-assistant/runs/{id:[0-9]+}/proposals/{proposalId:[0-9]+}', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'updateProposal']);
+            $g->post  ('/setup-assistant/runs/{id:[0-9]+}/approve', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'approve']);
+            $g->post  ('/setup-assistant/bundles/{id:[0-9]+}/reclassification', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'startReclassification']);
+            $g->get   ('/setup-assistant/jobs/{id:[0-9]+}', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'job']);
+            $g->post  ('/setup-assistant/jobs/{id:[0-9]+}/cancel', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'cancel']);
+            $g->post  ('/setup-assistant/jobs/{id:[0-9]+}/rollback', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'rollback']);
+            $g->delete('/setup-assistant/jobs/{id:[0-9]+}/snapshot', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'deleteSnapshot']);
             $g->post  ('/journal/{id:[0-9]+}/reverse',        [JournalAction::class, 'reverse']);
             $g->delete('/journal/{id:[0-9]+}',                [JournalAction::class, 'delete']);
             // §35 popis + §33a přílohy — KONKRÉTNÍ cesty PŘED generickým /journal/{id}

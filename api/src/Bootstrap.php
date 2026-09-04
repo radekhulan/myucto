@@ -898,6 +898,8 @@ final class Bootstrap
             \MyInvoice\Service\Import\LlmGatewayInterface::class => fn (ContainerInterface $c) => $c->get(\MyInvoice\Service\Import\LlmGatewayRouter::class),
             \MyInvoice\Service\Ai\EmbeddingGatewayInterface::class => fn (ContainerInterface $c) => $c->get(\MyInvoice\Service\Ai\EmbeddingGatewayRouter::class),
             \MyInvoice\Service\Ai\LlmClassifierInterface::class => fn (ContainerInterface $c) => $c->get(\MyInvoice\Service\Ai\LlmClassifierRouter::class),
+            \MyInvoice\Service\Accounting\Setup\AccountingSetupAiEnricherInterface::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Service\Accounting\Setup\AccountingSetupAiEnricher::class),
             \MyInvoice\Service\Ai\AiProviderHttpClient::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Ai\AiProviderHttpClient(
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Service\Import\LlmProviderRegistry::class),

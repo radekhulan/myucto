@@ -163,6 +163,7 @@ const form = reactive({
   amount_max: null as number | null,
   expense_kind: 'service' as ExpenseKind,
   target_account_code: '',
+  application_mode: 'auto' as 'suggest' | 'auto',
   priority: 100,
   is_active: true,
 })
@@ -183,6 +184,7 @@ function resetForm() {
   form.amount_max = null
   form.expense_kind = 'service'
   form.target_account_code = ''
+  form.application_mode = 'auto'
   form.priority = 100
   form.is_active = true
 }
@@ -203,6 +205,7 @@ function openEdit(r: ExpenseRule) {
   form.amount_max = r.amount_max
   form.expense_kind = r.expense_kind
   form.target_account_code = r.target_account_code ?? ''
+  form.application_mode = r.application_mode
   form.priority = r.priority
   form.is_active = r.is_active
   showForm.value = true
@@ -228,6 +231,7 @@ async function saveRule() {
       amount_max: form.amount_max,
       expense_kind: form.expense_kind,
       target_account_code: form.target_account_code.trim() || null,
+      application_mode: form.application_mode,
       priority: Number(form.priority),
       is_active: form.is_active,
     }
@@ -291,6 +295,9 @@ onMounted(load)
       <EmptyState v-else-if="items.length === 0" icon="cycle"
         :title="t('accounting.expense_rules.empty')"
         :cta="canWrite ? t('accounting.expense_rules.new') : undefined"
+        :secondary="t('accounting.setup_assistant.open')"
+        secondary-to="/accounting/setup-assistant"
+        secondary-icon="chart"
         @action="openNew" />
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -322,6 +329,9 @@ onMounted(load)
               </td>
               <td class="px-3 py-2 whitespace-nowrap">
                 <span class="text-xs px-2 py-0.5 rounded-full bg-primary-50 text-primary-700 font-medium">{{ kindLabel(r.expense_kind) }}</span>
+                <span class="ml-1 text-xs px-2 py-0.5 rounded-full" :class="r.application_mode === 'auto' ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'">
+                  {{ t(`accounting.expense_rules.mode_${r.application_mode}`) }}
+                </span>
                 <div class="text-xs text-neutral-500 mt-0.5 font-mono" :title="accountName(effectiveAccount(r))">
                   → {{ effectiveAccount(r) }}
                   <span v-if="!r.target_account_code" class="not-italic text-neutral-400">({{ t('accounting.expense_rules.derived') }})</span>
@@ -437,6 +447,14 @@ onMounted(load)
           <input v-model.number="form.priority" type="number" min="0" max="999" step="1"
                  class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm text-right bg-surface" />
           <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.expense_rules.priority_hint') }}</p>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_application_mode') }}</label>
+          <select v-model="form.application_mode" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="suggest">{{ t('accounting.expense_rules.mode_suggest') }}</option>
+            <option value="auto">{{ t('accounting.expense_rules.mode_auto') }}</option>
+          </select>
+          <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.expense_rules.application_mode_hint') }}</p>
         </div>
         <div class="flex items-end">
           <label class="flex items-center gap-2 text-sm text-neutral-700 cursor-pointer h-9">

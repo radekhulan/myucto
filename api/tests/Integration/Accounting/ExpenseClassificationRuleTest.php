@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Action\Accounting\ExpenseClassificationRuleAction;
 use MyInvoice\Repository\ExpenseClassificationRuleRepository;
+use MyInvoice\Repository\ExpenseKeywordCatalogRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
@@ -313,6 +315,65 @@ final class ExpenseClassificationRuleTest extends BankPostingTestCase
         self::assertArrayNotHasKey('Blíže neurčená položka', $byDesc, 'Co nevíme, nehádáme — řádek zůstane bez návrhu.');
     }
 
+    public function testKeywordCatalogCoversAllSupportedLanguagesAndVetoes(): void
+    {
+        $catalog = $this->container->get(ExpenseKeywordCatalogRepository::class)->active();
+
+        self::assertGreaterThanOrEqual(100, count($catalog));
+        $locales = array_values(array_unique(array_column($catalog, 'locale')));
+        sort($locales);
+        self::assertSame(['cs', 'de', 'en', 'sk'], $locales);
+
+        foreach ($locales as $locale) {
+            foreach (['asset_veto', 'fuel_veto'] as $concept) {
+                self::assertNotEmpty(array_filter(
+                    $catalog,
+                    static fn (array $row): bool => $row['locale'] === $locale
+                        && $row['concept_key'] === $concept
+                        && $row['polarity'] === 'veto',
+                ), "Katalog {$locale} musí obsahovat {$concept}.");
+            }
+        }
+
+        $sid = $this->cloneSupplier('double_entry');
+        foreach ([
+            ['poistenie vozidla', ExpenseKind::Service, '548'],
+            ['versicherung fahrzeug', ExpenseKind::Service, '548'],
+            ['insurance premium', ExpenseKind::Service, '548'],
+        ] as [$description, $kind, $account]) {
+            $suggestion = $this->classification->suggestForItem($sid, $description, null, null, 1000.0, self::YEAR);
+            self::assertNotNull($suggestion);
+            self::assertSame($kind, $suggestion->kind);
+            self::assertSame($account, $suggestion->accountCode);
+            self::assertSame('catalog', $suggestion->source);
+        }
+
+        foreach (['drobny majetok prenajom', 'geringwertiges wirtschaftsgut miete', 'small asset rent'] as $description) {
+            $suggestion = $this->classification->suggestForItem($sid, $description, null, null, 1000.0, self::YEAR);
+            self::assertTrue($suggestion === null || $suggestion->kind !== ExpenseKind::SmallAsset);
+        }
+    }
+
+    public function testAssetLimitComesFromYearSpecificTaxConstants(): void
+    {
+        $year = 2099;
+        $tax = $this->container->get(TaxConstantsRepository::class);
+        $sid = $this->cloneSupplier('double_entry');
+
+        $tax->upsert($year, ['fixed_asset_limit' => 50_000]);
+        self::assertSame(50_000.0, $this->classification->assetLimitForYear($year));
+        $above = $this->classification->suggestForItem($sid, 'small asset', null, null, 75_000.0, $year);
+        self::assertNotNull($above);
+        self::assertSame(ExpenseKind::FixedAsset, $above->kind);
+        self::assertSame('threshold', $above->source);
+
+        $tax->upsert($year, ['fixed_asset_limit' => 100_000]);
+        self::assertSame(100_000.0, $this->classification->assetLimitForYear($year));
+        $below = $this->classification->suggestForItem($sid, 'small asset', null, null, 75_000.0, $year);
+        self::assertNotNull($below);
+        self::assertSame(ExpenseKind::SmallAsset, $below->kind);
+    }
+
     /** Rok bere z data plnění dokladu, ne z dneška — limit DHM se mění. */
     public function testSuggestForInvoiceAppliesAssetLimitFromDocumentYear(): void
     {
@@ -373,7 +434,7 @@ final class ExpenseClassificationRuleTest extends BankPostingTestCase
         self::assertSame($pf, $res['body']['purchase_invoice_id']);
         $item = reset($res['body']['items']);
         self::assertSame('small_asset', $item['expense_kind']);
-        self::assertSame('keyword', $item['source']);
+        self::assertSame('catalog', $item['source']);
         self::assertNotSame('', $item['reason'], 'Bez důvodu se návrhu nedá věřit (§DM/UX).');
         self::assertArrayHasKey('confidence', $item);
         self::assertArrayHasKey('auto', $item);

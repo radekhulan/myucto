@@ -182,7 +182,11 @@ function amountRange(r: BankPostingRule): string {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
-    <EmptyState v-else-if="rules.length === 0" boxed icon="cycle" :title="t('bank.posting.rules_empty')" />
+    <EmptyState v-else-if="rules.length === 0" boxed icon="cycle" :title="t('bank.posting.rules_empty')"
+      :cta="auth.canWrite('bank.rules') ? t('bank.posting.rule_create_title') : undefined"
+      :secondary="t('accounting.setup_assistant.open')"
+      secondary-to="/accounting/setup-assistant" secondary-icon="chart"
+      @action="openCreate" />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop -->

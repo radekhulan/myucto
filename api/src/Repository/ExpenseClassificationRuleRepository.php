@@ -15,7 +15,7 @@ use PDO;
 final class ExpenseClassificationRuleRepository
 {
     private const COLS = 'id, supplier_id, name, vendor_client_id, vendor_name_contains,
-        description_contains, amount_min, amount_max, expense_kind, target_account_code, recurring_prepaid,
+        description_contains, amount_min, amount_max, expense_kind, target_account_code, recurring_prepaid, application_mode,
         priority, is_active, hit_count, last_hit_at, created_by, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
@@ -138,8 +138,8 @@ final class ExpenseClassificationRuleRepository
         $pdo->prepare(
             'INSERT INTO expense_classification_rules
                 (supplier_id, name, vendor_client_id, vendor_name_contains, description_contains,
-                 amount_min, amount_max, expense_kind, target_account_code, recurring_prepaid, priority, is_active, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 amount_min, amount_max, expense_kind, target_account_code, recurring_prepaid, application_mode, priority, is_active, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $data['name'],
@@ -151,6 +151,7 @@ final class ExpenseClassificationRuleRepository
             $data['expense_kind'],
             $data['target_account_code'] ?? null,
             array_key_exists('recurring_prepaid', $data) ? (int) (bool) $data['recurring_prepaid'] : 0,
+            $data['application_mode'] ?? 'auto',
             $data['priority'] ?? 100,
             array_key_exists('is_active', $data) ? (int) $data['is_active'] : 1,
             $createdBy,
@@ -167,7 +168,7 @@ final class ExpenseClassificationRuleRepository
     {
         $allowed = [
             'name', 'vendor_client_id', 'vendor_name_contains', 'description_contains',
-            'amount_min', 'amount_max', 'expense_kind', 'target_account_code', 'recurring_prepaid',
+            'amount_min', 'amount_max', 'expense_kind', 'target_account_code', 'recurring_prepaid', 'application_mode',
             'priority', 'is_active',
         ];
         $sets = [];

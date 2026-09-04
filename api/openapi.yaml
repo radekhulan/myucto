@@ -8672,6 +8672,215 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/accounting/setup-assistant:
+    get:
+      tags: [Accounting]
+      summary: Stav asistenta nastavení účtování
+      description: Vrací poslední read-only analýzy a úlohy přeúčtování aktuální firmy.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { runs: { type: array, items: { type: object } }, analysis_jobs: { type: array, items: { type: object } }, reclassification_jobs: { type: array, items: { type: object } }, active_expense_rule_count: { type: integer, minimum: 0 }, ai_available: { type: boolean } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/setup-assistant/analysis:
+    post:
+      tags: [Accounting]
+      summary: Spustí read-only analýzu historie na pozadí
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                date_from: { type: [string, "null"], format: date, description: Dolní mez DUZP nebo náhradně data vystavení. }
+                date_to: { type: [string, "null"], format: date, description: Horní mez DUZP nebo náhradně data vystavení. }
+                months_back: { type: integer, minimum: 1, maximum: 60, default: 60 }
+                use_ai: { type: boolean, default: false, description: Volitelně odešle anonymizované opakující se texty položek do nakonfigurované AI brány. }
+                ai_sample_limit: { type: integer, enum: [50, 100, 200], default: 50, description: Rozpočet AI vzorků. Každých nejvýše 50 vzorků tvoří jeden omezený požadavek. }
+      responses:
+        '201': { description: Úloha zařazena, content: { application/json: { schema: { type: object, properties: { job_id: { type: integer }, status: { type: string } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Analýza už běží nebo firma nevede podvojné účetnictví. }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/setup-assistant/runs/{id}:
+    get:
+      tags: [Accounting]
+      summary: Detail analýzy
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: OK }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/setup-assistant/runs/{id}/proposals:
+    get:
+      tags: [Accounting]
+      summary: Návrhy pravidel a majetku z analýzy
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: type, schema: { type: string, enum: [chart_account, expense_rule, posting_rule, bank_rule, asset_candidate, data_quality] } }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/setup-assistant/runs/{id}/proposals/{proposalId}:
+    put:
+      tags: [Accounting]
+      summary: Upraví čekající návrh před schválením
+      description: Upravuje pouze povolená pole analytiky, pravidla nákladů, předkontace nebo bankovního pravidla. Navrženou analytiku lze nahradit aktivním existujícím analytickým účtem; cíle všech jejích čekajících závislých návrhů se přepíší atomicky. Po vytvoření balíčku jsou návrhy neměnné. Bankovní návrh navíc vyžaduje oprávnění ke správě bankovních pravidel.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: proposalId, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, maxLength: 160 }
+                create: { type: boolean, description: U analytiky určuje, zda se má nový účet založit. }
+                replacement_account_code: { type: [string, "null"], maxLength: 32, description: Aktivní existující analytický účet použitý místo nezaloženého návrhu. }
+                description: { type: string, maxLength: 255 }
+                description_contains: { type: string, maxLength: 190 }
+                message_contains: { type: [string, "null"], maxLength: 190 }
+                expense_kind: { type: string, enum: [service, material, small_asset, small_intangible, fixed_asset] }
+                target_account_code: { type: string, maxLength: 32, description: Aktivní analytický účet pro pravidlo nákladů. }
+                debit_account_code: { type: string, maxLength: 32 }
+                credit_account_code: { type: string, maxLength: 32 }
+      responses:
+        '200': { description: Upravený návrh. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Návrh už byl schválen nebo uzamčen v balíčku. }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/setup-assistant/runs/{id}/approve:
+    post:
+      tags: [Accounting]
+      summary: Schválí vybrané návrhy do neměnného balíčku
+      description: Analytiky a předkontace vzniknou jen po výslovném výběru. Pravidla nákladů i banky vznikají v režimu pouze navrhovat. Pokud analýza neobsahuje žádný nový návrh, lze prázdným výběrem vytvořit balíček ze stávajících aktivních pravidel nákladů.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [proposal_ids]
+              properties:
+                proposal_ids: { type: array, minItems: 1, items: { type: integer } }
+      responses:
+        '201': { description: Balíček a pravidla vytvořeny. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Analýza není hotová nebo návrh nepatří do této analýzy. }
+
+  /api/v1/accounting/setup-assistant/bundles/{id}/reclassification:
+    post:
+      tags: [Accounting]
+      summary: Spustí dry-run nebo čisté přeúčtování historie
+      description: |
+        Ostrý běh vyžaduje ID dokončeného dry-runu stejného balíčku a vstupního
+        hashe se stejným rozsahem dat a režimem. Výchozí režim mění jen přijaté
+        faktury s konkrétní shodou pravidla. Režim all zahrne všechny způsobilé
+        přijaté faktury a použije i výchozí předkontace. Stávající řádky zápisu
+        přepíše bez storna. Uzavřená, uzavíraná a měkce uzamčená období vždy
+        přeskočí. Již zaúčtovanou bankovní historii tato operace nemění.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dry_run: { type: boolean, default: true }
+                dry_run_job_id: { type: [integer, "null"] }
+                date_from: { type: [string, "null"], format: date }
+                date_to: { type: [string, "null"], format: date }
+                scope_mode:
+                  type: string
+                  enum: [matched, all]
+                  default: matched
+      responses:
+        '201': { description: Úloha zařazena. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: Pro ostrý běh chybí shodný dry-run. }
+
+  /api/v1/accounting/setup-assistant/jobs/{id}:
+    get:
+      tags: [Accounting]
+      summary: Stav a výsledek úlohy asistenta
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/setup-assistant/jobs/{id}/cancel:
+    post:
+      tags: [Accounting]
+      summary: Požádá o zrušení běžící úlohy asistenta
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: OK }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/setup-assistant/jobs/{id}/rollback:
+    post:
+      tags: [Accounting]
+      summary: Obnoví původní řádky přeúčtovaných zápisů ze snapshotu
+      description: Obnova běží na pozadí a také nikdy nemění uzavřené nebo uzamčené období.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '201': { description: Úloha obnovy zařazena. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Snapshot chybí nebo obnova již byla spuštěna. }
+
+  /api/v1/accounting/setup-assistant/jobs/{id}/snapshot:
+    delete:
+      tags: [Accounting]
+      summary: Trvale smaže snapshot pro obnovu přeúčtování
+      description: Účetní deník ani klasifikaci položek nemění. Po smazání již dané přeúčtování nelze obnovit.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: boolean, enum: [true] }
+      responses:
+        '200': { description: Snapshot byl smazán. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Snapshot chybí nebo právě běží jiná úloha přeúčtování. }
+        '422': { description: Chybí výslovné potvrzení smazání. }
+
   /api/v1/accounting/periods:
     get:
       tags: [Accounting]
@@ -9275,6 +9484,7 @@ paths:
                 amount_max: { type: [number, "null"] }
                 target_account_code: { type: [string, "null"] }
                 recurring_prepaid: { type: boolean, default: false }
+                application_mode: { type: string, enum: [suggest, auto], default: auto }
                 priority: { type: integer, minimum: 0, maximum: 999, default: 100 }
                 name: { type: [string, "null"] }
                 is_active: { type: boolean, default: true }

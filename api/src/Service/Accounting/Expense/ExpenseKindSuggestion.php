@@ -14,7 +14,7 @@ final class ExpenseKindSuggestion
         public readonly ExpenseKind $kind,
         public readonly float $confidence,
         public readonly string $reason,
-        public readonly string $source, // 'rule' | 'keyword' | 'threshold' | 'ai'
+        public readonly string $source, // 'rule' | 'catalog' | 'keyword' | 'threshold' | 'ai'
         /**
          * Účet nákladu, když ho pravidlo určuje adresně; NULL = odvodí se z druhu.
          *

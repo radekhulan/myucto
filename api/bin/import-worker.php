@@ -31,6 +31,8 @@ use MyInvoice\Service\Import\IdokladImportService;
 use MyInvoice\Service\Export\MonthlyExportService;
 use MyInvoice\Service\Export\ClosingPackageService;
 use MyInvoice\Service\Document\DocumentJobService;
+use MyInvoice\Service\Accounting\Setup\AccountingSetupAnalysisService;
+use MyInvoice\Service\Accounting\Setup\AccountingHistoryReclassificationService;
 
 // STDOUT/STDERR existují pouze v CLI SAPI. Worker může být spuštěn také
 // z IIS/FastCGI, php-cgi nebo obdobného webového prostředí (sdílený hosting).
@@ -90,6 +92,10 @@ try {
         $container->get(FileImportJobService::class)->run($jobId);
     } elseif ($source === 'document_zip_import' || $source === 'document_zip_export' || $source === 'document_folder_import') {
         $container->get(DocumentJobService::class)->run($jobId);
+    } elseif ($source === 'accounting_setup_analysis') {
+        $container->get(AccountingSetupAnalysisService::class)->run($jobId);
+    } elseif ($source === 'accounting_history_reclassification') {
+        $container->get(AccountingHistoryReclassificationService::class)->run($jobId);
     } else {
         $jobs->appendLog($jobId, "Source '{$source}' není zatím podporován workerem.");
         $jobs->markFailed($jobId, "Source '{$source}' není podporován.");

@@ -32,7 +32,14 @@ final class AiProviderHttpClient
     }
 
     /** @param array<string,mixed> $schema @return array<string,mixed> */
-    public function completeJson(int $supplierId, string $system, string $user, array $schema, ?string $modelOverride = null): array
+    public function completeJson(
+        int $supplierId,
+        string $system,
+        string $user,
+        array $schema,
+        ?string $modelOverride = null,
+        int $maxOutputTokens = 500,
+    ): array
     {
         try {
             $ctx = $this->context($supplierId);
@@ -40,7 +47,13 @@ final class AiProviderHttpClient
                 $ctx['model'] = $modelOverride;
             }
             $this->dpa->assertConfirmed($supplierId, $ctx['provider']);
-            return $this->completeForProvider($ctx, $system, $user, $schema);
+            return $this->completeForProvider(
+                $ctx,
+                $system,
+                $user,
+                $schema,
+                max(100, min(4000, $maxOutputTokens)),
+            );
         } catch (AiDpaException $e) {
             return ['ok' => false, 'error' => $e->errorCode];
         } catch (ResidencyViolationException) {
@@ -175,13 +188,13 @@ final class AiProviderHttpClient
     }
 
     /** @param array{provider:string,region:string,model:string,credentials:array<string,mixed>} $ctx @param array<string,mixed> $schema @return array<string,mixed> */
-    private function completeForProvider(array $ctx, string $system, string $user, array $schema): array
+    private function completeForProvider(array $ctx, string $system, string $user, array $schema, int $maxOutputTokens): array
     {
         $provider = $ctx['provider'];
         $creds = $ctx['credentials'];
         if ($provider === 'anthropic') {
             $payload = [
-                'model' => $ctx['model'], 'max_tokens' => 500, 'temperature' => 0,
+                'model' => $ctx['model'], 'max_tokens' => $maxOutputTokens, 'temperature' => 0,
                 'system' => $system,
                 'messages' => [['role' => 'user', 'content' => $user]],
                 'tools' => [[
@@ -209,7 +222,7 @@ final class AiProviderHttpClient
             $model = (string) ($body['model'] ?? $ctx['model']);
         } elseif (in_array($provider, ['openai', 'azure_openai'], true)) {
             $payload = [
-                'model' => $ctx['model'], 'max_completion_tokens' => 500,
+                'model' => $ctx['model'], 'max_completion_tokens' => $maxOutputTokens,
                 'messages' => [['role' => 'system', 'content' => $system], ['role' => 'user', 'content' => $user]],
                 'response_format' => ['type' => 'json_schema', 'json_schema' => [
                     'name' => 'posting_suggestion', 'strict' => true, 'schema' => $schema,
@@ -238,7 +251,7 @@ final class AiProviderHttpClient
                 'systemInstruction' => ['parts' => [['text' => $system]]],
                 'contents' => [['parts' => [['text' => $user]]]],
                 'generationConfig' => [
-                    'temperature' => 0, 'maxOutputTokens' => 500,
+                    'temperature' => 0, 'maxOutputTokens' => $maxOutputTokens,
                     'responseMimeType' => 'application/json', 'responseSchema' => $this->geminiSchema($schema),
                 ],
             ];

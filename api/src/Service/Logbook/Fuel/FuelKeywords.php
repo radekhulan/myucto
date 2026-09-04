@@ -19,6 +19,19 @@ final class FuelKeywords
         'nabij', 'dobij', 'kwh', 'elektromobil', 'wallbox', 'emobility', 'e-mobility', 'charging', 'recharge',
     ];
 
+    /** Bezpečné výrazy pro účetní texty bez předem známého kontextu čerpací stanice. */
+    private const ACCOUNTING_FUEL = [
+        'nafta', 'motorova nafta', 'diesel', 'diesel fuel', 'benzin', 'automobilovy benzin',
+        'natural 95', 'natural 98', 'super 95', 'super e5', 'super e10', 'super plus',
+        'premium diesel', 'premiova nafta', 'adblue', 'ad blue', 'lpg', 'cng', 'phm',
+        'pohonne hmoty', 'pohonnych hmot', 'palivo', 'tankovani phm', 'tankovanie',
+        'kraftstoff', 'betankung', 'refuelling', 'motor fuel', 'unleaded petrol',
+        'efecta', 'verva', 'nabijeni vozidla', 'nabijeni kwh', 'dobijeni elektromobilu',
+        'nabijanie vozidla', 'dobijanie elektromobilu', 'ladevorgang', 'ladestrom',
+        'e auto laden', 'ev charging', 'ev charging session', 'charging session',
+        'vehicle charging', 'vehicle recharge', 'emobility', 'e-mobility',
+    ];
+
     /** Elektrické dobíjení (energie v kWh) — podmnožina FUEL, slouží i k volbě jednotky. */
     private const ELECTRIC = [
         'nabij', 'dobij', 'kwh', 'elektromobil', 'wallbox', 'emobility', 'e-mobility', 'charging', 'recharge',
@@ -81,7 +94,7 @@ final class FuelKeywords
         if (self::isNonFuelService($n)) {
             return false;
         }
-        foreach (self::FUEL as $kw) {
+        foreach (self::ACCOUNTING_FUEL as $kw) {
             if (preg_match('/(?:^| )' . preg_quote(self::normalize($kw), '/') . '/', $n) === 1) {
                 return true;
             }

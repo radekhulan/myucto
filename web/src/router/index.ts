@@ -99,6 +99,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // samotné spuštění hlídá server právem `accounting.journal.post` jako hromadné
   // zaúčtování z výběru — jedna operace, jedno právo.
   'accounting-posting-backfill': ['accounting'],
+  'accounting-setup-assistant': ['accounting'],
   'payroll-dashboard': ['payroll'],
   'payroll-runs': ['payroll'],
   'payroll-payments': ['payroll.payments'],
@@ -186,6 +187,7 @@ const demoReadOnlyRouteNames = new Set(['admin-settings', 'admin-branding', 'adm
 const commercialOnlyRouteNames = new Set([
   'accounting-activation',
   'automation-cockpit',
+  'accounting-setup-assistant',
   'portfolio-overview',
   'reports-s74b',
   'reports-related-parties',

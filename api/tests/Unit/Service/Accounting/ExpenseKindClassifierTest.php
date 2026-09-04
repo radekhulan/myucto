@@ -47,6 +47,8 @@ final class ExpenseKindClassifierTest extends TestCase
         yield ['ochr. sklo'];
         yield ['Notebook Dell Latitude'];   // skloňování/velká písmena
         yield ['2x monitor 27"'];
+        yield ['záložní zdroj UPS'];
+        yield ['wallbox pro firemní vozidlo'];
     }
 
     #[DataProvider('materialTexts')]
@@ -67,7 +69,6 @@ final class ExpenseKindClassifierTest extends TestCase
         yield ['Palivo do vozu'];     // #2: „palivo" doplněno vedle nafta/benzin/PHM
         yield ['natural 95'];
         yield ['kabeláž'];
-        yield ['záložní zdroj'];
         yield ['toner do tiskárny'];
     }
 
@@ -196,6 +197,24 @@ final class ExpenseKindClassifierTest extends TestCase
         self::assertFalse($s->isAutoApplicable(), 'Slabá shoda nesmí zaúčtovat sama — jen návrh ke kontrole.');
     }
 
+    #[DataProvider('ambiguousPrefixTexts')]
+    public function testAmbiguousPrefixesDoNotClassifyUnrelatedCosts(string $text): void
+    {
+        $s = $this->c->classify($text, null, null, 3000.0, self::LIMIT);
+
+        self::assertTrue(
+            $s === null || !in_array($s->kind, [ExpenseKind::Material, ExpenseKind::SmallAsset, ExpenseKind::FixedAsset], true),
+            "„{$text}" . '" nesmí klasifikovat obecný prefix jako PHM nebo majetek.',
+        );
+    }
+
+    /** @return iterable<array{string}> */
+    public static function ambiguousPrefixTexts(): iterable
+    {
+        yield ['Nastavení serveru'];
+        yield ['Supermarket supplies'];
+    }
+
     /** Negativní klíčová slova jsou tvrdá pojistka: Alza prodá notebook i dopravu na jedné faktuře. */
     #[DataProvider('negativeTexts')]
     public function testNegativeKeywordsPreventSmallAssetEvenForGoodsVendor(string $text): void
@@ -298,6 +317,32 @@ final class ExpenseKindClassifierTest extends TestCase
         self::assertSame(ExpenseKind::SmallAsset, $s->kind);
         self::assertTrue($s->isAutoApplicable(), 'Explicitní pravidlo uživatele je jistota 1,0.');
         self::assertStringContainsString('Alza — drobný majetek', $s->reason);
+    }
+
+    public function testGeneratedSuggestionRuleNeverAutoApplies(): void
+    {
+        $rules = [[
+            'name' => 'Návrh asistenta',
+            'vendor_name_contains' => 'Testovací dodavatel',
+            'description_contains' => 'pracovní stanice',
+            'vendor_client_id' => null,
+            'expense_kind' => 'small_asset',
+            'application_mode' => 'suggest',
+            'is_active' => true,
+        ]];
+
+        $s = $this->c->classify(
+            'Pracovní stanice pro kancelář',
+            'Testovací dodavatel s.r.o.',
+            null,
+            25_000.0,
+            self::LIMIT,
+            $rules,
+        );
+
+        self::assertNotNull($s);
+        self::assertSame(ExpenseKind::SmallAsset, $s->kind);
+        self::assertFalse($s->isAutoApplicable(), 'Pravidlo vytvořené asistentem musí nejprve zůstat jen návrhem.');
     }
 
     /** Pravidlo sedí na dodavatele, ale „doprava" ho přebije — dodavatel sám nestačí. */
