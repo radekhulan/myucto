@@ -11,6 +11,7 @@ use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Bank\BankMessageNormalizer;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\OperationType;
+use MyInvoice\Service\Accounting\Setup\AccountingRuleEquivalence;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use PDO;
@@ -28,29 +29,55 @@ final class RuleProposalService
     ) {}
 
     /** @return array<string,mixed> */
-    public function analyze(int $supplierId, int $monthsBack = 27): array
+    public function analyze(int $supplierId, int $monthsBack = 27, bool $includePostedHistory = false): array
     {
         $monthsBack = max(1, min(60, $monthsBack));
+        $historyFilter = $includePostedHistory ? '' : "
+                AND bt.match_status='unmatched' AND hp.source_id IS NULL
+                AND NOT EXISTS(SELECT 1 FROM bank_posting_suggestions pending_bps
+                                WHERE pending_bps.supplier_id=? AND pending_bps.bank_transaction_id=bt.id
+                                  AND pending_bps.status IN ('pending','needs_input','blocked','approved','auto_posted'))";
         $stmt = $this->db->pdo()->prepare(
             "SELECT bt.*,bs.account_number recipient_account,bs.bank_code recipient_bank,
                     EXISTS(SELECT 1 FROM accounting_periods ap WHERE ap.supplier_id=?
-                           AND bt.posted_at BETWEEN ap.starts_on AND ap.ends_on AND ap.status <> 'open') period_locked
+                           AND bt.posted_at BETWEEN ap.starts_on AND ap.ends_on AND ap.status <> 'open') period_locked,
+                    EXISTS(SELECT 1 FROM bank_posting_suggestions bps WHERE bps.supplier_id=? AND bps.bank_transaction_id=bt.id
+                           AND bps.status IN ('pending','needs_input','blocked','approved','auto_posted')) suggestion_exists,
+                    EXISTS(SELECT 1 FROM journal_entries historical_je
+                            WHERE historical_je.supplier_id=? AND historical_je.source_type='bank'
+                              AND historical_je.source_id=bt.id) posting_history_exists,
+                    hp.debit_code historical_debit_code,hp.credit_code historical_credit_code
               FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id
+              LEFT JOIN (
+                    SELECT je.source_id,
+                           MAX(CASE WHEN jel.side='debit' THEN coa.account_code END) debit_code,
+                           MAX(CASE WHEN jel.side='credit' THEN coa.account_code END) credit_code
+                      FROM journal_entries je
+                      JOIN journal_entry_lines jel ON jel.entry_id=je.id AND jel.supplier_id=je.supplier_id
+                      JOIN chart_of_accounts coa ON coa.id=jel.account_id AND coa.supplier_id=je.supplier_id
+                     WHERE je.supplier_id=? AND je.source_type='bank'
+                       AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL
+                     GROUP BY je.source_id
+                    HAVING COUNT(DISTINCT jel.id)=2
+              ) hp ON hp.source_id=bt.id
               WHERE bs.supplier_id=? AND bt.posted_at >= DATE_SUB(CURDATE(),INTERVAL ? MONTH)
-                AND COALESCE(bt.currency,bs.currency,'CZK')='CZK' AND bt.match_status='unmatched'
-                AND NOT EXISTS(SELECT 1 FROM journal_entries je WHERE je.supplier_id=? AND je.source_type='bank' AND je.source_id=bt.id)
-                AND NOT EXISTS(SELECT 1 FROM bank_posting_suggestions bps WHERE bps.supplier_id=? AND bps.bank_transaction_id=bt.id
-                               AND bps.status IN ('pending','needs_input','blocked','approved','auto_posted'))"
+                AND COALESCE(bt.currency,bs.currency,'CZK')='CZK'" . $historyFilter
         );
-        $stmt->execute([$supplierId, $supplierId, $monthsBack, $supplierId, $supplierId]);
-        $transactions = array_values(array_filter($stmt->fetchAll(PDO::FETCH_ASSOC), fn (array $tx): bool => $this->statementBelongsToSupplier($supplierId, $tx)));
+        $params = [$supplierId, $supplierId, $supplierId, $supplierId, $supplierId, $monthsBack];
+        if (!$includePostedHistory) {
+            $params[] = $supplierId;
+        }
+        $stmt->execute($params);
+        $transactions = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $clusters = [];
         $lockedPeriods = [];
         foreach ($transactions as $tx) {
             $key = $this->clusterKey($tx);
             if ($key === null) continue;
             $clusters[$key][] = $tx;
-            if ((bool) $tx['period_locked']) $lockedPeriods[substr((string) $tx['posted_at'], 0, 7)] = true;
+            if ($tx['historical_debit_code'] === null && !(bool) $tx['suggestion_exists'] && (bool) $tx['period_locked']) {
+                $lockedPeriods[substr((string) $tx['posted_at'], 0, 7)] = true;
+            }
         }
 
         $result = [];
@@ -60,7 +87,9 @@ final class RuleProposalService
             $covered += count($rows);
             usort($rows, static fn (array $a, array $b): int => strcmp((string) $a['posted_at'], (string) $b['posted_at']) ?: ((int) $a['id'] <=> (int) $b['id']));
             $first = $rows[0];
-            $posting = $this->historicalPosting($supplierId, $first);
+            $posting = $includePostedHistory
+                ? self::consistentHistoricalPosting($rows)
+                : $this->historicalPostingByCounterparty($supplierId, $first);
             $recipient = $this->accountEndpoint($supplierId, (string) ($first['recipient_account'] ?? ''), isset($first['recipient_bank']) ? (string) $first['recipient_bank'] : null);
             $counterpartyEndpoint = $this->accountEndpoint(
                 $supplierId,
@@ -97,8 +126,19 @@ final class RuleProposalService
                 'mode' => 'suggest',
                 'operation_type' => $flow['own_transfer'] ? OperationType::BANK_TRANSFER_OWN : OperationType::BANK_RULE_CUSTOM,
                 'own_transfer' => $flow['own_transfer'],
-                'tx_ids' => array_map(static fn (array $r): int => (int) $r['id'], $rows),
+                'tx_ids' => array_map(
+                    static fn (array $r): int => (int) $r['id'],
+                    array_values(array_filter($rows, static fn (array $r): bool =>
+                        !(bool) $r['posting_history_exists'] && !(bool) $r['suggestion_exists'])),
+                ),
             ];
+            if (!$flow['own_transfer']
+                && $proposal['debit_account_code'] !== null
+                && $proposal['credit_account_code'] !== null
+                && $this->hasEquivalentActive($supplierId, $proposal)
+            ) {
+                continue;
+            }
             $result[] = [
                 'key' => $key, 'direction' => $proposal['direction'],
                 'counterparty_account' => $counterparty, 'counterparty_bank' => $proposal['counterparty_bank'],
@@ -116,22 +156,27 @@ final class RuleProposalService
             'analyzed_tx' => count($transactions),
             'coverage_pct' => $transactions === [] ? 0.0 : round($covered / count($transactions) * 100, 1),
             'clusters' => $result,
-            'locked' => ['tx_count' => count(array_filter($transactions, static fn (array $r): bool => (bool) $r['period_locked'])), 'periods' => array_keys($lockedPeriods)],
+            'locked' => ['tx_count' => count(array_filter($transactions, static fn (array $r): bool =>
+                $r['historical_debit_code'] === null && !(bool) $r['suggestion_exists'] && (bool) $r['period_locked'])), 'periods' => array_keys($lockedPeriods)],
         ];
     }
 
     /** @param list<array<string,mixed>> $payloads @return array<string,mixed> */
-    public function apply(int $supplierId, int $userId, array $payloads, bool $backfill): array
+    public function apply(int $supplierId, int $userId, array $payloads, bool $backfill, bool $throwOnError = false): array
     {
-        $created = 0; $backfilled = 0; $locked = 0; $skipped = [];
+        $created = 0; $existing = 0; $backfilled = 0; $locked = 0; $skipped = [];
         foreach ($payloads as $payload) {
             try {
                 $data = $this->validate($supplierId, $payload);
                 $ownTransfer = (bool) ($payload['own_transfer'] ?? false);
                 $txIds = array_values(array_unique(array_filter(array_map('intval', (array) ($payload['tx_ids'] ?? [])), static fn (int $id): bool => $id > 0)));
                 if (!$ownTransfer) {
-                    $this->rules->insert($supplierId, $data, $userId);
-                    $created++;
+                    if ($this->hasEquivalentActive($supplierId, $data)) {
+                        $existing++;
+                    } else {
+                        $this->rules->insert($supplierId, $data, $userId);
+                        $created++;
+                    }
                 }
                 if ($backfill) {
                     foreach (array_slice($txIds, 0, 200) as $txId) {
@@ -146,10 +191,28 @@ final class RuleProposalService
                     }
                 }
             } catch (\Throwable $e) {
+                if ($throwOnError) {
+                    throw $e;
+                }
                 $skipped[] = ['name' => (string) ($payload['name'] ?? ''), 'code' => $e->getMessage()];
             }
         }
-        return ['created' => $created, 'skipped' => $skipped, 'backfilled' => $backfilled, 'locked_skipped' => $locked];
+        return ['created' => $created, 'existing' => $existing, 'skipped' => $skipped, 'backfilled' => $backfilled, 'locked_skipped' => $locked];
+    }
+
+    /** @param array<string,mixed> $proposal */
+    public function hasEquivalentActive(int $supplierId, array $proposal): bool
+    {
+        $direction = trim((string) ($proposal['direction'] ?? ''));
+        if (!in_array($direction, ['incoming', 'outgoing'], true)) {
+            return false;
+        }
+        foreach ($this->rules->findActive($supplierId, $direction) as $existing) {
+            if (AccountingRuleEquivalence::bank($existing, $proposal)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @param array<string,mixed> $tx */
@@ -165,20 +228,24 @@ final class RuleProposalService
         return mb_strlen($message) >= 4 ? $direction . ':message:' . $message : null;
     }
 
-    /** @param array<string,mixed> $tx */
-    private function statementBelongsToSupplier(int $supplierId, array $tx): bool
+    /** @param list<array<string,mixed>> $rows @return array{debit:string,credit:string}|null */
+    private static function consistentHistoricalPosting(array $rows): ?array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT account_number,iban,bank_code FROM currencies WHERE supplier_id=? AND (account_number IS NOT NULL OR iban IS NOT NULL)');
-        $stmt->execute([$supplierId]);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $account) {
-            if (AccountNumberNormalizer::matchesAny((string) $tx['recipient_account'], $account['account_number'], $account['iban'])
-                && ($tx['recipient_bank'] === null || $account['bank_code'] === null || AccountNumberNormalizer::canonicalBankCode((string) $tx['recipient_bank']) === AccountNumberNormalizer::canonicalBankCode((string) $account['bank_code']))) return true;
+        $pairs = [];
+        foreach ($rows as $row) {
+            $debit = trim((string) ($row['historical_debit_code'] ?? ''));
+            $credit = trim((string) ($row['historical_credit_code'] ?? ''));
+            if ($debit !== '' && $credit !== '') {
+                $pairs[$debit . '/' . $credit] = true;
+            }
         }
-        return false;
+        if (count($pairs) !== 1) return null;
+        [$debit, $credit] = explode('/', array_key_first($pairs), 2);
+        return ['debit' => $debit, 'credit' => $credit];
     }
 
     /** @param array<string,mixed> $tx @return array{debit:string,credit:string}|null */
-    private function historicalPosting(int $supplierId, array $tx): ?array
+    private function historicalPostingByCounterparty(int $supplierId, array $tx): ?array
     {
         $account = AccountNumberNormalizer::canonical((string) ($tx['counterparty_account'] ?? ''));
         if ($account === null) return null;
@@ -192,7 +259,9 @@ final class RuleProposalService
         );
         $stmt->execute([$supplierId, '%' . $account]);
         $pairs = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $pairs[(string) $row['debit_code'] . '/' . (string) $row['credit_code']] = true;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $pairs[(string) $row['debit_code'] . '/' . (string) $row['credit_code']] = true;
+        }
         if (count($pairs) !== 1) return null;
         [$debit, $credit] = explode('/', array_key_first($pairs), 2);
         return ['debit' => $debit, 'credit' => $credit];

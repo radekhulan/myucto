@@ -98,4 +98,21 @@ describe('navigace podle RBAC oprávnění', () => {
     expect(appLayout).toContain('system_signing: ICONS.api_tokens')
     expect(appLayout).not.toContain('bank_cash: ICONS.bank')
   })
+
+  it('řadí asistenta jako druhou položku Nástrojů a ne do Systému', () => {
+    const toolsStart = appLayout.indexOf("key: 'accounting_tools'")
+    const toolsEnd = appLayout.indexOf("key: 'tax_evidence'", toolsStart)
+    const tools = appLayout.slice(toolsStart, toolsEnd)
+    const templatesAt = tools.indexOf("to: '/templates'")
+    const assistantAt = tools.indexOf("to: '/accounting/setup-assistant'")
+    const accountsAt = tools.indexOf("to: '/accounting/accounts'")
+
+    expect(templatesAt).toBeGreaterThan(-1)
+    expect(assistantAt).toBeGreaterThan(templatesAt)
+    expect(assistantAt).toBeLessThan(accountsAt)
+
+    const systemStart = appLayout.indexOf("key: 'system_global'")
+    const systemEnd = appLayout.indexOf("key: 'system_signing'", systemStart)
+    expect(appLayout.slice(systemStart, systemEnd)).not.toContain("to: '/accounting/setup-assistant'")
+  })
 })

@@ -478,6 +478,9 @@
       "automation",
       "documents"
     ],
+    "accounting-setup-assistant": [
+      "imports"
+    ],
     "accounting-general-ledger": [
       "activation"
     ],

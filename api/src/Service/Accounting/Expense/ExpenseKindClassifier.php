@@ -50,7 +50,7 @@ final class ExpenseKindClassifier
         'doruceni', 'dorucne', 'preprava', 'balne', 'expedice',
         'licence', 'licenci', 'predplatne', 'hosting', 'najem', 'najemne', 'vyuctovani',
         'tarif', 'pausal', 'poplatek', 'poplatky', 'servis', 'oprava', 'opravy', 'udrzba',
-        'pojisteni', 'skoleni', 'konzultace', 'instalace', 'montaz',
+        'pojisteni', 'skoleni', 'konzultace', 'instalace', 'montaz', 'nastaveni',
         // Nehmotné plnění NIKDY není drobný HMOTNÝ majetek (501.200). Reálný nález: Alza
         // popisuje „Nehmotný produkt Roční členství AlzaPlus+" (i doručení/slevu) prefixem
         // „Nehmotný produkt". Členství/předplatné je služba (518), ne věc — bez tohoto veta
@@ -72,7 +72,7 @@ final class ExpenseKindClassifier
         // těchto klíčů propadne (reálný nález PF 234). Značka počítače = drobný majetek pod
         // limitem; nad limit ho §26/2 stejně překlopí na dlouhodobý (řeší práh v classify()).
         'thinkpad', 'macbook', 'ipad', 'notebook', 'ultrabook', 'chromebook', 'switch qnap',
-        'powerbank', 'nas',
+        'powerbank', 'nas server', 'zalozni zdroj', 'wallbox',
     ];
 
     /** Nasvědčuje drobnému majetku, ale samo o sobě nestačí → jen návrh ke kontrole. */
@@ -109,7 +109,7 @@ final class ExpenseKindClassifier
      * NIKOLI drobný majetek.
      */
     private const MATERIAL_STRONG = [
-        'dr material', 'drobny material', 'kabelaz', 'zalozni zdroj', 'toner', 'cartridge',
+        'dr material', 'drobny material', 'kabelaz', 'toner', 'cartridge',
         'papir', 'kancelarske potreby',
     ];
 
@@ -165,13 +165,18 @@ final class ExpenseKindClassifier
         float $fixedAssetLimit,
         array $rules = [],
         array $accounts = [],
+        array $catalog = [],
+        bool $rulesOnly = false,
     ): ?ExpenseKindSuggestion {
         $text = BankMessageNormalizer::normalizeKeepDigits($description);
         $vendor = $vendorName !== null ? BankMessageNormalizer::normalizeKeepDigits($vendorName) : '';
         $accounts = array_filter($accounts, static fn (?string $v): bool => $v !== null && $v !== '');
 
-        $suggestion = $this->fromRules($text, $vendor, $vendorClientId, $rules)
-            ?? $this->fromKeywords($text, $accounts);
+        $suggestion = $this->fromRules($text, $vendor, $vendorClientId, $rules);
+        if ($suggestion === null && !$rulesOnly) {
+            $suggestion = $this->fromCatalog($text, $catalog, $accounts)
+                ?? $this->fromKeywords($text, $accounts);
+        }
 
         if ($suggestion === null) {
             return null;
@@ -221,7 +226,7 @@ final class ExpenseKindClassifier
                     number_format($fixedAssetLimit, 2, ',', ' '),
                 ),
                 'threshold',
-                $suggestion->accountCode,
+                null,
                 $suggestion->nonDeductible,
             );
         }
@@ -284,9 +289,10 @@ final class ExpenseKindClassifier
 
             $account = self::str($rule['target_account_code'] ?? null);
 
+            $applicationMode = (string) ($rule['application_mode'] ?? 'auto');
             return new ExpenseKindSuggestion(
                 $kind,
-                self::CONF_RULE,
+                $applicationMode === 'suggest' ? self::CONF_WEAK : self::CONF_RULE,
                 'dle pravidla „' . (string) ($rule['name'] ?? '?') . '"'
                     . ($account !== null ? ' → účet ' . $account : ''),
                 'rule',
@@ -294,6 +300,66 @@ final class ExpenseKindClassifier
             );
         }
 
+        return null;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $catalog
+     */
+    private function fromCatalog(string $text, array $catalog, array $accounts): ?ExpenseKindSuggestion
+    {
+        if ($catalog === []) {
+            return null;
+        }
+
+        $vetos = [];
+        foreach ($catalog as $entry) {
+            if (($entry['polarity'] ?? '') !== 'veto') {
+                continue;
+            }
+            $phrase = self::str($entry['phrase'] ?? null);
+            if ($phrase !== null && self::containsWord($text, BankMessageNormalizer::normalizeKeepDigits($phrase))) {
+                $vetos[(string) ($entry['concept_key'] ?? '')] = $phrase;
+            }
+        }
+
+        foreach ($catalog as $entry) {
+            if (($entry['polarity'] ?? 'positive') !== 'positive') {
+                continue;
+            }
+            $kind = ExpenseKind::tryFromNullable((string) ($entry['expense_kind'] ?? ''));
+            $phrase = self::str($entry['phrase'] ?? null);
+            if ($kind === null || $phrase === null
+                || !self::containsWord($text, BankMessageNormalizer::normalizeKeepDigits($phrase))) {
+                continue;
+            }
+            if ($kind === ExpenseKind::SmallAsset && isset($vetos['asset_veto'])) {
+                continue;
+            }
+            if (($entry['concept_key'] ?? '') === 'fuel' && isset($vetos['fuel_veto'])) {
+                continue;
+            }
+
+            $confidence = (float) ($entry['confidence'] ?? self::CONF_WEAK);
+            if (!empty($entry['requires_review'])) {
+                $confidence = min($confidence, self::CONF_WEAK);
+            }
+            $concept = (string) ($entry['concept_key'] ?? '');
+            $account = self::str($entry['target_account_code'] ?? null);
+            if ($concept === 'fuel') {
+                $account = $accounts['fuel'] ?? $account;
+            } elseif ($concept === 'vehicle_repair') {
+                $account = $accounts['vehicle_repair'] ?? $account;
+            }
+            return new ExpenseKindSuggestion(
+                $kind,
+                $confidence,
+                'vícejazyčný katalog (' . (string) ($entry['locale'] ?? '?') . ') obsahuje „' . $phrase . '“',
+                'catalog',
+                $account,
+                $concept === 'personal',
+            );
+        }
         return null;
     }
 

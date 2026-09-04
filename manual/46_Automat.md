@@ -9,6 +9,10 @@ skončila právě v dané skupině.
 Stránku otevřete přes **Účetnictví → Automat**. Je dostupná firmám s podvojným
 účetnictvím a respektuje oprávnění uživatele pro každou firmu zvlášť.
 
+Pro prvotní nastavení celé firmy a návrh pravidel z již zaúčtované historie
+slouží samostatný [Asistent nastavení účtování](80_Sablony.md#807-asistent-nastaveni-uctovani).
+Automat zůstává provozní frontou pro každodenní návrhy a rozhodnutí.
+
 > [!IMPORTANT]
 > Automat nemění pravidla účetních období. Do uzavřeného nebo zamčeného období
 > nic nezaúčtuje ani nestornuje. Nejasnou platbu raději odloží ke kontrole. AI

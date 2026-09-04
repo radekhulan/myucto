@@ -539,9 +539,6 @@ const navSections = computed<NavSection[]>(() => {
       title: t('nav.section_accounting'),
       accent: 'primary',
       items: [
-        // Přehled firem (Fáze F, audit 2026-07) — jen když má uživatel přístup k víc
-        // firmám (membership/BC-multi); jednofiremní instalaci by jen zahltil menu.
-        ...(supplierStore.hasMultiple ? [{ to: '/portfolio', label: t('nav.portfolio'), icon: ICONS.stock_warehouses }] : []),
         { to: '/accounting/journal',        label: t('nav.accounting_journal'),  icon: ICONS.accounting, newTo: '/accounting/journal/new' },
         { to: '/automation',                label: t('nav.automation'),          icon: ICONS.ai, badge: automationStore.actionable, permission: 'accounting' },
         { to: '/accounting/manual-posting-queue', label: t('nav.manual_posting_queue'), icon: ICONS.approvals, permission: 'accounting' },
@@ -576,6 +573,7 @@ const navSections = computed<NavSection[]>(() => {
       accent: 'primaryDeep',
       items: [
         { to: '/templates', label: t('nav.section_templates'), icon: ICONS.documents, permission: 'accounting.templates' },
+        { to: '/accounting/setup-assistant', label: t('nav.accounting_setup_assistant'), icon: ICONS.ai, permission: 'accounting' },
         { to: '/accounting/accounts',       label: t('nav.accounting_accounts'), icon: ICONS.codebooks },
         { to: '/accounting/offsets',          label: t('nav.accounting_offsets'),          icon: ICONS.coin },
         { to: '/admin/accounting-activation', label: t('nav.accounting_activation'), icon: ICONS.updates, permission: 'accounting.periods.manage' as PermissionKey, access: 'write' },
@@ -607,7 +605,6 @@ const navSections = computed<NavSection[]>(() => {
       title: t('nav.section_tax_evidence'),
       accent: 'primary',
       items: [
-        ...(supplierStore.hasMultiple ? [{ to: '/portfolio', label: t('nav.portfolio'), icon: ICONS.stock_warehouses }] : []),
         { to: '/tax-evidence/cash-journal',         label: t('nav.de_cash_journal'),         icon: ICONS.tax_book },
         { to: '/tax-evidence/receivables-payables', label: t('nav.de_receivables_payables'), icon: ICONS.crm },
         // Přechodový můstek § 7b → § 24 — jen u firem na DE (chystaný/probíhající přechod);
@@ -721,7 +718,9 @@ const navSections = computed<NavSection[]>(() => {
       key: 'system_global',
       title: t('nav.system'),
       accent: 'neutral',
-      items: auth.isDemo ? [
+      items: [
+        ...(supplierStore.hasMultiple ? [{ to: '/portfolio', label: t('nav.portfolio'), icon: ICONS.stock_warehouses }] : []),
+        ...(auth.isDemo ? [
         { to: '/admin/codebooks?scope=global', label: t('nav.codebooks_global'), icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
         { to: '/admin/tax-constants', label: t('codebooks.tab_tax_constants'), icon: ICONS.tax_optimizer, permission: 'settings.company' as PermissionKey },
       ] : [
@@ -762,12 +761,16 @@ const navSections = computed<NavSection[]>(() => {
         // Manuál je poslední položka Systému — v novém tabu, ať člověk nepřijde
         // o rozdělanou práci.
         { to: '/manual', label: t('nav.manual'), icon: ICONS.documents, external: true },
+      ]),
       ],
     })
   }
 
   if (!isAdmin && !auth.isDemo) {
     const nonAdminSystemItems: NavItem[] = []
+    if (supplierStore.hasMultiple) {
+      nonAdminSystemItems.push({ to: '/portfolio', label: t('nav.portfolio'), icon: ICONS.stock_warehouses })
+    }
     if (auth.canRead('settings.signing') && accountantSigningProfilesEnabled.value) {
       nonAdminSystemItems.push({ to: '/admin/electronic-signatures', label: t('nav.electronic_signatures'), icon: ICONS.approvals })
     }

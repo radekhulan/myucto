@@ -115,6 +115,19 @@ final class ImportJobRepository
         return array_map(fn ($r) => $this->cast($r), $rows);
     }
 
+    public function hasAccountingRollbackFor(int $supplierId, int $appliedJobId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM import_jobs
+              WHERE supplier_id = ? AND source = "accounting_history_reclassification"
+                AND status NOT IN ("failed", "cancelled")
+                AND CAST(JSON_VALUE(params, "$.rollback_of_job_id") AS UNSIGNED) = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $appliedJobId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /**
      * Najdi nejstarší queued job — volá worker.
      */

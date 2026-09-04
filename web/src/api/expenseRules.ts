@@ -16,6 +16,7 @@ export interface ExpenseRule {
   amount_max: number | null
   expense_kind: ExpenseKind
   target_account_code: string | null
+  application_mode: 'suggest' | 'auto'
   priority: number
   is_active: boolean
   hit_count: number

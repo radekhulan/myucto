@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Accounting\Bank;
 
 use MyInvoice\Action\Accounting\Bank\BankPostingRuleAction;
+use MyInvoice\Service\Automation\RuleProposalService;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -15,6 +16,54 @@ use PHPUnit\Framework\Attributes\Group;
 #[Group('integration')]
 final class BankPostingRulesFlowTest extends BankPostingTestCase
 {
+    public function testSetupAnalysisLearnsRuleFromConsistentlyPostedHistory(): void
+    {
+        $statement = $this->statement();
+        foreach ([420.0, 440.0] as $amount) {
+            $transactionId = $this->transaction($statement, -$amount, [
+                'counterparty_account' => '1000000005',
+                'counterparty_bank' => '0100',
+                'description' => 'Syntetický pravidelný poplatek',
+            ]);
+            $this->service->postManual($this->supplierId, $transactionId, [
+                'debit_account_code' => '568',
+                'credit_account_code' => '221',
+            ], $this->meta());
+        }
+        $reversedTransactionId = $this->transaction($statement, -460.0, [
+            'counterparty_account' => '1000000005',
+            'counterparty_bank' => '0100',
+            'description' => 'Syntetický pravidelný poplatek',
+        ]);
+        $reversed = $this->service->postManual($this->supplierId, $reversedTransactionId, [
+            'debit_account_code' => '518',
+            'credit_account_code' => '221',
+        ], $this->meta());
+        $this->posting->reverse($this->supplierId, (int) $reversed['entry_id'], [
+            'entry_date' => self::YEAR . '-06-20',
+            'user_id' => $this->userId,
+            'posted_by' => $this->userId,
+        ]);
+
+        $proposalService = $this->container->get(RuleProposalService::class);
+        $operationalAnalysis = $proposalService->analyze($this->supplierId, 60);
+        self::assertSame([], array_values(array_filter(
+            $operationalAnalysis['clusters'],
+            static fn (array $item): bool => ($item['proposal']['counterparty_account'] ?? null) === '1000000005',
+        )));
+
+        $analysis = $proposalService->analyze($this->supplierId, 60, true);
+        $cluster = array_values(array_filter(
+            $analysis['clusters'],
+            static fn (array $item): bool => ($item['proposal']['counterparty_account'] ?? null) === '1000000005',
+        ));
+
+        self::assertCount(1, $cluster);
+        self::assertSame('568', $cluster[0]['proposal']['debit_account_code']);
+        self::assertStringStartsWith('221', $cluster[0]['proposal']['credit_account_code']);
+        self::assertSame([], $cluster[0]['proposal']['tx_ids']);
+    }
+
     public function testManualPostThenLearnedHintThenRuleSuggestThenAuto(): void
     {
         $stmt = $this->statement();

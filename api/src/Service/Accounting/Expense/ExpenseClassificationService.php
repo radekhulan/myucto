@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting\Expense;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ExpenseClassificationRuleRepository;
+use MyInvoice\Repository\ExpenseKeywordCatalogRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use PDO;
 
@@ -31,6 +32,7 @@ final class ExpenseClassificationService
         private readonly ExpenseClassificationRuleRepository $rules,
         private readonly TaxConstantsRepository $constants,
         private readonly ExpenseKindClassifier $classifier,
+        private readonly ExpenseKeywordCatalogRepository $catalog,
     ) {}
 
     public function suggestForItem(
@@ -46,9 +48,43 @@ final class ExpenseClassificationService
             $vendorName,
             $vendorClientId,
             $unitPrice,
-            $this->assetLimit($year),
+            $this->assetLimitForYear($year),
             $this->rulesForPrice($supplierId, $unitPrice),
             $this->vehicleAccounts($supplierId),
+            $this->catalog->active(),
+        );
+    }
+
+    /** @param list<array<string,mixed>> $rules */
+    public function suggestFromRules(
+        int $supplierId,
+        string $description,
+        ?string $vendorName,
+        ?int $vendorClientId,
+        float $unitPrice,
+        int $year,
+        array $rules,
+    ): ?ExpenseKindSuggestion {
+        $price = abs($unitPrice);
+        $eligible = array_values(array_filter(
+            $rules,
+            static function (array $rule) use ($price): bool {
+                $min = $rule['amount_min'] ?? null;
+                $max = $rule['amount_max'] ?? null;
+                return !($min !== null && $price < (float) $min)
+                    && !($max !== null && $price > (float) $max);
+            },
+        ));
+        return $this->classifier->classify(
+            $description,
+            $vendorName,
+            $vendorClientId,
+            $price,
+            $this->assetLimitForYear($year),
+            $eligible,
+            $this->vehicleAccounts($supplierId),
+            $this->catalog->active(),
+            true,
         );
     }
 
@@ -153,7 +189,7 @@ final class ExpenseClassificationService
         ));
     }
 
-    private function assetLimit(int $year): float
+    public function assetLimitForYear(int $year): float
     {
         return (float) ($this->constants->forYear($year)['fixed_asset_limit'] ?? self::DEFAULT_ASSET_LIMIT);
     }

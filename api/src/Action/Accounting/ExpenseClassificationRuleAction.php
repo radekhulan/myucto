@@ -164,6 +164,7 @@ final class ExpenseClassificationRuleAction
             'recurring_prepaid' => array_key_exists('recurring_prepaid', $body)
                 ? (bool) filter_var($body['recurring_prepaid'], FILTER_VALIDATE_BOOLEAN)
                 : false,
+            'application_mode' => ($body['application_mode'] ?? 'auto') === 'suggest' ? 'suggest' : 'auto',
             'priority' => $this->assertPriority($body['priority'] ?? 100),
             'is_active' => array_key_exists('is_active', $body)
                 ? (bool) filter_var($body['is_active'], FILTER_VALIDATE_BOOLEAN)
@@ -197,6 +198,9 @@ final class ExpenseClassificationRuleAction
         }
         if (array_key_exists('recurring_prepaid', $body)) {
             $fields['recurring_prepaid'] = (bool) filter_var($body['recurring_prepaid'], FILTER_VALIDATE_BOOLEAN);
+        }
+        if (array_key_exists('application_mode', $body)) {
+            $fields['application_mode'] = $body['application_mode'] === 'suggest' ? 'suggest' : 'auto';
         }
         if (array_key_exists('priority', $body)) {
             $fields['priority'] = $this->assertPriority($body['priority']);

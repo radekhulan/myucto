@@ -46,6 +46,10 @@ describe('workspace route factory', () => {
     expect(byName.get('purchase-invoice-detail')?.path).toBe('purchase-invoices/:id(\\d+)')
     expect(byName.get('purchase-invoice-edit')?.meta).toMatchObject({ requiresSupplier: true })
     expect(byName.get('accounting-journal')?.meta).toMatchObject({ requiresDoubleEntry: true })
+    expect(byName.get('accounting-setup-assistant')).toMatchObject({
+      path: 'accounting/setup-assistant',
+      meta: { requiresDoubleEntry: true, requiresSupplier: true },
+    })
   })
 
   it('má po aplikaci guard metadat permission paritu s globálním routerem', () => {

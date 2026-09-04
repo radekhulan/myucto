@@ -508,6 +508,12 @@ final class RoutePermissionMap
         // obecné `/api/accounting` níž: je to zápis do deníku, ne čtení nastavení.
         ['GET', '#^/api/accounting/posting-backfill(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/posting-backfill(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/setup-assistant(/|$)#', 'accounting', AccessLevel::READ],
+        ['PUT', '#^/api/accounting/setup-assistant/runs/[0-9]+/proposals/[0-9]+$#', 'accounting.templates', AccessLevel::WRITE],
+        ['POST', '#^/api/accounting/setup-assistant/(analysis|runs/[0-9]+/approve)$#', 'accounting.templates', AccessLevel::WRITE],
+        ['POST', '#^/api/accounting/setup-assistant/jobs/[0-9]+/cancel$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/setup-assistant/(bundles/[0-9]+/reclassification|jobs/[0-9]+/rollback)$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['DELETE', '#^/api/accounting/setup-assistant/jobs/[0-9]+/snapshot$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/journal-templates(/|$)#', 'accounting.templates', AccessLevel::READ],
         ['*', '#^/api/accounting/journal-templates(/|$)#', 'accounting.templates', AccessLevel::WRITE],
         // Mzdová rekapitulace: náhled je POST (nese vstupy v těle), ale nic nemění →

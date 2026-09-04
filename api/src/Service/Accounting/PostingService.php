@@ -168,7 +168,8 @@ final class PostingService
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float|int|string, cost_center?:?string}> $lines
      * @param array{
      *     entry_date:string, document_date?:?string, document_no?:?string, description?:?string,
-     *     posted?:bool, posted_by?:?int, user_id?:?int, ip?:?string, user_agent?:?string
+     *     posted?:bool, posted_at?:?string, posted_by?:?int, user_id?:?int, ip?:?string, user_agent?:?string,
+     *     expected_row_version?:?int
      * } $meta
      *
      * @throws UnbalancedEntryException když Σ MD ≠ Σ D
@@ -276,12 +277,12 @@ final class PostingService
                 'description'   => $description,
                 'source_type'   => $sourceType,
                 'source_id'     => $sourceId,
-                'posted_at'     => $posted ? date('Y-m-d H:i:s') : null,
+                'posted_at'     => $posted ? ($meta['posted_at'] ?? date('Y-m-d H:i:s')) : null,
                 'posted_by'     => $postedBy,
             ];
 
             $existing = $sourceId !== null
-                ? $this->journal->findBySource($supplierId, $sourceType, $sourceId)
+                ? $this->journal->findBySourceForUpdate($supplierId, $sourceType, $sourceId)
                 : null;
 
             if ($existing !== null) {
@@ -292,7 +293,14 @@ final class PostingService
                     );
                 }
                 $existing['lines'] = $this->journal->linesForEntry((int) $existing['id'], $supplierId);
-                $entryId = $this->rewriteExisting($supplierId, $existing, $header, $resolved, $allowClosing);
+                $entryId = $this->rewriteExisting(
+                    $supplierId,
+                    $existing,
+                    $header,
+                    $resolved,
+                    $allowClosing,
+                    isset($meta['expected_row_version']) ? (int) $meta['expected_row_version'] : null,
+                );
                 $auditPayload = [
                     'source_type' => $sourceType,
                     'source_id'   => $sourceId,
@@ -324,7 +332,14 @@ final class PostingService
                         );
                     }
                     $raced['lines'] = $this->journal->linesForEntry((int) $raced['id'], $supplierId);
-                    $entryId = $this->rewriteExisting($supplierId, $raced, $header, $resolved, $allowClosing);
+                    $entryId = $this->rewriteExisting(
+                        $supplierId,
+                        $raced,
+                        $header,
+                        $resolved,
+                        $allowClosing,
+                        isset($meta['expected_row_version']) ? (int) $meta['expected_row_version'] : null,
+                    );
                 }
                 $auditPayload = [
                     'source_type' => $sourceType,
@@ -590,9 +605,24 @@ final class PostingService
      * @param array<string,mixed> $header
      * @param list<array{account_id:int, side:'debit'|'credit', amount:float, cost_center:?string}> $resolved
      */
-    private function rewriteExisting(int $supplierId, array $existing, array $header, array $resolved, bool $allowClosing = false): int
+    private function rewriteExisting(
+        int $supplierId,
+        array $existing,
+        array $header,
+        array $resolved,
+        bool $allowClosing = false,
+        ?int $expectedRowVersion = null,
+    ): int
     {
         $entryId = (int) $existing['id'];
+
+        if ($expectedRowVersion !== null && (int) ($existing['row_version'] ?? -1) !== $expectedRowVersion) {
+            throw new PostingException(
+                'version_conflict',
+                'Zápis mezitím změnil jiný uživatel - načtěte aktuální stav.',
+                409,
+            );
+        }
 
         if (($existing['reversed_by'] ?? null) !== null) {
             throw new PostingException(
@@ -644,7 +674,7 @@ final class PostingService
      * znaménkem jako doklad, takže $net/$vat/$totalCzk zůstávají signed až do sestavení
      * řádků (audit B4).
      *
-     * @param array{rule_key?:string, cost_center?:?string} $opts
+     * @param array{rule_key?:string, cost_center?:?string, item_classification_overrides?:array<int,array{expense_kind:string,expense_account_code:?string}>} $opts
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}>
      */
     public function buildFromInvoice(int $supplierId, int $invoiceId, array $opts = []): array
@@ -1025,6 +1055,7 @@ final class PostingService
                 $pct,
                 $expense,
                 $taxDeductible,
+                (array) ($opts['item_classification_overrides'] ?? []),
             );
 
         // Normálně 5xx/042 MD + 343 MD / 321 D; dobropis obrací obě strany.
@@ -1166,6 +1197,7 @@ final class PostingService
         float $pct,
         string $defaultAccount,
         bool $taxDeductible,
+        array $itemOverrides = [],
     ): ?array {
         $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId);
         $stmt = $this->db->pdo()->prepare(
@@ -1186,10 +1218,20 @@ final class PostingService
             $override = trim((string) ($row['expense_account_code'] ?? ''));
             $override = $override === '' ? null : $override;
 
+            $approved = $itemOverrides[(int) $row['id']] ?? null;
+            if (is_array($approved)) {
+                $approvedKind = ExpenseKind::tryFromNullable((string) ($approved['expense_kind'] ?? ''));
+                if ($approvedKind !== null) {
+                    $kindValue = $approvedKind->value;
+                }
+                $approvedAccount = trim((string) ($approved['expense_account_code'] ?? ''));
+                $override = $approvedAccount === '' ? null : $approvedAccount;
+            }
+
             // Náhled i samotné zaúčtování musí použít jistý návrh stejně jako auto-post,
             // ale bez zápisu do dokladu. Ručně zvolený účet má vždy přednost.
             $suggestion = $suggestions[(int) $row['id']] ?? null;
-            if ($override === null && $suggestion !== null && !empty($suggestion['auto'])) {
+            if ($approved === null && $override === null && $suggestion !== null && !empty($suggestion['auto'])) {
                 $kindValue = (string) $suggestion['expense_kind'];
                 $suggestedAccount = trim((string) ($suggestion['expense_account_code'] ?? ''));
                 $override = $suggestedAccount === '' ? null : $suggestedAccount;

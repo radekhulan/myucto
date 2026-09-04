@@ -142,6 +142,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // takže doklady, které v systému už leží (typicky naimportované), jí neprojdou —
       // a schopnost je projít žila do teď jen uvnitř průvodce aktivací.
       { path: 'accounting/posting-backfill', name: 'accounting-posting-backfill', component: () => import('@/pages/accounting/PostingBackfill.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/setup-assistant', name: 'accounting-setup-assistant', component: () => import('@/pages/accounting/AccountingSetupAssistant.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/posting-rules', name: 'accounting-posting-rules', redirect: '/utilities?section=posting-rules' },
       // Účetní sestavy (Epic F2) — read-only, bez requiresWrite
       { path: 'accounting/general-ledger',   name: 'accounting-general-ledger',   component: () => import('@/pages/accounting/GeneralLedger.vue'),   meta: { requiresDoubleEntry: true } },

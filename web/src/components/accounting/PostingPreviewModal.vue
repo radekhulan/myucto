@@ -241,6 +241,7 @@ async function confirmPost(): Promise<void> {
           amount_max: null,
           expense_kind: basis.expense_kind as ExpenseKind,
           target_account_code: costAccount.value,
+          application_mode: 'auto',
           priority: 100,
           is_active: true,
         })
