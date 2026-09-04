@@ -344,11 +344,11 @@ BEFORE INSERT ON payroll_payment_allocations
 FOR EACH ROW
 BEGIN
   DECLARE item_amount BIGINT UNSIGNED DEFAULT NULL;
-  DECLARE item_direction VARCHAR(16) DEFAULT NULL;
-  DECLARE item_currency CHAR(3) DEFAULT NULL;
+  DECLARE item_direction VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE item_currency CHAR(3) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE liability_amount BIGINT UNSIGNED DEFAULT NULL;
-  DECLARE liability_direction VARCHAR(16) DEFAULT NULL;
-  DECLARE liability_currency CHAR(3) DEFAULT NULL;
+  DECLARE liability_direction VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE liability_currency CHAR(3) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE allocated_to_item BIGINT UNSIGNED DEFAULT 0;
   DECLARE allocated_to_liability BIGINT UNSIGNED DEFAULT 0;
 
@@ -404,19 +404,19 @@ BEFORE INSERT ON payroll_payment_matches
 FOR EACH ROW
 BEGIN
   DECLARE allocation_amount BIGINT UNSIGNED DEFAULT NULL;
-  DECLARE liability_direction VARCHAR(16) DEFAULT NULL;
-  DECLARE liability_currency CHAR(3) DEFAULT NULL;
+  DECLARE liability_direction VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE liability_currency CHAR(3) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE evidence_date DATE DEFAULT NULL;
   DECLARE evidence_amount_decimal DECIMAL(15,2) DEFAULT NULL;
   DECLARE evidence_amount BIGINT UNSIGNED DEFAULT NULL;
-  DECLARE evidence_currency CHAR(3) DEFAULT NULL;
-  DECLARE evidence_direction VARCHAR(16) DEFAULT NULL;
-  DECLARE evidence_state VARCHAR(16) DEFAULT NULL;
-  DECLARE evidence_fingerprint VARCHAR(191) DEFAULT NULL;
+  DECLARE evidence_currency CHAR(3) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE evidence_direction VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE evidence_state VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE evidence_fingerprint VARCHAR(191) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE allocation_matched BIGINT DEFAULT 0;
   DECLARE evidence_used BIGINT UNSIGNED DEFAULT 0;
   DECLARE source_amount BIGINT DEFAULT NULL;
-  DECLARE source_event VARCHAR(16) DEFAULT NULL;
+  DECLARE source_event VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE source_allocation_id BIGINT UNSIGNED DEFAULT NULL;
   DECLARE source_reversed BIGINT DEFAULT 0;
 

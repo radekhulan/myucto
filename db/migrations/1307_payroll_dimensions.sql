@@ -174,7 +174,7 @@ CREATE TRIGGER trg_payroll_employment_dimension_overlap_insert
 BEFORE INSERT ON payroll_employment_dimensions
 FOR EACH ROW
 BEGIN
-  DECLARE new_type VARCHAR(20);
+  DECLARE new_type VARCHAR(20) COLLATE utf8mb4_unicode_ci;
   SET new_type = (
     SELECT d.dimension_type
       FROM payroll_dimensions d
@@ -207,7 +207,7 @@ CREATE TRIGGER trg_payroll_employment_dimension_overlap_update
 BEFORE UPDATE ON payroll_employment_dimensions
 FOR EACH ROW
 BEGIN
-  DECLARE new_type VARCHAR(20);
+  DECLARE new_type VARCHAR(20) COLLATE utf8mb4_unicode_ci;
   IF NEW.supplier_id <> OLD.supplier_id OR NEW.id <> OLD.id THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'Payroll employment dimension ownership is immutable';

@@ -71,19 +71,19 @@ FOR EACH ROW
 BEGIN
   DECLARE settlement_limit BIGINT UNSIGNED DEFAULT NULL;
   DECLARE allocation_liability_id BIGINT UNSIGNED DEFAULT NULL;
-  DECLARE liability_direction VARCHAR(16) DEFAULT NULL;
-  DECLARE liability_currency CHAR(3) DEFAULT NULL;
+  DECLARE liability_direction VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE liability_currency CHAR(3) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE evidence_date DATE DEFAULT NULL;
   DECLARE evidence_amount_decimal DECIMAL(15,2) DEFAULT NULL;
   DECLARE evidence_amount BIGINT UNSIGNED DEFAULT NULL;
-  DECLARE evidence_currency CHAR(3) DEFAULT NULL;
-  DECLARE evidence_direction VARCHAR(16) DEFAULT NULL;
-  DECLARE evidence_state VARCHAR(16) DEFAULT NULL;
-  DECLARE evidence_fingerprint VARCHAR(191) DEFAULT NULL;
+  DECLARE evidence_currency CHAR(3) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE evidence_direction VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE evidence_state VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE evidence_fingerprint VARCHAR(191) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE liability_matched BIGINT DEFAULT 0;
   DECLARE evidence_used BIGINT UNSIGNED DEFAULT 0;
   DECLARE source_amount BIGINT DEFAULT NULL;
-  DECLARE source_event VARCHAR(16) DEFAULT NULL;
+  DECLARE source_event VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE source_allocation_id BIGINT UNSIGNED DEFAULT NULL;
   DECLARE source_liability_id BIGINT UNSIGNED DEFAULT NULL;
   DECLARE source_reversed BIGINT DEFAULT 0;
