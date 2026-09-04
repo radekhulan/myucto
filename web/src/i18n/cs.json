@@ -20105,6 +20105,12 @@
       "deliveredAt": "Doručeno",
       "messageId": "ID zprávy",
       "openMessage": "Otevřít zprávu a přílohy",
+      "reprocess": "Zpracovat znovu",
+      "reprocessing": "Zpracovávám…",
+      "reprocessHint": "Znovu zařadí zprávu a přečte její přílohu z uloženého originálu. Schránka se kvůli tomu nevybírá znovu.",
+      "reprocessed": "Zpráva byla zpracována a navázána na podání.",
+      "reprocessManual": "Zprávu se nepodařilo navázat automaticky ({code}). Zůstává k ručnímu posouzení.",
+      "reprocessNotApplicable": "K téhle zprávě aplikace žádné automatické zpracování nemá.",
       "lastOkAt": "Naposledy úspěšně vybráno: {at}",
       "unreachable": "Na datovou schránku se nedaří dovolat (neúspěšných pokusů: {count}). Nevíme tedy, jestli tam nové zprávy jsou — prázdný seznam níž to neznamená."
     },

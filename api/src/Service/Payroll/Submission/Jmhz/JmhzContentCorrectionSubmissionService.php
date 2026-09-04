@@ -16,6 +16,10 @@ use Psr\Clock\ClockInterface;
 final readonly class JmhzContentCorrectionSubmissionService
 {
     private const CHANNEL = 'vrep_apep';
+
+    /** Kanály, kterými smí být odeslané opravované řádné podání. */
+    private const ROOT_CHANNELS = ['vrep_apep', 'isds'];
+
     private const PRODUCT_NAME = 'MyÚčto.cz';
 
     public function __construct(
@@ -115,7 +119,7 @@ final readonly class JmhzContentCorrectionSubmissionService
             $supplierId,
             $environment,
             $regularSubmissionId,
-            array_keys($current),
+            self::externalIds($current),
         );
         $names = $this->people->namesForTenant(
             $supplierId,
@@ -123,6 +127,7 @@ final readonly class JmhzContentCorrectionSubmissionService
         );
         $rows = [];
         foreach ($current as $externalId => $row) {
+            $externalId = (string) $externalId;
             $state = $set->forEmployment($externalId);
             $rows[] = [
                 'employment_external_identifier' => $externalId,
@@ -210,7 +215,7 @@ final readonly class JmhzContentCorrectionSubmissionService
                 $supplierId,
                 $environment,
                 $regularSubmissionId,
-                array_keys($current),
+                self::externalIds($current),
             );
             $forms = [];
             $formGuids = [];
@@ -394,6 +399,25 @@ final readonly class JmhzContentCorrectionSubmissionService
         return [$resolution, $document, $identity, self::currentForms($document)];
     }
 
+    /**
+     * Identifikátory pracovních vztahů jako ŘETĚZCE.
+     *
+     * ID PPV je třináctimístné číslo, takže z něj PHP v roli klíče pole udělá
+     * `int` — `array_keys()` pak vrátí čísla a přísně typované rozhraní
+     * efektivního stavu na nich spadne. Na vymyšleném nečíselném
+     * identifikátoru se to nikdy neprojeví, na skutečném vždycky.
+     *
+     * @param array<array-key,mixed> $current
+     * @return list<string>
+     */
+    private static function externalIds(array $current): array
+    {
+        return array_map(
+            static fn (int|string $key): string => (string) $key,
+            array_keys($current),
+        );
+    }
+
     /** @return array<string,array{employee_id:int,employment_id:int,person_external_identifier:string}> */
     private static function currentForms(JmhzScenario1NormalizedDocument $document): array
     {
@@ -439,7 +463,7 @@ final readonly class JmhzContentCorrectionSubmissionService
     ): void {
         $guids = [];
         foreach ($current as $externalId => $row) {
-            $state = $set->forEmployment($externalId);
+            $state = $set->forEmployment((string) $externalId);
             $guids[$row['employment_id']] = $state->formGuid ?? $this->guids->next();
         }
         $projection = $this->validator->dryRun(
@@ -562,7 +586,10 @@ final readonly class JmhzContentCorrectionSubmissionService
             }
             $selection[trim($value)] = true;
         }
-        $selection = array_keys($selection);
+        // Odstranění duplicit přes klíče pole je levné, ale u číselného ID PPV
+        // vrátí `array_keys()` čísla — zpátky na řetězce, jinak se rozbije
+        // přísně typované rozhraní efektivního stavu.
+        $selection = self::externalIds($selection);
         sort($selection, SORT_STRING);
         if ($selection === []) {
             throw new \InvalidArgumentException('Vyberte alespoň jeden pracovní vztah k obsahové opravě.');
@@ -598,7 +625,12 @@ final readonly class JmhzContentCorrectionSubmissionService
         }
         $root = $this->repository->findSubmission($supplierId, $regularSubmissionId);
         if ($root === null || $root['environment'] !== $environment
-            || $root['submission_kind'] !== 'regular' || $root['channel'] !== self::CHANNEL
+            || $root['submission_kind'] !== 'regular'
+            // VREP i datová schránka jsou u JMHZ rovnocenné kanály podání
+            // (ČSSZ pro ně zřídila schránku iie254d). Opravovat jde hlášení
+            // odeslané kteroukoli z nich; kanál opravy se volí znovu při
+            // odeslání, stejně jako u řádného.
+            || !in_array($root['channel'], self::ROOT_CHANNELS, true)
         ) {
             throw new \DomainException('Řádné podání nebylo nalezeno ve stejné firmě a prostředí.');
         }

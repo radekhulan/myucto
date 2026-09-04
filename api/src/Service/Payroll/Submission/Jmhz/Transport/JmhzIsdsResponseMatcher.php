@@ -99,6 +99,55 @@ final readonly class JmhzIsdsResponseMatcher
     }
 
     /**
+     * `dmId` naší zprávy tak, jak ho ČSSZ píše mimo dokumentovaný tvar:
+     * „… z DZ 1761891234 …“. Ověřeno na odpovědi doručené 4. 9. 2026.
+     */
+    private const SENT_MESSAGE_PATTERN = '/\bz\s+DZ\s+(\d{1,20})\b/iu';
+
+    /** Variabilní symbol zaměstnavatele: `VS4442070407` i `VS 4442070407`. */
+    private const VARIABLE_SYMBOL_PATTERN = '/\bVS\s?(\d{10})\b/iu';
+
+    /** Rozhodné období: `08/2026`, ve starším tvaru i `VS…-05/2026-…`. */
+    private const PERIOD_PATTERN = '#\b(0?[1-9]|1[0-2])/((?:19|20)\d{2})\b#';
+
+    /**
+     * Vodítka z věci došlé zprávy — dokumentovaný tvar i skutečné věty, které
+     * ČSSZ pro JMHZ posílá. Nic z toho nic neprokazuje; slouží jen k tomu, ke
+     * kterému podání se má protokol zkusit přiřadit.
+     */
+    public function parseCsszSubject(?string $subject): ?JmhzIsdsProtocolSubject
+    {
+        if ($subject === null || trim($subject) === '') {
+            return null;
+        }
+        $documented = $this->parseSubject($subject);
+        $sentMessageId = $documented?->originalMessageId;
+        if ($sentMessageId === null
+            && preg_match(self::SENT_MESSAGE_PATTERN, $subject, $match) === 1
+        ) {
+            $sentMessageId = $match[1];
+        }
+        $variableSymbol = null;
+        if (preg_match(self::VARIABLE_SYMBOL_PATTERN, $subject, $match) === 1) {
+            $variableSymbol = $match[1];
+        }
+        $month = null;
+        $year = null;
+        if (preg_match(self::PERIOD_PATTERN, $subject, $match) === 1) {
+            $month = (int) $match[1];
+            $year = (int) $match[2];
+        }
+        $parsed = new JmhzIsdsProtocolSubject(
+            $sentMessageId,
+            $variableSymbol,
+            $month,
+            $year,
+        );
+
+        return $parsed->isEmpty() ? null : $parsed;
+    }
+
+    /**
      * Je tahle došlá zpráva odpovědí na zprávu, kterou jsme odeslali?
      *
      * @param string $sentMessageId `dmId` naší odeslané zprávy
@@ -124,5 +173,27 @@ final readonly class JmhzIsdsResponseMatcher
 
         return $expectedClassName === null
             || strcasecmp(trim($expectedClassName), $reference->className) === 0;
+    }
+
+    /**
+     * Táž otázka, ale i pro věty, které dokumentovaný tvar nedodržují.
+     *
+     * Rozhoduje pořád jen `dmId` NAŠÍ odeslané zprávy. Když ho věc neuvádí
+     * (protokol o kompletnosti ho nenese), vrací se `false` — vodítkem je pak
+     * variabilní symbol a období, ale ta sama o sobě k vazbě nestačí a musí je
+     * potvrdit obsah přílohy.
+     */
+    public function matchesSentMessage(?string $subject, string $sentMessageId): bool
+    {
+        $sentMessageId = trim($sentMessageId);
+        if ($sentMessageId === '') {
+            return false;
+        }
+        $parsed = $this->parseCsszSubject($subject);
+        if ($parsed?->originalMessageId === null) {
+            return false;
+        }
+
+        return hash_equals($sentMessageId, $parsed->originalMessageId);
     }
 }

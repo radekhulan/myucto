@@ -52,12 +52,24 @@ final readonly class JmhzReceiptVerifier implements PayrollReceiptVerifierInterf
      */
     private const CHANNELS = ['vrep_apep', 'isds'];
 
-    /** @param array<string,int> $formPartIds GUID formuláře → id součásti podání */
+    /**
+     * @param array<string,int> $formPartIds GUID formuláře → id součásti podání
+     * @param bool $requireCorrelation Musí protokol nést `CorrelationID` a sedět
+     *        s podáním? U VREP ano — tam je correlation JEDINÁ vazba protokolu
+     *        na podání a bez ní by prošel platně podepsaný protokol kteréhokoli
+     *        zaměstnavatele. Odpověď doručená datovou schránkou ale
+     *        `CorrelationID` v obálce GovTalk vůbec nemá (ověřeno na odpovědi
+     *        ČSSZ ze 4. 9. 2026) a vazbu tam nese `dmId` NAŠÍ odeslané zprávy,
+     *        které ČSSZ uvádí ve věci odpovědi. Volající, který takhle protokol
+     *        už navázal, si smí požadavek vypnout; když protokol correlation
+     *        přesto nese, musí sedět dál.
+     */
     public function __construct(
         private ?JmhzProtocolSignatureVerifierInterface $signatures = null,
         private JmhzProtocolParser $parser = new JmhzProtocolParser(),
         private array $formPartIds = [],
         private int $packageCount = 1,
+        private bool $requireCorrelation = true,
     ) {}
 
     /** @param array<array-key,int> $formPartIds klíče přicházejí zvenčí a ověřují se */
@@ -79,6 +91,7 @@ final readonly class JmhzReceiptVerifier implements PayrollReceiptVerifierInterf
             $this->parser,
             $normalized,
             $packageCount,
+            $this->requireCorrelation,
         );
     }
 
@@ -106,7 +119,7 @@ final readonly class JmhzReceiptVerifier implements PayrollReceiptVerifierInterf
         // stav „přijato". Podání odeslané přes VREP dostane CorrelationID už
         // při odeslání; jeho chybějící uložení je chyba, ne důvod protokol
         // přijmout.
-        if ($expectedCorrelationReference === null) {
+        if ($expectedCorrelationReference === null && $this->requireCorrelation) {
             throw new JmhzTransportException(
                 'jmhz_protocol_correlation_unknown',
                 'Podání nemá uložené CorrelationID, takže k němu nelze protokol'
@@ -122,15 +135,19 @@ final readonly class JmhzReceiptVerifier implements PayrollReceiptVerifierInterf
         // Protokol bez CorrelationID nelze k podání přiřadit. Propustit ho by
         // znamenalo vzít stav z dokumentu, o kterém nevíme, že k tomuhle podání
         // patří — a `remote_status` je jediný údaj, který v platformě rozhoduje
-        // o přijetí.
-        if ($report->correlationReference === null) {
+        // o přijetí. Výjimkou je volající, který protokol navázal jinak
+        // (datová schránka: `dmId` naší odeslané zprávy ve věci odpovědi).
+        if ($report->correlationReference === null && $this->requireCorrelation) {
             throw new JmhzTransportException(
                 'jmhz_protocol_correlation_missing',
                 'Ověřený protokol neuvádí CorrelationID, takže ho k podání'
                     . ' nelze přiřadit.',
             );
         }
-        if (!hash_equals($expectedCorrelationReference, $report->correlationReference)) {
+        if ($expectedCorrelationReference !== null
+            && $report->correlationReference !== null
+            && !hash_equals($expectedCorrelationReference, $report->correlationReference)
+        ) {
             throw new JmhzTransportException(
                 'jmhz_protocol_correlation_mismatch',
                 'Ověřený protokol patří jinému podání.',

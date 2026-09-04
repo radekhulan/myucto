@@ -20105,6 +20105,12 @@
       "deliveredAt": "Delivered",
       "messageId": "Message ID",
       "openMessage": "Open message and attachments",
+      "reprocess": "Process again",
+      "reprocessing": "Processing…",
+      "reprocessHint": "Re-classifies the message and reads its attachment from the stored original. The data box is not polled again.",
+      "reprocessed": "The message was processed and linked to a submission.",
+      "reprocessManual": "The message could not be linked automatically ({code}). It stays for manual review.",
+      "reprocessNotApplicable": "There is no automatic processing for this message.",
       "lastOkAt": "Last successful collection: {at}",
       "unreachable": "The data box cannot be reached (failed attempts: {count}). We therefore do not know whether new messages are waiting — the empty list below does not mean there are none."
     },

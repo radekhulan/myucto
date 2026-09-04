@@ -2674,6 +2674,9 @@ final class Routes
         $app->post   ('/api/submissions/inbox/sms/start', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'smsStart']);
         $app->post   ('/api/submissions/inbox/sms/complete', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'smsComplete']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/classify', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reclassify']);
+        // Opakované zpracování už stažené zprávy. Nesahá na síť — vyzvednutí
+        // schránky je právní úkon a kvůli našemu nedodělku se opakovat nemá.
+        $app->post   ('/api/submissions/inbox/{id:[0-9]+}/reprocess', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reprocess']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/hide', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'hide']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/restore', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'restore']);
         $app->delete ('/api/submissions/inbox/{id:[0-9]+}/local-content', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'purgeLocalContent']);

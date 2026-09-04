@@ -54,6 +54,41 @@ final readonly class JmhzEffectiveFormLedgerResolver
     }
 
     /**
+     * Jedno podání dostane od ČSSZ DVA protokoly a každý mluví o jiné vrstvě.
+     *
+     * Obálka GovTalk („Podání bylo přijato") je výsledek PŘÍJMU na DIS: prošla
+     * kontrola vstupu a věta se předala ke zpracování. Hlásí `result="OK"`
+     * i u formuláře, který cJMHZ vzápětí odmítne. Teprve protokol o zpracování
+     * říká, co se doopravdy zaevidovalo — a jen zúžit, nikdy rozšířit.
+     *
+     * Ověřeno na hlášení za 08/2026: zapečetěná obálka „přijato" + formulář OK,
+     * protokol o zpracování „částečně přijato" + týž formulář odmítnutý chybou
+     * 40244. Dokud se to bralo jako rozpor, spadl celý efektivní stav a opravné
+     * hlášení nešlo sestavit. Nejde o rozpor, ale o dvě různé otázky.
+     *
+     * Rozšíření zpátky na „přijato" se proto ignoruje; opačné pořadí protokolů
+     * dá tentýž výsledek, takže na pořadí doručení nezáleží. Skutečný rozpor
+     * (dvě různá odmítnutí téhož) tady vzniknout nemůže — každé podání
+     * zpracovává cJMHZ jednou a další verdikt patří až návaznému podání.
+     */
+    private static function narrower(?string $current, ?string $candidate): ?string
+    {
+        $rank = [
+            'accepted' => 0,
+            'partially_accepted' => 1,
+            'rejected' => 2,
+        ];
+        if ($candidate === null || !isset($rank[$candidate])) {
+            return $current;
+        }
+        if ($current === null || !isset($rank[$current])) {
+            return $candidate;
+        }
+
+        return $rank[$candidate] > $rank[$current] ? $candidate : $current;
+    }
+
+    /**
      * @param array{submission_type:string,forms:list<array<string,mixed>>} $description
      * @param list<array<string,mixed>> $evidence
      * @return array<string,mixed>
@@ -93,13 +128,7 @@ final readonly class JmhzEffectiveFormLedgerResolver
                 continue;
             }
             if (in_array($receiptStatus, ['accepted', 'partially_accepted', 'rejected'], true)) {
-                if ($terminalStatus !== null && $terminalStatus !== $receiptStatus) {
-                    throw new JmhzXmlException(
-                        'jmhz_effective_state_protocol_conflict',
-                        'Podepsané protokoly uvádějí rozporný konečný stav podání.',
-                    );
-                }
-                $terminalStatus = $receiptStatus;
+                $terminalStatus = self::narrower($terminalStatus, $receiptStatus);
             }
             $guid = $row['form_guid'] ?? null;
             if (!is_string($guid)) {
@@ -113,13 +142,7 @@ final readonly class JmhzEffectiveFormLedgerResolver
                 );
             }
             $status = $row['form_remote_status'] ?? null;
-            if (isset($outcomes[$guid]) && $outcomes[$guid] !== $status) {
-                throw new JmhzXmlException(
-                    'jmhz_effective_state_protocol_conflict',
-                    'Podepsané protokoly uvádějí rozporný výsledek formuláře.',
-                );
-            }
-            $outcomes[$guid] = $status;
+            $outcomes[$guid] = self::narrower($outcomes[$guid] ?? null, $status);
             foreach ([
                 'external_person_reference' => 'person_external_identifier',
                 'external_employment_reference' => 'employment_external_identifier',

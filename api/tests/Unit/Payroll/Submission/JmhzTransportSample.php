@@ -134,4 +134,44 @@ final class JmhzTransportSample
             . '</protokol></protokoly>'
             . '</DZMHOdpoved>';
     }
+
+    /**
+     * Protokol o zpracování tak, jak ho ČSSZ doručuje do datové schránky:
+     * holé XML bez pečeti, zato s `idPodani`, variabilním symbolem i obdobím.
+     * Právě podle nich se protokol váže na zmrazené podání.
+     *
+     * @param list<array{kod:string,popis:string,typChyby:string,castPodani:string,idFormulare:string}> $failures
+     */
+    public static function processingProtocol(
+        string $submissionGuid,
+        string $statusCode = '4',
+        string $statusLabel = 'Hlášení je částečně přijato',
+        string $variableSymbol = self::VARIABLE_SYMBOL,
+        int $month = 7,
+        int $year = 2026,
+        string $correlationId = 'CID0000000001',
+        array $failures = [],
+    ): string {
+        $errors = '';
+        foreach ($failures as $failure) {
+            $errors .= '<chyba><id>00000000-0000-0000-0000-000000000001</id>'
+                . '<typChyby>' . $failure['typChyby'] . '</typChyby>'
+                . '<castPodani>' . $failure['castPodani'] . '</castPodani>'
+                . '<idFormulare>' . $failure['idFormulare'] . '</idFormulare>'
+                . '<kod>' . $failure['kod'] . '</kod>'
+                . '<popis>' . $failure['popis'] . '</popis></chyba>';
+        }
+
+        return '<?xml version="1.0" encoding="utf-8"?>'
+            . '<ProtokolOZpracovani xmlns="http://schemas.cssz.cz/JMHZ/ProtokolOZpracovani/2026">'
+            . '<datumProtokolu>2026-08-04T10:26:10.567+02:00</datumProtokolu>'
+            . '<variabilniSymbol>' . $variableSymbol . '</variabilniSymbol>'
+            . '<idKonkretnihoPodani>' . $correlationId . '</idKonkretnihoPodani>'
+            . '<datumPodani>2026-08-04T10:23:32+02:00</datumPodani>'
+            . '<idPodani>' . $submissionGuid . '</idPodani>'
+            . '<mesic>' . $month . '</mesic><rok>' . $year . '</rok>'
+            . '<stavMH><kod>' . $statusCode . '</kod><nazev>' . $statusLabel . '</nazev></stavMH>'
+            . '<chybySeznam>' . $errors . '</chybySeznam>'
+            . '</ProtokolOZpracovani>';
+    }
 }

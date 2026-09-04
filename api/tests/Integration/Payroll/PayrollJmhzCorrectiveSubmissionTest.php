@@ -618,7 +618,21 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         );
     }
 
-    public function testEffectiveFormLedgerFailsClosedForConflictingSignedProtocols(): void
+    /**
+     * Dva protokoly k témuž podání nejsou rozpor, ale dvě různé otázky.
+     *
+     * Obálka GovTalk odpovídá na PŘÍJEM („Podání bylo přijato"), protokol
+     * o zpracování na to, co cJMHZ opravdu zaevidovala. Ověřeno na hlášení za
+     * 08/2026: zapečetěná obálka hlásila přijetí a zároveň protokol
+     * o zpracování „částečně přijato" s odmítnutým formulářem. Dokud se to
+     * bralo jako rozpor, spadl celý efektivní stav a opravné hlášení nešlo
+     * z aplikace sestavit.
+     *
+     * Platí proto pravidlo, že se výsledek smí jen zúžit: „přijato" nikdy
+     * nepřebije „částečně přijato" ani „zamítnuto", a na pořadí doručení
+     * protokolů nezáleží.
+     */
+    public function testNarrowerProtocolVerdictWinsOverPlainAcceptance(): void
     {
         $original = $this->regularSubmissionInStatus('submitted');
         $accepted = $this->submissions->importReceipt(
@@ -627,12 +641,12 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             $original['row_version'],
             null,
             '<accepted-jmhz-protocol/>',
-            'receipt:accepted-effective-state',
+            'receipt:accepted-narrower',
             'VREP-ORIGINAL-0001',
             'CSSZ_JMHZ',
             'accepted',
             self::CHANNEL,
-            'receipt-accepted-effective-state',
+            'receipt-accepted-narrower',
             null,
             $this->trustedVerifier('accepted'),
         );
@@ -642,24 +656,88 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             $accepted['submission_row_version'],
             null,
             '<rejected-jmhz-protocol/>',
-            'receipt:rejected-effective-state',
+            'receipt:rejected-narrower',
             'VREP-ORIGINAL-0001',
             'CSSZ_JMHZ',
             'rejected',
             self::CHANNEL,
-            'receipt-rejected-effective-state',
+            'receipt-rejected-narrower',
             null,
             $this->trustedVerifier('rejected'),
         );
 
+        $set = $this->effectiveForms->resolve(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            ['987654321'],
+        );
+
+        self::assertSame('rejected', $set->forEmployment('987654321')->state);
+    }
+
+    /**
+     * Zúžení výsledku je jedna věc, cizí formulář druhá. Protokol, který mluví
+     * o součásti mimo zmrazené podání, je pořád tvrdá chyba — takový dokument
+     * k tomuhle podání nepatří, ať je podepsaný jakkoli.
+     */
+    public function testEffectiveFormLedgerFailsClosedForForeignFormInSignedProtocol(): void
+    {
+        $original = $this->regularSubmissionInStatus('submitted');
+        $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $original['row_version'],
+            null,
+            '<foreign-form-jmhz-protocol/>',
+            'receipt:foreign-form-effective-state',
+            'VREP-ORIGINAL-0001',
+            'CSSZ_JMHZ',
+            'partially_accepted',
+            self::CHANNEL,
+            'receipt-foreign-form-effective-state',
+            null,
+            $this->foreignFormVerifier(),
+        );
+
         $this->expectException(JmhzXmlException::class);
-        $this->expectExceptionMessage('rozporný konečný stav');
+        $this->expectExceptionMessage('mimo zmrazené podání');
         $this->effectiveForms->resolve(
             $this->supplierId,
             self::ENVIRONMENT,
             $original['id'],
             ['987654321'],
         );
+    }
+
+    private function foreignFormVerifier(): PayrollReceiptVerifierInterface
+    {
+        return new class implements PayrollReceiptVerifierInterface {
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                return new PayrollVerifiedReceipt(
+                    'partially_accepted',
+                    $expectedCorrelationReference,
+                    [],
+                    [
+                        new PayrollVerifiedReceiptFormOutcome(
+                            'FFFFFFFF-9999-7999-8999-FFFFFFFFFFFF',
+                            null,
+                            3,
+                            'Rejected',
+                            'rejected',
+                            null,
+                            null,
+                            [],
+                        ),
+                    ],
+                );
+            }
+        };
     }
 
     /** @return array{id:int,row_version:int} */

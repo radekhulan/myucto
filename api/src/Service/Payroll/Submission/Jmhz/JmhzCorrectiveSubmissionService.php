@@ -40,6 +40,10 @@ use Psr\Clock\ClockInterface;
 final readonly class JmhzCorrectiveSubmissionService
 {
     private const CHANNEL = 'vrep_apep';
+
+    /** Kanály, kterými smí být odeslané stornované či opravované podání. */
+    private const ROOT_CHANNELS = ['vrep_apep', 'isds'];
+
     private const PRODUCT_NAME = 'MyÚčto.cz';
 
     public function __construct(
@@ -485,13 +489,15 @@ final readonly class JmhzCorrectiveSubmissionService
                 'Původní podání nebylo nalezeno ve stejné firmě a prostředí.',
             );
         }
+        // VREP i datová schránka jsou u JMHZ rovnocenné kanály podání, takže
+        // opravovat i stornovat jde hlášení odeslané kteroukoli z nich.
         if ($original['submission_kind'] !== 'regular'
-            || $original['channel'] !== self::CHANNEL
+            || !in_array($original['channel'], self::ROOT_CHANNELS, true)
         ) {
             throw new JmhzXmlException(
                 'jmhz_cancellation_target_invalid',
                 'Stornovat nebo opravovat lze jen řádné měsíční hlášení odeslané'
-                    . ' přes VREP.',
+                    . ' přes VREP nebo datovou schránku.',
             );
         }
 

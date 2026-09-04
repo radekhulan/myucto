@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsAgendaCatalog;
 use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsMessageBuilder;
 use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsInboxProcessor;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
@@ -55,6 +56,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
 
     private const CHANNEL = 'isds';
     private const GUID = '01912B4C-7A3E-7C21-9F55-0A1B2C3D4E5F';
+    private const FORM_GUID = '01912B4C-7A3E-7D02-8811-0A1B2C3D4E60';
     private const VARIABLE_SYMBOL = '1234567890';
 
     private Connection $db;
@@ -227,6 +229,154 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
         self::assertSame($first['outbox_id'], $second['outbox_id']);
     }
 
+    /**
+     * Obsahový výsledek nese JEDINĚ protokol o zpracování, a ten ČSSZ
+     * nepečetí — zapečetěná odpověď hlásí `result="OK"` i pro formulář, který
+     * cJMHZ následně odmítla kontrolou. Ověřeno na hlášení za 08/2026: podání
+     * bylo „částečně přijato" (stav 4), formulář odmítla nepropustná chyba
+     * 40244. Dokud aplikace uznávala jen podepsané protokoly, zůstalo podání
+     * navždy `submitted` a opravné hlášení nešlo z aplikace sestavit.
+     *
+     * Důvěru tady nese doručení ze schránky, do které podání odešlo, plus
+     * shoda `idPodani`, variabilního symbolu a období se zmrazenou větou.
+     */
+    public function testDeliveredProcessingProtocolMarksTheRejectedForm(): void
+    {
+        $submissionId = $this->dispatchedSubmission('inbox-processing', '1752953401');
+        $protocol = JmhzTransportSample::processingProtocol(
+            self::GUID,
+            variableSymbol: self::VARIABLE_SYMBOL,
+            failures: [[
+                'kod' => '40244',
+                'popis' => '(Propustnost: nepropustná) Nebylo-li učiněno prohlášení'
+                    . ' poplatníka, nelze vyplnit atribut(y) související s daňovými'
+                    . ' slevami a daňovým zvýhodněním. 10306',
+                'typChyby' => 'zpracovani',
+                'castPodani' => 'form',
+                'idFormulare' => self::FORM_GUID,
+            ]],
+        );
+        $zfo = SyntheticZfoBuilder::receivedMessage([[
+            'name' => 'JMH-PROTOKOL-O-KOMPLETNOSTI-VS' . self::VARIABLE_SYMBOL . '-2026-07.xml',
+            'mime' => 'application/xml',
+            'bytes' => $protocol,
+            'meta_type' => 'main',
+        ]], ['message_id' => 'DM-JMHZ-PROCESSING']);
+
+        $processed = $this->inboxProcessor()->process(
+            $this->supplierId,
+            'test',
+            987655,
+            new InboxMessageHeader(
+                'DM-JMHZ-PROCESSING',
+                '9tsaf6s',
+                'Česká správa sociálního zabezpečení',
+                // Věc protokolu o kompletnosti dmId NEUVÁDÍ, takže vazbu musí
+                // dát obsah přílohy. Bez toho zpráva zůstane nespárovaná.
+                'Protokol o kompletnosti podání JMH VS' . self::VARIABLE_SYMBOL
+                    . ' 07/2026 - Hlášení je částečně přijato',
+                null,
+                new \DateTimeImmutable('2026-08-15 09:30:00'),
+                null,
+            ),
+            ['classification' => 'cssz_protocol', 'matched_outbox_id' => null],
+            $zfo,
+            (int) $this->db->pdo()->query('SELECT MIN(id) FROM users')->fetchColumn(),
+        );
+
+        self::assertSame(
+            'processed',
+            $processed['status'],
+            json_encode($processed, JSON_THROW_ON_ERROR),
+        );
+        self::assertSame($submissionId, $processed['submission_id']);
+        self::assertSame('partially_accepted', $processed['remote_status']);
+        self::assertSame('partially_accepted', $this->submissions->get(
+            $this->supplierId,
+            $submissionId,
+        )['status']);
+
+        $outcomes = (new PayrollSubmissionRepository($this->db))
+            ->listJmhzProtocolFormOutcomes(
+                $this->supplierId,
+                'test',
+                (int) $processed['receipt_id'],
+            );
+        self::assertCount(1, $outcomes);
+        self::assertSame(self::FORM_GUID, (string) $outcomes[0]['form_guid']);
+        self::assertSame('rejected', (string) $outcomes[0]['remote_status']);
+        self::assertSame($submissionId, (int) $outcomes[0]['submission_id']);
+    }
+
+    /** Protokol vystavený na jiné období se k podání přiřadit nesmí. */
+    public function testDeliveredProtocolOfAnotherPeriodIsRefused(): void
+    {
+        $this->dispatchedSubmission('inbox-period', '1752953402');
+        $zfo = SyntheticZfoBuilder::receivedMessage([[
+            'name' => 'JMH-PROTOKOL.xml',
+            'mime' => 'application/xml',
+            'bytes' => JmhzTransportSample::processingProtocol(self::GUID, month: 6),
+            'meta_type' => 'main',
+        ]], ['message_id' => 'DM-JMHZ-PERIOD']);
+
+        $processed = $this->inboxProcessor()->process(
+            $this->supplierId,
+            'test',
+            987656,
+            new InboxMessageHeader(
+                'DM-JMHZ-PERIOD',
+                '9tsaf6s',
+                'Česká správa sociálního zabezpečení',
+                'Protokol o kompletnosti podání JMH VS' . self::VARIABLE_SYMBOL . ' 06/2026',
+                null,
+                new \DateTimeImmutable('2026-08-15 09:30:00'),
+                null,
+            ),
+            ['classification' => 'cssz_protocol', 'matched_outbox_id' => null],
+            $zfo,
+            null,
+        );
+
+        self::assertSame('manual_review', $processed['status']);
+        self::assertSame('jmhz_isds_response_unmatched', $processed['code']);
+    }
+
+    /**
+     * Protokol doručený z JINÉ schránky, než do které podání odešlo, nesmí
+     * o podání rozhodnout. Na tom stojí celá důvěra nepodepsaného protokolu.
+     */
+    public function testDeliveredProtocolFromAnotherBoxIsRefused(): void
+    {
+        $this->dispatchedSubmission('inbox-box', '1752953403');
+        $zfo = SyntheticZfoBuilder::receivedMessage([[
+            'name' => 'JMH-PROTOKOL.xml',
+            'mime' => 'application/xml',
+            'bytes' => JmhzTransportSample::processingProtocol(self::GUID),
+            'meta_type' => 'main',
+        ]], ['message_id' => 'DM-JMHZ-FOREIGN']);
+
+        $processed = $this->inboxProcessor()->process(
+            $this->supplierId,
+            'test',
+            987657,
+            new InboxMessageHeader(
+                'DM-JMHZ-FOREIGN',
+                'aaaaaaa',
+                'Někdo jiný',
+                'Protokol o kompletnosti podání JMH VS' . self::VARIABLE_SYMBOL . ' 07/2026',
+                null,
+                new \DateTimeImmutable('2026-08-15 09:30:00'),
+                null,
+            ),
+            ['classification' => 'cssz_protocol', 'matched_outbox_id' => null],
+            $zfo,
+            null,
+        );
+
+        self::assertSame('manual_review', $processed['status']);
+        self::assertSame('jmhz_isds_response_unmatched', $processed['code']);
+    }
+
     public function testDownloadedSignedProtocolUpdatesTheExactJmhzSubmission(): void
     {
         $submissionId = $this->frozenSubmission('inbox-protocol', false);
@@ -295,6 +445,10 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
                 new NullLogger(),
             ),
             $this->outboxService,
+            new JmhzFrozenPayloadReader(
+                new PayrollSubmissionRepository($this->db),
+                $this->submissions,
+            ),
             $container->get(ZfoExtractor::class),
             $signatures,
         );
@@ -407,6 +561,72 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
         );
     }
 
+    /** Zmrazené podání zařazené do fronty a doloženě odeslané datovkou. */
+    private function dispatchedSubmission(string $key, string $sentMessageId): int
+    {
+        $submissionId = $this->frozenSubmission($key, false);
+        $draft = $this->submissions->get($this->supplierId, $submissionId);
+        $validated = $this->submissions->transition(
+            $this->supplierId,
+            $submissionId,
+            (int) $draft['row_version'],
+            'validated',
+        );
+        $this->submissions->transition(
+            $this->supplierId,
+            $submissionId,
+            (int) $validated['row_version'],
+            'ready',
+        );
+        $queued = $this->isds->enqueue($this->supplierId, 'test', $submissionId, null);
+        $outbox = new SubmissionOutboxRepository($this->db);
+        $userId = (int) $this->db->pdo()->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $claimed = $outbox->claimForManualSending(
+            $this->supplierId,
+            (int) $queued['outbox_id'],
+            $userId,
+        );
+        self::assertNotNull($claimed);
+        $outbox->markSentManually(
+            $this->supplierId,
+            (int) $queued['outbox_id'],
+            $sentMessageId,
+            new \DateTimeImmutable('2026-08-15 08:00:00'),
+            (int) $claimed['row_version'],
+        );
+
+        return $submissionId;
+    }
+
+    private function inboxProcessor(): JmhzIsdsInboxProcessor
+    {
+        $container = Bootstrap::buildContainer();
+        $signatures = new class implements JmhzProtocolSignatureVerifierInterface {
+            public function verifiedProtocolXml(string $bytes, string $environment): string
+            {
+                return $bytes;
+            }
+        };
+
+        return new JmhzIsdsInboxProcessor(
+            new SubmissionOutboxRepository($this->db),
+            new PayrollSubmissionRepository($this->db),
+            $this->submissions,
+            new PayrollSubmissionDispatchProjection(
+                new PayrollSubmissionRepository($this->db),
+                $this->submissions,
+                new NullLogger(),
+            ),
+            $this->outboxService,
+            new JmhzFrozenPayloadReader(
+                new PayrollSubmissionRepository($this->db),
+                $this->submissions,
+            ),
+            $container->get(ZfoExtractor::class),
+            $signatures,
+        );
+    }
+
     private function payload(): string
     {
         return '<?xml version="1.0" encoding="UTF-8"?>'
@@ -416,6 +636,14 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             . '<variabilniSymbol>' . self::VARIABLE_SYMBOL . '</variabilniSymbol>'
             . '<mesic>7</mesic><rok>2026</rok><typPodani>R</typPodani>'
             . '</hlavicka>'
+            . '<formulareOsob><formularOsoby>'
+            . '<hlavicka><idFormulare>' . self::FORM_GUID . '</idFormulare>'
+            . '<typFormulare>R</typFormulare></hlavicka>'
+            . '<form:cinnostKS xmlns:form="http://schemas.cssz.cz/JMHZ/form/1.0">'
+            . '<form:identifikace><form:ikMpsv>1234567890</form:ikMpsv>'
+            . '<form:idPpv>4000000000001</form:idPpv></form:identifikace>'
+            . '</form:cinnostKS>'
+            . '</formularOsoby></formulareOsob>'
             . '</jmhz>';
     }
 

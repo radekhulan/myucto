@@ -1998,6 +1998,47 @@ final class PayrollSubmissionRepository
         });
     }
 
+    /**
+     * Kanál, kterým podání SKUTEČNĚ odešlo.
+     *
+     * Zmrazení zakládá podání na výchozím kanálu agendy, jenže datová schránka
+     * je u JMHZ rovnocenná cesta a zvolí se až při odeslání. Dokud se sloupec
+     * nepřepsal, mířil zbytek řetězce jinam, než kudy zpráva šla: protokol
+     * z datovky spadl na „Kanál protokolu neodpovídá podání." a dotaz na stav
+     * se marně ptal VREP.
+     *
+     * Zápis je jednosměrný v tom smyslu, že se dělá proti doloženému odeslání
+     * (řádek odchozí fronty), ne podle přání volajícího.
+     */
+    public function updateSubmissionChannel(
+        int $supplierId,
+        int $submissionId,
+        int $expectedRowVersion,
+        string $channel,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'UPDATE payroll_submissions
+                SET channel = ?,
+                    row_version = row_version + 1
+              WHERE supplier_id = ?
+                AND id = ?
+                AND row_version = ?',
+        );
+        $statement->execute([
+            $channel,
+            $supplierId,
+            $submissionId,
+            $expectedRowVersion,
+        ]);
+        if ($statement->rowCount() !== 1) {
+            throw new PayrollSubmissionConflictException(
+                'Podání se mezitím změnilo.',
+            );
+        }
+
+        return $expectedRowVersion + 1;
+    }
+
     public function bumpSubmissionVersion(
         int $supplierId,
         int $submissionId,

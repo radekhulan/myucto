@@ -478,6 +478,20 @@ export interface GatewayStart {
   resumed: boolean
 }
 
+/** Výsledek opakovaného zpracování jedné už stažené zprávy. */
+export interface InboxReprocessResult {
+  message_id: number
+  classification: InboxClassification
+  matched_outbox_id: number | null
+  /** Zpráva se teprve teď navázala na podání. */
+  linked: boolean
+  status: 'processed' | 'manual_review' | 'not_applicable'
+  code: string | null
+  submission_id: number | null
+  receipt_id: number | null
+  remote_status: string | null
+}
+
 export interface InboxPollResult {
   fetched: number
   stored: number
@@ -756,6 +770,17 @@ export const dataBoxApi = {
     api.get<{ items: InboxMessage[]; state: InboxPollState | null }>('/submissions/inbox', {
       params: { environment, classification, visibility },
     }).then(r => r.data),
+
+  /**
+   * Zpracovat uloženou zprávu znovu. Nesahá na síť — pracuje s originálem,
+   * který je v aplikaci uložený, takže se kvůli tomu nemusí znovu vybírat
+   * schránka (což je právní úkon).
+   */
+  reprocessInboxMessage: (id: number, environment: string) =>
+    api.post<{ result: InboxReprocessResult; item: InboxMessage }>(
+      `/submissions/inbox/${id}/reprocess`,
+      { environment },
+    ).then(r => r.data),
 
   hideInboxMessage: (id: number, rowVersion: number) =>
     api.post<{ item: InboxMessage }>(`/submissions/inbox/${id}/hide`, {

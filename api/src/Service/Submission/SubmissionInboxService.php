@@ -9,6 +9,7 @@ use MyInvoice\Repository\Submission\SubmissionInboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Document\DocumentIngestService;
+use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelStatus;
 use MyInvoice\Service\Submission\Channel\InboxMessageHeader;
@@ -60,10 +61,170 @@ final readonly class SubmissionInboxService
         private DocumentIngestService $documents,
         private SubmissionInboxStorageSettingsService $storageSettings,
         private DeliveryResolutionService $delivery,
+        private DocumentStorage $storage,
         private ActivityLogger $activity,
         private LoggerInterface $logger,
         private ?SubmissionInboxMessageProcessor $messageProcessor = null,
     ) {}
+
+    /**
+     * Znovu zařadit a zpracovat zprávu, která už je stažená.
+     *
+     * ── Proč to musí jít ručně ──────────────────────────────────────────────
+     * Automat běží JEN ve chvíli stahování ({@see ingest()}). Zpráva vyzvednutá
+     * dřív, než aplikace uměla její tvar rozpoznat, tak zůstane navždy
+     * nezpracovaná — a druhý pokus by znamenal znovu vybrat schránku, což je
+     * podle § 17 odst. 3 zák. 300/2008 Sb. právní úkon, ne obnovení stránky.
+     * Opakované zpracování proto sahá výhradně na ULOŽENÝ originál a k síti
+     * nejde vůbec.
+     *
+     * Zařazení se přepočítá, ale evidenční vazba na podání se nikdy nepřepisuje
+     * — {@see reclassify()} to hlídá stejně a z dobrého důvodu: jednou navázaná
+     * zpráva tvrdí něco o konkrétním podání.
+     *
+     * @return array{
+     *   message_id:int,classification:string,matched_outbox_id:?int,
+     *   linked:bool,status:string,code:?string,submission_id:?int,
+     *   receipt_id:?int,remote_status:?string
+     * }
+     */
+    public function reprocess(
+        int $supplierId,
+        string $environment,
+        int $messageId,
+        ?int $actorUserId,
+    ): array {
+        $message = $this->inbox->findById($supplierId, $messageId);
+        if ($message === null || (string) $message['environment'] !== $environment) {
+            throw new SubmissionChannelException(
+                'isds_inbox_message_not_found',
+                'Zpráva nebyla nalezena.',
+                404,
+            );
+        }
+        if ((string) $message['local_content_state'] !== 'available'
+            || $message['document_id'] === null
+        ) {
+            throw new SubmissionChannelException(
+                'isds_inbox_local_content_missing',
+                'Zprávu nelze zpracovat znovu: její místní kopie už není'
+                    . ' k dispozici.',
+                409,
+            );
+        }
+        $container = $this->inbox->messageContainer($supplierId, $messageId);
+        if ($container === null) {
+            throw new SubmissionChannelException(
+                'isds_inbox_local_content_missing',
+                'Uložený originál zprávy se nepodařilo dohledat.',
+                409,
+            );
+        }
+        $path = $this->storage->pathFor(
+            $supplierId,
+            $container['sha256'],
+            $container['filename'],
+        );
+        $bytes = is_file($path) ? @file_get_contents($path) : false;
+        if ($bytes === false || $bytes === '') {
+            throw new SubmissionChannelException(
+                'isds_inbox_local_content_missing',
+                'Uložený originál zprávy se nepodařilo přečíst.',
+                409,
+            );
+        }
+
+        $header = new InboxMessageHeader(
+            (string) $message['external_message_id'],
+            $message['sender_box_id'] === null ? null : (string) $message['sender_box_id'],
+            $message['sender_name'] === null ? null : (string) $message['sender_name'],
+            $message['subject'] === null ? null : (string) $message['subject'],
+            $message['sender_ident'] === null ? null : (string) $message['sender_ident'],
+            self::dateTimeOrNull($message['delivered_at'] ?? null),
+            self::dateTimeOrNull($message['accepted_at'] ?? null),
+        );
+
+        $verdict = $this->classifier->classify(
+            $supplierId,
+            $environment,
+            $header,
+            $this->recipientBoxKinds($supplierId),
+        );
+        $existingLink = $message['matched_outbox_id'] === null
+            ? null
+            : (int) $message['matched_outbox_id'];
+        $linked = false;
+        if ($existingLink === null && $verdict['matched_outbox_id'] !== null) {
+            $linked = $this->inbox->reclassify(
+                $supplierId,
+                $messageId,
+                $verdict['classification'],
+                (int) $verdict['matched_outbox_id'],
+                (int) $message['lifecycle_row_version'],
+            );
+        } else {
+            // Existující vazba má přednost: přepsat ji automatem by znamenalo
+            // tiše přehodit výsledek na jiné podání.
+            $verdict['matched_outbox_id'] = $existingLink;
+        }
+
+        $processed = [
+            'status' => 'not_applicable',
+            'code' => null,
+            'submission_id' => null,
+            'receipt_id' => null,
+            'remote_status' => null,
+        ];
+        if ($this->messageProcessor !== null) {
+            $processed = $this->messageProcessor->process(
+                $supplierId,
+                $environment,
+                $messageId,
+                $header,
+                $verdict,
+                $bytes,
+                $actorUserId,
+            );
+        }
+
+        $this->activity->log(
+            'submission_inbox_message_reprocessed',
+            $actorUserId,
+            'submission_inbox_message',
+            $messageId,
+            [
+                'status' => $processed['status'],
+                'code' => $processed['code'],
+                'submission_id' => $processed['submission_id'],
+                'receipt_id' => $processed['receipt_id'],
+                'remote_status' => $processed['remote_status'],
+                'linked' => $linked,
+            ],
+            null,
+            null,
+            $supplierId,
+        );
+
+        return [
+            'message_id' => $messageId,
+            'classification' => $verdict['classification'],
+            'matched_outbox_id' => $verdict['matched_outbox_id'],
+            'linked' => $linked,
+            ...$processed,
+        ];
+    }
+
+    private static function dateTimeOrNull(mixed $value): ?\DateTimeImmutable
+    {
+        if (!is_string($value) || trim($value) === '') {
+            return null;
+        }
+        try {
+            return new \DateTimeImmutable($value);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
 
     /**
      * Přepočítá rozhodný den doručení u zpráv, kde se závěr může změnit pouhým
