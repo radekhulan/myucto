@@ -23,6 +23,7 @@ use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\DeliveryReceiptMatcher;
 use MyInvoice\Service\Submission\DeliveryReceiptReader;
 use MyInvoice\Service\Submission\DeliveryReceiptService;
+use MyInvoice\Service\Submission\InboxMessageClassifier;
 use MyInvoice\Service\Submission\SubmissionArtifactResolver;
 use MyInvoice\Service\Submission\SubmissionArtifactValidator;
 use MyInvoice\Service\Submission\SubmissionChannelRegistry;
@@ -307,6 +308,55 @@ final class DeliveryReceiptServiceTest extends TestCase
             'Druhé nahrání nesmí do podání zapsat vůbec nic.',
         );
         self::assertSame(1, $this->countInboxMessages(), 'Druhá zpráva se založit nesmí.');
+    }
+
+    /**
+     * Nedokončené přiřazení se druhým průchodem DOTÁHNE, ne zamluví.
+     *
+     * Zámek idempotence hlídá příchozí zprávu, ne podání. Když je zpráva
+     * v evidenci navázaná na podání, ale doručenka se k němu nepřipojila,
+     * tvrdila aplikace „už tu máte, je připojená k podání a nic se nezměnilo"
+     * — a bylo to NEOPRAVITELNÉ: další stažení z ISDS i ruční nahrání téhož
+     * souboru spadly do stejné zkratky. Účetní přitom u podání dál viděla
+     * „Nahrát doručenku". Ven vedla jen ruční oprava databáze.
+     */
+    public function testUnfinishedMatchIsCompletedOnTheSecondPass(): void
+    {
+        $row = $this->enqueue()['row'];
+        $bytes = $this->receiptFor($row, ['sender_ident' => null]);
+
+        // Zpráva se uloží i s dokumentem, ale sama se nespáruje.
+        $first = $this->upload($bytes);
+        self::assertSame(DeliveryReceiptService::STATUS_CANDIDATES, $first['status']);
+
+        // Vazba na podání vznikne, připojení souboru ale neproběhne — přesně
+        // ten stav, ze kterého dřív nevedla cesta ven.
+        $this->inbox->linkToOutbox(
+            $this->supplierId,
+            (int) $first['inbox_message_id'],
+            (int) $row['id'],
+        );
+        $before = $this->outbox->find($this->supplierId, (int) $row['id']);
+        self::assertNotNull($before);
+        self::assertNull($before['receipt_document_id']);
+
+        $second = $this->upload($bytes);
+
+        self::assertSame(DeliveryReceiptService::STATUS_ALREADY_PROCESSED, $second['status']);
+        self::assertSame('duplicate_upload_completed', $second['reason']);
+        self::assertSame((int) $row['id'], $second['outbox_id']);
+        // Žádný druhý dokument ani druhá zpráva: použije se ten uložený.
+        self::assertSame($first['document_id'], $second['document_id']);
+        self::assertSame(1, $this->countInboxMessages());
+
+        $after = $this->outbox->find($this->supplierId, (int) $row['id']);
+        self::assertNotNull($after);
+        self::assertSame(
+            $first['document_id'],
+            (int) $after['receipt_document_id'],
+            'Druhý průchod musel doručenku k podání připojit.',
+        );
+        self::assertStringNotContainsString('nic se nezměnilo', (string) $second['message']);
     }
 
     /** Potvrzení vazby podruhé taky nic nezmění. */
@@ -635,7 +685,96 @@ final class DeliveryReceiptServiceTest extends TestCase
         $this->download((int) $row['id']);
     }
 
+    // ───────────────────────── hromadné stažení ─────────────────────────
+
+    /**
+     * Dávka: jedna relace vyřídí všechno, co čeká, a každá zpráva má vlastní
+     * výsledek. „Zatím bez dodejky" není selhání, ale stav.
+     */
+    public function testBatchDownloadsEveryWaitingReceiptSeparately(): void
+    {
+        $delivered = $this->sentSubmission('9900001', 42);
+        $waiting = $this->sentSubmission('9900002', 43);
+        $this->transport->deliveryReceipts = [
+            '9900001' => $this->receiptFor($delivered, ['sender_ident' => null]),
+            '9900002' => null,
+        ];
+
+        $result = $this->downloadBatch();
+
+        self::assertSame(1, $result['attached']);
+        self::assertSame(1, $result['pending']);
+        self::assertSame(0, $result['failed']);
+
+        $first = $this->outbox->find($this->supplierId, (int) $delivered['id']);
+        self::assertNotNull($first);
+        self::assertNotNull($first['receipt_document_id']);
+
+        $second = $this->outbox->find($this->supplierId, (int) $waiting['id']);
+        self::assertNotNull($second);
+        self::assertNull($second['receipt_document_id'], 'Bez dodejky se nesmí zapsat nic.');
+    }
+
+    /**
+     * Souhrn dávky se počítá podle PODÁNÍ, ne podle stavu průchodu.
+     *
+     * Dokud se „připojeno" počítalo z návratového stavu, hlásila dávka
+     * „Připojeno: 1" i tam, kde jen narazila na zámek idempotence a k podání
+     * se nepřipojilo nic. Účetní tedy dostala potvrzení o zprávě, které pořád
+     * chyběl důkaz — a u řádku dál svítilo „Nahrát doručenku".
+     */
+    public function testBatchNeverCountsAnUnattachedReceiptAsAttached(): void
+    {
+        $row = $this->sentSubmission();
+        $bytes = $this->receiptFor($row, ['sender_ident' => null]);
+        $this->transport->deliveryReceipt = $bytes;
+
+        // Zpráva je v evidenci navázaná na podání, ale bez uloženého souboru,
+        // takže dotáhnout se nedá. Musí to být vidět jako problém, ne jako
+        // hotovo.
+        $this->inbox->record([
+            'supplier_id' => $this->supplierId,
+            'environment' => 'test',
+            'channel' => 'isds',
+            'external_message_id' => '9900001',
+            'sender_box_id' => null,
+            'sender_name' => null,
+            'subject' => null,
+            'sender_ident' => null,
+            'classification' => InboxMessageClassifier::DELIVERY_RECEIPT,
+            'matched_outbox_id' => (int) $row['id'],
+            'document_id' => null,
+            'delivered_at' => null,
+            'accepted_at' => null,
+            'raw_sha256' => str_repeat('a', 64),
+        ]);
+
+        $result = $this->downloadBatch();
+
+        self::assertSame(0, $result['attached']);
+        self::assertSame(0, $result['pending']);
+        self::assertSame(1, $result['failed']);
+
+        $submission = $this->outbox->find($this->supplierId, (int) $row['id']);
+        self::assertNotNull($submission);
+        self::assertNull($submission['receipt_document_id']);
+    }
+
     // ───────────────────────── pomocné ─────────────────────────
+
+    /**
+     * @return array{attached:int,pending:int,failed:int,items:list<array<string,mixed>>}
+     */
+    private function downloadBatch(): array
+    {
+        return $this->service->downloadManyFromIsds(
+            $this->supplierId,
+            'test',
+            $this->userId,
+            $this->channelContext(),
+            $this->transport,
+        );
+    }
 
     /** @return array<string,mixed> */
     private function upload(string $bytes, string $filename = 'dorucenka.zfo', ?int $outboxId = null): array
@@ -677,9 +816,9 @@ final class DeliveryReceiptServiceTest extends TestCase
      *
      * @return array<string,mixed>
      */
-    private function sentSubmission(string $messageId = '9900001'): array
+    private function sentSubmission(string $messageId = '9900001', int $artifactId = 42): array
     {
-        $row = $this->enqueue()['row'];
+        $row = $this->enqueue('HOZ', $artifactId)['row'];
 
         return $this->outboxService->markSentManually(
             $this->supplierId,

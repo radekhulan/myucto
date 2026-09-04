@@ -123,7 +123,13 @@ final readonly class DeliveryReceiptService
         // v Dokumentech duplicitní kontejner s přílohami.
         $existing = $this->inbox->find($supplierId, self::CHANNEL, $environment, $receipt->messageId);
         if ($existing !== null) {
-            return $this->alreadyProcessed($supplierId, $existing, $receipt);
+            return $this->alreadyProcessed(
+                $supplierId,
+                $existing,
+                $receipt,
+                $userId,
+                $matchedBy,
+            );
         }
 
         $verdict = $outboxId !== null
@@ -406,10 +412,18 @@ final readonly class DeliveryReceiptService
                 continue;
             }
             $status = (string) ($result['status'] ?? '');
+            // „Připojeno" se počítá podle PODÁNÍ, ne podle stavu průchodu.
+            // Dokud se počítalo podle stavu, hlásila dávka „Připojeno: 1"
+            // i tam, kde jen narazila na zámek idempotence a k podání se
+            // nepřipojilo nic — souhrn tedy tvrdil hotovo o zprávě, které
+            // pořád chyběl důkaz.
+            $row = is_array($result['submission'] ?? null) ? $result['submission'] : null;
             if ($status === self::STATUS_NOT_AVAILABLE) {
                 $pending++;
-            } else {
+            } elseif ($row !== null && ($row['receipt_document_id'] ?? null) !== null) {
                 $attached++;
+            } else {
+                $failed++;
             }
             $items[] = [
                 'outbox_id' => $outboxId,
@@ -719,31 +733,114 @@ final readonly class DeliveryReceiptService
     }
 
     /**
+     * Táž doručenka podruhé.
+     *
+     * ── Proč se to tu NESMÍ jen odbýt hláškou ───────────────────────────────
+     * Zámek idempotence hlídá PŘÍCHOZÍ ZPRÁVU, ne podání. Že zpráva v evidenci
+     * je, ještě neznamená, že se doručenka k podání opravdu připojila: mezi
+     * zápisem zprávy a připojením souboru leží kroky, které můžou selhat
+     * ({@see applyToSubmission()}), a stačí, aby jeden z nich neproběhl.
+     *
+     * Dokud tahle metoda jen tvrdila „je připojená k podání a nic se
+     * nezměnilo", byl takový stav NEOPRAVITELNÝ: podání zůstalo bez důkazu,
+     * další stažení z ISDS i ruční nahrání téhož souboru spadly do stejné
+     * zkratky a hlásily hotovo. Účetní viděla u podání „Nahrát doručenku"
+     * a zároveň větu, že ji tam už má. Ven z toho vedla jen ruční oprava
+     * databáze.
+     *
+     * Nově se tvrzení OVĚŘÍ proti podání, a když doručenka připojená není,
+     * dotáhne se to touž cestou jako u prvního nahrání — se všemi jejími
+     * zámky. Uložený soubor se přitom používá ten původní, žádný nový do
+     * Dokumentů nepřibude.
+     *
      * @param array<string,mixed> $existing
+     * @param ?string $matchedBy čím je vazba podložená v TOMHLE průchodu
      * @return array<string,mixed>
      */
-    private function alreadyProcessed(int $supplierId, array $existing, DeliveryReceipt $receipt): array
-    {
+    private function alreadyProcessed(
+        int $supplierId,
+        array $existing,
+        DeliveryReceipt $receipt,
+        int $userId,
+        ?string $matchedBy,
+    ): array {
         $outboxId = $existing['matched_outbox_id'] !== null ? (int) $existing['matched_outbox_id'] : null;
+        $documentId = $existing['document_id'] !== null ? (int) $existing['document_id'] : null;
 
         $result = $this->baseResult(
             self::STATUS_ALREADY_PROCESSED,
             $receipt,
             $existing,
-            $existing['document_id'] !== null ? (int) $existing['document_id'] : null,
+            $documentId,
         );
+
+        if ($outboxId === null) {
+            return $result + [
+                'outbox_id' => null,
+                'matched_by' => null,
+                'candidates' => [],
+                'reason' => 'duplicate_upload',
+                'submission' => null,
+                'validation' => null,
+                'delivery_recorded' => false,
+                'message' => 'Tuhle doručenku už tu máte. Leží v nezařazených'
+                    . ' a čeká na přiřazení k podání.',
+            ];
+        }
+
+        $submission = $this->outbox->find($supplierId, $outboxId);
+        $attached = $submission !== null && $submission['receipt_document_id'] !== null;
+
+        if (!$attached && $submission !== null && $documentId !== null) {
+            $matchedBy ??= DeliveryReceiptMatcher::BY_MANUAL;
+            try {
+                $applied = $this->applyToSubmission(
+                    $supplierId,
+                    $outboxId,
+                    $receipt,
+                    (int) $existing['id'],
+                    $documentId,
+                    $matchedBy,
+                    $userId,
+                );
+            } catch (SubmissionChannelException $e) {
+                return $result + [
+                    'outbox_id' => $outboxId,
+                    'matched_by' => null,
+                    'candidates' => [],
+                    'reason' => $e->errorCode,
+                    'submission' => $submission,
+                    'validation' => null,
+                    'delivery_recorded' => false,
+                    'message' => 'Doručenka je v aplikaci uložená, ale k podání'
+                        . ' se ji nepodařilo připojit. ' . $e->getMessage(),
+                ];
+            }
+
+            return array_merge($result, $applied, [
+                'outbox_id' => $outboxId,
+                'matched_by' => $matchedBy,
+                'candidates' => [],
+                // Vlastní kód, ne `duplicate_upload`: tenhle průchod něco
+                // ZMĚNIL a v auditní stopě se to nesmí tvářit jako opakování,
+                // po kterém se nic nestalo.
+                'reason' => 'duplicate_upload_completed',
+            ]);
+        }
 
         return $result + [
             'outbox_id' => $outboxId,
             'matched_by' => null,
             'candidates' => [],
             'reason' => 'duplicate_upload',
-            'submission' => $outboxId !== null ? $this->outbox->find($supplierId, $outboxId) : null,
+            'submission' => $submission,
             'validation' => null,
             'delivery_recorded' => false,
-            'message' => $outboxId !== null
+            'message' => $attached
                 ? 'Tuhle doručenku už tu máte — je připojená k podání a nic se nezměnilo.'
-                : 'Tuhle doručenku už tu máte. Leží v nezařazených a čeká na přiřazení k podání.',
+                : 'Tuhle doručenku už tu máte, ale k podání připojená není a'
+                    . ' uložený soubor k ní chybí. Nahrajte doručenku souborem'
+                    . ' přímo u podání.',
         ];
     }
 
