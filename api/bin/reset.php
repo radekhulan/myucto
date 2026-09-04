@@ -18,10 +18,13 @@ declare(strict_types=1);
  * Ponechává (globální číselníky + schema): countries, vat_rates, units,
  *       tax_constants, exchange_rates (cache ČNB kurzů — drahé refetchnout), migrations,
  *       statement_versions/statement_rows/statement_account_map (výkazy, seed 1012),
- *       cnb_repo_rates (seed 1048), systémové role a jejich oprávnění (seed 1074).
+ *       cnb_repo_rates (seed 1048), oss_member_state_rates (sazby DPH členských států,
+ *       seed 1152+), systémové role a jejich oprávnění (seed 1074) a provozní údaje
+ *       instance (license, backup_schedule_contract, instance_storage_usage, cron_settings).
  *       S --keep-cache navíc ares_cache/vies_cache/crpdph_cache.
  * Globální seed (supplier_id IS NULL) zůstává u: vat_classifications,
- *       bank_email_notice_providers, posting_rules — maže se jen per-tenant.
+ *       bank_email_notice_providers, posting_rules, submission_recipients — maže se
+ *       jen per-tenant.
  * POZOR na per-tenant seedy z migrací (analytiky osnovy, bankovní pravidla): migrace
  *       jsou evidované jako proběhlé, takže je migrate.php po resetu NEOBNOVÍ. Co má
  *       dostat každá firma, patří do kódu (ChartOfAccountsTemplate + ChartOfAccountsSeeder),
@@ -133,6 +136,21 @@ $keep = [
     'cnb_repo_rates',        // repo sazby ČNB pro úrok z prodlení — seed 1048
     'bank_rule_templates',   // globální šablony bankovních pravidel — seed 1056
     'remittance_map',        // globální mapa odvodů na účty ČNB — seed 1056
+    // Legislativní číselník sazeb členských států (seed 1152/1292/1294, dotah 1319).
+    // NENÍ to uživatelský údaj: jsou to sazby DPH platné v EU. Když zmizí, import
+    // i vystavení odmítne KAŽDÝ doklad se sazbou vyšší než 0 % s hláškou, která radí
+    // spustit migrate.php — jenže ten ho nevrátí, protože migrace jsou evidované jako
+    // proběhlé. Reset uživatelských dat tedy instalaci utrhne nohy. Nahlášeno
+    // z hostované instance po `reset.php`.
+    'oss_member_state_rates',
+    // ⚠️ Provozní údaje INSTANCE, ne uživatelská data — stejná třída jako cron_settings níž.
+    // `license` se sice po smazání znovu založí, ale jako TRIAL: placená instalace by se
+    // resetem dat tiše degradovala. `backup_schedule_contract` drží parametry sjednané
+    // s poskytovatelem (runs_per_day, contract_max) a znovuzaložení by je nahradilo
+    // výchozími. `instance_storage_usage` je podklad pro měření u poskytovatele.
+    'license',
+    'backup_schedule_contract',
+    'instance_storage_usage',
     // ⚠️ Provozní nastavení instalace, NE uživatelská data. Když řádek zmizí,
     // spadne režim plánovaných úloh zpátky na `individual` — a na instalaci,
     // kde je hostingem nastavený `dispatcher`, se dispatcher ukončí bez práce
@@ -150,6 +168,11 @@ $partial = [
     'vat_classifications'         => 'supplier_id IS NOT NULL',
     'bank_email_notice_providers' => 'supplier_id IS NOT NULL', // ponech globální bankovní providery
     'posting_rules'               => 'supplier_id IS NOT NULL', // ponech globální předkontace (seed 1006+)
+    // Číselník příjemců podání (ČSSZ e-Podání, zdravotní pojišťovny vč. ID datových
+    // schránek) — seed 1381/1410/1535. Globální řádky jsou legislativní údaj, ne
+    // uživatelská data, a migrate.php je po smazání nevrátí. Per-tenant override
+    // (vlastní příjemce firmy) se maže.
+    'submission_recipients'       => 'supplier_id IS NOT NULL',
     'role_permissions'            => 'role_id NOT IN (SELECT id FROM roles WHERE system_key IS NOT NULL)',
     'roles'                       => 'system_key IS NULL', // ponech systémové role (seed 1074)
 ];

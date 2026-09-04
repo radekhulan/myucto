@@ -47,6 +47,17 @@ php api/bin/reset.php                # smaže všechna user-data (vyžaduje "ANO
 php api/bin/recompute-stats.php      # přepočítá agregované statistiky
 ```
 
+> [!NOTE]
+> `reset.php` maže **uživatelská data**, ne instalaci. Globální číselníky (země, sazby
+> DPH, sazby členských států pro OSS, výkazy, příjemci podání) i provozní údaje
+> instance (licence, režim plánovaných úloh, smlouva o zálohování) zůstávají — po
+> jejich smazání by je totiž nikdo nevrátil, protože je seedují migrace a ty jsou
+> evidované jako proběhlé.
+>
+> Kdyby přesto číselník sazeb členských států kdykoli zmizel, vrátí ho
+> `php api/bin/migrate.php` — má na to sebeopravný krok. Poznáte to podle toho, že
+> import i vystavení odmítnou každý doklad se sazbou vyšší než 0 %.
+
 ## 5.5 Cron skripty
 
 V `cmd/` jsou připravené `.cmd` (Windows Task Scheduler) i `.sh` (Linux cron)
