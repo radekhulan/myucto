@@ -264,6 +264,23 @@ function runAutoBackfills(\PDO $db, string $binDir): void
                              AND status != 'cancelled'",
             'script'  => 'backfill-purchase-varsymbols.php',
         ],
+        [
+            // Číselník sazeb členských států je seed migrací 1152/1292/1294, takže po
+            // ztrátě obsahu ho migrate.php sám nevrátí — migrace jsou evidované jako
+            // proběhlé. Přitom právě „spusťte php api/bin/migrate.php" radí uživateli
+            // KAŽDÁ hláška, která na prázdný číselník narazí (import i vystavení
+            // odmítne doklad se sazbou vyšší než 0 %). Bez tohohle kroku ta rada lže.
+            //
+            // Podmínka se ptá na SEEDOVANÉ řádky, ne na prázdnou tabulku: instalace,
+            // kde si někdo po ztrátě založil vlastní sazbu (`is_custom = 1`), by jinak
+            // vypadala zdravě a seed by se nedotáhl.
+            'name'    => 'oss-member-state-rates',
+            'reason'  => 'chybějící legislativní číselník sazeb členských států',
+            'count'   => "SELECT CASE WHEN EXISTS (
+                              SELECT 1 FROM oss_member_state_rates WHERE is_custom = 0
+                          ) THEN 0 ELSE 1 END",
+            'script'  => 'backfill-oss-rates.php',
+        ],
     ];
 
     echo "\n=== Auto-backfill check ===\n";
