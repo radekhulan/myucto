@@ -405,6 +405,29 @@ final readonly class SubmissionInboxService
         );
     }
 
+    /**
+     * Stránka příchozích zpráv od nejnověji doručené.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
+     */
+    public function listRecentPage(
+        int $supplierId,
+        string $environment,
+        ?string $classification = null,
+        int $limit = SubmissionInboxRepository::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+        string $visibility = 'active',
+    ): array {
+        return $this->inbox->listRecentPage(
+            $supplierId,
+            $environment,
+            $classification,
+            $limit,
+            $offset,
+            $visibility,
+        );
+    }
+
     /** @return array<string,mixed>|null */
     public function pollState(int $supplierId, string $channelCode, string $environment): ?array
     {

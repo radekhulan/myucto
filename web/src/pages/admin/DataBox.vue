@@ -48,6 +48,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -97,6 +98,11 @@ const recipients = ref<SubmissionRecipient[]>([])
 const outbox = ref<OutboxSubmission[]>([])
 const inbox = ref<InboxMessage[]>([])
 const inboxVisibility = ref<'active' | 'hidden'>('active')
+// Schránka roste každý měsíc a mazat se z ní nesmí, takže se listuje.
+const inboxPageSize = 25
+const inboxTotal = ref(0)
+const inboxOffset = ref(0)
+const inboxPage = computed(() => Math.floor(inboxOffset.value / inboxPageSize) + 1)
 const pollState = ref<InboxPollState | null>(null)
 const inboxStorageItems = ref<DataBoxInboxStorageSetting[]>([])
 const inboxArchiveFolders = ref<DataBoxArchiveFolder[]>([])
@@ -334,7 +340,13 @@ async function loadAll() {
       dataBoxApi.credentials(),
       dataBoxApi.recipients(),
       dataBoxApi.outbox(environment.value),
-      dataBoxApi.inbox(environment.value, undefined, inboxVisibility.value),
+      dataBoxApi.inbox(
+        environment.value,
+        undefined,
+        inboxVisibility.value,
+        inboxPageSize,
+        inboxOffset.value,
+      ),
       // Nespárovaná doručenka nesmí zmizet z očí — načítá se vždycky, ne až
       // na vyžádání.
       dataBoxApi.unmatchedReceipts(environment.value).catch(() => [] as InboxMessage[]),
@@ -358,6 +370,7 @@ async function loadAll() {
     recipients.value = recips
     outbox.value = out
     inbox.value = inb.items
+    inboxTotal.value = inb.total ?? inb.items.length
     pollState.value = inb.state
     unmatchedReceipts.value = unmatched
     savedMobileCredential.value = mobileProfile
@@ -433,6 +446,15 @@ async function reprocessInboxMessage(message: InboxMessage) {
 async function setInboxVisibility(visibility: 'active' | 'hidden') {
   if (inboxVisibility.value === visibility) return
   inboxVisibility.value = visibility
+  // Jiný pohled má vlastní počet zpráv; zůstat na páté stránce by ukázalo prázdno.
+  inboxOffset.value = 0
+  await loadAll()
+}
+
+async function goToInboxPage(nextPage: number) {
+  const offset = Math.max(0, (nextPage - 1) * inboxPageSize)
+  if (offset === inboxOffset.value) return
+  inboxOffset.value = offset
   await loadAll()
 }
 
@@ -2741,6 +2763,15 @@ onUnmounted(clearMobileStatusTimer)
           </tbody>
         </table>
       </div>
+
+      <PaginationBar
+        v-if="inboxTotal > inboxPageSize"
+        data-test="inbox-pagination"
+        :page="inboxPage"
+        :per-page="inboxPageSize"
+        :total="inboxTotal"
+        @update:page="goToInboxPage"
+      />
     </section>
 
     <!-- ─────────────── Výzvy k odstranění vad (§ 74 DŘ) ─────────────── -->

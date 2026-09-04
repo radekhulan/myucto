@@ -762,13 +762,26 @@ export const dataBoxApi = {
       session_id: sessionId,
     }).then(r => r.data),
 
+  /**
+   * Příchozí zprávy od nejnověji doručené, po stránkách. Řadí se podle
+   * rozhodného doručení, ne podle pořadí stažení — jinak seznam vypadá
+   * zpřeházeně pokaždé, když jedno vyzvednutí dotáhne i starší zprávu.
+   */
   inbox: (
     environment: string,
     classification?: InboxClassification,
     visibility: 'active' | 'hidden' | 'all' = 'active',
+    limit?: number,
+    offset?: number,
   ) =>
-    api.get<{ items: InboxMessage[]; state: InboxPollState | null }>('/submissions/inbox', {
-      params: { environment, classification, visibility },
+    api.get<{
+      items: InboxMessage[]
+      total: number
+      limit: number
+      offset: number
+      state: InboxPollState | null
+    }>('/submissions/inbox', {
+      params: { environment, classification, visibility, limit, offset },
     }).then(r => r.data),
 
   /**

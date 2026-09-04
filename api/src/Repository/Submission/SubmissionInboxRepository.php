@@ -143,6 +143,9 @@ final class SubmissionInboxRepository
         return $row !== false ? self::normalize($row) : null;
     }
 
+    public const LIST_DEFAULT_LIMIT = 25;
+    public const LIST_MAX_LIMIT = 200;
+
     /** @return list<array<string,mixed>> */
     public function listRecent(
         int $supplierId,
@@ -152,28 +155,75 @@ final class SubmissionInboxRepository
         string $visibility = 'active',
     ): array
     {
+        return $this->listRecentPage(
+            $supplierId,
+            $environment,
+            $classification,
+            $limit,
+            0,
+            $visibility,
+        )['items'];
+    }
+
+    /**
+     * Stránka příchozích zpráv, od NEJNOVĚJI DORUČENÉ.
+     *
+     * ── Proč se neřadí podle `id` ───────────────────────────────────────────
+     * `id` je pořadí, v jakém zprávy stáhla aplikace, ne pořadí, v jakém přišly
+     * do schránky. Stačí jedno vyzvednutí, které dotáhne starší zprávu později,
+     * a seznam vypadá zpřeházeně: dnešní protokol nad červnovým oznámením a pod
+     * ním zase dnešní doručenka. Účetní hledá „co přišlo naposled", takže se
+     * řadí podle rozhodného doručení. `fetched_at` je záloha pro zprávu, u které
+     * ISDS čas doručení nedodá; `id` rozsoudí shodu na sekundu.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
+     */
+    public function listRecentPage(
+        int $supplierId,
+        string $environment,
+        ?string $classification = null,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+        string $visibility = 'active',
+    ): array {
         $this->assertAvailable();
-        $limit = max(1, min(500, $limit));
-        $sql = 'SELECT ' . $this->columns() . ' FROM ' . self::TABLE . '
-                 WHERE supplier_id = ? AND environment = ?';
-        $params = [$supplierId, $environment];
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
         if (!in_array($visibility, ['active', 'hidden', 'all'], true)) {
             throw new \InvalidArgumentException('Neznámý pohled příchozích zpráv.');
         }
+        $where = ' WHERE supplier_id = ? AND environment = ?';
+        $params = [$supplierId, $environment];
         if ($this->supportsPrivacyLifecycle() && $visibility !== 'all') {
-            $sql .= $visibility === 'hidden'
+            $where .= $visibility === 'hidden'
                 ? ' AND hidden_at IS NOT NULL'
                 : ' AND hidden_at IS NULL';
         }
         if ($classification !== null) {
-            $sql .= ' AND classification = ?';
+            $where .= ' AND classification = ?';
             $params[] = $classification;
         }
-        $sql .= ' ORDER BY id DESC LIMIT ' . $limit;
 
-        $stmt = $this->db->pdo()->prepare($sql);
+        $countStmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM ' . self::TABLE . $where,
+        );
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . $this->columns() . ' FROM ' . self::TABLE . $where
+            . ' ORDER BY COALESCE(delivered_at, fetched_at) DESC, id DESC'
+            . ' LIMIT ' . $limit . ' OFFSET ' . $offset,
+        );
         $stmt->execute($params);
-        return array_values(array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []));
+
+        return [
+            'items' => array_values(array_map(
+                self::normalize(...),
+                $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+            )),
+            'total' => $total,
+        ];
     }
 
     /** @return array<string,mixed>|null */

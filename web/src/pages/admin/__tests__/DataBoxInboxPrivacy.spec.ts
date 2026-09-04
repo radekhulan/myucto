@@ -138,7 +138,9 @@ describe('DataBox — soukromí příchozích zpráv', () => {
     await wrapper.get('[data-test="inbox-purge-content"]').trigger('click')
     await flushPromises()
 
-    expect(m.inbox).toHaveBeenCalledWith('production', undefined, 'hidden')
+    // Přepnutí pohledu vrací listování na první stránku: skrytých zpráv je
+    // jiný počet a zůstat na páté stránce by ukázalo prázdno.
+    expect(m.inbox).toHaveBeenCalledWith('production', undefined, 'hidden', 25, 0)
     expect(m.purgeInboxLocalContent).toHaveBeenCalledWith(51, 4)
     expect(m.toastSuccess).toHaveBeenCalledWith('databox.inbox.privacy.purged')
   })
