@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS activity_log_chain_head (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     CONSTRAINT chk_alch_singleton CHECK (id = 1)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='§ 33a — hlava hash-řetězu activity_log; jediný řádek, bodový zámek místo range scanu';
 
 -- Navázání na existující řetěz: bez toho by první zapečetění po migraci začalo znovu

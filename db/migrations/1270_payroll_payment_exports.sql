@@ -110,10 +110,10 @@ CREATE TRIGGER trg_payroll_payment_export_validate_insert
 BEFORE INSERT ON payroll_payment_exports
 FOR EACH ROW
 BEGIN
-  DECLARE batch_snapshot_hash CHAR(64) DEFAULT NULL;
-  DECLARE batch_export_format VARCHAR(16) DEFAULT NULL;
+  DECLARE batch_snapshot_hash CHAR(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
+  DECLARE batch_export_format VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE previous_batch_id BIGINT UNSIGNED DEFAULT NULL;
-  DECLARE previous_export_format VARCHAR(16) DEFAULT NULL;
+  DECLARE previous_export_format VARCHAR(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE previous_revision_no INT UNSIGNED DEFAULT NULL;
 
   SELECT batch.snapshot_hash, batch.export_format

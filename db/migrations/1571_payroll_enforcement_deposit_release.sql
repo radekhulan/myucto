@@ -61,9 +61,9 @@ BEGIN
   DECLARE returned_total BIGINT DEFAULT 0;
   DECLARE result_fee BIGINT DEFAULT NULL;
   DECLARE decision_case_id BIGINT UNSIGNED DEFAULT NULL;
-  DECLARE decision_command VARCHAR(40) DEFAULT NULL;
+  DECLARE decision_command VARCHAR(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
   DECLARE decision_document_id BIGINT UNSIGNED DEFAULT NULL;
-  DECLARE decision_evidence_hash CHAR(64) DEFAULT NULL;
+  DECLARE decision_evidence_hash CHAR(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
 
   IF NEW.entry_kind = 'released_for_remittance' THEN
     SELECT decision.case_id, decision.command_name,

@@ -35,7 +35,7 @@ CREATE OR REPLACE TRIGGER trg_payroll_run_revision_immutable_update
 BEFORE UPDATE ON payroll_run_revisions
 FOR EACH ROW
 BEGIN
-  DECLARE run_status VARCHAR(32) DEFAULT NULL;
+  DECLARE run_status VARCHAR(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL;
 
   -- Odsunutá i zahozená revize je konečná: doklad o tom, co kdysi platilo
   -- (resp. co se zahodilo), se už nemění.

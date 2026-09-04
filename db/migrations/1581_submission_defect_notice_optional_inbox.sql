@@ -7,7 +7,7 @@ CREATE TRIGGER trg_submission_defect_notice_inbox_privacy
 BEFORE INSERT ON submission_defect_notices
 FOR EACH ROW
 BEGIN
-  DECLARE inbox_state VARCHAR(16);
+  DECLARE inbox_state VARCHAR(16) COLLATE utf8mb4_unicode_ci;
   IF NEW.inbox_message_id IS NOT NULL THEN
     SET inbox_state = (
       SELECT local_content_state
