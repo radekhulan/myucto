@@ -425,13 +425,20 @@ function canCancel(group: AttemptGroup): boolean {
  * Druh O smí navázat až na konečný protokol. Samotné převzetí zprávy branou
  * nic neříká o tom, které součásti ČSSZ přijala, a výběr před výsledkem by byl
  * jen odhad. Definitivní způsobilost ještě ověří server nad stavem podání.
+ *
+ * Konečný protokol pozná stav PODÁNÍ, ne uzavřený pokus o odeslání. Dřív se tu
+ * čekalo na `attempt.status === 'completed'`, jenže to platí jen pro VREP —
+ * u hlášení odeslaného datovou schránkou protokol přijde do schránky a žádný
+ * dotazovací pokus se nikdy neuzavře. Podání za 08/2026 tak bylo „částečně
+ * přijato", nabízelo storno (to na pokus nečeká), a opravu ne. Stav
+ * `accepted`/`partially_accepted` přitom server zapíše výhradně z ověřeného
+ * protokolu, takže je to silnější podmínka než uzavřený pokus.
  */
 function canCorrect(group: AttemptGroup): boolean {
   if (
     !canWrite.value
     || group.submissionKind !== 'regular'
     || !['accepted', 'partially_accepted'].includes(group.submissionStatus ?? '')
-    || !group.attempts.some(attempt => attempt.status === 'completed')
   ) {
     return false
   }
