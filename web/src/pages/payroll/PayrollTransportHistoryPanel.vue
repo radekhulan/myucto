@@ -38,6 +38,7 @@ import {
   type PayrollJmhzImportedProtocol,
   type PayrollJmhzIsdsEnqueueResult,
   type PayrollJmhzProtocolError,
+  type PayrollJmhzDispatchedSubmission,
   type PayrollJmhzReadySubmission,
   type PayrollJmhzTransportAttempt,
   type PayrollJmhzTransportEnvironment,
@@ -64,6 +65,7 @@ const environment = defineModel<PayrollJmhzTransportEnvironment>('environment', 
 const loading = ref(false)
 const attempts = ref<PayrollJmhzTransportAttempt[]>([])
 const readySubmissions = ref<PayrollJmhzReadySubmission[]>([])
+const dispatchedSubmissions = ref<PayrollJmhzDispatchedSubmission[]>([])
 const imported = ref<PayrollJmhzImportedProtocol[]>([])
 const importing = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -223,11 +225,21 @@ interface AttemptGroup {
   submissionStatus: string | null
   correctsSubmissionId: number | null
   attempts: PayrollJmhzTransportAttempt[]
+  /**
+   * Odchozí zpráva datové schránky, pokud podání odešlo tudy. Skupina pak
+   * nemá žádný pokus — protokol chodí do schránky a VREP se na nic neptá.
+   */
+  dispatched: PayrollJmhzDispatchedSubmission | null
 }
 
 /**
  * Seskupení podle podání se zachovaným pořadím: první výskyt určí místo
  * skupiny, pokusy uvnitř zůstanou tak, jak přišly ze serveru (od nejnovějšího).
+ *
+ * Za pokusy se přidávají hlášení odeslaná DATOVKOU. Ta žádný pokus nemají,
+ * takže by se do přehledu jinak nedostala vůbec — a s nimi ani storno a oprava.
+ * Podání, které má obojí (zkusilo se VREP a odešlo datovkou), zůstává jednou
+ * kartou z ledgeru pokusů; server ho v druhém seznamu už nevrací.
  */
 const groups = computed<AttemptGroup[]>(() => {
   const byId = new Map<number, AttemptGroup>()
@@ -243,11 +255,27 @@ const groups = computed<AttemptGroup[]>(() => {
         submissionStatus: attempt.submission_status,
         correctsSubmissionId: attempt.corrects_submission_id,
         attempts: [],
+        dispatched: null,
       }
       byId.set(attempt.submission_id, group)
       ordered.push(group)
     }
     group.attempts.push(attempt)
+  }
+  for (const sent of dispatchedSubmissions.value) {
+    if (byId.has(sent.submission_id)) continue
+    const group: AttemptGroup = {
+      submissionId: sent.submission_id,
+      periodStart: sent.period_start,
+      periodEnd: sent.period_end,
+      submissionKind: sent.submission_kind,
+      submissionStatus: sent.submission_status,
+      correctsSubmissionId: sent.corrects_submission_id,
+      attempts: [],
+      dispatched: sent,
+    }
+    byId.set(sent.submission_id, group)
+    ordered.push(group)
   }
   return ordered
 })
@@ -418,7 +446,10 @@ function canCancel(group: AttemptGroup): boolean {
   return canWrite.value
     && group.submissionKind === 'regular'
     && ['accepted', 'partially_accepted'].includes(group.submissionStatus ?? '')
-    && group.attempts.some(attempt => attempt.sent_at !== null)
+    // Odeslání dokládá buď pokus VREP, nebo odchozí zpráva datové schránky.
+    // Hlášení poslané datovkou žádný pokus nemá a stornovat ho jde stejně.
+    && (group.attempts.some(attempt => attempt.sent_at !== null)
+      || group.dispatched !== null)
 }
 
 /**
@@ -574,6 +605,7 @@ async function load() {
     ])
     attempts.value = history.attempts ?? []
     readySubmissions.value = history.ready_submissions ?? []
+    dispatchedSubmissions.value = history.dispatched_submissions ?? []
     attemptsTotal.value = history.total ?? 0
     imported.value = protocols.protocols ?? []
     importedTotal.value = protocols.total ?? 0
@@ -582,6 +614,7 @@ async function load() {
     // prázdný stav i seznam, aby se selhání nedalo přečíst jako „nic neodešlo".
     attempts.value = []
     readySubmissions.value = []
+    dispatchedSubmissions.value = []
     attemptsTotal.value = 0
     imported.value = []
     importedTotal.value = 0
@@ -1593,6 +1626,52 @@ onMounted(loadVariableSymbols)
                 {{ t('payroll.submissions.transport.storno.cancel') }}
               </button>
             </div>
+          </div>
+
+          <div
+            v-if="entry.group.dispatched"
+            :data-test="`transport-dispatched-${entry.group.submissionId}`"
+            class="border-b border-neutral-100 p-4 sm:p-6"
+          >
+            <p class="text-sm text-neutral-700">
+              {{ t('payroll.submissions.transport.dispatched.note') }}
+            </p>
+            <dl class="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.dispatched.recipient') }}
+                </dt>
+                <dd class="font-mono text-sm text-neutral-800">
+                  {{ entry.group.dispatched.outbox_recipient_box_id ?? '—' }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.dispatched.message_id') }}
+                </dt>
+                <dd class="font-mono text-sm text-neutral-800">
+                  {{ entry.group.dispatched.outbox_external_message_id ?? '—' }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.dispatched.sent_at') }}
+                </dt>
+                <dd class="text-sm text-neutral-800">
+                  {{ entry.group.dispatched.outbox_sent_at
+                    ? formatDateTime(entry.group.dispatched.outbox_sent_at)
+                    : t('payroll.submissions.transport.not_sent_yet') }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.dispatched.reference') }}
+                </dt>
+                <dd class="font-mono text-sm text-neutral-800">
+                  {{ entry.group.dispatched.outbox_correlation_reference }}
+                </dd>
+              </div>
+            </dl>
           </div>
 
           <div class="divide-y divide-neutral-100">

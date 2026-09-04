@@ -653,6 +653,122 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
     }
 
     /**
+     * Hlášení odeslané DATOVKOU nesmí z přehledu zmizet.
+     *
+     * Přehled „Stav odeslání" se skládal jen z pokusů kanálu VREP a z podání ve
+     * stavu `ready`. Odeslání datovou schránkou ale žádný pokus nezakládá a ze
+     * stavu `ready` podání odejde hned při zařazení do fronty — zmizelo tedy
+     * z obrazovky úplně a s ním storno i oprava. Přesně na tohle narazilo
+     * srpnové hlášení 2026, které se opravovalo po chybě 40244.
+     */
+    public function testDispatchedByDataBoxStaysVisibleWithoutAnyAttempt(): void
+    {
+        $pdo = $this->db->pdo();
+        $obligationId = (int) $pdo->query(
+            'SELECT obligation_id FROM payroll_submissions WHERE id = '
+            . $this->submissionId,
+        )->fetchColumn();
+        $pdo->prepare('UPDATE payroll_obligations SET agenda_code = ? WHERE id = ?')
+            ->execute([JmhzSubmissionBridgeService::AGENDA_CODE, $obligationId]);
+        // Kanál podání se schválně nechává tak, jak ho založilo zmrazení:
+        // odeslání datovkou pozná řádek odchozí fronty, ne sloupec `channel`.
+        $pdo->prepare(
+            'UPDATE payroll_submissions
+                SET status = "submitted", submitted_at = UTC_TIMESTAMP()
+              WHERE id = ?',
+        )->execute([$this->submissionId]);
+
+        $pdo->prepare(
+            'INSERT INTO payroll_submission_artifacts
+                (supplier_id, environment, submission_id, artifact_kind,
+                 direction, mime_type, content_ciphertext, byte_size,
+                 artifact_sha256, channel, idempotency_key_hash)
+             VALUES (?, ?, ?, "outbound_xml", "outbound", "application/xml",
+                     "enc:v2:test", 1, ?, "isds", ?)',
+        )->execute([
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $this->submissionId,
+            str_repeat('e', 64),
+            hash('sha256', "dispatched-artifact:{$this->supplierId}", true),
+        ]);
+        $artifactId = (int) $pdo->lastInsertId();
+
+        $outbox = new SubmissionOutboxRepository($this->db);
+        $queued = $outbox->enqueue([
+            'supplier_id' => $this->supplierId,
+            'environment' => self::ENVIRONMENT,
+            'channel' => 'isds',
+            'agenda_code' => JmhzSubmissionBridgeService::AGENDA_CODE,
+            'recipient_id' => null,
+            'recipient_box_id' => '9tsaf6s',
+            'subject' => 'Syntetické JMHZ datovkou',
+            'artifact_kind' => 'payroll_submission',
+            'artifact_id' => $artifactId,
+            'artifact_filename' => 'synthetic-jmhz-isds.xml',
+            'artifact_sha256' => str_repeat('e', 64),
+            'correlation_reference' => 'TEST-JMHZ-ISDS-' . $this->submissionId,
+            'created_by' => null,
+        ], 'dispatched-outbox-' . $this->submissionId);
+        $outboxId = (int) $queued['row']['id'];
+
+        // Zpráva, která ve frontě teprve čeká, mezi odeslaná nepatří.
+        self::assertSame(
+            [],
+            $this->repository->listDispatchedSubmissions(
+                $this->supplierId,
+                self::ENVIRONMENT,
+                [JmhzSubmissionBridgeService::AGENDA_CODE],
+            ),
+        );
+
+        $userId = (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $claimed = $outbox->claimForManualSending($this->supplierId, $outboxId, $userId);
+        self::assertNotNull($claimed);
+        $outbox->markSentManually(
+            $this->supplierId,
+            $outboxId,
+            '1752953999',
+            new \DateTimeImmutable('2026-08-15 08:00:00'),
+            (int) $claimed['row_version'],
+        );
+
+        $dispatched = $this->repository->listDispatchedSubmissions(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            [JmhzSubmissionBridgeService::AGENDA_CODE],
+        );
+
+        self::assertCount(1, $dispatched);
+        self::assertSame($this->submissionId, $dispatched[0]['submission_id']);
+        self::assertSame('submitted', $dispatched[0]['submission_status']);
+        self::assertSame($outboxId, $dispatched[0]['outbox_id']);
+        self::assertSame('1752953999', $dispatched[0]['outbox_external_message_id']);
+        self::assertSame('9tsaf6s', $dispatched[0]['outbox_recipient_box_id']);
+
+        // Jakmile pokus existuje, kartu ukazuje ledger pokusů. Kdyby se podání
+        // vrátilo i tudy, měla by účetní na obrazovce dvě karty k jednomu podání.
+        $this->repository->open(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $this->submissionId,
+            self::CHANNEL,
+            1,
+            'dispatched-attempt',
+            str_repeat('f', 64),
+            null,
+        );
+        self::assertSame(
+            [],
+            $this->repository->listDispatchedSubmissions(
+                $this->supplierId,
+                self::ENVIRONMENT,
+                [JmhzSubmissionBridgeService::AGENDA_CODE],
+            ),
+        );
+    }
+
+    /**
      * Neúspěšné odeslání nesmí podání navždy odstřihnout od tlačítka.
      *
      * Zmrazené podání zůstává `ready`, dokud reálně neodejde. Když se pokus
