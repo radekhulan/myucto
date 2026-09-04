@@ -153,6 +153,40 @@ final class PayrollDeadlineAssessmentServiceTest extends TestCase
                 'is_overdue' => false,
             ],
         ];
+        /*
+         * Měsíc uzavřený protokolem ČSSZ nesmí dál volat po zásahu.
+         *
+         * Obsahová oprava JMHZ řádné podání ZÁMĚRNĚ nenahrazuje, takže řádné
+         * zůstane navždy `partially_accepted`. Když ČSSZ potvrdí, že hlášení
+         * je úplné, uzavře se povinnost — a dokud stav podání přebíjel stav
+         * povinnosti, ukazoval tentýž řádek zároveň „Splněno" i „Je nutný
+         * zásah".
+         */
+        yield 'fulfilled obligation beats partially accepted submission' => [
+            '2026-08-01',
+            '2026-08-20',
+            'fulfilled',
+            'partially_accepted',
+            [
+                'phase' => 'fulfilled',
+                'days_to_due' => 5,
+                'is_action_required' => false,
+                'is_overdue' => false,
+            ],
+        ];
+        // Nahrazené podání povinnost nenese; nese ji nástupce, který ji splnil.
+        yield 'fulfilled obligation beats superseded submission' => [
+            '2026-08-01',
+            '2026-08-10',
+            'fulfilled',
+            'superseded',
+            [
+                'phase' => 'fulfilled',
+                'days_to_due' => -5,
+                'is_action_required' => false,
+                'is_overdue' => false,
+            ],
+        ];
         yield 'cancelled remains terminal' => [
             '2026-08-01',
             '2026-08-10',

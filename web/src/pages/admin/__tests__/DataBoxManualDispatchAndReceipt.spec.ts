@@ -22,7 +22,7 @@ const m = vi.hoisted(() => ({
   unmatchedReceipts: vi.fn(),
   receiptCandidates: vi.fn(),
   matchReceipt: vi.fn(),
-  downloadReceipt: vi.fn(),
+  downloadReceiptsBatch: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
@@ -38,7 +38,7 @@ vi.mock('@/api/dataBox', () => ({
     unmatchedReceipts: m.unmatchedReceipts,
     receiptCandidates: m.receiptCandidates,
     matchReceipt: m.matchReceipt,
-    downloadReceipt: m.downloadReceipt,
+    downloadReceiptsBatch: m.downloadReceiptsBatch,
   },
 }))
 
@@ -139,13 +139,21 @@ function receipt(overrides: Partial<InboxMessage> = {}): InboxMessage {
   }
 }
 
-async function mountWith(rows: OutboxSubmission[], unmatched: InboxMessage[] = []) {
+async function mountWith(
+  rows: OutboxSubmission[],
+  unmatched: InboxMessage[] = [],
+  mobileProfile: { saved: boolean; username: string | null; environment: string } = {
+    saved: false,
+    username: null,
+    environment: 'production',
+  },
+) {
   m.credentials.mockResolvedValue([credential])
   m.recipients.mockResolvedValue([])
   m.outbox.mockResolvedValue(rows)
   m.inbox.mockResolvedValue({ items: [], state: null })
   m.unmatchedReceipts.mockResolvedValue(unmatched)
-  m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })
+  m.mobileKeyProfile.mockResolvedValue(mobileProfile)
 
   const wrapper = mount(DataBox, { global: { stubs: { EmptyState: true } } })
   await flushPromises()
@@ -241,30 +249,22 @@ describe('DataBox — ruční odeslání a doručenka', () => {
    * Zdravotní pojišťovna na podání nikdy neodpoví — dodejka je jediný důkaz,
    * který kdy vznikne. `dmID` aplikace zná, takže si o ni umí říct sama a
    * účetní nemusí exportovat ZFO z portálu datovky.
+   *
+   * Stahuje se HROMADNĚ z jednoho místa dole: přihlášení do schránky je
+   * potvrzení v mobilu a dělat ho zvlášť u každé zprávy znamená, že to účetní
+   * po uzávěrce přestane dělat.
    */
-  it('u odeslané zprávy s dmID nabídne stažení doručenky z ISDS', async () => {
-    m.downloadReceipt.mockResolvedValue({
-      status: 'matched',
-      message: 'Doručenka je připojená k podání.',
-      reason: 'isds_download',
-      inbox_message_id: 77,
-      document_id: 500,
-      outbox_id: 10,
-      matched_by: 'isds_download',
-      candidates: [],
-      submission: null,
-      receipt: {
-        message_id: '9900001',
-        sender_box_id: 'abcdefg',
-        sender_name: 'Naše firma',
-        recipient_box_id: 'zzzzzzz',
-        recipient_name: 'Úřad',
-        sender_ident: 'DPHDP3-20260815-ABCDEF',
+  it('nabídne hromadné stažení doručenek, když je co stahovat', async () => {
+    m.downloadReceiptsBatch.mockResolvedValue({
+      attached: 1,
+      pending: 0,
+      failed: 0,
+      items: [{
+        outbox_id: 10,
         subject: 'Přiznání k DPH',
-        sent_at: '2026-08-15 09:00:00',
-        delivered_at: '2026-08-15 10:00:00',
-        signature_status: 'unverified',
-      },
+        status: 'matched',
+        message: 'Doručenka je připojená k podání.',
+      }],
     })
     const wrapper = await mountWith([
       submission({
@@ -276,21 +276,72 @@ describe('DataBox — ruční odeslání a doručenka', () => {
       }),
     ])
 
-    const button = wrapper.find('[data-test="outbox-receipt-download"]')
-    expect(button.exists()).toBe(true)
-    await button.trigger('click')
+    const block = wrapper.find('[data-test="outbox-receipts-batch"]')
+    expect(block.exists()).toBe(true)
+    expect(block.text()).toContain('databox.outbox.receiptsBatch.waiting')
+    // Všechny čtyři cesty přihlášení, ne jenom Mobilní klíč.
+    for (const method of ['mobile_key', 'password', 'sms', 'certificate']) {
+      expect(block.text()).toContain(`databox.inbox.auth.${method}.title`)
+    }
+
+    // Firma má uložený certifikát, takže tahle cesta jde spustit rovnou.
+    await block.findAll('input[type="radio"]')[3].setValue()
+    await wrapper.get('[data-test="outbox-receipts-batch-submit"]').trigger('click')
     await flushPromises()
 
-    expect(m.downloadReceipt).toHaveBeenCalledWith(10, 'production')
-    // Ruční nahrání zůstává vedle jako záloha, ne náhrada.
+    expect(m.downloadReceiptsBatch).toHaveBeenCalledWith('production')
+    const result = wrapper.find('[data-test="outbox-receipts-batch-result"]')
+    expect(result.exists()).toBe(true)
+    expect(result.text()).toContain('Doručenka je připojená k podání.')
+    // Ruční nahrání u řádku zůstává vedle jako záloha, ne náhrada.
     expect(wrapper.text()).toContain('databox.outbox.uploadReceipt')
   })
 
-  /** Bez `dmID` není ISDS na co se zeptat — tlačítko se nesmí nabízet. */
-  it('bez ID odeslané zprávy stažení doručenky nenabídne', async () => {
+  /**
+   * Uložený přístup do schránky je jeden na firmu, uživatele a prostředí.
+   * Nechat pole prázdné jen v dávce doručenek vypadá, že tam uložený přístup
+   * neplatí, a účetní ho opisuje znovu.
+   */
+  it('předvyplní uložené uživatelské jméno i v dávce doručenek', async () => {
+    const wrapper = await mountWith(
+      [submission({
+        dispatch_state: 'sent',
+        external_message_id: '1752953337',
+        sent_at: '2026-08-15 09:00:00',
+      })],
+      [],
+      { saved: true, username: 'vpte4i', environment: 'production' },
+    )
+
+    const block = wrapper.get('[data-test="outbox-receipts-batch"]')
+    const username = block.get('[data-test="outbox-receipts-batch-username"]')
+    expect((username.element as HTMLInputElement).value).toBe('vpte4i')
+    // Že se uložený přístup opravdu použije, říká i věta pod polem. Její text
+    // se tu neověřuje: `t` je v testu nahrazené a interpolaci nedělá, takže by
+    // se kontroloval překlad, ne chování.
+    expect(block.find('[data-test="outbox-receipts-batch-saved-credential"]').exists())
+      .toBe(true)
+  })
+
+  /** Bez `dmID` není ISDS na co se zeptat — blok se nesmí nabízet. */
+  it('bez ID odeslané zprávy hromadné stažení nenabídne', async () => {
     const wrapper = await mountWith([submission({ dispatch_state: 'sent' })])
 
-    expect(wrapper.find('[data-test="outbox-receipt-download"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="outbox-receipts-batch"]').exists()).toBe(false)
+  })
+
+  /** Zpráva, která doručenku už má, do dávky nepatří — a blok pak nemá co dělat. */
+  it('u zprávy s doručenkou hromadné stažení nenabídne', async () => {
+    const wrapper = await mountWith([
+      submission({
+        dispatch_state: 'delivered',
+        external_message_id: '9900001',
+        sent_at: '2026-08-15 09:00:00',
+        receipt_document_id: 500,
+      }),
+    ])
+
+    expect(wrapper.find('[data-test="outbox-receipts-batch"]').exists()).toBe(false)
   })
 
   it('u ručně odeslaného podání bez doručenky řekne, že se na ni čeká', async () => {

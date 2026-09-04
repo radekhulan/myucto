@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Service\Document\ZfoExtractor;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzMonthCompletionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenSubmissionIdentity;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
@@ -49,6 +50,7 @@ final readonly class JmhzIsdsInboxProcessor implements SubmissionInboxMessagePro
         private PayrollSubmissionDispatchProjection $dispatchProjection,
         private SubmissionOutboxService $outboxService,
         private JmhzFrozenPayloadReader $frozen,
+        private JmhzMonthCompletionService $months,
         private ZfoExtractor $zfo,
         private JmhzProtocolSignatureVerifierInterface $signatures,
         private JmhzProtocolParser $parser = new JmhzProtocolParser(),
@@ -132,28 +134,42 @@ final readonly class JmhzIsdsInboxProcessor implements SubmissionInboxMessagePro
                 $verifier,
             );
         } catch (\Throwable $exception) {
-            $current = $this->submissions->get($supplierId, $submissionId);
-            $receipt = $this->submissions->importReceipt(
-                $supplierId,
-                $submissionId,
-                (int) $current['row_version'],
-                null,
-                $bytes,
-                $header->externalMessageId,
-                $report->correlationReference,
-                $report->submissionClass,
-                $declaredStatus,
-                'isds',
-                $idempotencyKey,
-                $actorUserId,
-                null,
-            );
+            $code = $exception instanceof JmhzTransportException
+                ? $exception->errorCode
+                : 'jmhz_isds_protocol_untrusted';
+            try {
+                $current = $this->submissions->get($supplierId, $submissionId);
+                $receipt = $this->submissions->importReceipt(
+                    $supplierId,
+                    $submissionId,
+                    (int) $current['row_version'],
+                    null,
+                    $bytes,
+                    $header->externalMessageId,
+                    $report->correlationReference,
+                    $report->submissionClass,
+                    $declaredStatus,
+                    'isds',
+                    $idempotencyKey,
+                    $actorUserId,
+                    null,
+                );
+            } catch (\Throwable) {
+                // Tenhle protokol už v evidenci JE, jen se jeho dřívější
+                // uložený výklad liší od dnešního. Idempotence to odmítá
+                // správně — jednou přijatý doklad se nepřepisuje. Není to
+                // porucha ke spadnutí na 500: zpracování prostě nemá co
+                // přidat a člověku se to řekne větou.
+                return self::result(
+                    'manual_review',
+                    'jmhz_isds_protocol_already_processed',
+                    $submissionId,
+                );
+            }
 
             return self::result(
                 'manual_review',
-                $exception instanceof JmhzTransportException
-                    ? $exception->errorCode
-                    : 'jmhz_isds_protocol_untrusted',
+                $code,
                 $submissionId,
                 (int) $receipt['id'],
             );
@@ -165,6 +181,10 @@ final readonly class JmhzIsdsInboxProcessor implements SubmissionInboxMessagePro
             $declaredStatus,
             'Ověřený protokol ČSSZ z datové schránky.',
         );
+        // Hlášení je řetězec podání, ne jedno podání. Když ČSSZ řekne, že je
+        // měsíc zpracovaný a úplný, není za období co dodávat — i když řádné
+        // podání zůstalo „částečně přijaté" a oprava ho záměrně nenahrazuje.
+        $this->months->apply($supplierId, $environment, $submissionId, $report);
 
         return self::result(
             'processed',
@@ -193,9 +213,11 @@ final readonly class JmhzIsdsInboxProcessor implements SubmissionInboxMessagePro
             return $this->sealedVerifier($report->correlationReference);
         }
 
+        // Součásti i s identitou zaměstnance: výsledek formuláře se bez ní sice
+        // uloží, ale obrazovka opravy pak neví, koho se odmítnutí týká.
         return new JmhzDeliveredProtocolVerifier(
             $identity,
-            $this->frozen->formGuids($supplierId, $environment, $submissionId),
+            $this->frozen->describe($supplierId, $environment, $submissionId)['forms'],
             [],
             $this->parser,
         );
@@ -260,11 +282,50 @@ final readonly class JmhzIsdsInboxProcessor implements SubmissionInboxMessagePro
         if ($matches === []) {
             return 'jmhz_isds_response_unmatched';
         }
-        if (count($matches) > 1) {
-            return 'jmhz_isds_response_ambiguous';
+        if (count($matches) === 1) {
+            return $matches[0];
         }
 
-        return $matches[0];
+        // `idPodani` označuje CELÝ měsíční řetězec, ne jedno podání: řádné
+        // hlášení i jeho opravy ho sdílejí. Jakmile za období odejde druhé
+        // podání, sedí identita na obě a shoda sama o sobě nestačí.
+        //
+        // Rozsoudí je `datumPodani` z protokolu, což je čas podání KONKRÉTNÍ
+        // datové zprávy. Ověřeno na obou protokolech za 08/2026: 10:23:32
+        // a 13:38:18 přesně odpovídají časům odeslání obou zpráv.
+        $submittedAt = self::utcTimestamp($report->submittedDate);
+        if ($submittedAt !== null) {
+            $exact = array_values(array_filter(
+                $matches,
+                static fn (array $match): bool
+                    => self::utcTimestamp($match[0]['sent_at'] ?? null) === $submittedAt,
+            ));
+            if (count($exact) === 1) {
+                return $exact[0];
+            }
+        }
+
+        return 'jmhz_isds_response_ambiguous';
+    }
+
+    /**
+     * Čas v UTC na vteřinu, nebo `null`, když se přečíst nedá.
+     *
+     * Protokol píše čas s posunem (`2026-09-04T13:38:18+02:00`), odchozí fronta
+     * ho drží v UTC. Porovnávat je jako řetězce by neshodlo nikdy nic.
+     */
+    private static function utcTimestamp(mixed $value): ?string
+    {
+        if (!is_string($value) || trim($value) === '') {
+            return null;
+        }
+        try {
+            return (new \DateTimeImmutable($value, new \DateTimeZone('UTC')))
+                ->setTimezone(new \DateTimeZone('UTC'))
+                ->format('Y-m-d H:i:s');
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

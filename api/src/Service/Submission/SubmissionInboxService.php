@@ -176,15 +176,34 @@ final readonly class SubmissionInboxService
             'remote_status' => null,
         ];
         if ($this->messageProcessor !== null) {
-            $processed = $this->messageProcessor->process(
-                $supplierId,
-                $environment,
-                $messageId,
-                $header,
-                $verdict,
-                $bytes,
-                $actorUserId,
-            );
+            try {
+                $processed = $this->messageProcessor->process(
+                    $supplierId,
+                    $environment,
+                    $messageId,
+                    $header,
+                    $verdict,
+                    $bytes,
+                    $actorUserId,
+                );
+            } catch (\Throwable $exception) {
+                // Selhání automatu je stav zprávy, ne pád obrazovky. Stejně to
+                // dělá i cesta při stahování ({@see ingest()}): zpráva zůstane
+                // k ručnímu posouzení a důvod se zaloguje. Pustit výjimku ven
+                // by uživateli místo věty ukázalo stack trace.
+                $this->logger->error('Submission inbox message reprocess failed', [
+                    'supplier_id' => $supplierId,
+                    'message_id' => $messageId,
+                    'error' => $exception->getMessage(),
+                ]);
+                $processed = [
+                    'status' => 'manual_review',
+                    'code' => 'inbox_message_processing_failed',
+                    'submission_id' => null,
+                    'receipt_id' => null,
+                    'remote_status' => null,
+                ];
+            }
         }
 
         $this->activity->log(

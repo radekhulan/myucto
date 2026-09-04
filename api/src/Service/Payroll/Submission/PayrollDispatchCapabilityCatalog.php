@@ -172,19 +172,31 @@ final class PayrollDispatchCapabilityCatalog
                 // musí upozornit dřív, než účetní klikne — viz
                 // `HealthInsuranceIsdsSubmissionService::enqueue()`.
                 productionOnly: true,
+                // Pojišťovna na přehled neodpovídá ničím, co by šlo strojově
+                // přečíst. Odeslané se tedy samo nikdy neuzavře.
+                authorityReportsResult: false,
             ),
             new PayrollDispatchCapability(
                 HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
                 self::MODE_ISDS_HEALTH,
                 null,
                 productionOnly: true,
+                authorityReportsResult: false,
             ),
+            // Agendy bez odesílacího kanálu mají `authorityReportsResult`
+            // rovněž `false` — je to prostý fakt: co aplikace neodešle, na to
+            // jí úřad nemá jak odpovědět. Ruční uzavření z fronty tím ale
+            // NEOTEVÍRÁ: {@see PayrollSubmissionSettlementService} vyžaduje
+            // navíc doložený kanál, aby se neobešla vlastní evidence ELDP
+            // ({@see \MyInvoice\Service\Payroll\Submission\Eldp\EldpManualCompletionService}),
+            // která výsledek dokládá dokumentem, ne jen kliknutím.
             new PayrollDispatchCapability(
                 EldpStatementService::AGENDA_CODE,
                 self::MODE_NONE,
                 'Evidenční list důchodového pojištění aplikace neodesílá.'
                     . ' Připravený list si stáhněte na záložce ELDP a podejte'
                     . ' ho na ČSSZ obvyklou cestou.',
+                authorityReportsResult: false,
             ),
             new PayrollDispatchCapability(
                 OzuspojSubmissionService::AGENDA_CODE,
@@ -193,6 +205,7 @@ final class PayrollDispatchCapabilityCatalog
                     . ' neodesílá — ČSSZ pro něj nemá doložený strojový kanál.'
                     . ' Připravené XML stáhněte na záložce Záměry slev'
                     . ' a podejte je ze své datové schránky.',
+                authorityReportsResult: false,
             ),
             new PayrollDispatchCapability(
                 PayrollRegistrationSubmissionService::AGENDA_EMPLOYER_REGISTRATION,
@@ -200,6 +213,7 @@ final class PayrollDispatchCapabilityCatalog
                 'První přihláška zaměstnavatele do registru ČSSZ nemá datovou'
                     . ' větu ani XSD, takže ji aplikace odeslat nemůže. Podává'
                     . ' se na místně příslušné OSSZ; tady se jen hlídá lhůta.',
+                authorityReportsResult: false,
             ),
             new PayrollDispatchCapability(
                 RegzelSubmissionBridgeService::AGENDA_CODE,
@@ -207,6 +221,7 @@ final class PayrollDispatchCapabilityCatalog
                 'Doplnění údajů do registru zaměstnavatelů se podává ručně —'
                     . ' aplikace pro něj nemá doložený odesílací kanál.'
                     . ' Podklad najdete na záložce REGZEL.',
+                authorityReportsResult: false,
             ),
         ];
 

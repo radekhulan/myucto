@@ -293,9 +293,24 @@ function protocolErrorMatchesComponent(
   return false
 }
 
+/**
+ * Které pracovní vztahy protokol vytkl.
+ *
+ * Dva zdroje schválně. `protocol_error_count` chodí ze serveru z uložených
+ * výsledků formulářů a funguje pro každý protokol, tedy i pro hlášení odeslané
+ * datovkou, kde žádný dotazovací pokus neexistuje a dřív tu proto nesvítilo
+ * nic. Report z právě provedeného doptání na VREP se přidává navrch, aby se
+ * označení objevilo hned po dotazu, ještě než se seznam znovu načte.
+ */
 const protocolErrorComponentGuids = computed(() => {
   const matched = new Set<string>()
   const group = correctionGroup.value
+
+  for (const component of correctableComponents.value) {
+    if ((component.protocol_error_count ?? 0) > 0) {
+      matched.add(component.employment_external_identifier)
+    }
+  }
   if (!group) return matched
 
   const errors = group.attempts.flatMap(attempt => polls.value[attempt.id]?.report?.errors ?? [])

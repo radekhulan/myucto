@@ -43,12 +43,16 @@ use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceiptFormOutcome;
 final readonly class JmhzDeliveredProtocolVerifier implements PayrollReceiptVerifierInterface
 {
     /**
-     * @param list<string> $frozenFormGuids GUIDy součástí zmrazeného podání
+     * @param list<array{
+     *   form_guid:string,
+     *   person_external_identifier?:?string,
+     *   employment_external_identifier?:?string
+     * }> $frozenForms součásti zmrazeného podání i s identitou zaměstnance
      * @param array<string,int> $formPartIds GUID formuláře → id součásti podání
      */
     public function __construct(
         private JmhzFrozenSubmissionIdentity $identity,
-        private array $frozenFormGuids,
+        private array $frozenForms,
         private array $formPartIds = [],
         private JmhzProtocolParser $parser = new JmhzProtocolParser(),
     ) {}
@@ -143,6 +147,24 @@ final readonly class JmhzDeliveredProtocolVerifier implements PayrollReceiptVeri
             true,
         );
 
+        // Identita zaměstnance se bere ze ZMRAZENÉHO podání, ne z protokolu:
+        // protokol o zpracování ji u chyby neuvádí (má jen `idFormulare`),
+        // kdežto obrazovka opravy potřebuje vědět, KOHO se chyba týká. Bez
+        // toho by u padesáti zaměstnanců musela účetní hledat odmítnutý
+        // formulář ručně.
+        /** @var array<string,array{person:?string,employment:?string}> $identities */
+        $identities = [];
+        foreach ($this->frozenForms as $form) {
+            $guid = strtoupper(trim((string) ($form['form_guid'] ?? '')));
+            if ($guid === '') {
+                continue;
+            }
+            $identities[$guid] = [
+                'person' => self::reference($form['person_external_identifier'] ?? null),
+                'employment' => self::reference($form['employment_external_identifier'] ?? null),
+            ];
+        }
+
         /** @var array<string,list<PayrollVerifiedReceiptFormError>> $errorsByGuid */
         $errorsByGuid = [];
         /** @var array<string,bool> $blockedByGuid */
@@ -152,7 +174,7 @@ final readonly class JmhzDeliveredProtocolVerifier implements PayrollReceiptVeri
                 continue;
             }
             $guid = strtoupper($part->formGuid);
-            if (!in_array($guid, $this->frozenFormGuids, true)) {
+            if (!isset($identities[$guid])) {
                 throw new JmhzTransportException(
                     'jmhz_delivered_protocol_form_unknown',
                     'Doručený protokol odkazuje na formulář mimo zmrazené podání.',
@@ -172,7 +194,7 @@ final readonly class JmhzDeliveredProtocolVerifier implements PayrollReceiptVeri
         }
 
         $outcomes = [];
-        foreach ($this->frozenFormGuids as $guid) {
+        foreach ($identities as $guid => $identity) {
             $rejected = $submissionRejected || ($blockedByGuid[$guid] ?? false);
             $status = $rejected
                 ? JmhzSubmissionStatus::Rejected
@@ -183,13 +205,24 @@ final readonly class JmhzDeliveredProtocolVerifier implements PayrollReceiptVeri
                 $status->value,
                 $status->name,
                 $rejected ? 'rejected' : 'accepted',
-                null,
-                null,
+                $identity['person'],
+                $identity['employment'],
                 $errorsByGuid[$guid] ?? [],
             );
         }
 
         return $outcomes;
+    }
+
+    /** Prázdný řetězec není identifikátor; platformní hodnota to odmítne. */
+    private static function reference(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 
     /**

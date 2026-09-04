@@ -345,6 +345,89 @@ final readonly class DeliveryReceiptService
     }
 
     /**
+     * Stáhne dodejky ke VŠEM odeslaným zprávám, které je ještě nemají.
+     *
+     * ── Proč dávka ──────────────────────────────────────────────────────────
+     * Přihlášení do schránky Mobilním klíčem je potvrzení v mobilu. Vyžadovat
+     * ho zvlášť u každé zprávy znamená, že si účetní po měsíční uzávěrce
+     * odklepne pět potvrzení za sebou — a příště to radši neudělá vůbec.
+     * Jedna relace vyřídí všechno, co čeká.
+     *
+     * ── Jedna zpráva nesmí položit dávku ────────────────────────────────────
+     * Selhání se sbírá po řádcích, ne jako výjimka ven. Zpráva, u které se
+     * dotaz nepovede, zůstane bez dodejky a je vidět ve výsledku; ostatní se
+     * stáhnou. Opak by znamenal, že jedna rozbitá zpráva zablokuje celou
+     * uzávěrku.
+     *
+     * Rozlišují se tři výsledky, protože znamenají tři různé věci:
+     * `attached` doručenka je připojená, `pending` ISDS ji ještě nemá (zpráva
+     * nebyla doručena), `failed` nepodařilo se zeptat.
+     *
+     * @return array{
+     *   attached:int,pending:int,failed:int,
+     *   items:list<array{outbox_id:int,subject:?string,status:string,message:string}>
+     * }
+     */
+    public function downloadManyFromIsds(
+        int $supplierId,
+        string $environment,
+        int $userId,
+        ChannelContext $context,
+        IsdsTransport $transport,
+        int $limit = 50,
+    ): array {
+        $this->assertEnvironment($environment);
+        $rows = $this->outbox->listAwaitingDeliveryReceipt($supplierId, $environment, $limit);
+
+        $items = [];
+        $attached = 0;
+        $pending = 0;
+        $failed = 0;
+        foreach ($rows as $row) {
+            $outboxId = (int) $row['id'];
+            $subject = isset($row['subject']) ? (string) $row['subject'] : null;
+            try {
+                $result = $this->downloadFromIsds(
+                    $supplierId,
+                    $environment,
+                    $outboxId,
+                    $userId,
+                    $context,
+                    $transport,
+                );
+            } catch (\Throwable $exception) {
+                $failed++;
+                $items[] = [
+                    'outbox_id' => $outboxId,
+                    'subject' => $subject,
+                    'status' => 'failed',
+                    'message' => $exception->getMessage(),
+                ];
+                continue;
+            }
+            $status = (string) ($result['status'] ?? '');
+            if ($status === self::STATUS_NOT_AVAILABLE) {
+                $pending++;
+            } else {
+                $attached++;
+            }
+            $items[] = [
+                'outbox_id' => $outboxId,
+                'subject' => $subject,
+                'status' => $status,
+                'message' => (string) ($result['message'] ?? ''),
+            ];
+        }
+
+        return [
+            'attached' => $attached,
+            'pending' => $pending,
+            'failed' => $failed,
+            'items' => $items,
+        ];
+    }
+
+    /**
      * Potvrzení vazby člověkem u doručenky, která se sama nepřiřadila.
      *
      * @return array<string,mixed>

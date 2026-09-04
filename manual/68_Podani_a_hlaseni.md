@@ -63,6 +63,16 @@ Zahodit nejde podání, které úřad přijal nebo přijal částečně. Tam už
 něco je a opakované odeslání by vyrobilo duplicitu; opravuje se opravným
 podáním (viz § 68.9).
 
+Stejně tak nejde zahodit zprávu, kterou **datová schránka prokazatelně
+doručila** — tedy takovou, u níž je stažená doručenka nebo potvrzené dodání.
+Adresát ji má, takže druhé podání téhož by u něj založilo duplicitu. Takové
+podání se ve frontě „K odeslání" ani neukazuje: není z čeho vést cestu ven.
+Řešíte-li chybný obsah, použijte opravné nebo stornovací podání.
+
+Z fronty zmizí i podání pod povinností, která je už uzavřená. Připravená
+podání tam ale zůstávají vždy, i k uzavřené povinnosti — opravné hlášení se
+odesílá pořád odtud.
+
 ### Hromadné odeslání
 
 Zaškrtávacím políčkem vyberte položky, nebo použijte políčko v hlavičce tabulky
@@ -127,6 +137,36 @@ prostředí, takže se v testovacím prostředí ve frontě zobrazí jako neodes
 ## 68.4 Stavy
 
 Návrh čeká na doplnění, připravené podání prošlo lokální kontrolou, outbox čeká na uživatelskou akci a koncept čeká na potvrzení v ISDS. Odesláno popisuje transport. Doručeno dokládá doručení datové zprávy, nikoli přijetí obsahu institucí. Přijato, odmítnuto nebo vyžaduje opravu určete až z doručenky, odpovědi či stavu cílového systému.
+
+### Když úřad výsledek neposílá
+
+U některých agend žádná strojově čitelná odpověď nedorazí — typicky u přehledu
+o platbě pojistného zdravotní pojišťovně. Pojišťovna zprávu převezme a tím to
+končí. Řádek by proto zůstal navždy ve stavu **Čeká na výsledek podání**
+a lhůta by se neuzavřela.
+
+V přehledu podání je u takového řádku pod štítkem termínu věta *„Úřad výsledek
+zpracování neposílá, potvrďte vyřízení sami"* a tlačítko **Označit za
+vyřízené**. Vyžádá si poznámku, čím je vyřízení doložené (číslo zprávy, datum
+doručenky); ta zůstane v historii, aby bylo poznat, že měsíc uzavřel člověk
+a o co se opřel.
+
+Uzavírá se tím **povinnost**, ne stav podání: podání zůstane „odesláno",
+protože úřad se k němu nevyjádřil a tvrdit opak by byla nepravda. Termín se
+překlopí na **Splněno** a řádek zmizí z fronty „K odeslání".
+
+Tlačítko se objeví jen tam, kde je doložené, že odpověď nepřijde. U měsíčního
+hlášení ČSSZ ani u registrací zaměstnanců ho nenajdete — tam protokol dorazí
+sám a aplikace podle něj podání uzavře.
+
+### Měsíc uzavírá protokol, ne jedno podání
+
+Obsahová oprava měsíčního hlášení řádné podání záměrně nenahrazuje: přijaté
+formuláře zůstávají zaevidované, takže řádné podání navždy zůstane „částečně
+přijaté". Jakmile ČSSZ v protokolu potvrdí, že je hlášení úplné, uzavře se
+celá povinnost za měsíc a termín ukáže **Splněno** — i když u řádného podání
+dál svítí „částečně přijato". Obojí je pravda: první o měsíci, druhé o jednom
+podání v jeho řetězci.
 
 ## 68.5 Kontroly a bezpečnost
 

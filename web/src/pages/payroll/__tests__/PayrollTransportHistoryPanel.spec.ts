@@ -1030,12 +1030,14 @@ describe('PayrollTransportHistoryPanel', () => {
       person_external_identifier: '1234567890',
       employment_external_identifier: '987654321',
       effective_state: 'accepted',
+      protocol_error_count: 0,
       action: 'correct_values',
     }, {
       employee_name: 'Petr Syntetický',
       person_external_identifier: '1234567891',
       employment_external_identifier: '987654322',
       effective_state: 'rejected',
+      protocol_error_count: 1,
       action: 'complete_form',
     }]
     m.jmhzContentCorrectionCandidates.mockResolvedValue({
@@ -1175,6 +1177,64 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(m.jmhzContentCorrectionCandidates).not.toHaveBeenCalled()
     expect(wrapper.find('[data-test="transport-correct-preparation-select"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="transport-correct-preparation-id"]').exists()).toBe(false)
+  })
+
+  /**
+   * Označení „chyba v protokolu" musí fungovat i u hlášení odeslaného datovkou.
+   *
+   * Dřív se plnilo výhradně z reportu doptání na VREP. Podání poslané datovkou
+   * žádný dotazovací pokus nemá, takže u něj nesvítilo nic a účetní musela mezi
+   * padesáti zaměstnanci hledat odmítnutý formulář ručně — přestože výsledky
+   * formulářů včetně chyb aplikace v evidenci má.
+   */
+  it('označí vytknuté vztahy i bez dotazovacího pokusu', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [],
+      dispatched_submissions: [dispatched()],
+    })
+    m.jmhzContentCorrectionCandidates.mockResolvedValue({
+      environment: 'production',
+      submission_id: 70,
+      preparation_id: 125,
+      submission_guid: '0195AAAA-1111-7222-8333-BBBBCCCCDDDD',
+      document_sha256: 'f'.repeat(64),
+      forms: [{
+        employee_name: 'Jana Syntetická',
+        person_external_identifier: '1234567890',
+        employment_external_identifier: '987654321',
+        effective_state: 'accepted',
+        protocol_error_count: 0,
+        action: 'correct_values',
+      }, {
+        employee_name: 'Petr Syntetický',
+        person_external_identifier: '1234567891',
+        employment_external_identifier: '987654322',
+        effective_state: 'rejected',
+        protocol_error_count: 1,
+        action: 'complete_form',
+      }],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
+    await flushPromises()
+
+    // Žádné doptání neproběhlo, přesto je vytknutý vztah vidět.
+    expect(m.pollJmhzTransportAttempt).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="transport-correct-component-987654322"]').text())
+      .toContain('payroll.submissions.transport.correction.flagged_by_protocol')
+    expect(wrapper.get('[data-test="transport-correct-component-987654321"]').text())
+      .not.toContain('payroll.submissions.transport.correction.flagged_by_protocol')
+
+    // A tlačítko „Vybrat označené protokolem" vybere právě jeho.
+    await wrapper.get('[data-test="transport-correct-select-errors"]').trigger('click')
+    await flushPromises()
+    const flagged = wrapper.get('[data-test="transport-correct-component-987654322"] input')
+    expect((flagged.element as HTMLInputElement).checked).toBe(true)
+    const clean = wrapper.get('[data-test="transport-correct-component-987654321"] input')
+    expect((clean.element as HTMLInputElement).checked).toBe(false)
   })
 
   /**
@@ -1356,12 +1416,14 @@ describe('PayrollTransportHistoryPanel', () => {
       person_external_identifier: '1234567891',
       employment_external_identifier: '987654321',
       effective_state: 'accepted',
+      protocol_error_count: 0,
       action: 'correct_values',
     }, {
       employee_name: 'Petr Syntetický',
       person_external_identifier: '1234567891',
       employment_external_identifier: '987654322',
       effective_state: 'rejected',
+      protocol_error_count: 1,
       action: 'complete_form',
     }]
     m.jmhzContentCorrectionCandidates.mockResolvedValue({

@@ -34,6 +34,7 @@ import {
   type InboxPollState,
   type OutboxAttempt,
   type OutboxSubmission,
+  type ReceiptBatchResult,
   type ReceiptCandidate,
   type ReceiptUploadResult,
   type RecipientKind,
@@ -377,8 +378,16 @@ async function loadAll() {
     inboxStorageItems.value = storage.items
     inboxArchiveFolders.value = storage.folders
     selectedInboxArchiveFolderId.value = storage.items.find(item => item.environment === environment.value)?.base_folder_id ?? ''
-    if (mobileProfile.saved && mobileProfile.username && inboxUsername.value === '') {
-      inboxUsername.value = mobileProfile.username
+    // Uložený přístup je jeden na firmu, uživatele a prostředí, takže se
+    // předvyplní všude, kde se do schránky přihlašuje. Nechat pole prázdné
+    // jen v dávce doručenek by vypadalo, že tam uložený přístup neplatí.
+    if (mobileProfile.saved && mobileProfile.username) {
+      if (inboxUsername.value === '') {
+        inboxUsername.value = mobileProfile.username
+      }
+      if (receiptsUsername.value === '') {
+        receiptsUsername.value = mobileProfile.username
+      }
     }
     await loadNotices()
   } catch (e) {
@@ -430,6 +439,9 @@ async function reprocessInboxMessage(message: InboxMessage) {
     const { result } = await dataBoxApi.reprocessInboxMessage(message.id, environment.value)
     if (result.status === 'processed') {
       toast.success(t('databox.inbox.reprocessed'))
+    } else if (result.code === 'jmhz_isds_protocol_already_processed') {
+      // Není to chyba k řešení: doklad je v evidenci a přepsat se nesmí.
+      toast.info(t('databox.inbox.reprocessAlreadyDone'))
     } else if (result.status === 'manual_review') {
       toast.error(t('databox.inbox.reprocessManual', { code: result.code ?? '' }))
     } else {
@@ -667,49 +679,18 @@ async function onReceiptChosen(event: Event) {
 }
 
 /**
- * Dodejku si jde vyžádat jen u zprávy, která doloženě odešla a nese dmID —
- * bez něj se ISDS není na co zeptat. Podání, které dodejku už má, se
- * nestahuje podruhé.
- */
-function canDownloadReceipt(row: OutboxSubmission): boolean {
-  return row.channel === 'isds'
-    && !row.receipt_document_id
-    && (row.external_message_id ?? '') !== ''
-    && ['sent', 'delivered'].includes(row.dispatch_state)
-}
-
-/**
- * Vyžádá dodejku k odeslané zprávě přímo z ISDS.
+ * Zprávy, ke kterým si jde dodejku vyžádat: odešly datovkou, nesou dmID (bez
+ * něj se ISDS není na co zeptat) a doručenku ještě nemají.
  *
- * Není to vyzvednutí schránky: ptáme se na NAŠI odeslanou zprávu, takže se tím
- * nic nedoručuje a nezačíná běžet žádná lhůta. U hlášení zdravotním
- * pojišťovnám je dodejka jediný důkaz, který kdy vznikne — pojišťovna žádnou
- * odpověď neposílá.
+ * Dávka nic nevybírá zaškrtáváním — přihlášení do schránky je potvrzení
+ * v mobilu a dělat ho zvlášť pro každou zprávu znamená, že to účetní po
+ * uzávěrce přestane dělat. Jedna relace vyřídí všechno, co čeká.
  */
-async function downloadReceipt(row: OutboxSubmission) {
-  busyId.value = row.id
-  try {
-    reportReceiptDownload(await dataBoxApi.downloadReceipt(row.id, environment.value))
-    await loadAll()
-  } catch (e) {
-    toast.error(apiErrorMessage(e))
-  } finally {
-    busyId.value = null
-  }
-}
-
-/**
- * „Dodejka ještě není" NENÍ chyba — zpráva prostě zatím nebyla doručena.
- * Červená hláška by účetní posílala hledat závadu tam, kde žádná není.
- */
-function reportReceiptDownload(result: ReceiptUploadResult) {
-  lastUpload.value = result.status === 'not_available' ? null : result
-  if (result.status === 'not_available') {
-    toast.info(result.message)
-    return
-  }
-  toast.success(result.message)
-}
+const receiptsAwaiting = computed(() => outbox.value.filter(row =>
+  row.channel === 'isds'
+  && !row.receipt_document_id
+  && (row.external_message_id ?? '') !== ''
+  && ['sent', 'delivered'].includes(row.dispatch_state)))
 
 async function showCandidates(message: InboxMessage) {
   try {
@@ -1051,9 +1032,6 @@ const mobileOutboxUseSaved = ref(false)
 const rememberMobileOutboxCredential = ref(false)
 const mobileOutboxFlow = ref('')
 const mobileOutboxStatus = ref('')
-/** Co se má v potvrzené relaci udělat: odeslat podání, nebo stáhnout dodejku. */
-type MobileOutboxIntent = 'send' | 'receipt'
-const mobileOutboxIntent = ref<MobileOutboxIntent>('send')
 let mobileOutboxTimer: ReturnType<typeof setTimeout> | null = null
 
 function clearMobileOutboxTimer() {
@@ -1061,15 +1039,9 @@ function clearMobileOutboxTimer() {
   mobileOutboxTimer = null
 }
 
-/**
- * Týž panel Mobilního klíče slouží dvěma akcím. Přihlášení k ISDS je pro obě
- * stejné; liší se až to, co se v potvrzené relaci udělá — proto `intent`, ne
- * druhá kopie celého formuláře.
- */
-function openMobileOutbox(row: OutboxSubmission, intent: MobileOutboxIntent = 'send') {
+function openMobileOutbox(row: OutboxSubmission) {
   clearMobileOutboxTimer()
   mobileOutboxFor.value = row.id
-  mobileOutboxIntent.value = intent
   mobileOutboxFlow.value = ''
   mobileOutboxStatus.value = ''
   mobileOutboxCode.value = ''
@@ -1125,22 +1097,6 @@ async function startMobileOutbox(row: OutboxSubmission) {
 async function pollMobileOutbox(row: OutboxSubmission) {
   if (mobileOutboxFlow.value === '') return
   try {
-    if (mobileOutboxIntent.value === 'receipt') {
-      const status = await dataBoxApi.downloadReceiptWithMobileKey(
-        row.id,
-        mobileOutboxFlow.value,
-        environment.value,
-      )
-      mobileOutboxStatus.value = status.description
-      if (status.result) {
-        closeMobileOutbox()
-        reportReceiptDownload(status.result)
-        await loadAll()
-        return
-      }
-      mobileOutboxTimer = setTimeout(() => { void pollMobileOutbox(row) }, 2000)
-      return
-    }
     const status = await dataBoxApi.mobileKeyOutboxConfirm(row.id, mobileOutboxFlow.value, environment.value)
     mobileOutboxStatus.value = status.description
     if (status.result) {
@@ -1160,6 +1116,162 @@ async function pollMobileOutbox(row: OutboxSubmission) {
     clearMobileOutboxTimer()
     mobileOutboxFlow.value = ''
     toast.error(apiErrorMessage(e))
+  }
+}
+
+// ── Hromadné stažení dodejek ────────────────────────────────────────────────
+// Vlastní stav, ne sdílený s vyzvedáváním schránky: obojí se dá rozdělat
+// najednou a sdílený formulář by jedno druhému přepsal rozepsané přihlášení.
+const receiptsAuthMethod = ref<InboxAuthMethod>('mobile_key')
+const receiptsUsername = ref('')
+const receiptsPassword = ref('')
+const receiptsCommunicationCode = ref('')
+const receiptsFlowToken = ref('')
+const receiptsSmsFlowToken = ref('')
+const receiptsSmsCode = ref('')
+const receiptsStatus = ref('')
+const receiptsBusy = ref(false)
+const receiptsResult = ref<ReceiptBatchResult | null>(null)
+let receiptsTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearReceiptsTimer() {
+  if (receiptsTimer !== null) clearTimeout(receiptsTimer)
+  receiptsTimer = null
+}
+
+function resetReceiptsAuth() {
+  clearReceiptsTimer()
+  receiptsFlowToken.value = ''
+  receiptsSmsFlowToken.value = ''
+  receiptsSmsCode.value = ''
+  receiptsPassword.value = ''
+  receiptsCommunicationCode.value = ''
+  receiptsStatus.value = ''
+}
+
+/**
+ * Dokončená dávka: tři počty schválně zvlášť. „ISDS dodejku ještě nemá" není
+ * chyba, jen zpráva zatím nebyla doručena — sloučit to se selháním dotazu by
+ * účetní posílalo hledat závadu tam, kde žádná není.
+ */
+function finishReceiptsBatch(result: ReceiptBatchResult) {
+  resetReceiptsAuth()
+  receiptsResult.value = result
+  if (result.failed > 0) {
+    toast.warning(t('databox.outbox.receiptsBatch.doneWithFailures', {
+      attached: result.attached,
+      failed: result.failed,
+    }))
+  } else if (result.attached > 0) {
+    toast.success(t('databox.outbox.receiptsBatch.done', { attached: result.attached }))
+  } else {
+    toast.info(t('databox.outbox.receiptsBatch.nothingYet'))
+  }
+}
+
+async function pollReceiptsMobileKey() {
+  if (receiptsFlowToken.value === '') return
+  try {
+    const status = await dataBoxApi.downloadReceiptsBatchWithMobileKey(
+      receiptsFlowToken.value,
+      environment.value,
+    )
+    receiptsStatus.value = status.description
+    if (status.result) {
+      finishReceiptsBatch(status.result)
+      await loadAll()
+      return
+    }
+    receiptsTimer = setTimeout(() => { void pollReceiptsMobileKey() }, 2000)
+  } catch (e) {
+    // Vypršelou relaci neobnovujeme sami — nová by nebyla ta, kterou člověk
+    // schválil. Uživatel ji musí potvrdit znovu vědomě.
+    clearReceiptsTimer()
+    receiptsFlowToken.value = ''
+    toast.error(apiErrorMessage(e))
+  }
+}
+
+async function downloadReceiptsBatch() {
+  receiptsBusy.value = true
+  receiptsResult.value = null
+  try {
+    if (receiptsAuthMethod.value === 'certificate') {
+      if (!currentCredential.value) {
+        toast.error(t('databox.inbox.certificateMissing'))
+        return
+      }
+      finishReceiptsBatch(await dataBoxApi.downloadReceiptsBatch(environment.value))
+      await loadAll()
+      return
+    }
+    if (receiptsUsername.value.trim() === '') {
+      toast.error(t('databox.inbox.usernameRequired'))
+      return
+    }
+    if (receiptsAuthMethod.value === 'password') {
+      if (receiptsPassword.value === '') {
+        toast.error(t('databox.inbox.passwordRequired'))
+        return
+      }
+      finishReceiptsBatch(await dataBoxApi.downloadReceiptsBatchWithPassword(
+        environment.value,
+        receiptsUsername.value,
+        receiptsPassword.value,
+      ))
+      await loadAll()
+      return
+    }
+    if (receiptsAuthMethod.value === 'sms') {
+      if (receiptsSmsFlowToken.value === '') {
+        if (receiptsPassword.value === '') {
+          toast.error(t('databox.inbox.passwordRequired'))
+          return
+        }
+        const start = await dataBoxApi.startReceiptsBatchSms(
+          environment.value,
+          receiptsUsername.value,
+          receiptsPassword.value,
+        )
+        receiptsSmsFlowToken.value = start.flow_token
+        receiptsStatus.value = start.description
+        receiptsPassword.value = ''
+        return
+      }
+      if (receiptsSmsCode.value.trim() === '') {
+        toast.error(t('databox.inbox.smsCodeRequired'))
+        return
+      }
+      finishReceiptsBatch(await dataBoxApi.completeReceiptsBatchSms(
+        environment.value,
+        receiptsSmsFlowToken.value,
+        receiptsSmsCode.value,
+      ))
+      await loadAll()
+      return
+    }
+    const useSaved = savedMobileCredential.value?.saved === true
+      && savedMobileCredential.value.username === receiptsUsername.value.trim()
+      && receiptsCommunicationCode.value === ''
+    if (!useSaved && receiptsCommunicationCode.value === '') {
+      toast.error(t('databox.inbox.communicationCodeRequired'))
+      return
+    }
+    const start = await dataBoxApi.startMobileKeyOutboxBatch(
+      environment.value,
+      receiptsUsername.value,
+      useSaved ? '' : receiptsCommunicationCode.value,
+      useSaved,
+    )
+    receiptsFlowToken.value = start.flow_token
+    receiptsStatus.value = start.description
+    // Kód se v paměti nedrží déle, než je potřeba k jeho odeslání.
+    receiptsCommunicationCode.value = ''
+    receiptsTimer = setTimeout(() => { void pollReceiptsMobileKey() }, 1500)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    receiptsBusy.value = false
   }
 }
 
@@ -1267,6 +1379,9 @@ async function pollInbox() {
 
 async function changeEnvironment() {
   resetInboxAuth()
+  resetReceiptsAuth()
+  receiptsUsername.value = ''
+  receiptsResult.value = null
   inboxUsername.value = ''
   savedMobileCredential.value = null
   rememberMobileCredential.value = false
@@ -1465,6 +1580,7 @@ onMounted(async () => {
 })
 
 onUnmounted(clearMobileStatusTimer)
+onUnmounted(clearReceiptsTimer)
 </script>
 
 <template>
@@ -2072,11 +2188,7 @@ onUnmounted(clearMobileStatusTimer)
           class="mt-3 rounded-md border border-primary-200 bg-primary-50/40 p-3"
           data-test="outbox-mobile-key-form"
         >
-          <p class="text-sm text-neutral-700">
-            {{ mobileOutboxIntent === 'receipt'
-              ? t('databox.outbox.downloadReceipt.mobileKeyIntro')
-              : t('databox.outbox.mobileKey.intro') }}
-          </p>
+          <p class="text-sm text-neutral-700">{{ t('databox.outbox.mobileKey.intro') }}</p>
           <!--
             Testovací ISDS má vlastní účty. Bez tohohle upozornění vypadalo
             odmítnutí ostrého přihlášení jako překlep v kódu a účetní ho
@@ -2276,39 +2388,6 @@ onUnmounted(clearMobileStatusTimer)
             </svg>
             {{ t('databox.outbox.uploadReceipt') }}
           </button>
-          <!--
-            Dodejku umí aplikace vyžádat sama podle dmID, které si zapsala při
-            odeslání. Ruční nahrání zůstává vedle jako záloha — pro zprávy
-            odeslané mimo aplikaci a pro případ, kdy se na ISDS nedovoláme.
-          -->
-          <button
-            v-if="canDownloadReceipt(row) && currentCredential?.auth_mode === 'certificate'"
-            type="button"
-            :class="btnOutline('primary')"
-            :disabled="busyId === row.id"
-            :title="t('databox.outbox.downloadReceipt.hint')"
-            data-test="outbox-receipt-download"
-            @click="downloadReceipt(row)"
-          >
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" />
-            </svg>
-            {{ t('databox.outbox.downloadReceipt.action') }}
-          </button>
-          <button
-            v-if="canDownloadReceipt(row) && mobileOutboxFor !== row.id"
-            type="button"
-            :class="btnOutline('primary')"
-            :disabled="busyId === row.id"
-            :title="t('databox.outbox.downloadReceipt.hint')"
-            data-test="outbox-receipt-download-mobile-key"
-            @click="openMobileOutbox(row, 'receipt')"
-          >
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" />
-            </svg>
-            {{ t('databox.outbox.downloadReceipt.mobileKeyAction') }}
-          </button>
           <button
             v-if="primaryAction(row) === 'confirm'"
             type="button"
@@ -2389,6 +2468,172 @@ onUnmounted(clearMobileStatusTimer)
             </tbody>
           </table>
         </div>
+      </div>
+
+      <!--
+        Hromadné stažení dodejek. Jedno přihlášení vyřídí všechny čekající
+        zprávy: potvrzovat Mobilní klíč u každé zvlášť znamená, že to účetní
+        po uzávěrce přestane dělat. Ruční nahrání u řádku zůstává jako záloha.
+      -->
+      <div
+        v-if="receiptsAwaiting.length"
+        class="min-w-0 rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm"
+        data-test="outbox-receipts-batch"
+      >
+        <h2 class="font-medium text-neutral-900">{{ t('databox.outbox.receiptsBatch.title') }}</h2>
+        <p class="mt-1 text-sm text-neutral-500">{{ t('databox.outbox.receiptsBatch.intro') }}</p>
+        <p class="mt-2 text-sm font-medium text-neutral-700" data-test="outbox-receipts-batch-count">
+          {{ t('databox.outbox.receiptsBatch.waiting', { count: receiptsAwaiting.length }) }}
+        </p>
+
+        <div class="mt-4 grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <label
+            v-for="method in (['mobile_key', 'password', 'sms', 'certificate'] as InboxAuthMethod[])"
+            :key="method"
+            class="flex min-w-0 cursor-pointer gap-3 rounded-lg border p-3"
+            :class="receiptsAuthMethod === method ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 bg-surface'"
+          >
+            <input v-model="receiptsAuthMethod" type="radio" :value="method" class="mt-0.5" />
+            <span class="min-w-0 break-words">
+              <span class="block text-sm font-medium text-neutral-900">{{ t(`databox.inbox.auth.${method}.title`) }}</span>
+              <span class="mt-1 block text-xs text-neutral-500">{{ t(`databox.inbox.auth.${method}.description`) }}</span>
+              <span v-if="method === 'certificate' && !currentCredential" class="mt-1 block text-xs text-warning-700 dark:text-warning-300">
+                {{ t('databox.inbox.certificateMissing') }}
+              </span>
+            </span>
+          </label>
+        </div>
+
+        <p
+          v-if="environment === 'test'"
+          class="mt-3 rounded-md border border-warning-200 bg-warning-50 p-2 text-xs text-warning-800"
+        >
+          {{ t('databox.outbox.mobileKey.testEnvironmentWarning') }}
+        </p>
+
+        <div
+          v-if="receiptsAuthMethod !== 'certificate' && !(receiptsAuthMethod === 'sms' && receiptsSmsFlowToken)"
+          class="mt-4 grid gap-3 sm:grid-cols-2"
+        >
+          <label class="block">
+            <span class="text-sm font-medium">{{ t('databox.inbox.username') }}</span>
+            <input
+              v-model="receiptsUsername"
+              type="text"
+              maxlength="128"
+              autocomplete="username"
+              class="form-input mt-1 w-full"
+              data-test="outbox-receipts-batch-username"
+            />
+          </label>
+          <label v-if="receiptsAuthMethod === 'password' || receiptsAuthMethod === 'sms'" class="block">
+            <span class="text-sm font-medium">{{ t('databox.inbox.password') }}</span>
+            <input v-model="receiptsPassword" type="password" maxlength="512" autocomplete="current-password" class="form-input mt-1 w-full" />
+          </label>
+          <label v-else-if="receiptsAuthMethod === 'mobile_key'" class="block">
+            <span class="text-sm font-medium">{{ t('databox.inbox.communicationCode') }}</span>
+            <input
+              v-model="receiptsCommunicationCode"
+              type="password"
+              maxlength="512"
+              autocomplete="off"
+              class="form-input mt-1 w-full"
+              :placeholder="savedMobileCredential?.saved ? t('databox.inbox.savedCommunicationCodePlaceholder') : ''"
+            />
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('databox.inbox.communicationCodeHint') }}</span>
+          </label>
+        </div>
+
+        <!-- Uložený přístup je jeden trezor na firmu, uživatele a prostředí.
+             Dávka ho jen používá; zapomenout ho jde tam, kde se ukládá. -->
+        <p
+          v-if="receiptsAuthMethod === 'mobile_key' && savedMobileCredential?.saved"
+          class="mt-3 text-sm text-success-700 dark:text-success-300"
+          data-test="outbox-receipts-batch-saved-credential"
+        >
+          {{ t('databox.inbox.mobileCredentialSaved', { username: savedMobileCredential.username }) }}
+        </p>
+
+        <div v-if="receiptsAuthMethod === 'sms' && receiptsSmsFlowToken" class="mt-4 grid gap-3 sm:grid-cols-2">
+          <label class="block">
+            <span class="text-sm font-medium">{{ t('databox.inbox.smsCode') }}</span>
+            <input v-model="receiptsSmsCode" type="text" inputmode="numeric" autocomplete="one-time-code" class="form-input mt-1 w-full" />
+          </label>
+          <div class="flex flex-wrap items-end gap-2">
+            <button
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              :disabled="receiptsBusy"
+              @click="resetReceiptsAuth()"
+            >
+              {{ t('databox.inbox.requestNewSms') }}
+            </button>
+          </div>
+        </div>
+
+        <p
+          v-if="receiptsStatus"
+          class="mt-4 rounded-lg border border-primary-500/40 bg-primary-50 p-3 text-sm text-primary-800 dark:text-primary-200"
+          data-test="outbox-receipts-batch-status"
+        >
+          {{ receiptsStatus }}
+        </p>
+
+        <div class="mt-4 flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            :class="btnFilled('primary')"
+            :disabled="receiptsBusy || receiptsFlowToken !== '' || (receiptsAuthMethod === 'certificate' && !currentCredential)"
+            data-test="outbox-receipts-batch-submit"
+            @click="downloadReceiptsBatch"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" />
+            </svg>
+            {{ receiptsAuthMethod === 'mobile_key'
+              ? t('databox.inbox.startMobileKey')
+              : receiptsAuthMethod === 'sms'
+                ? (receiptsSmsFlowToken ? t('databox.outbox.receiptsBatch.confirmSms') : t('databox.inbox.sendSms'))
+                : t('databox.outbox.receiptsBatch.action') }}
+          </button>
+        </div>
+      </div>
+
+      <!--
+        Výsledek po zprávách. Prázdno by tady bylo nejhorší odpověď: účetní
+        potvrdila přihlášení v mobilu a musí vidět, co z toho vzešlo.
+      -->
+      <div
+        v-if="receiptsResult"
+        class="min-w-0 rounded-lg border border-neutral-200 bg-surface p-4 text-sm shadow-sm"
+        data-test="outbox-receipts-batch-result"
+      >
+        <div class="font-medium text-neutral-900">
+          {{ t('databox.outbox.receiptsBatch.summary', {
+            attached: receiptsResult.attached,
+            pending: receiptsResult.pending,
+            failed: receiptsResult.failed,
+          }) }}
+        </div>
+        <ul class="mt-3 space-y-2">
+          <li
+            v-for="item in receiptsResult.items"
+            :key="item.outbox_id"
+            class="rounded-md border border-neutral-200 bg-surface p-2"
+          >
+            <div class="font-medium text-neutral-800">{{ item.subject ?? '—' }}</div>
+            <div
+              class="mt-0.5 text-xs"
+              :class="item.status === 'failed'
+                ? 'text-danger-700 dark:text-danger-300'
+                : item.status === 'not_available'
+                  ? 'text-neutral-500'
+                  : 'text-success-700 dark:text-success-300'"
+            >
+              {{ item.message }}
+            </div>
+          </li>
+        </ul>
       </div>
     </section>
 

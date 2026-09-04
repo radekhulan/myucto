@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission;
 
+use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 
 /**
@@ -26,6 +27,17 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
  * odpověď úřadu ukáže a rozhodne účetní, která ji vidí. Tahle služba je ta ruční
  * páka, ne automatika.
  *
+ * CO SE ZAHODIT NESMÍ
+ * ------------------------------------------------------------------------------
+ * Zpráva, kterou úřad PROKAZATELNĚ dostal. Stav podání to neprozradí —
+ * `submitted` znamená jen tolik, že aplikace odeslání zapsala. Důkazem je řádek
+ * odchozí fronty datové schránky: dodání potvrzené ISDS, připnutá doručenka nebo
+ * vyjádření úřadu ({@see PayrollSubmissionDeliveryProof}). Dokud se to
+ * nekontrolovalo, nabízela fronta „Zahodit a podat znovu" i u přehledu, který
+ * pojišťovna měla ve schránce — a druhé podání téhož by u ní založilo duplicitu,
+ * kterou nejde vzít zpět. Špatný obsah se v takovém případě řeší opravným nebo
+ * stornovacím podáním, ne novým odesláním.
+ *
  * CO ZŮSTÁVÁ
  * ------------------------------------------------------------------------------
  * Zahozený pokus se z ledgeru NEMAŽE. Dostane terminální stav `expired` s kódem
@@ -42,6 +54,7 @@ final readonly class PayrollSubmissionAbandonService
     public function __construct(
         private PayrollSubmissionService $submissions,
         private PayrollSubmissionTransportAttemptRepository $attempts,
+        private PayrollSubmissionRepository $repository,
     ) {}
 
     /**
@@ -58,6 +71,22 @@ final readonly class PayrollSubmissionAbandonService
         int $expectedRowVersion,
         string $reason,
     ): array {
+        // Doložené doručení je STOPKA, a kontroluje se jako první — dřív, než
+        // se sáhne na jediný pokus. Kdyby se pokusy uzavřely a teprve pak se
+        // zjistilo, že zprávu úřad má, zůstalo by podání bez otevřeného pokusu
+        // a tedy volné k dalšímu odeslání: přesně ta duplicita, které se
+        // kontrola snaží zabránit.
+        $blocked = PayrollSubmissionDeliveryProof::abandonBlockedReason(
+            $this->repository->findDispatchOutboxForSubmission(
+                $supplierId,
+                $environment,
+                $submissionId,
+            ),
+        );
+        if ($blocked !== null) {
+            throw new \DomainException($blocked);
+        }
+
         // Pokusy se uzavírají PŘED návratem podání na `ready`. Kdyby se pořadí
         // otočilo a uzavření selhalo, zůstalo by podání odesílatelné s otevřeným
         // pokusem — tedy přesně stav, ve kterém hrozí druhé odeslání téhož.
