@@ -90,6 +90,7 @@ const loading = ref(true)
 const saving = ref(false)
 const busyId = ref<number | null>(null)
 const privacyBusyId = ref<number | null>(null)
+const reprocessBusyId = ref<number | null>(null)
 
 const credentials = ref<DataBoxCredential[]>([])
 const recipients = ref<SubmissionRecipient[]>([])
@@ -397,6 +398,36 @@ async function saveInboxArchiveFolder() {
 
 function canManageInboxPrivacy(message: InboxMessage): boolean {
   return message.classification === 'unclassified' && message.matched_outbox_id === null
+}
+
+/**
+ * Zprávu má smysl zpracovat znovu, dokud je po ruce její uložený originál.
+ * Nabízí se u úředních odpovědí, protože právě u nich se z přílohy přebírá
+ * výsledek podání; u nezařazené pošty by tlačítko nic nedělalo.
+ */
+function canReprocess(message: InboxMessage): boolean {
+  return message.local_content_state === 'available'
+    && message.document_id !== null
+    && message.classification !== 'unclassified'
+}
+
+async function reprocessInboxMessage(message: InboxMessage) {
+  reprocessBusyId.value = message.id
+  try {
+    const { result } = await dataBoxApi.reprocessInboxMessage(message.id, environment.value)
+    if (result.status === 'processed') {
+      toast.success(t('databox.inbox.reprocessed'))
+    } else if (result.status === 'manual_review') {
+      toast.error(t('databox.inbox.reprocessManual', { code: result.code ?? '' }))
+    } else {
+      toast.info(t('databox.inbox.reprocessNotApplicable'))
+    }
+    await loadAll()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    reprocessBusyId.value = null
+  }
 }
 
 async function setInboxVisibility(visibility: 'active' | 'hidden') {
@@ -2504,6 +2535,22 @@ onUnmounted(clearMobileStatusTimer)
               {{ t('databox.notices.recordFromMessage') }}
             </button>
             <button
+              v-if="canReprocess(m)"
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              :disabled="reprocessBusyId === m.id"
+              :title="t('databox.inbox.reprocessHint')"
+              data-test="inbox-reprocess"
+              @click="reprocessInboxMessage(m)"
+            >
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
+              </svg>
+              {{ t(reprocessBusyId === m.id
+                ? 'databox.inbox.reprocessing'
+                : 'databox.inbox.reprocess') }}
+            </button>
+            <button
               v-if="canManageInboxPrivacy(m) && inboxVisibility === 'active'"
               type="button"
               :class="btnOutlineSm('neutral')"
@@ -2630,6 +2677,22 @@ onUnmounted(clearMobileStatusTimer)
                   </span>
                   <button type="button" :class="btnOutlineSm('neutral')" @click="startNoticeFromMessage(m)">
                     {{ t('databox.notices.recordFromMessage') }}
+                  </button>
+                  <button
+                    v-if="canReprocess(m)"
+                    type="button"
+                    :class="btnOutlineSm('neutral')"
+                    :disabled="reprocessBusyId === m.id"
+                    :title="t('databox.inbox.reprocessHint')"
+                    data-test="inbox-reprocess"
+                    @click="reprocessInboxMessage(m)"
+                  >
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
+                    </svg>
+                    {{ t(reprocessBusyId === m.id
+                      ? 'databox.inbox.reprocessing'
+                      : 'databox.inbox.reprocess') }}
                   </button>
                   <button
                     v-if="canManageInboxPrivacy(m) && inboxVisibility === 'active'"

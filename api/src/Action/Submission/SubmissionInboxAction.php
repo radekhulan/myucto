@@ -347,6 +347,50 @@ final class SubmissionInboxAction
         ]);
     }
 
+    /**
+     * Zpracovat uloženou zprávu znovu.
+     *
+     * Automat rozpoznávání běží jen při stahování, takže zpráva vyzvednutá
+     * dřív, než aplikace uměla její tvar navázat, zůstane nezpracovaná. Nové
+     * vyzvednutí schránky je právní úkon a opakovat se kvůli tomu nemá; tahle
+     * akce proto pracuje výhradně s uloženým originálem a k síti nejde.
+     *
+     * @param array<string,string> $args
+     */
+    public function reprocess(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $environment = (string) ($body['environment']
+            ?? $request->getQueryParams()['environment']
+            ?? 'production');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+        try {
+            $result = $this->inbox->reprocess(
+                SupplierGuard::currentId($request),
+                $environment,
+                $this->positiveMessageId($args),
+                $this->userId($request),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+
+        return Json::ok($response, [
+            'result' => $result,
+            'item' => $this->inbox->findById(
+                SupplierGuard::currentId($request),
+                $this->positiveMessageId($args),
+            ),
+        ]);
+    }
+
     /** @param array<string,string> $args */
     public function hide(Request $request, Response $response, array $args): Response
     {

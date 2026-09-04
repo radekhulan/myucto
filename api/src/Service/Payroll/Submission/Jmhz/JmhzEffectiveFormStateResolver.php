@@ -164,7 +164,11 @@ final readonly class JmhzEffectiveFormStateResolver
         }
 
         foreach ($currentEmploymentExternalIdentifiers as $employment) {
-            $employment = trim($employment);
+            // ID PPV je čistě číselné (13 číslic), takže kdykoli projde polem
+            // jako KLÍČ, udělá z něj PHP `int`. Přetypování je proto nutné,
+            // ne kosmetické: bez něj to na skutečném identifikátoru spadne,
+            // kdežto na vymyšleném nečíselném projde.
+            $employment = trim((string) $employment);
             if ($employment === '') {
                 $this->invalid('current_set_invalid', 'Aktuální příprava obsahuje vztah bez identifikátoru JMHZ.');
             }

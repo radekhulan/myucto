@@ -189,6 +189,37 @@ final class SubmissionInboxRepository
         return $row !== false ? self::normalize($row) : null;
     }
 
+    /**
+     * Uložený originál zprávy (kontejner ZFO) v DMS.
+     *
+     * Slouží k opakovanému zpracování už stažené zprávy — automat běží jen při
+     * stahování, takže zprávu vyzvednutou dřív, než aplikace uměla protokol
+     * navázat, by jinak nešlo dohnat jinak než novým vyzvednutím schránky.
+     * A to je právní úkon, který se kvůli našemu nedodělku opakovat nemá.
+     *
+     * @return array{sha256:string,filename:string}|null
+     */
+    public function messageContainer(int $supplierId, int $id): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT d.sha256, d.filename
+               FROM ' . self::TABLE . ' m
+               JOIN documents d ON d.id = m.document_id AND d.supplier_id = m.supplier_id
+              WHERE m.supplier_id = ? AND m.id = ? AND d.deleted_at IS NULL'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+
+        return [
+            'sha256' => (string) $row['sha256'],
+            'filename' => (string) $row['filename'],
+        ];
+    }
+
     /** @return array<string,mixed>|null */
     public function findByIdForUpdate(int $supplierId, int $id): ?array
     {

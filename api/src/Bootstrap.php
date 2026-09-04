@@ -142,6 +142,16 @@ final class Bootstrap
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Submission\CompositeSubmissionInboxMessageProcessor::class,
                 ),
+            // Zpracování protokolu z došlé zprávy je NEPOVINNÝ parametr služby,
+            // protože testy si ji staví bez něj. Autowiring ale nepovinné
+            // parametry nedoplňuje — nechá výchozí `null` — takže se celá
+            // automatika po vyzvednutí schránky tiše nespouštěla. Musí se proto
+            // předat výslovně.
+            \MyInvoice\Service\Submission\SubmissionInboxService::class =>
+                \DI\autowire()->constructorParameter(
+                    'messageProcessor',
+                    \DI\get(\MyInvoice\Service\Submission\SubmissionInboxMessageProcessor::class),
+                ),
             \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthOfficialFormProvider::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Payroll\Submission\HealthInsurance\CachedHealthOfficialFormProvider::class,

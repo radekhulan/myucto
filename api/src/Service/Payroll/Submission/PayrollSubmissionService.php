@@ -320,6 +320,38 @@ final class PayrollSubmissionService
     }
 
     /**
+     * Přepíše kanál podání na ten, kterým podání doloženě odešlo.
+     *
+     * Volá se z transportu poté, co je odeslání doložené odchozí frontou —
+     * u JMHZ typicky ve chvíli, kdy se hlášení zařadí do datové schránky.
+     * Bez toho zůstane v řádku výchozí kanál agendy a protokol z jiné cesty se
+     * pak k podání nedá přiřadit („Kanál protokolu neodpovídá podání.").
+     *
+     * Vrací aktuální řádek; když kanál sedí, nemění se nic.
+     *
+     * @return array<string,mixed>
+     */
+    public function adoptDispatchChannel(
+        int $supplierId,
+        int $submissionId,
+        string $channel,
+    ): array {
+        $this->assertAllowed($channel, self::CHANNELS, 'Kanál odeslání');
+        $submission = $this->get($supplierId, $submissionId);
+        if ((string) $submission['channel'] === $channel) {
+            return $submission;
+        }
+        $this->repository->updateSubmissionChannel(
+            $supplierId,
+            $submissionId,
+            (int) $submission['row_version'],
+            $channel,
+        );
+
+        return $this->get($supplierId, $submissionId);
+    }
+
+    /**
      * Povinnost, ke které podání patří — kvůli agendě.
      *
      * Bez ní se z podání nedá zjistit, JAKÉ podání to vlastně je: `channel`

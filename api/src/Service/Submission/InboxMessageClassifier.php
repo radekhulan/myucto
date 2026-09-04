@@ -112,14 +112,21 @@ final readonly class InboxMessageClassifier
         InboxMessageHeader $header,
     ): ?int {
         $matcher = new JmhzIsdsResponseMatcher();
-        $reference = $matcher->parseSubject($header->subject);
-        if ($reference === null) {
+        // Dokumentovaný tvar `[classname-correlationId-dmId]` se bere přednostně,
+        // protože kromě dmId nese i agendu. Pro JMHZ ho ale ČSSZ nepoužívá —
+        // reálná věc zní „… z DZ 1761891234 …“ — takže se dmId hledá i tam.
+        // Protokol o kompletnosti dmId neuvádí vůbec a zůstane nenavázaný;
+        // vazbu mu pak dá obsah přílohy v JmhzIsdsInboxProcessor.
+        $documented = $matcher->parseSubject($header->subject);
+        $sentMessageId = $documented?->originalMessageId
+            ?? $matcher->parseCsszSubject($header->subject)?->originalMessageId;
+        if ($sentMessageId === null) {
             return null;
         }
         $row = $this->outbox->findByExternalMessageId(
             $supplierId,
             'isds',
-            $reference->originalMessageId,
+            $sentMessageId,
         );
         if ($row === null
             || (string) $row['environment'] !== $environment
@@ -132,9 +139,13 @@ final readonly class InboxMessageClassifier
                 ['JMHZ', 'JMHZ25'],
                 true,
             )
-            || !$matcher->matches(
+        ) {
+            return null;
+        }
+        if ($documented !== null
+            && !$matcher->matches(
                 $header->subject,
-                $reference->originalMessageId,
+                $sentMessageId,
                 JmhzDispatchService::SUBMISSION_CLASS,
             )
         ) {

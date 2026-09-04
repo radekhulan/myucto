@@ -139,6 +139,7 @@ final class SubmissionInboxServiceTest extends TestCase
                 $activity,
                 new NativeClock(),
             ),
+            $container->get(DocumentStorage::class),
             $activity,
             new NullLogger(),
         );
