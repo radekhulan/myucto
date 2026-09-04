@@ -80,6 +80,9 @@ final class PurchaseImportStatusTest extends TestCase
                 (SELECT id FROM purchase_invoices WHERE supplier_id = ?)'
         )->execute([$this->supplierId]);
         $pdo->prepare('DELETE FROM purchase_invoices WHERE supplier_id = ?')->execute([$this->supplierId]);
+        // Číselnou řadu založí až přidělení varsymbolu při importu přijatého dokladu —
+        // bez úklidu drží FK na supplier a tearDown spadne.
+        $pdo->prepare('DELETE FROM purchase_invoice_counters WHERE supplier_id = ?')->execute([$this->supplierId]);
         $pdo->prepare('DELETE FROM clients WHERE supplier_id = ?')->execute([$this->supplierId]);
         $pdo->prepare('DELETE FROM currencies WHERE supplier_id = ?')->execute([$this->supplierId]);
         $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplierId]);
@@ -104,6 +107,41 @@ final class PurchaseImportStatusTest extends TestCase
         self::assertSame('draft', $this->statusOf((int) $out['purchase_invoice_id']));
     }
 
+    /**
+     * NÁVAZNÝ NÁLEZ: doklad založený rovnou jako přijatý nedostával NAŠE INTERNÍ ČÍSLO.
+     *
+     * Varsymbol se generuje v přechodu draft→received
+     * ({@see \MyInvoice\Action\PurchaseInvoice\TransitionPurchaseInvoiceStatusAction}),
+     * který import z definice přeskočí — celá dávka pak v seznamu svítí jako „#id“
+     * a účetní nemá doklad pod čím najít. Pravidlo proto drží zakládání dokladu.
+     */
+    public function testReceivedImportAssignsOurInternalNumber(): void
+    {
+        $out = $this->importOne('prijata-3.xml', $this->pohodaReceived('93700003', '2093-07-16'), 'received');
+        self::assertSame('created', $out['status'], (string) ($out['reason'] ?? ''));
+
+        $varsymbol = $this->varsymbolOf((int) $out['purchase_invoice_id']);
+        self::assertNotSame('', $varsymbol, 'importovaný přijatý doklad musí mít naše interní číslo');
+        // Tvar nese šablona firmy (default {PP}{YY}{MM}{CCC}), takhle se testuje jen to,
+        // co je na šabloně nezávislé: daňový prefix a období dokladu, ne číslo dodavatele.
+        self::assertStringStartsWith('PF', $varsymbol, 'naše řada, ne číslo dodavatele');
+        self::assertStringContainsString('9307', $varsymbol, 'období z data vystavení dokladu');
+        self::assertStringNotContainsString('93700003', $varsymbol, 'nesmí to být symVar dodavatele');
+    }
+
+    /**
+     * Koncept číslo ZÁMĚRNĚ nedostává: řada by se proděravěla o doklady, které účetní
+     * ještě může zahodit. Číslo přijde až při přijetí dokladu.
+     */
+    public function testDraftImportLeavesInternalNumberEmpty(): void
+    {
+        $out = $this->importOne('prijata-4.xml', $this->pohodaReceived('93700004', '2093-07-17'), 'draft');
+        self::assertSame('created', $out['status'], (string) ($out['reason'] ?? ''));
+
+        self::assertSame('', $this->varsymbolOf((int) $out['purchase_invoice_id']));
+    }
+
+
     // ── pomůcky ──────────────────────────────────────────────────────────────
 
     /** @return array<string,mixed> */
@@ -122,6 +160,15 @@ final class PurchaseImportStatusTest extends TestCase
 
         return $out['results'][0];
     }
+
+    private function varsymbolOf(int $purchaseInvoiceId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT varsymbol FROM purchase_invoices WHERE id = ?');
+        $stmt->execute([$purchaseInvoiceId]);
+
+        return (string) $stmt->fetchColumn();
+    }
+
 
     private function statusOf(int $purchaseInvoiceId): string
     {
