@@ -43,6 +43,26 @@ tak jdou všechny registrace vyřídit najednou. U každého řádku je vidět, 
 týká, koho se týká (u registrací jméno zaměstnance), do kdy se má podat a v jakém
 je stavu.
 
+### Odeslané podání, na které nepřijde odpověď
+
+Ve frontě zůstávají i podání, která už jednou odešla a čekají na vyjádření
+úřadu. Odeslat se z fronty nedají a je u nich uvedeno proč — jsou tam kvůli
+případu, kdy se odpovědi nedočkáte: ČSSZ zprávu převezme, ale zpracovat ji
+odmítne, například když certifikát, kterým je podání podepsané, není u OSSZ
+zapsaný v registru podávajících. Podané pak nic není, jenže povinnost by bez
+zásahu zůstala nesplněná a z aplikace by zmizela.
+
+Rozeznat takový případ od běžného čekání aplikace neumí, proto o něm
+nerozhoduje sama. Zobrazí odpověď úřadu a nabídne tlačítko **Zahodit a podat
+znovu**. To si vyžádá důvod (předvyplní se tím, co úřad odpověděl), pokus
+uzavře a podání vrátí do stavu k odeslání, takže je lze podat znovu. Původní
+pokus z historie nezmizí — jen přestane bránit dalšímu odeslání. Totéž
+tlačítko je i v záložce **JMHZ** u připraveného hlášení.
+
+Zahodit nejde podání, které úřad přijal nebo přijal částečně. Tam už u úřadu
+něco je a opakované odeslání by vyrobilo duplicitu; opravuje se opravným
+podáním (viz § 68.9).
+
 ### Hromadné odeslání
 
 Zaškrtávacím políčkem vyberte položky, nebo použijte políčko v hlavičce tabulky

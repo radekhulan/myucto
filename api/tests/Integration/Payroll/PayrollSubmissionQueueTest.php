@@ -128,8 +128,19 @@ final class PayrollSubmissionQueueTest extends TestCase
         );
     }
 
-    /** Odeslané podání ve frontě nemá co dělat — už není „k odeslání". */
-    public function testSubmittedSubmissionLeavesTheQueue(): void
+    /**
+     * Odeslané podání ve frontě ZŮSTÁVÁ — ale odeslat se z ní nedá.
+     *
+     * Dřív z fronty mizelo, protože „už není k odeslání". Jenže právě tam
+     * končí podání, u kterých odpověď úřadu nikdy nepřijde (ČSSZ zprávu
+     * převezme a zpracovat ji odmítne): povinnost zůstala nesplněná a
+     * z aplikace zmizela beze stopy. Rozeznat takový případ od normálního
+     * čekání neumíme, tak ho fronta ukáže s důvodem a nabídne účetní, ať
+     * o opakování rozhodne sama.
+     *
+     * Co se nesmí ztratit: odeslat se z tohohle stavu nedá ani omylem.
+     */
+    public function testSubmittedSubmissionStaysInQueueButCannotBeDispatched(): void
     {
         $submissionId = $this->seed('JMHZ25', 'ready', dueOn: '2026-08-20');
         self::assertNotNull($this->row($submissionId));
@@ -139,6 +150,37 @@ final class PayrollSubmissionQueueTest extends TestCase
                 SET status = ?, submitted_at = ?
               WHERE id = ?',
         )->execute(['submitted', '2026-08-15 10:00:00', $submissionId]);
+
+        $row = $this->row($submissionId);
+        self::assertNotNull($row);
+        self::assertSame('submitted', $row['submission_status']);
+        self::assertFalse($row['dispatch']['dispatchable']);
+        self::assertStringContainsString(
+            'zahodit a podat znovu',
+            (string) $row['dispatch']['blocked_reason'],
+        );
+    }
+
+    /**
+     * Přijaté podání z fronty naopak mizí — u úřadu něco JE, opakované
+     * odeslání by vyrobilo duplicitu a vracet se tam není kam. Opravuje se
+     * opravným podáním, ne novým pokusem o totéž.
+     */
+    public function testAcceptedSubmissionLeavesTheQueue(): void
+    {
+        $submissionId = $this->seed('JMHZ25', 'ready', dueOn: '2026-08-20');
+        self::assertNotNull($this->row($submissionId));
+
+        $this->pdo->prepare(
+            'UPDATE payroll_submissions
+                SET status = ?, submitted_at = ?, decided_at = ?
+              WHERE id = ?',
+        )->execute([
+            'accepted',
+            '2026-08-15 10:00:00',
+            '2026-08-15 11:00:00',
+            $submissionId,
+        ]);
 
         self::assertNull($this->row($submissionId));
     }

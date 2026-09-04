@@ -671,6 +671,76 @@ final class PayrollSubmissionService
     }
 
     /**
+     * Vědomé zahození rozdělaného odeslání a návrat podání k odeslání.
+     *
+     * PROČ TO EXISTUJE
+     * --------------------------------------------------------------------------
+     * ČSSZ zprávu převezme, ale zpracovat ji odmítne — třeba proto, že certifikát,
+     * kterým je e-podání podepsané, není u OSSZ zapsaný v registru podávajících.
+     * Odeslané tedy nic není, jenže podání uvízlo ve stavu, ze kterého nevedla cesta
+     * nikam: na `ready` se nedalo vrátit a klíč `uq_payroll_submissions_regular`
+     * pouští na jednu povinnost jediné řádné podání, takže nešlo založit ani nové.
+     * Povinnost byla z aplikace trvale nepodatelná i poté, co účetní příčinu u OSSZ
+     * vyřídila.
+     *
+     * ROZHODUJE ČLOVĚK, NE AUTOMATIKA
+     * --------------------------------------------------------------------------
+     * Důvodů, proč úřad podání nepřijme, je víc, než kolik jich umíme z protokolu
+     * spolehlivě rozpoznat. Aplikace proto odpověď úřadu jen UKÁŽE a o opakování
+     * rozhodne účetní, která ji vidí. Zahození nese `reason` (typicky právě text
+     * od ČSSZ), zapíše se do ledgeru i do auditní stopy a pokus v historii zůstává —
+     * jen přestane blokovat další odeslání
+     * ({@see PayrollDispatchGate::attemptAllowsRetry()}).
+     *
+     * CO SE ZAHODIT NESMÍ
+     * --------------------------------------------------------------------------
+     * Přijaté ani částečně přijaté podání: tam u úřadu něco JE a opakované odeslání
+     * by vyrobilo duplicitu. Oprava přijatého podání vede přes `correction_required`.
+     * Seznam povolených stavů je {@see PayrollSubmissionStateMachine::REOPENABLE_STATUSES}.
+     *
+     * @param  string $reason co úřad odpověděl / proč se pokus zahazuje
+     * @return array{id:int,status:string,row_version:int}
+     */
+    public function abandonAndReopen(
+        int $supplierId,
+        int $submissionId,
+        int $expectedRowVersion,
+        string $reason,
+    ): array {
+        $this->assertPositive($supplierId, 'Firma podání');
+        $this->assertPositive($submissionId, 'Podání');
+        $this->assertPositive($expectedRowVersion, 'Verze podání');
+
+        $trimmedReason = trim($reason);
+        if ($trimmedReason === '') {
+            throw new \DomainException(
+                'Zahození rozdělaného odeslání musí nést důvod — bez něj by v historii'
+                    . ' zůstal pokus, u kterého nikdo nezjistí, proč se zahodil.',
+            );
+        }
+
+        $submission = $this->repository->findSubmission($supplierId, $submissionId);
+        if ($submission === null) {
+            throw new \DomainException('Podání nenalezeno.');
+        }
+        $status = (string) $submission['status'];
+        if (!in_array($status, PayrollSubmissionStateMachine::REOPENABLE_STATUSES, true)) {
+            throw new \DomainException(sprintf(
+                'Podání ve stavu „%s" zahodit nelze. Vrátit k odeslání jde jen podání,'
+                    . ' které úřad nepřijal; přijaté se opravuje opravným podáním.',
+                $status,
+            ));
+        }
+
+        return $this->transition(
+            $supplierId,
+            $submissionId,
+            $expectedRowVersion,
+            'ready',
+        );
+    }
+
+    /**
      * @return array{id:int,status:string,row_version:int}
      */
     private function transitionVerifiedReceipt(
@@ -891,6 +961,16 @@ final class PayrollSubmissionService
                 ],
                 true,
             ) ? $now : null;
+            // Vrací-li se podání do předodeslaného stavu, musí s ním zmizet i
+            // stopy po odeslání — `submitted_at` je tam zakázané databázovým
+            // omezením a stará correlation by zablokovala nový pokus. Odvozuje se
+            // to z CÍLOVÉHO STAVU, ne z toho, kdo přechod vyvolal: pravidlo platí
+            // pro každou cestu zpátky, ne jen pro zahození pokusu.
+            $resetDispatchEvidence = in_array(
+                $targetStatus,
+                PayrollSubmissionStateMachine::PRE_SUBMISSION_STATUSES,
+                true,
+            );
             $rowVersion = $this->repository->updateSubmissionStatus(
                 $supplierId,
                 $submissionId,
@@ -899,6 +979,7 @@ final class PayrollSubmissionService
                 $correlationReference,
                 $submittedAt,
                 $decidedAt,
+                $resetDispatchEvidence,
             );
             $obligationStatus = $this->obligationStatus($targetStatus);
             if ($obligationStatus !== null) {

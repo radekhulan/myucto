@@ -1231,6 +1231,121 @@ final class PayrollSubmissionPlatformTest extends TestCase
     }
 
     /** @return array{id:int,due_on:string,created:bool} */
+    /**
+     * Zahození uvízlého pokusu musí podání vrátit až do stavu, ze kterého jde
+     * DOOPRAVDY odeslat znovu — ne jen přepsat `status`.
+     *
+     * Napoprvé to skončilo hláškou z databáze: řádek se vracel do `ready`
+     * s vyplněným `submitted_at` a `chk_payroll_submissions_dates` ho odmítl.
+     * Po opravě datumu čekal druhý slepý konec o krok dál — correlation
+     * z původního pokusu by nové odeslání shodila na „Correlation reference
+     * podání je neměnná." Test proto jde celou cestu až k druhému odeslání;
+     * zelený návrat na `ready` sám o sobě nic nedokazuje.
+     */
+    public function testAbandonedSubmissionReturnsToReadyAndCanBeSentAgain(): void
+    {
+        $submitted = $this->submittedSubmission('abandon');
+        $stored = $this->dispatchEvidence($submitted['id']);
+        self::assertNotNull($stored['submitted_at']);
+        self::assertSame(
+            'synthetic-correlation-abandon',
+            $stored['correlation_reference'],
+        );
+
+        $reopened = $this->submissions->abandonAndReopen(
+            $this->supplierId,
+            $submitted['id'],
+            $submitted['row_version'],
+            'Podání nebylo zpracováno, certifikát není v registru podávajících.',
+        );
+        self::assertSame('ready', $reopened['status']);
+
+        $cleared = $this->dispatchEvidence($submitted['id']);
+        self::assertNull($cleared['submitted_at']);
+        self::assertNull($cleared['decided_at']);
+        self::assertNull($cleared['correlation_reference']);
+
+        $resent = $this->submissions->transition(
+            $this->supplierId,
+            $submitted['id'],
+            $reopened['row_version'],
+            'submitted',
+            'synthetic-correlation-second',
+        );
+        self::assertSame('submitted', $resent['status']);
+        self::assertSame(
+            'synthetic-correlation-second',
+            $this->dispatchEvidence($submitted['id'])['correlation_reference'],
+        );
+    }
+
+    /**
+     * Zamítnuté podání se vrací stejnou cestou, jen s jedním datem navíc:
+     * `decided_at` je v `rejected` povinné a v `ready` zakázané, takže návrat
+     * musí smazat obojí. Kdyby se čistilo jen `submitted_at`, byla by tahle
+     * větev pořád rozbitá — a „nebylo přijato" je zrovna ten případ, kvůli
+     * kterému se hlášení podává znovu nejčastěji.
+     */
+    public function testRejectedSubmissionReturnsToReadyAndForgetsDecision(): void
+    {
+        $submitted = $this->submittedSubmission('rejected-reopen');
+        $rejected = $this->submissions->importReceipt(
+            $this->supplierId,
+            $submitted['id'],
+            $submitted['row_version'],
+            null,
+            '<receipt status="rejected"/>',
+            'receipt-rejected-reopen',
+            null,
+            'JMHZ',
+            'rejected',
+            'manual_upload',
+            'idempotency-rejected-reopen',
+            null,
+            $this->trustedVerifier('rejected'),
+        );
+        self::assertSame('rejected', $rejected['submission_status']);
+        $decided = $this->dispatchEvidence($submitted['id']);
+        self::assertNotNull($decided['decided_at']);
+
+        $reopened = $this->submissions->abandonAndReopen(
+            $this->supplierId,
+            $submitted['id'],
+            $rejected['submission_row_version'],
+            'Zamítnuto kvůli chybnému údaji, opraveno a podáváme znovu.',
+        );
+        self::assertSame('ready', $reopened['status']);
+
+        $cleared = $this->dispatchEvidence($submitted['id']);
+        self::assertNull($cleared['decided_at']);
+        self::assertNull($cleared['submitted_at']);
+    }
+
+    /**
+     * Stopy po odeslání čte test PŘÍMO z tabulky, ne přes `get()`: hlídá je
+     * databázový CHECK, takže rozhoduje, co je v řádku — ne co o něm říká
+     * čtecí cesta služby.
+     *
+     * @return array{submitted_at:?string,decided_at:?string,correlation_reference:?string}
+     */
+    private function dispatchEvidence(int $submissionId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submitted_at, decided_at, correlation_reference
+               FROM payroll_submissions
+              WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$this->supplierId, $submissionId]);
+        $row = $statement->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($row);
+
+        return [
+            'submitted_at' => $row['submitted_at'],
+            'decided_at' => $row['decided_at'],
+            'correlation_reference' => $row['correlation_reference'],
+        ];
+    }
+
     private function createObligation(): array
     {
         return $this->obligations->register(
