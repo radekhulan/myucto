@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Submission;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Repository\Submission\SubmissionInboxRepository;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
@@ -57,15 +58,29 @@ final class SubmissionInboxAction
             ? (string) $params['classification']
             : null;
         $visibility = (string) ($params['visibility'] ?? 'active');
+        // Schránka roste každý měsíc a starší zprávy se z ní mazat nesmí,
+        // takže seznam musí být stránkovaný, ne useknutý na prvních sto.
+        $limit = max(1, min(
+            SubmissionInboxRepository::LIST_MAX_LIMIT,
+            (int) ($params['limit'] ?? SubmissionInboxRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($params['offset'] ?? 0));
 
         try {
+            $page = $this->inbox->listRecentPage(
+                $supplierId,
+                $environment,
+                $classification,
+                $limit,
+                $offset,
+                $visibility,
+            );
+
             return Json::ok($response, [
-                'items' => $this->inbox->listRecent(
-                    $supplierId,
-                    $environment,
-                    $classification,
-                    visibility: $visibility,
-                ),
+                'items' => $page['items'],
+                'total' => $page['total'],
+                'limit' => $limit,
+                'offset' => $offset,
                 'state' => $this->inbox->pollState($supplierId, 'isds', $environment),
             ]);
         } catch (\InvalidArgumentException $e) {

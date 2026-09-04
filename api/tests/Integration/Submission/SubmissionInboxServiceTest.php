@@ -342,6 +342,76 @@ final class SubmissionInboxServiceTest extends TestCase
         self::assertNull($stored['matched_outbox_id'], 'Nezařazená zpráva se nesmí hádat na podání.');
     }
 
+    /**
+     * Seznam se řadí podle DORUČENÍ, ne podle pořadí stažení.
+     *
+     * `id` je pořadí, v jakém zprávy dotáhla aplikace. Stačí jedno vyzvednutí,
+     * které přinese i starší zprávu, a přehled vypadá zpřeházeně: dnešní
+     * protokol nad červnovým oznámením a pod ním zase dnešní doručenka.
+     * Účetní hledá „co přišlo naposled".
+     */
+    public function testInboxIsOrderedByDeliveryNotByFetchOrder(): void
+    {
+        $this->enablePolling();
+        // Schválně: nejnovější zpráva se stahuje jako POSLEDNÍ, takže dostane
+        // nejvyšší `id`, a nejstarší jako druhá.
+        $this->transport->inboxMessages = [
+            [
+                'message_id' => 'DM-ORDER-B',
+                'sender_box_id' => 'qqqqqqq',
+                'sender_name' => 'Syntetický odesílatel',
+                'subject' => 'Prostřední zpráva',
+                'sender_ident' => null,
+                'delivered_at' => '2026-07-15 10:00:00',
+                'accepted_at' => null,
+            ],
+            [
+                'message_id' => 'DM-ORDER-C',
+                'sender_box_id' => 'qqqqqqq',
+                'sender_name' => 'Syntetický odesílatel',
+                'subject' => 'Nejstarší zpráva',
+                'sender_ident' => null,
+                'delivered_at' => '2026-06-01 10:00:00',
+                'accepted_at' => null,
+            ],
+            [
+                'message_id' => 'DM-ORDER-A',
+                'sender_box_id' => 'qqqqqqq',
+                'sender_name' => 'Syntetický odesílatel',
+                'subject' => 'Nejnovější zpráva',
+                'sender_ident' => null,
+                'delivered_at' => '2026-09-04 10:00:00',
+                'accepted_at' => null,
+            ],
+        ];
+        foreach (['DM-ORDER-A', 'DM-ORDER-B', 'DM-ORDER-C'] as $id) {
+            $this->transport->downloads[$id] = $this->syntheticZfo();
+        }
+
+        self::assertSame(3, $this->pollInteractively()['stored']);
+
+        $listed = $this->service->listRecent($this->supplierId, 'test');
+        self::assertSame(
+            ['DM-ORDER-A', 'DM-ORDER-B', 'DM-ORDER-C'],
+            array_map(
+                static fn (array $row): string => (string) $row['external_message_id'],
+                $listed,
+            ),
+        );
+
+        // Stránkování: strop platí a celkový počet se nese s ním, jinak by
+        // uživatel nevěděl, že za první stránkou něco je.
+        $first = $this->service->listRecentPage($this->supplierId, 'test', null, 2, 0);
+        self::assertSame(3, $first['total']);
+        self::assertCount(2, $first['items']);
+        self::assertSame('DM-ORDER-A', (string) $first['items'][0]['external_message_id']);
+
+        $second = $this->service->listRecentPage($this->supplierId, 'test', null, 2, 2);
+        self::assertSame(3, $second['total']);
+        self::assertCount(1, $second['items']);
+        self::assertSame('DM-ORDER-C', (string) $second['items'][0]['external_message_id']);
+    }
+
     public function testPrivateUnclassifiedMessageCanBeHiddenAndItsLocalTreePurged(): void
     {
         $this->enablePolling();
