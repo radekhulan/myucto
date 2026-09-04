@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsMessageBuilder;
 use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzMonthCompletionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsInboxProcessor;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
@@ -449,6 +450,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
                 new PayrollSubmissionRepository($this->db),
                 $this->submissions,
             ),
+            new JmhzMonthCompletionService(new PayrollSubmissionRepository($this->db)),
             $container->get(ZfoExtractor::class),
             $signatures,
         );
@@ -622,6 +624,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
                 new PayrollSubmissionRepository($this->db),
                 $this->submissions,
             ),
+            new JmhzMonthCompletionService(new PayrollSubmissionRepository($this->db)),
             $container->get(ZfoExtractor::class),
             $signatures,
         );

@@ -511,6 +511,42 @@ final class SubmissionOutboxRepository
         return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
+    /**
+     * Odeslané zprávy datovky, které ještě nemají doručenku a jde si o ni říct.
+     *
+     * Slouží hromadnému stažení: jedno přihlášení do schránky vyřídí všechny
+     * čekající dodejky místo toho, aby účetní potvrzovala Mobilní klíč u každé
+     * zprávy zvlášť.
+     *
+     * Do výběru se dostane jen zpráva, u které má dotaz smysl: kanál `isds`
+     * (jinde dodejka neexistuje), doložené odeslání a uložené `dmID`, kterým se
+     * ISDS ptáme. Bez něj by dotaz stejně skončil chybou, takže takový řádek
+     * nemá v dávce co dělat.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listAwaitingDeliveryReceipt(
+        int $supplierId,
+        string $environment,
+        int $limit = 50,
+    ): array {
+        $this->assertAvailable();
+        $limit = max(1, min(100, $limit));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ? AND channel = \'isds\'
+                AND receipt_document_id IS NULL
+                AND external_message_id IS NOT NULL
+                AND external_message_id <> \'\'
+                AND dispatch_state IN (\'sent\', \'delivered\')
+              ORDER BY sent_at DESC, id DESC
+              LIMIT ' . $limit,
+        );
+        $stmt->execute([$supplierId, $environment]);
+
+        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
     /** @return array<string,mixed> */
     public function cancel(int $supplierId, int $id, int $expectedVersion): array
     {

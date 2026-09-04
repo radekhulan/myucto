@@ -153,6 +153,7 @@ use MyInvoice\Action\Payroll\PayrollSubmissionDetailAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionInboxAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionOverviewAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionQueueAction;
+use MyInvoice\Action\Payroll\PayrollSubmissionSettlementAction;
 use MyInvoice\Action\Payroll\PayrollStatutoryObligationAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Action\Payroll\PayrollTravelAction;
@@ -1343,6 +1344,15 @@ final class Routes
             $g->get(
                 '/submissions/overview',
                 PayrollSubmissionOverviewAction::class,
+            );
+            // Ruční uzavření podání, na které úřad neodpoví. Zdravotní
+            // pojišťovna na přehled o platbě pojistného nic strojově
+            // čitelného neposílá, takže by povinnost zůstala navždy ve stavu
+            // „čeká na výsledek". Brána je úzká — viz
+            // PayrollSubmissionSettlementService.
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/settle',
+                PayrollSubmissionSettlementAction::class,
             );
             // Fronta odchozích podání: jedno místo pro všechno připravené
             // a neodeslané napříč agendami. Odesílá přes TYTÉŽ služby jako
@@ -2652,6 +2662,13 @@ final class Routes
         // Dodejku k odeslané zprávě si aplikace umí vyžádat sama
         // (`GetSignedDeliveryInfo`). Není to doručení podle § 17 odst. 3
         // zák. 300/2008 Sb. — ptáme se na NAŠI odeslanou zprávu, ne na dodané.
+        // Dávka MUSÍ být nad `{id}` cestami, jinak by `receipts` spadlo do
+        // parametru a router by hledal podání s takovým číslem.
+        $app->post   ('/api/submissions/outbox/receipts/download', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadBatch']);
+        $app->post   ('/api/submissions/outbox/receipts/download/password', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadBatchWithPassword']);
+        $app->post   ('/api/submissions/outbox/receipts/download/sms/start', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadBatchSmsStart']);
+        $app->post   ('/api/submissions/outbox/receipts/download/sms/complete', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadBatchSmsComplete']);
+        $app->post   ('/api/submissions/outbox/receipts/download/mobile-key/confirm', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadBatchWithMobileKey']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/receipt/download', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'download']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/receipt/download/mobile-key/confirm', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadWithMobileKey']);
         // Odesílací brána ISDS (SetConcept): aplikace vloží KONCEPT do perimetru

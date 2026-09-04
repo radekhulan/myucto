@@ -554,6 +554,25 @@ export interface MobileKeyOutboxConfirmBatch {
   results: MobileKeyBatchItemResult[] | null
 }
 
+/**
+ * Výsledek hromadného stažení dodejek.
+ *
+ * Tři počty schválně: `attached` je připojeno, `pending` znamená, že ISDS
+ * dodejku ještě nemá (zpráva nebyla doručena) a `failed`, že se nepodařilo
+ * zeptat. Sloučit poslední dvě by z čekání udělalo poruchu a naopak.
+ */
+export interface ReceiptBatchResult {
+  attached: number
+  pending: number
+  failed: number
+  items: {
+    outbox_id: number
+    subject: string | null
+    status: string
+    message: string
+  }[]
+}
+
 export interface IsdsMobileCredentialProfile {
   id?: number
   saved: boolean
@@ -879,6 +898,46 @@ export const dataBoxApi = {
       outbox_ids: outboxIds,
       flow_token: flowToken,
       environment,
+    }).then(r => r.data),
+
+  /**
+   * Dodejky ke VŠEM odeslaným zprávám, které je ještě nemají, v jednom
+   * přihlášení certifikátem.
+   */
+  downloadReceiptsBatch: (environment: string) =>
+    api.post<ReceiptBatchResult>('/submissions/outbox/receipts/download', {
+      environment,
+    }).then(r => r.data),
+
+  /** Totéž v relaci potvrzené Mobilním klíčem — jedno potvrzení, všechny dodejky. */
+  downloadReceiptsBatchWithMobileKey: (flowToken: string, environment: string) =>
+    api.post<{ state: number; description: string; result: ReceiptBatchResult | null }>(
+      '/submissions/outbox/receipts/download/mobile-key/confirm',
+      { flow_token: flowToken, environment },
+    ).then(r => r.data),
+
+  /** Dávka v relaci otevřené jménem a heslem; údaje se nikam neukládají. */
+  downloadReceiptsBatchWithPassword: (environment: string, username: string, password: string) =>
+    api.post<ReceiptBatchResult>('/submissions/outbox/receipts/download/password', {
+      environment,
+      username,
+      password,
+    }).then(r => r.data),
+
+  /** Vyžádá SMS kód pro dávkové stažení dodejek. */
+  startReceiptsBatchSms: (environment: string, username: string, password: string) =>
+    api.post<SmsInboxStart>('/submissions/outbox/receipts/download/sms/start', {
+      environment,
+      username,
+      password,
+    }).then(r => r.data),
+
+  /** Ověří SMS kód a v téže relaci stáhne všechny čekající dodejky. */
+  completeReceiptsBatchSms: (environment: string, flowToken: string, smsCode: string) =>
+    api.post<ReceiptBatchResult>('/submissions/outbox/receipts/download/sms/complete', {
+      environment,
+      flow_token: flowToken,
+      sms_code: smsCode,
     }).then(r => r.data),
 
   startSmsInbox: (environment: string, username: string, password: string) =>

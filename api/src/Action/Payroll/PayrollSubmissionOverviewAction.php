@@ -10,7 +10,10 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDeliveryProof;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -22,6 +25,8 @@ final class PayrollSubmissionOverviewAction
         private readonly PayrollSubmissionRepository $repository,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollDeadlineAssessmentService $deadlines,
+        private readonly PayrollSubmissionSettlementPolicy $settlements,
+        private readonly PayrollDispatchCapabilityCatalog $capabilities,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -140,6 +145,20 @@ final class PayrollSubmissionOverviewAction
             )->phase];
         }
 
+        // Doklad o odeslání pro CELOU stránku jedním dotazem. Rozhoduje o tom,
+        // jestli u řádku svítí „Označit za vyřízené" — a to se nesmí ptát
+        // v cyklu, při padesáti řádcích by to bylo padesát dotazů.
+        $outboxes = $this->repository->dispatchOutboxesBySubmission(
+            $supplierId,
+            $environment,
+            array_values(array_filter(array_map(
+                static fn (array $row): int => (int) (
+                    $row['latest_submission']['id'] ?? 0
+                ),
+                $items,
+            ))),
+        );
+
         // Posouzení termínu u ZOBRAZENÝCH řádků — tady kvůli tomu, co uživatel
         // u řádku vidí, ne kvůli souhrnu.
         foreach ($items as &$item) {
@@ -156,6 +175,7 @@ final class PayrollSubmissionOverviewAction
                 $item['agenda_code'],
                 $item['subject_reference'],
             );
+            $item['settlement'] = $this->settlement($item, $outboxes);
         }
         unset($item);
 
@@ -171,6 +191,45 @@ final class PayrollSubmissionOverviewAction
             'limit' => $limit,
             'offset' => $offset,
         ]);
+    }
+
+    /**
+     * Co smí účetní u řádku udělat s tím, že úřad neodpoví.
+     *
+     * `authority_reports_result` jde ven i tam, kde se uzavřít nedá: bez něj
+     * by u přehledu pojišťovně svítilo „Čeká na výsledek podání" a nikde by
+     * nestálo, že se nečeká na nic. Právě tenhle rozpor přiměl účetní hledat
+     * odpověď, která nikdy nepřijde.
+     *
+     * @param array<string,mixed> $item
+     * @param array<int,array<string,mixed>> $outboxes
+     * @return array{
+     *   authority_reports_result:bool,can_settle:bool,delivery_proof:?string
+     * }
+     */
+    private function settlement(array $item, array $outboxes): array
+    {
+        $capability = $this->capabilities->forAgenda((string) $item['agenda_code']);
+        $submission = $item['latest_submission'] ?? null;
+        if (!is_array($submission)) {
+            return [
+                'authority_reports_result' => $capability->authorityReportsResult,
+                'can_settle' => false,
+                'delivery_proof' => null,
+            ];
+        }
+        $outbox = $outboxes[(int) $submission['id']] ?? null;
+
+        return [
+            'authority_reports_result' => $capability->authorityReportsResult,
+            'can_settle' => $this->settlements->blockedReason(
+                (string) $item['agenda_code'],
+                (string) $item['status'],
+                (string) $submission['status'],
+                $outbox,
+            ) === null,
+            'delivery_proof' => PayrollSubmissionDeliveryProof::reason($outbox),
+        ];
     }
 
     private function agendaGroup(mixed $value): ?string

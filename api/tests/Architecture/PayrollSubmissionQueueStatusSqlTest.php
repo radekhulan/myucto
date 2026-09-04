@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionQueueRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapability;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDeliveryProof;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
 use PHPUnit\Framework\TestCase;
 
@@ -30,6 +31,75 @@ final class PayrollSubmissionQueueStatusSqlTest extends TestCase
         self::assertSame(
             PayrollSubmissionQueueRepository::LISTED_STATUSES,
             $fromSql,
+        );
+    }
+
+    public function testQueuedSqlStatusListMirrorsThePhpList(): void
+    {
+        $fromSql = array_map(
+            static fn (string $item): string => trim($item, '"'),
+            explode(',', PayrollSubmissionQueueRepository::QUEUED_STATUSES_SQL),
+        );
+
+        self::assertSame(
+            PayrollSubmissionQueueRepository::QUEUED_STATUSES,
+            $fromSql,
+        );
+    }
+
+    /**
+     * Podmínka „doručení je doložené" žije taky dvakrát: jako SQL ve frontě
+     * (která takový řádek přestane ukazovat) a jako PHP v
+     * {@see PayrollSubmissionDeliveryProof} (které podle ní zakazuje zahodit
+     * a podat znovu). Kdyby se rozešly, dostal by se řádek do fronty
+     * s tlačítkem, které server odmítne — nebo naopak zmizel, aniž by k němu
+     * vedla jakákoliv akce.
+     */
+    public function testDeliveryProofSqlMirrorsThePhpRule(): void
+    {
+        $sql = (string) (new \ReflectionClass(
+            PayrollSubmissionQueueRepository::class,
+        ))->getConstant('DELIVERY_PROVEN_SQL');
+
+        // Každý důvod, který PHP uznává, musí mít protějšek ve sloupci dotazu.
+        $columnsByReason = [
+            'delivered' => 'outbox.dispatch_state = "delivered"',
+            'receipt' => 'outbox.receipt_document_id IS NOT NULL',
+            'accepted' => 'outbox.acceptance_state = "accepted"',
+        ];
+        $rowsByReason = [
+            'delivered' => ['dispatch_state' => 'delivered'],
+            'receipt' => [
+                'dispatch_state' => 'sent',
+                'receipt_document_id' => 7,
+            ],
+            'accepted' => [
+                'dispatch_state' => 'sent',
+                'acceptance_state' => 'accepted',
+            ],
+        ];
+        foreach ($columnsByReason as $reason => $condition) {
+            self::assertStringContainsString($condition, $sql, sprintf(
+                'Fronta neumí odfiltrovat důkaz doručení „%s".',
+                $reason,
+            ));
+            self::assertSame(
+                $reason,
+                PayrollSubmissionDeliveryProof::reason($rowsByReason[$reason]),
+            );
+        }
+
+        // A naopak: co PHP za důkaz nepovažuje, nesmí fronta schovat.
+        self::assertNull(PayrollSubmissionDeliveryProof::reason(null));
+        self::assertNull(PayrollSubmissionDeliveryProof::reason([
+            'dispatch_state' => 'sent',
+            'acceptance_state' => 'unknown',
+            'receipt_document_id' => null,
+        ]));
+        self::assertSame(
+            count($columnsByReason),
+            substr_count($sql, 'outbox.'),
+            'V SQL přibyla podmínka, kterou PayrollSubmissionDeliveryProof nezná.',
         );
     }
 

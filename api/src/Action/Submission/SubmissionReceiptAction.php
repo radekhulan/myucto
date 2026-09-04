@@ -13,6 +13,9 @@ use MyInvoice\Service\Document\DocumentException;
 use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\Isds\DirectIsdsInboxTransport;
 use MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator;
+use MyInvoice\Service\Submission\Channel\Isds\SmsIsdsAuthenticator;
+use MyInvoice\Service\Submission\Channel\ChannelCredentials;
+use MyInvoice\Service\Submission\Channel\SensitiveValue;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\DeliveryReceiptService;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
@@ -46,6 +49,7 @@ final class SubmissionReceiptAction
         private readonly SubmissionCredentialService $credentials,
         private readonly DirectIsdsInboxTransport $transport,
         private readonly MobileKeyIsdsAuthenticator $mobileKey,
+        private readonly SmsIsdsAuthenticator $sms,
     ) {}
 
     /**
@@ -346,7 +350,264 @@ final class SubmissionReceiptAction
         ]);
     }
 
+    /**
+     * POST /api/submissions/outbox/receipts/download — dodejky ke VŠEM
+     * odeslaným zprávám, které je ještě nemají, v jednom přihlášení.
+     *
+     * Přihlášení do schránky je potvrzení v mobilu; vyžadovat ho u každé
+     * zprávy zvlášť znamená, že to účetní po uzávěrce přestane dělat.
+     */
+    public function downloadBatch(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $environment = (string) ($body['environment'] ?? 'production');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+
+        $supplierId = SupplierGuard::currentId($request);
+        try {
+            $context = $this->credentials->unlock($supplierId, $environment);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        return $this->downloadBatchWithContext($response, $supplierId, $environment, $request, $context);
+    }
+
+    /**
+     * POST /api/submissions/outbox/receipts/download/password — dávka
+     * v relaci otevřené jménem a heslem do datové schránky.
+     *
+     * Údaje se nikam neukládají; žijí jen po dobu tohohle volání.
+     */
+    public function downloadBatchWithPassword(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $environment = (string) ($body['environment'] ?? 'production');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+        $username = trim((string) ($body['username'] ?? ''));
+        $password = (string) ($body['password'] ?? '');
+        if ($username === '' || strlen($username) > 128
+            || preg_match('/[\x00-\x20:\x7f]/', $username) === 1
+        ) {
+            return Json::error(
+                $response,
+                'isds_username_invalid',
+                'Vyplňte platné uživatelské jméno k datové schránce.',
+                400,
+            );
+        }
+        if ($password === '' || strlen($password) > 512) {
+            return Json::error(
+                $response,
+                'isds_password_invalid',
+                'Vyplňte heslo k datové schránce.',
+                400,
+            );
+        }
+
+        $supplierId = SupplierGuard::currentId($request);
+        $context = new ChannelContext(
+            $supplierId,
+            $environment,
+            new ChannelCredentials(
+                boxId: '',
+                authMode: 'password',
+                username: SensitiveValue::fromProducer(static fn (): string => $username),
+                password: SensitiveValue::fromProducer(static fn (): string => $password),
+            ),
+        );
+
+        return $this->downloadBatchWithContext($response, $supplierId, $environment, $request, $context);
+    }
+
+    /**
+     * POST /api/submissions/outbox/receipts/download/sms/start — vyžádá SMS kód.
+     */
+    public function downloadBatchSmsStart(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $result = $this->sms->start(
+                SupplierGuard::currentId($request),
+                $this->userId($request),
+                (string) ($body['environment'] ?? 'production'),
+                (string) ($body['username'] ?? ''),
+                (string) ($body['password'] ?? ''),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * POST /api/submissions/outbox/receipts/download/sms/complete — ověří kód
+     * a v téže relaci stáhne všechny čekající dodejky.
+     */
+    public function downloadBatchSmsComplete(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $environment = (string) ($body['environment'] ?? 'production');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+        $flowToken = (string) ($body['flow_token'] ?? '');
+        if ($flowToken === '' || strlen($flowToken) > 8192) {
+            return Json::error(
+                $response,
+                'isds_sms_flow_invalid',
+                'Přihlášení pomocí SMS není platné. Vyžádejte nový kód.',
+                400,
+            );
+        }
+
+        $supplierId = SupplierGuard::currentId($request);
+        try {
+            $context = $this->sms->complete(
+                $flowToken,
+                (string) ($body['sms_code'] ?? ''),
+                $supplierId,
+                $this->userId($request),
+                $environment,
+            );
+            try {
+                $result = $this->receipts->downloadManyFromIsds(
+                    $supplierId,
+                    $environment,
+                    $this->userId($request),
+                    $context,
+                    $this->transport,
+                );
+            } finally {
+                $this->sms->logout($context);
+            }
+        } catch (DocumentException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'receipt_conflict', $e->getMessage(), 409);
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * POST /api/submissions/outbox/receipts/download/mobile-key/confirm —
+     * totéž v relaci potvrzené Mobilním klíčem.
+     *
+     * Relace se zahajuje existující dávkovou cestou
+     * `/api/submissions/outbox/mobile-key/start-batch`; ta o žádném podání nic
+     * netvrdí, jen přihlašuje.
+     */
+    public function downloadBatchWithMobileKey(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $environment = (string) ($body['environment'] ?? 'production');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+        $flowToken = (string) ($body['flow_token'] ?? '');
+        if ($flowToken === '' || strlen($flowToken) > 8192) {
+            return Json::error(
+                $response,
+                'isds_mobile_flow_invalid',
+                'Přihlášení Mobilním klíčem není platné. Spusťte ho znovu.',
+                400,
+            );
+        }
+
+        $supplierId = SupplierGuard::currentId($request);
+        try {
+            $flow = $this->mobileKey->continue(
+                $flowToken,
+                $supplierId,
+                $this->userId($request),
+                $environment,
+            );
+            $context = $flow['context'];
+            if ($context === null) {
+                // Čeká se na potvrzení v mobilu — žádné podání se nedotýká.
+                return Json::ok($response, [
+                    'state' => $flow['state'],
+                    'description' => $flow['description'],
+                    'result' => null,
+                ]);
+            }
+            try {
+                $result = $this->receipts->downloadManyFromIsds(
+                    $supplierId,
+                    $environment,
+                    $this->userId($request),
+                    $context,
+                    $this->transport,
+                );
+            } finally {
+                $this->mobileKey->logout($context);
+            }
+        } catch (DocumentException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'receipt_conflict', $e->getMessage(), 409);
+        }
+
+        return Json::ok($response, [
+            'state' => $flow['state'],
+            'description' => $flow['description'],
+            'result' => $result,
+        ]);
+    }
+
     // ───────────────────────── interní ─────────────────────────
+
+    /** Společný závěr obou dávkových cest. */
+    private function downloadBatchWithContext(
+        Response $response,
+        int $supplierId,
+        string $environment,
+        Request $request,
+        ChannelContext $context,
+    ): Response {
+        try {
+            $result = $this->receipts->downloadManyFromIsds(
+                $supplierId,
+                $environment,
+                $this->userId($request),
+                $context,
+                $this->transport,
+            );
+        } catch (DocumentException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'receipt_conflict', $e->getMessage(), 409);
+        }
+
+        return Json::ok($response, $result);
+    }
 
     /** Společný závěr obou cest stažení. */
     private function downloadWithContext(

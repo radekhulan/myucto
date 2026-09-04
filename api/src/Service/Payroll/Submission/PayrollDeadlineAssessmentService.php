@@ -39,6 +39,32 @@ final class PayrollDeadlineAssessmentService
         'correction_required',
         'superseded',
     ];
+
+    /**
+     * Stavy podání, které USTOUPÍ splněné povinnosti.
+     *
+     * Povinnost plní celý ŘETĚZEC podání, ne jedno z nich. U měsíčního hlášení
+     * obsahová oprava řádné podání ZÁMĚRNĚ nenahrazuje — přijaté formuláře
+     * zůstávají zaevidované — takže řádné podání zůstane navždy „částečně
+     * přijaté", i když ČSSZ potvrdila, že hlášení je úplné
+     * ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzMonthCompletionService}).
+     * Totéž platí pro nahrazené podání: nástupce povinnost nese, předchůdce
+     * už ne.
+     *
+     * Dokud se tohle nerozlišovalo, hlásil tentýž řádek zároveň „Splněno"
+     * (podle povinnosti) i „Je nutný zásah" (podle podání) a účetní řešila
+     * měsíc, který úřad potvrdil jako hotový.
+     *
+     * `rejected`, `waiting_for_identity` ani `correction_required` tu ZÁMĚRNĚ
+     * nejsou: tam je splněná povinnost naopak zastaralá projekce a pravdu má
+     * podání — s takovým výsledkem není odevzdané nic.
+     *
+     * @var list<string>
+     */
+    private const YIELD_TO_FULFILLED_OBLIGATION = [
+        'partially_accepted',
+        'superseded',
+    ];
     private const PENDING_SUBMISSION_STATUSES = [
         'submitted',
         'processing',
@@ -90,13 +116,18 @@ final class PayrollDeadlineAssessmentService
         ) {
             return $this->result('cancelled', $daysToDue, false, false);
         }
-        if ($obligationStatus === 'manual_review'
-            || in_array(
-                $latestSubmissionStatus,
-                self::ACTION_SUBMISSION_STATUSES,
-                true,
-            )
-        ) {
+        // Stav podání volá po zásahu — pokud ho nepřebíjí splněná povinnost
+        // (viz YIELD_TO_FULFILLED_OBLIGATION).
+        $submissionDemandsAction = in_array(
+            $latestSubmissionStatus,
+            self::ACTION_SUBMISSION_STATUSES,
+            true,
+        ) && !($obligationStatus === 'fulfilled' && in_array(
+            $latestSubmissionStatus,
+            self::YIELD_TO_FULFILLED_OBLIGATION,
+            true,
+        ));
+        if ($obligationStatus === 'manual_review' || $submissionDemandsAction) {
             return $this->result(
                 'action_required',
                 $daysToDue,

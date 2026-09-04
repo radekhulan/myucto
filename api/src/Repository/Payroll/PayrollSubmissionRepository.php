@@ -1550,6 +1550,155 @@ final class PayrollSubmissionRepository
     }
 
     /**
+     * Poslední řádek odchozí fronty datové schránky, který k podání patří.
+     *
+     * Je to jediné místo, kde se dá DOLOŽIT, že zpráva aplikaci opustila:
+     * `dispatch_state`, doručenka a datum doručení. Stav podání sám o sobě
+     * důkaz není — `submitted` může znamenat i to, že se odeslání teprve
+     * zapsalo. Bez tohohle rozlišení by šlo zahodit a podat znovu i podání,
+     * které úřad prokazatelně dostal, a účetní by u něj vyrobila duplicitu.
+     *
+     * Podání odeslané VREPem tady legitimně nemá nic; jeho stopa jsou pokusy
+     * ({@see PayrollSubmissionTransportAttemptRepository}).
+     *
+     * @return array{
+     *   id:int,row_version:int,dispatch_state:string,acceptance_state:string,
+     *   dispatch_mode:string,delivered_at:?string,receipt_document_id:?int,
+     *   external_message_id:?string,recipient_box_id:?string
+     * }|null
+     */
+    public function findDispatchOutboxForSubmission(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT outbox.id, outbox.row_version, outbox.dispatch_state,
+                    outbox.acceptance_state, outbox.dispatch_mode,
+                    outbox.delivered_at, outbox.receipt_document_id,
+                    outbox.external_message_id, outbox.recipient_box_id
+               FROM submission_outbox outbox
+               JOIN payroll_submission_artifacts artifact
+                 ON artifact.supplier_id = outbox.supplier_id
+                AND artifact.environment = outbox.environment
+                AND artifact.id = outbox.artifact_id
+              WHERE outbox.supplier_id = ?
+                AND outbox.environment = ?
+                AND outbox.channel = "isds"
+                AND outbox.artifact_kind = "payroll_submission"
+                AND artifact.submission_id = ?
+              -- Nejnovější řádek: opakované zařazení do fronty (zrušený
+              -- koncept, druhý pokus) zakládá další, a rozhoduje ten poslední.
+              ORDER BY outbox.id DESC
+              LIMIT 1',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || !is_array($row)) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $row['id'],
+            'row_version' => (int) $row['row_version'],
+            'dispatch_state' => (string) $row['dispatch_state'],
+            'acceptance_state' => (string) $row['acceptance_state'],
+            'dispatch_mode' => (string) $row['dispatch_mode'],
+            'delivered_at' => $row['delivered_at'] === null
+                ? null
+                : (string) $row['delivered_at'],
+            'receipt_document_id' => $row['receipt_document_id'] === null
+                ? null
+                : (int) $row['receipt_document_id'],
+            'external_message_id' => $row['external_message_id'] === null
+                ? null
+                : (string) $row['external_message_id'],
+            'recipient_box_id' => $row['recipient_box_id'] === null
+                ? null
+                : (string) $row['recipient_box_id'],
+        ];
+    }
+
+    /**
+     * Totéž pro celou stránku přehledu najednou.
+     *
+     * Přehled potřebuje u KAŽDÉHO řádku vědět, jestli je doručení doložené —
+     * podle toho se rozhoduje, jestli u něj svítí tlačítko. Volat kvůli tomu
+     * {@see self::findDispatchOutboxForSubmission()} v cyklu by při padesáti
+     * řádcích znamenalo padesát dotazů.
+     *
+     * @param  list<int> $submissionIds
+     * @return array<int,array{
+     *   id:int,row_version:int,dispatch_state:string,acceptance_state:string,
+     *   dispatch_mode:string,delivered_at:?string,receipt_document_id:?int,
+     *   external_message_id:?string,recipient_box_id:?string
+     * }> klíčem je `submission_id`
+     */
+    public function dispatchOutboxesBySubmission(
+        int $supplierId,
+        string $environment,
+        array $submissionIds,
+    ): array {
+        $submissionIds = array_values(array_unique(array_filter(
+            $submissionIds,
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($submissionIds === []) {
+            return [];
+        }
+        $placeholders = implode(', ', array_fill(0, count($submissionIds), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT artifact.submission_id, outbox.id, outbox.row_version,
+                    outbox.dispatch_state, outbox.acceptance_state,
+                    outbox.dispatch_mode, outbox.delivered_at,
+                    outbox.receipt_document_id, outbox.external_message_id,
+                    outbox.recipient_box_id
+               FROM submission_outbox outbox
+               JOIN payroll_submission_artifacts artifact
+                 ON artifact.supplier_id = outbox.supplier_id
+                AND artifact.environment = outbox.environment
+                AND artifact.id = outbox.artifact_id
+              WHERE outbox.supplier_id = ?
+                AND outbox.environment = ?
+                AND outbox.channel = "isds"
+                AND outbox.artifact_kind = "payroll_submission"
+                AND artifact.submission_id IN (' . $placeholders . ')
+              -- Vzestupně, aby poslední zápis do mapy byl ten NEJNOVĚJŠÍ —
+              -- stejné pravidlo jako u findDispatchOutboxForSubmission().
+              ORDER BY outbox.id ASC',
+        );
+        $statement->execute([$supplierId, $environment, ...$submissionIds]);
+
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $result[(int) $row['submission_id']] = [
+                'id' => (int) $row['id'],
+                'row_version' => (int) $row['row_version'],
+                'dispatch_state' => (string) $row['dispatch_state'],
+                'acceptance_state' => (string) $row['acceptance_state'],
+                'dispatch_mode' => (string) $row['dispatch_mode'],
+                'delivered_at' => $row['delivered_at'] === null
+                    ? null
+                    : (string) $row['delivered_at'],
+                'receipt_document_id' => $row['receipt_document_id'] === null
+                    ? null
+                    : (int) $row['receipt_document_id'],
+                'external_message_id' => $row['external_message_id'] === null
+                    ? null
+                    : (string) $row['external_message_id'],
+                'recipient_box_id' => $row['recipient_box_id'] === null
+                    ? null
+                    : (string) $row['recipient_box_id'],
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * @return array{
      *   id:int,submission_id:int,part_id:?int,content_ciphertext:string,
      *   byte_size:int,artifact_sha256:string,environment:string,
@@ -1764,6 +1913,67 @@ final class PayrollSubmissionRepository
         }
 
         return $outcomes;
+    }
+
+    /**
+     * Kolik chyb protokol vytkl kterému PRACOVNÍMU VZTAHU v celém řetězci.
+     *
+     * Obrazovka opravy podle toho zvýrazní a předvybere právě ty zaměstnance,
+     * na které si ČSSZ stěžovala. U padesáti lidí je to rozdíl mezi kliknutím
+     * a ručním procházením seznamu.
+     *
+     * Počítá se jen z DŮVĚRYHODNÝCH protokolů třídy `CSSZ_JMHZ`; neověřený
+     * doklad nesmí nikoho označit.
+     *
+     * Klíčem je GUID FORMULÁŘE, ne identifikátor vztahu. Protokol o zpracování
+     * uvádí u chyby jen `idFormulare` a starší uložené výsledky proto identitu
+     * zaměstnance vůbec nenesou. Na vztah se to přeloží až u volajícího podle
+     * zmrazené datové věty, takže označení funguje i pro protokoly, které se
+     * naimportovaly dřív — přeimportovat je nejde, idempotence to správně
+     * odmítne.
+     *
+     * @param list<int> $submissionIds řetězec podání za období
+     * @return array<string,int> GUID formuláře → počet vytknutých chyb
+     */
+    public function jmhzProtocolErrorCountsByForm(
+        int $supplierId,
+        string $environment,
+        array $submissionIds,
+    ): array {
+        $ids = array_values(array_unique(array_filter(
+            array_map(static fn (mixed $id): int => (int) $id, $submissionIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids === []) {
+            return [];
+        }
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT outcome.form_guid AS form_guid,
+                    SUM(outcome.error_count) AS errors
+               FROM payroll_jmhz_protocol_form_outcomes outcome
+               JOIN payroll_submission_receipts receipt
+                 ON receipt.supplier_id = outcome.supplier_id
+                AND receipt.environment = outcome.environment
+                AND receipt.id = outcome.receipt_id
+              WHERE outcome.supplier_id = ?
+                AND outcome.environment = ?
+                AND outcome.submission_id IN (' . $placeholders . ')
+                AND outcome.error_count > 0
+                AND receipt.verification_status = "trusted"
+                AND receipt.protocol_code = "CSSZ_JMHZ"
+              GROUP BY outcome.form_guid',
+        );
+        $statement->execute([$supplierId, $environment, ...$ids]);
+        $counts = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row) || !is_string($row['form_guid'] ?? null)) {
+                continue;
+            }
+            $counts[strtoupper((string) $row['form_guid'])] = (int) $row['errors'];
+        }
+
+        return $counts;
     }
 
     /**

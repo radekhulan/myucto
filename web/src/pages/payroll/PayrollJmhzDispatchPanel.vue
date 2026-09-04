@@ -85,7 +85,14 @@ const ABANDONABLE_STATUSES = ['submitted', 'processing', 'waiting_for_identity',
 const abandoning = ref<string | null>(null)
 
 function canAbandon(preview: PayrollJmhzPvpojPreview): boolean {
-  const latest = obligation(preview)?.latest_submission
+  const item = obligation(preview)
+  const latest = item?.latest_submission
+  // Zprávu, kterou datová schránka prokazatelně doručila, zahodit nelze:
+  // druhé podání téhož by u ČSSZ založilo duplicitu. Server to odmítne tak
+  // jako tak (PayrollSubmissionDeliveryProof), ale nabízet tlačítko, které
+  // vždycky skončí chybou, je horší než ho neukázat.
+  if (item?.settlement?.delivery_proof) return false
+
   return latest !== null && latest !== undefined
     && ABANDONABLE_STATUSES.includes(latest.status)
 }

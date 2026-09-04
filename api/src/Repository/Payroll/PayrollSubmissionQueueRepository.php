@@ -89,6 +89,33 @@ final class PayrollSubmissionQueueRepository
         '"validated","prepared","ready",'
         . '"submitted","processing","waiting_for_identity","rejected"';
 
+    /**
+     * Ruční kopie {@see self::QUEUED_STATUSES} ze stejného důvodu; shodu hlídá
+     * tentýž architektonický test.
+     */
+    public const QUEUED_STATUSES_SQL = '"validated","prepared","ready"';
+
+    /**
+     * Podání, u kterého je doručení DOLOŽENÉ, do fronty k odeslání nepatří.
+     *
+     * Fronta ukazuje odeslaná podání jen proto, aby z nich vedla cesta ven —
+     * zahodit pokus a podat znovu. Jenže zprávu, kterou datová schránka
+     * doručila, zahodit nelze: druhé podání téhož by u úřadu založilo
+     * duplicitu, kterou nejde vzít zpět. Řádek tedy nenabízí žádnou akci
+     * a ve frontě „K odeslání" jen mate — přesně to se stalo u přehledu VZP
+     * za 08/2026, který tam seděl odeslaný, s doručenkou, a nabízel „Zahodit
+     * a podat znovu".
+     *
+     * Podmínka je ZRCADLO {@see \MyInvoice\Service\Payroll\Submission\PayrollSubmissionDeliveryProof::reason()};
+     * shodu hlídá `PayrollSubmissionQueueStatusSqlTest`. Rozejít se nesmí:
+     * v SQL navíc znamená řádek, který zmizel, aniž by k němu vedla akce;
+     * v PHP navíc znamená řádek s tlačítkem, které server odmítne.
+     */
+    private const DELIVERY_PROVEN_SQL =
+        'outbox.dispatch_state = "delivered"
+              OR outbox.receipt_document_id IS NOT NULL
+              OR outbox.acceptance_state = "accepted"';
+
     private const FROM = '
           FROM payroll_submissions submission
           JOIN payroll_obligations obligation
@@ -149,7 +176,22 @@ final class PayrollSubmissionQueueRepository
          WHERE submission.supplier_id = ?
            AND submission.environment = ?
            AND submission.status IN ('
-        . self::LISTED_STATUSES_SQL . ')';
+        . self::LISTED_STATUSES_SQL . ')
+           -- Neodeslaná podání zůstávají vždycky; odeslaná jen dokud z nich
+           -- vede cesta ven (viz DELIVERY_PROVEN_SQL).
+           AND (
+                submission.status IN (' . self::QUEUED_STATUSES_SQL . ')
+             OR outbox.id IS NULL
+             OR NOT (' . self::DELIVERY_PROVEN_SQL . ')
+           )
+           -- A stejně tak: uzavřená povinnost už nic nedluží. Odeslané podání
+           -- pod ní nemá kam vést — zahodit a podat znovu by znamenalo znovu
+           -- otevřít měsíc, který je hotový. Připravená podání se NEVYNECHÁVAJÍ
+           -- ani tady: oprava k uzavřené povinnosti se odesílá pořád odtud.
+           AND (
+                submission.status IN (' . self::QUEUED_STATUSES_SQL . ')
+             OR obligation.status NOT IN ("fulfilled", "cancelled")
+           )';
 
     /**
      * Řazení. Výchozí je podle lhůty — fronta se čte shora dolů a co je

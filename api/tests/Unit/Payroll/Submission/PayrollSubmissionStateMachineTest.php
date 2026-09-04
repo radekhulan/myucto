@@ -58,6 +58,15 @@ final class PayrollSubmissionStateMachineTest extends TestCase
     public static function invalidTransitions(): iterable
     {
         yield 'ready is not accepted' => ['ready', 'accepted'];
+        /*
+         * Přijetí tvrdí ověřený protokol úřadu a ten podání vždycky posune
+         * přes `processing`. Přímá hrana by navíc obešla roční uzávěrku:
+         * `accepted` se u ní vědomě nehlídá, takže by doručený protokol uzavřel
+         * podání i v uzavřeném roce. Agendy, u kterých úřad výsledek neposílá,
+         * se proto uzavírají na úrovni POVINNOSTI
+         * ({@see \MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementService}),
+         * ne změnou stavu podání.
+         */
         yield 'submitted is not automatically accepted' => [
             'submitted',
             'accepted',

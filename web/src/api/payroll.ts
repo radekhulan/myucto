@@ -2486,6 +2486,23 @@ export interface PayrollSubmissionOverviewItem {
     submitted_at: string | null
     decided_at: string | null
   } | null
+  /**
+   * Ruční uzavření podání, na které úřad neodpoví.
+   *
+   * `authority_reports_result === false` znamená, že od úřadu strojový
+   * výsledek NEPŘIJDE (přehled zdravotní pojišťovně) — řádek by jinak zůstal
+   * navždy „čeká na výsledek podání" a čekal by na nic.
+   *
+   * Volitelné kvůli starší odpovědi ze cache: chybějící pole znamená „nevíme",
+   * tedy tlačítko se neukáže. Fail-closed je tu správně — nabídnout uzavření
+   * tam, kde ho server odmítne, je horší než ho na chvíli nenabídnout.
+   */
+  settlement?: {
+    authority_reports_result: boolean
+    can_settle: boolean
+    /** Čím je doručení doložené: `delivered` | `receipt` | `accepted`. */
+    delivery_proof: string | null
+  }
 }
 
 export interface PayrollSubmissionOverviewResponse {
@@ -2642,6 +2659,21 @@ export interface PayrollSubmissionAbandonResult {
   submission: { id: number; status: string; row_version: number }
   /** ID pokusů, které se tímhle uzavřely. */
   abandoned_attempts: number[]
+}
+
+/**
+ * Výsledek ručního uzavření povinnosti, na kterou úřad neodpoví.
+ *
+ * Mění se POVINNOST, ne stav podání: `accepted` u podání smí zapsat jen
+ * ověřený protokol úřadu, a ten tady žádný není. Podání proto zůstane
+ * „odesláno" a jde v odpovědi ven schválně, ať je to vidět.
+ */
+export interface PayrollSubmissionSettlementResult {
+  environment: PayrollRegzelEnvironment
+  obligation: { id: number; status: string; row_version: number }
+  submission: { id: number; status: string }
+  outbox_id: number | null
+  delivery_proof: string | null
 }
 
 export interface PayrollSubmissionQueueDispatchResult {
@@ -5648,6 +5680,14 @@ export interface PayrollJmhzContentCorrectionForm {
   person_external_identifier: string
   employment_external_identifier: string
   effective_state: 'accepted' | 'rejected' | 'cancelled' | 'missing'
+  /**
+   * Kolik chyb protokol ČSSZ vytkl právě tomuhle pracovnímu vztahu.
+   *
+   * Počítá se z uložených výsledků formulářů, takže označení funguje i pro
+   * hlášení odeslané datovou schránkou, kde se aplikace na výsledek nikam
+   * nedoptává a dotazovací pokus tu žádný není.
+   */
+  protocol_error_count: number
   action: 'correct_values' | 'complete_form'
 }
 
@@ -6394,6 +6434,28 @@ export const payrollApi = {
     api.post<PayrollSubmissionAbandonResult>(
       `/payroll/submissions/queue/${submissionId}/abandon`,
       { environment, row_version: rowVersion, reason },
+    ).then(response => response.data),
+  /**
+   * Potvrdí, že je povinnost vyřízená, protože od úřadu už nic nepřijde.
+   *
+   * Zdravotní pojišťovna na přehled o platbě pojistného neodpovídá ničím, co
+   * by šlo strojově přečíst — povinnost by tedy zůstala navždy „čeká na
+   * výsledek". Server pustí jen agendu, u které je tohle doložené; u JMHZ
+   * a registrací výsledek dorazí sám.
+   *
+   * `rowVersion` je verze POVINNOSTI (`item.row_version`), ne podání — mění
+   * se povinnost. `note` je povinná a jde do historie, aby bylo poznat, že
+   * měsíc uzavřel člověk a o co se opřel.
+   */
+  settleSubmission: (
+    environment: PayrollRegzelEnvironment,
+    submissionId: number,
+    rowVersion: number,
+    note: string,
+  ) =>
+    api.post<PayrollSubmissionSettlementResult>(
+      `/payroll/submissions/${submissionId}/settle`,
+      { environment, row_version: rowVersion, note },
     ).then(response => response.data),
   /**
    * Jeden měsíční přehled: co se za zvolené období generuje/odesílá, kam,

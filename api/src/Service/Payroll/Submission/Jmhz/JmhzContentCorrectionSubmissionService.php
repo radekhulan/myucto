@@ -125,6 +125,14 @@ final readonly class JmhzContentCorrectionSubmissionService
             $supplierId,
             array_values(array_unique(array_column($current, 'employee_id'))),
         );
+        // Koho protokol vytkl. Bere se z uložených výsledků formulářů, ne
+        // z dotazu na VREP — jinak by u hlášení odeslaného datovkou zůstal
+        // seznam bez označení, přestože chyby v evidenci máme.
+        $flagged = $this->protocolErrorsByEmployment(
+            $supplierId,
+            $environment,
+            $regularSubmissionId,
+        );
         $rows = [];
         foreach ($current as $externalId => $row) {
             $externalId = (string) $externalId;
@@ -134,6 +142,7 @@ final readonly class JmhzContentCorrectionSubmissionService
                 'person_external_identifier' => $row['person_external_identifier'],
                 'employee_name' => $names[$row['employee_id']] ?? null,
                 'effective_state' => $state->state,
+                'protocol_error_count' => $flagged[$externalId] ?? 0,
                 'action' => $state->state === 'accepted'
                     ? 'correct_values'
                     : 'complete_form',
@@ -397,6 +406,62 @@ final readonly class JmhzContentCorrectionSubmissionService
         }
 
         return [$resolution, $document, $identity, self::currentForms($document)];
+    }
+
+    /**
+     * Chyby vytknuté protokolem, přeložené z GUIDů formulářů na pracovní vztahy.
+     *
+     * Překlad se dělá až tady, podle zmrazené datové věty každého podání
+     * v řetězci. Uložený výsledek formuláře totiž identitu zaměstnance nést
+     * nemusí — protokol o zpracování uvádí u chyby jen `idFormulare` — a starší
+     * záznamy ji nenesou vůbec. Zmrazená věta ji má vždycky.
+     *
+     * @return array<string,int> identifikátor vztahu → počet vytknutých chyb
+     */
+    private function protocolErrorsByEmployment(
+        int $supplierId,
+        string $environment,
+        int $regularSubmissionId,
+    ): array {
+        $chain = $this->repository->jmhzChainForRoot(
+            $supplierId,
+            $environment,
+            $regularSubmissionId,
+        );
+        $submissionIds = array_map(
+            static fn (array $member): int => (int) $member['id'],
+            $chain,
+        );
+        $counts = $this->repository->jmhzProtocolErrorCountsByForm(
+            $supplierId,
+            $environment,
+            $submissionIds,
+        );
+        if ($counts === []) {
+            return [];
+        }
+
+        $byEmployment = [];
+        foreach ($submissionIds as $memberId) {
+            try {
+                $forms = $this->frozen->describe($supplierId, $environment, $memberId)['forms'];
+            } catch (\Throwable) {
+                // Podání bez čitelné zmrazené věty se přeskočí; označení je
+                // pomůcka, ne důkaz, a nesmí kvůli němu spadnout celý výběr.
+                continue;
+            }
+            foreach ($forms as $form) {
+                $guid = strtoupper((string) ($form['form_guid'] ?? ''));
+                $employment = (string) ($form['employment_external_identifier'] ?? '');
+                $errors = $counts[$guid] ?? 0;
+                if ($guid === '' || $employment === '' || $errors === 0) {
+                    continue;
+                }
+                $byEmployment[$employment] = ($byEmployment[$employment] ?? 0) + $errors;
+            }
+        }
+
+        return $byEmployment;
     }
 
     /**

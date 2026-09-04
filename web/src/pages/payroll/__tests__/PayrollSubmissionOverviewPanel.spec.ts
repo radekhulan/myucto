@@ -9,6 +9,7 @@ const m = vi.hoisted(() => ({
   healthPaymentOverviews: vi.fn(),
   submissionDetail: vi.fn(),
   downloadSubmissionArtifact: vi.fn(),
+  settleSubmission: vi.fn(),
   prepareHealthOverview: vi.fn(),
   enqueueHealthIsds: vi.fn(),
   gatewayStartPayroll: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock('@/api/payroll', () => ({
     healthPaymentOverviews: m.healthPaymentOverviews,
     submissionDetail: m.submissionDetail,
     downloadSubmissionArtifact: m.downloadSubmissionArtifact,
+    settleSubmission: m.settleSubmission,
   },
 }))
 vi.mock('@/stores/auth', () => ({
@@ -596,5 +598,155 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     expect(wrapper.findAll('[data-test="submission-not-prepared"]').length).toBeGreaterThan(0)
     expect(wrapper.get('[data-test="submission-not-prepared"]').text())
       .toContain('payroll.submissions.overview.not_prepared_action')
+  })
+})
+
+
+/**
+ * Přehled o platbě pojistného zdravotní pojišťovně odejde datovkou a tím to
+ * končí: pojišťovna neodpovídá ničím, co by šlo strojově přečíst. Řádek proto
+ * zůstával navždy „čeká na výsledek podání" a účetní neměla jak měsíc uzavřít.
+ */
+describe('PayrollSubmissionOverviewPanel — ruční uzavření podání', () => {
+  const EMPTY_PHASES = {
+    not_open: 0,
+    open: 0,
+    due_soon: 0,
+    due_today: 0,
+    overdue: 0,
+    awaiting_result: 0,
+    fulfilled: 0,
+    action_required: 0,
+    cancelled: 0,
+  }
+
+  function overviewWith(settlement: Record<string, unknown>) {
+    return {
+      items: [{
+        id: 2,
+        environment: 'production',
+        agenda_code: 'PPZ_2026',
+        agenda_group: 'health',
+        subject_type: 'insurer',
+        subject_reference: 'payroll_run:1:111',
+        subject_label: 'VZP (111)',
+        period_start: '2026-08-01',
+        period_end: '2026-08-31',
+        obligation_kind: 'monthly',
+        preferred_channel: 'health_portal',
+        status: 'submitted',
+        row_version: 7,
+        earliest_submission_on: '2026-09-01',
+        due_on: '2026-09-21',
+        calendar_basis: 'business',
+        deadline: {
+          phase: 'awaiting_result',
+          days_to_due: 17,
+          is_action_required: false,
+          is_overdue: false,
+        },
+        latest_submission: {
+          id: 2,
+          status: 'submitted',
+          row_version: 3,
+          submission_kind: 'regular',
+          channel: 'health_portal',
+          submitted_at: '2026-09-04T10:28:10Z',
+          decided_at: null,
+        },
+        settlement,
+      }],
+      total: 1,
+      deadline_summary: { ...EMPTY_PHASES, awaiting_result: 1 },
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.runs.mockResolvedValue([])
+    m.jmhzPvpojOffices.mockResolvedValue([])
+    m.healthPaymentOverviews.mockResolvedValue({ items: [] })
+    m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })
+  })
+
+  it('nabídne uzavření a pošle ho i s poznámkou', async () => {
+    m.submissionOverview.mockResolvedValue(overviewWith({
+      authority_reports_result: false,
+      can_settle: true,
+      delivery_proof: 'delivered',
+    }))
+    m.settleSubmission.mockResolvedValue({
+      environment: 'production',
+      obligation: { id: 2, status: 'fulfilled', row_version: 8 },
+      submission: { id: 2, status: 'submitted' },
+      outbox_id: 2,
+      delivery_proof: 'delivered',
+    })
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('  Doručenka z 4. 9.  ')
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'health' } })
+    await flushPromises()
+
+    // Štítek „čeká na výsledek" musí doprovodit věta, že se nečeká na nic.
+    expect(wrapper.find('[data-test="submission-no-authority-result"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="submission-settle"]').trigger('click')
+    await flushPromises()
+
+    // Poznámka se ořízne, ale nezahodí — je to jediná stopa, proč se uzavřelo.
+    // Verze POVINNOSTI (7), ne podání (3) - uzavírá se povinnost.
+    expect(m.settleSubmission).toHaveBeenCalledWith('production', 2, 7, 'Doručenka z 4. 9.')
+    // Po uzavření se přehled načte znovu, aby řádek ukázal nový stav.
+    expect(m.submissionOverview).toHaveBeenCalledTimes(2)
+    prompt.mockRestore()
+  })
+
+  it('bez poznámky neodešle nic', async () => {
+    m.submissionOverview.mockResolvedValue(overviewWith({
+      authority_reports_result: false,
+      can_settle: true,
+      delivery_proof: 'delivered',
+    }))
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('   ')
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'health' } })
+    await flushPromises()
+    await wrapper.get('[data-test="submission-settle"]').trigger('click')
+    await flushPromises()
+
+    expect(m.settleSubmission).not.toHaveBeenCalled()
+    prompt.mockRestore()
+  })
+
+  /**
+   * U agend, kde protokol od úřadu dorazí (JMHZ, registrace), se tlačítko
+   * nesmí objevit vůbec — jinak by účetní odklikla měsíc, o kterém ČSSZ
+   * teprve rozhoduje.
+   */
+  it('u agendy s odpovědí úřadu tlačítko ani nápovědu neukáže', async () => {
+    m.submissionOverview.mockResolvedValue(overviewWith({
+      authority_reports_result: true,
+      can_settle: false,
+      delivery_proof: null,
+    }))
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'health' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="submission-settle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="submission-no-authority-result"]').exists()).toBe(false)
+  })
+
+  /** Starší odpověď bez pole `settlement` nesmí panel shodit. */
+  it('přežije odpověď bez informace o uzavření', async () => {
+    const response = overviewWith({})
+    delete (response.items[0] as Record<string, unknown>).settlement
+    m.submissionOverview.mockResolvedValue(response)
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'health' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="submission-settle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="submission-deadline-phase"]').exists()).toBe(true)
   })
 })

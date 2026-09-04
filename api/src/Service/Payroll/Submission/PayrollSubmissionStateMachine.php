@@ -63,6 +63,12 @@ final class PayrollSubmissionStateMachine
         'validated' => ['draft', 'prepared', 'ready', 'cancelled_in_time'],
         'prepared' => ['validated', 'ready', 'cancelled_in_time'],
         'ready' => ['validated', 'submitted', 'cancelled_in_time'],
+        // `accepted` tu ZÁMĚRNĚ není. Přijetí tvrdí ověřený protokol úřadu
+        // a ten podání vždycky posune přes `processing`; přímá hrana by navíc
+        // obešla roční uzávěrku, protože `accepted` se u ní vědomě nehlídá
+        // ({@see \MyInvoice\Repository\Payroll\PayrollSubmissionRepository::updateSubmissionStatus()}).
+        // Agendy, u kterých úřad výsledek neposílá, se uzavírají na úrovni
+        // POVINNOSTI, ne podání ({@see PayrollSubmissionSettlementService}).
         'submitted' => [
             'processing',
             'partially_accepted',

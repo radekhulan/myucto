@@ -193,6 +193,59 @@ function deadlineLabel(item: PayrollSubmissionOverviewItem): string {
   )
 }
 
+const settlingId = ref<number | null>(null)
+const settleError = ref('')
+
+/**
+ * Řádek čeká na výsledek, který NIKDY nepřijde.
+ *
+ * Zdravotní pojišťovna na přehled o platbě pojistného neodpovídá ničím, co by
+ * šlo strojově přečíst. Štítek „Čeká na výsledek podání" je tedy sám o sobě
+ * pravdivý jen napůl — a bez téhle věty pod ním účetní hledá odpověď, která
+ * nikde není.
+ */
+function awaitsMissingResult(item: PayrollSubmissionOverviewItem): boolean {
+  return item.settlement?.authority_reports_result === false
+    && item.deadline.phase === 'awaiting_result'
+}
+
+/**
+ * Účetní potvrdí, že je povinnost vyřízená. Poznámka je povinná a jde do
+ * historie, aby bylo později poznat, že měsíc uzavřel člověk a o co se opřel.
+ *
+ * Posílá se verze POVINNOSTI (`item.row_version`): mění se ona, ne stav
+ * podání. To zůstane „odesláno", protože úřad se nevyjádřil.
+ */
+async function settle(item: PayrollSubmissionOverviewItem) {
+  const latest = item.latest_submission
+  if (!latest || settlingId.value !== null) return
+
+  const note = window.prompt(
+    t('payroll.submissions.overview.settle_prompt'),
+    t('payroll.submissions.overview.settle_prompt_default'),
+  )
+  if (note === null || note.trim() === '') return
+
+  settlingId.value = item.id
+  settleError.value = ''
+  try {
+    await payrollApi.settleSubmission(
+      environment.value,
+      latest.id,
+      item.row_version,
+      note.trim(),
+    )
+    await load()
+  } catch (e) {
+    settleError.value = apiErrorMessage(
+      e,
+      t('payroll.submissions.overview.settle_failed'),
+    )
+  } finally {
+    settlingId.value = null
+  }
+}
+
 function formatMinor(value: number): string {
   return new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'cs-CZ', {
     style: 'currency',
@@ -651,6 +704,15 @@ onMounted(load)
         </div>
       </dl>
 
+      <p
+        v-if="settleError"
+        class="rounded-xl border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
+        role="alert"
+        data-test="submission-settle-error"
+      >
+        {{ settleError }}
+      </p>
+
       <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
         <div v-if="items.length === 0" class="p-6 text-sm text-neutral-500">
           {{ t('payroll.submissions.overview.empty') }}
@@ -686,6 +748,13 @@ onMounted(load)
                     >
                       {{ deadlineLabel(item) }}
                     </span>
+                    <span
+                      v-if="awaitsMissingResult(item)"
+                      class="mt-1 block text-xs text-neutral-500"
+                      data-test="submission-no-authority-result"
+                    >
+                      {{ t('payroll.submissions.overview.no_authority_result') }}
+                    </span>
                   </td>
                   <td v-if="tbl.isVisible('channel')" class="px-4 py-3 text-neutral-700">{{ submissionChannelLabel(item.preferred_channel) }}</td>
                   <td v-if="tbl.isVisible('status')" class="px-4 py-3">
@@ -694,38 +763,55 @@ onMounted(load)
                     </span>
                   </td>
                   <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">
-                    <button
-                      v-if="item.latest_submission"
-                      type="button"
-                      :class="btnOutlineSm('neutral')"
-                      :disabled="detailLoadingId !== null"
-                      data-test="submission-detail-open"
-                      @click="openDetail(item)"
-                    >
-                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path :d="ICONS.doc" />
-                      </svg>
-                      {{ t('payroll.submissions.overview.detail_action') }}
-                    </button>
-                    <!--
-                      Povinnost bez podání je otevřený úkol, ne prázdné pole.
-                      Pomlčka tu byla slepá ulička: řádek říkal „něco se blíží"
-                      a nenabízel žádnou cestu dál. Příprava se dělá jinde
-                      (JMHZ náhledy, karta zaměstnance, ELDP…), takže sem
-                      patří odkaz na měsíční přehled — ten u KAŽDÉ povinnosti
-                      ukazuje, kde se úkon reálně provádí.
-                    -->
-                    <RouterLink
-                      v-else
-                      :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' } }"
-                      :class="btnOutlineSm('neutral')"
-                      data-test="submission-not-prepared"
-                    >
-                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path :d="ICONS.clipboardCheck" />
-                      </svg>
-                      {{ t('payroll.submissions.overview.not_prepared_action') }}
-                    </RouterLink>
+                    <div class="flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        v-if="item.settlement?.can_settle"
+                        type="button"
+                        :class="btnFilledSm('success')"
+                        :disabled="settlingId !== null"
+                        data-test="submission-settle"
+                        @click="settle(item)"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.check" />
+                        </svg>
+                        {{ settlingId === item.id
+                          ? t('payroll.submissions.overview.settling')
+                          : t('payroll.submissions.overview.settle_action') }}
+                      </button>
+                      <button
+                        v-if="item.latest_submission"
+                        type="button"
+                        :class="btnOutlineSm('neutral')"
+                        :disabled="detailLoadingId !== null"
+                        data-test="submission-detail-open"
+                        @click="openDetail(item)"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.doc" />
+                        </svg>
+                        {{ t('payroll.submissions.overview.detail_action') }}
+                      </button>
+                      <!--
+                        Povinnost bez podání je otevřený úkol, ne prázdné pole.
+                        Pomlčka tu byla slepá ulička: řádek říkal „něco se blíží"
+                        a nenabízel žádnou cestu dál. Příprava se dělá jinde
+                        (JMHZ náhledy, karta zaměstnance, ELDP…), takže sem
+                        patří odkaz na měsíční přehled — ten u KAŽDÉ povinnosti
+                        ukazuje, kde se úkon reálně provádí.
+                      -->
+                      <RouterLink
+                        v-else
+                        :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' } }"
+                        :class="btnOutlineSm('neutral')"
+                        data-test="submission-not-prepared"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.clipboardCheck" />
+                        </svg>
+                        {{ t('payroll.submissions.overview.not_prepared_action') }}
+                      </RouterLink>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -755,12 +841,35 @@ onMounted(load)
                 >
                   {{ deadlineLabel(item) }}
                 </dd>
+                <dd
+                  v-if="awaitsMissingResult(item)"
+                  class="mt-1 text-xs text-neutral-500"
+                  data-test="submission-no-authority-result"
+                >
+                  {{ t('payroll.submissions.overview.no_authority_result') }}
+                </dd>
               </div>
               <div>
                 <dt class="text-neutral-500">{{ t('payroll.submissions.overview.channel_label') }}</dt>
                 <dd class="mt-0.5 text-neutral-800">{{ submissionChannelLabel(item.preferred_channel) }}</dd>
               </div>
             </dl>
+            <button
+              v-if="item.settlement?.can_settle"
+              type="button"
+              class="cursor-pointer mt-4"
+              :class="btnFilledSm('success')"
+              :disabled="settlingId !== null"
+              data-test="submission-settle"
+              @click="settle(item)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.check" />
+              </svg>
+              {{ settlingId === item.id
+                ? t('payroll.submissions.overview.settling')
+                : t('payroll.submissions.overview.settle_action') }}
+            </button>
             <button
               v-if="item.latest_submission"
               type="button"
