@@ -61,6 +61,16 @@ final class FakeIsdsTransport implements IsdsTransport
     public ?string $deliveryReceipt = null;
 
     /**
+     * Dodejky podle `dmID`. Dávka se ptá na víc zpráv a každá může dopadnout
+     * jinak; jediná společná odpověď by z takového testu udělala test jedné
+     * zprávy opakovaný dvakrát. Co v mapě není, spadne na
+     * {@see self::$deliveryReceipt}.
+     *
+     * @var array<string,?string>
+     */
+    public array $deliveryReceipts = [];
+
+    /**
      * Selhání dotazu na dodejku. `null` z {@see downloadDeliveryReceipt()}
      * smí znamenat výhradně „dodejka ještě není"; nedostupné ISDS musí být
      * poznat jako výjimka, ne jako prázdno.
@@ -171,6 +181,8 @@ final class FakeIsdsTransport implements IsdsTransport
             throw $this->deliveryReceiptFailure;
         }
 
-        return $this->deliveryReceipt;
+        return array_key_exists($messageId, $this->deliveryReceipts)
+            ? $this->deliveryReceipts[$messageId]
+            : $this->deliveryReceipt;
     }
 }
