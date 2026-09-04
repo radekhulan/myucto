@@ -17,13 +17,14 @@ import FooterTip from './FooterTip.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import LanguageToggle from './LanguageToggle.vue'
 import DesktopMenuBar from './DesktopMenuBar.vue'
+import DesktopUtilityActions from './DesktopUtilityActions.vue'
+import TabletNavigationRail from './TabletNavigationRail.vue'
 import StorageQuotaBanner from './StorageQuotaBanner.vue'
 import InstanceCriticalBar from './InstanceCriticalBar.vue'
 import InstancePreviewBar from './InstancePreviewBar.vue'
 import { instanceStatus } from '@/api/instanceStatus'
 import { hostingNavAttention, resolveHostingActions } from '@/api/hostingActions'
 import WorkspaceHost from '@/components/workspace/WorkspaceHost.vue'
-import WorkspaceLayoutToggle from '@/components/workspace/WorkspaceLayoutToggle.vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
 import PaneActivityScope from '@/components/workspace/PaneActivityScope.vue'
 import type { AccessLevel, PermissionKey } from '@/security/permissions'
@@ -54,8 +55,8 @@ const desktopSearchRef = ref<InstanceType<typeof GlobalSearch> | null>(null)
 const mobileSearchRef = ref<InstanceType<typeof GlobalSearch> | null>(null)
 
 const mobileOpen = ref(false)
-const quickOpen = ref(false)
 const userMenuOpen = ref(false)
+const navigationLayoutOpen = ref(false)
 const supportOpen = ref(false)
 const featureOpen = ref(false)
 const accountantSigningProfilesEnabled = ref(false)
@@ -273,11 +274,37 @@ const ICONS = {
   factory:          'M3 21h18M3 10l5 3V10l5 3V10l5 3v8H3V10z',
   tag:              'M9.5 9.5h.01M21 11.5l-9-9H4a2 2 0 0 0-2 2v8l9 9a2 2 0 0 0 2.8 0l7.2-7.2a2 2 0 0 0 0-2.8z',
   coin:             'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
+  percent:          'M9 7.5a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0zm10.5 9a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0zM5.25 18.75l13.5-13.5',
+  company:          'M3.75 21h16.5M4.5 3h15v18h-15V3zm3.75 4.5h.008v.008H8.25V7.5zm0 3h.008v.008H8.25V10.5zm0 3h.008v.008H8.25V13.5zm3.75-6h.008v.008H12V7.5zm0 3h.008v.008H12V10.5zm0 3h.008v.008H12V13.5zm3.75-6h.008v.008H15.75V7.5zm0 3h.008v.008H15.75V10.5zm0 3h.008v.008H15.75V13.5zM9 21v-3.75h6V21',
+  tools:            'M11.42 15.17l-5.66 5.66a2.25 2.25 0 0 1-3.18-3.18l5.66-5.66m3.18 3.18 2.12-2.12m-2.12 2.12-3.18-3.18m5.3 1.06 1.06-1.06m0 0 4.24 4.24m-4.24-4.24a6 6 0 0 0 1.62-6.23l-2.83 2.83-3.18-3.18 2.83-2.83a6 6 0 0 0-6.23 1.62',
   folderOpen:       'M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z M3 9h18',
   requestDoc:       'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M12 11v4m-2-2h4',
   // Výmaz osobních údajů — koš. Odlišný od tax_archive (uschovávání), protože
   // sousední položka menu dělá pravý opak.
   erasure:          'M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16',
+}
+
+const SECTION_ICONS: Record<string, string> = {
+  dashboard: ICONS.dashboard,
+  charts: ICONS.stats,
+  sales: ICONS.invoices,
+  purchase: ICONS.purchase,
+  contacts: ICONS.clients,
+  bank_cash: ICONS.coin,
+  documents: ICONS.folderOpen,
+  stock: ICONS.stock_items,
+  taxes: ICONS.percent,
+  accounting: ICONS.accounting,
+  accounting_tools: ICONS.tools,
+  tax_evidence: ICONS.tax_book,
+  payroll: ICONS.users,
+  company: ICONS.company,
+  system_global: ICONS.settings,
+  system_signing: ICONS.api_tokens,
+}
+
+function sectionIcon(section: NavSection): string {
+  return SECTION_ICONS[section.key] ?? section.items[0]?.icon ?? ICONS.dashboard
 }
 
 const navSections = computed<NavSection[]>(() => {
@@ -854,11 +881,13 @@ const orderedNav = computed(() => nav.orderedSections(navSections.value))
 
 // Od tabletové šířky je navigace buď nahoře, nebo jako trvalý levý panel.
 const isDesktop = ref(false)
-let desktopMql: MediaQueryList | null = null
+const isTablet = ref(false)
+let desktopResizeObserver: ResizeObserver | null = null
 const desktopNavHost = ref<HTMLElement | null>(null)
 const sideSupplierHost = ref<HTMLElement | null>(null)
 const autoSideNavigation = ref(false)
 const NAV_LAYOUT_COOKIE = 'myinvoice_nav_layout'
+const TABLET_NAV_RAIL_COOKIE = 'myinvoice_tablet_nav_rail'
 
 function readCookie(name: string): string | null {
   const prefix = `${encodeURIComponent(name)}=`
@@ -866,17 +895,37 @@ function readCookie(name: string): string | null {
   return match ? decodeURIComponent(match.slice(prefix.length)) : null
 }
 
-function saveNavigationPreference(side: boolean): void {
-  document.cookie = side
-    ? `${NAV_LAYOUT_COOKIE}=side; Path=/; Max-Age=31536000; SameSite=Lax`
+type DesktopNavigationPreference = 'side' | 'rail' | null
+
+function saveNavigationPreference(mode: DesktopNavigationPreference): void {
+  document.cookie = mode
+    ? `${NAV_LAYOUT_COOKIE}=${mode}; Path=/; Max-Age=31536000; SameSite=Lax`
     : `${NAV_LAYOUT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
 }
 
-const preferSideNavigation = ref(readCookie(NAV_LAYOUT_COOKIE) === 'side')
-const sideNavigation = computed(() => isDesktop.value && (preferSideNavigation.value || autoSideNavigation.value))
-const topNavigation = computed(() => isDesktop.value && !sideNavigation.value)
+const storedNavigationPreference = readCookie(NAV_LAYOUT_COOKIE)
+const desktopNavigationPreference = ref<DesktopNavigationPreference>(
+  storedNavigationPreference === 'side' || storedNavigationPreference === 'rail'
+    ? storedNavigationPreference
+    : null,
+)
+const preferSideNavigation = computed(() => desktopNavigationPreference.value === 'side')
+const forceNavigationRail = computed(() => desktopNavigationPreference.value === 'rail')
+const sideNavigation = computed(() => isDesktop.value && !forceNavigationRail.value && (preferSideNavigation.value || autoSideNavigation.value))
+const tabletNavigationRailPreference = ref(readCookie(TABLET_NAV_RAIL_COOKIE) === '1')
+const tabletNavigationRail = computed(() => (
+  (isDesktop.value && forceNavigationRail.value)
+  || (isTablet.value && tabletNavigationRailPreference.value)
+))
+const topNavigation = computed(() => isDesktop.value && !sideNavigation.value && !tabletNavigationRail.value)
+const desktopNavigationMode = computed<'top' | 'side' | 'rail'>(() => {
+  if (tabletNavigationRail.value && isDesktop.value) return 'rail'
+  if (sideNavigation.value) return 'side'
+  return 'top'
+})
 let navResizeObserver: ResizeObserver | null = null
 let navFitFrame: number | null = null
+let desktopStateFrame: number | null = null
 
 function evaluateDesktopNavFit(): void {
   const host = desktopNavHost.value
@@ -907,25 +956,50 @@ function scheduleDesktopNavFit(): void {
   })
 }
 
-function onDesktopChange(e: MediaQueryListEvent): void {
-  isDesktop.value = e.matches
+function updateDesktopState(): void {
+  const containerWidth = document.body.clientWidth
+  const desktop = containerWidth >= 1024
+  const tablet = window.innerWidth >= 768 && containerWidth < 1024
+  if (desktop === isDesktop.value && tablet === isTablet.value) return
+  isDesktop.value = desktop
+  isTablet.value = tablet
   void nextTick(scheduleDesktopNavFit)
 }
 
-function toggleNavigationLayout(): void {
-  if (preferSideNavigation.value) {
-    preferSideNavigation.value = false
-    saveNavigationPreference(false)
+function scheduleDesktopStateUpdate(): void {
+  if (desktopStateFrame !== null) return
+  desktopStateFrame = requestAnimationFrame(() => {
+    desktopStateFrame = requestAnimationFrame(() => {
+      desktopStateFrame = null
+      updateDesktopState()
+    })
+  })
+}
+
+function setDesktopNavigationMode(mode: 'top' | 'side' | 'rail'): void {
+  navigationLayoutOpen.value = false
+  if (mode === 'top') {
+    desktopNavigationPreference.value = null
+    saveNavigationPreference(null)
     autoSideNavigation.value = false
     void nextTick(scheduleDesktopNavFit)
     return
   }
-  if (autoSideNavigation.value) return
-  preferSideNavigation.value = true
-  saveNavigationPreference(true)
+  desktopNavigationPreference.value = mode
+  saveNavigationPreference(mode)
+  mobileOpen.value = false
+}
+
+function toggleTabletNavigationRail(): void {
+  tabletNavigationRailPreference.value = !tabletNavigationRailPreference.value
+  mobileOpen.value = false
+  document.cookie = tabletNavigationRailPreference.value
+    ? `${TABLET_NAV_RAIL_COOKIE}=1; Path=/; Max-Age=31536000; SameSite=Lax`
+    : `${TABLET_NAV_RAIL_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
 }
 
 watch([orderedNav, locale], () => { void nextTick(scheduleDesktopNavFit) })
+watch(tabletNavigationRail, () => { mobileOpen.value = false })
 
 function onResetNavOrder(): void {
   if (confirm(t('common.nav_reset_order_confirm'))) nav.reset()
@@ -1157,6 +1231,11 @@ const paletteNavItems = computed(() =>
   })))
 )
 
+const tabletNavSections = computed(() => orderedNav.value.map(section => ({
+  ...section,
+  icon: sectionIcon(section),
+})))
+
 const manualHref = computed(() => {
   const chapter = manualChapter(activeRoute.value.path)
   const path = chapter ? `/manual?ch=${chapter}` : '/manual'
@@ -1247,7 +1326,6 @@ function syncActivePaneTitle(): void {
 // Zavři mobile drawer + popupy po navigaci
 watch([() => workspace.activeFullPath, () => workspace.layoutRevision], () => {
   mobileOpen.value = false
-  quickOpen.value = false
   userMenuOpen.value = false
   syncActivePaneTitle()
 }, { immediate: true })
@@ -1288,9 +1366,11 @@ onMounted(async () => {
   void ensurePrefsLoaded()   // F5: prefetch per-user UI stavu (filtry + preference tabulek)
   void keyboardShortcuts.load()
   window.addEventListener('keydown', onGlobalShortcut)
-  desktopMql = window.matchMedia('(min-width: 1024px)')
-  isDesktop.value = desktopMql.matches
-  desktopMql.addEventListener('change', onDesktopChange)
+  window.addEventListener('resize', scheduleDesktopStateUpdate)
+  desktopResizeObserver = new ResizeObserver(updateDesktopState)
+  desktopResizeObserver.observe(document.body)
+  desktopResizeObserver.observe(document.documentElement)
+  updateDesktopState()
   navResizeObserver = new ResizeObserver(scheduleDesktopNavFit)
   if (desktopNavHost.value) navResizeObserver.observe(desktopNavHost.value)
   void nextTick(scheduleDesktopNavFit)
@@ -1306,14 +1386,16 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalShortcut)
-  desktopMql?.removeEventListener('change', onDesktopChange)
+  window.removeEventListener('resize', scheduleDesktopStateUpdate)
+  desktopResizeObserver?.disconnect()
   navResizeObserver?.disconnect()
+  if (desktopStateFrame !== null) cancelAnimationFrame(desktopStateFrame)
   if (navFitFrame !== null) cancelAnimationFrame(navFitFrame)
 })
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col bg-neutral-50" @keydown.esc="userMenuOpen = false; quickOpen = false">
+  <div class="min-h-screen flex flex-col overflow-x-clip bg-neutral-50" @keydown.esc="userMenuOpen = false; navigationLayoutOpen = false">
 
     <!-- ═════════════════════ TOPBAR ═════════════════════ -->
     <header class="nav-inverted sticky top-0 z-30 bg-surface border-b border-neutral-200 shadow-md">
@@ -1326,7 +1408,7 @@ onBeforeUnmount(() => {
       <div class="h-12 px-3 flex items-center gap-1">
         <WorkspaceNavLink to="/" class="flex h-10 items-center gap-2 shrink-0 px-1.5 rounded-md hover:bg-neutral-100" @click="mobileOpen = false">
           <img src="/styles/logo.svg" alt="MyÚčto" class="w-7 h-7" />
-          <span class="text-sm font-semibold leading-tight select-none" :class="sideNavigation ? 'inline' : 'inline lg:hidden 2xl:inline'">
+          <span class="text-sm font-semibold leading-tight select-none" :class="sideNavigation || tabletNavigationRail ? 'inline' : 'inline lg:hidden 2xl:inline'">
             My<span class="text-primary-600">Účto</span><span class="text-neutral-400 font-normal">.cz</span>
           </span>
         </WorkspaceNavLink>
@@ -1349,63 +1431,15 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="ml-auto flex h-full shrink-0 items-center gap-1 text-sm">
-          <WorkspaceLayoutToggle />
-
-          <div v-if="quickActions.length > 0" class="relative hidden lg:block">
-            <button
-              type="button"
-              class="cursor-pointer inline-flex w-8 h-8 items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 hover:text-primary-700"
-              :class="{ 'bg-neutral-100 text-primary-700': quickOpen }"
-              :aria-expanded="quickOpen"
-              :aria-label="t('nav.quick_new')"
-              :title="t('nav.quick_new')"
-              @click="quickOpen = !quickOpen"
-            >
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-            <transition
-              enter-active-class="transition duration-100 ease-out"
-              enter-from-class="opacity-0 -translate-y-1"
-              enter-to-class="opacity-100 translate-y-0"
-              leave-active-class="transition duration-75 ease-in"
-              leave-from-class="opacity-100 translate-y-0"
-              leave-to-class="opacity-0 -translate-y-1"
-            >
-              <div v-if="quickOpen" class="absolute right-0 top-full mt-1 w-56 bg-surface border border-neutral-200 rounded-lg shadow-xl py-1 z-40">
-                <WorkspaceNavLink
-                  v-for="s in quickActions"
-                  :key="s.to"
-                  :to="s.to"
-                  class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700"
-                  @click="quickOpen = false"
-                >
-                  <svg class="w-4 h-4 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" :d="s.icon" />
-                  </svg>
-                  <span>{{ s.label }}</span>
-                </WorkspaceNavLink>
-              </div>
-            </transition>
-            <div v-if="quickOpen" class="fixed inset-0 z-10" aria-hidden="true" @click="quickOpen = false"></div>
-          </div>
-
-          <a
-            :href="manualHref"
-            target="_blank"
-            rel="noopener"
-            class="hidden sm:inline-flex w-8 h-8 items-center justify-center rounded-md text-neutral-600 hover:bg-neutral-100 hover:text-primary-700"
-            :title="t('nav.help')"
-            :aria-label="t('nav.help')"
-          >
-            <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
-            </svg>
-          </a>
+          <DesktopUtilityActions
+            class="hidden 2xl:flex"
+            :quick-actions="quickActions"
+            :manual-href="manualHref"
+            placement="below"
+          />
 
           <div
-            v-if="sideNavigation && supplierStore.hasMultiple"
+            v-if="(sideNavigation || tabletNavigationRail) && supplierStore.hasMultiple"
             ref="sideSupplierHost"
             class="hidden lg:flex items-center gap-2"
           >
@@ -1501,6 +1535,7 @@ onBeforeUnmount(() => {
           </div>
 
           <button
+            v-if="!tabletNavigationRail"
             type="button"
             class="lg:hidden inline-flex items-center justify-center w-9 h-9 rounded-md text-neutral-700 hover:bg-neutral-100"
             :aria-expanded="mobileOpen"
@@ -1528,6 +1563,24 @@ onBeforeUnmount(() => {
     <!-- ═════════════════════ TĚLO: SIDEBAR + OBSAH ═════════════════════ -->
     <div class="flex flex-1 min-h-0">
 
+      <TabletNavigationRail
+        v-if="tabletNavigationRail"
+        :sections="tabletNavSections"
+        :is-active="isActive"
+        :can-create="canCreate"
+        :create-target="createTarget"
+        :quick-new-label="t('nav.quick_new')"
+        :menu-label="t('nav.tablet_menu_rail_label')"
+        :expand-label="isDesktop ? t('nav.menu_full') : undefined"
+        @expand="setDesktopNavigationMode('side')"
+        :class="[
+          'sticky top-[calc(var(--instance-alert-h,0px)+3rem)] h-[calc(100vh-3rem-var(--instance-alert-h,0px))]',
+          supplierStore.hasMultiple && supplierStore.currentSupplier
+            ? 'top-[calc(var(--instance-alert-h,0px)+5.125rem)] h-[calc(100vh-5.125rem-var(--instance-alert-h,0px))]'
+            : '',
+        ]"
+      />
+
       <!-- Mobile backdrop -->
       <div
         v-if="mobileOpen" @click="mobileOpen = false"
@@ -1541,16 +1594,17 @@ onBeforeUnmount(() => {
            o první položku menu. -->
       <aside
         :class="[
-          'fixed z-30 lg:sticky lg:top-[calc(var(--instance-alert-h,0px)+3rem)] lg:h-[calc(100vh-3rem-var(--instance-alert-h,0px))]',
+          'fixed right-0 z-30 lg:right-auto lg:sticky lg:top-[calc(var(--instance-alert-h,0px)+3rem)] lg:h-[calc(100vh-3rem-var(--instance-alert-h,0px))]',
           supplierStore.hasMultiple && supplierStore.currentSupplier
             ? 'top-[calc(var(--instance-alert-h,0px)+5.125rem)] h-[calc(100vh-5.125rem-var(--instance-alert-h,0px))]'
             : 'top-[calc(var(--instance-alert-h,0px)+3rem)] h-[calc(100vh-3rem-var(--instance-alert-h,0px))]',
-          'w-[calc(100vw-3rem)] max-w-80 lg:w-60 shrink-0',
-          'nav-inverted bg-surface border-r border-neutral-200 shadow-lg lg:shadow-none',
+          'w-[calc(100vw-3rem)] max-w-80 shrink-0',
+          'lg:w-60',
+          'nav-inverted bg-surface border-l border-neutral-200 shadow-lg lg:border-l-0 lg:border-r lg:shadow-none',
           'flex flex-col',
-          'transition-transform duration-200 ease-in-out',
+          'transition-[transform,width] duration-200 ease-in-out',
           sideNavigation ? 'lg:flex lg:translate-x-0 lg:z-auto' : 'lg:hidden',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+          mobileOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0',
         ]"
       >
         <nav class="flex-1 overflow-y-auto scrollbar-slim px-2.5 py-3">
@@ -1575,8 +1629,11 @@ onBeforeUnmount(() => {
               @drop="nav.onSectionDrop($event, section.key)"
             >
               <div
-                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider select-none text-neutral-600"
-                :class="isDesktop ? 'cursor-move hover:bg-neutral-100' : ''"
+                class="flex w-full items-center gap-1.5 rounded-md py-1 pl-2.5 text-[11px] font-bold uppercase tracking-wider select-none text-neutral-600"
+                :class="[
+                  si === 0 && isDesktop ? 'pr-0.5' : 'pr-2.5',
+                  isDesktop ? 'cursor-move hover:bg-neutral-100' : '',
+                ]"
                 :draggable="isDesktop"
                 @dragstart="nav.onSectionDragStart($event, section.key)"
                 @dragend="nav.onDragEnd()"
@@ -1591,6 +1648,20 @@ onBeforeUnmount(() => {
                 <svg v-if="isDesktop" class="w-3 h-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M4 9h16M4 15h16" />
                 </svg>
+                <button
+                  v-if="si === 0 && isDesktop"
+                  type="button"
+                  class="ml-auto inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-primary-700"
+                  :title="t('nav.menu_compact')"
+                  :aria-label="t('nav.menu_compact')"
+                  draggable="false"
+                  @pointerdown.stop
+                  @click.stop="setDesktopNavigationMode('rail')"
+                >
+                  <svg class="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 18l-6-6 6-6" />
+                  </svg>
+                </button>
               </div>
             </div>
 
@@ -1617,7 +1688,7 @@ onBeforeUnmount(() => {
                 <svg class="w-[15px] h-[15px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
                 </svg>
-                {{ item.label }}
+                <span>{{ item.label }}</span>
                 <svg class="w-3 h-3 ml-auto text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14"/>
                 </svg>
@@ -1651,17 +1722,20 @@ onBeforeUnmount(() => {
                   <svg class="w-[15px] h-[15px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
                   </svg>
-                  {{ item.label }}
+                  <span>{{ item.label }}</span>
                   <!-- Tečka „je co řešit". Barvu určuje závažnost, ne položka —
                        viz `hostingNavAttention`. -->
                   <span
                     v-if="item.attention"
-                    class="ml-auto inline-block h-2 w-2 shrink-0 rounded-full"
-                    :class="item.attention === 'danger' ? 'bg-danger-500' : 'bg-warning-500'"
+                    class="inline-block h-2 w-2 shrink-0 rounded-full"
+                    :class="[item.attention === 'danger' ? 'bg-danger-500' : 'bg-warning-500', 'ml-auto']"
                     :title="t(`nav.attention_${item.attention}`)"
                     :aria-label="t(`nav.attention_${item.attention}`)"
                   ></span>
-                  <span v-else-if="item.badge" class="ml-auto min-w-5 rounded-full bg-warning-500/20 px-1.5 py-0.5 text-center text-[10px] font-semibold text-warning-600">{{ item.badge }}</span>
+                  <span
+                    v-else-if="item.badge"
+                    class="ml-auto min-w-5 rounded-full bg-warning-500/20 px-1.5 py-0.5 text-center text-[10px] font-semibold text-warning-600"
+                  >{{ item.badge }}</span>
                 </WorkspaceNavLink>
                 <!-- Rychlé „+" (vytvořit nový) — skryté, odhalí se až při hoveru nad položkou -->
                 <WorkspaceNavLink
@@ -1782,7 +1856,7 @@ onBeforeUnmount(() => {
              takže nosí i stejnou tmavou plochu. Světlá patička pod tmavou lištou
              působila jako nedodělaná půlka — takhle obsah rámují z obou stran. -->
         <footer class="nav-inverted sticky bottom-0 z-20 border-t border-neutral-200 bg-surface shadow-[0_-2px_10px_rgba(21,19,29,0.10)]">
-          <div class="hidden lg:grid h-11 grid-cols-[minmax(14rem,1fr)_auto_minmax(23rem,1fr)] items-center gap-4 px-3">
+          <div class="hidden lg:grid h-11 grid-cols-[minmax(14rem,1fr)_auto_minmax(14rem,1fr)] 2xl:grid-cols-[minmax(14rem,1fr)_auto_minmax(23rem,1fr)] items-center gap-4 px-3">
             <div class="flex w-full max-w-lg items-center gap-2">
               <div class="min-w-0 flex-1">
                 <GlobalSearch
@@ -1820,32 +1894,85 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex min-w-0 items-center justify-end gap-1.5 text-[11px] leading-none text-neutral-500">
-              <button
-                type="button"
-                class="cursor-pointer h-8 w-8 inline-flex items-center justify-center rounded-md border border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700 disabled:cursor-not-allowed disabled:opacity-45"
-                :disabled="autoSideNavigation && !preferSideNavigation"
-                :title="autoSideNavigation && !preferSideNavigation ? t('nav.menu_top_unavailable') : t(sideNavigation ? 'nav.menu_top' : 'nav.menu_side')"
-                :aria-label="autoSideNavigation && !preferSideNavigation ? t('nav.menu_top_unavailable') : t(sideNavigation ? 'nav.menu_top' : 'nav.menu_side')"
-                @click="toggleNavigationLayout"
-              >
-                <svg v-if="sideNavigation" class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18v4H3V4zm0 8h5v8H3v-8zm9 0h9m-9 4h9m-9 4h9" />
-                </svg>
-                <svg v-else class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h5v16H3V4zm9 0h9m-9 4h9m-9 4h9m-9 4h9m-9 4h9" />
-                </svg>
-              </button>
+              <DesktopUtilityActions
+                class="flex 2xl:hidden"
+                :quick-actions="quickActions"
+                :manual-href="manualHref"
+                placement="above"
+              />
+              <div class="relative">
+                <button
+                  type="button"
+                  class="cursor-pointer h-8 w-8 inline-flex items-center justify-center rounded-md border border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700"
+                  :class="navigationLayoutOpen ? 'bg-neutral-100 text-primary-700' : ''"
+                  :title="t('nav.menu_layout')"
+                  :aria-label="t('nav.menu_layout')"
+                  :aria-expanded="navigationLayoutOpen"
+                  aria-haspopup="menu"
+                  @click="navigationLayoutOpen = !navigationLayoutOpen"
+                >
+                  <svg v-if="desktopNavigationMode === 'top'" class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18v5H3V4zm0 9h18m-18 4h18m-18 4h18" />
+                  </svg>
+                  <svg v-else-if="desktopNavigationMode === 'side'" class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h6v16H3V4zm10 1h8m-8 4h8m-8 4h8m-8 4h8" />
+                  </svg>
+                  <svg v-else class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h5v16H3V4zm2 3h1m-1 4h1m-1 4h1m6-10h9m-9 5h9m-9 5h9" />
+                  </svg>
+                </button>
+                <div v-if="navigationLayoutOpen" class="fixed inset-0 z-10" aria-hidden="true" @click="navigationLayoutOpen = false"></div>
+                <div v-if="navigationLayoutOpen" class="absolute bottom-full right-0 z-40 mb-2 w-56 rounded-lg border border-neutral-200 bg-surface p-1.5 text-sm shadow-xl" role="menu">
+                  <button
+                    type="button"
+                    class="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left hover:bg-neutral-100"
+                    :class="desktopNavigationMode === 'top' ? 'bg-primary-50 text-primary-700' : 'text-neutral-700'"
+                    :disabled="autoSideNavigation && desktopNavigationPreference === null"
+                    role="menuitemradio"
+                    :aria-checked="desktopNavigationMode === 'top'"
+                    @click="setDesktopNavigationMode('top')"
+                  >
+                    <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18v5H3V4zm0 9h18m-18 4h18m-18 4h18" /></svg>
+                    <span class="flex-1">{{ t('nav.menu_top') }}</span>
+                    <span v-if="desktopNavigationMode === 'top'" aria-hidden="true">✓</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left hover:bg-neutral-100"
+                    :class="desktopNavigationMode === 'side' ? 'bg-primary-50 text-primary-700' : 'text-neutral-700'"
+                    role="menuitemradio"
+                    :aria-checked="desktopNavigationMode === 'side'"
+                    @click="setDesktopNavigationMode('side')"
+                  >
+                    <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h6v16H3V4zm10 1h8m-8 4h8m-8 4h8m-8 4h8" /></svg>
+                    <span class="flex-1">{{ t('nav.menu_side') }}</span>
+                    <span v-if="desktopNavigationMode === 'side'" aria-hidden="true">✓</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left hover:bg-neutral-100"
+                    :class="desktopNavigationMode === 'rail' ? 'bg-primary-50 text-primary-700' : 'text-neutral-700'"
+                    role="menuitemradio"
+                    :aria-checked="desktopNavigationMode === 'rail'"
+                    @click="setDesktopNavigationMode('rail')"
+                  >
+                    <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h5v16H3V4zm2 3h1m-1 4h1m-1 4h1m6-10h9m-9 5h9m-9 5h9" /></svg>
+                    <span class="flex-1">{{ t('nav.menu_compact') }}</span>
+                    <span v-if="desktopNavigationMode === 'rail'" aria-hidden="true">✓</span>
+                  </button>
+                </div>
+              </div>
               <LanguageToggle />
               <ThemeToggle />
               <span class="mx-1 h-5 w-px bg-neutral-200" aria-hidden="true"></span>
               <a href="https://myucto.cz/" target="_blank" rel="noopener"
-                 class="whitespace-nowrap hover:text-primary-700 hover:underline transition-colors"
+                 class="hidden 2xl:inline whitespace-nowrap hover:text-primary-700 hover:underline transition-colors"
                  title="MyÚčto.cz">MyÚčto.cz</a>
               <template v-if="versionInfo">
                 <WorkspaceNavLink
                   v-if="auth.isSuperadmin && !clientExperience"
                   to="/admin/update"
-                  class="inline-flex items-center gap-1 text-neutral-400 hover:text-neutral-600 transition-colors"
+                  class="hidden 2xl:inline-flex items-center gap-1 text-neutral-400 hover:text-neutral-600 transition-colors"
                   :title="t('updates.title')"
                 >
                   <span>v{{ versionInfo.current }}</span>
@@ -1857,11 +1984,11 @@ onBeforeUnmount(() => {
                     v{{ versionInfo.latest }}
                   </span>
                 </WorkspaceNavLink>
-                <span v-else class="text-neutral-400">v{{ versionInfo.current }}</span>
+                <span v-else class="hidden 2xl:inline text-neutral-400">v{{ versionInfo.current }}</span>
               </template>
-              <span aria-hidden="true">·</span>
-              <a href="https://mywebdesign.cz" target="_blank" rel="noopener" class="hidden xl:inline whitespace-nowrap hover:text-neutral-700">© MyWebdesign.cz</a>
-              <span class="hidden xl:inline" aria-hidden="true">·</span>
+              <span class="hidden 2xl:inline" aria-hidden="true">·</span>
+              <a href="https://mywebdesign.cz" target="_blank" rel="noopener" class="hidden 2xl:inline whitespace-nowrap hover:text-neutral-700">© MyWebdesign.cz</a>
+              <span class="hidden 2xl:inline" aria-hidden="true">·</span>
               <WorkspaceNavLink v-if="!clientExperience" to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
@@ -1873,12 +2000,23 @@ onBeforeUnmount(() => {
 
           <div class="lg:hidden min-h-12 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-500">
             <div class="flex items-center gap-1.5">
+              <button
+                v-if="isTablet"
+                type="button"
+                class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700"
+                :title="t(tabletNavigationRailPreference ? 'nav.tablet_menu_drawer' : 'nav.tablet_menu_rail')"
+                :aria-label="t(tabletNavigationRailPreference ? 'nav.tablet_menu_drawer' : 'nav.tablet_menu_rail')"
+                @click="toggleTabletNavigationRail"
+              >
+                <svg class="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path v-if="tabletNavigationRailPreference" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                  <path v-else stroke-linecap="round" stroke-linejoin="round" d="M3 4h5v16H3V4zm9 0h9m-9 4h9m-9 4h9m-9 4h9m-9 4h9" />
+                </svg>
+              </button>
               <LanguageToggle />
               <ThemeToggle />
             </div>
             <div class="flex flex-wrap items-center justify-end gap-1.5">
-              <a href="https://myucto.cz/" target="_blank" rel="noopener" class="hover:text-primary-700">MyÚčto.cz</a>
-              <span v-if="versionInfo" class="text-neutral-400">v{{ versionInfo.current }}</span>
               <WorkspaceNavLink v-if="!clientExperience" to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
