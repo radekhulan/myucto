@@ -345,11 +345,18 @@ final class PayrollSubmissionTransportAttemptRepository
                -- pokus nemůže nic zdvojit. Všechny ostatní stavy (včetně
                -- `failed` PO odeslání a `expired`) dál blokují: tam už se
                -- neví, co ČSSZ přijala, a řeší se stornem nebo opravou.
+               -- Druhá výjimka je pokus, který účetní VĚDOMĚ ZAHODILA poté, co
+               -- viděla odpověď úřadu (`expired` s kódem `abandoned_by_user`).
+               -- Důvodů, proč ČSSZ podání nepřijme, je víc, než kolik jich umíme
+               -- z protokolu spolehlivě rozpoznat, takže o opakování rozhoduje
+               -- člověk, ne automatika podle textu odpovědi.
+               -- TOTOŽNÉ pravidlo jako PayrollDispatchGate::attemptAllowsRetry().
                LEFT JOIN ' . self::TABLE . ' attempt
                  ON attempt.supplier_id = submission.supplier_id
                 AND attempt.environment = submission.environment
                 AND attempt.submission_id = submission.id
                 AND NOT (attempt.status = "failed" AND attempt.sent_at IS NULL)
+                AND NOT (attempt.status = "expired" AND attempt.error_code = "abandoned_by_user")
                LEFT JOIN submission_outbox outbox
                  ON outbox.id = (
                     SELECT MAX(candidate.id)

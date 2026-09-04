@@ -69,6 +69,58 @@ function cancelConfirm(preview: PayrollJmhzPvpojPreview) {
   setState(preview, { ...state(preview), confirming: null })
 }
 
+/*
+ * Zahození rozdělaného odeslání.
+ *
+ * ČSSZ zprávu převezme, ale zpracovat ji odmítne — třeba proto, že certifikát,
+ * kterým je e-podání podepsané, není u OSSZ zapsaný v registru podávajících.
+ * Odeslané pak nic není, ale podání uvízne ve stavu, ze kterého nevede cesta zpět:
+ * odeslat znovu nejde a nové podání za totéž období databáze nepustí.
+ *
+ * Aplikace o tom NEROZHODUJE sama — důvodů, proč úřad podání nepřijme, je víc, než
+ * kolik jich jde z protokolu spolehlivě rozpoznat. Ukáže tedy odpověď úřadu
+ * a rozhodne účetní.
+ */
+const ABANDONABLE_STATUSES = ['submitted', 'processing', 'waiting_for_identity', 'rejected']
+const abandoning = ref<string | null>(null)
+
+function canAbandon(preview: PayrollJmhzPvpojPreview): boolean {
+  const latest = obligation(preview)?.latest_submission
+  return latest !== null && latest !== undefined
+    && ABANDONABLE_STATUSES.includes(latest.status)
+}
+
+async function abandon(preview: PayrollJmhzPvpojPreview) {
+  const item = obligation(preview)
+  const latest = item?.latest_submission
+  if (!canWrite.value || !latest || abandoning.value !== null) return
+
+  const reason = window.prompt(
+    t('payroll.submissions.overview.jmhz_abandon_prompt'),
+    state(preview).error || '',
+  )
+  if (reason === null || reason.trim() === '') return
+
+  abandoning.value = key(preview)
+  setState(preview, { ...state(preview), error: '' })
+  try {
+    await payrollApi.abandonSubmissionInQueue(
+      props.environment,
+      latest.id,
+      latest.row_version,
+      reason.trim(),
+    )
+    emit('refresh')
+  } catch (e) {
+    setState(preview, {
+      ...state(preview),
+      error: apiErrorMessage(e, t('payroll.submissions.overview.jmhz_abandon_failed')),
+    })
+  } finally {
+    abandoning.value = null
+  }
+}
+
 function mobileKeySent(preview: PayrollJmhzPvpojPreview) {
   setState(preview, { ...state(preview), mobileKeySent: true })
   emit('refresh')
@@ -296,12 +348,35 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
           </div>
         </div>
 
-        <p
+        <div
           v-if="unavailableReason(preview)"
           class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-700"
         >
-          {{ unavailableReason(preview) }}
-        </p>
+          <p>{{ unavailableReason(preview) }}</p>
+          <!--
+            Cesta ven z podání, které úřad nepřijal. Bez ní zůstane povinnost
+            trvale nepodatelná: odeslat znovu nejde a nové podání za totéž období
+            databáze nepustí.
+          -->
+          <div v-if="canWrite && canAbandon(preview)" class="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              :class="btnOutline('danger')"
+              :disabled="abandoning !== null"
+              :data-test="`jmhz-abandon-${key(preview)}`"
+              @click="abandon(preview)"
+            >
+              <span class="whitespace-nowrap">
+                {{ abandoning === key(preview)
+                  ? t('payroll.submissions.overview.jmhz_abandoning')
+                  : t('payroll.submissions.overview.jmhz_abandon') }}
+              </span>
+            </button>
+            <span class="text-xs text-warning-700/80">
+              {{ t('payroll.submissions.overview.jmhz_abandon_hint') }}
+            </span>
+          </div>
+        </div>
         <p
           v-if="state(preview).error"
           class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"

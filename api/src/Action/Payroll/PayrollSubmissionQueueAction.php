@@ -13,6 +13,7 @@ use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAbandonService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionQueueService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
@@ -36,6 +37,7 @@ final class PayrollSubmissionQueueAction
         private readonly PayrollRegistrationChangeDetectionService $changes,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollProductionGate $productionGate,
+        private readonly PayrollSubmissionAbandonService $abandonService,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -332,6 +334,84 @@ final class PayrollSubmissionQueueAction
                 $exception->getMessage(),
                 422,
             ));
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return $this->noStore(Json::error(
+                $response,
+                'conflict',
+                $exception->getMessage(),
+                409,
+            ));
+        }
+
+        return $this->noStore(Json::ok($response, $result));
+    }
+
+    /**
+     * POST /submissions/queue/{submissionId}/abandon — zahodí rozdělané odeslání,
+     * aby šlo podat znovu.
+     *
+     * Tělo: `{ environment, row_version, reason }`.
+     *
+     * Je to RUČNÍ PÁKA, ne automatika. Úřad zprávu převezme, ale zpracovat ji
+     * odmítne (třeba certifikát nezapsaný v registru podávajících u OSSZ) — odeslané
+     * pak nic není, ale podání uvízne ve stavu, ze kterého nevede cesta zpět.
+     * Důvodů takového odmítnutí je víc, než kolik jich umíme z protokolu spolehlivě
+     * rozpoznat, takže aplikace odpověď úřadu ukáže a rozhodne účetní.
+     *
+     * `reason` je povinný a putuje do ledgeru i do auditní stopy — typicky se do něj
+     * vloží právě to, co úřad odpověděl.
+     */
+    public function abandon(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response)) !== null) {
+            return $denied;
+        }
+        $body = $request->getParsedBody();
+        $body = is_array($body) ? $body : [];
+
+        $environment = self::environmentIn($body['environment'] ?? null)
+            ?? self::environmentIn($request->getQueryParams()['environment'] ?? null);
+        if ($environment === null) {
+            return $this->invalid(
+                $response,
+                'Prostředí podání musí být test nebo production.',
+            );
+        }
+        $submissionId = $args['submissionId'] ?? '';
+        if (preg_match('/^[1-9][0-9]*$/D', $submissionId) !== 1) {
+            return $this->invalid(
+                $response,
+                'Identifikátor podání musí být kladné celé číslo.',
+            );
+        }
+        $rowVersion = $body['row_version'] ?? null;
+        if (!is_int($rowVersion) && (!is_string($rowVersion) || preg_match('/^[1-9][0-9]*$/D', $rowVersion) !== 1)) {
+            return $this->invalid(
+                $response,
+                'Verze podání musí být kladné celé číslo — bez ní by se dalo zahodit'
+                    . ' podání, které se mezitím pohnulo.',
+            );
+        }
+        $reason = $body['reason'] ?? null;
+        $reason = is_string($reason) ? trim($reason) : '';
+        if ($reason === '') {
+            return $this->invalid(
+                $response,
+                'Uveďte důvod zahození — typicky to, co úřad odpověděl. Bez něj by'
+                    . ' v historii zůstal pokus, u kterého nikdo nezjistí proč.',
+            );
+        }
+
+        try {
+            $result = $this->abandonService->abandon(
+                $this->currentSupplierId($request),
+                $environment,
+                (int) $submissionId,
+                (int) $rowVersion,
+                $reason,
+            );
         } catch (\InvalidArgumentException $exception) {
             return $this->invalid($response, $exception->getMessage());
         } catch (\DomainException $exception) {

@@ -31,27 +31,44 @@ final class PayrollDispatchGate
         string $environment,
         int $blockingIssues,
     ): ?string {
-        // 1. Nezmrazené podání. Stojí první, protože je to jediný důvod, se
-        //    kterým může uživatel rovnou něco udělat.
-        if ((string) ($row['submission_status'] ?? '') !== 'ready') {
+        // 1. Podání, které už jednou odešlo a čeká na odpověď úřadu. Stojí
+        //    ÚPLNĚ PRVNÍ, protože jinak by ho odbylo pravidlo o nezmrazeném
+        //    podání radou „dokončete přípravu v agendě" — a to je u odeslaného
+        //    podání rada do zdi. Blokuje se, ale s pravdivým důvodem: odpověď
+        //    může přijít, nebo taky ne (ČSSZ zprávu převezme a zpracovat ji
+        //    odmítne), a rozhodnout o tom umí jen člověk, který ji vidí.
+        $status = (string) ($row['submission_status'] ?? '');
+        if (in_array(
+            $status,
+            PayrollSubmissionStateMachine::REOPENABLE_STATUSES,
+            true,
+        )) {
+            return 'Podání už bylo odesláno a čeká se na vyjádření úřadu.'
+                . ' Pokud je z odpovědi zřejmé, že podané nic není, můžete'
+                . ' pokus zahodit a podat znovu.';
+        }
+
+        // 2. Nezmrazené podání. Je to jediný důvod, se kterým může uživatel
+        //    rovnou něco udělat.
+        if ($status !== 'ready') {
             return 'Podání zatím není zmrazené k odeslání. Dokončete jeho'
                 . ' přípravu v příslušné agendě; teprve zmrazené podání se dá'
                 . ' odeslat.';
         }
 
-        // 2. Kanál neumíme vůbec.
+        // 3. Kanál neumíme vůbec.
         if (!$capability->isDispatchable()) {
             return $capability->reason;
         }
 
-        // 3. Kanál umíme, ale ne v tomhle prostředí.
+        // 4. Kanál umíme, ale ne v tomhle prostředí.
         if ($capability->productionOnly && $environment !== 'production') {
             return 'Datová schránka příjemce je doložená jen pro ostré'
                 . ' prostředí, takže v testovacím prostředí tohle podání'
                 . ' odeslat nejde.';
         }
 
-        // 4. Už se odesílalo.
+        // 5. Už se odesílalo.
         $attempt = $row['attempt'] ?? null;
         if (is_array($attempt) && !self::attemptAllowsRetry($attempt)) {
             return sprintf(
@@ -63,7 +80,7 @@ final class PayrollDispatchGate
             );
         }
 
-        // 5. Už čeká v odchozí frontě datové schránky.
+        // 6. Už čeká v odchozí frontě datové schránky.
         $outbox = $row['outbox'] ?? null;
         if (is_array($outbox)
             && !in_array(
@@ -79,7 +96,7 @@ final class PayrollDispatchGate
             );
         }
 
-        // 6. Otevřené blokující nedostatky.
+        // 7. Otevřené blokující nedostatky.
         if ($blockingIssues > 0) {
             return sprintf(
                 'Podání má %d nevyřešených chyb, které brání odeslání.'
@@ -92,10 +109,28 @@ final class PayrollDispatchGate
     }
 
     /**
+     * Kód důvodu, kterým se značí pokus VĚDOMĚ ZAHOZENÝ ČLOVĚKEM.
+     *
+     * Nese ho `payroll_submission_transport_attempts.error_code` a je to jediné,
+     * čím se takový pokus liší od pokusu, který automatika vzdala sama — u toho
+     * se pořád neví, co úřad přijal, takže dál blokuje.
+     */
+    public const ABANDONED_ERROR_CODE = 'abandoned_by_user';
+
+    /**
      * Neúspěšný pokus BEZ `sent_at` znamená, že se odeslání nepovedlo dřív,
      * než cokoli opustilo aplikaci — u úřadu po něm nic nezůstalo, takže druhý
-     * pokus nemůže nic zdvojit. Všechny ostatní stavy (včetně `failed` PO
-     * odeslání a `expired`) dál blokují: tam už se neví, co úřad přijal.
+     * pokus nemůže nic zdvojit.
+     *
+     * Druhá povolená cesta je pokus, který účetní VĚDOMĚ ZAHODILA poté, co viděla,
+     * co úřad odpověděl ({@see \MyInvoice\Service\Payroll\Submission\PayrollSubmissionService::abandonAndReopen()}).
+     * Důvodů, proč úřad podání nepřijme, je víc, než kolik jich umíme spolehlivě
+     * rozpoznat z protokolu — proto o opakování nerozhoduje automatika podle textu
+     * odpovědi, ale člověk, který ten text vidí. Zahození se zapisuje do auditní
+     * stopy a pokus zůstává v ledgeru; nezmizí, jen přestane blokovat.
+     *
+     * Všechny ostatní stavy (včetně `failed` PO odeslání a `expired`, které vzdala
+     * automatika) dál blokují: tam se pořád neví, co úřad přijal.
      *
      * Tohle je TOTOŽNÉ pravidlo jako v
      * {@see \MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository::listReadySubmissions()}.
@@ -107,7 +142,12 @@ final class PayrollDispatchGate
      */
     public static function attemptAllowsRetry(array $attempt): bool
     {
-        return (string) ($attempt['status'] ?? '') === 'failed'
-            && ($attempt['sent_at'] ?? null) === null;
+        $status = (string) ($attempt['status'] ?? '');
+        if ($status === 'failed' && ($attempt['sent_at'] ?? null) === null) {
+            return true;
+        }
+
+        return $status === 'expired'
+            && (string) ($attempt['error_code'] ?? '') === self::ABANDONED_ERROR_CODE;
     }
 }

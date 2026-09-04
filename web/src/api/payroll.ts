@@ -2479,6 +2479,8 @@ export interface PayrollSubmissionOverviewItem {
   latest_submission: {
     id: number
     status: string
+    /** Optimistický zámek pro zahození rozdělaného odeslání. */
+    row_version: number
     submission_kind: string
     channel: string
     submitted_at: string | null
@@ -2523,6 +2525,8 @@ export type PayrollSubmissionDispatchMode =
 export interface PayrollSubmissionQueueItem {
   submission_id: number
   submission_status: string
+  /** Optimistický zámek pro zahození rozdělaného odeslání. */
+  submission_row_version: number
   submission_kind: string
   submission_channel: string
   created_at: string
@@ -2628,6 +2632,16 @@ export interface PayrollChangeSweepResult {
   created: number
   /** `true` = strop porce byl vyčerpán, další vztahy čekají. */
   has_more: boolean
+}
+
+/**
+ * Výsledek zahození rozdělaného odeslání. Pokusy se z historie NEMAŽOU —
+ * dostanou terminální stav a zůstanou i s tím, co úřad odpověděl.
+ */
+export interface PayrollSubmissionAbandonResult {
+  submission: { id: number; status: string; row_version: number }
+  /** ID pokusů, které se tímhle uzavřely. */
+  abandoned_attempts: number[]
 }
 
 export interface PayrollSubmissionQueueDispatchResult {
@@ -6329,6 +6343,28 @@ export const payrollApi = {
       `/payroll/submissions/queue/${submissionId}/dispatch`,
       { environment },
       { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  /**
+   * Zahodí rozdělané odeslání, aby šlo podat znovu.
+   *
+   * Úřad zprávu převezme, ale zpracovat ji odmítne — třeba proto, že certifikát,
+   * kterým je e-podání podepsané, není u OSSZ zapsaný v registru podávajících.
+   * Odeslané pak nic není, ale podání uvízne ve stavu, ze kterého nevede cesta
+   * zpět, a povinnost je z aplikace trvale nepodatelná.
+   *
+   * Důvodů takového odmítnutí je víc, než kolik jich jde z protokolu spolehlivě
+   * rozpoznat, takže o opakování rozhoduje účetní, která odpověď úřadu vidí.
+   * `reason` je povinný a putuje do ledgeru i do auditní stopy.
+   */
+  abandonSubmissionInQueue: (
+    environment: PayrollRegzelEnvironment,
+    submissionId: number,
+    rowVersion: number,
+    reason: string,
+  ) =>
+    api.post<PayrollSubmissionAbandonResult>(
+      `/payroll/submissions/queue/${submissionId}/abandon`,
+      { environment, row_version: rowVersion, reason },
     ).then(response => response.data),
   /**
    * Jeden měsíční přehled: co se za zvolené období generuje/odesílá, kam,

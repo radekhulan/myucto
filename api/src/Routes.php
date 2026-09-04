@@ -1357,6 +1357,14 @@ final class Routes
                 '/submissions/queue/{submissionId:[0-9]+}/dispatch',
                 [PayrollSubmissionQueueAction::class, 'dispatch'],
             );
+            // Zahození rozdělaného odeslání. Úřad zprávu převezme, ale zpracovat ji
+            // odmítne (např. certifikát nezapsaný v registru podávajících u OSSZ);
+            // odeslané pak nic není, ale podání uvízne ve stavu, ze kterého nevede
+            // cesta zpět a povinnost je z aplikace trvale nepodatelná.
+            $g->post(
+                '/submissions/queue/{submissionId:[0-9]+}/abandon',
+                [PayrollSubmissionQueueAction::class, 'abandon'],
+            );
             // Hromadné odeslání. Cesta je bez ID, protože předmětem je DÁVKA;
             // klient ji posílá po porcích, aby žádný požadavek neběžel minuty.
             $g->post(

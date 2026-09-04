@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
 use PDO;
 
 /**
@@ -33,6 +34,17 @@ use PDO;
  * evidenční list nikde neviděla a myslela si, že o něm aplikace neví.
  * `draft` se nebere — rozdělaná práce ve formuláři není podání k odeslání.
  *
+ * K tomu stavy, ze kterých se podání smí VRÁTIT k odeslání
+ * ({@see \MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine::REOPENABLE_STATUSES}).
+ * Odeslané podání čekající na odpověď úřadu do fronty na první pohled nepatří —
+ * jenže právě tam končí ta podání, u kterých odpověď nikdy nepřijde: ČSSZ
+ * zprávu převezme a zpracovat ji odmítne, takže věc dál vypadá jako „čeká se",
+ * ale nečeká se na nic. Rozeznat to od normálního čekání aplikace neumí a
+ * předstírat, že umí, by bylo horší než to ukázat: účetní vidí odpověď úřadu
+ * i tlačítko, kterým pokus zahodí a podá znovu. Odeslat se z těchhle stavů
+ * pochopitelně nedá, brána je blokuje s vlastní větou
+ * ({@see \MyInvoice\Service\Payroll\Submission\PayrollDispatchGate::blockedReason()}).
+ *
  * Vyhodnocení, jestli konkrétní řádek odeslat JDE, nepatří sem: závisí na
  * katalogu odesílatelnosti a prostředí, ne na SQL. Dělá ho
  * {@see \MyInvoice\Service\Payroll\Submission\PayrollSubmissionQueueService}.
@@ -45,6 +57,37 @@ final class PayrollSubmissionQueueRepository
 
     /** @var list<string> */
     public const QUEUED_STATUSES = ['validated', 'prepared', 'ready'];
+
+    /**
+     * Stavy, které fronta ukazuje jen proto, aby z nich VEDLA CESTA VEN.
+     *
+     * Drží se schválně odděleně od {@see self::QUEUED_STATUSES}: tamty stavy
+     * znamenají „ještě to neodešlo", tyhle „odešlo, ale nedopadlo to". Kdyby
+     * splynuly do jednoho seznamu, první pravidlo brány by uvízlému podání
+     * poradilo dokončit přípravu v agendě — což je rada do zdi.
+     *
+     * @var list<string>
+     */
+    public const REOPENABLE_STATUSES =
+        PayrollSubmissionStateMachine::REOPENABLE_STATUSES;
+
+    /** @var list<string> */
+    public const LISTED_STATUSES = [
+        ...self::QUEUED_STATUSES,
+        ...self::REOPENABLE_STATUSES,
+    ];
+
+    /**
+     * Tentýž seznam pro `IN (...)`.
+     *
+     * Je to RUČNÍ KOPIE {@see self::LISTED_STATUSES}, protože konstantní výraz
+     * v PHP neumí zavolat `implode()` a dotaz je konstanta. Aby se ty dvě verze
+     * nerozešly, hlídá jejich shodu
+     * {@see \MyInvoice\Tests\Architecture\PayrollSubmissionQueueStatusSqlTest}.
+     */
+    public const LISTED_STATUSES_SQL =
+        '"validated","prepared","ready",'
+        . '"submitted","processing","waiting_for_identity","rejected"';
 
     private const FROM = '
           FROM payroll_submissions submission
@@ -105,7 +148,8 @@ final class PayrollSubmissionQueueRepository
             )
          WHERE submission.supplier_id = ?
            AND submission.environment = ?
-           AND submission.status IN ("validated", "prepared", "ready")';
+           AND submission.status IN ('
+        . self::LISTED_STATUSES_SQL . ')';
 
     /**
      * Řazení. Výchozí je podle lhůty — fronta se čte shora dolů a co je
@@ -256,6 +300,10 @@ final class PayrollSubmissionQueueRepository
     private const SELECT_COLUMNS =
             'SELECT submission.id AS submission_id,
                     submission.status AS submission_status,
+                    -- Verze podání jde ven kvůli optimistickému zámku u zahození
+                    -- rozdělaného odeslání: bez ní by šlo zahodit podání, které se
+                    -- mezitím pohnulo (třeba právě dotažený protokol).
+                    submission.row_version AS submission_row_version,
                     submission.submission_kind,
                     submission.channel AS submission_channel,
                     submission.created_at AS submission_created_at,
@@ -292,6 +340,7 @@ final class PayrollSubmissionQueueRepository
         return [
                 'submission_id' => (int) $row['submission_id'],
                 'submission_status' => (string) $row['submission_status'],
+                'submission_row_version' => (int) $row['submission_row_version'],
                 'submission_kind' => (string) $row['submission_kind'],
                 'submission_channel' => (string) $row['submission_channel'],
                 'created_at' => (string) $row['submission_created_at'],

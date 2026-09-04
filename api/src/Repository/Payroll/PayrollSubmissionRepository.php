@@ -56,6 +56,10 @@ final class PayrollSubmissionRepository
                                   submission.environment,
                                   submission.obligation_id,
                                   submission.status,
+                                  -- Verze podání jde ven kvůli optimistickému zámku
+                                  -- u zahození rozdělaného odeslání: bez ní by šlo
+                                  -- zahodit podání, které se mezitím pohnulo.
+                                  submission.row_version,
                                   submission.submission_kind,
                                   submission.channel,
                                   submission.submitted_at,
@@ -200,6 +204,7 @@ final class PayrollSubmissionRepository
                     deadline.calendar_basis,
                     latest_submission.id AS submission_id,
                     latest_submission.status AS submission_status,
+                    latest_submission.row_version AS submission_row_version,
                     latest_submission.submission_kind,
                     latest_submission.channel AS submission_channel,
                     latest_submission.submitted_at,
@@ -245,6 +250,7 @@ final class PayrollSubmissionRepository
                     : [
                         'id' => $submissionId,
                         'status' => self::string($row, 'submission_status'),
+                        'row_version' => self::integer($row, 'submission_row_version'),
                         'submission_kind' => self::string(
                             $row,
                             'submission_kind',
@@ -1915,6 +1921,11 @@ final class PayrollSubmissionRepository
         return $rows;
     }
 
+    /**
+     * @param bool $resetDispatchEvidence smazat stopy po odeslání místo jejich
+     *                                    zachování — jen pro návrat podání do
+     *                                    předodeslaného stavu, viz níže
+     */
     public function updateSubmissionStatus(
         int $supplierId,
         int $submissionId,
@@ -1923,6 +1934,7 @@ final class PayrollSubmissionRepository
         ?string $correlationReference,
         ?string $submittedAt,
         ?string $decidedAt,
+        bool $resetDispatchEvidence = false,
     ): int {
         return $this->transaction(function () use (
             $supplierId,
@@ -1932,26 +1944,45 @@ final class PayrollSubmissionRepository
             $correlationReference,
             $submittedAt,
             $decidedAt,
+            $resetDispatchEvidence,
         ): int {
             if (!in_array($status, ['accepted', 'superseded', 'cancelled_in_time'], true)) {
                 $this->yearClose->assertOpenForSubmission($supplierId, $submissionId);
             }
+            // Datumy i correlation se normálně jen DOPLŇUJÍ (`COALESCE`): stavový
+            // automat chodí dopředu, takže „nepředal jsem hodnotu" znamená
+            // „nesahej na to, co už je zapsané". Přesně na tom ale stál slepý
+            // konec, kvůli kterému vznikl návrat na `ready`: řádek se vracel do
+            // předodeslaného stavu s vyplněným `submitted_at` a zápis padal na
+            // `chk_payroll_submissions_dates`. A i kdyby prošel, correlation po
+            // původním pokusu by nové odeslání shodila na „Correlation reference
+            // podání je neměnná." — druhý slepý konec o krok dál. Vyčištění je
+            // proto vědomé a explicitní, ne vedlejší efekt předání NULL.
             $statement = $this->db->pdo()->prepare(
                 'UPDATE payroll_submissions
                     SET status = ?,
-                        correlation_reference =
-                          COALESCE(?, correlation_reference),
-                        submitted_at = COALESCE(?, submitted_at),
-                        decided_at = COALESCE(?, decided_at),
+                        correlation_reference = CASE
+                          WHEN ? THEN NULL
+                          ELSE COALESCE(?, correlation_reference) END,
+                        submitted_at = CASE
+                          WHEN ? THEN NULL
+                          ELSE COALESCE(?, submitted_at) END,
+                        decided_at = CASE
+                          WHEN ? THEN NULL
+                          ELSE COALESCE(?, decided_at) END,
                         row_version = row_version + 1
                   WHERE supplier_id = ?
                     AND id = ?
                     AND row_version = ?',
             );
+            $reset = $resetDispatchEvidence ? 1 : 0;
             $statement->execute([
                 $status,
+                $reset,
                 $correlationReference,
+                $reset,
                 $submittedAt,
+                $reset,
                 $decidedAt,
                 $supplierId,
                 $submissionId,

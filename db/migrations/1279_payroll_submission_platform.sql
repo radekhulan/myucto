@@ -530,12 +530,21 @@ BEGIN
     SET MESSAGE_TEXT = 'Payroll submission deadlines are immutable';
 END//
 
+-- Correlation se nesmí PŘEPSAT jinou hodnotou — váže podání na to, co úřad
+-- potvrdil. Vynulovat ji ale smí návrat do předodeslaného stavu: tam se stopa po
+-- vědomě zahozeném pokusu maže, aby šlo podat znovu. Podrobně v migraci
+-- 1737_payroll_submission_correlation_reset.sql, která tenhle trigger u starších
+-- instalací dorovnává.
 CREATE TRIGGER IF NOT EXISTS trg_payroll_submission_correlation_update
 BEFORE UPDATE ON payroll_submissions
 FOR EACH ROW
 BEGIN
   IF OLD.correlation_reference IS NOT NULL
-     AND NOT (NEW.correlation_reference <=> OLD.correlation_reference) THEN
+     AND NOT (NEW.correlation_reference <=> OLD.correlation_reference)
+     AND NOT (
+       NEW.correlation_reference IS NULL
+       AND NEW.status IN ('draft', 'validated', 'prepared', 'ready')
+     ) THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'Payroll submission correlation is immutable';
   END IF;

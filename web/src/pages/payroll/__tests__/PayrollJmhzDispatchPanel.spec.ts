@@ -207,6 +207,7 @@ describe('PayrollJmhzDispatchPanel', () => {
           latest_submission: {
             id: 88,
             status: 'ready',
+            row_version: 1,
             submission_kind: 'regular',
             channel: 'vrep_apep',
             submitted_at: null,

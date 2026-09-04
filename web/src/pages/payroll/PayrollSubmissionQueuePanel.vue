@@ -158,6 +158,59 @@ async function sendOne(item: PayrollSubmissionQueueItem): Promise<void> {
   await sendMany([item.submission_id])
 }
 
+/*
+ * Zahození rozdělaného odeslání.
+ *
+ * Úřad zprávu převezme, ale zpracovat ji odmítne — třeba proto, že certifikát,
+ * kterým je e-podání podepsané, není u OSSZ zapsaný v registru podávajících.
+ * Odeslané pak nic není, ale podání uvízne ve stavu, ze kterého nevede cesta zpět,
+ * a povinnost je z aplikace trvale nepodatelná.
+ *
+ * Aplikace o tom NEROZHODUJE sama: důvodů, proč úřad podání nepřijme, je víc, než
+ * kolik jich jde z protokolu spolehlivě rozpoznat. Ukáže tedy, co úřad odpověděl,
+ * a rozhodne účetní — proto to potvrzení i předvyplněný důvod.
+ */
+const abandoning = ref<number | null>(null)
+
+/** Zahodit smí jen podání, které úřad nepřijal — přijaté se opravuje opravným podáním. */
+const ABANDONABLE_STATUSES = ['submitted', 'processing', 'waiting_for_identity', 'rejected']
+
+function canAbandon(item: PayrollSubmissionQueueItem): boolean {
+  return !item.dispatch.dispatchable
+    && ABANDONABLE_STATUSES.includes(item.submission_status)
+}
+
+async function abandon(item: PayrollSubmissionQueueItem): Promise<void> {
+  if (abandoning.value !== null || batch.value !== null) return
+
+  // Do důvodu se předvyplní přesně to, co úřad odpověděl — je to jediné, co
+  // o odmítnutí víme, a v historii pokusu to má zůstat čitelné.
+  const suggested = item.attempt?.error_message
+    ?? item.dispatch.blocked_reason
+    ?? ''
+  const reason = window.prompt(
+    t('payroll.submissions.queue.abandon_prompt'),
+    suggested,
+  )
+  if (reason === null || reason.trim() === '') return
+
+  abandoning.value = item.submission_id
+  error.value = ''
+  try {
+    await payrollApi.abandonSubmissionInQueue(
+      props.environment,
+      item.submission_id,
+      item.submission_row_version,
+      reason.trim(),
+    )
+    await load()
+  } catch (e) {
+    error.value = apiErrorMessage(e, t('payroll.submissions.queue.abandon_failed'))
+  } finally {
+    abandoning.value = null
+  }
+}
+
 async function sendSelected(): Promise<void> {
   await sendMany([...selected.value])
 }
@@ -546,19 +599,41 @@ void load()
                 </p>
               </td>
               <td class="px-3 py-2 align-top text-right">
-                <button
-                  type="button"
-                  :class="btnFilledSm('primary')"
-                  :disabled="!item.dispatch.dispatchable || batch !== null"
-                  :title="item.dispatch.blocked_reason ?? undefined"
-                  data-test="queue-send"
-                  @click="sendOne(item)"
-                >
-                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path :d="ICONS.send" />
-                  </svg>
-                  <span class="whitespace-nowrap">{{ t('payroll.submissions.queue.send') }}</span>
-                </button>
+                <div class="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    :class="btnFilledSm('primary')"
+                    :disabled="!item.dispatch.dispatchable || batch !== null"
+                    :title="item.dispatch.blocked_reason ?? undefined"
+                    data-test="queue-send"
+                    @click="sendOne(item)"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.send" />
+                    </svg>
+                    <span class="whitespace-nowrap">{{ t('payroll.submissions.queue.send') }}</span>
+                  </button>
+                  <!--
+                    Cesta ven z podání, které úřad nepřijal. Bez ní zůstane
+                    povinnost trvale nepodatelná: odeslat nejde a nové podání
+                    za totéž období databáze nepustí.
+                  -->
+                  <button
+                    v-if="canAbandon(item)"
+                    type="button"
+                    :class="btnOutlineSm('danger')"
+                    :disabled="abandoning !== null || batch !== null"
+                    :title="t('payroll.submissions.queue.abandon_hint')"
+                    data-test="queue-abandon"
+                    @click="abandon(item)"
+                  >
+                    <span class="whitespace-nowrap">
+                      {{ abandoning === item.submission_id
+                        ? t('payroll.submissions.queue.abandoning')
+                        : t('payroll.submissions.queue.abandon') }}
+                    </span>
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -621,6 +696,19 @@ void load()
               <path :d="ICONS.send" />
             </svg>
             <span class="whitespace-nowrap">{{ t('payroll.submissions.queue.send') }}</span>
+          </button>
+          <button
+            v-if="canAbandon(item)"
+            type="button"
+            :class="[btnOutlineSm('danger'), 'mt-2 w-full justify-center']"
+            :disabled="abandoning !== null || batch !== null"
+            @click="abandon(item)"
+          >
+            <span class="whitespace-nowrap">
+              {{ abandoning === item.submission_id
+                ? t('payroll.submissions.queue.abandoning')
+                : t('payroll.submissions.queue.abandon') }}
+            </span>
           </button>
         </article>
       </div>
