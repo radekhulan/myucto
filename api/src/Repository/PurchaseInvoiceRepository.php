@@ -1188,6 +1188,17 @@ final class PurchaseInvoiceRepository
                 ->execute([$projectId, $newId, $supplierId]);
         }
 
+        // Doklad založený rovnou jako PŘIJATÝ musí dostat naše interní číslo hned tady.
+        // Generování varsymbolu jinak visí na přechodu draft→received
+        // ({@see \MyInvoice\Action\PurchaseInvoice\TransitionPurchaseInvoiceStatusAction}),
+        // který tahle cesta z definice přeskočí — doklad pak v seznamu svítí jako „#id“
+        // a nemá číslo, pod kterým by ho účetní našla. Stejná past už jednou vznikla
+        // u AI auto-paid (markAlreadyPaid) a řešila se až backfillem; pravidlo proto drží
+        // ZAKLÁDÁNÍ dokladu, ne každý volající zvlášť.
+        if ($initialStatus === 'received' && $manualVarsymbol === null) {
+            $this->ensureVarsymbol($newId, $supplierId);
+        }
+
         return $newId;
     }
 
