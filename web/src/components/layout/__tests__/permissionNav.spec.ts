@@ -51,7 +51,51 @@ describe('navigace podle RBAC oprávnění', () => {
   })
 
   it('omezuje šířku mobilního a tabletového menu', () => {
-    expect(appLayout).toContain("'w-[calc(100vw-3rem)] max-w-80 lg:w-60 shrink-0'")
+    expect(appLayout).toContain("'w-[calc(100vw-3rem)] max-w-80 shrink-0'")
+    expect(appLayout).toContain("'lg:w-60'")
     expect(appLayout).not.toContain("'w-full lg:w-60 shrink-0'")
+  })
+
+  it('otevírá mobilní menu zprava a desktopové levé menu přepne na kompaktní pruh', () => {
+    expect(appLayout).toContain("'fixed right-0 z-30 lg:right-auto lg:sticky")
+    expect(appLayout).toContain("'nav-inverted bg-surface border-l border-neutral-200 shadow-lg lg:border-l-0 lg:border-r lg:shadow-none'")
+    expect(appLayout).toContain("mobileOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'")
+    expect(appLayout).toContain("t('nav.menu_compact')")
+    expect(appLayout).toContain('v-if="si === 0 && isDesktop"')
+    expect(appLayout).toContain("@click.stop=\"setDesktopNavigationMode('rail')\"")
+  })
+
+  it('na užším desktopu přesouvá utility do patičky a skrývá metadata', () => {
+    expect(appLayout.match(/<DesktopUtilityActions/g)).toHaveLength(2)
+    expect(appLayout).toContain('class="hidden 2xl:flex"')
+    expect(appLayout).toContain('class="flex 2xl:hidden"')
+    expect(appLayout).toContain('class="hidden 2xl:inline whitespace-nowrap hover:text-primary-700')
+    expect(appLayout).toContain('class="hidden 2xl:inline whitespace-nowrap hover:text-neutral-700"')
+  })
+
+  it('nabízí na tabletu volitelný levý pruh sekcí místo hamburgeru', () => {
+    expect(appLayout).toContain('(isDesktop.value && forceNavigationRail.value)')
+    expect(appLayout).toContain('(isTablet.value && tabletNavigationRailPreference.value)')
+    expect(appLayout).toContain('<TabletNavigationRail')
+    expect(appLayout).toContain('v-if="!tabletNavigationRail"')
+    expect(appLayout).toContain("'nav.tablet_menu_drawer' : 'nav.tablet_menu_rail'")
+  })
+
+  it('nabízí na desktopu tři přímo volitelné režimy menu', () => {
+    expect(appLayout).toContain("const desktopNavigationMode = computed<'top' | 'side' | 'rail'>")
+    expect(appLayout).toContain("setDesktopNavigationMode('top')")
+    expect(appLayout).toContain("setDesktopNavigationMode('side')")
+    expect(appLayout).toContain("setDesktopNavigationMode('rail')")
+    expect(appLayout).toContain("t('nav.menu_layout')")
+  })
+
+  it('používá v kompaktním pruhu významově odlišené ikony sekcí', () => {
+    expect(appLayout).toContain('bank_cash: ICONS.coin')
+    expect(appLayout).toContain('documents: ICONS.folderOpen')
+    expect(appLayout).toContain('taxes: ICONS.percent')
+    expect(appLayout).toContain('accounting_tools: ICONS.tools')
+    expect(appLayout).toContain('company: ICONS.company')
+    expect(appLayout).toContain('system_signing: ICONS.api_tokens')
+    expect(appLayout).not.toContain('bank_cash: ICONS.bank')
   })
 })

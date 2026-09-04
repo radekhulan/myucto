@@ -68,7 +68,9 @@ lištami:
   Přístupové klíče, Zámek aplikace, Klávesové zkratky a Odhlásit;
 - **spodní lišta** — vlevo je společné hledání v menu, klientech a dokladech,
   uprostřed přepínač firem (jen v režimu horního menu) a vpravo jazyk,
-  světlý/tmavý motiv, verze a odkazy aplikace;
+  světlý/tmavý motiv a na širokém desktopu také verze a odkazy aplikace;
+  na užším desktopu se sem z horní lišty přesune přepínač panelů, rychlé
+  vytvoření a nápověda, zatímco verze a odkazy ustoupí;
 - **režim levého menu** — přepínač firem se přesune do pravé části hlavičky,
   kde je od ostatních akcí oddělený svislou čárou.
 
@@ -76,12 +78,21 @@ Pokud by se názvy sekcí do horní lišty nevešly, aplikace to změří a auto
 zobrazí menu jako trvalý levý panel. Na dostatečně široké obrazovce můžeš mezi
 horní a levou variantou přepnout ikonou rozložení ve spodní liště; přetékající
 horní variantu nelze vynutit. Výchozí je horní menu; ručně zvolená levá
-varianta se uloží do cookie tohoto prohlížeče. Obě varianty používají stejné
-názvy sekcí; například **Sklad** a **Nástroje**. Na menších obrazovkách se
+varianta se uloží do cookie tohoto prohlížeče. Přepínač rozložení nabízí horní
+menu, plný levý panel a kompaktní levý pruh. Sbalovací šipka v prvním řádku
+plného panelu přepne rovnou na kompaktní pruh s výraznými barevnými ikonami
+sekcí; šipka nahoře v pruhu znovu otevře plný panel.
+Všechny varianty používají stejné sekce, například **Sklad** a **Nástroje**. Na menších obrazovkách se
 v hlavičce vedle loga zobrazuje celý název aplikace a hlavní nabídka se otevírá
-tlačítkem **☰** přes celou šířku obrazovky. Přepínač firmy pod hlavičkou také
+tlačítkem **☰** zprava. Přepínač firmy pod hlavičkou také
 využívá celou dostupnou šířku. Jazyk a motiv zůstávají ve spodní liště; jazyk
 přepíná jediná vlaječka na druhý dostupný jazyk.
+
+Na tabletu lze ikonou ve spodní liště nahradit hamburger připnutým levým pruhem.
+Pruh zobrazuje pouze barevné ikony sekcí, aby nezabíral místo položkami celého
+menu. Klepnutí na ikonu otevře vedle pruhu položky vybrané sekce. Stejnou ikonou
+ve spodní liště se lze kdykoli vrátit k hamburger menu. Volba se ukládá do cookie
+prohlížeče a na telefonu se neuplatní.
 
 Aktuální hlavní struktura menu je:
 
@@ -136,10 +147,12 @@ kombinaci nelze uložit.
 
 ### 10.6.2 Více panelů pracovního prostoru
 
-Na široké desktopové obrazovce můžeš v horní liště zvolit rozložení s jedním,
+Na široké desktopové obrazovce můžeš zvolit rozložení s jedním,
 dvěma nebo třemi stejně širokými panely. Dva panely jsou dostupné od šířky
 pracovního prostoru 1 100 px, tři od 1 600 px. Na užším okně se aplikace
-automaticky vrátí k jednomu panelu. Přepínač rozložení je v horní liště.
+automaticky vrátí k jednomu panelu. Přepínač rozložení je v horní liště; mezi
+šířkami 1 024 a 1 535 px se přesune do spodní lišty, aby horní menu zůstalo
+viditelné co nejdéle.
 V režimu dvou nebo tří panelů můžeš jejich šířku změnit tažením svislého
 předělu myší nebo klávesami šipka vlevo a vpravo po zaměření předělu. Obsah
 stránky se přitom responzivně přeskupuje podle skutečné šířky svého panelu,
