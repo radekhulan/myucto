@@ -666,6 +666,51 @@ async function onReceiptChosen(event: Event) {
   }
 }
 
+/**
+ * Dodejku si jde vyžádat jen u zprávy, která doloženě odešla a nese dmID —
+ * bez něj se ISDS není na co zeptat. Podání, které dodejku už má, se
+ * nestahuje podruhé.
+ */
+function canDownloadReceipt(row: OutboxSubmission): boolean {
+  return row.channel === 'isds'
+    && !row.receipt_document_id
+    && (row.external_message_id ?? '') !== ''
+    && ['sent', 'delivered'].includes(row.dispatch_state)
+}
+
+/**
+ * Vyžádá dodejku k odeslané zprávě přímo z ISDS.
+ *
+ * Není to vyzvednutí schránky: ptáme se na NAŠI odeslanou zprávu, takže se tím
+ * nic nedoručuje a nezačíná běžet žádná lhůta. U hlášení zdravotním
+ * pojišťovnám je dodejka jediný důkaz, který kdy vznikne — pojišťovna žádnou
+ * odpověď neposílá.
+ */
+async function downloadReceipt(row: OutboxSubmission) {
+  busyId.value = row.id
+  try {
+    reportReceiptDownload(await dataBoxApi.downloadReceipt(row.id, environment.value))
+    await loadAll()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    busyId.value = null
+  }
+}
+
+/**
+ * „Dodejka ještě není" NENÍ chyba — zpráva prostě zatím nebyla doručena.
+ * Červená hláška by účetní posílala hledat závadu tam, kde žádná není.
+ */
+function reportReceiptDownload(result: ReceiptUploadResult) {
+  lastUpload.value = result.status === 'not_available' ? null : result
+  if (result.status === 'not_available') {
+    toast.info(result.message)
+    return
+  }
+  toast.success(result.message)
+}
+
 async function showCandidates(message: InboxMessage) {
   try {
     receiptCandidates.value = {
@@ -1006,6 +1051,9 @@ const mobileOutboxUseSaved = ref(false)
 const rememberMobileOutboxCredential = ref(false)
 const mobileOutboxFlow = ref('')
 const mobileOutboxStatus = ref('')
+/** Co se má v potvrzené relaci udělat: odeslat podání, nebo stáhnout dodejku. */
+type MobileOutboxIntent = 'send' | 'receipt'
+const mobileOutboxIntent = ref<MobileOutboxIntent>('send')
 let mobileOutboxTimer: ReturnType<typeof setTimeout> | null = null
 
 function clearMobileOutboxTimer() {
@@ -1013,9 +1061,15 @@ function clearMobileOutboxTimer() {
   mobileOutboxTimer = null
 }
 
-function openMobileOutbox(row: OutboxSubmission) {
+/**
+ * Týž panel Mobilního klíče slouží dvěma akcím. Přihlášení k ISDS je pro obě
+ * stejné; liší se až to, co se v potvrzené relaci udělá — proto `intent`, ne
+ * druhá kopie celého formuláře.
+ */
+function openMobileOutbox(row: OutboxSubmission, intent: MobileOutboxIntent = 'send') {
   clearMobileOutboxTimer()
   mobileOutboxFor.value = row.id
+  mobileOutboxIntent.value = intent
   mobileOutboxFlow.value = ''
   mobileOutboxStatus.value = ''
   mobileOutboxCode.value = ''
@@ -1071,6 +1125,22 @@ async function startMobileOutbox(row: OutboxSubmission) {
 async function pollMobileOutbox(row: OutboxSubmission) {
   if (mobileOutboxFlow.value === '') return
   try {
+    if (mobileOutboxIntent.value === 'receipt') {
+      const status = await dataBoxApi.downloadReceiptWithMobileKey(
+        row.id,
+        mobileOutboxFlow.value,
+        environment.value,
+      )
+      mobileOutboxStatus.value = status.description
+      if (status.result) {
+        closeMobileOutbox()
+        reportReceiptDownload(status.result)
+        await loadAll()
+        return
+      }
+      mobileOutboxTimer = setTimeout(() => { void pollMobileOutbox(row) }, 2000)
+      return
+    }
     const status = await dataBoxApi.mobileKeyOutboxConfirm(row.id, mobileOutboxFlow.value, environment.value)
     mobileOutboxStatus.value = status.description
     if (status.result) {
@@ -1657,7 +1727,15 @@ onUnmounted(clearMobileStatusTimer)
             · {{ t('databox.receipts.deliveredAt') }}: {{ lastUpload.receipt.delivered_at }}
           </span>
         </div>
-        <div v-if="lastUpload.candidates.length" class="mt-3 space-y-2">
+        <!--
+          Kandidáti dávají smysl jen u uložené doručenky. `inbox_message_id`
+          je `null` u stavu, kdy dodejka ještě neexistuje — tam se nic
+          nepřiřazuje a blok se nekreslí.
+        -->
+        <div
+          v-if="lastUpload.candidates.length && lastUpload.inbox_message_id !== null"
+          class="mt-3 space-y-2"
+        >
           <div class="text-xs font-medium uppercase text-neutral-500">{{ t('databox.receipts.candidatesHint') }}</div>
           <div
             v-for="c in lastUpload.candidates"
@@ -1994,7 +2072,11 @@ onUnmounted(clearMobileStatusTimer)
           class="mt-3 rounded-md border border-primary-200 bg-primary-50/40 p-3"
           data-test="outbox-mobile-key-form"
         >
-          <p class="text-sm text-neutral-700">{{ t('databox.outbox.mobileKey.intro') }}</p>
+          <p class="text-sm text-neutral-700">
+            {{ mobileOutboxIntent === 'receipt'
+              ? t('databox.outbox.downloadReceipt.mobileKeyIntro')
+              : t('databox.outbox.mobileKey.intro') }}
+          </p>
           <!--
             Testovací ISDS má vlastní účty. Bez tohohle upozornění vypadalo
             odmítnutí ostrého přihlášení jako překlep v kódu a účetní ho
@@ -2193,6 +2275,39 @@ onUnmounted(clearMobileStatusTimer)
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" />
             </svg>
             {{ t('databox.outbox.uploadReceipt') }}
+          </button>
+          <!--
+            Dodejku umí aplikace vyžádat sama podle dmID, které si zapsala při
+            odeslání. Ruční nahrání zůstává vedle jako záloha — pro zprávy
+            odeslané mimo aplikaci a pro případ, kdy se na ISDS nedovoláme.
+          -->
+          <button
+            v-if="canDownloadReceipt(row) && currentCredential?.auth_mode === 'certificate'"
+            type="button"
+            :class="btnOutline('primary')"
+            :disabled="busyId === row.id"
+            :title="t('databox.outbox.downloadReceipt.hint')"
+            data-test="outbox-receipt-download"
+            @click="downloadReceipt(row)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" />
+            </svg>
+            {{ t('databox.outbox.downloadReceipt.action') }}
+          </button>
+          <button
+            v-if="canDownloadReceipt(row) && mobileOutboxFor !== row.id"
+            type="button"
+            :class="btnOutline('primary')"
+            :disabled="busyId === row.id"
+            :title="t('databox.outbox.downloadReceipt.hint')"
+            data-test="outbox-receipt-download-mobile-key"
+            @click="openMobileOutbox(row, 'receipt')"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" />
+            </svg>
+            {{ t('databox.outbox.downloadReceipt.mobileKeyAction') }}
           </button>
           <button
             v-if="primaryAction(row) === 'confirm'"

@@ -8,8 +8,10 @@ use MyInvoice\Repository\Submission\SubmissionInboxRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Document\DocumentIngestService;
+use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelStatus;
 use MyInvoice\Service\Submission\Channel\DispatchState;
+use MyInvoice\Service\Submission\Channel\Isds\IsdsTransport;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use Psr\Log\LoggerInterface;
 
@@ -69,6 +71,11 @@ final readonly class DeliveryReceiptService
     public const STATUS_UNMATCHED = 'unmatched';
     /** Tatáž doručenka už tu je. Druhý průchod nic nemění. */
     public const STATUS_ALREADY_PROCESSED = 'already_processed';
+    /**
+     * ISDS dodejku k naší zprávě zatím nemá — zpráva ještě nebyla doručena.
+     * Je to STAV, ne selhání; selhání dotazu letí ven jako výjimka.
+     */
+    public const STATUS_NOT_AVAILABLE = 'not_available';
 
     private const CHANNEL = 'isds';
     private const ENVIRONMENTS = ['production', 'test'];
@@ -90,6 +97,10 @@ final readonly class DeliveryReceiptService
      * @param ?int $outboxId když uživatel nahrává doručenku PŘÍMO u podání,
      *                       je to jeho vlastní rozhodnutí o vazbě — bere se
      *                       jako ruční potvrzení, ne jako automatická shoda
+     * @param ?string $matchedBy čím je vazba na `$outboxId` podložená. `null`
+     *                       znamená rozhodnutí člověka; {@see downloadFromIsds()}
+     *                       sem pošle {@see DeliveryReceiptMatcher::BY_ISDS_DOWNLOAD},
+     *                       protože tam za vazbu ručí ISDS, ne uživatel
      * @return array<string,mixed>
      * @throws \MyInvoice\Service\Document\DocumentException když soubor není čitelná doručenka
      */
@@ -101,6 +112,7 @@ final readonly class DeliveryReceiptService
         int $userId,
         ?int $outboxId = null,
         ?int $folderId = null,
+        ?string $matchedBy = null,
     ): array {
         $this->assertEnvironment($environment);
         $receipt = $this->reader->read($bytes);
@@ -115,7 +127,7 @@ final readonly class DeliveryReceiptService
         }
 
         $verdict = $outboxId !== null
-            ? $this->verdictForExplicitTarget($supplierId, $environment, $outboxId)
+            ? $this->verdictForExplicitTarget($supplierId, $environment, $outboxId, $matchedBy)
             : $this->matcher->match($supplierId, $environment, $receipt);
 
         $ingested = $this->documents->ingestZfoBytes(
@@ -208,6 +220,128 @@ final readonly class DeliveryReceiptService
             'outbox_id' => (int) $matchedOutboxId,
             'matched_by' => $verdict['matched_by'],
         ]);
+    }
+
+    /**
+     * Vyžádá si doručenku k odeslanému podání přímo z ISDS
+     * (`GetSignedDeliveryInfo`) a projde s ní tutéž cestu jako ruční nahrání.
+     *
+     * ── Proč to existuje ────────────────────────────────────────────────────
+     * U agend, které {@see AgendaReceiptCapability} řadí mezi
+     * `DeliveryReceiptOnly` — typicky hlášení zdravotním pojišťovnám — je
+     * doručenka JEDINÝ strojový důkaz, který kdy vznikne. Pojišťovna žádnou
+     * odpověď neposílá, takže bez doručenky nemá podání v evidenci nic než
+     * naše vlastní tvrzení, že odešlo. Nutit kvůli tomu účetní exportovat ZFO
+     * z portálu datovky a nahrávat ho zpátky je zbytečné kolečko: `dmID` té
+     * zprávy aplikace zná, protože si ho zapsala při odeslání.
+     *
+     * ── Právní poznámka: tohle NENÍ doručení ────────────────────────────────
+     * Právně významný úkon je `GetListOfReceivedMessages` — přihlášení do
+     * schránky, a tím doručení všech DODANÝCH zpráv podle § 17 odst. 3
+     * zák. 300/2008 Sb. `GetSignedDeliveryInfo` se ptá na dodejku k NAŠÍ
+     * ODESLANÉ zprávě; ta v naší schránce žádnou dodanou zprávou není a lhůta
+     * doručení běží příjemci, ne nám. Tenhle následek tedy nemá.
+     *
+     * Přesto se volá výhradně z výslovné akce přihlášeného uživatele, ne na
+     * pozadí: sahá to na síť pod pověřením firmy a to má být vidět v auditní
+     * stopě s konkrétním člověkem.
+     *
+     * ── Fail-closed ─────────────────────────────────────────────────────────
+     * `null` z transportu znamená VÝHRADNĚ „zpráva ještě dodejku nemá"
+     * (nedoručeno). Selhání dotazu letí ven jako {@see SubmissionChannelException} —
+     * nikdy se nesmí přeložit na „doručenka není". Rozdíl mezi „ještě nedorazila"
+     * a „nepodařilo se zeptat" je rozdíl mezi čekáním a opravou.
+     *
+     * @return array<string,mixed> tvar jako {@see upload()}; navíc `status`
+     *         {@see self::STATUS_NOT_AVAILABLE}, když dodejka ještě není
+     * @throws SubmissionChannelException když se na dodejku nedá zeptat
+     */
+    public function downloadFromIsds(
+        int $supplierId,
+        string $environment,
+        int $outboxId,
+        int $userId,
+        ChannelContext $context,
+        IsdsTransport $transport,
+    ): array {
+        $this->assertEnvironment($environment);
+        $submission = $this->outbox->find($supplierId, $outboxId);
+        if ($submission === null) {
+            throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
+        }
+        if ((string) $submission['environment'] !== $environment) {
+            throw new SubmissionChannelException(
+                'submission_environment_mismatch',
+                'Podání je z jiného prostředí. Testovací doručenka nesmí hnout produkčním podáním.',
+                409,
+            );
+        }
+        if ((string) $submission['channel'] !== self::CHANNEL) {
+            throw new SubmissionChannelException(
+                'receipt_channel_unsupported',
+                'Doručenku umí vydat jen datová schránka. Tohle podání šlo jiným kanálem.',
+                409,
+            );
+        }
+        if ($submission['receipt_document_id'] !== null) {
+            throw new SubmissionChannelException(
+                'receipt_already_attached',
+                'Tohle podání už doručenku má.',
+                409,
+            );
+        }
+        $messageId = trim((string) ($submission['external_message_id'] ?? ''));
+        if ($messageId === '') {
+            // Bez dmID není na co se ptát. Je to legitimní stav (podání ještě
+            // neodešlo, nebo odešlo ručně a číslo nikdo neopsal), ne porucha.
+            throw new SubmissionChannelException(
+                'receipt_message_id_missing',
+                'U podání není ID odeslané datové zprávy, takže si o doručenku nejde říct. '
+                . 'Doplňte ho přes „Označit jako odesláno", nebo doručenku nahrajte souborem.',
+                409,
+            );
+        }
+
+        $bytes = $transport->downloadDeliveryReceipt($context, $messageId);
+        if ($bytes === null || $bytes === '') {
+            $this->activity->log(
+                'databox_receipt_download_pending',
+                $userId,
+                'submission_outbox',
+                $outboxId,
+                ['message_id' => $messageId],
+                null,
+                null,
+                $supplierId,
+            );
+
+            return [
+                'status' => self::STATUS_NOT_AVAILABLE,
+                'outbox_id' => $outboxId,
+                'inbox_message_id' => null,
+                'document_id' => null,
+                'receipt' => null,
+                'candidates' => [],
+                'reason' => 'not_delivered_yet',
+                'matched_by' => null,
+                'submission' => $submission,
+                'validation' => null,
+                'delivery_recorded' => false,
+                'message' => 'ISDS k téhle zprávě zatím dodejku nemá — příjemce ji ještě nedostal. '
+                    . 'Zkuste to znovu později; nejde o chybu podání.',
+            ];
+        }
+
+        return $this->upload(
+            $supplierId,
+            $environment,
+            $bytes,
+            'dodejka-' . $messageId . '.zfo',
+            $userId,
+            $outboxId,
+            null,
+            DeliveryReceiptMatcher::BY_ISDS_DOWNLOAD,
+        );
     }
 
     /**
@@ -398,7 +532,10 @@ final readonly class DeliveryReceiptService
                 $outboxId,
                 ChannelStatus::deliveredOnly(
                     $deliveredAt,
-                    'Doručenka nahraná uživatelem. Dokládá doručení do schránky příjemce, '
+                    ($matchedBy === DeliveryReceiptMatcher::BY_ISDS_DOWNLOAD
+                        ? 'Doručenka stažená aplikací z ISDS. '
+                        : 'Doručenka nahraná uživatelem. ')
+                    . 'Dokládá doručení do schránky příjemce, '
                     . 'ne vyřízení úřadem. Podpis doručenky neověřujeme.',
                 ),
             );
@@ -470,8 +607,12 @@ final readonly class DeliveryReceiptService
      *
      * @return array{status:string,outbox_id:?int,matched_by:?string,reason:string,candidates:list<array<string,mixed>>}
      */
-    private function verdictForExplicitTarget(int $supplierId, string $environment, int $outboxId): array
-    {
+    private function verdictForExplicitTarget(
+        int $supplierId,
+        string $environment,
+        int $outboxId,
+        ?string $matchedBy = null,
+    ): array {
         $submission = $this->outbox->find($supplierId, $outboxId);
         if ($submission === null) {
             throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
@@ -483,12 +624,13 @@ final readonly class DeliveryReceiptService
                 409,
             );
         }
+        $matchedBy ??= DeliveryReceiptMatcher::BY_MANUAL;
 
         return [
             'status' => DeliveryReceiptMatcher::STATUS_MATCHED,
             'outbox_id' => $outboxId,
-            'matched_by' => DeliveryReceiptMatcher::BY_MANUAL,
-            'reason' => DeliveryReceiptMatcher::BY_MANUAL,
+            'matched_by' => $matchedBy,
+            'reason' => $matchedBy,
             'candidates' => [],
         ];
     }

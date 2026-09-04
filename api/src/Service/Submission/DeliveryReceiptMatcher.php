@@ -42,6 +42,17 @@ final readonly class DeliveryReceiptMatcher
     public const BY_MESSAGE_ID = 'external_message_id';
     public const BY_MANUAL = 'manual';
 
+    /**
+     * Doručenku si k podání vyžádala sama aplikace z ISDS podle `dmID`, které
+     * u toho podání drží odchozí fronta.
+     *
+     * Není to `manual` (soubor nevybral člověk) ani `external_message_id`
+     * (nikdo nic nepároval — o zprávu jsme si řekli jménem). Rozlišuje se to
+     * proto, že UI u ručního nahrání píše „přiřadili jste ručně"; u staženého
+     * dokladu by ta věta byla nepravdivá.
+     */
+    public const BY_ISDS_DOWNLOAD = 'isds_download';
+
     /** Doručenka se přiřadila sama — přes přesný identifikátor. */
     public const STATUS_MATCHED = 'matched';
     /** Nabízíme kandidáty, rozhoduje člověk. Nic se nezměnilo. */

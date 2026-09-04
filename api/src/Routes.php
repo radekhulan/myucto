@@ -2649,6 +2649,11 @@ final class Routes
         // zůstalo navždy v „připraveno".
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/mark-sent', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'markSent']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/receipt',   [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'upload']);
+        // Dodejku k odeslané zprávě si aplikace umí vyžádat sama
+        // (`GetSignedDeliveryInfo`). Není to doručení podle § 17 odst. 3
+        // zák. 300/2008 Sb. — ptáme se na NAŠI odeslanou zprávu, ne na dodané.
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/receipt/download', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'download']);
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/receipt/download/mobile-key/confirm', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadWithMobileKey']);
         // Odesílací brána ISDS (SetConcept): aplikace vloží KONCEPT do perimetru
         // datové schránky a odeslání schválí uživatel přímo v ISDS. Přihlašovací
         // údaje ke schránce tudy neprocházejí — zadávají se v ISDS (§ 9 odst. 2

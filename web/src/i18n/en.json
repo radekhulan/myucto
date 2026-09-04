@@ -19966,6 +19966,12 @@
       "markedSent": "The dispatch is recorded. Upload the delivery receipt here once it arrives.",
       "validationFailed": "The submitted file failed validation against the XSD schema. The authority may return it as a defective filing under § 74 of the Tax Code — fix it and file again.",
       "uploadReceipt": "Upload delivery receipt",
+      "downloadReceipt": {
+        "action": "Download receipt from ISDS",
+        "mobileKeyAction": "Download receipt (Mobile Key)",
+        "hint": "Requests the delivery info for this message straight from the data box. This is not a mailbox collection — we ask about your own sent message, so nothing gets delivered.",
+        "mobileKeyIntro": "Sign in with Mobile Key. In the confirmed session the app requests the delivery info for this sent message; nothing is sent."
+      },
       "receiptAttached": "Delivery receipt attached ({at}).",
       "downloadArtifactHint": "Download the file this submission sends",
       "receiptUnverified": "we do not verify the receipt signature yet",
@@ -20030,7 +20036,8 @@
       "matchedBy": {
         "correlation_reference": "matched by our reference number",
         "external_message_id": "matched by message ID",
-        "manual": "you assigned it manually"
+        "manual": "you assigned it manually",
+        "isds_download": "downloaded by the app from ISDS"
       }
     },
     "inbox": {

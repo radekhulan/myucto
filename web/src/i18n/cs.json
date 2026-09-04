@@ -19966,6 +19966,12 @@
       "markedSent": "Odeslání je zapsané. Až dorazí doručenka, nahrajte ji sem.",
       "validationFailed": "Odeslaný podklad neprošel kontrolou proti XSD schématu. Úřad ho může vrátit jako vadné podání podle § 74 daňového řádu — opravte ho a podejte znovu.",
       "uploadReceipt": "Nahrát doručenku",
+      "downloadReceipt": {
+        "action": "Stáhnout doručenku z ISDS",
+        "mobileKeyAction": "Stáhnout doručenku (Mobilní klíč)",
+        "hint": "Vyžádá dodejku k téhle zprávě přímo z datové schránky. Není to vyzvednutí schránky — ptáme se na vaši odeslanou zprávu, takže se tím nic nedoručuje.",
+        "mobileKeyIntro": "Přihlaste se Mobilním klíčem. V potvrzené relaci si aplikace vyžádá dodejku k téhle odeslané zprávě; nic se neodesílá."
+      },
       "receiptAttached": "Doručenka je připojená ({at}).",
       "downloadArtifactHint": "Stáhnout soubor, který se tímhle podáním odesílá",
       "receiptUnverified": "podpis doručenky zatím neověřujeme",
@@ -20030,7 +20036,8 @@
       "matchedBy": {
         "correlation_reference": "spárováno podle naší spisové značky",
         "external_message_id": "spárováno podle ID zprávy",
-        "manual": "přiřadili jste ručně"
+        "manual": "přiřadili jste ručně",
+        "isds_download": "stáhla aplikace z ISDS"
       }
     },
     "inbox": {

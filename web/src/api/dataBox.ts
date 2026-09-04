@@ -135,7 +135,12 @@ export type DispatchMode = 'channel' | 'manual'
  * nic slabšího automat nepoužije, protože špatně přiřazená doručenka tvrdí něco
  * o podání, o kterém nic neví.
  */
-export type ReceiptMatchedBy = 'correlation_reference' | 'external_message_id' | 'manual'
+export type ReceiptMatchedBy =
+  | 'correlation_reference'
+  | 'external_message_id'
+  | 'manual'
+  /** Doručenku si vyžádala aplikace z ISDS podle dmID odeslané zprávy. */
+  | 'isds_download'
 
 export interface OutboxSubmission {
   id: number
@@ -380,10 +385,12 @@ export interface ReceiptCandidate {
  *   - `already_processed`  — tuhle doručenku už máme, druhý průchod nic nedělá.
  */
 export interface ReceiptUploadResult {
-  status: 'matched' | 'candidates' | 'unmatched' | 'already_processed'
+  /** `not_available` = ISDS dodejku zatím nemá; není to chyba, jen se čeká. */
+  status: 'matched' | 'candidates' | 'unmatched' | 'already_processed' | 'not_available'
   message: string
   reason: string
-  inbox_message_id: number
+  /** `null` u `not_available` — žádná zpráva nevznikla, není co evidovat. */
+  inbox_message_id: number | null
   document_id: number | null
   outbox_id: number | null
   matched_by: ReceiptMatchedBy | null
@@ -922,6 +929,24 @@ export const dataBoxApi = {
     api.post<ReceiptUploadResult>('/submissions/receipts', receiptForm(environment, file), {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data),
+
+  /**
+   * Vyžádá dodejku k odeslané zprávě přímo z ISDS pod uloženým pověřením firmy.
+   * Není to vyzvednutí schránky — ptáme se na NAŠI odeslanou zprávu, takže se
+   * tím nic nedoručuje a žádná lhůta nezačíná běžet.
+   */
+  downloadReceipt: (id: number, environment: string) =>
+    api.post<ReceiptUploadResult>(
+      `/submissions/outbox/${id}/receipt/download`,
+      { environment },
+    ).then(r => r.data),
+
+  /** Totéž v relaci potvrzené Mobilním klíčem; zahajuje ji `startMobileKeyOutbox`. */
+  downloadReceiptWithMobileKey: (id: number, flowToken: string, environment: string) =>
+    api.post<{ state: number; description: string; result: ReceiptUploadResult | null }>(
+      `/submissions/outbox/${id}/receipt/download/mobile-key/confirm`,
+      { flow_token: flowToken, environment },
+    ).then(r => r.data),
 
   unmatchedReceipts: (environment: string) =>
     api.get<{ items: InboxMessage[] }>('/submissions/receipts/unmatched', {

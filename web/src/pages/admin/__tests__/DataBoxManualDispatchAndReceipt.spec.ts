@@ -22,8 +22,10 @@ const m = vi.hoisted(() => ({
   unmatchedReceipts: vi.fn(),
   receiptCandidates: vi.fn(),
   matchReceipt: vi.fn(),
+  downloadReceipt: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  toastInfo: vi.fn(),
 }))
 
 vi.mock('@/api/dataBox', () => ({
@@ -36,6 +38,7 @@ vi.mock('@/api/dataBox', () => ({
     unmatchedReceipts: m.unmatchedReceipts,
     receiptCandidates: m.receiptCandidates,
     matchReceipt: m.matchReceipt,
+    downloadReceipt: m.downloadReceipt,
   },
 }))
 
@@ -43,7 +46,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/composables/useFormat', () => ({ formatUtcDateTime: (value: string) => value }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
+  useToast: () => ({ success: m.toastSuccess, error: m.toastError, info: m.toastInfo }),
 }))
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({ currentSupplier: { company_name: 'Testovací firma' } }),
@@ -232,6 +235,62 @@ describe('DataBox — ruční odeslání a doručenka', () => {
     expect(m.receiptCandidates).toHaveBeenCalledWith(77)
     expect(wrapper.text()).toContain('databox.receipts.assign')
     expect(wrapper.text()).toContain('databox.receipts.reasons.recipient_box')
+  })
+
+  /**
+   * Zdravotní pojišťovna na podání nikdy neodpoví — dodejka je jediný důkaz,
+   * který kdy vznikne. `dmID` aplikace zná, takže si o ni umí říct sama a
+   * účetní nemusí exportovat ZFO z portálu datovky.
+   */
+  it('u odeslané zprávy s dmID nabídne stažení doručenky z ISDS', async () => {
+    m.downloadReceipt.mockResolvedValue({
+      status: 'matched',
+      message: 'Doručenka je připojená k podání.',
+      reason: 'isds_download',
+      inbox_message_id: 77,
+      document_id: 500,
+      outbox_id: 10,
+      matched_by: 'isds_download',
+      candidates: [],
+      submission: null,
+      receipt: {
+        message_id: '9900001',
+        sender_box_id: 'abcdefg',
+        sender_name: 'Naše firma',
+        recipient_box_id: 'zzzzzzz',
+        recipient_name: 'Úřad',
+        sender_ident: 'DPHDP3-20260815-ABCDEF',
+        subject: 'Přiznání k DPH',
+        sent_at: '2026-08-15 09:00:00',
+        delivered_at: '2026-08-15 10:00:00',
+        signature_status: 'unverified',
+      },
+    })
+    const wrapper = await mountWith([
+      submission({
+        dispatch_state: 'sent',
+        dispatch_mode: 'manual',
+        external_message_id: '9900001',
+        sent_at: '2026-08-15 09:00:00',
+        artifact_validation_status: 'skipped',
+      }),
+    ])
+
+    const button = wrapper.find('[data-test="outbox-receipt-download"]')
+    expect(button.exists()).toBe(true)
+    await button.trigger('click')
+    await flushPromises()
+
+    expect(m.downloadReceipt).toHaveBeenCalledWith(10, 'production')
+    // Ruční nahrání zůstává vedle jako záloha, ne náhrada.
+    expect(wrapper.text()).toContain('databox.outbox.uploadReceipt')
+  })
+
+  /** Bez `dmID` není ISDS na co se zeptat — tlačítko se nesmí nabízet. */
+  it('bez ID odeslané zprávy stažení doručenky nenabídne', async () => {
+    const wrapper = await mountWith([submission({ dispatch_state: 'sent' })])
+
+    expect(wrapper.find('[data-test="outbox-receipt-download"]').exists()).toBe(false)
   })
 
   it('u ručně odeslaného podání bez doručenky řekne, že se na ni čeká', async () => {

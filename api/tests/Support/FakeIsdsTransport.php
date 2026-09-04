@@ -60,6 +60,13 @@ final class FakeIsdsTransport implements IsdsTransport
 
     public ?string $deliveryReceipt = null;
 
+    /**
+     * Selhání dotazu na dodejku. `null` z {@see downloadDeliveryReceipt()}
+     * smí znamenat výhradně „dodejka ještě není"; nedostupné ISDS musí být
+     * poznat jako výjimka, ne jako prázdno.
+     */
+    public ?SubmissionChannelException $deliveryReceiptFailure = null;
+
     public function checkRecipientBox(ChannelContext $context, string $boxId): IsdsBoxCheck
     {
         $this->callLog[] = 'checkRecipientBox';
@@ -160,6 +167,10 @@ final class FakeIsdsTransport implements IsdsTransport
     public function downloadDeliveryReceipt(ChannelContext $context, string $messageId): ?string
     {
         $this->callLog[] = 'downloadDeliveryReceipt';
+        if ($this->deliveryReceiptFailure !== null) {
+            throw $this->deliveryReceiptFailure;
+        }
+
         return $this->deliveryReceipt;
     }
 }
