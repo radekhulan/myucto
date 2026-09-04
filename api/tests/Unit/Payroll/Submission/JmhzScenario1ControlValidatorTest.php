@@ -1044,6 +1044,34 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         );
     }
 
+    /**
+     * Regrese proti skutečnému protokolu ČSSZ: hlášení za 08/2026
+     * (VS 4442070407) neslo u zaměstnance bez prohlášení `form:danBonus` = 0
+     * a ČSSZ formulář odmítla nepropustnou chybou 40244 s odkazem na atribut
+     * 10306. „Vyplněný" atribut je tedy přítomnost elementu, ne až nenulová
+     * částka — dokud se nula tolerovala, svítila kontrola 244 zeleně a podání
+     * odešlo do odmítnutí.
+     */
+    public function testZeroTaxBonusWithoutDeclarationIsRefused(): void
+    {
+        $xml = str_replace(
+            '<form:danZalohaPoSleve>150</form:danZalohaPoSleve>',
+            '<form:danZalohaPoSleve>150</form:danZalohaPoSleve>'
+                . "\n                        <form:danBonus>0</form:danBonus>",
+            JmhzXmlSample::minimal(),
+        );
+        self::assertStringContainsString('<form:danBonus>0</form:danBonus>', $xml);
+        self::assertStringContainsString(
+            '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+            $xml,
+        );
+
+        $report = $this->validate($xml);
+
+        self::assertContains(244, $this->failedIds($report));
+        self::assertFalse($report->submittable());
+    }
+
     public function testShorterWorkingTimeAboveThirtyHoursIsRefused(): void
     {
         $report = $this->validate(JmhzXmlSample::withEmployerDiscount('A', '30.01'));

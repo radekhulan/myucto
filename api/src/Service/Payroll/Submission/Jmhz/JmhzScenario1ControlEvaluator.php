@@ -255,10 +255,6 @@ final class JmhzScenario1ControlEvaluator
             270 => 'Táž konstrukce jako u kontroly 168 a 170 — vedle tolerance'
                 . ' žádá katalog dolní mez 7,171 %, která by odmítla i správné'
                 . ' podání. Vynucuje se jen tolerance.',
-            244 => 'Katalog zakazuje, aby slevy „nabývaly hodnot" bez podepsaného'
-                . ' prohlášení. Vykázaná nula ale žádnou slevu neuplatňuje, takže'
-                . ' se za hodnotu nepovažuje — jinak by neprošel ani zaměstnanec'
-                . ' bez prohlášení, který má nulový bonus.',
         ];
     }
 
@@ -2836,10 +2832,12 @@ final class JmhzScenario1ControlEvaluator
                     return null;
                 }
                 foreach ($forbidden as $attributeId) {
-                    $value = $form->value($attributeId);
-                    // Vykázaná nula slevu neuplatňuje, a katalog zakazuje
-                    // „nabývat hodnot", ne uvést nulu.
-                    if ($value !== null && $value !== '0' && $value !== 'false') {
+                    // „Vyplněný" atribut je pro ČSSZ samotná přítomnost
+                    // elementu, ne až nenulová částka. Ověřeno protokolem
+                    // k hlášení za 08/2026 (VS 4442070407): formulář nesl
+                    // `form:danBonus` = 0 u zaměstnance bez prohlášení a ČSSZ
+                    // ho odmítla chybou 40244 s odkazem na atribut 10306.
+                    if ($form->has($attributeId)) {
                         return 'Bez podepsaného prohlášení poplatníka nesmí být'
                             . " uplatněna sleva ani zvýhodnění ({$attributeId}).";
                     }

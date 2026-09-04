@@ -489,6 +489,45 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         }
     }
 
+    /**
+     * Kontrola 244 bere za „vyplněný" atribut samotnou přítomnost elementu.
+     * Hlášení za 08/2026 (VS 4442070407) neslo `form:danBonus` = 0 u zaměstnance
+     * bez prohlášení a ČSSZ celý formulář odmítla chybou 40244 s odkazem na
+     * atribut 10306. Bez prohlášení se element proto neuvádí vůbec.
+     */
+    public function testTaxBonusElementIsOmittedWithoutSignedDeclaration(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($this->payload()),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+            $result['xml'],
+        );
+        self::assertStringContainsString('<form:danZalohaPoSleve>', $result['xml']);
+        self::assertStringNotContainsString('<form:danBonus>', $result['xml']);
+    }
+
+    public function testTaxBonusElementStaysWithSignedDeclaration(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['term']
+            ['tax_declaration_signed'] = true;
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:prohlaseniPoplatnika>true</form:prohlaseniPoplatnika>',
+            $result['xml'],
+        );
+        self::assertStringContainsString('<form:danBonus>', $result['xml']);
+    }
+
     public function testBlockedResolutionIsNeverSerialized(): void
     {
         $payload = $this->payload();
@@ -1440,7 +1479,6 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                         <form:zakladDane>1000</form:zakladDane>
                         <form:vypoctenaZaloha>150</form:vypoctenaZaloha>
                         <form:danZalohaPoSleve>150</form:danZalohaPoSleve>
-                        <form:danBonus>0</form:danBonus>
                       </form:zalohaNaDan>
                       <form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>
                       <form:mzdaCista>
