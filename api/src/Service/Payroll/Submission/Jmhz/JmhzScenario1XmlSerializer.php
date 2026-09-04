@@ -857,6 +857,10 @@ final class JmhzScenario1XmlSerializer
         );
         $node->appendChild($income);
 
+        $declarationSigned = $this->bool(
+            $summary['taxpayer_declaration_signed'] ?? null,
+            '10419',
+        );
         $advance = $this->object($summary['advance_tax_czk'] ?? null);
         $tax = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:zalohaNaDan');
         foreach ([
@@ -865,6 +869,22 @@ final class JmhzScenario1XmlSerializer
             'form:danZalohaPoSleve' => ['after_credits', '10305'],
             'form:danBonus' => ['bonus', '10306'],
         ] as $element => [$key, $attributeId]) {
+            if ($element === 'form:danBonus' && !$declarationSigned) {
+                // Kontrola 244 bere za „vyplněný" atribut samotnou přítomnost
+                // elementu, ne až nenulovou částku — nulový bonus u zaměstnance
+                // bez prohlášení nechal ČSSZ celý formulář odmítnout (40244,
+                // atribut 10306). Bonus bez prohlášení navíc vzniknout nemůže,
+                // takže se element vynechává; nenulová hodnota je rozpor.
+                if ($this->int($advance[$key] ?? null, $attributeId) !== 0) {
+                    $this->invalid(
+                        'jmhz_xml_bonus_without_declaration',
+                        'Měsíční daňový bonus nelze vykázat bez podepsaného'
+                            . ' prohlášení poplatníka.',
+                    );
+                }
+
+                continue;
+            }
             $this->text(
                 $dom,
                 $tax,
@@ -875,10 +895,6 @@ final class JmhzScenario1XmlSerializer
         }
         $node->appendChild($tax);
 
-        $declarationSigned = $this->bool(
-            $summary['taxpayer_declaration_signed'] ?? null,
-            '10419',
-        );
         $this->text(
             $dom,
             $node,

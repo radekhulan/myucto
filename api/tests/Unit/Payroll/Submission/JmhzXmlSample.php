@@ -212,7 +212,6 @@ final class JmhzXmlSample
                         <form:zakladDane>1000</form:zakladDane>
                         <form:vypoctenaZaloha>150</form:vypoctenaZaloha>
                         <form:danZalohaPoSleve>150</form:danZalohaPoSleve>
-                        <form:danBonus>0</form:danBonus>
                       </form:zalohaNaDan>
                       <form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>
                       <form:mzdaCista>
