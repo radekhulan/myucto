@@ -88,6 +88,59 @@ XML;
         self::assertTrue((new EpoDirectResponseParser())->testResult($xml)['passed']);
     }
 
+    /**
+     * Ostrá cesta se musí rozhodovat stejně jako zkušební: obálka `Chyby`, ve které jsou
+     * jen PROPUSTNÉ (`P`) a informativní (`I`) zprávy, není odmítnutí. Konkrétně jde
+     * o chyby č. 58 / č. 60 u KH oddílu A.2 s dodavatelem bez EU DIČ — GFŘ je výslovně
+     * označuje za propustné a podání nebrání (issue #53). Brát je jako `rejected`
+     * by uživatele svedlo k opakovanému odeslání přijatého výkazu.
+     */
+    public function testPassableSubmitEnvelopeIsNotFlaggedAsBlocking(): void
+    {
+        $xml = <<<'XML'
+<Chyby>
+  <Chyba Typ="P" Zkr="60" Oddil="A.2"><Text>Není vyplněno VAT ID dodavatele.</Text></Chyba>
+  <Chyba Typ="P" Zkr="58" Oddil="A.2"><Text>Není vyplněn kód státu dodavatele.</Text></Chyba>
+</Chyby>
+XML;
+
+        $result = (new EpoDirectResponseParser())->submitEnvelope($xml);
+
+        self::assertSame('errors', $result['kind']);
+        self::assertFalse($result['blocking'], 'propustné chyby 58/60 nesmí platit za odmítnutí');
+        self::assertCount(2, $result['messages']);
+    }
+
+    public function testBlockingSubmitEnvelopeStaysBlocking(): void
+    {
+        $xml = <<<'XML'
+<Chyby>
+  <Chyba Typ="P" Zkr="60"><Text>Není vyplněno VAT ID dodavatele.</Text></Chyba>
+  <Chyba Typ="K" Zkr="FIELD"><Text>Chybí DIČ podávajícího.</Text></Chyba>
+</Chyby>
+XML;
+
+        $result = (new EpoDirectResponseParser())->submitEnvelope($xml);
+
+        self::assertSame('errors', $result['kind']);
+        self::assertTrue($result['blocking'], 'kritická chyba musí zůstat blokující i vedle propustné');
+    }
+
+    /**
+     * Potvrzení se hledá DŘÍV než kořen `Chyby` — přijaté podání, jehož protokol nese
+     * propustné chyby, se nesmí vyhodnotit jako odmítnuté.
+     */
+    public function testConfirmationWinsOverPassableErrorsInSameEnvelope(): void
+    {
+        $result = (new EpoDirectResponseParser())->submitEnvelope(
+            '<Chyby><Chyba Typ="P" Zkr="58"><Text>Není vyplněn kód státu.</Text></Chyba>'
+            . '<Potvrzeni ID_predani="ABC123" Heslo="secret"/></Chyby>',
+        );
+
+        self::assertSame('offline', $result['kind']);
+        self::assertSame('ABC123', $result['transfer_id']);
+    }
+
     public function testRecognizesOfflineReceiptWithoutExposingItAsError(): void
     {
         $result = (new EpoDirectResponseParser())->submitEnvelope(

@@ -374,6 +374,56 @@ final class EpoDirectSubmissionService
                 ['attempt_id' => $attemptId],
             );
         }
+        // Obálka `chyby`, ve které NIC podání nebrání (jen propustné `P` / informativní
+        // `I`), NENÍ odmítnutí. EPO takové podání přijímá — typicky chyby č. 58 (chybí
+        // kód státu) a č. 60 (chybí VAT ID) u KH oddílu A.2 s dodavatelem bez EU DIČ,
+        // které GFŘ výslovně označuje za propustné (issue #53). Potvrzení ale v obálce
+        // není, takže ani „podáno“ tvrdit nemůžeme: výsledek je NEJISTÝ a musí ho ověřit
+        // člověk. Označit to za `rejected` by z přijatého podání udělalo blokované a svedlo
+        // uživatele k opakovanému odeslání téhož výkazu.
+        if ($envelope['kind'] === 'errors' && ($envelope['blocking'] ?? true) === false) {
+            $messages = $envelope['messages'] ?? [];
+            $this->direct->setStatus(
+                $attemptId,
+                'uncertain',
+                $response['http_status'],
+                'submission_outcome_uncertain',
+                'EPO vrátilo jen propustné chyby a žádné potvrzení. Ověřte stav podání na '
+                    . 'portálu Finanční správy; neodesílejte jej znovu bez kontroly.',
+            );
+            $this->event(
+                $supplierId,
+                $submissionId,
+                $attemptId,
+                'submission_uncertain',
+                'uncertain',
+                $response['http_status'],
+                ['message_count' => count($messages), 'blocking' => false],
+                $userId,
+            );
+            try {
+                $this->documents->storeGeneratedArtifact(
+                    $response['body'],
+                    $this->filename($submission, $attemptId, 'submit-messages.xml'),
+                    'epo_error_xml',
+                    $submission,
+                    $supplierId,
+                    $attemptId,
+                    $userId,
+                    'valid',
+                    ['test_mode' => false, 'epo_environment' => $environment, 'blocking' => false],
+                );
+            } catch (\Throwable) {
+                // Archivace protokolu nesmí přebít výsledek podání.
+            }
+            throw new EpoSubmissionException(
+                'submission_outcome_uncertain',
+                'EPO vrátilo jen propustné chyby a žádné potvrzení. Ověřte stav podání na '
+                    . 'portálu Finanční správy; neodesílejte jej znovu bez kontroly.',
+                502,
+                ['attempt_id' => $attemptId, 'messages' => $messages],
+            );
+        }
         if ($envelope['kind'] === 'errors') {
             $messages = $envelope['messages'] ?? [];
             $summary = $this->messageSummary($messages);
