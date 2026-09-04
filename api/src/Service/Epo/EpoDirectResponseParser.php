@@ -41,6 +41,47 @@ final class EpoDirectResponseParser
     }
 
     /**
+     * Typy zpráv EPO, které BRÁNÍ podání. `N` = nepropustná chyba; chyběla tu kdysi,
+     * takže zkušební podání s nepropustnou vadou se hlásilo jako prošlé — přesně to,
+     * co ostrý EPO nepřijme.
+     *
+     * Co tu ZÁMĚRNĚ NENÍ: `P` (propustná) a `I` (informativní). Ty podání nebrání —
+     * např. chyby č. 58 (chybí kód státu) a č. 60 (chybí VAT ID) u KH oddílu A.2
+     * s dodavatelem bez EU DIČ, které GFŘ výslovně označuje za propustné (issue #53).
+     * Brát je jako odmítnutí by z plně legitimního podání udělalo blokované.
+     */
+    private const BLOCKING_MESSAGE_TYPES = ['S', 'K', 'E', 'N'];
+
+    /**
+     * Brání tahle zpráva EPO podání? Jediné místo, kde se závažnost vyhodnocuje —
+     * zkušební i ostrá cesta se musí rozhodovat stejně.
+     *
+     * @param array<string,?string> $message
+     */
+    public static function isBlockingMessage(array $message): bool
+    {
+        if (strtoupper((string) ($message['code'] ?? '')) === 'TEST_REZIM') {
+            return false;
+        }
+        return in_array(
+            strtoupper((string) ($message['type'] ?? '')),
+            self::BLOCKING_MESSAGE_TYPES,
+            true,
+        );
+    }
+
+    /** @param list<array<string,?string>> $messages */
+    public static function hasBlockingMessage(array $messages): bool
+    {
+        foreach ($messages as $message) {
+            if (self::isBlockingMessage($message)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * @return array{passed:bool,messages:list<array<string,?string>>,large_submission:bool}
      */
     public function testResult(string $body): array
@@ -58,7 +99,6 @@ final class EpoDirectResponseParser
         $blocking = false;
         $large = false;
         foreach ($messages as $message) {
-            $type = strtoupper((string) ($message['type'] ?? ''));
             $code = strtoupper((string) ($message['code'] ?? ''));
             if ($code === 'TEST_REZIM') {
                 $hasTestMarker = true;
@@ -68,11 +108,7 @@ final class EpoDirectResponseParser
                 );
                 continue;
             }
-            // `N` = NEPROPUSTNÁ chyba. Chyběla tu, takže zkušební podání
-            // s nepropustnou vadou se hlásilo jako „prošlo" — přesně to, co
-            // ostrý EPO nepřijme. Propustná (`P`) a informativní (`I`) projdou
-            // dál, protože ty podání nebrání.
-            if (in_array($type, ['S', 'K', 'E', 'N'], true)) {
+            if (self::isBlockingMessage($message)) {
                 $blocking = true;
             }
         }
@@ -86,7 +122,7 @@ final class EpoDirectResponseParser
     /**
      * @return array{
      *   kind:'errors'|'offline'|'confirmation',
-     *   messages?:list<array<string,?string>>,
+     *   messages?:list<array<string,?string>>,blocking?:bool,
      *   transfer_id?:string,transfer_password?:string,confirmation?:string
      * }
      */
@@ -96,10 +132,10 @@ final class EpoDirectResponseParser
         if ($dom === null) {
             return ['kind' => 'confirmation', 'confirmation' => $body];
         }
-        $root = strtolower((string) $dom->documentElement?->localName);
-        if ($root === 'chyby') {
-            return ['kind' => 'errors', 'messages' => $this->errors($dom)];
-        }
+        // Potvrzení se hledá DŘÍV než kořen `chyby`: podání s pouhými PROPUSTNÝMI
+        // chybami EPO přijme, a přijít může obálka, která nese obojí. Původní pořadí
+        // (kořen napřed) by takové potvrzení zahodilo a přijaté podání označilo za
+        // odmítnuté — viz issue #53 (chyby č. 58/60 u KH oddílu A.2).
         $xpath = new \DOMXPath($dom);
         $confirmation = $xpath->query('//*[local-name()="Potvrzeni"]')->item(0);
         if ($confirmation instanceof \DOMElement) {
@@ -112,6 +148,17 @@ final class EpoDirectResponseParser
                     'transfer_password' => mb_substr($password, 0, 500),
                 ];
             }
+        }
+        $root = strtolower((string) $dom->documentElement?->localName);
+        if ($root === 'chyby') {
+            $messages = $this->errors($dom);
+            return [
+                'kind' => 'errors',
+                'messages' => $messages,
+                // `false` = EPO nevrátilo potvrzení, ale ani nic, co by podání bránilo.
+                // Volající z toho NESMÍ udělat „odmítnuto“ — výsledek je nejistý.
+                'blocking' => self::hasBlockingMessage($messages),
+            ];
         }
         throw new EpoSubmissionException(
             'epo_invalid_response',

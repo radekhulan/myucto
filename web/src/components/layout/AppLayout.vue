@@ -523,6 +523,12 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/reports/invoice-series-completeness', label: t('nav.reports_series_completeness'), icon: ICONS.logbook },
         ...(isOsvc && auth.hasCommercialFeatures ? [{ to: '/tax', label: t('nav.tax_optimizer'), icon: ICONS.tax_optimizer }] : []),
         { to: '/reports/monthly-export', label: t('nav.reports_monthly_export'), icon: ICONS.exports, permission: 'reports.export' },
+        // Úplně dole: EPO podání a archív je poslední krok měsíční agendy — výkaz se
+        // nejdřív postaví výše v sekci a teďka se podá. Komerční modul (EPO napojení),
+        // proto stejné hradítko jako u ostatních placených položek téhle sekce.
+        ...(auth.hasCommercialFeatures ? [
+          { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive },
+        ] : []),
       ],
     },
   ]
@@ -588,7 +594,8 @@ const navSections = computed<NavSection[]>(() => {
         // Uzávěrka — účetní období vytažená ze záložky Nástrojů do vlastní top-level
         // položky menu (jen podvojné účetnictví).
         { to: '/accounting/periods', label: t('nav.section_closing'), icon: ICONS.approvals },
-        { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive },
+        // EPO podání a archív se přesunulo dolů do sekce Daně — archív podání patří
+        // k výkazům, které se jím podávají, ne mezi setup nástroje.
       ],
     })
 
