@@ -4755,6 +4755,13 @@
           "app": "Odesláno aplikací",
           "imported": "Načtený protokol"
         },
+        "dispatched": {
+          "note": "Odesláno datovou schránkou. Dotazovací pokus na VREP tu proto žádný není a o výsledku rozhodne protokol, který ČSSZ doručí do schránky.",
+          "recipient": "Schránka příjemce",
+          "message_id": "ID odeslané zprávy",
+          "sent_at": "Odesláno",
+          "reference": "Spisová značka"
+        },
         "imported": {
           "action": "Načíst protokol z datové schránky",
           "importing": "Načítám protokol…",

@@ -5679,6 +5679,7 @@ export interface PayrollJmhzTransportHistory {
   environment: PayrollJmhzTransportEnvironment
   attempts: PayrollJmhzTransportAttempt[]
   ready_submissions: PayrollJmhzReadySubmission[]
+  dispatched_submissions: PayrollJmhzDispatchedSubmission[]
   total: number
   limit: number
   offset: number
@@ -5703,6 +5704,34 @@ export interface PayrollJmhzReadySubmission {
   outbox_dispatch_state: string | null
   outbox_acceptance_state: string | null
   outbox_external_message_id: string | null
+}
+
+/**
+ * Hlášení, které opustilo aplikaci DATOVOU SCHRÁNKOU.
+ *
+ * Odeslání datovkou nezakládá dotazovací pokus a ze stavu `ready` podání
+ * odejde hned při zařazení do fronty. Bez tohohle seznamu by z přehledu
+ * zmizelo úplně a s ním storno i oprava.
+ */
+export interface PayrollJmhzDispatchedSubmission {
+  submission_id: number
+  agenda_code: string
+  submission_kind: string
+  submission_status: string
+  corrects_submission_id: number | null
+  period_start: string
+  period_end: string
+  created_at: string
+  outbox_id: number
+  outbox_dispatch_state: string
+  outbox_acceptance_state: string
+  outbox_external_message_id: string | null
+  /** Spisová značka, kterou aplikace razítkovala do odchozí zprávy. */
+  outbox_correlation_reference: string
+  outbox_recipient_box_id: string | null
+  outbox_sent_at: string | null
+  outbox_delivered_at: string | null
+  outbox_receipt_attached_at: string | null
 }
 
 /** Potvrzení o PŘEVZETÍ zprávy, ne o přijetí podání. */

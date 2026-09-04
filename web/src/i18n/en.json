@@ -4755,6 +4755,13 @@
           "app": "Sent by this app",
           "imported": "Imported protocol"
         },
+        "dispatched": {
+          "note": "Sent through the data box. There is no VREP polling attempt here, so the outcome comes from the protocol ČSSZ delivers to the box.",
+          "recipient": "Recipient box",
+          "message_id": "Sent message ID",
+          "sent_at": "Sent",
+          "reference": "File reference"
+        },
         "imported": {
           "action": "Import protocol from the data box",
           "importing": "Importing protocol…",

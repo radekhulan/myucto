@@ -65,6 +65,30 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 
 import PayrollTransportHistoryPanel from '@/pages/payroll/PayrollTransportHistoryPanel.vue'
 
+/** Hlášení, které opustilo aplikaci datovkou a žádný pokus tedy nemá. */
+function dispatched(overrides: Record<string, unknown> = {}) {
+  return {
+    submission_id: 70,
+    agenda_code: 'JMHZ25',
+    submission_kind: 'regular',
+    submission_status: 'partially_accepted',
+    corrects_submission_id: null,
+    period_start: '2026-07-01',
+    period_end: '2026-07-31',
+    created_at: '2026-08-10 08:00:00',
+    outbox_id: 12,
+    outbox_dispatch_state: 'sent',
+    outbox_acceptance_state: 'unknown',
+    outbox_external_message_id: '1752953337',
+    outbox_correlation_reference: 'JMHZ25-20260810-SYNTETICKA',
+    outbox_recipient_box_id: '9tsaf6s',
+    outbox_sent_at: '2026-08-10 09:00:00',
+    outbox_delivered_at: null,
+    outbox_receipt_attached_at: null,
+    ...overrides,
+  }
+}
+
 function attempt(overrides: Record<string, unknown> = {}) {
   return {
     id: 1,
@@ -1151,6 +1175,47 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(m.jmhzContentCorrectionCandidates).not.toHaveBeenCalled()
     expect(wrapper.find('[data-test="transport-correct-preparation-select"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="transport-correct-preparation-id"]').exists()).toBe(false)
+  })
+
+  /**
+   * Hlášení odeslané datovkou nemá žádný dotazovací pokus, a přehled se přitom
+   * skládal výhradně z pokusů. Zmizelo tedy z obrazovky úplně a s ním storno
+   * i oprava, přestože protokol o výsledku už ležel v datové schránce.
+   */
+  it('ukáže hlášení odeslané datovkou, které nemá žádný pokus', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [],
+      dispatched_submissions: [dispatched()],
+    })
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="transport-empty"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="transport-group-70"]').exists()).toBe(true)
+
+    const detail = wrapper.get('[data-test="transport-dispatched-70"]').text()
+    expect(detail).toContain('9tsaf6s')
+    expect(detail).toContain('1752953337')
+    expect(detail).toContain('JMHZ25-20260810-SYNTETICKA')
+
+    // Obě akce, které na kartě podání visí, musí být dostupné i tudy.
+    expect(wrapper.find('[data-test="transport-correct-70"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="transport-cancel-70"]').exists()).toBe(true)
+  })
+
+  /** Podání s pokusem se ukazuje z ledgeru pokusů, ne dvakrát. */
+  it('nezdvojí kartu, když podání má pokus i odchozí zprávu', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({ submission_status: 'partially_accepted' })],
+      dispatched_submissions: [dispatched()],
+    })
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="transport-group-70"]')).toHaveLength(1)
+    expect(wrapper.find('[data-test="transport-dispatched-70"]').exists()).toBe(false)
   })
 
   /**

@@ -416,6 +416,153 @@ final class PayrollSubmissionTransportAttemptRepository
     }
 
     /**
+     * Podání, která opustila aplikaci DATOVOU SCHRÁNKOU a nemají tu žádný pokus.
+     *
+     * ── Proč to musí existovat ──────────────────────────────────────────────
+     * Přehled „Stav odeslání" se skládal výhradně z pokusů kanálu VREP a z
+     * podání ve stavu `ready`. Hlášení odeslané datovkou ale žádný pokus
+     * nezakládá a ze stavu `ready` odejde hned při zařazení do fronty, takže
+     * z obrazovky beze stopy zmizelo. S ním zmizela i obě tlačítka, která na
+     * kartě podání visí: storno i oprava. Účetní pak neměla jak reagovat na
+     * protokol, který jí ČSSZ doručila do schránky.
+     *
+     * Vrací se jen podání, u kterých je odeslání DOLOŽENÉ řádkem odchozí fronty
+     * (`sent` nebo `delivered`). Zpráva, která ve frontě teprve čeká, patří pod
+     * „připravená k odeslání", ne mezi odeslaná.
+     *
+     * @param list<string> $agendaCodes
+     * @return list<array{
+     *   submission_id:int,agenda_code:string,submission_kind:string,
+     *   submission_status:string,corrects_submission_id:?int,
+     *   period_start:string,period_end:string,created_at:string,
+     *   outbox_id:int,outbox_dispatch_state:string,
+     *   outbox_acceptance_state:string,outbox_external_message_id:?string,
+     *   outbox_correlation_reference:string,outbox_recipient_box_id:?string,
+     *   outbox_sent_at:?string,outbox_delivered_at:?string,
+     *   outbox_receipt_attached_at:?string
+     * }>
+     */
+    public function listDispatchedSubmissions(
+        int $supplierId,
+        string $environment,
+        array $agendaCodes,
+        int $limit = 50,
+    ): array {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        self::assertEnvironment($environment);
+        $agendaCodes = array_values(array_unique(array_filter(
+            array_map(
+                static fn (string $code): string => strtoupper(trim($code)),
+                $agendaCodes,
+            ),
+            static fn (string $code): bool => $code !== '',
+        )));
+        if ($agendaCodes === []) {
+            throw new \InvalidArgumentException(
+                'Seznam odeslaných podání potřebuje aspoň jednu agendu.',
+            );
+        }
+        $limit = max(1, min($limit, 100));
+        $placeholders = implode(', ', array_fill(0, count($agendaCodes), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.id AS submission_id,
+                    obligation.agenda_code,
+                    submission.submission_kind,
+                    submission.status AS submission_status,
+                    submission.corrects_submission_id,
+                    obligation.period_start, obligation.period_end,
+                    submission.created_at,
+                    outbox.id AS outbox_id,
+                    outbox.dispatch_state AS outbox_dispatch_state,
+                    outbox.acceptance_state AS outbox_acceptance_state,
+                    outbox.external_message_id AS outbox_external_message_id,
+                    outbox.correlation_reference AS outbox_correlation_reference,
+                    outbox.recipient_box_id AS outbox_recipient_box_id,
+                    outbox.sent_at AS outbox_sent_at,
+                    outbox.delivered_at AS outbox_delivered_at,
+                    outbox.receipt_attached_at AS outbox_receipt_attached_at
+               FROM payroll_submissions submission
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+               JOIN submission_outbox outbox
+                 ON outbox.id = (
+                    SELECT MAX(candidate.id)
+                      FROM submission_outbox candidate
+                      JOIN payroll_submission_artifacts queued_artifact
+                        ON queued_artifact.supplier_id = candidate.supplier_id
+                       AND queued_artifact.environment = candidate.environment
+                       AND queued_artifact.id = candidate.artifact_id
+                       AND queued_artifact.submission_id = submission.id
+                     WHERE candidate.supplier_id = submission.supplier_id
+                       AND candidate.environment = submission.environment
+                       AND candidate.channel = "isds"
+                       AND candidate.agenda_code = obligation.agenda_code
+                       AND candidate.artifact_kind = "payroll_submission"
+                 )
+              WHERE submission.supplier_id = ?
+                AND submission.environment = ?
+                AND obligation.agenda_code IN (' . $placeholders . ')
+                AND outbox.dispatch_state IN ("sent", "delivered")
+                -- Podání s pokusem se ukazuje z ledgeru pokusů; kdyby se
+                -- vrátilo i tudy, měla by účetní na obrazovce dvě karty
+                -- k jednomu podání.
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM ' . self::TABLE . ' attempt
+                     WHERE attempt.supplier_id = submission.supplier_id
+                       AND attempt.environment = submission.environment
+                       AND attempt.submission_id = submission.id
+                )
+              ORDER BY outbox.sent_at DESC, submission.id DESC
+              LIMIT ' . $limit,
+        );
+        $statement->execute([$supplierId, $environment, ...$agendaCodes]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $rows[] = [
+                'submission_id' => (int) $row['submission_id'],
+                'agenda_code' => (string) $row['agenda_code'],
+                'submission_kind' => (string) $row['submission_kind'],
+                'submission_status' => (string) $row['submission_status'],
+                'corrects_submission_id' => $row['corrects_submission_id'] === null
+                    ? null
+                    : (int) $row['corrects_submission_id'],
+                'period_start' => (string) $row['period_start'],
+                'period_end' => (string) $row['period_end'],
+                'created_at' => (string) $row['created_at'],
+                'outbox_id' => (int) $row['outbox_id'],
+                'outbox_dispatch_state' => (string) $row['outbox_dispatch_state'],
+                'outbox_acceptance_state' => (string) $row['outbox_acceptance_state'],
+                'outbox_external_message_id' => $row['outbox_external_message_id'] === null
+                    ? null
+                    : (string) $row['outbox_external_message_id'],
+                'outbox_correlation_reference' => (string) $row['outbox_correlation_reference'],
+                'outbox_recipient_box_id' => $row['outbox_recipient_box_id'] === null
+                    ? null
+                    : (string) $row['outbox_recipient_box_id'],
+                'outbox_sent_at' => $row['outbox_sent_at'] === null
+                    ? null
+                    : (string) $row['outbox_sent_at'],
+                'outbox_delivered_at' => $row['outbox_delivered_at'] === null
+                    ? null
+                    : (string) $row['outbox_delivered_at'],
+                'outbox_receipt_attached_at' => $row['outbox_receipt_attached_at'] === null
+                    ? null
+                    : (string) $row['outbox_receipt_attached_at'],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
      * Celá historie pokusů jednoho podání v pořadí, v jakém vznikly.
      *
      * @return list<array<string,mixed>>

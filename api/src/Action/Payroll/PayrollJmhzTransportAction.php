@@ -145,11 +145,20 @@ final class PayrollJmhzTransportAction
             $environment,
             [JmhzSubmissionBridgeService::AGENDA_CODE],
         );
+        // Hlášení odeslané datovou schránkou nezakládá pokus a ze stavu
+        // `ready` odejde hned při zařazení do fronty. Bez tohohle seznamu
+        // by z obrazovky zmizelo úplně, a s ním i storno a oprava.
+        $dispatchedSubmissions = $this->attempts->listDispatchedSubmissions(
+            $supplierId,
+            $environment,
+            [JmhzSubmissionBridgeService::AGENDA_CODE],
+        );
 
         return $this->noStore(Json::ok($response, [
             'environment' => $environment,
             'attempts' => $page['items'],
             'ready_submissions' => $readySubmissions,
+            'dispatched_submissions' => $dispatchedSubmissions,
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,
