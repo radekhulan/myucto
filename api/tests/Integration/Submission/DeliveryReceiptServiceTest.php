@@ -14,6 +14,8 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Document\DocumentException;
 use MyInvoice\Service\Document\DocumentIngestService;
 use MyInvoice\Service\Document\ZfoExtractor;
+use MyInvoice\Service\Submission\Channel\ChannelContext;
+use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusReader;
 use MyInvoice\Service\Submission\Channel\Epo\EpoChannel;
 use MyInvoice\Service\Submission\Channel\Isds\IsdsChannel;
@@ -59,6 +61,7 @@ final class DeliveryReceiptServiceTest extends TestCase
     private SubmissionOutboxService $outboxService;
     private SubmissionOutboxRepository $outbox;
     private SubmissionInboxRepository $inbox;
+    private FakeIsdsTransport $transport;
     private int $supplierId;
     private int $userId;
     private int $recipientId;
@@ -95,9 +98,10 @@ final class DeliveryReceiptServiceTest extends TestCase
             'is_active' => true,
         ], $this->userId);
 
+        $this->transport = new FakeIsdsTransport();
         $registry = new SubmissionChannelRegistry(
             new EpoChannel($this->stubEpoReader()),
-            new IsdsChannel(new FakeIsdsTransport()),
+            new IsdsChannel($this->transport),
         );
         $this->outboxService = new SubmissionOutboxService(
             $this->outbox,
@@ -530,6 +534,107 @@ final class DeliveryReceiptServiceTest extends TestCase
         self::assertSame('failed', $result['validation']['status']);
     }
 
+    // ────────────────── dodejka stažená z ISDS ──────────────────
+
+    /**
+     * Hlášení zdravotní pojišťovně žádnou odpověď nedostane — dodejka je
+     * jediný důkaz, který kdy vznikne. Aplikace si o ni umí říct sama podle
+     * `dmID`, které si při odeslání zapsala, takže účetní nemusí exportovat
+     * ZFO z portálu datovky a nahrávat ho zpátky.
+     */
+    public function testDownloadedReceiptAttachesItselfWithoutManualUpload(): void
+    {
+        $row = $this->sentSubmission();
+        $this->transport->deliveryReceipt = $this->receiptFor($row, ['sender_ident' => null]);
+
+        $result = $this->download((int) $row['id']);
+
+        self::assertSame(DeliveryReceiptService::STATUS_MATCHED, $result['status']);
+        self::assertSame((int) $row['id'], $result['outbox_id']);
+        // Ne `manual`: soubor nikdo nevybíral, za vazbu ručí ISDS.
+        self::assertSame(DeliveryReceiptMatcher::BY_ISDS_DOWNLOAD, $result['matched_by']);
+        self::assertContains('downloadDeliveryReceipt', $this->transport->callLog);
+
+        $submission = $this->outbox->find($this->supplierId, (int) $row['id']);
+        self::assertNotNull($submission);
+        self::assertNotNull($submission['receipt_document_id']);
+        self::assertSame(DeliveryReceiptMatcher::BY_ISDS_DOWNLOAD, $submission['receipt_matched_by']);
+        self::assertSame('delivered', $submission['dispatch_state']);
+        // Doručení ≠ vyřízení. Ani u stažené dodejky se osa vyřízení nehne.
+        self::assertSame('unknown', $submission['acceptance_state']);
+        self::assertSame('unverified', $submission['receipt_signature_status']);
+    }
+
+    /**
+     * Nedoručená zpráva dodejku ještě nemá. Je to STAV, u kterého se čeká —
+     * ne chyba, kterou má kdo opravovat, a hlavně se u něj nesmí nic zapsat.
+     */
+    public function testMissingDeliveryInfoIsAStateNotAFailure(): void
+    {
+        $row = $this->sentSubmission();
+        $this->transport->deliveryReceipt = null;
+
+        $result = $this->download((int) $row['id']);
+
+        self::assertSame(DeliveryReceiptService::STATUS_NOT_AVAILABLE, $result['status']);
+        self::assertSame('not_delivered_yet', $result['reason']);
+        self::assertNull($result['document_id']);
+
+        $submission = $this->outbox->find($this->supplierId, (int) $row['id']);
+        self::assertNotNull($submission);
+        self::assertNull($submission['receipt_document_id']);
+        self::assertSame('sent', $submission['dispatch_state'], 'Bez dodejky se nesmí změnit NIC.');
+        self::assertSame(0, $this->countInboxMessages());
+    }
+
+    /**
+     * Fail-closed: nedostupné ISDS se NIKDY nesmí přeložit na „dodejka není".
+     * Rozdíl mezi „ještě nedorazila" a „nepodařilo se zeptat" je rozdíl mezi
+     * čekáním a opravou.
+     */
+    public function testUnreachableIsdsNeverLooksLikeMissingReceipt(): void
+    {
+        $row = $this->sentSubmission();
+        $this->transport->deliveryReceiptFailure = new SubmissionChannelException(
+            'isds_unreachable',
+            'Na ISDS se nedovoláme.',
+        );
+
+        try {
+            $this->download((int) $row['id']);
+            self::fail('Selhání dotazu muselo vyletět ven, ne se tvářit jako prázdno.');
+        } catch (SubmissionChannelException $e) {
+            self::assertSame('isds_unreachable', $e->errorCode);
+        }
+
+        $submission = $this->outbox->find($this->supplierId, (int) $row['id']);
+        self::assertNotNull($submission);
+        self::assertNull($submission['receipt_document_id']);
+        self::assertSame('sent', $submission['dispatch_state']);
+    }
+
+    /** Bez `dmID` není na co se ptát — a nesmí se to zamluvit prázdnou odpovědí. */
+    public function testDownloadWithoutMessageIdIsRefused(): void
+    {
+        $row = $this->enqueue()['row'];
+
+        $this->expectException(SubmissionChannelException::class);
+        $this->expectExceptionMessageMatches('/ID odeslané datové zprávy/');
+        $this->download((int) $row['id']);
+    }
+
+    /** Podání, které už dodejku má, se podruhé nestahuje. */
+    public function testDownloadIsRefusedWhenReceiptAlreadyAttached(): void
+    {
+        $row = $this->sentSubmission();
+        $this->transport->deliveryReceipt = $this->receiptFor($row, ['sender_ident' => null]);
+        $this->download((int) $row['id']);
+
+        $this->expectException(SubmissionChannelException::class);
+        $this->expectExceptionMessageMatches('/už doručenku má/');
+        $this->download((int) $row['id']);
+    }
+
     // ───────────────────────── pomocné ─────────────────────────
 
     /** @return array<string,mixed> */
@@ -564,6 +669,47 @@ final class DeliveryReceiptServiceTest extends TestCase
             'delivery_time' => $now->format(\DateTimeInterface::ATOM),
             'acceptance_time' => $now->modify('+1 hour')->format(\DateTimeInterface::ATOM),
         ]);
+    }
+
+    /**
+     * Podání, které už odešlo a nese `dmID` — teprve o takovém se dá ISDS
+     * na dodejku zeptat.
+     *
+     * @return array<string,mixed>
+     */
+    private function sentSubmission(string $messageId = '9900001'): array
+    {
+        $row = $this->enqueue()['row'];
+
+        return $this->outboxService->markSentManually(
+            $this->supplierId,
+            (int) $row['id'],
+            $this->userId,
+            $messageId,
+            new \DateTimeImmutable('now'),
+        )['row'];
+    }
+
+    /** @return array<string,mixed> */
+    private function download(int $outboxId): array
+    {
+        return $this->service->downloadFromIsds(
+            $this->supplierId,
+            'test',
+            $outboxId,
+            $this->userId,
+            $this->channelContext(),
+            $this->transport,
+        );
+    }
+
+    private function channelContext(): ChannelContext
+    {
+        return new ChannelContext(
+            $this->supplierId,
+            'test',
+            new ChannelCredentials(boxId: 'abcdefg', authMode: 'certificate'),
+        );
     }
 
     /** @return array{row:array<string,mixed>,created:bool} */
