@@ -1040,8 +1040,12 @@ describe('PayrollTransportHistoryPanel', () => {
     m.jmhzTransportHistory.mockResolvedValue({
       environment: 'production',
       attempts: [attempt({
-        status: 'completed',
-        completed_at: '2026-08-11 10:00:00',
+        // Hlášení odeslané datovkou nemá uzavřený dotazovací pokus: protokol
+        // přijde do schránky a VREP se na nic nedoptá. Rozhoduje proto stav
+        // podání, který server zapíše jen z ověřeného protokolu.
+        status: 'awaiting_protocol',
+        completed_at: null,
+        submission_status: 'partially_accepted',
       })],
     })
 
@@ -1149,7 +1153,17 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(wrapper.find('[data-test="transport-correct-preparation-id"]').exists()).toBe(false)
   })
 
-  it('částečnou opravu nabídne až po konečném protokolu', async () => {
+  /**
+   * Konečný protokol pozná stav PODÁNÍ, ne uzavřený dotazovací pokus. Hlášení
+   * odeslané datovou schránkou žádný uzavřený pokus mít nebude — protokol chodí
+   * do schránky — a přesto je opravitelné. Dokud se čekalo na `completed`,
+   * nabízelo částečně přijaté hlášení storno, ale opravu ne.
+   */
+  it('opravu nabídne podle stavu podání, ne podle uzavřeného pokusu', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({ submission_status: 'submitted' })],
+    })
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
 
@@ -1158,8 +1172,9 @@ describe('PayrollTransportHistoryPanel', () => {
     m.jmhzTransportHistory.mockResolvedValue({
       environment: 'production',
       attempts: [attempt({
-        status: 'completed',
-        completed_at: '2026-08-11 10:00:00',
+        submission_status: 'partially_accepted',
+        status: 'awaiting_protocol',
+        completed_at: null,
       })],
     })
     await wrapper.get('[data-test="transport-reload"]').trigger('click')
