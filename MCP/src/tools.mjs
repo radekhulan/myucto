@@ -565,6 +565,43 @@ export const TOOLS = [
     }, tool),
   },
   {
+    name: 'create_payroll_person',
+    title: 'Založit zaměstnance',
+    description:
+      'Založí osobu i její první pracovní vztah. Slouží k onboardingu z jiné '
+      + 'agendy — z personálního systému, z docházky, ze skriptu. Nová osoba do '
+      + 'mzdy sama nevstoupí: mzdový běh, schválení a podání zůstávají jen pro '
+      + 'webové rozhraní. `monthly_gross` je v KORUNÁCH, na rozdíl od '
+      + '`change_payroll_salary`, které pracuje v haléřích.',
+    inputSchema: schema({
+      full_name: str('Celé jméno tak, jak má být na mzdových dokladech.', { minLength: 2, maxLength: 200 }),
+      first_name: str('Křestní jméno; bez něj se odvodí z `full_name`.', { maxLength: 100 }),
+      last_name: str('Příjmení; bez něj se odvodí z `full_name`.', { maxLength: 100 }),
+      birth_number: str('Rodné číslo bez lomítka nebo s ním.', { maxLength: 11 }),
+      birth_date: date('Datum narození; u cizince bez rodného čísla povinné.'),
+      relation_type: str('Druh pracovního vztahu (např. `employment`, `dpp`, `dpc`).'),
+      planned_start_on: date('Den nástupu.'),
+      monthly_gross: int('Sjednaná měsíční hrubá mzda v korunách.', { minimum: 0 }),
+      weekly_hours: int('Týdenní úvazek v hodinách.', { minimum: 0, maximum: 40 }),
+      office_id: int('Pracoviště, pod které vztah spadá.'),
+      health_insurer_code: str('Kód zdravotní pojišťovny.', { maxLength: 8 }),
+    }, ['full_name', 'birth_number', 'relation_type', 'planned_start_on']),
+    write: true,
+    run: (c, a, tool) => c.post('/payroll/people', {
+      full_name: a.full_name,
+      first_name: a.first_name,
+      last_name: a.last_name,
+      birth_number: a.birth_number,
+      birth_date: a.birth_date,
+      relation_type: a.relation_type,
+      planned_start_on: a.planned_start_on,
+      monthly_gross: a.monthly_gross,
+      weekly_hours: a.weekly_hours,
+      office_id: a.office_id,
+      health_insurer_code: a.health_insurer_code,
+    }, tool),
+  },
+  {
     name: 'get_payroll_person',
     title: 'Detail zaměstnance a sjednané mzdy',
     description:

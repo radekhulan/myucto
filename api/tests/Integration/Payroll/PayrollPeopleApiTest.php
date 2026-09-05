@@ -829,6 +829,10 @@ final class PayrollPeopleApiTest extends TestCase
         self::assertSame(403, $forbidden->getStatusCode());
         self::assertSame('forbidden', $this->json($forbidden)['error']['code']);
 
+        // ⚠️ Založení osoby je ZÁMĚRNĚ dostupné i přes API token — onboarding
+        // z personálního systému nebo ze skriptu je právě ta automatizace,
+        // kvůli které se integrace staví. Nová osoba bez pracovního vztahu do
+        // mzdy nevstoupí a `delete()` session-only zůstává.
         $bearer = $this->action->create(
             $this->request(
                 'POST',
@@ -839,11 +843,7 @@ final class PayrollPeopleApiTest extends TestCase
             ),
             new Response(),
         );
-        self::assertSame(403, $bearer->getStatusCode());
-        self::assertSame([
-            'code' => 'session_required',
-            'message' => 'Tento endpoint je dostupný pouze z přihlášené relace.',
-        ], $this->json($bearer)['error']);
+        self::assertSame(201, $bearer->getStatusCode());
 
         $cases = [
             [

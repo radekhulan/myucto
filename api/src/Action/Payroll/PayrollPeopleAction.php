@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollEmployeeDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicensePayrollLimitExceeded;
@@ -129,11 +130,18 @@ final class PayrollPeopleAction
         return Json::ok($response, ['person' => $person]);
     }
 
+    /**
+     * ⚠️ Založení osoby je ZÁMĚRNĚ dostupné i přes API token.
+     *
+     * Onboarding z jiné agendy — z personálního systému, z docházky, z vlastního
+     * skriptu — je přesně ta automatizace, kvůli které se integrace staví, a nic
+     * na ní není nevratné: nová osoba bez pracovního vztahu do mzdy nevstoupí.
+     * Zbytek mzdové agendy (výpočet, schválení, podání) session-only zůstává
+     * a {@see delete()} taky — mazání kaskáduje na mzdovou historii.
+     */
     public function create(Request $request, Response $response): Response
     {
-        if (!$this->requireSession($request, $response, $error)) {
-            return $this->guardFailure($error);
-        }
+        $error = null;
         if (!$this->requirePermission(
             $request,
             $response,
@@ -288,13 +296,8 @@ final class PayrollPeopleAction
         Response $response,
         ?Response &$error,
     ): bool {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            $error = Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            $error = Json::sessionRequired($response);
             return false;
         }
         $error = null;

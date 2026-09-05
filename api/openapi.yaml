@@ -17311,7 +17311,11 @@ paths:
         bez nich měsíční JMHZ hlásí `Historická identita nemá explicitní jméno
         a příjmení` a doplňují se ručně na kartě osoby.
 
-        Zápis přes API token není dostupný (`403 token_write_forbidden`).
+        Dostupné i přes API token se scope `read_write` — onboarding z jiné
+        agendy je právě ta automatizace, kvůli které se integrace staví, a nová
+        osoba bez pracovního vztahu do mzdy nevstoupí. Zbytek mzdové agendy
+        (výpočet, schválení, podání) i smazání osoby zůstávají jen pro webové
+        rozhraní.
       requestBody:
         required: true
         content:

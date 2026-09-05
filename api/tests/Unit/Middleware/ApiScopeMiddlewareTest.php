@@ -155,6 +155,8 @@ final class ApiScopeMiddlewareTest extends TestCase
         foreach ([
             ['GET', '/api/payroll/people', 'read'],
             ['GET', '/api/payroll/people/7', 'read'],
+            // Onboarding z jiné agendy je záměrně dostupný; mazání osoby ne.
+            ['POST', '/api/payroll/people', 'read_write'],
             ['GET', '/api/payroll/components', 'read'],
             ['GET', '/api/payroll/inputs?period=2026-08', 'read'],
             ['POST', '/api/payroll/inputs', 'read_write'],
@@ -181,7 +183,6 @@ final class ApiScopeMiddlewareTest extends TestCase
     public function testBearerCannotControlPayrollRunsOrSensitivePayrollSurface(): void
     {
         foreach ([
-            ['POST', '/api/payroll/people'],
             ['DELETE', '/api/payroll/people/7'],
             ['POST', '/api/payroll/components'],
             ['POST', '/api/payroll/time/averages'],

@@ -6,6 +6,7 @@ namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\RequestPath;
+use MyInvoice\Security\RequestAuthorization;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
@@ -178,8 +179,11 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // změnu pravidel dělá člověk.
         '#^/api/automation(/|$)#',
         // Seznam zaměstnanců a běhů se sdílí s interními POST/DELETE routami.
-        // Token je smí číst, ale nesmí zakládat či mazat osoby ani mzdové běhy.
-        '#^/api/payroll/people$#',
+        // Token smí osobu ZALOŽIT — onboarding z jiné agendy je přesně ta
+        // automatizace, kvůli které se integrace staví, a nová osoba bez
+        // pracovního vztahu do mzdy nevstoupí. SMAZAT ji nesmí: mazání
+        // kaskáduje na pracovní vztahy a mzdovou historii. Detail osoby proto
+        // zůstává jen ke čtení, kolekce ne.
         '#^/api/payroll/people/[0-9]+$#',
         '#^/api/payroll/components$#',
         '#^/api/payroll/runs$#',
@@ -193,7 +197,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
 
     public function process(Request $request, Handler $handler): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'bearer') {
+        if (!RequestAuthorization::isBearerAuth($request)) {
             return $handler->handle($request);
         }
 
