@@ -74,6 +74,9 @@ lištami:
 - **režim levého menu** — přepínač firem se přesune do pravé části hlavičky,
   kde je od ostatních akcí oddělený svislou čárou.
 
+Pokud v sekci **Systém** zůstane pouze **Nápověda (manuál)**, horní menu tuto
+sekci nezobrazuje. Nápověda je dál dostupná přes kontextovou ikonu.
+
 Pokud by se názvy sekcí do horní lišty nevešly, aplikace to změří a automaticky
 zobrazí menu jako trvalý levý panel. Na dostatečně široké obrazovce můžeš mezi
 horní a levou variantou přepnout ikonou rozložení ve spodní liště; přetékající

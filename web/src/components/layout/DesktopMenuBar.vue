@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -73,6 +73,11 @@ const props = defineProps<{
   quickNewLabel: string
   menuLabel: string
 }>()
+
+const visibleSections = computed(() => props.sections.filter(section => !(
+  (section.key === 'system_global' || section.key === 'system_signing')
+  && section.items.length === 1 && section.items[0]?.to === '/manual'
+)))
 
 const workspace = useWorkspaceStore()
 const workspaceNavigation = useWorkspaceNavigation()
@@ -160,7 +165,7 @@ onBeforeUnmount(() => {
 <template>
   <nav ref="root" class="flex min-w-0 flex-1 h-full items-stretch" :aria-label="menuLabel">
     <div
-      v-for="(section, index) in sections"
+      v-for="(section, index) in visibleSections"
       :key="section.key"
       class="relative flex items-stretch"
       @pointerenter="openFromPointer(section.key)"
@@ -208,7 +213,7 @@ onBeforeUnmount(() => {
         <div
           v-if="openSection === section.key"
           class="absolute top-full z-50 w-72 max-w-[calc(100vw-2rem)] bg-surface border border-neutral-200 dark:border-neutral-300 rounded-b-lg shadow-xl dark:shadow-[0_14px_32px_rgba(0,0,0,0.45)] py-1.5"
-          :class="index >= sections.length - 3 ? 'right-0' : 'left-0'"
+          :class="index >= visibleSections.length - 3 ? 'right-0' : 'left-0'"
           role="menu"
         >
           <template v-for="item in section.items" :key="item.to">
