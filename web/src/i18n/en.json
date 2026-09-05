@@ -992,6 +992,9 @@
     "title": "Payroll",
     "subtitle": "HR and payroll records, monthly runs, documents, payments, automatic posting and statutory submissions.",
     "load_failed": "The payroll module could not be loaded.",
+    "license_required_title": "Payroll is not active in your licence",
+    "license_required_description": "After the trial period, Payroll requires a separate add-on.",
+    "license_required_action": "Buy the Payroll add-on",
     "year_close": {
       "title": "Payroll year close",
       "description": "Close the year only after all twelve payroll periods, corrections and submissions are complete. Liabilities still waiting for a bank statement do not prevent closing — they are only listed.",

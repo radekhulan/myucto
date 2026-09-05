@@ -313,6 +313,28 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
   })
 
+  it('při chybě mzdové licence vyzve k objednání místo obecné chyby', async () => {
+    m.capabilities.mockRejectedValueOnce({
+      response: {
+        data: {
+          error: {
+            code: 'license_payroll_feature_unavailable',
+            message: 'Modul Mzdy vyžaduje aktivní mzdový doplněk.',
+            buy_url: '/activation/purchase#payroll-addon',
+          },
+        },
+      },
+    })
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="payroll-license-required"]').text())
+      .toContain('Modul Mzdy vyžaduje aktivní mzdový doplněk.')
+    expect(wrapper.get('[data-test="payroll-license-buy"]').attributes('data-to'))
+      .toBe('"/activation/purchase#payroll-addon"')
+    expect(wrapper.find('[data-test="payroll-dashboard-failed"]').exists()).toBe(false)
+  })
+
   it('keeps the overview usable when the optional month calls fail', async () => {
     m.runs.mockRejectedValue(new Error('403'))
     m.payrollSetupCheck.mockRejectedValue(new Error('403'))

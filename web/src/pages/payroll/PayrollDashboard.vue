@@ -35,6 +35,7 @@ const loading = ref(true)
  * BEZ VIDITELNÉ AKCE VEN.
  */
 const loadFailed = ref(false)
+const licenseRequired = ref<{ message: string; buyUrl: string } | null>(null)
 const saving = ref(false)
 const capabilities = ref<PayrollCapabilitiesResponse | null>(null)
 const currentPeriod = localPayrollPeriod()
@@ -167,6 +168,7 @@ const runStatusClass = computed(() => {
 
 async function load() {
   loading.value = true
+  licenseRequired.value = null
   try {
     const data = await payrollApi.capabilities()
     capabilities.value = data
@@ -174,13 +176,22 @@ async function load() {
     if (data.state.start_period) {
       startPeriod.value = data.state.start_period
     }
-  } catch {
-    loadFailed.value = true
-    toast.error(t('payroll.load_failed'))
+  } catch (error: any) {
+    const apiError = error?.response?.data?.error
+    if (apiError?.code === 'license_payroll_feature_unavailable') {
+      licenseRequired.value = {
+        message: apiError.message || t('payroll.license_required_description'),
+        buyUrl: apiError.buy_url || '/activation/purchase#payroll-addon',
+      }
+      loadFailed.value = false
+    } else {
+      loadFailed.value = true
+      toast.error(t('payroll.load_failed'))
+    }
   } finally {
     loading.value = false
   }
-  if (!isEnabled.value) return
+  if (licenseRequired.value || loadFailed.value || !isEnabled.value) return
   // Stav měsíce a blokátory nastavení jsou doplňkové — jejich výpadek
   // (typicky chybějící oprávnění) nesmí shodit celý přehled.
   void loadMonthStatus()
@@ -306,6 +317,23 @@ onMounted(load)
     <div v-if="loading" class="grid grid-cols-1 gap-4 md:grid-cols-3">
       <div v-for="index in 3" :key="index" class="h-32 animate-pulse rounded-xl bg-neutral-100" />
     </div>
+
+    <section
+      v-else-if="licenseRequired"
+      class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6"
+      role="alert"
+      data-test="payroll-license-required"
+    >
+      <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.license_required_title') }}</h2>
+      <p class="mt-1 max-w-3xl text-sm text-neutral-700">{{ licenseRequired.message }}</p>
+      <RouterLink
+        :to="licenseRequired.buyUrl"
+        :class="[btnFilled('primary'), 'mt-4']"
+        data-test="payroll-license-buy"
+      >
+        {{ t('payroll.license_required_action') }}
+      </RouterLink>
+    </section>
 
     <!--
       Selhání načtení nesmí skončit prázdnou stránkou: o stavu modulu nevíme

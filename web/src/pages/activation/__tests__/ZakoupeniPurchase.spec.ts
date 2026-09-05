@@ -127,6 +127,23 @@ describe('automatický purchase handoff', () => {
     expect(wrapper.text()).toContain('license.purchase_existing_subscription_hint')
   })
 
+  it('u ruční licence bez předplatného nabídne nový nákup místo nefunkčních doplatků', async () => {
+    api.status.mockResolvedValue(status({
+      state: 'active',
+      tier: 'single',
+      users_licensed: 1,
+      license_key_masked: 'MYU-…-AAAA',
+      subscription: null,
+    }))
+
+    const wrapper = await mountPage()
+
+    expect(wrapper.find('[data-license-purchase-start]').exists()).toBe(true)
+    expect(wrapper.find('#payroll-addon').exists()).toBe(false)
+    expect(wrapper.find('#tier-change').exists()).toBe(false)
+    expect(wrapper.find('#upgrade').exists()).toBe(false)
+  })
+
   it('self-hosted předplatné neukazuje hostingové varování ani nákup prostoru', async () => {
     api.status.mockResolvedValue(status({
       state: 'active',

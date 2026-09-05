@@ -1229,32 +1229,33 @@ watch(previewScenario, (scenario) => {
         <RouterLink to="/activation/terms" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.terms') }}</RouterLink>
       </p>
 
-      <!-- Rozcestník náhledu, jen v serverovém development prostředí,
-           jen superadmin a jen jako poslední věc na stránce.
-           ⚠️ Nikdy se nezapíná sám; každý stav je jeden odkaz. -->
-      <section v-if="serverDevelopment && auth.isSuperadmin" class="rounded-lg border border-dashed border-neutral-300 p-4" data-hosting-preview-switch>
-        <h2 class="text-sm font-semibold text-neutral-700">{{ t('hosting.preview_title') }}</h2>
-        <p class="mt-0.5 text-xs text-neutral-500">{{ t('hosting.preview_desc') }}</p>
-        <div class="mt-3 flex flex-wrap gap-1.5">
-          <RouterLink
-            v-for="scenario in previewScenarios" :key="scenario"
-            :to="{ path: '/hosting', query: { nahled: scenario } }"
-            class="rounded-md border px-2.5 py-1 text-xs font-medium"
-            :class="previewScenario === scenario
-              ? 'border-accent-500 bg-accent-600 text-white'
-              : 'border-neutral-300 text-neutral-700 hover:bg-neutral-50'"
-          >
-            {{ t(`hosting.preview_name_${scenario}`) }}
-          </RouterLink>
-          <RouterLink
-            v-if="previewing" :to="{ path: '/hosting' }"
-            class="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-          >
-            {{ t('hosting.preview_stop') }}
-          </RouterLink>
-        </div>
-      </section>
     </div>
+
+    <!-- Rozcestník náhledu, jen v serverovém development prostředí,
+         jen superadmin a vždy jako poslední věc na stránce.
+         ⚠️ Nikdy se nezapíná sám; každý stav je jeden odkaz. -->
+    <section v-if="serverDevelopment && auth.isSuperadmin" class="mt-6 rounded-lg border border-dashed border-neutral-300 p-4" data-hosting-preview-switch>
+      <h2 class="text-sm font-semibold text-neutral-700">{{ t('hosting.preview_title') }}</h2>
+      <p class="mt-0.5 text-xs text-neutral-500">{{ t('hosting.preview_desc') }}</p>
+      <div class="mt-3 flex flex-wrap gap-1.5">
+        <RouterLink
+          v-for="scenario in previewScenarios" :key="scenario"
+          :to="{ path: '/hosting', query: { nahled: scenario } }"
+          class="rounded-md border px-2.5 py-1 text-xs font-medium"
+          :class="previewScenario === scenario
+            ? 'border-accent-500 bg-accent-600 text-white'
+            : 'border-neutral-300 text-neutral-700 hover:bg-neutral-50'"
+        >
+          {{ t(`hosting.preview_name_${scenario}`) }}
+        </RouterLink>
+        <RouterLink
+          v-if="previewing" :to="{ path: '/hosting' }"
+          class="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+        >
+          {{ t('hosting.preview_stop') }}
+        </RouterLink>
+      </div>
+    </section>
 
     <div v-if="errorMsg" class="mt-4 rounded-md bg-danger-50 border border-danger-500/40 p-4 text-sm text-danger-600">
       {{ errorMsg }}

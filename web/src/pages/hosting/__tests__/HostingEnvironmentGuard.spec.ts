@@ -12,5 +12,6 @@ describe('Hosting preview environment guard', () => {
     expect(source).toContain('serverDevelopment.value = result.development === true')
     expect(source).toContain('if (!serverDevelopment.value || !auth.isSuperadmin')
     expect(source).not.toContain('import.meta.env')
+    expect(source).toMatch(/<\/div>\s*<!-- Rozcestník náhledu[\s\S]*?<section v-if="serverDevelopment && auth\.isSuperadmin"/)
   })
 })

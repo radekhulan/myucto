@@ -179,7 +179,10 @@ const periodLabel = computed(() =>
 /** Navýšení má smysl jen u aktivního placeného předplatného (aktivní klíč). */
 const canUpgrade = computed(() => {
   const s = status.value
-  return !!s && !!s.license_key_masked && (s.state === 'active' || s.state === 'overage')
+  return !!s
+    && !!s.license_key_masked
+    && (s.state === 'active' || s.state === 'overage')
+    && s.subscription?.state === 'active'
 })
 
 /** Přečerpání rozsahu licence — víc aktivních uživatelů / firem, než licencuje klíč. */

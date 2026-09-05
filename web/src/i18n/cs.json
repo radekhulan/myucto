@@ -992,6 +992,9 @@
     "title": "Mzdy",
     "subtitle": "Personální a mzdová agenda, měsíční běhy, dokumenty, platby, automatické účtování a zákonná podání.",
     "load_failed": "Mzdový modul se nepodařilo načíst.",
+    "license_required_title": "Modul Mzdy není v licenci aktivní",
+    "license_required_description": "Po skončení zkušební doby je pro modul Mzdy potřeba samostatný doplněk.",
+    "license_required_action": "Objednat modul Mzdy",
     "year_close": {
       "title": "Roční uzávěrka mezd",
       "description": "Uzavřete rok až po dokončení všech dvanácti mzdových období, oprav a podání. Odvody, ke kterým ještě nedorazil výpis, uzavření nebrání — jen se vypíšou.",
