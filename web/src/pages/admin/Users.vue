@@ -6,6 +6,7 @@ import { rolesApi, type RoleListItem } from '@/api/roles'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -38,6 +39,11 @@ const supplierCursor = ref<string | null>(null)
 const assignments = ref<Array<UserSupplierAssignment & { role_id: number | null }>>([])
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 let supplierSearchGeneration = 0
+
+const sendingLink = ref(false)
+const linkSent = ref(false)
+/** Účet vznikl, ale pozvánka neodešla — bez odkazu se do něj nikdo nedostane. */
+const inviteFailed = ref(false)
 
 const form = reactive({ id: null as number | null, email: '', name: '', role_id: 0, locale: 'cs' as 'cs' | 'en', is_active: true, password: '' })
 const selectedRole = computed(() => roles.value.find(r => r.id === form.role_id) ?? null)
@@ -73,6 +79,8 @@ function resetSupplierSearch() {
 }
 
 function openCreate() {
+  linkSent.value = false
+  inviteFailed.value = false
   resetSupplierSearch()
   const initial = roles.value.find(r => r.is_active && r.role_type === 'staff' && r.system_key !== 'superadmin') ?? roles.value.find(r => r.is_active)
   Object.assign(form, { id: null, email: '', name: '', role_id: initial?.id ?? 0, locale: 'cs', is_active: true, password: '' })
@@ -81,6 +89,8 @@ function openCreate() {
 }
 
 async function openEdit(user: AdminUser) {
+  linkSent.value = false
+  inviteFailed.value = false
   resetSupplierSearch()
   Object.assign(form, { id: user.id, email: user.email, name: user.name, role_id: user.role_id || user.role.id, locale: user.locale, is_active: user.is_active, password: '' })
   assignments.value = user.is_superadmin ? [] : (await adminApi.listUserSuppliers(user.id)).map(a => ({ ...a, role_id: a.role_id }))
@@ -141,9 +151,21 @@ function addSupplier(item: AdminSupplierSearchItem) {
   supplierQuery.value = ''
 }
 
+async function sendPasswordLink() {
+  if (form.id === null || sendingLink.value) return
+  sendingLink.value = true
+  linkSent.value = false
+  error.value = ''
+  try {
+    await adminApi.sendUserPasswordLink(form.id)
+    linkSent.value = true
+  } catch (e: any) { error.value = e?.response?.data?.error?.message || t('common.error') }
+  finally { sendingLink.value = false }
+}
+
 async function save() {
   error.value = ''
-  if (!form.role_id || (!form.id && !form.password)) { error.value = t('users.password_required'); return }
+  if (!form.role_id) { error.value = t('users.role_required'); return }
   const original = users.value.find(u => u.id === form.id)
   if (isLastActiveSuperadmin(original) && (!selectedIsSuperadmin.value || !form.is_active)) {
     error.value = t('users.last_admin_form'); return
@@ -153,11 +175,21 @@ async function save() {
   saving.value = true
   try {
     if (form.id === null) {
-      const user = await adminApi.createUser({ email: form.email, name: form.name, role_id: form.role_id, locale: form.locale, password: form.password })
+      // Prázdné heslo se NEPOSÍLÁ jako prázdný řetězec — server podle jeho
+      // nepřítomnosti pozná, že má vydat pozvánku.
+      const user = await adminApi.createUser({ email: form.email, name: form.name, role_id: form.role_id, locale: form.locale, ...(form.password ? { password: form.password } : {}) })
+      inviteFailed.value = form.password === '' && user.invite_sent === false
       if (!selectedIsSuperadmin.value) await adminApi.setUserSuppliers(user.id, assignments.value.map(a => ({ supplier_id: a.supplier_id, role_id: a.role_id })))
     } else {
       await adminApi.updateUser(form.id, { name: form.name, role_id: form.role_id, locale: form.locale, is_active: form.is_active, ...(form.password ? { password: form.password } : {}) })
       if (!selectedIsSuperadmin.value) await adminApi.setUserSuppliers(form.id, assignments.value.map(a => ({ supplier_id: a.supplier_id, role_id: a.role_id })))
+    }
+    // ⚠️ Neodeslaná pozvánka nesmí zmizet se zavřeným formulářem. Účet už
+    // existuje a jeho heslo je náhodné — dokud odkaz nedorazí, je nepoužitelný.
+    if (inviteFailed.value) {
+      toast.error(t('users.invite_failed'))
+    } else if (form.id === null && form.password === '') {
+      toast.success(t('users.invite_sent'))
     }
     showForm.value = false
     await load()
@@ -201,16 +233,29 @@ onMounted(load)
         <h2 class="text-lg font-semibold">{{ form.id === null ? t('users.new_title') : t('users.edit_title', { email: form.email }) }}</h2>
         <p v-if="seatWarning && form.id === null" class="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">{{ seatWarning }}</p>
         <div class="grid sm:grid-cols-2 gap-3">
-          <label class="text-sm"><span class="block font-medium mb-1">{{ t('settings.email') }}</span><input v-model="form.email" :disabled="form.id !== null" type="email" class="w-full h-10 px-3 border border-neutral-300 rounded-md" /></label>
-          <label class="text-sm"><span class="block font-medium mb-1">{{ t('users.name') }}</span><input v-model="form.name" class="w-full h-10 px-3 border border-neutral-300 rounded-md" /></label>
-          <label class="text-sm"><span class="block font-medium mb-1">{{ t('users.role') }}</span><select v-model.number="form.role_id" :disabled="editingLastActiveSuperadmin" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:opacity-60"><option v-for="role in roles.filter(r => r.is_active || r.id === form.role_id)" :key="role.id" :value="role.id">{{ role.name }} ({{ t(`roles.types.${role.role_type}`) }})</option></select></label>
+          <label class="text-sm"><span class="block font-medium mb-1">{{ t('settings.email') }}<RequiredMark /></span><input v-model="form.email" :disabled="form.id !== null" type="email" class="w-full h-10 px-3 border border-neutral-300 rounded-md" /></label>
+          <label class="text-sm"><span class="block font-medium mb-1">{{ t('users.name') }}<RequiredMark /></span><input v-model="form.name" class="w-full h-10 px-3 border border-neutral-300 rounded-md" /></label>
+          <label class="text-sm"><span class="block font-medium mb-1">{{ t('users.role') }}<RequiredMark /></span><select v-model.number="form.role_id" :disabled="editingLastActiveSuperadmin" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:opacity-60"><option v-for="role in roles.filter(r => r.is_active || r.id === form.role_id)" :key="role.id" :value="role.id">{{ role.name }} ({{ t(`roles.types.${role.role_type}`) }})</option></select></label>
           <label class="text-sm"><span class="block font-medium mb-1">{{ t('common.language') }}</span><select v-model="form.locale" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface"><option value="cs">cs</option><option value="en">en</option></select></label>
         </div>
         <label v-if="form.id !== null" class="flex gap-2 items-center"><input v-model="form.is_active" :disabled="editingLastActiveSuperadmin" type="checkbox" />{{ t('common.active') }}<span v-if="editingLastActiveSuperadmin" class="text-xs text-neutral-500">— {{ t('users.is_last_admin_lock') }}</span></label>
-        <label class="text-sm"><span class="block font-medium mb-1">{{ t('auth.password') }}</span><input v-model="form.password" type="password" autocomplete="new-password" class="w-full h-10 px-3 border border-neutral-300 rounded-md" /></label>
+        <label class="text-sm">
+          <span class="block font-medium mb-1">{{ t('auth.password') }} <span class="font-normal text-neutral-500">— {{ t('common.optional') }}</span></span>
+          <input v-model="form.password" type="password" autocomplete="new-password" :placeholder="t('users.password_invite_placeholder')" class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('users.password_invite_hint') }}</span>
+        </label>
+
+        <!-- ⚠️ Jen u existujícího účtu. U nového se odkaz pošle sám při uložení,
+             dřív ho není komu poslat — uživatel ještě neexistuje. -->
+        <div v-if="form.id !== null" class="text-sm">
+          <button type="button" :disabled="sendingLink" class="h-9 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-60" data-user-password-link @click="sendPasswordLink">
+            {{ sendingLink ? t('users.password_link_sending') : t('users.password_link_cta') }}
+          </button>
+          <p v-if="linkSent" class="mt-1 text-xs text-success-700">{{ t('users.password_link_sent') }}</p>
+        </div>
 
         <section v-if="!selectedIsSuperadmin" class="border-t border-neutral-200 pt-4 space-y-3">
-          <div><h3 class="font-medium">{{ t('users.suppliers_title') }}</h3><p class="text-xs text-neutral-500">{{ t('users.suppliers_hint') }}</p></div>
+          <div><h3 class="font-medium">{{ t('users.suppliers_title') }}<RequiredMark v-if="!selectedIsSuperadmin" /></h3><p class="text-xs text-neutral-500">{{ t('users.suppliers_hint') }}</p></div>
           <div v-for="(item,index) in assignments" :key="item.supplier_id" class="border border-neutral-200 rounded-md p-3 flex flex-wrap items-center gap-2">
             <div class="flex-1 min-w-40"><div class="font-medium">{{ item.name }}</div><div v-if="item.ic" class="text-xs text-neutral-500">{{ t('common.ic') }} {{ item.ic }}</div></div>
             <select v-model.number="item.role_id" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm"><option :value="null">{{ t('users.supplier_role_inherit') }}</option><option v-for="role in compatibleRoles" :key="role.id" :value="role.id">{{ role.name }}</option></select>

@@ -12,6 +12,29 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 final class PayrollQuoteAction
 {
+    /**
+     * ⚠️ Jedna společná hláška nestačí. „Předplatné nemá uloženou kartu" a
+     * „zvolili jste míň, než kolik opravdu používáte" jsou dvě různé situace
+     * s dvěma různými řešeními — bez rozlišení zákazník vidí jen to, že se
+     * cena nespočítala, a nemá co udělat.
+     */
+    public const ERROR_MESSAGES = [
+        'invalid_key' => 'Aktivní licence nenalezena. Nejprve aktivujte licenční klíč.',
+        'subscription_inactive' => 'Poměrný doplatek jde strhnout jen z předplatného s uloženou kartou. '
+            . 'Mzdový doplněk si objednejte na myucto.cz.',
+        'target_below_active' => 'Cílové počty nesmí být nižší než skutečné využití. '
+            . 'Nejprve deaktivujte zaměstnance nebo odeberte práva k mzdám.',
+        'invalid_target' => 'Cílové počty jsou mimo povolený rozsah.',
+        'invalid_telemetry' => 'Skutečné využití mezd se nepodařilo změřit. Zkuste to prosím znovu.',
+        'payroll_price_unavailable' => 'Ceník mzdového doplňku je momentálně nedostupný. Zkuste to prosím za chvíli.',
+        'upgrade_in_progress' => 'Předchozí změna licence se ještě zpracovává. Zkuste to prosím za chvíli.',
+        'server_unreachable' => 'Licenční server je nedostupný. Zkuste to prosím za chvíli.',
+        'quote_failed' => 'Změnu mzdového doplňku se nepodařilo spočítat.',
+    ];
+
+    /** Chyby, ze kterých vede cesta ven jen novým nákupem na webu. */
+    public const BUY_URL_ERRORS = ['subscription_inactive', 'invalid_key'];
+
     public function __construct(private readonly LicenseService $license) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -44,7 +67,13 @@ final class PayrollQuoteAction
         );
         if (($result['ok'] ?? false) !== true) {
             $error = (string) ($result['error'] ?? 'quote_failed');
-            return Json::error($response, $error, 'Změnu mzdového doplňku se nepodařilo spočítat.', $error === 'server_unreachable' ? 503 : 422);
+            return Json::error(
+                $response,
+                $error,
+                self::ERROR_MESSAGES[$error] ?? self::ERROR_MESSAGES['quote_failed'],
+                $error === 'server_unreachable' ? 503 : 422,
+                in_array($error, self::BUY_URL_ERRORS, true) ? ['buy_url' => $this->license->buyUrl()] : [],
+            );
         }
         unset($result['ok']);
         return Json::ok($response, $result);

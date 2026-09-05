@@ -1292,6 +1292,7 @@ final class Mailer
         $subjects = [
             'cs' => [
                 'password_reset'    => 'Obnova hesla — ' . $app,
+                'user_invite'       => 'Váš účet je připravený — ' . $app,
                 'login_otp'         => 'Ověřovací kód pro přihlášení — ' . $app,
                 'email_profile_test'=> 'Test odesílacího profilu — ' . $app,
                 'invoice_send'      => 'Faktura — ' . $app,
@@ -1309,6 +1310,7 @@ final class Mailer
             ],
             'en' => [
                 'password_reset'    => 'Password reset — ' . $app,
+                'user_invite'       => 'Your account is ready — ' . $app,
                 'login_otp'         => 'Sign-in verification code — ' . $app,
                 'email_profile_test'=> 'Sending profile test — ' . $app,
                 'invoice_send'      => 'Invoice — ' . $app,

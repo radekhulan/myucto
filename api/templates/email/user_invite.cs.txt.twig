@@ -1,0 +1,17 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Váš účet je připravený
+----------------------
+
+Dobrý den{% if name %} {{ name }}{% endif %},
+
+byl Vám založen účet v MyÚčto.cz. Heslo si zvolíte sami — nikdo jiný ho nezná.
+
+Nastavte si ho tímto odkazem (platný {{ expiresIn|default('24 hodin') }}, jen na jedno použití):
+
+{{ resetLink }}
+
+Až lhůta vyprší, požádejte správce o nový odkaz, nebo si heslo nastavte sami
+přes „Zapomenuté heslo“ na přihlašovací stránce.
+{% endblock %}

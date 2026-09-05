@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Admin;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Service\ActivityLogger;
@@ -15,6 +16,8 @@ use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicenseSeatLimitExceeded;
 use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\License\LicenseState;
+use MyInvoice\Service\Mail\Mailer;
+use MyInvoice\Service\Setup\PasswordSetupLinkIssuer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -27,6 +30,9 @@ final class UserAdminAction
         private readonly PasswordHasher $hasher,
         private readonly SessionManager $sessions,
         private readonly LicenseCapacityGate $capacity,
+        private readonly PasswordSetupLinkIssuer $passwordSetupLinks,
+        private readonly Mailer $mailer,
+        private readonly Config $config,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -54,6 +60,14 @@ final class UserAdminAction
         if (!in_array($locale, ['cs', 'en'], true)) return Json::error($response, 'validation_failed', 'Neplatný locale.', 400);
         $role = $this->activeRole($roleId);
         if ($role === null) return Json::error($response, 'validation_failed', 'Vybraná role neexistuje nebo není aktivní.', 400);
+
+        // ⚠️ Prázdné heslo NENÍ chyba — je to pozvánka. Uživatel si heslo nastaví
+        // sám z jednorázového odkazu, takže ho admin nemusí vymýšlet, posílat
+        // nezabezpečeným kanálem ani znát. Heslo zadané výslovně se chová jako dřív.
+        $invite = $password === '';
+        if ($invite) {
+            $password = $this->passwordSetupLinks->randomPassword();
+        }
         try {
             $this->hasher->validate($password);
         } catch (\InvalidArgumentException $e) {
@@ -83,8 +97,93 @@ final class UserAdminAction
             }
             throw $e;
         }
-        $this->log($request, 'user.created', $id, ['email' => $email, 'role_id' => $roleId]);
-        return Json::ok($response, $this->fetchUser($id), 201);
+        $this->log($request, 'user.created', $id, ['email' => $email, 'role_id' => $roleId, 'invite' => $invite]);
+
+        $user = $this->fetchUser($id);
+        if ($invite) {
+            // ⚠️ Neúspěch odeslání nesmí objednávku uživatele shodit — účet už je
+            // založený a zabírá licenční místo, rollback tady by ho jen osiřel.
+            // Admin se o tom ale MUSÍ dozvědět: bez odkazu se do účtu nikdo
+            // nedostane, protože heslo je náhodné a nikdo ho nezná.
+            $user['invite_sent'] = $this->sendPasswordLink($request, $id, $email, $name, $locale, 'setup');
+        }
+
+        return Json::ok($response, $user, 201);
+    }
+
+    /**
+     * Znovu pošle odkaz na nastavení hesla už existujícímu uživateli.
+     *
+     * ⚠️ Vydává se `reset`, ne `setup`. Setupový token dává po nastavení hesla
+     * rovnou sezení — u účtu, který si mezitím zapnul vlastní TOTP na instalaci
+     * bez povinného MFA, by odkaz z e-mailu obešel jeho druhý faktor. Lhůta
+     * zůstává onboardingová (24 h): pozvánku od admina otevře člověk klidně až
+     * druhý den, na rozdíl od obnovy, kterou si právě vyžádal sám.
+     *
+     * @param array<string,string> $args
+     */
+    public function sendPasswordSetup(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->guard($request, $response)) !== null) return $error;
+        $id = (int) ($args['id'] ?? 0);
+        $row = $this->fetchUser($id);
+        if ($row === null) return Json::error($response, 'not_found', 'Uživatel nenalezen.', 404);
+        if (!$row['is_active']) {
+            return Json::error($response, 'user_inactive', 'Deaktivovanému uživateli odkaz neposíláme — nejdřív ho aktivujte.', 409);
+        }
+
+        $sent = $this->sendPasswordLink(
+            $request,
+            $id,
+            (string) $row['email'],
+            (string) ($row['name'] ?? ''),
+            (string) ($row['locale'] ?? 'cs'),
+            'reset',
+        );
+        if (!$sent) {
+            return Json::error($response, 'mail_failed', 'Odkaz se nepodařilo odeslat. Zkontrolujte nastavení odchozí pošty.', 502);
+        }
+        $this->log($request, 'user.password_link_sent', $id, ['email' => $row['email']]);
+
+        return Json::ok($response, ['ok' => true]);
+    }
+
+    /**
+     * Vydá jednorázový odkaz a pošle ho uživateli. Vrací, jestli mail odešel.
+     *
+     * @param 'setup'|'reset' $purpose
+     */
+    private function sendPasswordLink(
+        Request $request,
+        int $userId,
+        string $email,
+        string $name,
+        string $locale,
+        string $purpose,
+    ): bool {
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        try {
+            $link = $purpose === 'setup'
+                ? $this->passwordSetupLinks->issue($this->db->pdo(), $userId, $ip)
+                : $this->passwordSetupLinks->issueReset($this->db->pdo(), $userId, $ip);
+            $appUrl = rtrim((string) $this->config->get('app.url', ''), '/');
+            $this->mailer->sendTemplate(
+                'user_invite',
+                in_array($locale, ['cs', 'en'], true) ? $locale : 'cs',
+                [$email],
+                [
+                    'name' => $name,
+                    'resetLink' => $appUrl . '/reset?token=' . $link['token'],
+                    'expiresIn' => PasswordSetupLinkIssuer::SETUP_TTL_HOURS . ' hodin',
+                ],
+            );
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->log('user.invite_mail_failed', $userId, 'user', $userId, [
+                'error' => $e->getMessage(),
+            ], $ip, $request->getHeaderLine('User-Agent'));
+            return false;
+        }
     }
 
     /**

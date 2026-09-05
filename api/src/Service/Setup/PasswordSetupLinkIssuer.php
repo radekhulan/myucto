@@ -60,4 +60,36 @@ final class PasswordSetupLinkIssuer
 
         return ['token' => $token, 'expires_at' => $expiresAt];
     }
+
+    /**
+     * Odkaz s onboardingovou lhůtou, ale BEZ setupového sezení.
+     *
+     * ⚠️ Pro účet, který už existuje a mohl si mezitím zapnout vlastní druhý
+     * faktor. `purpose = 'setup'` by mu po nastavení hesla vydal sezení rovnou
+     * z odkazu v e-mailu, takže by jeho TOTP na instalaci bez povinného MFA
+     * neplatilo. `reset` ho pošle na přihlašovací formulář, kde druhý faktor
+     * projde standardní cestou. Delší lhůta zůstává: pozvánku od admina
+     * otevře člověk klidně až druhý den.
+     *
+     * @return array{token:string,expires_at:\DateTimeImmutable}
+     */
+    public function issueReset(\PDO $pdo, int $userId, ?string $ip = null, ?\DateTimeImmutable $now = null): array
+    {
+        $token     = bin2hex(random_bytes(32));
+        $expiresAt = ($now ?? new \DateTimeImmutable())
+            ->modify(sprintf('+%d hours', self::SETUP_TTL_HOURS));
+
+        $pdo->prepare(
+            'INSERT INTO password_resets (user_id, token_hash, purpose, expires_at, ip)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([
+            $userId,
+            hash('sha256', $token),
+            'reset',
+            $expiresAt->format('Y-m-d H:i:s'),
+            @inet_pton((string) $ip) ?: '',
+        ]);
+
+        return ['token' => $token, 'expires_at' => $expiresAt];
+    }
 }

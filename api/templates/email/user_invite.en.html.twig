@@ -1,0 +1,33 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#18181b;">Your account is ready</h1>
+
+<p style="margin:0 0 16px;">Hello{% if name %} {{ name }}{% endif %},</p>
+
+<p style="margin:0 0 16px;">an account has been created for you in <strong>MyÚčto.cz</strong>.
+You choose the password yourself — nobody else knows it. Set it using the button below:</p>
+
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ resetLink }}" style="display:inline-block;background:{{ accent }};color:#ffffff;text-decoration:none;font-weight:600;padding:12px 28px;border-radius:6px;font-size:15px;">
+    Set password
+  </a>
+</p>
+
+<p style="margin:0 0 8px;font-size:13px;color:#71717a;">
+  The link is valid for <strong>{{ expiresIn|default('24 hours') }}</strong> and can be used only once.
+</p>
+
+<p style="margin:0 0 8px;font-size:13px;color:#71717a;">
+  If the button does not work, copy this address into your browser:
+</p>
+
+<p style="margin:0;font-size:12px;color:#52525b;word-break:break-all;background:#f4f4f5;padding:10px;border-radius:6px;font-family:monospace;">
+  {{ resetLink }}
+</p>
+
+<p style="margin:24px 0 0;font-size:13px;color:#71717a;">
+  Once the link expires, ask your administrator for a new one, or use
+  “Forgot password” on the sign-in page.
+</p>
+{% endblock %}

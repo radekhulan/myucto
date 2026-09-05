@@ -209,11 +209,15 @@ export const adminApi = {
 
   // Users
   listUsers: () => api.get<AdminUser[]>('/admin/users').then(r => r.data),
-  createUser: (payload: { email: string; name: string; role_id: number; locale?: 'cs' | 'en'; password: string }) =>
-    api.post<AdminUser>('/admin/users', payload).then(r => r.data),
+  /** `password` je nepovinné — bez něj se uživateli pošle odkaz na nastavení hesla. */
+  createUser: (payload: { email: string; name: string; role_id: number; locale?: 'cs' | 'en'; password?: string }) =>
+    api.post<AdminUser & { invite_sent?: boolean }>('/admin/users', payload).then(r => r.data),
   updateUser: (id: number, payload: Partial<{ name: string; role_id: number; locale: 'cs' | 'en'; is_active: boolean; password: string }>) =>
     api.put<AdminUser>(`/admin/users/${id}`, payload).then(r => r.data),
   deleteUser: (id: number) => api.delete(`/admin/users/${id}`),
+  /** Pošle existujícímu uživateli jednorázový odkaz na nastavení hesla. */
+  sendUserPasswordLink: (id: number) =>
+    api.post<{ ok: boolean }>(`/admin/users/${id}/password-link`).then(r => r.data),
   // Epic F0 — přiřazení firem uživateli (prázdné = bez omezení, vidí všechny firmy)
   listUserSuppliers: (id: number) =>
     api.get<UserSupplierAssignment[]>(`/admin/users/${id}/suppliers`).then(r => r.data),

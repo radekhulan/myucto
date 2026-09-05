@@ -1,0 +1,18 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Your account is ready
+---------------------
+
+Hello{% if name %} {{ name }}{% endif %},
+
+an account has been created for you in MyÚčto.cz. You choose the password
+yourself — nobody else knows it.
+
+Set it using this link (valid {{ expiresIn|default('24 hours') }}, single use):
+
+{{ resetLink }}
+
+Once the link expires, ask your administrator for a new one, or use
+"Forgot password" on the sign-in page.
+{% endblock %}

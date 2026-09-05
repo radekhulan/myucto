@@ -12,6 +12,20 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 final class PayrollChangeAction
 {
+    /** Hlášky kalkulace plus to, co může selhat až u stržení. */
+    public const ERROR_MESSAGES = PayrollQuoteAction::ERROR_MESSAGES + [
+        'charge_failed' => 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte '
+            . 'jinou kartou přes odkaz níž — poslali jsme ho i e-mailem.',
+        'charge_pending' => 'Platba se zpracovává. Nekupujte prosím znovu — jakmile ji brána potvrdí, změna se projeví sama.',
+        'result_unknown' => 'Odpověď licenčního serveru nedorazila. Než to zkusíte znovu, ověřte prosím stav licence — '
+            . 'změna mohla proběhnout.',
+        'quote_expired' => 'Kalkulace vypršela. Nechte si prosím spočítat aktuální cenu znovu.',
+        'quote_changed' => 'Cena se mezitím změnila. Nechte si prosím spočítat aktuální cenu znovu.',
+        'quote_invalid' => 'Kalkulace neodpovídá zadání. Nechte si prosím spočítat cenu znovu.',
+        'not_bound' => 'Tato instalace není k licenci aktivně přiřazená.',
+        'change_failed' => 'Změna mzdového doplňku se nezdařila. Zkuste to prosím znovu.',
+    ];
+
     public function __construct(private readonly LicenseService $license) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -49,8 +63,20 @@ final class PayrollChangeAction
         );
         if (($result['ok'] ?? false) !== true) {
             $error = (string) ($result['error'] ?? 'change_failed');
+            // ⚠️ `pay_url` musí projít až na obrazovku: po neprojité kartě je to
+            // jediná nabídka, která dává smysl — opakovat totéž nepomůže.
+            // U předplatného bez karty je tou nabídkou nákup na webu.
             $extra = isset($result['pay_url']) ? ['pay_url' => (string) $result['pay_url']] : [];
-            return Json::error($response, $error, 'Změna mzdového doplňku se nezdařila.', $error === 'server_unreachable' ? 503 : 422, $extra);
+            if (in_array($error, PayrollQuoteAction::BUY_URL_ERRORS, true)) {
+                $extra['buy_url'] = $this->license->buyUrl();
+            }
+            return Json::error(
+                $response,
+                $error,
+                self::ERROR_MESSAGES[$error] ?? self::ERROR_MESSAGES['change_failed'],
+                $error === 'server_unreachable' ? 503 : 422,
+                $extra,
+            );
         }
         $state = $result['state_local'] ?? $this->license->current();
         unset($result['ok'], $result['state_local']);

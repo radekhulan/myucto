@@ -126,6 +126,8 @@ const tierSuccess = ref<string | null>(null)
 const payrollQuote = ref<PayrollQuote | null>(null)
 const payrollBusy = ref(false)
 const payrollError = ref<string | null>(null)
+/** Odkaz na objednávku na webu, když změna licence z aplikace není proveditelná. */
+const payrollBuyUrl = ref<string | null>(null)
 const payrollSuccess = ref<string | null>(null)
 const payrollEmployeesTarget = ref(0)
 const payrollUsersTarget = ref(0)
@@ -224,8 +226,16 @@ const tierLabel = computed(() => {
   return map[tier] ?? tier
 })
 
-/** Doplní jen pohodlné předvyplnění. Vazbu na instanci nese serverový handoff. */
-function checkoutUrl(base: string): string {
+/**
+ * Doplní jen pohodlné předvyplnění. Vazbu na instanci nese serverový handoff.
+ *
+ * `withPayroll` se předává VÝSLOVNĚ, neodvozuje se z rozepsaných políček.
+ * Cílové počty se plní z aktuálního stavu hned při načtení obrazovky, takže
+ * podle nich nejde poznat, jestli zákazník Mzdy opravdu chce — a objednávka
+ * s předzapnutými Mzdami tomu, kdo o ně nestojí, je horší než žádné
+ * předvyplnění. Mzdy jsou v objednávce ve výchozím stavu vypnuté.
+ */
+function checkoutUrl(base: string, withPayroll = false): string {
   const s = status.value
   if (!s) return base
   const c = s.company
@@ -239,6 +249,13 @@ function checkoutUrl(base: string): string {
     city: c?.city ?? '',
     zip: c?.zip ?? '',
     email: c?.email ?? '',
+  }
+  if (withPayroll) {
+    // ⚠️ Posílá se POČET ZAMĚSTNANCŮ, ne kód mzdového pásma. Hranice pásem
+    // patří ceníku na webu; instalace je nezná a znát nemá — jinak by po
+    // jejich posunu odkazovala na variantu, která už neexistuje.
+    raw.payroll_employees = String(Math.max(payrollEmployeesTarget.value || 0, s.payroll_employees_active, 0))
+    raw.payroll_users = String(Math.max(payrollUsersTarget.value || 0, s.payroll_users_active, 1))
   }
   const params = new URLSearchParams()
   for (const [k, v] of Object.entries(raw)) {
@@ -287,6 +304,35 @@ function fmtDate(ts: number | null): string {
 function fmtDateTime(s: string | null): string {
   if (!s) return '—'
   try { return new Date(s).toLocaleString() } catch { return s }
+}
+
+/**
+ * Vyžádání nového licenčního tokenu ze serveru.
+ *
+ * ⚠️ Rozsah se do instalace propíše až novým tokenem, a ten se běžně obnovuje
+ * jednou denně. Po platbě, která proběhla jinde než tady — odkaz z e-mailu,
+ * ruční potvrzení obsluhou, objednávka na webu — koukal zákazník do zítřka na
+ * staré počty a nechápal, za co zaplatil. Hostovaná instalace tohle tlačítko
+ * má pod Hostingem; self-hosted obrazovku Hosting nemá, takže tady bylo jediné
+ * východisko počkat do rána.
+ */
+const refreshing = ref(false)
+
+async function refreshEntitlement(): Promise<void> {
+  refreshing.value = true
+  errorMsg.value = null
+  try {
+    // ⚠️ Stav se čte AŽ POTOM běžnou cestou. Odpověď obnovy ho nenese —
+    // payload `/license/status` je bohatší a jeho druhá, chudší podoba by
+    // obrazovku shodila.
+    await licenseApi.refresh()
+    await load()
+    await auth.refresh()
+  } catch (e: unknown) {
+    errorMsg.value = (e as Error)?.message ?? t('license.refresh_failed')
+  } finally {
+    refreshing.value = false
+  }
 }
 
 async function load() {
@@ -381,6 +427,17 @@ function fmtAmount(amount: number | null, currency: string | null): string {
 function upgradeErrMsg(e: unknown): string {
   const err = e as { response?: { data?: { error?: { message?: string } } } }
   return err.response?.data?.error?.message ?? t('license.upgrade_failed')
+}
+
+/**
+ * Odkaz na objednávku, který server přiložil k chybě. Posílá ho tam, kde
+ * změna z aplikace není proveditelná — typicky u předplatného bez uložené
+ * karty; opakovat totéž by nepomohlo, koupit na webu ano.
+ */
+function errBuyUrl(e: unknown): string | null {
+  const err = e as { response?: { data?: { error?: { buy_url?: string } } } }
+  const url = err.response?.data?.error?.buy_url
+  return typeof url === 'string' && url !== '' ? url : null
 }
 
 async function calcQuote() {
@@ -480,6 +537,7 @@ async function calcPayrollQuote(enabled: boolean): Promise<void> {
   if (payrollBusy.value || !status.value || (enabled && !payrollTargetsValid.value)) return
   payrollBusy.value = true
   payrollError.value = null
+  payrollBuyUrl.value = null
   payrollSuccess.value = null
   try {
     payrollQuotedEmployeesTarget.value = enabled
@@ -495,6 +553,7 @@ async function calcPayrollQuote(enabled: boolean): Promise<void> {
     )
   } catch (e: unknown) {
     payrollError.value = upgradeErrMsg(e)
+    payrollBuyUrl.value = errBuyUrl(e)
   } finally {
     payrollBusy.value = false
   }
@@ -505,6 +564,7 @@ async function applyPayrollChange(): Promise<void> {
   if (!quote || payrollBusy.value) return
   payrollBusy.value = true
   payrollError.value = null
+  payrollBuyUrl.value = null
   try {
     let result = await licenseApi.changePayroll(
       quote.new_enabled,
@@ -524,6 +584,7 @@ async function applyPayrollChange(): Promise<void> {
     await auth.refresh()
   } catch (e: unknown) {
     payrollError.value = upgradeErrMsg(e)
+    payrollBuyUrl.value = errBuyUrl(e)
   } finally {
     payrollBusy.value = false
   }
@@ -995,7 +1056,23 @@ onMounted(async () => {
           <span class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium" :class="stateStyle.badge">
             {{ t('license.state_' + status.state) }}
           </span>
-          <span class="text-sm text-neutral-500">{{ t('license.tier') }}: <strong class="text-neutral-700">{{ tierLabel }}</strong></span>
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="text-sm text-neutral-500">{{ t('license.tier') }}: <strong class="text-neutral-700">{{ tierLabel }}</strong></span>
+            <!-- ⚠️ Jen u self-hosted. Hostovaná instalace má totéž tlačítko na
+                 obrazovce Hosting a dvě místa na tutéž akci by si jen říkala
+                 o to, aby se jedno z nich přestalo udržovat. -->
+            <button
+              v-if="!isManaged"
+              type="button"
+              :class="btnOutline('primary')"
+              :disabled="refreshing"
+              data-license-refresh
+              @click="refreshEntitlement"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+              {{ refreshing ? t('license.refresh_busy') : t('license.refresh_cta') }}
+            </button>
+          </div>
         </div>
 
         <dl class="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
@@ -1177,13 +1254,29 @@ onMounted(async () => {
          instance dostává při zřízení automaticky — o důvod víc, aby šel opravit
          ručně, když se to nepovede. -->
     <div v-if="status && isAdmin && !loading" class="space-y-6 mt-6">
-      <section v-if="canUpgrade" id="payroll-addon" class="rounded-lg border border-payroll-200 bg-payroll-50/30 p-5">
+      <!-- ⚠️ Sekce se vykresluje VŽDY, i když licenci nejde měnit z aplikace.
+           Výzva „Aktivovat mzdový doplněk" (nastavení firmy, blokované mzdové
+           API) míří na kotvu #payroll-addon — a ta bez licence nebo ve zkušební
+           době neexistovala, takže zákazník skončil na obrazovce, kde po Mzdách
+           nebylo ani vidu. Bez předplatného se místo kalkulace nabídne
+           objednávka na webu. Se SaaS to nesouvisí: rozhoduje aktivní placené
+           předplatné, ne to, kdo instalaci provozuje. -->
+      <section id="payroll-addon" class="rounded-lg border border-payroll-200 bg-payroll-50/30 p-5">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.payroll_title') }}</h2>
         <p class="mt-1 text-sm text-neutral-600">{{ t('license.payroll_desc') }}</p>
         <dl class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
           <div><dt class="text-neutral-500">{{ t('license.payroll_employees') }}</dt><dd class="font-medium">{{ status.payroll_employees_active }} / {{ status.payroll_max_employees ?? t('license.unlimited') }}</dd></div>
           <div><dt class="text-neutral-500">{{ t('license.payroll_users') }}</dt><dd class="font-medium">{{ status.payroll_users_active }} / {{ status.payroll_users_licensed }}</dd></div>
         </dl>
+
+        <template v-if="!canUpgrade">
+          <p class="mt-3 text-sm text-neutral-600">{{ t('license.payroll_needs_purchase') }}</p>
+          <a :href="checkoutUrl(status.buy_url, true)" :class="[btnFilled('success'), 'mt-3']">
+            {{ t('license.payroll_buy_on_web') }}
+          </a>
+        </template>
+
+        <template v-else>
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
           <label class="text-sm">
             <span class="mb-1 block text-xs uppercase tracking-wider text-neutral-500">{{ t('license.payroll_employees_target') }}</span>
@@ -1213,7 +1306,13 @@ onMounted(async () => {
           </button>
         </div>
         <p v-if="payrollSuccess" class="mt-3 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700">{{ payrollSuccess }}</p>
-        <p v-if="payrollError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">{{ payrollError }}</p>
+        <div v-if="payrollError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">
+          <p>{{ payrollError }}</p>
+          <a v-if="payrollBuyUrl" :href="checkoutUrl(payrollBuyUrl, true)" :class="[btnFilled('success'), 'mt-3']">
+            {{ t('license.payroll_buy_on_web') }}
+          </a>
+        </div>
+        </template>
       </section>
 
       <section v-if="canUpgrade" id="tier-change" class="rounded-lg border border-primary-200 bg-primary-50/30 p-5">

@@ -78,6 +78,28 @@ final class PasswordSetupLinkIssuerTest extends TestCase
         self::assertSame('setup', $purpose);
     }
 
+    /**
+     * ⚠️ Pozvánka pro UŽ EXISTUJÍCÍ účet nesmí být `setup`.
+     *
+     * Setupový token dává po nastavení hesla rovnou sezení. U účtu, který si
+     * mezitím sám zapnul TOTP na instalaci bez povinného MFA, by odkaz
+     * z e-mailu jeho druhý faktor obešel. Delší onboardingová lhůta zůstává —
+     * pozvánku od admina otevře člověk klidně až druhý den.
+     */
+    public function testResendForAnExistingAccountKeepsTheLongTtlButNotTheSetupSession(): void
+    {
+        $now = new \DateTimeImmutable('2026-08-21 19:40:00');
+
+        $issued = (new PasswordSetupLinkIssuer())->issueReset($this->pdo, 42, '198.51.100.7', $now);
+
+        $row = $this->pdo->query('SELECT purpose, expires_at FROM password_resets')->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame('reset', $row['purpose'], 'Odkaz pro existující účet nesmí vydávat sezení.');
+        self::assertSame('2026-08-22 19:40:00', $row['expires_at']);
+        self::assertSame('2026-08-22 19:40:00', $issued['expires_at']->format('Y-m-d H:i:s'));
+        self::assertSame(64, strlen($issued['token']));
+        self::assertSame(hash('sha256', $issued['token']), $this->pdo->query('SELECT token_hash FROM password_resets')->fetchColumn());
+    }
+
     public function testOnlyTheHashIsStored(): void
     {
         $issued = (new PasswordSetupLinkIssuer())->issue($this->pdo, 7, '198.51.100.7');

@@ -15,6 +15,7 @@ const api = {
   startPurchase: vi.fn(),
   resumePendingChanges: vi.fn(async () => []),
   supportLink: vi.fn(),
+  refresh: vi.fn(async () => ({ refreshed: true })),
 }
 
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => auth }))
@@ -139,9 +140,19 @@ describe('automatický purchase handoff', () => {
     const wrapper = await mountPage()
 
     expect(wrapper.find('[data-license-purchase-start]').exists()).toBe(true)
-    expect(wrapper.find('#payroll-addon').exists()).toBe(false)
     expect(wrapper.find('#tier-change').exists()).toBe(false)
     expect(wrapper.find('#upgrade').exists()).toBe(false)
+
+    // ⚠️ Mzdy jsou výjimka: jsou samostatně prodejný modul a výzvy k jeho
+    // aktivaci (nastavení firmy, blokované mzdové API) míří na #payroll-addon.
+    // Kotva proto musí existovat vždycky — jen místo neproveditelné kalkulace
+    // nabídne objednávku na webu.
+    const payroll = wrapper.find('#payroll-addon')
+    expect(payroll.exists()).toBe(true)
+    expect(payroll.text()).toContain('license.payroll_needs_purchase')
+    expect(payroll.text()).toContain('license.payroll_buy_on_web')
+    expect(payroll.text()).not.toContain('license.payroll_enable')
+    expect(payroll.text()).not.toContain('license.payroll_change')
   })
 
   it('self-hosted předplatné neukazuje hostingové varování ani nákup prostoru', async () => {
@@ -194,5 +205,39 @@ describe('automatický purchase handoff', () => {
 
     expect(wrapper.find('[data-managed-cancellation-warning]').exists()).toBe(true)
     expect(wrapper.find('a[href="/admin/instance-export"]').exists()).toBe(true)
+    // Hostovaná instalace má vyžádání stavu na obrazovce Hosting — tady by
+    // bylo druhé a jedno z nich by se přestalo udržovat.
+    expect(wrapper.find('[data-license-refresh]').exists()).toBe(false)
+  })
+
+  it('self-hosted instalace si umí vyžádat aktuální stav licence ze serveru', async () => {
+    api.status.mockResolvedValue(status({
+      state: 'active',
+      tier: 'single',
+      users_licensed: 1,
+      license_key_masked: 'MYU-…-AAAA',
+    }))
+
+    const wrapper = await mountPage()
+
+    const refresh = wrapper.find('[data-license-refresh]')
+    expect(refresh.exists()).toBe(true)
+
+    // Druhé načtení stavu musí nést nový rozsah — jinak by tlačítko jen
+    // zablikalo a zákazník by koukal na tatáž čísla jako předtím.
+    api.status.mockResolvedValue(status({
+      state: 'active',
+      tier: 'single',
+      users_licensed: 5,
+      license_key_masked: 'MYU-…-AAAA',
+    }))
+    await refresh.trigger('click')
+    await flushPromises()
+
+    expect(api.refresh).toHaveBeenCalledTimes(1)
+    // ⚠️ Stav se čte AŽ POTOM běžnou cestou, ne z odpovědi obnovy.
+    expect(api.status).toHaveBeenCalledTimes(2)
+    expect(auth.refresh).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('1 / 5')
   })
 })
