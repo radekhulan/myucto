@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\License\LicenseClient;
+use MyInvoice\Tests\Support\NamedArgs;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseTokenVerifier;
 use MyInvoice\Tests\Support\LicenseTokenTrait;
@@ -78,7 +79,7 @@ final class LicenseDomainReportedTest extends TestCase
         $captured = 'nezavoláno';
         $this->client->expects($this->once())->method('renew')
             ->willReturnCallback(function (...$args) use (&$captured) {
-                $captured = $args[8] ?? null;
+                $captured = NamedArgs::of(LicenseClient::class, 'renew', $args)['domain'] ?? null;
 
                 return ['ok' => true, 'token' => $this->token(['nonce' => 'nonce-2'])];
             });
@@ -95,7 +96,7 @@ final class LicenseDomainReportedTest extends TestCase
         $captured = 'nezavoláno';
         $this->client->expects($this->once())->method('renew')
             ->willReturnCallback(function (...$args) use (&$captured) {
-                $captured = $args[8] ?? null;
+                $captured = NamedArgs::of(LicenseClient::class, 'renew', $args)['domain'] ?? null;
 
                 return ['ok' => true, 'token' => $this->token(['nonce' => 'nonce-2'])];
             });
@@ -114,7 +115,7 @@ final class LicenseDomainReportedTest extends TestCase
         $captured = 'nezavoláno';
         $this->client->expects($this->once())->method('renew')
             ->willReturnCallback(function (...$args) use (&$captured) {
-                $captured = $args[8] ?? null;
+                $captured = NamedArgs::of(LicenseClient::class, 'renew', $args)['domain'] ?? null;
 
                 return ['ok' => true, 'token' => $this->token(['nonce' => 'nonce-2'])];
             });
@@ -131,7 +132,7 @@ final class LicenseDomainReportedTest extends TestCase
         $captured = 'nezavoláno';
         $this->client->expects($this->once())->method('activate')
             ->willReturnCallback(function (...$args) use (&$captured) {
-                $captured = $args[7] ?? null;
+                $captured = NamedArgs::of(LicenseClient::class, 'activate', $args)['domain'] ?? null;
 
                 return ['ok' => true, 'token' => $this->token()];
             });

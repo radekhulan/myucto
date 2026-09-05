@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\License\LicenseClient;
+use MyInvoice\Tests\Support\NamedArgs;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseTokenVerifier;
 use MyInvoice\Service\System\AppUrlConfiguration;
@@ -82,7 +83,7 @@ final class LicenseRenewTelemetryTest extends TestCase
         $captured = 'nezavoláno';
         $this->client->expects($this->once())->method('renew')
             ->willReturnCallback(function (...$args) use (&$captured) {
-                $captured = $args[7] ?? null;
+                $captured = NamedArgs::of(LicenseClient::class, 'renew', $args)['telemetry'] ?? null;
 
                 return ['ok' => true, 'token' => $this->token(['nonce' => 'nonce-2'])];
             });
@@ -104,7 +105,7 @@ final class LicenseRenewTelemetryTest extends TestCase
         $captured = 'nezavoláno';
         $this->client->expects($this->once())->method('renew')
             ->willReturnCallback(function (...$args) use (&$captured) {
-                $captured = $args[7] ?? null;
+                $captured = NamedArgs::of(LicenseClient::class, 'renew', $args)['telemetry'] ?? null;
 
                 return ['ok' => true, 'token' => $this->token(['nonce' => 'nonce-2'])];
             });
@@ -121,7 +122,7 @@ final class LicenseRenewTelemetryTest extends TestCase
         $captured = 'nezavoláno';
         $this->client->expects($this->once())->method('renew')
             ->willReturnCallback(function (...$args) use (&$captured, $token) {
-                $captured = $args[7] ?? null;
+                $captured = NamedArgs::of(LicenseClient::class, 'renew', $args)['telemetry'] ?? null;
 
                 return ['ok' => true, 'token' => $token];
             });
