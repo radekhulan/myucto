@@ -6,6 +6,8 @@ import { api } from './client'
  */
 
 export interface PurchaseKpi {
+  /** Náklady napříč měnami v CZK — protějšek `TotalCzk` v dashboard.ts, viz komentář tam. */
+  total_czk?: import('./dashboard').TotalCzk
   per_currency: Array<{
     currency: string
     this_year: number

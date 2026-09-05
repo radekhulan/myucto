@@ -43,6 +43,12 @@ const costsThisYear = computed(() =>
     vendor_count: c.this_year_vendor_count,
   }))
 )
+/** Náklady napříč měnami v CZK — zrcadlo `revenueTotalCzk` ve Stats.vue, ukazuje se až od dvou měn. */
+const costsTotalCzk = computed(() => {
+  const t = summary.value?.kpi.total_czk
+  return t && t.currency_count > 1 ? t : null
+})
+
 const costsPrevYear = computed(() =>
   (summary.value?.kpi.per_currency ?? []).map(c => ({
     currency: c.currency,
@@ -182,6 +188,25 @@ const hasAnyData = computed(() =>
             {{ t('costs.rolling_12m_vs_prev', { total: formatMoney(r.prev_period_total, r.currency) }) }}
           </div>
           <div class="text-[11px] text-neutral-400 mt-2">{{ t('costs.rolling_12m_hint') }}</div>
+        </div>
+
+        <!-- Náklady celkem v CZK — jen u víc měn, viz costsTotalCzk -->
+        <div v-if="costsTotalCzk"
+          class="bg-surface border border-primary-200 rounded-lg p-5 shadow-sm bg-primary-50/30">
+          <div class="text-xs uppercase tracking-wide text-primary-700 mb-1">
+            {{ t('costs.costs_total_czk', { year: summary.year }) }}
+          </div>
+          <div class="text-2xl font-semibold text-primary-700 font-mono">
+            {{ formatMoney(costsTotalCzk.this_year, 'CZK') }}
+          </div>
+          <div v-if="costsTotalCzk.change_pct !== null" class="text-xs mt-1"
+            :class="costsTotalCzk.change_pct <= 0 ? 'text-success-600' : 'text-danger-500'">
+            {{ costsTotalCzk.change_pct >= 0 ? '▲' : '▼' }} {{ Math.abs(costsTotalCzk.change_pct) }} %
+            {{ t('costs.vs_prev_ytd', { year: summary.prev_year }) }}
+          </div>
+          <div class="text-[11px] text-neutral-500 mt-2">
+            {{ t('costs.costs_total_czk_hint', { n: costsTotalCzk.currency_count }) }}
+          </div>
         </div>
 
         <!-- Náklady tento rok per měna -->

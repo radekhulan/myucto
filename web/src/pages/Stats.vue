@@ -136,6 +136,16 @@ const revenueThisYear = computed(() =>
     project_count: c.this_year_project_count,
   }))
 )
+/**
+ * Obrat napříč měnami v CZK. Ukazujeme až od DVOU měn — u korunového dodavatele by dlaždice
+ * jen zdvojila to, co stojí vedle. Pro multi-currency je to naopak jediné číslo, které jde
+ * porovnat s jiným účetnictvím: cizoměnná faktura v CZK řadě není a při srovnávání zmizí.
+ */
+const revenueTotalCzk = computed(() => {
+  const t = summary.value?.kpi?.total_czk
+  return t && t.currency_count > 1 ? t : null
+})
+
 const revenuePrevYear = computed(() =>
   (summary.value?.kpi?.per_currency ?? []).map(c => ({
     currency: c.currency,
@@ -290,6 +300,25 @@ const hasAnyData = computed(() =>
               }) }}
             </div>
             <div class="text-[10px] text-neutral-400 mt-0.5">{{ t('stats.flat_tax_hint') }}</div>
+          </div>
+        </div>
+
+        <!-- Obrat celkem v CZK — jen u víc měn, viz revenueTotalCzk -->
+        <div v-if="revenueTotalCzk"
+          class="bg-surface border border-primary-200 rounded-lg p-5 shadow-sm bg-primary-50/30">
+          <div class="text-xs uppercase tracking-wide text-primary-700 mb-1">
+            {{ t('stats.revenue_total_czk', { year: summary.year }) }}
+          </div>
+          <div class="text-2xl font-semibold text-primary-700 font-mono">
+            {{ formatMoney(revenueTotalCzk.this_year, 'CZK') }}
+          </div>
+          <div v-if="revenueTotalCzk.change_pct !== null" class="text-xs mt-1"
+            :class="revenueTotalCzk.change_pct >= 0 ? 'text-success-600' : 'text-danger-500'">
+            {{ revenueTotalCzk.change_pct >= 0 ? '▲' : '▼' }} {{ Math.abs(revenueTotalCzk.change_pct) }} %
+            {{ t('dashboard.vs_prev_ytd', { year: summary.prev_year }) }}
+          </div>
+          <div class="text-[11px] text-neutral-500 mt-2">
+            {{ t('stats.revenue_total_czk_hint', { n: revenueTotalCzk.currency_count }) }}
           </div>
         </div>
 

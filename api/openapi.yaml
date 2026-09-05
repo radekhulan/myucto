@@ -7843,6 +7843,10 @@ paths:
         aging závazků, forecast, rozpad DPH na vstupu (12m), rozpad nákladů po
         kategoriích, histogramy. VAT-aware (`is_vat_payer`). Zálohy se vyřazují
         z nákladů dle cash sémantiky (zaplaceno a nespárováno).
+
+        `kpi.total_czk` nese náklady napříč všemi měnami přepočtené kurzem dokladu
+        (`purchase_invoices.exchange_rate`) — protějšek téhož pole v `/dashboard/summary`
+        a jediné číslo porovnatelné s účetnictvím vedeným v korunách.
       responses:
         '200': { description: OK }
 
@@ -21105,6 +21109,19 @@ components:
         kpi:
           type: object
           properties:
+            total_czk:
+              type: object
+              description: |
+                Obrat napříč VŠEMI měnami přepočtený na CZK kurzem dokladu (`invoices.exchange_rate`;
+                CZK i chybějící kurz = násobitel 1). `per_currency` je zdroj pravdy pro čtení po měnách,
+                tohle je jediné číslo porovnatelné s účetnictvím vedeným v korunách. UI ho zobrazuje
+                až od dvou měn (`currency_count > 1`).
+              properties:
+                currency_count: { type: integer, description: "Počet měn, které se do součtu sešly" }
+                this_year: { type: number }
+                prev_year: { type: number }
+                prev_year_ytd: { type: number, description: "Loni do stejného dne v roce (pro fair YoY)" }
+                change_pct: { type: [number, "null"], description: "Letošek vs prev_year_ytd v %" }
             per_currency:
               type: array
               description: "Per měna: obrat YTD + loni + YTD loni (do stejného kalendářního dne) + počty faktur/klientů/zakázek pro každý rok."

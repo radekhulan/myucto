@@ -131,6 +131,47 @@ final class SummaryActionRevenueTest extends TestCase
         self::assertEqualsWithDelta($baseCnt + 2.0, $this->kpiCur($after, 'CZK', 'this_year_invoice_count'), 0.01, 'this_year_invoice_count = 2.');
     }
 
+    /**
+     * kpi().total_czk sčítá VŠECHNY měny přepočtené kurzem dokladu.
+     *
+     * Vzniklo z reklamace (2026-09): zákazník srovnával graf tržeb s Pohodou a chybělo
+     * mu 44 918 Kč — přesně jeho cizoměnné faktury, které v CZK řadě nejsou a nikde
+     * v UI nebylo celkové číslo. Test proto hlídá právě ten rozdíl: per_currency CZK
+     * naroste JEN o korunovou fakturu, total_czk o obě.
+     */
+    public function testKpiTotalCzkSumsAllCurrencies(): void
+    {
+        if ($this->eurId === 0) {
+            self::markTestSkipped('Bez EUR měny nelze ověřit součet napříč měnami.');
+        }
+        $baseTotal = (float) $this->kpi(2001, 2000)['total_czk']['this_year'];
+        $baseCzk = $this->kpiCur($this->kpi(2001, 2000), 'CZK', 'this_year');
+        $client = $this->client('Golden Klient TotalCzk');
+
+        // CZK 1000 → 1000 Kč; EUR 100 × kurz 25 → 2500 Kč. Dohromady 3500 Kč.
+        $this->invoice($client, '2001-06-15', '2001-06-15', 1000.0, 1210.0, $this->czkId, 1.0);
+        $this->invoice($client, '2001-07-15', '2001-07-15', 100.0, 121.0, $this->eurId, 25.0);
+
+        $after = $this->kpi(2001, 2000);
+        self::assertEqualsWithDelta(
+            $baseCzk + 1000.0,
+            $this->kpiCur($after, 'CZK', 'this_year'),
+            0.01,
+            'CZK řada zůstává v měně dokladu — eurová faktura do ní nepatří.',
+        );
+        self::assertEqualsWithDelta(
+            $baseTotal + 3500.0,
+            (float) $after['total_czk']['this_year'],
+            0.01,
+            'total_czk = CZK net + EUR net×kurz (1000 + 100×25).',
+        );
+        self::assertGreaterThanOrEqual(
+            2,
+            (int) $after['total_czk']['currency_count'],
+            'currency_count hlásí, kolik měn se do součtu sešlo — UI podle něj dlaždici zobrazuje.',
+        );
+    }
+
     /** topClients(): přepočet na CZK přes exchange_rate + agregace přes měny na klienta. */
     public function testTopClientsCzkConversionForFreshClient(): void
     {

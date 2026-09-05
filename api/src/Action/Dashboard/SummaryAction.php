@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Accounting\Activation\PendingBackfillCounter;
+use MyInvoice\Support\Sql\CzkAmountExpr;
 use MyInvoice\Support\Sql\PayablePredicate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -181,7 +182,7 @@ final class SummaryAction
     {
         $rev = $this->revenueCol($isVatPayer);
         $sql = "SELECT i.revenue_category_id, rc.code, rc.label,
-                       SUM($rev * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)) AS total,
+                       SUM(" . CzkAmountExpr::amount($rev, 'i') . ") AS total,
                        COUNT(*) AS cnt
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
@@ -310,7 +311,7 @@ final class SummaryAction
             $current = round((float) ($journal['totals']['prijem_danovy'] ?? 0) + (float) ($journal['totals']['prijem_osvobozeny'] ?? 0), 2);
         } else {
             $stmt = $pdo->prepare(
-            "SELECT COALESCE(SUM(i.total_with_vat * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)), 0) AS sum_czk
+            "SELECT COALESCE(SUM(" . CzkAmountExpr::amount('i.total_with_vat', 'i') . "), 0) AS sum_czk
                FROM invoices i
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
@@ -386,6 +387,9 @@ final class SummaryAction
     private function kpi(\PDO $pdo, int $year, int $prevYear, int $sid, bool $isVatPayer): array
     {
         $rev = $this->revenueCol($isVatPayer);
+        // Tentýž obrat ještě jednou, přepočtený na CZK — z něj se sečte `total_czk` (viz níže).
+        // Jde o DALŠÍ SLOUPCE téhož dotazu, ne druhý průchod tabulkou.
+        $revCzk = CzkAmountExpr::amount($rev, 'i');
         // Obrat per měna pro YTD (letošní vs. minulý rok)
         // Záměrně počítáme i NEZAPLACENÉ faktury, pokud jsou vystavené (status: issued / sent / paid).
         // Dobropisy (credit_note) ZAHRNUJEME — mají záporné total_with_vat (viz CancelInvoiceAction),
@@ -402,6 +406,13 @@ final class SummaryAction
                        SUM(CASE WHEN YEAR(i.effective_tax_date) = ?
                                   AND i.effective_tax_date <= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
                                  THEN $rev ELSE 0 END) AS prev_year_ytd,
+                       SUM(CASE WHEN YEAR(i.effective_tax_date) = ?
+                                 THEN $revCzk ELSE 0 END) AS this_year_czk,
+                       SUM(CASE WHEN YEAR(i.effective_tax_date) = ?
+                                 THEN $revCzk ELSE 0 END) AS prev_year_czk,
+                       SUM(CASE WHEN YEAR(i.effective_tax_date) = ?
+                                  AND i.effective_tax_date <= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+                                 THEN $revCzk ELSE 0 END) AS prev_year_ytd_czk,
                        SUM(CASE WHEN YEAR(i.effective_tax_date) = ?
                                  THEN 1 ELSE 0 END) AS this_year_invoice_count,
                        SUM(CASE WHEN YEAR(i.effective_tax_date) = ?
@@ -426,6 +437,7 @@ final class SummaryAction
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
             $year, $prevYear, $prevYear,
+            $year, $prevYear, $prevYear,   // tytéž tři periody znovu, ale v CZK přepočtu
             $year, $prevYear,
             $year, $prevYear,
             $year, $prevYear,
@@ -434,7 +446,13 @@ final class SummaryAction
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
         $perCurrency = [];
+        $czkThisYear = 0.0;
+        $czkPrevYear = 0.0;
+        $czkPrevYearYtd = 0.0;
         foreach ($rows as $r) {
+            $czkThisYear += (float) $r['this_year_czk'];
+            $czkPrevYear += (float) $r['prev_year_czk'];
+            $czkPrevYearYtd += (float) $r['prev_year_ytd_czk'];
             $thisYear = (float) $r['this_year'];
             $prevYearTotal = (float) $r['prev_year'];
             $prevYearYtd = (float) $r['prev_year_ytd'];
@@ -519,12 +537,12 @@ final class SummaryAction
         $costCol = $this->costCol($isVatPayer);
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) AS cnt,
-                    COALESCE(SUM({$costCol} * IF(cur.code = 'CZK' OR pi.exchange_rate IS NULL, 1, pi.exchange_rate)), 0) AS costs_czk
+                    COALESCE(SUM(" . CzkAmountExpr::amount($costCol, 'pi') . "), 0) AS costs_czk
                FROM purchase_invoices pi
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
                 AND pi.status NOT IN ('draft', 'cancelled')" . $this->advanceCostExclude() . "
-                AND pi.issue_date >= ? AND pi.issue_date < ?"
+                AND pi.effective_cost_date >= ? AND pi.effective_cost_date < ?"
         );
         $stmt->execute([$sid, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)]);
         $piRow = $stmt->fetch(\PDO::FETCH_ASSOC) ?: ['cnt' => 0, 'costs_czk' => 0];
@@ -532,7 +550,7 @@ final class SummaryAction
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) AS cnt,
                     COALESCE(SUM(GREATEST(" . PayablePredicate::remainingExpression('pi') . ", 0)
-                    * IF(cur.code = 'CZK' OR pi.exchange_rate IS NULL, 1, pi.exchange_rate)), 0) AS unpaid_czk
+                    * " . CzkAmountExpr::rate('pi') . "), 0) AS unpaid_czk
                FROM purchase_invoices pi
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
@@ -556,6 +574,20 @@ final class SummaryAction
 
         return [
             'per_currency'        => array_values($perCurrency),
+            // Obrat napříč VŠEMI měnami, přepočtený kurzem dokladu. Per-měnové řady jsou
+            // pro čtení správně (euro se nesčítá s korunou), ale nedají se porovnat s jiným
+            // účetnictvím, které vede jedno CZK číslo — a cizoměnná faktura z nich při
+            // pohledu na CZK řadu prostě zmizí. UI tenhle součet ukazuje jen u víc měn,
+            // u jednoměnového dodavatele by jen zdvojil to, co už na stránce je.
+            'total_czk'           => [
+                'currency_count' => count($perCurrency),
+                'this_year'      => round($czkThisYear, 2),
+                'prev_year'      => round($czkPrevYear, 2),
+                'prev_year_ytd'  => round($czkPrevYearYtd, 2),
+                'change_pct'     => $czkPrevYearYtd > 0
+                    ? round((($czkThisYear - $czkPrevYearYtd) / $czkPrevYearYtd) * 100, 1)
+                    : null,
+            ],
             'issued_count_ytd'    => $issuedCount,
             'overdue_count'       => $overdueTotalCount,
             'overdue_per_currency'=> $overduePerCurrency,
@@ -623,16 +655,23 @@ final class SummaryAction
         return "(i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)";
     }
 
+    /**
+     * Náklady po měsících pro dashboard. Datum uznání je `effective_cost_date`
+     * (= COALESCE(tax_date, issue_date), DUZP má přednost dle § 73) — TOTÉŽ, co používá
+     * {@see PurchaseSummaryAction}. Dokud se tady bralo `issue_date`, ukazovaly dashboard
+     * a stránka Náklady nad týmiž doklady jiná čísla všude, kde DUZP spadlo do jiného
+     * měsíce než datum vystavení (typicky faktura z přelomu měsíce).
+     */
     private function purchaseCostsByMonth(\PDO $pdo, int $sid, bool $isVatPayer): array
     {
         $costCol = $this->costCol($isVatPayer);
-        $sql = "SELECT DATE_FORMAT(pi.issue_date, '%Y-%m') AS ym,
-                       SUM({$costCol} * IF(cur.code = 'CZK' OR pi.exchange_rate IS NULL, 1, pi.exchange_rate)) AS total
+        $sql = "SELECT DATE_FORMAT(pi.effective_cost_date, '%Y-%m') AS ym,
+                       SUM(" . CzkAmountExpr::amount($costCol, 'pi') . ") AS total
                   FROM purchase_invoices pi
              LEFT JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
                    AND pi.status NOT IN ('draft', 'cancelled')" . $this->advanceCostExclude() . "
-                   AND pi.issue_date >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 11 MONTH), '%Y-%m-01')
+                   AND pi.effective_cost_date >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 11 MONTH), '%Y-%m-01')
                  GROUP BY ym";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$sid]);
@@ -738,7 +777,7 @@ final class SummaryAction
         // Přepočet na CZK přes i.exchange_rate (CNB k DUZP). CZK řádky multiplier 1.
         // Grupujeme jen po klientovi (ne per currency) — multi-currency klient se neroztrhne
         // a ranking je správný (1000 EUR > 20 000 CZK).
-        $revCzk = "$rev * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)";
+        $revCzk = CzkAmountExpr::amount($rev, 'i');
         $sql = "SELECT c.id, c.company_name,
                        SUM($revCzk) AS total_czk,
                        GROUP_CONCAT(DISTINCT cur.code ORDER BY cur.code SEPARATOR ',') AS currencies,
@@ -851,7 +890,7 @@ final class SummaryAction
         $rev = $this->revenueCol($isVatPayer);
         // Stejné jako topClients() — CZK přepočet + grupování po klientovi pro správný ranking
         // napříč měnami (1000 EUR > 20 000 CZK).
-        $revCzk = "$rev * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1)";
+        $revCzk = CzkAmountExpr::amount($rev, 'i');
         $sql = "SELECT c.id, c.company_name,
                        SUM($revCzk) AS total_czk,
                        GROUP_CONCAT(DISTINCT cur.code ORDER BY cur.code SEPARATOR ',') AS currencies,
@@ -1320,7 +1359,7 @@ final class SummaryAction
         $rev = $isVatPayer ? 'total_without_vat' : 'total_with_vat';
         // CZK pojistka jako ve zbytku kódu: bez ní by se korunová faktura se zbloudilým
         // `exchange_rate` vynásobila kurzem. Ostatních ~45 kurzových výrazů ji má.
-        $sql = "SELECT $rev * COALESCE(IF(cur.code = 'CZK', 1, i.exchange_rate), 1) AS size_czk
+        $sql = "SELECT " . CzkAmountExpr::amount($rev, 'i') . " AS size_czk
                   FROM invoices i
              LEFT JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
