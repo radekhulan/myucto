@@ -13,6 +13,7 @@ use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicenseSeatLimitExceeded;
+use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\License\LicenseState;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -74,6 +75,8 @@ final class UserAdminAction
             );
         } catch (LicenseSeatLimitExceeded $e) {
             return Json::error($response, self::blockCode($e->reason), self::blockMessage($e->reason, $e->state), 403);
+        } catch (LicensePayrollLimitExceeded) {
+            return Json::error($response, 'license_payroll_user_limit', 'Zvolená role by zabrala další placené místo v modulu Mzdy. Nejprve rozšiřte mzdový doplněk.', 403, ['buy_url' => '/activation/purchase#payroll-addon']);
         } catch (\PDOException $e) {
             if (str_contains($e->getMessage(), 'uq_users_email')) {
                 return Json::error($response, 'email_taken', 'Email je už registrovaný.', 409);
@@ -145,6 +148,8 @@ final class UserAdminAction
             }
         } catch (LicenseSeatLimitExceeded $e) {
             return Json::error($response, self::blockCode($e->reason), self::blockMessage($e->reason, $e->state), 403);
+        } catch (LicensePayrollLimitExceeded) {
+            return Json::error($response, 'license_payroll_user_limit', 'Zvolená role by zabrala další placené místo v modulu Mzdy. Nejprve rozšiřte mzdový doplněk.', 403, ['buy_url' => '/activation/purchase#payroll-addon']);
         }
         if ($newRole !== null && (int) $row['role_id'] !== (int) $newRole['id']) {
             $this->log($request, 'user.role_updated', $id, ['from_role_id' => $row['role_id'], 'to_role_id' => (int) $newRole['id']]);
@@ -177,6 +182,8 @@ final class UserAdminAction
             }
         } catch (LicenseSeatLimitExceeded $e) {
             return Json::error($response, self::blockCode($e->reason), self::blockMessage($e->reason, $e->state), 403);
+        } catch (LicensePayrollLimitExceeded) {
+            return Json::error($response, 'license_payroll_user_limit', 'Zvolená role by zabrala další placené místo v modulu Mzdy. Nejprve rozšiřte mzdový doplněk.', 403, ['buy_url' => '/activation/purchase#payroll-addon']);
         }
         $this->sessions->destroyAllForUser($id);
         $this->log($request, 'user.deactivated', $id, []);

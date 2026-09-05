@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { licenseApi, type LicenseStatus, type LicenseStateKind, type TierQuote, type UpgradeQuote } from '@/api/license'
+import { licenseApi, type LicenseStatus, type LicenseStateKind, type PayrollQuote, type TierQuote, type UpgradeQuote } from '@/api/license'
 import { formatQuotaBytes } from '@/api/storageQuota'
 import { ensureInstanceDunning, instanceStatus } from '@/api/instanceStatus'
 import { resolveBillingNarrative } from '@/api/instanceHealth'
@@ -123,6 +123,25 @@ const tierQuote = ref<TierQuote | null>(null)
 const tierBusy = ref(false)
 const tierError = ref<string | null>(null)
 const tierSuccess = ref<string | null>(null)
+const payrollQuote = ref<PayrollQuote | null>(null)
+const payrollBusy = ref(false)
+const payrollError = ref<string | null>(null)
+const payrollSuccess = ref<string | null>(null)
+const payrollEmployeesTarget = ref(0)
+const payrollUsersTarget = ref(0)
+const payrollQuotedEmployeesTarget = ref(0)
+const payrollQuotedUsersTarget = ref(0)
+const payrollTargetsValid = computed(() => {
+  const current = status.value
+  return !!current
+    && Number.isInteger(payrollEmployeesTarget.value)
+    && Number.isInteger(payrollUsersTarget.value)
+    && payrollEmployeesTarget.value >= current.payroll_employees_active
+    && payrollEmployeesTarget.value <= 4294967295
+    && payrollUsersTarget.value >= current.payroll_users_active
+    && payrollUsersTarget.value >= 1
+    && payrollUsersTarget.value <= 100
+})
 
 // Automatické prodlužování předplatného (vypnutí = licence doběhne do valid_until).
 const cancellingRenewal = ref(false)
@@ -172,7 +191,13 @@ const companiesOverage = computed(() => {
   const s = status.value
   return !!s && s.max_companies !== null && s.companies_active > s.max_companies
 })
-const hasOverage = computed(() => usersOverage.value || companiesOverage.value)
+const payrollOverage = computed(() => {
+  const s = status.value
+  if (!s?.payroll_enabled) return false
+  return (s.payroll_max_employees !== null && s.payroll_employees_active > s.payroll_max_employees)
+    || s.payroll_users_active > s.payroll_users_licensed
+})
+const hasOverage = computed(() => usersOverage.value || companiesOverage.value || payrollOverage.value)
 
 /** Barevný akcent karty stavu dle stavu licence. */
 const STATE_STYLE: Record<LicenseStateKind, { card: string; badge: string }> = {
@@ -276,6 +301,8 @@ async function load() {
     // Výchozí cílový počet = aktuální aktivní počet uživatelů.
     upgradeUsers.value = Math.max(status.value.users_active, 1)
     targetTier.value = status.value.tier ?? 'single'
+    payrollEmployeesTarget.value = status.value.payroll_employees_active
+    payrollUsersTarget.value = Math.max(status.value.payroll_users_active, status.value.payroll_users_licensed, 1)
   } catch (e: unknown) {
     errorMsg.value = (e as Error)?.message ?? 'Nepodařilo se načíst stav licence.'
   } finally {
@@ -443,6 +470,59 @@ async function applyTierChange(): Promise<void> {
     tierError.value = upgradeErrMsg(e)
   } finally {
     tierBusy.value = false
+  }
+}
+
+async function calcPayrollQuote(enabled: boolean): Promise<void> {
+  if (payrollBusy.value || !status.value || (enabled && !payrollTargetsValid.value)) return
+  payrollBusy.value = true
+  payrollError.value = null
+  payrollSuccess.value = null
+  try {
+    payrollQuotedEmployeesTarget.value = enabled
+      ? payrollEmployeesTarget.value
+      : status.value.payroll_employees_active
+    payrollQuotedUsersTarget.value = enabled
+      ? payrollUsersTarget.value
+      : Math.max(status.value.payroll_users_active, 1)
+    payrollQuote.value = await licenseApi.payrollQuote(
+      enabled,
+      payrollQuotedEmployeesTarget.value,
+      payrollQuotedUsersTarget.value,
+    )
+  } catch (e: unknown) {
+    payrollError.value = upgradeErrMsg(e)
+  } finally {
+    payrollBusy.value = false
+  }
+}
+
+async function applyPayrollChange(): Promise<void> {
+  const quote = payrollQuote.value
+  if (!quote || payrollBusy.value) return
+  payrollBusy.value = true
+  payrollError.value = null
+  try {
+    let result = await licenseApi.changePayroll(
+      quote.new_enabled,
+      quote.quote_token,
+      payrollQuotedEmployeesTarget.value,
+      payrollQuotedUsersTarget.value,
+    )
+    if (result.pending && result.order_id) {
+      const settled = await licenseApi.waitForChange(result.order_id)
+      if (settled.applied && settled.license) result = { ...result, pending: false, state: settled.license }
+    }
+    status.value = result.state
+    payrollQuote.value = null
+    payrollSuccess.value = result.scheduled
+      ? t('license.change_scheduled', { date: fmtEffective(result.effective_at) })
+      : result.pending ? t('license.change_pending') : t('license.payroll_change_success')
+    await auth.refresh()
+  } catch (e: unknown) {
+    payrollError.value = upgradeErrMsg(e)
+  } finally {
+    payrollBusy.value = false
   }
 }
 
@@ -958,8 +1038,8 @@ onMounted(async () => {
         <!-- Přečerpání rozsahu — víc aktivních uživatelů / firem, než licence pokrývá. -->
         <div v-if="hasOverage" class="mt-4 rounded-md border border-danger-300 bg-danger-50/60 p-3 text-sm text-danger-700">
           <p class="font-medium">{{ t('license.overage_title') }}</p>
-          <p class="mt-1 text-danger-600">{{ t('license.overage_desc') }}</p>
-          <a v-if="canUpgrade" :href="companiesOverage ? '#tier-change' : '#upgrade'" :class="[btnFilled('danger'), 'mt-3']">
+          <p class="mt-1 text-danger-600">{{ t(payrollOverage ? 'license.payroll_overage_desc' : 'license.overage_desc') }}</p>
+          <a v-if="canUpgrade" :href="payrollOverage ? '#payroll-addon' : companiesOverage ? '#tier-change' : '#upgrade'" :class="[btnFilled('danger'), 'mt-3']">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
             {{ t('license.overage_cta') }}
           </a>
@@ -1094,6 +1174,45 @@ onMounted(async () => {
          instance dostává při zřízení automaticky — o důvod víc, aby šel opravit
          ručně, když se to nepovede. -->
     <div v-if="status && isAdmin && !loading" class="space-y-6 mt-6">
+      <section v-if="canUpgrade" id="payroll-addon" class="rounded-lg border border-payroll-200 bg-payroll-50/30 p-5">
+        <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.payroll_title') }}</h2>
+        <p class="mt-1 text-sm text-neutral-600">{{ t('license.payroll_desc') }}</p>
+        <dl class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+          <div><dt class="text-neutral-500">{{ t('license.payroll_employees') }}</dt><dd class="font-medium">{{ status.payroll_employees_active }} / {{ status.payroll_max_employees ?? t('license.unlimited') }}</dd></div>
+          <div><dt class="text-neutral-500">{{ t('license.payroll_users') }}</dt><dd class="font-medium">{{ status.payroll_users_active }} / {{ status.payroll_users_licensed }}</dd></div>
+        </dl>
+        <div class="mt-3 grid gap-3 sm:grid-cols-2">
+          <label class="text-sm">
+            <span class="mb-1 block text-xs uppercase tracking-wider text-neutral-500">{{ t('license.payroll_employees_target') }}</span>
+            <input v-model.number="payrollEmployeesTarget" type="number" :min="status.payroll_employees_active" max="4294967295" step="1" class="h-9 w-full rounded-md border border-neutral-300 px-3 text-sm" @input="payrollQuote = null" />
+          </label>
+          <label class="text-sm">
+            <span class="mb-1 block text-xs uppercase tracking-wider text-neutral-500">{{ t('license.payroll_users_target') }}</span>
+            <input v-model.number="payrollUsersTarget" type="number" :min="Math.max(status.payroll_users_active, 1)" max="100" step="1" class="h-9 w-full rounded-md border border-neutral-300 px-3 text-sm" @input="payrollQuote = null" />
+          </label>
+        </div>
+        <p v-if="!payrollTargetsValid" class="mt-2 text-xs text-danger-600">{{ t('license.payroll_target_invalid') }}</p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button type="button" :disabled="payrollBusy || !payrollTargetsValid" :class="btnFilled('success')" @click="calcPayrollQuote(true)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
+            {{ payrollBusy ? t('license.upgrade_quoting') : t(status.payroll_enabled ? 'license.payroll_change' : 'license.payroll_enable') }}
+          </button>
+          <button v-if="status.payroll_enabled" type="button" :disabled="payrollBusy" :class="btnOutline('warning')" @click="calcPayrollQuote(false)">
+            {{ t('license.payroll_disable') }}
+          </button>
+        </div>
+        <div v-if="payrollQuote" class="mt-4 rounded-md border border-payroll-300 bg-surface p-3 text-sm">
+          <p class="font-medium">{{ payrollQuote.scheduled ? t('license.payroll_disable_scheduled') : t('license.upgrade_amount', { amount: fmtAmount(payrollQuote.amount, payrollQuote.currency) }) }}</p>
+          <p v-if="payrollQuote.recurring_delta !== null" class="mt-1 text-neutral-500">{{ t('license.payroll_recurring_delta', { amount: fmtAmount(payrollQuote.recurring_delta, payrollQuote.currency) }) }}</p>
+          <button type="button" :disabled="payrollBusy" :class="[btnFilled(payrollQuote.scheduled ? 'warning' : 'success'), 'mt-3']" @click="applyPayrollChange">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t(payrollQuote.scheduled ? 'license.schedule_change_cta' : 'license.upgrade_pay_cta') }}
+          </button>
+        </div>
+        <p v-if="payrollSuccess" class="mt-3 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700">{{ payrollSuccess }}</p>
+        <p v-if="payrollError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">{{ payrollError }}</p>
+      </section>
+
       <section v-if="canUpgrade" id="tier-change" class="rounded-lg border border-primary-200 bg-primary-50/30 p-5">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.tier_change_title') }}</h2>
         <p class="mt-1 text-sm text-neutral-600">{{ t('license.tier_change_desc') }}</p>

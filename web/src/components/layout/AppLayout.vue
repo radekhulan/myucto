@@ -379,7 +379,7 @@ const navSections = computed<NavSection[]>(() => {
   // uživateli nesebrala účetnictví.
   const accountingEnabled = auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_enabled !== false
   // Mzdy jsou opt-in (migrace 1290), takže undefined = vypnuto — opačně než účetnictví výš.
-  const payrollEnabled = auth.hasCommercialFeatures && supplierStore.currentSupplier?.payroll_enabled === true
+  const payrollEnabled = auth.hasPayrollFeatures && supplierStore.currentSupplier?.payroll_enabled === true
   // Účetnictví (Epic F1) — sekce se zobrazí jen firmám v režimu podvojného účetnictví.
   const isDoubleEntry = accountingEnabled && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
   // Daňová evidence (Epic DE) — zrcadlo isDoubleEntry; sekce jen pro režim daňové evidence.

@@ -335,6 +335,8 @@ use MyInvoice\Action\License\UpgradeLicenseAction;
 use MyInvoice\Action\License\SupportLinkAction;
 use MyInvoice\Action\License\TierQuoteAction;
 use MyInvoice\Action\License\TierChangeAction;
+use MyInvoice\Action\License\PayrollQuoteAction;
+use MyInvoice\Action\License\PayrollChangeAction;
 use MyInvoice\Action\License\ChangeStatusAction;
 use MyInvoice\Action\License\PurchaseStartAction;
 use MyInvoice\Action\License\PurchaseCompleteAction;
@@ -473,6 +475,8 @@ final class Routes
         $app->post('/api/license/quota',       StorageUpgradeAction::class);
         $app->post('/api/license/tier/quote', TierQuoteAction::class);
         $app->post('/api/license/tier',       TierChangeAction::class);
+        $app->post('/api/license/payroll/quote', PayrollQuoteAction::class);
+        $app->post('/api/license/payroll',       PayrollChangeAction::class);
         $app->post('/api/license/change-status', ChangeStatusAction::class);
         // Nový nákup: PKCE session a serverový claim bez licenčního klíče v URL.
         $app->post('/api/license/purchase/start', PurchaseStartAction::class);

@@ -22,6 +22,7 @@ final class LicenseCapacityGate
         private readonly Connection $db,
         private readonly LicenseService $license,
         private readonly SeatPolicy $seats,
+        private readonly PayrollUsagePolicy $payroll,
     ) {}
 
     /**
@@ -33,14 +34,48 @@ final class LicenseCapacityGate
     {
         return $this->withLock(function () use ($mutation): mixed {
             $before = $this->seats->countActiveSeats();
+            $payrollBefore = $this->payroll->countActiveUsers();
 
-            return $this->transactional(function () use ($mutation, $before): mixed {
+            return $this->transactional(function () use ($mutation, $before, $payrollBefore): mixed {
                 $result = $mutation();
                 $after = $this->seats->countActiveSeats();
+                $payrollAfter = $this->payroll->countActiveUsers();
                 $state = $this->license->current()->withActiveUsers($before);
                 $reason = $state->seatCountBlockReason($after);
                 if ($reason !== null) {
                     throw new LicenseSeatLimitExceeded($reason, $state, $before, $after);
+                }
+                $state = $state->withPayrollUsage($state->payrollEmployeesActive, $payrollBefore);
+                $reason = $state->payrollUserBlockReason($payrollAfter);
+                if ($reason !== null) {
+                    throw new LicensePayrollLimitExceeded($reason, $state, $payrollBefore, $payrollAfter);
+                }
+
+                return $result;
+            });
+        });
+    }
+
+    /**
+     * @template T
+     * @param callable():T $mutation
+     * @return T
+     */
+    public function mutatePayrollEmployees(callable $mutation): mixed
+    {
+        return $this->withLock(function () use ($mutation): mixed {
+            $before = $this->payroll->countActiveEmployees();
+
+            return $this->transactional(function () use ($mutation, $before): mixed {
+                $result = $mutation();
+                $after = $this->payroll->countActiveEmployees();
+                $state = $this->license->current()->withPayrollUsage(
+                    $before,
+                    $this->payroll->countActiveUsers(),
+                );
+                $reason = $state->payrollEmployeeBlockReason($after);
+                if ($reason !== null) {
+                    throw new LicensePayrollLimitExceeded($reason, $state, $before, $after);
                 }
 
                 return $result;

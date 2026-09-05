@@ -37,9 +37,10 @@ nezakládá právo produkt jako celek provozovat bez licence.
 > Teprve po uplynutí zkušebního období vyžaduje komerční část aktivaci
 > licenčním klíčem.
 
-Cena předplatného je **za jednoho aktivního uživatele a měsíc**; celková cena
+Cena účetní licence je **za jednoho aktivního uživatele a měsíc**; celková cena
 je násobkem tarifu a počtu aktivních uživatelů (viz [§ 100.3](#1003-zkusebni-obdobi-a-stavy-licence)
-ke způsobu započítání). Úplné znění licenčního ujednání je v souboru
+ke způsobu započítání). Mzdy jsou samostatný volitelný doplněk s vlastní cenou
+za aktivního mzdového uživatele. Úplné znění licenčního ujednání je v souboru
 `LICENCE.txt` v rootu instalace a na <https://myucto.cz/licence>; podmínky
 prodeje předplatného upravují obchodní podmínky na
 <https://myucto.cz/obchodni-podminky>.
@@ -106,7 +107,14 @@ instalace ani licenční tajemství se nedají změnit formulářem. Na webu zvo
 - **tarif** podle počtu firemních agend — **Jedna firma** (1 agenda),
   **Účetní kancelář** (až 10 agend) nebo **Neomezeně** (bez limitu firem),
 - **počet uživatelů**,
+- volitelně **Mzdy**, mzdové pásmo a počet mzdových uživatelů,
 - **období** — měsíční, nebo roční.
+
+Mzdové pásmo se určuje podle součtu aktivních zaměstnanců všech firem v celé
+instalaci. Nabídka obsahuje pásma do 25 zaměstnanců, do 50 zaměstnanců a
+neomezený počet zaměstnanců. Do počtu mzdových uživatelů se počítají aktivní
+uživatelé, kteří mají alespoň v jedné firmě se zapnutými Mzdami účinné právo
+k zápisu do mzdových dat. Mzdy nejsou v objednávce předvolené.
 
 > 💡 **Roční předplatné = 10 měsíčních plateb** (dva měsíce zdarma).
 
@@ -130,7 +138,7 @@ neomezí. Ověřování běží samo na pozadí a **nevyžaduje žádné nastave
 
 > 🛈 **Co se při ověření přenáší.** Jen technické údaje — identifikátor
 > instalace, licenční klíč, identifikace sestavení a souhrnné počty aktivních
-> uživatelů a firem. **Žádná účetní ani osobní data** se na licenční server
+> uživatelů, firem, zaměstnanců a mzdových uživatelů. **Žádná účetní ani osobní data** se na licenční server
 > neposílají.
 
 ## 100.6 Změny kapacity a tarifu
@@ -153,6 +161,11 @@ self-hosted licence nezobrazují. Nabídka ceny je krátkodobě platná a potvrz
 je svázané právě se zobrazenou částkou. Pokud platební brána platbu zpracovává
 asynchronně, aplikace její stav průběžně ověřuje a nový rozsah zpřístupní
 hned po potvrzení.
+
+V téže správě lze doplnit Mzdy, zvýšit počet mzdových uživatelů nebo přejít do
+vyššího pásma podle počtu zaměstnanců. Server účtuje poměrný doplatek do konce
+období. Bez aktivního mzdového nároku po zkušební době nelze Mzdy zapnout ani
+otevřít. Aplikace v takovém případě nabídne zakoupení nebo rozšíření licence.
 
 **Snížení počtu uživatelů, tarifu nebo prostoru** se neprojeví uprostřed už
 zaplaceného období. Po potvrzení se naplánuje od začátku následujícího

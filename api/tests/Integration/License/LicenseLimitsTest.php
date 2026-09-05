@@ -115,6 +115,34 @@ final class LicenseLimitsTest extends TestCase
         self::assertSame($baseline + 2, $this->service->countActiveUsers(), 'Neaktivní uživatel se nepočítá.');
     }
 
+    public function testPayrollUsersCountOnlyEffectiveWriteAccessInEnabledPayrollCompanies(): void
+    {
+        if (!$this->db->hasColumn('supplier', 'payroll_enabled')) {
+            $this->markTestSkipped('Migrace s payroll_enabled neproběhla.');
+        }
+        $pdo = $this->db->pdo();
+        $pdo->exec('UPDATE supplier SET payroll_enabled = 0');
+        $supplierId = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $pdo->prepare("INSERT INTO roles (system_key, name, role_type, is_active) VALUES (NULL, ?, 'staff', 1)")
+            ->execute(['Payroll capacity ' . bin2hex(random_bytes(4))]);
+        $payrollRoleId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, 'payroll.people', 2)")
+            ->execute([$payrollRoleId]);
+        $userId = $this->insertUser('readonly', $this->roleIds()['readonly']);
+        $pdo->prepare('INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, ?)')
+            ->execute([$userId, $supplierId, $payrollRoleId]);
+
+        self::assertSame(0, $this->service->countActivePayrollUsers());
+
+        $pdo->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$supplierId]);
+        $withMembership = $this->service->countActivePayrollUsers();
+        $pdo->prepare('DELETE FROM user_suppliers WHERE user_id = ? AND supplier_id = ?')->execute([$userId, $supplierId]);
+        self::assertSame($withMembership - 1, $this->service->countActivePayrollUsers());
+
+        $pdo->prepare('UPDATE supplier SET payroll_enabled = 0 WHERE id = ?')->execute([$supplierId]);
+        self::assertSame(0, $this->service->countActivePayrollUsers(), 'Bez firmy se zapnutými Mzdami se nepočítá ani superadmin.');
+    }
+
     // ── seat limit přes UserAdminAction::create ─────────────────────────────
 
     public function testCreateUserBlockedOverSeatLimit(): void
@@ -340,6 +368,78 @@ final class LicenseLimitsTest extends TestCase
         self::assertSame('validation_failed', $this->error($resp));
     }
 
+    public function testPayrollCannotBeEnabledWithoutEntitlementAndSupplierGetRemainsReadOnly(): void
+    {
+        if (!$this->db->hasColumn('supplier', 'payroll_enabled')) {
+            $this->markTestSkipped('Migrace s payroll_enabled neproběhla.');
+        }
+        $supplierId = (int) $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 0 WHERE id = ?')->execute([$supplierId]);
+        $this->licenseWithToken($this->token(['payroll_enabled' => false]));
+
+        $get = $this->settings->getSupplierById(
+            (new ServerRequestFactory())
+                ->createServerRequest('GET', '/api/suppliers/' . $supplierId)
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role' => 'admin', 'is_superadmin' => true]),
+            new Psr7Response(),
+            ['id' => (string) $supplierId],
+        );
+        self::assertSame(200, $get->getStatusCode(), (string) $get->getBody());
+        self::assertSame(0, $this->payrollEnabled($supplierId));
+
+        $put = $this->settings->updateSupplier(
+            (new ServerRequestFactory())
+                ->createServerRequest('PUT', '/api/settings/supplier')
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role' => 'admin', 'is_superadmin' => true])
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
+                ->withParsedBody(['payroll_enabled' => true]),
+            new Psr7Response(),
+        );
+
+        self::assertSame(403, $put->getStatusCode(), (string) $put->getBody());
+        self::assertSame('license_payroll_feature_unavailable', $this->error($put));
+        self::assertSame(0, $this->payrollEnabled($supplierId), 'Odmítnuté zapnutí nesmí nic uložit.');
+
+        $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$supplierId]);
+        $unchanged = $this->updateSupplierPayroll($supplierId, true);
+        self::assertSame(200, $unchanged->getStatusCode(), 'Už zapnuté Mzdy nesmí po expiraci blokovat uložení formuláře.');
+        self::assertSame(1, $this->payrollEnabled($supplierId));
+
+        $disabled = $this->updateSupplierPayroll($supplierId, false);
+        self::assertSame(200, $disabled->getStatusCode(), 'Vypnutí Mezd musí jít i bez entitlementu.');
+        self::assertSame(0, $this->payrollEnabled($supplierId));
+    }
+
+    public function testEnablingSupplierPayrollRollsBackWhenItWouldExceedPayrollUserSeats(): void
+    {
+        if (!$this->db->hasColumn('supplier', 'payroll_enabled')) {
+            $this->markTestSkipped('Migrace s payroll_enabled neproběhla.');
+        }
+        $supplierId = (int) $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $this->db->pdo()->exec('UPDATE supplier SET payroll_enabled = 0');
+        $this->licenseWithToken($this->token([
+            'payroll_enabled' => true,
+            'payroll_tier' => 'up_to_25',
+            'payroll_max_employees' => 25,
+            'payroll_users_licensed' => 0,
+        ]));
+
+        $put = $this->settings->updateSupplier(
+            (new ServerRequestFactory())
+                ->createServerRequest('PUT', '/api/settings/supplier')
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role' => 'admin', 'is_superadmin' => true])
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
+                ->withParsedBody(['payroll_enabled' => true]),
+            new Psr7Response(),
+        );
+
+        self::assertSame(403, $put->getStatusCode(), (string) $put->getBody());
+        self::assertSame('license_payroll_user_limit', $this->error($put));
+        self::assertSame(0, $this->payrollEnabled($supplierId), 'Kapacitní brána musí zapnutí firmy rollbacknout.');
+        $body = json_decode((string) $put->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('/activation/purchase#payroll-addon', $body['error']['buy_url'] ?? null);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private function createUser(int $roleId, string $password = 'Sup3rSecret!123'): Psr7Response
@@ -441,6 +541,25 @@ final class LicenseLimitsTest extends TestCase
     private function companyCount(): int
     {
         return (int) $this->db->pdo()->query('SELECT COUNT(*) FROM supplier')->fetchColumn();
+    }
+
+    private function payrollEnabled(int $supplierId): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT payroll_enabled FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function updateSupplierPayroll(int $supplierId, bool $enabled): Psr7Response
+    {
+        return $this->settings->updateSupplier(
+            (new ServerRequestFactory())
+                ->createServerRequest('PUT', '/api/settings/supplier')
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role' => 'admin', 'is_superadmin' => true])
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
+                ->withParsedBody(['payroll_enabled' => $enabled]),
+            new Psr7Response(),
+        );
     }
 
     private function licenseWithToken(string $token): void

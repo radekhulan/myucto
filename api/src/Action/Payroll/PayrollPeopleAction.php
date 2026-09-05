@@ -12,6 +12,9 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\LicenseCapacityGate;
+use MyInvoice\Service\License\LicensePayrollLimitExceeded;
+use MyInvoice\Service\License\LicenseState;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -28,6 +31,7 @@ final class PayrollPeopleAction
         private readonly PayrollPeopleRepository $people,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollPersonCreateService $createService,
+        private readonly LicenseCapacityGate $licenseCapacity,
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollEmployeeDeletionRepository $deletion,
     ) {}
@@ -161,12 +165,24 @@ final class PayrollPeopleAction
                     $serverParams[$key] = $value;
                 }
             }
-            $person = $this->createService->create(
-                $this->currentSupplierId($request),
-                $input,
-                $this->userId($request),
-                $this->ipMatcher->clientIpFromRequest($serverParams),
-                $request->getHeaderLine('User-Agent'),
+            $person = $this->licenseCapacity->mutatePayrollEmployees(
+                fn (): array => $this->createService->create(
+                    $this->currentSupplierId($request),
+                    $input,
+                    $this->userId($request),
+                    $this->ipMatcher->clientIpFromRequest($serverParams),
+                    $request->getHeaderLine('User-Agent'),
+                ),
+            );
+        } catch (LicensePayrollLimitExceeded $e) {
+            return Json::error(
+                $response,
+                $e->reason === LicenseState::BLOCK_NO_LICENSE
+                    ? 'license_payroll_feature_unavailable'
+                    : 'license_payroll_employee_limit',
+                'Dalšího aktivního zaměstnance lze přidat až po rozšíření mzdového doplňku.',
+                403,
+                ['buy_url' => '/activation/purchase#payroll-addon'],
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);

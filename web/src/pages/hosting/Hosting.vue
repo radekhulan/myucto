@@ -54,6 +54,7 @@ const auth = useAuthStore()
 
 const loading = ref(true)
 const errorMsg = ref<string | null>(null)
+const serverDevelopment = ref(false)
 
 const status = instanceStatus.status
 const instance = instanceStatus.instance
@@ -77,7 +78,7 @@ function syncPreviewFromRoute(): void {
   const raw = route.query.nahled
   const value = Array.isArray(raw) ? raw[0] : raw
 
-  if (!auth.isSuperadmin || !isPreviewScenario(value)) {
+  if (!serverDevelopment.value || !auth.isSuperadmin || !isPreviewScenario(value)) {
     stopPreview()
     return
   }
@@ -99,8 +100,13 @@ async function load(): Promise<void> {
   loading.value = true
   errorMsg.value = null
   try {
-    publishInstanceStatus(await licenseApi.status())
+    const result = await licenseApi.status()
+    serverDevelopment.value = result.development === true
+    publishInstanceStatus(result)
+    syncPreviewFromRoute()
   } catch (e: unknown) {
+    serverDevelopment.value = false
+    stopPreview()
     errorMsg.value = (e as Error)?.message ?? t('hosting.load_failed')
   } finally {
     loading.value = false
@@ -1223,9 +1229,10 @@ watch(previewScenario, (scenario) => {
         <RouterLink to="/activation/terms" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.terms') }}</RouterLink>
       </p>
 
-      <!-- Rozcestník náhledu — jen superadmin, jen jako poslední věc na stránce.
+      <!-- Rozcestník náhledu, jen v serverovém development prostředí,
+           jen superadmin a jen jako poslední věc na stránce.
            ⚠️ Nikdy se nezapíná sám; každý stav je jeden odkaz. -->
-      <section v-if="auth.isSuperadmin" class="rounded-lg border border-dashed border-neutral-300 p-4" data-hosting-preview-switch>
+      <section v-if="serverDevelopment && auth.isSuperadmin" class="rounded-lg border border-dashed border-neutral-300 p-4" data-hosting-preview-switch>
         <h2 class="text-sm font-semibold text-neutral-700">{{ t('hosting.preview_title') }}</h2>
         <p class="mt-0.5 text-xs text-neutral-500">{{ t('hosting.preview_desc') }}</p>
         <div class="mt-3 flex flex-wrap gap-1.5">

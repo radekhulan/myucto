@@ -22,11 +22,19 @@ final class LicenseStateTest extends TestCase
         ?string $key = null,
         bool $commercial = true,
         bool $managed = true,
+        bool $payrollEnabled = false,
+        ?string $payrollTier = null,
+        ?int $payrollMaxEmployees = null,
+        int $payrollUsersLicensed = 0,
+        int $payrollEmployeesActive = 0,
+        int $payrollUsersActive = 0,
     ): LicenseState {
         return new LicenseState(
             $kind, 'iid-1', 'single', $maxCompanies, $usersLicensed, $usersActive,
             $companiesActive, null, null, null, $key, null, true,
             false, null, $commercial, $managed,
+            $payrollEnabled, $payrollTier, $payrollMaxEmployees,
+            $payrollUsersLicensed, $payrollEmployeesActive, $payrollUsersActive,
         );
     }
 
@@ -254,5 +262,54 @@ final class LicenseStateTest extends TestCase
         self::assertTrue($paid['commercial_features']);
         self::assertFalse($free['tier_commercial']);
         self::assertFalse($free['commercial_features']);
+    }
+
+    public function testPayrollEntitlementIsIndependentAndTrialAllowsIt(): void
+    {
+        self::assertTrue($this->state(LicenseState::TRIAL)->hasPayrollFeatures());
+        self::assertFalse($this->state(LicenseState::ACTIVE)->hasPayrollFeatures());
+        self::assertTrue($this->state(LicenseState::ACTIVE, payrollEnabled: true)->hasPayrollFeatures());
+        self::assertFalse($this->state(LicenseState::DEGRADED, payrollEnabled: true)->hasPayrollFeatures());
+    }
+
+    public function testPayrollEmployeeAndUserLimitsBlockOnlyGrowth(): void
+    {
+        $state = $this->state(
+            LicenseState::ACTIVE,
+            payrollEnabled: true,
+            payrollTier: 'up_to_25',
+            payrollMaxEmployees: 25,
+            payrollUsersLicensed: 2,
+            payrollEmployeesActive: 25,
+            payrollUsersActive: 2,
+        );
+
+        self::assertNull($state->payrollEmployeeBlockReason(25));
+        self::assertSame(LicenseState::BLOCK_PAYROLL_EMPLOYEE_LIMIT, $state->payrollEmployeeBlockReason(26));
+        self::assertNull($state->payrollUserBlockReason(2));
+        self::assertSame(LicenseState::BLOCK_PAYROLL_USER_LIMIT, $state->payrollUserBlockReason(3));
+    }
+
+    public function testPayrollScopeIsExposedToApiAndAuthSummary(): void
+    {
+        $state = $this->state(
+            LicenseState::ACTIVE,
+            payrollEnabled: true,
+            payrollTier: 'up_to_50',
+            payrollMaxEmployees: 50,
+            payrollUsersLicensed: 4,
+            payrollEmployeesActive: 31,
+            payrollUsersActive: 3,
+        );
+
+        foreach ([$state->toArray('https://example.test'), $state->toMeSummary()] as $payload) {
+            self::assertTrue($payload['payroll_features']);
+            self::assertTrue($payload['payroll_enabled']);
+            self::assertSame('up_to_50', $payload['payroll_tier']);
+            self::assertSame(50, $payload['payroll_max_employees']);
+            self::assertSame(4, $payload['payroll_users_licensed']);
+            self::assertSame(31, $payload['payroll_employees_active']);
+            self::assertSame(3, $payload['payroll_users_active']);
+        }
     }
 }

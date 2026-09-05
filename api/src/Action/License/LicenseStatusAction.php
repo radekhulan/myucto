@@ -63,6 +63,7 @@ final class LicenseStatusAction
         $state = LicenseMiddleware::state($request) ?? $this->license->current();
         $payload = $state->toArray($this->license->buyUrl());
         $payload['company'] = $this->company($request);
+        $payload['development'] = $this->config->get('app.env') === 'development';
 
         // Pozor na pořadí: klíč se přidává JEN ve spravovaném režimu, aby
         // self-hosted odpověď zůstala nezměněná.

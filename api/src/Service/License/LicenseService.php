@@ -25,6 +25,9 @@ use Psr\Log\NullLogger;
  */
 final class LicenseService
 {
+    public const MAX_PAYROLL_USERS_TARGET = 100;
+    public const MAX_PAYROLL_EMPLOYEES_TARGET = 4294967295;
+
     /** Zabudovaný veřejný klíč (base64, dev). Přepsatelný přes cfg license.public_key. */
     public const DEFAULT_PUBLIC_KEY = 'lDwgisBH87eegfc95Z3dvc9FhMpZz/sQtat8JMd+KdE=';
 
@@ -126,6 +129,8 @@ final class LicenseService
             $fingerprint = $this->ensureFingerprint($row);
             $usersActive = $this->countActiveUsers();
             $companiesActive = $this->countCompanies();
+            $payrollEmployeesActive = $this->countActivePayrollEmployees();
+            $payrollUsersActive = $this->countActivePayrollUsers();
 
             try {
                 $resp = $this->client->activate(
@@ -136,6 +141,8 @@ final class LicenseService
                     $takeover,
                     $usersActive,
                     $companiesActive,
+                    $payrollEmployeesActive,
+                    $payrollUsersActive,
                     $this->instanceDomain(),
                 );
             } catch (LicenseNetworkException $e) {
@@ -413,6 +420,8 @@ final class LicenseService
         $counter = (int) $row['counter'] + 1;
         $usersActive = $this->countActiveUsers();
         $companiesActive = $this->countCompanies();
+        $payrollEmployeesActive = $this->countActivePayrollEmployees();
+        $payrollUsersActive = $this->countActivePayrollUsers();
 
         try {
             $resp = $this->client->renew(
@@ -422,6 +431,8 @@ final class LicenseService
                 $this->nonceOf($row['token_payload'] ?? null) ?? ($row['last_nonce'] ?? null),
                 $usersActive,
                 $companiesActive,
+                $payrollEmployeesActive,
+                $payrollUsersActive,
                 $this->appVersion(),
                 $this->telemetry(),
                 $this->instanceDomain(),
@@ -810,6 +821,98 @@ final class LicenseService
             $resp = $this->client->tierChange($key, $this->instanceIdOf($row), $tier, $quoteToken);
         } catch (LicenseNetworkException $e) {
             $this->logger->warning('license.tier_change.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'result_unknown'];
+        }
+        if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
+            return $this->rejection($resp, 'change_failed');
+        }
+        $pending = ($resp['error'] ?? '') === 'charge_pending' || ($resp['state'] ?? '') === 'pending';
+        $scheduled = ($resp['scheduled'] ?? false) === true || ($resp['change'] ?? '') === 'scheduled';
+        if (!$pending && !$scheduled) {
+            $this->forceRenew();
+        }
+        $resp['ok'] = true;
+        $resp['pending'] = $pending;
+        $resp['scheduled'] = $scheduled;
+        $resp['state_local'] = $this->current();
+        return $resp;
+    }
+
+    /** @return array<string,mixed> */
+    public function payrollQuote(bool $enabled, ?int $employeesTarget = null, ?int $usersTarget = null): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+        $employeesActive = $this->countActivePayrollEmployees();
+        $usersActive = $this->countActivePayrollUsers();
+        $employeesTarget ??= $employeesActive;
+        $usersTarget ??= max($usersActive, 1);
+        if ($employeesTarget < $employeesActive
+            || $employeesTarget > self::MAX_PAYROLL_EMPLOYEES_TARGET
+            || $usersTarget < max($usersActive, 1)
+            || $usersTarget > self::MAX_PAYROLL_USERS_TARGET
+        ) {
+            return ['ok' => false, 'error' => 'invalid_target'];
+        }
+        try {
+            $resp = $this->client->payrollQuote(
+                $key,
+                $this->instanceIdOf($row),
+                $enabled,
+                $employeesActive,
+                $usersActive,
+                $employeesTarget,
+                $usersTarget,
+            );
+            $resp['scheduled'] = ($resp['scheduled'] ?? false) === true
+                || ($resp['change'] ?? '') === 'scheduled';
+            return $resp;
+        } catch (LicenseNetworkException $e) {
+            $this->logger->info('license.payroll_quote.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'server_unreachable'];
+        }
+    }
+
+    /** @return array<string,mixed> */
+    public function changePayroll(
+        bool $enabled,
+        string $quoteToken,
+        ?int $employeesTarget = null,
+        ?int $usersTarget = null,
+    ): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+        $employeesActive = $this->countActivePayrollEmployees();
+        $usersActive = $this->countActivePayrollUsers();
+        $employeesTarget ??= $employeesActive;
+        $usersTarget ??= max($usersActive, 1);
+        if ($employeesTarget < $employeesActive
+            || $employeesTarget > self::MAX_PAYROLL_EMPLOYEES_TARGET
+            || $usersTarget < max($usersActive, 1)
+            || $usersTarget > self::MAX_PAYROLL_USERS_TARGET
+        ) {
+            return ['ok' => false, 'error' => 'invalid_target'];
+        }
+        try {
+            $resp = $this->client->payrollChange(
+                $key,
+                $this->instanceIdOf($row),
+                $enabled,
+                $employeesActive,
+                $usersActive,
+                $employeesTarget,
+                $usersTarget,
+                $quoteToken,
+            );
+        } catch (LicenseNetworkException $e) {
+            $this->logger->warning('license.payroll_change.network_error', ['error' => $e->getMessage()]);
             return ['ok' => false, 'error' => 'result_unknown'];
         }
         if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
@@ -1342,6 +1445,8 @@ final class LicenseService
         $key = $this->keyOf($row);
         $usersActive = $this->countActiveUsers();
         $companiesActive = $this->countCompanies();
+        $payrollEmployeesActive = $this->countActivePayrollEmployees();
+        $payrollUsersActive = $this->countActivePayrollUsers();
         $lastCheckAt = isset($row['last_check_at']) ? (string) $row['last_check_at'] : null;
         $lastCheckOk = (bool) ($row['last_check_ok'] ?? 1);
 
@@ -1353,6 +1458,7 @@ final class LicenseService
                 $state, $instanceId, null, null, 0, $usersActive, $companiesActive,
                 null, $trialEndsAt, null, null, $lastCheckAt, $lastCheckOk,
                 false, null, true, $this->isManaged(),
+                false, null, null, 0, $payrollEmployeesActive, $payrollUsersActive,
             );
         }
 
@@ -1367,6 +1473,7 @@ final class LicenseService
                 LicenseState::DEGRADED, $instanceId, null, null, 0, $usersActive, $companiesActive,
                 null, null, null, $key, $lastCheckAt, $lastCheckOk, false, $subscription,
                 true, $this->isManaged(),
+                false, null, null, 0, $payrollEmployeesActive, $payrollUsersActive,
             );
         }
 
@@ -1387,6 +1494,15 @@ final class LicenseService
         // licence jsou placené — opačný default by zavřel účetnictví každému
         // platícímu zákazníkovi až do příští obnovy tokenu.
         $commercial = (bool) ($payload['commercial'] ?? true);
+        $payrollEnabled = (bool) ($payload['payroll_enabled'] ?? false);
+        $payrollTier = isset($payload['payroll_tier']) && $payload['payroll_tier'] !== null
+            ? (string) $payload['payroll_tier']
+            : null;
+        $payrollMaxEmployees = array_key_exists('payroll_max_employees', $payload)
+            && $payload['payroll_max_employees'] !== null
+            ? (int) $payload['payroll_max_employees']
+            : null;
+        $payrollUsersLicensed = max(0, (int) ($payload['payroll_users_licensed'] ?? 0));
 
         // ⚠️ Bezplatný tarif si místa nekupuje. Klíč dostává kvůli kvótě, stavu
         // předplatného a telemetrii, ale jeho cena je NULA — kdyby v tokenu
@@ -1406,6 +1522,8 @@ final class LicenseService
                 LicenseState::DEGRADED, $instanceId, $tier, $maxCompanies, $usersLicensed,
                 $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk,
                 $perpetual, $subscription, $commercial, $this->isManaged(),
+                $payrollEnabled, $payrollTier, $payrollMaxEmployees, $payrollUsersLicensed,
+                $payrollEmployeesActive, $payrollUsersActive,
             );
         }
 
@@ -1417,6 +1535,8 @@ final class LicenseService
             $state, $instanceId, $tier, $maxCompanies, $usersLicensed,
             $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk,
             $perpetual, $subscription, $commercial, $this->isManaged(),
+            $payrollEnabled, $payrollTier, $payrollMaxEmployees, $payrollUsersLicensed,
+            $payrollEmployeesActive, $payrollUsersActive,
         );
     }
 
@@ -1512,6 +1632,16 @@ final class LicenseService
             'license:companies',
             fn (): int => (int) $this->db->pdo()->query('SELECT COUNT(*) FROM supplier')->fetchColumn(),
         );
+    }
+
+    public function countActivePayrollEmployees(): int
+    {
+        return (new PayrollUsagePolicy($this->db))->countActiveEmployees();
+    }
+
+    public function countActivePayrollUsers(): int
+    {
+        return (new PayrollUsagePolicy($this->db))->countActiveUsers();
     }
 
     /**

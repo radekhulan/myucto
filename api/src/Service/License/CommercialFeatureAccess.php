@@ -96,4 +96,9 @@ final class CommercialFeatureAccess
         }
         return false;
     }
+
+    public static function restrictsPayrollPath(string $path): bool
+    {
+        return preg_match('#^/api/(?:payroll|accounting/payroll)(?:/|$)#', $path) === 1;
+    }
 }

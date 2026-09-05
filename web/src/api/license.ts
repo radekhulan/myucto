@@ -22,6 +22,13 @@ export interface LicenseSummary {
    * něco, co je zaplacené.
    */
   tier_commercial: boolean
+  payroll_features?: boolean
+  payroll_enabled?: boolean
+  payroll_tier?: string | null
+  payroll_max_employees?: number | null
+  payroll_users_licensed?: number
+  payroll_employees_active?: number
+  payroll_users_active?: number
   /**
    * Proč nejde přidat dalšího uživatele na licencované místo:
    * `no_license` / `seat_limit` / `null`. Obrazovka správy uživatelů podle
@@ -197,6 +204,8 @@ export interface ManagedLinks {
 export interface LicenseStatus {
   state: LicenseStateKind
   instance_id: string
+  /** Serverové prostředí. Debugovací UI smí být vidět pouze při hodnotě true. */
+  development: boolean
   tier: string | null
   max_companies: number | null
   users_licensed: number
@@ -210,6 +219,13 @@ export interface LicenseStatus {
   commercial_features: boolean
   /** Odemyká placené moduly TARIF? Viz LicenseSummary.tier_commercial. */
   tier_commercial: boolean
+  payroll_features: boolean
+  payroll_enabled: boolean
+  payroll_tier: string | null
+  payroll_max_employees: number | null
+  payroll_users_licensed: number
+  payroll_employees_active: number
+  payroll_users_active: number
   license_key_masked: string | null
   last_check_at: string | null
   last_check_ok: boolean
@@ -337,6 +353,33 @@ export interface TierQuote {
 
 export interface TierChangeResult {
   new_tier: string
+  amount_charged: number | null
+  scheduled: boolean
+  effective_at: number | string | null
+  pending: boolean
+  order_id: string | null
+  state: LicenseStatus
+}
+
+export interface PayrollQuote {
+  current_enabled: boolean
+  new_enabled: boolean
+  current_tier: string | null
+  new_tier: string | null
+  current_max_employees: number | null
+  new_max_employees: number | null
+  amount: number | null
+  recurring_delta: number | null
+  currency: string | null
+  period_end: number | string | null
+  quote_token: string
+  expires_at: number | string | null
+  scheduled: boolean
+  effective_at: number | string | null
+}
+
+export interface PayrollChangeResult {
+  enabled: boolean
   amount_charged: number | null
   scheduled: boolean
   effective_at: number | string | null
@@ -480,6 +523,21 @@ export const licenseApi = {
 
   changeTier: (tier: string, quote_token: string) =>
     api.post<TierChangeResult>('/license/tier', { tier, quote_token }).then((r) => r.data),
+
+  payrollQuote: (enabled: boolean, payroll_employees_target: number, payroll_users_target: number) =>
+    api.post<PayrollQuote>('/license/payroll/quote', {
+      enabled,
+      payroll_employees_target,
+      payroll_users_target,
+    }).then((r) => r.data),
+
+  changePayroll: (enabled: boolean, quote_token: string, payroll_employees_target: number, payroll_users_target: number) =>
+    api.post<PayrollChangeResult>('/license/payroll', {
+      enabled,
+      quote_token,
+      payroll_employees_target,
+      payroll_users_target,
+    }).then((r) => r.data),
 
   changeStatus: (order_id: string) =>
     api.post<ChangeStatusResult>('/license/change-status', { order_id }).then((r) => r.data),

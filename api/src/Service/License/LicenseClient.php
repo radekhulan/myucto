@@ -65,6 +65,8 @@ final class LicenseClient
         bool $takeover = false,
         int $usersActive = 0,
         int $companiesActive = 0,
+        int $payrollEmployeesActive = 0,
+        int $payrollUsersActive = 0,
         string $domain = '',
     ): array
     {
@@ -76,6 +78,8 @@ final class LicenseClient
             'takeover'         => $takeover,
             'users_active'     => max(0, $usersActive),
             'companies_active' => max(0, $companiesActive),
+            'payroll_employees_active' => max(0, $payrollEmployeesActive),
+            'payroll_users_active' => max(0, $payrollUsersActive),
         ];
         if ($domain !== '') {
             $body['domain'] = $domain;
@@ -107,6 +111,8 @@ final class LicenseClient
         ?string $prevNonce,
         int $usersActive,
         int $companiesActive,
+        int $payrollEmployeesActive,
+        int $payrollUsersActive,
         string $appVersion,
         ?array $telemetry = null,
         string $domain = '',
@@ -118,6 +124,8 @@ final class LicenseClient
             'prev_nonce'       => $prevNonce,
             'users_active'     => $usersActive,
             'companies_active' => $companiesActive,
+            'payroll_employees_active' => $payrollEmployeesActive,
+            'payroll_users_active' => $payrollUsersActive,
             'app_version'      => $appVersion,
         ];
         if ($telemetry !== null) {
@@ -313,6 +321,50 @@ final class LicenseClient
             'license_key' => $licenseKey,
             'instance_id' => $instanceId,
             'tier'        => $tier,
+            'quote_token' => $quoteToken,
+        ], self::CHARGE_TIMEOUT);
+    }
+
+    /** @return array<string,mixed> */
+    public function payrollQuote(
+        string $licenseKey,
+        string $instanceId,
+        bool $enabled,
+        int $employeesActive,
+        int $usersActive,
+        int $employeesTarget,
+        int $usersTarget,
+    ): array {
+        return $this->post('/api/license/payroll/quote', [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+            'enabled' => $enabled,
+            'payroll_employees_active' => $employeesActive,
+            'payroll_users_active' => $usersActive,
+            'payroll_employees_target' => $employeesTarget,
+            'payroll_users_target' => $usersTarget,
+        ]);
+    }
+
+    /** @return array<string,mixed> */
+    public function payrollChange(
+        string $licenseKey,
+        string $instanceId,
+        bool $enabled,
+        int $employeesActive,
+        int $usersActive,
+        int $employeesTarget,
+        int $usersTarget,
+        string $quoteToken,
+    ): array {
+        return $this->post('/api/license/payroll', [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+            'enabled' => $enabled,
+            'payroll_employees_active' => $employeesActive,
+            'payroll_users_active' => $usersActive,
+            'payroll_employees_target' => $employeesTarget,
+            'payroll_users_target' => $usersTarget,
             'quote_token' => $quoteToken,
         ], self::CHARGE_TIMEOUT);
     }

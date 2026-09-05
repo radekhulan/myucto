@@ -1240,16 +1240,20 @@ async function confirmTaxRepDelete() {
         <p class="mb-4 rounded-md border border-warning-300 bg-warning-50 px-3 py-2 text-xs text-warning-800">
           {{ t('settings.payroll_enabled.alpha_warning') }}
         </p>
-        <label class="flex items-start gap-2" :class="auth.hasCommercialFeatures ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'">
-          <input v-model="supplier.payroll_enabled" type="checkbox" :disabled="!auth.hasCommercialFeatures" class="mt-0.5 rounded border-neutral-300 text-payroll-600" />
+        <label class="flex items-start gap-2" :class="auth.hasPayrollFeatures || supplier.payroll_enabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'">
+          <input v-model="supplier.payroll_enabled" type="checkbox" :disabled="!auth.hasPayrollFeatures && !supplier.payroll_enabled" class="mt-0.5 rounded border-neutral-300 text-payroll-600" />
           <span>
             <span class="font-medium">{{ t('settings.payroll_enabled.label') }}</span>
             <p class="text-xs text-neutral-500 mt-0.5">{{ t('settings.payroll_enabled.hint') }}</p>
           </span>
         </label>
-        <p v-if="supplier.payroll_enabled === false && auth.hasCommercialFeatures" class="text-xs text-warning-600 mt-2">
+        <p v-if="supplier.payroll_enabled === false && auth.hasPayrollFeatures" class="text-xs text-warning-600 mt-2">
           {{ t('settings.payroll_enabled.off_note') }}
         </p>
+        <RouterLink v-if="!auth.hasPayrollFeatures" to="/activation/purchase#payroll-addon" :class="[btnFilled('primary'), 'mt-3']">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
+          {{ t('settings.payroll_enabled.buy') }}
+        </RouterLink>
       </section>
 
       <!-- Sklad (Epic SKLAD) — samostatný box, nezávislé na accounting_mode.

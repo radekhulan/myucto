@@ -17,6 +17,9 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Payroll\PayrollCalculator;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\LicenseCapacityGate;
+use MyInvoice\Service\License\LicensePayrollLimitExceeded;
+use MyInvoice\Service\License\LicenseState;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -111,6 +114,7 @@ final class PayrollEmployeeAction
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollModuleStateRepository $moduleState,
         private readonly PayrollEmployeeDeletionRepository $moduleDeletion,
+        private readonly LicenseCapacityGate $licenseCapacity,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -137,7 +141,21 @@ final class PayrollEmployeeAction
         if ($data === null) return $err;
         if (!$this->autoPostHasGross($data, $response, $err)) return $err;
 
-        $id = $this->employees->insert($supplierId, $data);
+        try {
+            $id = $this->licenseCapacity->mutatePayrollEmployees(
+                fn (): int => $this->employees->insert($supplierId, $data),
+            );
+        } catch (LicensePayrollLimitExceeded $e) {
+            return Json::error(
+                $response,
+                $e->reason === LicenseState::BLOCK_NO_LICENSE
+                    ? 'license_payroll_feature_unavailable'
+                    : 'license_payroll_employee_limit',
+                'Dalšího aktivního zaměstnance lze přidat až po rozšíření mzdového doplňku.',
+                403,
+                ['buy_url' => '/activation/purchase#payroll-addon'],
+            );
+        }
         $this->log($request, 'payroll_employee.created', $id, ['full_name' => $data['full_name']]);
         return Json::ok($response, [
             'employee' => $this->employees->find($supplierId, $id),
@@ -162,7 +180,23 @@ final class PayrollEmployeeAction
         if ($fields === null) return $err;
         if (!$this->autoPostHasGross(array_merge($current, $fields), $response, $err)) return $err;
 
-        $this->employees->update($supplierId, $id, $fields);
+        try {
+            $this->licenseCapacity->mutatePayrollEmployees(
+                function () use ($supplierId, $id, $fields): void {
+                    $this->employees->update($supplierId, $id, $fields);
+                },
+            );
+        } catch (LicensePayrollLimitExceeded $e) {
+            return Json::error(
+                $response,
+                $e->reason === LicenseState::BLOCK_NO_LICENSE
+                    ? 'license_payroll_feature_unavailable'
+                    : 'license_payroll_employee_limit',
+                'Zaměstnance lze znovu aktivovat až po rozšíření mzdového doplňku.',
+                403,
+                ['buy_url' => '/activation/purchase#payroll-addon'],
+            );
+        }
         $this->log($request, 'payroll_employee.updated', $id, array_keys($fields));
         return Json::ok($response, [
             'employee' => $this->employees->find($supplierId, $id),

@@ -19,6 +19,7 @@ use MyInvoice\Service\Bank\OwnBankAccountRegistrar;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicenseCompanyLimitExceeded;
+use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Mail\RecipientResolver;
 use MyInvoice\Service\Mail\SafeLogoPath;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -514,6 +515,22 @@ final class SettingsAction
             return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
         }
 
+        $activatesPayroll = false;
+        if (array_key_exists('payroll_enabled', $body) && (bool) $body['payroll_enabled']) {
+            $currentPayroll = $this->db->pdo()->prepare('SELECT payroll_enabled FROM supplier WHERE id = ?');
+            $currentPayroll->execute([$id]);
+            $activatesPayroll = (int) $currentPayroll->fetchColumn() !== 1;
+        }
+        if ($activatesPayroll && !$this->payrollAccess->isLicensed()) {
+            return Json::error(
+                $response,
+                'license_payroll_feature_unavailable',
+                'Modul Mzdy lze po skončení zkušební doby zapnout až po zakoupení mzdového doplňku.',
+                403,
+                ['buy_url' => '/activation/purchase#payroll-addon'],
+            );
+        }
+
         $allowed = [
             'company_name', 'display_name', 'street', 'city', 'zip', 'country_id',
             'ic', 'dic', 'is_vat_payer', 'is_identified', 'email', 'phone', 'web', 'tagline', 'commercial_register',
@@ -553,7 +570,7 @@ final class SettingsAction
             'accounting_mode',
             // „Vést účetnictví" (migrace 1179) — opt-out účetní nadstavby v menu.
             'accounting_enabled',
-            // „Vést mzdy" (migrace 1187) — výchozí opt-in modulu, bez vlivu na licenci.
+            // „Vést mzdy" (migrace 1187), firemní opt-in pod samostatným entitlementem.
             'payroll_enabled',
             // Doklad po úhradě proformy (issue #39, migrace 1565) — rychlý prodej vs.
             // zakázková výroba; výchozí hodnota drží dnešní chování.
@@ -921,7 +938,22 @@ final class SettingsAction
         if (!empty($sets)) {
             $params[] = $id;
             $sql = 'UPDATE supplier SET ' . implode(', ', $sets) . ' WHERE id = ?';
-            $this->db->pdo()->prepare($sql)->execute($params);
+            $persist = fn (): bool => $this->db->pdo()->prepare($sql)->execute($params);
+            try {
+                if (array_key_exists('payroll_enabled', $body)) {
+                    $this->licenseCapacity->mutateSeats($persist);
+                } else {
+                    $persist();
+                }
+            } catch (LicensePayrollLimitExceeded) {
+                return Json::error(
+                    $response,
+                    'license_payroll_user_limit',
+                    'Zapnutí Mezd by překročilo zaplacený počet uživatelů mzdového modulu. Navyšte rozsah doplňku.',
+                    403,
+                    ['buy_url' => '/activation/purchase#payroll-addon'],
+                );
+            }
         }
         if ($paymentQrBody !== []) {
             $qrResult = $this->paymentQrSettings->update($id, $paymentQrBody);

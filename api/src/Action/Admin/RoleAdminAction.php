@@ -18,6 +18,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicenseSeatLimitExceeded;
+use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\License\LicenseState;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -143,6 +144,13 @@ final class RoleAdminAction
                 'Změna role by dala právo zápisu více aktivním uživatelům, než dovoluje licence. '
                     . 'Nejprve rozšiřte předplatné nebo uvolněte licenční místo.',
                 403,
+            ),
+            $e instanceof LicensePayrollLimitExceeded => Json::error(
+                $response,
+                'license_payroll_user_limit',
+                'Změna role by dala zápis do mezd více aktivním uživatelům, než dovoluje mzdový doplněk.',
+                403,
+                ['buy_url' => '/activation/purchase#payroll-addon'],
             ),
             $e instanceof \OutOfBoundsException => Json::error($response, 'not_found', 'Role nenalezena.', 404),
             $e instanceof \InvalidArgumentException => Json::error($response, 'validation_failed', 'Neplatná data role.', 400),

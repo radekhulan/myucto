@@ -58,10 +58,6 @@ final class LicenseMiddleware implements MiddlewareInterface
 
         $request = $request->withAttribute(self::ATTR_STATE, $state);
 
-        if ($state->hasCommercialFeatures()) {
-            return $handler->handle($request);
-        }
-
         if ($method === 'OPTIONS') {
             return $handler->handle($request);
         }
@@ -69,6 +65,24 @@ final class LicenseMiddleware implements MiddlewareInterface
         // Normalizovaná cesta (jedno rawurldecode jako router) — jinak by
         // `/api/%61ccounting/...` restrictsApiPath() minulo a licenční brána se přeskočila.
         $path = RequestPath::normalize($request->getUri()->getPath());
+        if (CommercialFeatureAccess::restrictsPayrollPath($path)) {
+            if ($state->hasPayrollFeatures()) {
+                return $handler->handle($request);
+            }
+
+            return Json::error(
+                $this->responseFactory->createResponse(403),
+                'license_payroll_feature_unavailable',
+                'Modul Mzdy vyžaduje aktivní mzdový doplněk. Po skončení zkušební doby jej aktivujte na obrazovce Licence a hosting.',
+                403,
+                ['buy_url' => '/activation/purchase#payroll-addon'],
+            );
+        }
+
+        if ($state->hasCommercialFeatures()) {
+            return $handler->handle($request);
+        }
+
         if (!CommercialFeatureAccess::restrictsApiPath($path)) {
             return $handler->handle($request);
         }

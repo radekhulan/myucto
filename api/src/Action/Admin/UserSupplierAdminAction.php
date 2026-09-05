@@ -12,6 +12,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicenseSeatLimitExceeded;
+use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\License\LicenseState;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -91,6 +92,14 @@ final class UserSupplierAdminAction
                 'Tímhle přiřazením by účet získal právo zápisu a zabral licenční místo, '
                     . 'které teď není volné. Přidělte roli jen pro čtení, nebo rozšiřte předplatné.',
                 403,
+            );
+        } catch (LicensePayrollLimitExceeded) {
+            return Json::error(
+                $response,
+                'license_payroll_user_limit',
+                'Tímto přiřazením by účet získal zápis do mezd a zabral další placené mzdové místo. Nejprve rozšiřte mzdový doplněk.',
+                403,
+                ['buy_url' => '/activation/purchase#payroll-addon'],
             );
         }
         $this->log($request, 'user.suppliers_updated', $id, ['supplier_ids' => array_keys($seen)]);

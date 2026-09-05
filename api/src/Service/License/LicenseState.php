@@ -25,6 +25,8 @@ final class LicenseState
     /** Důvody, proč nejde přidat uživatele na licencované místo. */
     public const BLOCK_NO_LICENSE = 'no_license';
     public const BLOCK_SEAT_LIMIT = 'seat_limit';
+    public const BLOCK_PAYROLL_EMPLOYEE_LIMIT = 'payroll_employee_limit';
+    public const BLOCK_PAYROLL_USER_LIMIT = 'payroll_user_limit';
 
     /**
      * Kolik uživatelů s právem zápisu unese SPRAVOVANÁ instalace BEZ licence.
@@ -90,6 +92,14 @@ final class LicenseState
          * NESMÍ ptát, KDO ji hostuje — jen jestli je hostovaná.
          */
         public readonly bool $managed = false,
+        /** Samostatně placený mzdový add-on. Trial ho odemyká i bez tokenu. */
+        public readonly bool $payrollEnabled = false,
+        public readonly ?string $payrollTier = null,
+        /** null = neomezený počet aktivních zaměstnanců. */
+        public readonly ?int $payrollMaxEmployees = null,
+        public readonly int $payrollUsersLicensed = 0,
+        public readonly int $payrollEmployeesActive = 0,
+        public readonly int $payrollUsersActive = 0,
     ) {}
 
     /** Prodlužuje se licence automaticky (chystá se další stržení)? */
@@ -112,6 +122,38 @@ final class LicenseState
     public function hasCommercialFeatures(): bool
     {
         return $this->commercial && $this->licenseLive();
+    }
+
+    public function hasPayrollFeatures(): bool
+    {
+        return $this->state === self::TRIAL
+            || ($this->payrollEnabled && $this->licenseLive());
+    }
+
+    public function payrollEmployeeBlockReason(int $targetEmployees): ?string
+    {
+        if ($targetEmployees <= $this->payrollEmployeesActive || $this->state === self::TRIAL) {
+            return null;
+        }
+        if (!$this->hasPayrollFeatures()) {
+            return self::BLOCK_NO_LICENSE;
+        }
+        return $this->payrollMaxEmployees === null || $targetEmployees <= $this->payrollMaxEmployees
+            ? null
+            : self::BLOCK_PAYROLL_EMPLOYEE_LIMIT;
+    }
+
+    public function payrollUserBlockReason(int $targetUsers): ?string
+    {
+        if ($targetUsers <= $this->payrollUsersActive || $this->state === self::TRIAL) {
+            return null;
+        }
+        if (!$this->hasPayrollFeatures()) {
+            return self::BLOCK_NO_LICENSE;
+        }
+        return $this->payrollUsersLicensed <= 0 || $targetUsers > $this->payrollUsersLicensed
+            ? self::BLOCK_PAYROLL_USER_LIMIT
+            : null;
     }
 
     /**
@@ -210,6 +252,8 @@ final class LicenseState
             $this->validUntil, $this->trialEndsAt, $this->overageDeadline,
             $this->licenseKey, $this->lastCheckAt, $this->lastCheckOk,
             $this->perpetual, $this->subscription, $this->commercial, $this->managed,
+            $this->payrollEnabled, $this->payrollTier, $this->payrollMaxEmployees,
+            $this->payrollUsersLicensed, $this->payrollEmployeesActive, $this->payrollUsersActive,
         );
     }
 
@@ -222,6 +266,21 @@ final class LicenseState
             $this->validUntil, $this->trialEndsAt, $this->overageDeadline,
             $this->licenseKey, $this->lastCheckAt, $this->lastCheckOk,
             $this->perpetual, $this->subscription, $this->commercial, $this->managed,
+            $this->payrollEnabled, $this->payrollTier, $this->payrollMaxEmployees,
+            $this->payrollUsersLicensed, $this->payrollEmployeesActive, $this->payrollUsersActive,
+        );
+    }
+
+    public function withPayrollUsage(int $employeesActive, int $usersActive): self
+    {
+        return new self(
+            $this->state, $this->instanceId, $this->tier, $this->maxCompanies,
+            $this->usersLicensed, $this->usersActive, $this->companiesActive,
+            $this->validUntil, $this->trialEndsAt, $this->overageDeadline,
+            $this->licenseKey, $this->lastCheckAt, $this->lastCheckOk,
+            $this->perpetual, $this->subscription, $this->commercial, $this->managed,
+            $this->payrollEnabled, $this->payrollTier, $this->payrollMaxEmployees,
+            $this->payrollUsersLicensed, $employeesActive, $usersActive,
         );
     }
 
@@ -273,6 +332,13 @@ final class LicenseState
             // rozlišit „licence propadla, zaplaťte" od „tenhle tarif to nikdy
             // neměl" — a nabízela by zaplacení něčeho, co je zaplacené.
             'tier_commercial' => $this->commercial,
+            'payroll_features' => $this->hasPayrollFeatures(),
+            'payroll_enabled' => $this->payrollEnabled,
+            'payroll_tier' => $this->payrollTier,
+            'payroll_max_employees' => $this->payrollMaxEmployees,
+            'payroll_users_licensed' => $this->payrollUsersLicensed,
+            'payroll_employees_active' => $this->payrollEmployeesActive,
+            'payroll_users_active' => $this->payrollUsersActive,
             // ⚠️ Stav předplatného, ne jen stav licence.
             //
             // Licence může být pořád platná, a přitom má zákazník po splatnosti:
@@ -305,6 +371,13 @@ final class LicenseState
             'perpetual'        => $this->perpetual,
             'commercial_features' => $this->hasCommercialFeatures(),
             'tier_commercial'  => $this->commercial,
+            'payroll_features' => $this->hasPayrollFeatures(),
+            'payroll_enabled' => $this->payrollEnabled,
+            'payroll_tier' => $this->payrollTier,
+            'payroll_max_employees' => $this->payrollMaxEmployees,
+            'payroll_users_licensed' => $this->payrollUsersLicensed,
+            'payroll_employees_active' => $this->payrollEmployeesActive,
+            'payroll_users_active' => $this->payrollUsersActive,
             'subscription_state' => isset($this->subscription['state'])
                 ? (string) $this->subscription['state']
                 : null,

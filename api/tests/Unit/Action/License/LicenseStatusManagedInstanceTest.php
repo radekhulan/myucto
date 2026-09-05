@@ -65,7 +65,7 @@ final class LicenseStatusManagedInstanceTest extends TestCase
 
         self::assertArrayNotHasKey('instance', $payload, 'Self-hosted odpověď nesmí nést blok spravované instalace.');
 
-        $expected = array_merge(array_keys($state->toArray('https://example.test/objednavka')), ['company']);
+        $expected = array_merge(array_keys($state->toArray('https://example.test/objednavka')), ['company', 'development']);
         sort($expected);
         $actual = array_keys($payload);
         sort($actual);
@@ -82,6 +82,27 @@ final class LicenseStatusManagedInstanceTest extends TestCase
         );
 
         self::assertArrayNotHasKey('instance', $payload);
+    }
+
+    public function testDevelopmentFlagRequiresExactServerEnvironment(): void
+    {
+        $snapshot = $this->measured(0);
+
+        self::assertTrue($this->invoke(
+            $this->config(managed: false, extra: ['app' => ['env' => 'development']]),
+            $this->state(),
+            $snapshot,
+        )['development']);
+        self::assertFalse($this->invoke(
+            $this->config(managed: false, extra: ['app' => ['env' => 'production']]),
+            $this->state(),
+            $snapshot,
+        )['development']);
+        self::assertFalse($this->invoke(
+            $this->config(managed: false, extra: ['app' => ['env' => 'Development']]),
+            $this->state(),
+            $snapshot,
+        )['development']);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

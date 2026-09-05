@@ -39,6 +39,7 @@ export const useAuthStore = defineStore('auth', () => {
   // na `false`: dokud server nabídku nepotvrdí, nikoho nikam neposíláme.
   const shouldOfferMfa = computed(() => user.value?.should_offer_mfa === true)
   const hasCommercialFeatures = computed(() => license.value?.commercial_features !== false)
+  const hasPayrollFeatures = computed(() => license.value?.payroll_features === true)
   // ⚠️ Odemyká placené moduly TARIF? Bez toho obrazovka nerozliší „licence
   // propadla, zaplaťte" od „tenhle tarif to nikdy neměl" — a bezplatnému
   // tarifu nabízí zaplatit něco, co má zaplacené. Fail-open na `true` je
@@ -262,6 +263,7 @@ export const useAuthStore = defineStore('auth', () => {
     mustSetupMfa,
     shouldOfferMfa,
     hasCommercialFeatures,
+    hasPayrollFeatures,
     tierUnlocksCommercial,
     newUserBlocked,
     permissions,

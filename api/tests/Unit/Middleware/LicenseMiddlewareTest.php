@@ -69,8 +69,6 @@ final class LicenseMiddlewareTest extends TestCase
             'expired accounting activation' => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/settings/accounting-activation/status'],
             // Čtyři licencované moduly: účetnictví (obě jeho tváře), mzdy, sklad, OSS.
             'degraded tax evidence'         => [LicenseState::DEGRADED, 'POST', '/api/tax-evidence/cash-journal'],
-            'expired payroll run'           => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/payroll/runs'],
-            'degraded payroll capabilities' => [LicenseState::DEGRADED, 'GET', '/api/payroll/capabilities'],
             'expired OSS return'            => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/reports/oss/preview'],
             'degraded OSS bulk assign'      => [LicenseState::DEGRADED, 'POST', '/api/invoices/bulk-oss'],
             // Daň z příjmů: základ daně se počítá z výsledku hospodaření nebo
@@ -143,6 +141,24 @@ final class LicenseMiddlewareTest extends TestCase
         self::assertSame(204, $response->getStatusCode());
     }
 
+    public function testPayrollRequiresItsOwnEntitlementAfterTrial(): void
+    {
+        $withoutAddon = $this->middleware($this->stateReturning(LicenseState::ACTIVE))
+            ->process($this->request('GET', '/api/payroll/runs'), $this->handler());
+        self::assertSame(403, $withoutAddon->getStatusCode());
+        self::assertStringContainsString('license_payroll_feature_unavailable', (string) $withoutAddon->getBody());
+
+        $trial = $this->middleware($this->stateReturning(LicenseState::TRIAL))
+            ->process($this->request('GET', '/api/payroll/runs'), $this->handler());
+        self::assertSame(204, $trial->getStatusCode());
+
+        $licensed = $this->createStub(LicenseService::class);
+        $licensed->method('current')->willReturn($this->state(LicenseState::ACTIVE, payrollEnabled: true));
+        $allowed = $this->middleware($licensed)
+            ->process($this->request('GET', '/api/accounting/payroll/preview'), $this->handler());
+        self::assertSame(204, $allowed->getStatusCode());
+    }
+
     public function testRenewSkippedForAnonymousRequest(): void
     {
         $service = $this->createMock(LicenseService::class);
@@ -197,9 +213,24 @@ final class LicenseMiddlewareTest extends TestCase
         return $service;
     }
 
-    private function state(string $state): LicenseState
+    private function state(string $state, bool $payrollEnabled = false): LicenseState
     {
-        return new LicenseState($state, 'iid-1', 'single', null, 0, 0, 0, null, null, null, null, null, true);
+        return new LicenseState(
+            $state,
+            'iid-1',
+            'single',
+            null,
+            0,
+            0,
+            0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            true,
+            payrollEnabled: $payrollEnabled,
+        );
     }
 
     private function request(string $method, string $path, bool $authenticated = true): ServerRequestInterface
