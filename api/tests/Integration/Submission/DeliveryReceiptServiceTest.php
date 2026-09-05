@@ -27,6 +27,7 @@ use MyInvoice\Service\Submission\InboxMessageClassifier;
 use MyInvoice\Service\Submission\SubmissionArtifactResolver;
 use MyInvoice\Service\Submission\SubmissionArtifactValidator;
 use MyInvoice\Service\Submission\SubmissionChannelRegistry;
+use MyInvoice\Service\Submission\SubmissionInboxStorageSettingsService;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
 use MyInvoice\Tests\Support\FakeIsdsTransport;
@@ -120,6 +121,8 @@ final class DeliveryReceiptServiceTest extends TestCase
         self::assertInstanceOf(DocumentIngestService::class, $documents);
         $activity = $container->get(ActivityLogger::class);
         self::assertInstanceOf(ActivityLogger::class, $activity);
+        $storageSettings = $container->get(SubmissionInboxStorageSettingsService::class);
+        self::assertInstanceOf(SubmissionInboxStorageSettingsService::class, $storageSettings);
 
         $this->service = new DeliveryReceiptService(
             new DeliveryReceiptReader(new ZfoExtractor()),
@@ -128,6 +131,7 @@ final class DeliveryReceiptServiceTest extends TestCase
             $this->outbox,
             $this->outboxService,
             $documents,
+            $storageSettings,
             $activity,
             new NullLogger(),
         );
@@ -163,6 +167,32 @@ final class DeliveryReceiptServiceTest extends TestCase
         self::assertSame('9900001', $submission['external_message_id']);
         self::assertNotNull($submission['receipt_document_id']);
         self::assertSame(DeliveryReceiptMatcher::BY_CORRELATION, $submission['receipt_matched_by']);
+    }
+
+    /**
+     * ⚠️ Doručenka nesmí skončit v KOŘENI Dokumentů.
+     *
+     * Předává se dovnitř bez složky, a dokud se cíl nedopočítal, spadla vedle
+     * zákazníkových vlastních složek. Po pár podáních z toho byla v kořeni
+     * hromada `ODZ-*.zfo`, kterou tam nikdo nehledá. Patří do téhož stromu
+     * archivu jako zpráva, ke které se váže.
+     */
+    public function testReceiptIsFiledIntoTheArchiveFolderNotTheDocumentsRoot(): void
+    {
+        $row = $this->enqueue()['row'];
+
+        $result = $this->upload($this->receiptFor($row));
+
+        $documentId = (int) $result['document_id'];
+        self::assertGreaterThan(0, $documentId);
+
+        $document = $this->db->pdo()->prepare('SELECT folder_id FROM documents WHERE id = ? AND supplier_id = ?');
+        $document->execute([$documentId, $this->supplierId]);
+        $folderId = $document->fetchColumn();
+
+        self::assertNotFalse($folderId, 'Dokument doručenky musí existovat.');
+        self::assertNotNull($folderId, 'Doručenka nesmí zůstat v kořeni Dokumentů.');
+        self::assertGreaterThan(0, (int) $folderId);
     }
 
     /**

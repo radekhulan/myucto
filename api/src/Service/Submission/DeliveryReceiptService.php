@@ -87,6 +87,7 @@ final readonly class DeliveryReceiptService
         private SubmissionOutboxRepository $outbox,
         private SubmissionOutboxService $outboxService,
         private DocumentIngestService $documents,
+        private SubmissionInboxStorageSettingsService $storageSettings,
         private ActivityLogger $activity,
         private LoggerInterface $logger,
     ) {}
@@ -139,7 +140,7 @@ final readonly class DeliveryReceiptService
         $ingested = $this->documents->ingestZfoBytes(
             $bytes,
             $supplierId,
-            $folderId,
+            $folderId ?? $this->archiveFolder($supplierId, $environment, $receipt, $userId),
             $this->safeFilename($filename, $receipt->messageId),
             $userId,
         );
@@ -939,6 +940,43 @@ final readonly class DeliveryReceiptService
     }
 
     /** Název pod kterým doručenka přistane v Dokumentech. */
+    /**
+     * Složka archivu pro doručenku — tatáž větev, ve které leží zpráva.
+     *
+     * ⚠️ Doručenky sem dřív chodily s `folderId = null` a končily v KOŘENI
+     * Dokumentů, mezi složkami zákazníka. Nikdo je tam nehledá a po pár
+     * podáních je z kořene rozsypaná hromada `ODZ-*.zfo`.
+     *
+     * ⚠️ Selhání se POLYKÁ a padá se zpátky do kořene. Uložení doručenky je
+     * zároveň záznam o doručení podání, tedy věc s právním významem; shodit
+     * ho kvůli tomu, že si někdo smazal složku archivu, by byla mnohem horší
+     * porucha než špatně zařazený soubor. Přijatá pošta si výjimku propustit
+     * může — tam uživatel jen zopakuje stažení.
+     */
+    private function archiveFolder(
+        int $supplierId,
+        string $environment,
+        DeliveryReceipt $receipt,
+        ?int $userId,
+    ): ?int {
+        try {
+            return $this->storageSettings->resolveFolderFor(
+                $supplierId,
+                $environment,
+                $receipt->messageId,
+                $receipt->deliveryTime ?? $receipt->acceptanceTime,
+                $userId,
+            );
+        } catch (\Throwable $e) {
+            $this->logger->warning('submission.receipt.archive_folder_failed', [
+                'supplier_id' => $supplierId,
+                'message_id' => $receipt->messageId,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
     private function safeFilename(string $filename, string $messageId): string
     {
         $filename = trim(basename(str_replace('\\', '/', $filename)));

@@ -97,6 +97,30 @@ final readonly class SubmissionInboxStorageSettingsService
         InboxMessageHeader $header,
         ?int $userId,
     ): ?int {
+        return $this->resolveFolderFor(
+            $supplierId,
+            $environment,
+            $header->externalMessageId,
+            $header->deliveredAt,
+            $userId,
+        );
+    }
+
+    /**
+     * Cílová složka archivu podle ID zprávy a data dodání.
+     *
+     * ⚠️ Existuje samostatně kvůli DORUČENKÁM. Ty nemají `InboxMessageHeader`
+     * (nejsou to přijaté zprávy, ale potvrzení k odeslaným), a přesto patří do
+     * téhož stromu jako zpráva, které se týkají — jinak skončí v kořeni
+     * Dokumentů, kde je nikdo nehledá.
+     */
+    public function resolveFolderFor(
+        int $supplierId,
+        string $environment,
+        string $messageId,
+        ?\DateTimeImmutable $deliveredAt,
+        ?int $userId,
+    ): ?int {
         $this->assertEnvironment($environment);
         $setting = $this->repository->find($supplierId, $environment);
         $baseFolderId = $setting === null ? null : (int) $setting['base_folder_id'];
@@ -108,7 +132,7 @@ final readonly class SubmissionInboxStorageSettingsService
             );
         }
 
-        if (preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $header->externalMessageId) !== 1) {
+        if (preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $messageId) !== 1) {
             throw new SubmissionChannelException(
                 'isds_message_id_invalid',
                 'Datová schránka vrátila neplatný identifikátor zprávy.',
@@ -120,15 +144,15 @@ final readonly class SubmissionInboxStorageSettingsService
         if ($baseFolderId === null) {
             $segments[] = self::DEFAULT_ROOT_NAMES[$environment];
         }
-        if ($header->deliveredAt !== null) {
-            $deliveredAt = $header->deliveredAt->setTimezone(new \DateTimeZone(date_default_timezone_get()));
-            $segments[] = $deliveredAt->format('Y');
-            $segments[] = $deliveredAt->format('m');
-            $segments[] = $deliveredAt->format('d');
+        if ($deliveredAt !== null) {
+            $local = $deliveredAt->setTimezone(new \DateTimeZone(date_default_timezone_get()));
+            $segments[] = $local->format('Y');
+            $segments[] = $local->format('m');
+            $segments[] = $local->format('d');
         } else {
             $segments[] = '_bez-data-dodani';
         }
-        $segments[] = $header->externalMessageId;
+        $segments[] = $messageId;
 
         return $this->documents->ensureFolderPath($supplierId, $baseFolderId, $segments, $userId);
     }
