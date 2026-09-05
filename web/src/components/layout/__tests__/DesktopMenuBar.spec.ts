@@ -105,4 +105,20 @@ describe('DesktopMenuBar — klik na otevřenou sekci', () => {
     expect(push).not.toHaveBeenCalled()
     expect(help.attributes('aria-expanded')).toBe('true')
   })
+
+  it.each(['system_global', 'system_signing'])('skryje %s pouze s manuálem a obnoví ji při přidání další položky', async key => {
+    const { wrapper } = mountBar(true)
+    const manual = { to: '/manual', label: 'Nápověda (manuál)', icon: 'M0 0', external: true }
+    const system = { key, title: 'Systém', items: [manual] }
+    await wrapper.setProps({ sections: [...SECTIONS, system] })
+    expect(wrapper.findAll('button').some(button => button.text() === 'Systém')).toBe(false)
+    expect(wrapper.findAll('button').some(button => button.text() === 'Nápověda')).toBe(true)
+
+    await wrapper.setProps({ sections: [...SECTIONS, { ...system, items: [manual, { to: '/admin/users', label: 'Uživatelé', icon: 'M0 0' }] }] })
+    expect(wrapper.findAll('button').some(button => button.text() === 'Systém')).toBe(true)
+
+    await wrapper.setProps({ sections: [...SECTIONS, { ...system, items: [{ to: '/admin/users', label: 'Uživatelé', icon: 'M0 0' }] }] })
+    expect(wrapper.findAll('button').some(button => button.text() === 'Systém')).toBe(true)
+    wrapper.unmount()
+  })
 })
