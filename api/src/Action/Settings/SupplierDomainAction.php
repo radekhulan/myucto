@@ -241,8 +241,8 @@ final class SupplierDomainAction
         if (($locked = $this->managed->deny($response, ManagedModeGuard::CAPABILITY_CUSTOM_DOMAINS)) !== null) {
             return $locked;
         }
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error($response, 'forbidden_via_token', 'Domény lze spravovat jen z webového rozhraní.', 403);
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Domény lze spravovat jen z webového rozhraní.');
         }
         if (!RequestAuthorization::allows($request, 'settings.domains', $level)) {
             return Json::error($response, 'forbidden_permission', 'Pro správu domén nemáš oprávnění.', 403);

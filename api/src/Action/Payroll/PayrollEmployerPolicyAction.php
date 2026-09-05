@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyOverlapException;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -367,13 +368,8 @@ final class PayrollEmployerPolicyAction
         Response $response,
         AccessLevel $level,
     ): ?Response {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response);
         }
         $error = null;
         if (!$this->requirePermission(

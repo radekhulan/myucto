@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollImportedJmhzProtocolRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolImportService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
@@ -233,13 +234,8 @@ final class PayrollJmhzProtocolImportAction
     ): ?Response {
         // Stejně jako u odeslání: úřední doklady firmy se přes token nečtou
         // ani nezakládají — token se dá odcizit a nemá druhý faktor.
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response);
         }
         $error = null;
         if (!$this->requirePermission($request, $response, 'payroll.submissions', $level, $error)) {

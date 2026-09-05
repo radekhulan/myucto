@@ -138,7 +138,7 @@ final class EpoStepUpServiceTest extends TestCase
             $service->verify($request, self::USER_ID, [], 'certificate.store');
             self::fail('Bearer nesmí spravovat podpisový certifikát.');
         } catch (EpoSubmissionException $e) {
-            self::assertSame('forbidden_via_token', $e->errorCode);
+            self::assertSame('session_required', $e->errorCode);
             self::assertSame(403, $e->httpStatus);
         }
     }

@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -31,13 +32,8 @@ final class PayrollInsuranceBreakdownAction
     /** @param array{revisionId:string,employeeId:string} $args */
     public function detail(Request $request, Response $response, array $args): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response);
         }
         $error = null;
         if (!$this->requirePermission($request, $response, 'payroll', AccessLevel::READ, $error)) {

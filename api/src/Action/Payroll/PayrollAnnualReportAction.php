@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Report\PayrollAnnualReportService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -24,8 +25,8 @@ final class PayrollAnnualReportAction
     /** @param array{year:string} $args */
     public function show(Request $request, Response $response, array $args): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            return Json::error($response, 'session_required', 'Tento endpoint je dostupný pouze z přihlášené webové session.', 403);
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         $error = null;
         if (!$this->requirePermission($request, $response, 'payroll.reports', AccessLevel::READ, $error)

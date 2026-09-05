@@ -12,6 +12,7 @@ use MyInvoice\Repository\Payroll\PayrollDimensionInUseException;
 use MyInvoice\Repository\Payroll\PayrollDimensionOverlapException;
 use MyInvoice\Repository\Payroll\PayrollDimensionRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -179,13 +180,8 @@ final class PayrollDimensionAction
 
     private function authorize(Request $request, Response $response, AccessLevel $level): ?Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response);
         }
         $error = null;
         if (!$this->requirePermission($request, $response, 'payroll.settings', $level, $error)) {

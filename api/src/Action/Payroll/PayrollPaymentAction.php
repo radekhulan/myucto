@@ -9,14 +9,15 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollPaymentExportRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollEnforcementLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationResult;
-use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollInsolvencyLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
@@ -31,8 +32,8 @@ use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReversalCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationConflictException;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
-use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\Run\PayrollRunAutoSettlementService;
@@ -891,12 +892,7 @@ final class PayrollPaymentAction
         }
         $userId = $this->userId($request);
         if ($userId === null) {
-            return Json::error(
-                $response,
-                'session_required',
-                'Chybí přihlášený uživatel.',
-                403,
-            );
+            return Json::sessionRequired($response, 'Chybí přihlášený uživatel.');
         }
         $supplierId = $this->currentSupplierId($request);
         try {
@@ -1562,7 +1558,7 @@ final class PayrollPaymentAction
         $userId = $this->userId($request);
         $supplierId = $this->currentSupplierId($request);
         if ($userId === null) {
-            return Json::error($response, 'session_required', 'Chybí přihlášený uživatel.', 403);
+            return Json::sessionRequired($response, 'Chybí přihlášený uživatel.');
         }
         try {
             $employeeId = (int) $args['employeeId'];
@@ -1764,13 +1760,8 @@ final class PayrollPaymentAction
         AccessLevel $access,
         ?Response &$error,
     ): bool {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            $error = Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            $error = Json::sessionRequired($response);
             return false;
         }
         return $this->requirePermission(

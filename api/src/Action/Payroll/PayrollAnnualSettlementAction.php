@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollAnnualSettlementConflictException;
 use MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementAnnualClaims;
@@ -160,13 +161,8 @@ final class PayrollAnnualSettlementAction
         Response $response,
         array $args,
     ): Response {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené webové session.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->approvalGuard($request, $response, AccessLevel::WRITE, $error)) {
             return $error;
@@ -230,13 +226,8 @@ final class PayrollAnnualSettlementAction
         Response $response,
         array $args,
     ): Response {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené webové session.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->guard($request, $response, AccessLevel::WRITE, $error)) {
             return $error;
@@ -351,13 +342,8 @@ final class PayrollAnnualSettlementAction
     /** @param array<string,string> $args */
     public function settle(Request $request, Response $response, array $args): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené webové session.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->approvalGuard($request, $response, AccessLevel::WRITE, $error)) {
             return $error;

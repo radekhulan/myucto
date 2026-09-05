@@ -6,6 +6,7 @@ namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\RequestPath;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SessionLockService;
 use MyInvoice\Service\IpMatcher;
@@ -82,7 +83,7 @@ final class SessionLockMiddleware implements MiddlewareInterface
 
     public function process(Request $request, Handler $handler): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+        if (!RequestAuthorization::isSessionAuth($request)) {
             return $handler->handle($request);
         }
         $session = $request->getAttribute(AuthMiddleware::ATTR_SESSION);

@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -46,7 +47,7 @@ final class ApiMeAction
             }
         }
 
-        $method = (string) $request->getAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+        $method = RequestAuthorization::authMethod($request);
         $tokenOut = null;
         if ($method === 'bearer') {
             $tok = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Middleware;
 
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ApiRequestLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -35,7 +36,7 @@ final class ApiRequestLogMiddleware implements MiddlewareInterface
 
     public function process(Request $request, Handler $handler): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'bearer') {
+        if (!RequestAuthorization::isBearerAuth($request)) {
             return $handler->handle($request);
         }
 

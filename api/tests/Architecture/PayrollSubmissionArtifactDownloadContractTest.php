@@ -53,7 +53,8 @@ final class PayrollSubmissionArtifactDownloadContractTest extends TestCase
             $action,
         );
         self::assertStringContainsString(
-            "AuthMiddleware::ATTR_METHOD) === 'bearer'",
+            // Brána se čte přes sdílený helper; doslovné ATTR_METHOD už v akcích není.
+            '!RequestAuthorization::isSessionAuth($request)',
             $action,
         );
         self::assertStringContainsString(

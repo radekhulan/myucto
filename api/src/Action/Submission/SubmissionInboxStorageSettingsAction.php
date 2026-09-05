@@ -94,13 +94,8 @@ final class SubmissionInboxStorageSettingsAction
         if ($this->userId($request) <= 0) {
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'forbidden_via_token',
-                'Nastavení datové schránky lze spravovat jen z webového rozhraní.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Nastavení datové schránky lze spravovat jen z webového rozhraní.');
         }
         return null;
     }

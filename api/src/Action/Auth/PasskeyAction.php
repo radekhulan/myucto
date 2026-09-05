@@ -8,30 +8,31 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\BruteForceGuard;
-use MyInvoice\Service\Auth\LoginSessionIssuer;
 use MyInvoice\Service\Auth\LastMfaFactorException;
+use MyInvoice\Service\Auth\LoginSessionIssuer;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\MfaProtectedOperationService;
+use MyInvoice\Service\Auth\MfaRecoveryCodeService;
 use MyInvoice\Service\Auth\MfaStepUpService;
 use MyInvoice\Service\Auth\OneTimeTokenException;
-use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Auth\PasskeyCounterAnomalyException;
+use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Auth\PasskeySessionTransitionService;
 use MyInvoice\Service\Auth\PasskeyVerificationException;
 use MyInvoice\Service\Auth\PasswordHasher;
-use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionCookieFactory;
-use MyInvoice\Service\Auth\StoredPasskeyCredential;
+use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Auth\StepUpOperationException;
+use MyInvoice\Service\Auth\StoredPasskeyCredential;
 use MyInvoice\Service\Auth\WebAuthnCeremonyStore;
 use MyInvoice\Service\IpMatcher;
 use Psr\Clock\ClockInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
-use MyInvoice\Service\Auth\MfaRecoveryCodeService;
 
 final class PasskeyAction
 {
@@ -543,7 +544,7 @@ final class PasskeyAction
      */
     private function sessionContext(Request $request): ?array
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+        if (!RequestAuthorization::isSessionAuth($request)) {
             return null;
         }
         $user = $request->getAttribute(AuthMiddleware::ATTR_USER);
@@ -598,12 +599,7 @@ final class PasskeyAction
 
     private function sessionRequired(Response $response): Response
     {
-        return Json::error(
-            $response,
-            'session_required',
-            'Tento endpoint je dostupný pouze z přihlášené webové session.',
-            403,
-        );
+        return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
     }
 
     private function passkeysUnavailable(Response $response): Response

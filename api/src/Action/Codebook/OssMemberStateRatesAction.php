@@ -150,7 +150,7 @@ final class OssMemberStateRatesAction
     private function canWrite(Request $request): bool
     {
         return RequestAuthorization::isSuperadmin($request)
-            && $request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'bearer';
+            && !RequestAuthorization::isBearerAuth($request);
     }
 
     private function forbidden(Response $response): Response

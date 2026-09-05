@@ -116,13 +116,8 @@ final class CertificateVaultAction
         }
         // Soukromý klíč se nikdy nespravuje přes token: token se dá odcizit
         // a na rozdíl od relace u něj není druhý faktor.
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'forbidden_via_token',
-                'Certifikáty lze spravovat jen z webového rozhraní.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Certifikáty lze spravovat jen z webového rozhraní.');
         }
 
         return null;

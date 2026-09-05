@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollOperationalReconciliationService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -123,13 +124,8 @@ final class PayrollOperationalReconciliationAction
         AccessLevel $level,
         ?Response &$error,
     ): bool {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            $error = Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            )->withHeader('Cache-Control', 'no-store, private');
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            $error = Json::sessionRequired($response)->withHeader('Cache-Control', 'no-store, private');
             return false;
         }
         if (!$this->requirePermission(

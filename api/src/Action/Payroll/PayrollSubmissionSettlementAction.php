@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -43,13 +44,8 @@ final class PayrollSubmissionSettlementAction
     {
         // Uzavření úřední povinnosti jménem firmy se nespouští přes token:
         // token se dá odcizit a na rozdíl od relace u něj není druhý faktor.
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Uzavření podání je dostupné jen z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Uzavření podání je dostupné jen z přihlášené relace.');
         }
         $error = null;
         if (!$this->requirePermission(

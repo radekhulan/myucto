@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollEmployerSettingsConflictException;
 use MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollEmployerSettingsValidator;
@@ -107,13 +108,8 @@ final class PayrollEmployerSettingsAction
         Response $response,
         ?Response &$error,
     ): bool {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            $error = Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            $error = Json::sessionRequired($response);
             return false;
         }
         $error = null;

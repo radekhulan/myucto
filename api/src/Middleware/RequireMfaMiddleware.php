@@ -6,6 +6,7 @@ namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\RequestPath;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -79,7 +80,7 @@ final class RequireMfaMiddleware implements MiddlewareInterface
 
     public function process(Request $request, Handler $handler): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+        if (RequestAuthorization::isBearerAuth($request)) {
             return $handler->handle($request);
         }
 

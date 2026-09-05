@@ -68,7 +68,7 @@ final class CertificateVaultActionTest extends TestCase
 
         self::assertSame(403, $response->getStatusCode());
         self::assertStringContainsString(
-            'forbidden_via_token',
+            'session_required',
             (string) $response->getBody(),
         );
     }

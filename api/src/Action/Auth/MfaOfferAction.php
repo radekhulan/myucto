@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Auth;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\MfaOfferService;
 use MyInvoice\Service\IpMatcher;
@@ -37,12 +38,7 @@ final class MfaOfferAction
     {
         $userId = $this->sessionUserId($request);
         if ($userId === null) {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené webové session.',
-                403,
-            );
+            return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
 
         if (!$this->offers->dismiss($userId)) {
@@ -69,7 +65,7 @@ final class MfaOfferAction
 
     private function sessionUserId(Request $request): ?int
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+        if (!RequestAuthorization::isSessionAuth($request)) {
             return null;
         }
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

@@ -146,7 +146,7 @@ final class BulkOssUpdateAction
         // odpovědností — stejná logika, kterou {@see \MyInvoice\Middleware\ApiScopeMiddleware}
         // uplatňuje na účetní vrstvu. Náhled přes token projde, provedení ne: to dělá
         // člověk v aplikaci, kde vidí, co se přeskočilo a proč.
-        if ($apply && $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+        if ($apply && RequestAuthorization::isBearerAuth($request)) {
             return Json::error($response, 'token_write_forbidden',
                 'Hromadnou změnu OSS lze provést jen z webového rozhraní, ne přes API token.', 403);
         }

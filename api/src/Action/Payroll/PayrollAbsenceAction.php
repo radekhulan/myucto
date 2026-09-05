@@ -18,12 +18,13 @@ use MyInvoice\Repository\Payroll\PayrollLeaveOverdrawException;
 use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Absence\AbsenceHolidayTreatment;
-use MyInvoice\Service\Payroll\Absence\AverageEarningCalculator;
-use MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementConflictException;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
+use MyInvoice\Service\Payroll\Absence\AverageEarningCalculator;
+use MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService;
 use MyInvoice\Service\Payroll\Absence\LeaveEntitlementCalculator;
 use MyInvoice\Service\Payroll\Absence\PayrollLeaveInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
@@ -729,13 +730,8 @@ final class PayrollAbsenceAction
         bool $allowBearer = false,
     ): ?Response
     {
-        if (!$allowBearer && $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Mzdové absence jsou dostupné pouze z přihlášené relace.',
-                403,
-            );
+        if (!$allowBearer && !RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Mzdové absence jsou dostupné pouze z přihlášené relace.');
         }
         $permission = $level === AccessLevel::READ ? 'payroll' : 'payroll.time.write';
         $error = null;

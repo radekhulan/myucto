@@ -8,19 +8,20 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SessionLockMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\OneTimeTokenException;
-use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Auth\PasskeyCounterAnomalyException;
+use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Auth\PasskeySessionTransitionService;
 use MyInvoice\Service\Auth\PasskeyVerificationException;
+use MyInvoice\Service\Auth\SessionCookieFactory;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\Auth\SessionLockPreferenceService;
 use MyInvoice\Service\Auth\SessionLockResult;
 use MyInvoice\Service\Auth\SessionLockService;
 use MyInvoice\Service\Auth\SessionManager;
-use MyInvoice\Service\Auth\SessionCookieFactory;
 use MyInvoice\Service\Auth\StoredPasskeyCredential;
 use MyInvoice\Service\Auth\WebAuthnCeremonyStore;
 use MyInvoice\Service\IpMatcher;
@@ -310,7 +311,7 @@ final class SessionAction
      */
     private function context(Request $request): ?array
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+        if (!RequestAuthorization::isSessionAuth($request)) {
             return null;
         }
         $token = (string) $request->getAttribute(AuthMiddleware::ATTR_TOKEN, '');

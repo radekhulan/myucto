@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollRegzelProfileConflictException;
 use MyInvoice\Repository\Payroll\PayrollRegzelRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -256,13 +257,8 @@ final class PayrollRegzelAction
         AccessLevel $minimum,
         ?Response &$error,
     ): bool {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            $error = Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            $error = Json::sessionRequired($response);
             return false;
         }
         if (!$this->requirePermission(

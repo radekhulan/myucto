@@ -87,7 +87,7 @@ final class SubmissionInboxStorageSettingsActionTest extends TestCase
             ->withParsedBody(['base_folder_id' => $folderId, 'row_version' => 0]);
         $response = $this->action->save($request, new Response(), ['environment' => 'test']);
         self::assertSame(403, $response->getStatusCode());
-        self::assertSame('forbidden_via_token', $this->decode($response)['error']['code']);
+        self::assertSame('session_required', $this->decode($response)['error']['code']);
     }
 
     public function testMissingFolderFieldCannotAccidentallyClearSetting(): void

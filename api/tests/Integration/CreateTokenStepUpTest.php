@@ -265,6 +265,6 @@ final class CreateTokenStepUpTest extends TestCase
         $res = ($this->action())($request, (new ResponseFactory())->createResponse());
 
         self::assertSame(403, $res->getStatusCode());
-        self::assertSame('forbidden_via_token', $this->decode($res)['error']['code'] ?? null);
+        self::assertSame('session_required', $this->decode($res)['error']['code'] ?? null);
     }
 }

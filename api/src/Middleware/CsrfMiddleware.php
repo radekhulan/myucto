@@ -7,6 +7,7 @@ namespace MyInvoice\Middleware;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\RequestPath;
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -54,7 +55,7 @@ final class CsrfMiddleware implements MiddlewareInterface
         }
 
         // Bearer (API token) auth nepoužívá cookies → CSRF nehrozí, skip.
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+        if (RequestAuthorization::isBearerAuth($request)) {
             return $handler->handle($request);
         }
 

@@ -12,22 +12,23 @@ use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Payment\PayrollPaydayResolver;
+use MyInvoice\Service\Payroll\PayrollLegacyRecapitulationService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnedException;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
-use MyInvoice\Service\Accounting\PostingException;
-use MyInvoice\Service\Payroll\PayrollLegacyRecapitulationService;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
-use MyInvoice\Service\Payroll\Payment\PayrollPaydayResolver;
 use MyInvoice\Service\Payroll\Run\PayrollRunAutoSettlementService;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommand;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
-use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
 use MyInvoice\Service\Payroll\Run\PayrollRunPaymentsUnsettledException;
-use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
+use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
+use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -980,13 +981,8 @@ final class PayrollRunsAction
         AccessLevel $level,
         bool $allowBearer = false,
     ): ?Response {
-        if (!$allowBearer && $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!$allowBearer && !RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response);
         }
         $error = null;
         if (!$this->requirePermission(

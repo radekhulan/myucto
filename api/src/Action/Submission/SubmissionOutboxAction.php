@@ -647,13 +647,8 @@ final class SubmissionOutboxAction
         if ($this->userId($request) <= 0) {
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'forbidden_via_token',
-                'Podání se odesílá jen z webového rozhraní.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Podání se odesílá jen z webového rozhraní.');
         }
 
         return null;

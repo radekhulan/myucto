@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Epo;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\MfaStepUpService;
@@ -33,9 +34,11 @@ final class EpoStepUpService
     /** @param array<string,mixed> $body */
     public function verify(Request $request, int $userId, array $body, string $purpose): void
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            // Stejný kód jako Json::sessionRequired() — tahle cesta jen letí
+            // ven výjimkou místo odpovědi, takže se sjednocuje ručně.
             throw new EpoSubmissionException(
-                'forbidden_via_token',
+                'session_required',
                 'Certifikát a přímé EPO podání lze spravovat jen z webového rozhraní.',
                 403,
             );

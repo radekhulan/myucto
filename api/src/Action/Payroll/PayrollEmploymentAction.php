@@ -14,9 +14,10 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\Payroll\PayrollMealEntitlementBasisLockedException;
 use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
-use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
+use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -180,7 +181,7 @@ final class PayrollEmploymentAction
             if (!is_bool($correctEffectiveFrom)) {
                 throw new \InvalidArgumentException('Pole correct_effective_from musí být boolean.');
             }
-            if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+            if (!RequestAuthorization::isSessionAuth($request)) {
                 $correctEffectiveFrom = false;
             }
             if (!$correctEffectiveFrom) {
@@ -363,13 +364,8 @@ final class PayrollEmploymentAction
         bool $allowBearer = false,
     ): ?Response
     {
-        if (!$allowBearer && $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!$allowBearer && RequestAuthorization::isBearerAuth($request)) {
+            return Json::sessionRequired($response);
         }
         $error = null;
         if (!$this->requirePermission(
@@ -389,13 +385,8 @@ final class PayrollEmploymentAction
 
     private function authorizeRead(Request $request, Response $response): ?Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (RequestAuthorization::isBearerAuth($request)) {
+            return Json::sessionRequired($response);
         }
         $error = null;
         if (!$this->requirePermission(
@@ -423,7 +414,7 @@ final class PayrollEmploymentAction
         array $body,
         bool $newTerms,
     ): array {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'bearer') {
+        if (!RequestAuthorization::isBearerAuth($request)) {
             return $body;
         }
         $allowed = [

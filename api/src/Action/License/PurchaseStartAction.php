@@ -26,8 +26,8 @@ final class PurchaseStartAction
 
     public function __invoke(Request $request, Response $response): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            return Json::error($response, 'session_required', 'Tato operace vyžaduje přihlášení v prohlížeči.', 403);
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Tato operace vyžaduje přihlášení v prohlížeči.');
         }
         if (!RequestAuthorization::isSuperadmin($request)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);

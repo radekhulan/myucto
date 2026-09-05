@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollPersonNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollPersonProfileConflictException;
 use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
@@ -255,13 +256,8 @@ final class PayrollPersonProfileAction
         Response $response,
         ?Response &$error,
     ): bool {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            $error = Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            $error = Json::sessionRequired($response);
             return false;
         }
         $error = null;

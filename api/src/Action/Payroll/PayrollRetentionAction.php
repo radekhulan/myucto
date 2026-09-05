@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollRetentionPolicyException;
 use MyInvoice\Repository\Payroll\PayrollRetentionPolicyRepository;
 use MyInvoice\Repository\RetentionHoldRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -465,13 +466,8 @@ final class PayrollRetentionAction
         string $permission,
         AccessLevel $level,
     ): ?Response {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response);
         }
         if (!$this->requirePermission($request, $response, $permission, $level, $error)) {
             return $this->guardFailure($error);

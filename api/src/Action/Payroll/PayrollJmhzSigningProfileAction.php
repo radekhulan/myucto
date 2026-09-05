@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Epo\EpoSigningCredentialService;
 use MyInvoice\Service\Epo\EpoStepUpService;
@@ -393,13 +394,8 @@ final class PayrollJmhzSigningProfileAction
     {
         // Volba podpisového certifikátu se nespravuje přes API token: token se dá
         // odcizit a na rozdíl od relace u něj není druhý faktor.
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'forbidden_via_token',
-                'Podpisový certifikát mzdových podání lze spravovat jen z webového rozhraní.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Podpisový certifikát mzdových podání lze spravovat jen z webového rozhraní.');
         }
         $error = null;
         if (!$this->requirePermission($request, $response, 'payroll.submissions', $level, $error)) {

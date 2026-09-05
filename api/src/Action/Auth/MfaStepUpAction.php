@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Auth;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\MfaStepUpService;
@@ -32,13 +33,8 @@ final class MfaStepUpAction
 
     public function totp(Request $request, Response $response): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené webové session.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
@@ -111,13 +107,8 @@ final class MfaStepUpAction
      */
     public function recovery(Request $request, Response $response): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené webové session.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);

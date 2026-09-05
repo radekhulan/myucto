@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Auth;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\DomainLoginException;
 use MyInvoice\Service\Auth\DomainLoginService;
@@ -41,8 +42,8 @@ final class DomainLoginAction
 
     public function authorize(Request $request, Response $response): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            return Json::error($response, 'authentication_required', 'Je nutné přihlášení browserovou session.', 401);
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Je nutné přihlášení browserovou session.');
         }
         $body = (array) ($request->getParsedBody() ?? []);
         try {

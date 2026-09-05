@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSubmissionQueueRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
@@ -441,13 +442,8 @@ final class PayrollSubmissionQueueAction
     ): ?Response {
         // Odeslání úředního podání jménem firmy se nikdy nespouští přes token:
         // token se dá odcizit a na rozdíl od relace u něj není druhý faktor.
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'session_required',
-                'Fronta odchozích podání je dostupná jen z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Fronta odchozích podání je dostupná jen z přihlášené relace.');
         }
         $error = null;
         if (!$this->requirePermission(

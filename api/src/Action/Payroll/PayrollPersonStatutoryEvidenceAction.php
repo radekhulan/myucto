@@ -151,13 +151,8 @@ final class PayrollPersonStatutoryEvidenceAction
         AccessLevel $level,
         ?Response &$error,
     ): bool {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            $error = Json::error(
-                $response,
-                'session_required',
-                'Tento endpoint je dostupný pouze z přihlášené relace.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            $error = Json::sessionRequired($response);
             return false;
         }
         $permission = $level === AccessLevel::WRITE ? 'payroll.person.write' : 'payroll';

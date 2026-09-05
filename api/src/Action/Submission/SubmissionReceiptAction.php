@@ -663,13 +663,8 @@ final class SubmissionReceiptAction
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
         // Doručenka je důkaz o podání a připojuje ho člověk, ne integrace.
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error(
-                $response,
-                'forbidden_via_token',
-                'Doručenky se obsluhují jen z webového rozhraní.',
-                403,
-            );
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Doručenky se obsluhují jen z webového rozhraní.');
         }
 
         return null;

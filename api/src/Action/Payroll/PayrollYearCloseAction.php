@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollYearCloseBlockedException;
@@ -102,8 +103,8 @@ final class PayrollYearCloseAction
         ?Response &$error,
     ): bool
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            $error = Json::error($response, 'session_required', 'Tento endpoint je dostupný pouze z přihlášené webové session.', 403);
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            $error = Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
             return false;
         }
         if (!$this->requirePermission($request, $response, $permission, $level, $error)) {

@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\Garnishment\Xmlzam\XmlzamCooperationFlowService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -178,8 +179,8 @@ final class PayrollXmlzamCooperationAction
         AccessLevel $minimum = AccessLevel::WRITE,
     ): ?Response
     {
-        if (($request->getAttribute(AuthMiddleware::ATTR_METHOD) ?? '') !== 'session') {
-            return Json::error($response, 'session_required', 'Součinnost XMLZAM vyžaduje přihlášenou uživatelskou relaci.', 403);
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Součinnost XMLZAM vyžaduje přihlášenou uživatelskou relaci.');
         }
         if (!$this->requirePermission(
             $request,

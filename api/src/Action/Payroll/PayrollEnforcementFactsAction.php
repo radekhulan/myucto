@@ -10,6 +10,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementFactsRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Document\DocumentViewerResolver;
 use MyInvoice\Service\IpMatcher;
@@ -214,8 +215,8 @@ final class PayrollEnforcementFactsAction
 
     private function authorize(Request $request, Response $response, AccessLevel $level): ?Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
-            return Json::error($response, 'session_required', 'Tento endpoint je dostupný pouze z přihlášené webové session.', 403);
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->requirePermission($request, $response, 'payroll.enforcement', $level, $error)
             || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {

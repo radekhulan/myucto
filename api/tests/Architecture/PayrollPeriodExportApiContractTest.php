@@ -34,7 +34,8 @@ final class PayrollPeriodExportApiContractTest extends TestCase
             self::assertStringContainsString($route, $routes);
         }
         self::assertStringContainsString(
-            "AuthMiddleware::ATTR_METHOD) === 'bearer'",
+            // Brána se čte přes sdílený helper; doslovné ATTR_METHOD už v akcích není.
+            '!RequestAuthorization::isSessionAuth($request)',
             $action,
         );
         self::assertStringContainsString(
