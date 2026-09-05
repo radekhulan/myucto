@@ -14,6 +14,7 @@ use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
 use MyInvoice\Service\Bank\OwnBankAccountRegistrar;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
@@ -264,7 +265,13 @@ final class SettingsAction
     /** POST /api/suppliers — nový supplier (admin). */
     public function createSupplier(Request $request, Response $response): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!RequestAuthorization::canCreateSupplier($request)) {
+            return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $creatorUserId = (int) ($user['id'] ?? 0);
+        $assignCreator = !RequestAuthorization::isSuperadmin($request);
 
         $b = (array) ($request->getParsedBody() ?? []);
 
@@ -300,6 +307,8 @@ final class SettingsAction
                 $b,
                 $countryId,
                 $defaultVatId,
+                $creatorUserId,
+                $assignCreator,
                 &$fkSuspended,
             ): int {
                 $ownsTransaction = !$pdo->inTransaction();
@@ -408,6 +417,12 @@ final class SettingsAction
                     // `forYear()` padá na `supplier.accounting_mode`, kdežto historický
                     // řádek by rok založení navždy hlásil jako daňovou evidenci.
                     OwnBankAccountRegistrar::syncSupplier($pdo, $newSupplierId, $this->bankOwnership);
+                    BankRuleTemplateSeeder::seed($pdo, $newSupplierId);
+                    if ($assignCreator) {
+                        $pdo->prepare(
+                            'INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, NULL)'
+                        )->execute([$creatorUserId, $newSupplierId]);
+                    }
                     if ($ownsTransaction) {
                         $pdo->commit();
                     } else {

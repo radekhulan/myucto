@@ -26,6 +26,18 @@ final class EffectiveRole
         return $this->type === 'superadmin' && $this->systemKey === 'superadmin';
     }
 
+    public function isCompanyAdmin(): bool
+    {
+        return $this->isSuperadmin()
+            || ($this->type === 'staff' && in_array($this->systemKey, ['admin', 'admin_plus'], true));
+    }
+
+    public function canCreateSupplier(): bool
+    {
+        return $this->isSuperadmin()
+            || ($this->type === 'staff' && $this->systemKey === 'admin_plus');
+    }
+
     public function isClientType(): bool
     {
         return $this->type === 'client';

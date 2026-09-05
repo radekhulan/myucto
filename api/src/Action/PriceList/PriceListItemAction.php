@@ -437,7 +437,7 @@ final class PriceListItemAction
 
     private function isAdmin(Request $request): bool
     {
-        return RequestAuthorization::isSuperadmin($request);
+        return RequestAuthorization::isCompanyAdmin($request);
     }
 
     private function unavailableForStock(int $supplierId, Response $response): ?Response

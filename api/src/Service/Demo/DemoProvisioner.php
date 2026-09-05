@@ -11,6 +11,7 @@ use MyInvoice\Repository\JournalEntryTemplateRepository;
 use MyInvoice\Repository\RoleRepository;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Sample\SampleDataGenerator;
 use MyInvoice\Service\Sample\SampleDataService;
@@ -242,7 +243,9 @@ final class DemoProvisioner
             if ((string) $rows[0]['company_name'] !== $data['company_name']) {
                 throw new \RuntimeException("Demo e-mail {$data['email']} už používá jiná firma.");
             }
-            return (int) $rows[0]['id'];
+            $supplierId = (int) $rows[0]['id'];
+            BankRuleTemplateSeeder::seed($this->db->pdo(), $supplierId);
+            return $supplierId;
         }
 
         $pdo = $this->db->pdo();
@@ -288,6 +291,7 @@ final class DemoProvisioner
             $defaultCurrencyId = (int) $pdo->lastInsertId();
             $currency->execute([$supplierId, 'EUR', 'EUR — výchozí', '€', 'Euro', 'Euro', 0]);
             $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([$defaultCurrencyId, $supplierId]);
+            BankRuleTemplateSeeder::seed($pdo, $supplierId);
             if ($fkSuspended) {
                 $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
                 $fkSuspended = false;

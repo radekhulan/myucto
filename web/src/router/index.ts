@@ -25,6 +25,8 @@ declare module 'vue-router' {
     additionalPermissions?: PermissionKey[]
     access?: AccessLevel
     superadminOnly?: boolean
+    adminPlusOnly?: boolean
+    companyAdminOnly?: boolean
     requiresSupplier?: boolean
     requiresDoubleEntry?: boolean
     requiresTaxEvidence?: boolean
@@ -152,8 +154,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   logbook: ['logbook'], stats: ['dashboard'], 'purchase-stats': ['dashboard'], 'bank-statements': ['bank'], 'bank-detail': ['bank'], gopay: ['bank'],
   'admin-electronic-signatures': ['settings.signing', 'write'], 'admin-databox': ['settings.signing', 'write'], templates: ['accounting.templates'], tools: ['utilities'], 'crm-dashboard': ['dashboard.portfolio'], 'portfolio-overview': ['dashboard.portfolio'],
   'automation-cockpit': ['accounting'],
-  'admin-settings': ['settings.company.write', 'write'], 'admin-branding': ['settings.branding', 'write'], 'admin-integrations': ['settings.company.write', 'write'], 'admin-codebooks': ['settings.company'], 'admin-support': ['profile'],
-  'admin-price-list': ['settings.company.write', 'write'], 'admin-price-list-new': ['settings.company.write', 'write'], 'admin-price-list-edit': ['settings.company.write', 'write'],
+  'admin-settings': ['settings.company.write', 'write'], 'admin-branding': ['settings.branding', 'write'], 'admin-integrations': ['settings.company.write', 'write'], 'admin-codebooks': ['settings.company'], 'admin-bank-rule-templates': ['bank.rules'], 'admin-approvals': ['invoices.approval'], 'admin-support': ['profile'],
   'accounting-activation': ['accounting.periods.manage', 'write'],
   'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
   'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-invoice-series-completeness': ['reports'], 'reports-foreign-income': ['reports'], 'reports-submissions': ['reports'], 'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
@@ -161,10 +162,9 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
 }
 
 const superadminRouteNames = new Set([
-  'activity-log', 'sent-emails', 'cron-jobs', 'admin-users', 'admin-roles', 'admin-suppliers',
-  'admin-tax-constants', 'admin-bank-rule-templates', 'admin-email-templates', 'admin-emails', 'admin-approvals', 'admin-update',
+  'activity-log', 'sent-emails', 'cron-jobs', 'admin-users', 'admin-roles',
+  'admin-tax-constants', 'admin-email-templates', 'admin-emails', 'admin-update',
   'admin-isds-gateway',
-  'admin-price-list', 'admin-price-list-new', 'admin-price-list-edit',
   'activation-license', 'activation-terms', 'activation-purchase',
   'admin-diagnostics',
   // Obojí čte administrátorské endpointy (/api/admin/*, /api/license/status),
@@ -172,6 +172,9 @@ const superadminRouteNames = new Set([
   // deny-by-default guard by je jinak tiše přesměroval na homepage.
   'admin-instance-export', 'hosting',
 ])
+
+const adminPlusRouteNames = new Set(['admin-suppliers'])
+const companyAdminRouteNames = new Set(['admin-price-list', 'admin-price-list-new', 'admin-price-list-edit'])
 
 // Routy, které projdou deny-by-default guardem (:361) bez permission meta jinak než
 // přes routePermissions — musí být zrcadleny se `selfServiceRoute` v beforeEach.
@@ -201,6 +204,8 @@ export function applyAuthorizationMeta(records: RouteRecordRaw[], inheritedRequi
     const name = typeof record.name === 'string' ? record.name : ''
     const requiresAuth = inheritedRequiresAuth || !!record.meta?.requiresAuth
     if (superadminRouteNames.has(name)) record.meta = { ...record.meta, superadminOnly: true }
+    if (adminPlusRouteNames.has(name)) record.meta = { ...record.meta, adminPlusOnly: true }
+    if (companyAdminRouteNames.has(name)) record.meta = { ...record.meta, companyAdminOnly: true }
     if (record.meta?.requiresDoubleEntry || record.meta?.requiresStock || commercialOnlyRouteNames.has(name)) {
       record.meta = { ...record.meta, commercialOnly: true }
     }
@@ -214,6 +219,8 @@ export function applyAuthorizationMeta(records: RouteRecordRaw[], inheritedRequi
     // bez logu. Upozorni na to hned při startu, ne až po hodině hledání v produkci.
     if (import.meta.env.DEV && name && requiresAuth && !rule
       && !superadminRouteNames.has(name) && !selfServiceRouteNames.has(name)
+      && !adminPlusRouteNames.has(name)
+      && !companyAdminRouteNames.has(name)
       && !record.meta?.mfaSetupOnly
       && !record.meta?.public && !record.redirect) {
       console.warn(`[router] Route "${name}" nemá záznam v routePermissions ani superadminOnly/self-service výjimku — deny-by-default guard ji bude tiše přesměrovávat na homepage/portal.`)
@@ -438,6 +445,16 @@ export async function authorizationGuard(
     if (!demoReadOnlyRoute) return denyFallback(to.name, auth)
   }
 
+  const adminPlusOnly = to.matched.some((r) => r.meta.adminPlusOnly)
+  if (adminPlusOnly && !auth.isSuperadmin && !auth.isAdminPlusRole) {
+    return denyFallback(to.name, auth)
+  }
+
+  const companyAdminOnly = to.matched.some((r) => r.meta.companyAdminOnly)
+  if (companyAdminOnly && !auth.isCompanyAdminRole) {
+    return denyFallback(to.name, auth)
+  }
+
   const permissionMeta = [...to.matched].reverse().find(r => r.meta.permission)?.meta
   const additionalPermissionDenied = to.matched.some(record =>
     record.meta.additionalPermissions?.some(permission => !auth.can(permission, 'read')),
@@ -452,7 +469,7 @@ export async function authorizationGuard(
   }
   const selfServiceRoute = mfaSetupRoute
     || (typeof to.name === 'string' && selfServiceRouteNames.has(to.name))
-  if (requiresAuth && !permissionMeta?.permission && !superadminOnly && !selfServiceRoute) {
+  if (requiresAuth && !permissionMeta?.permission && !superadminOnly && !adminPlusOnly && !companyAdminOnly && !selfServiceRoute) {
     return denyFallback(to.name, auth)
   }
 

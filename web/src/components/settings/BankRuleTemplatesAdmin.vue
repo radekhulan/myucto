@@ -10,6 +10,8 @@ import {
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { useAutoSlug } from '@/composables/useAutoSlug'
+import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import Modal from '@/components/ui/Modal.vue'
@@ -17,6 +19,9 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
+const auth = useAuthStore()
+const supplierStore = useSupplierStore()
+const canWrite = computed(() => auth.canWrite('bank.rules'))
 const catalog = ref<AdminBankRuleTemplateCatalog>({ templates: [], operation_types: [], posting_rules: [] })
 const loading = ref(true)
 const saving = ref(false)
@@ -25,6 +30,7 @@ const editingId = ref<number | null>(null)
 const formOpen = ref(false)
 const page = ref(1)
 const perPage = 25
+let loadVersion = 0
 
 const form = reactive<AdminBankRuleTemplatePayload>({
   template_key: '',
@@ -64,19 +70,28 @@ function onNameCsInput(e: Event) { keySlug.fromName((e.target as HTMLInputElemen
 function onTemplateKeyInput(e: Event) { keySlug.markManual((e.target as HTMLInputElement).value) }
 
 async function load() {
+  const version = ++loadVersion
   loading.value = true
   error.value = ''
   try {
-    catalog.value = await adminApi.listBankRuleTemplates()
+    const nextCatalog = await adminApi.listBankRuleTemplates()
+    if (version !== loadVersion) return
+    catalog.value = nextCatalog
     page.value = Math.min(page.value, Math.max(1, Math.ceil(catalog.value.templates.length / perPage)))
   } catch (e) {
-    error.value = apiErrorMessage(e, t('bank_template_admin.load_error'))
+    if (version === loadVersion) error.value = apiErrorMessage(e, t('bank_template_admin.load_error'))
   } finally {
-    loading.value = false
+    if (version === loadVersion) loading.value = false
   }
 }
 
 onMounted(load)
+watch(() => supplierStore.currentSupplierId, () => {
+  closeForm()
+  page.value = 1
+  catalog.value = { templates: [], operation_types: [], posting_rules: [] }
+  void load()
+})
 
 function nextSortOrder(): number {
   return catalog.value.templates.reduce((max, item) => Math.max(max, item.sort_order), 0) + 10
@@ -193,7 +208,7 @@ function criteria(item: AdminBankRuleTemplate): string {
         <h1 class="text-2xl font-semibold">{{ t('bank_template_admin.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-1">{{ t('bank_template_admin.subtitle') }}</p>
       </div>
-      <button type="button" :class="btnFilled('primary')" @click="startNew">
+      <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="startNew">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
         {{ t('bank_template_admin.new') }}
       </button>
@@ -202,7 +217,7 @@ function criteria(item: AdminBankRuleTemplate): string {
     <div v-if="error" class="mb-4 rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-600">{{ error }}</div>
     <div v-if="loading" class="py-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
     <EmptyState v-else-if="sortedTemplates.length === 0" boxed icon="copy"
-      :title="t('bank_template_admin.empty')" :cta="t('bank_template_admin.new')" @action="startNew" />
+      :title="t('bank_template_admin.empty')" :cta="canWrite ? t('bank_template_admin.new') : undefined" @action="startNew" />
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="hidden lg:block overflow-x-auto">
         <table class="w-full text-sm">
@@ -213,7 +228,7 @@ function criteria(item: AdminBankRuleTemplate): string {
               <th class="px-3 py-3 text-left font-medium">{{ t('bank_template_admin.posting') }}</th>
               <th class="px-3 py-3 text-center font-medium">{{ t('bank_template_admin.order') }}</th>
               <th class="px-3 py-3 text-center font-medium">{{ t('bank_template_admin.usage') }}</th>
-              <th class="px-3 py-3 text-right font-medium">{{ t('common.actions') }}</th>
+              <th v-if="canWrite" class="px-3 py-3 text-right font-medium">{{ t('common.actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -233,7 +248,7 @@ function criteria(item: AdminBankRuleTemplate): string {
               </td>
               <td class="px-3 py-3 text-center font-mono">{{ item.sort_order }}</td>
               <td class="px-3 py-3 text-center">{{ item.usage_count }}</td>
-              <td class="px-3 py-3">
+              <td v-if="canWrite" class="px-3 py-3">
                 <div class="flex flex-wrap justify-end gap-2">
                   <button type="button" :class="btnOutlineSm('neutral')" @click="editTemplate(item)">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
@@ -265,7 +280,7 @@ function criteria(item: AdminBankRuleTemplate): string {
           <p class="text-xs font-mono text-neutral-500">{{ item.rule_key }} · {{ item.debit_account_code || '—' }}/{{ item.credit_account_code || '—' }}</p>
           <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
             <span class="text-xs text-neutral-500">{{ t('bank_template_admin.usage_count', { count: item.usage_count }) }}</span>
-            <div class="flex flex-wrap gap-2">
+            <div v-if="canWrite" class="flex flex-wrap gap-2">
               <button type="button" :class="btnOutlineSm('neutral')" @click="editTemplate(item)">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                 {{ t('common.edit') }}

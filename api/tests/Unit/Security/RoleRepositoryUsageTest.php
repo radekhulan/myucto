@@ -89,6 +89,33 @@ final class RoleRepositoryUsageTest extends TestCase
         $this->repository->delete(1);
     }
 
+    public function testFixedCompanyAdminRolesCannotBeUpdatedDeletedOrDuplicated(): void
+    {
+        $this->insertRole(2, 'admin');
+        $this->insertRole(3, 'admin_plus');
+
+        foreach ([2, 3] as $id) {
+            $role = $this->repository->find($id);
+            self::assertIsArray($role);
+            try {
+                $this->repository->update($id, 'Změněná role', true, [], (string) $role['updated_at']);
+                self::fail('Předdefinovaná role měla být uzamčena proti úpravě.');
+            } catch (SystemRoleLocked) {
+            }
+            try {
+                $this->repository->delete($id);
+                self::fail('Předdefinovaná role měla být uzamčena proti smazání.');
+            } catch (SystemRoleLocked) {
+            }
+            try {
+                $this->repository->duplicate($id, 'Kopie');
+                self::fail('Předdefinovaná role měla být uzamčena proti duplikaci.');
+            } catch (SystemRoleLocked) {
+            }
+        }
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM roles')->fetchColumn());
+    }
+
     private function insertRole(int $id, ?string $systemKey, string $type = 'staff'): void
     {
         $stmt = $this->pdo->prepare(

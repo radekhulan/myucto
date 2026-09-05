@@ -101,7 +101,7 @@ const GROUPS: Group[] = [
       { id: 'taxes',     to: '/admin/settings?tab=accounting', visible: () => auth.canRead('settings.company') },
       { id: 'bank',      to: '/bank?tab=accounts',             visible: () => auth.canRead('bank') },
       { id: 'branding',  to: '/admin/branding',                visible: () => auth.canRead('settings.branding') },
-      { id: 'suppliers', to: '/admin/suppliers',               visible: () => isSuperadmin.value && canAddCompanies.value },
+      { id: 'suppliers', to: '/admin/suppliers',               visible: () => (isSuperadmin.value || auth.isAdminPlusRole) && canAddCompanies.value },
     ],
   },
   {
@@ -111,7 +111,7 @@ const GROUPS: Group[] = [
       { id: 'numbering', to: '/admin/settings?tab=documents',  visible: () => auth.canRead('settings.company') },
       { id: 'series',    to: '/utilities?section=document-series', visible: () => isDoubleEntry.value && auth.canRead('utilities') },
       { id: 'bank_email', to: '/bank?tab=email',               visible: () => auth.canRead('bank') },
-      { id: 'databox',   to: '/admin/databox',                 visible: () => isSuperadmin.value && payrollEnabled.value },
+      { id: 'databox',   to: '/admin/databox',                 visible: () => auth.isCompanyAdminRole && payrollEnabled.value },
       // Právo zrcadlí skutečnou bránu `/admin/integrations` (viz AppLayout).
       // `settings.company = WRITE` má nově i klientská role a na integrace nesmí.
       { id: 'ai_extraction', to: '/admin/integrations?tab=ai', visible: () => auth.canWrite('settings.company.write') },

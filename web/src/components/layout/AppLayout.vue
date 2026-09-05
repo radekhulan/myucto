@@ -364,6 +364,7 @@ const navSections = computed<NavSection[]>(() => {
   }
 
   const isAdmin = auth.isSuperadmin
+  const isAdminPlus = auth.isAdminPlusRole
   // Daňový optimalizátor (paušál vs standardní režim) je jen pro OSVČ (fyzická osoba).
   const isOsvc = supplierStore.currentSupplier?.taxpayer_type === 'fo'
   // Účetnictví, mzdy, sklad i OSS jsou komerční moduly: po vypršení trialu je
@@ -411,7 +412,13 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         { to: '/invoices',         label: t('nav.invoices'),   icon: ICONS.invoices,  newTo: '/invoices/new' },
         { to: '/recurring',        label: t('nav.recurring'),  icon: ICONS.recurring, newTo: '/recurring/new' },
-        ...(isAdmin && !isStockEnabled ? [{ to: '/admin/price-list', label: t('nav.price_list'), icon: ICONS.price_list }] : []),
+        ...(auth.isCompanyAdminRole && !isStockEnabled ? [{
+          to: '/admin/price-list',
+          label: t('nav.price_list'),
+          icon: ICONS.price_list,
+          permission: 'settings.company.write' as PermissionKey,
+          access: 'write' as const,
+        }] : []),
         { to: '/clients',          label: t('nav.clients'),    icon: ICONS.clients,   newTo: '/clients/new' },
         { to: '/projects',         label: t('nav.projects'),   icon: ICONS.projects },
         // AI import vydané faktury — prodejní zrcadlo Nákup → AI import. Nahrát PDF/ISDOC →
@@ -420,7 +427,7 @@ const navSections = computed<NavSection[]>(() => {
         // Export/Import vydaných (reorg UX 2026-07, vytažené z Nástrojů).
         { to: '/invoices/export',  label: t('nav.export'),     icon: ICONS.exports },
         { to: '/invoices/import', label: t('nav.import'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' },
-        ...(isAdmin ? [{ to: '/admin/approvals',          label: t('nav.approvals'),         icon: ICONS.approvals }] : []),
+        { to: '/admin/approvals', label: t('nav.approvals'), icon: ICONS.approvals, permission: 'invoices.approval' as PermissionKey },
       ],
     },
     {
@@ -574,6 +581,7 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         { to: '/templates', label: t('nav.section_templates'), icon: ICONS.documents, permission: 'accounting.templates' },
         { to: '/accounting/setup-assistant', label: t('nav.accounting_setup_assistant'), icon: ICONS.ai, permission: 'accounting' },
+        { to: '/admin/bank-rule-templates', label: t('nav.bank_rule_templates'), icon: ICONS.bank, permission: 'bank.rules' as PermissionKey },
         { to: '/accounting/accounts',       label: t('nav.accounting_accounts'), icon: ICONS.codebooks },
         { to: '/accounting/offsets',          label: t('nav.accounting_offsets'),          icon: ICONS.coin },
         { to: '/admin/accounting-activation', label: t('nav.accounting_activation'), icon: ICONS.updates, permission: 'accounting.periods.manage' as PermissionKey, access: 'write' },
@@ -712,7 +720,7 @@ const navSections = computed<NavSection[]>(() => {
     ],
   })
 
-  if (isAdmin || auth.isDemo) {
+  if (isAdmin || isAdminPlus || auth.isDemo) {
     // Systém — globální nastavení a licenční agenda v jednom menu.
     sections.push({
       key: 'system_global',
@@ -724,16 +732,19 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/admin/codebooks?scope=global', label: t('nav.codebooks_global'), icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
         { to: '/admin/tax-constants', label: t('codebooks.tab_tax_constants'), icon: ICONS.tax_optimizer, permission: 'settings.company' as PermissionKey },
       ] : [
-        { to: '/admin/codebooks?scope=global', label: t('nav.codebooks_global'), icon: ICONS.codebooks },
-        { to: '/admin/tax-constants', label: t('codebooks.tab_tax_constants'), icon: ICONS.tax_optimizer },
-        { to: '/admin/bank-rule-templates', label: t('nav.bank_rule_templates'), icon: ICONS.bank },
-        { to: '/admin/suppliers',        label: t('nav.suppliers'),       icon: ICONS.suppliers },
-        { to: '/admin/users',            label: t('nav.users'),           icon: ICONS.users },
-        { to: '/admin/roles',            label: t('nav.roles'),           icon: ICONS.approvals },
-        { to: '/admin/emails',           label: t('nav.emails'),          icon: ICONS.email },
-        { to: '/admin/activity-log',     label: t('nav.log'),             icon: ICONS.log },
-        { to: '/admin/cron-jobs',        label: t('nav.cron_jobs'),       icon: ICONS.cron },
-        { to: '/admin/update',           label: t('nav.updates'),         icon: ICONS.updates },
+        ...(isAdmin ? [
+          { to: '/admin/codebooks?scope=global', label: t('nav.codebooks_global'), icon: ICONS.codebooks },
+          { to: '/admin/tax-constants', label: t('codebooks.tab_tax_constants'), icon: ICONS.tax_optimizer },
+        ] : []),
+        ...((isAdmin || isAdminPlus) ? [{ to: '/admin/suppliers', label: t('nav.suppliers'), icon: ICONS.suppliers }] : []),
+        ...(isAdmin ? [
+          { to: '/admin/users',        label: t('nav.users'),      icon: ICONS.users },
+          { to: '/admin/roles',        label: t('nav.roles'),      icon: ICONS.approvals },
+          { to: '/admin/emails',       label: t('nav.emails'),     icon: ICONS.email },
+          { to: '/admin/activity-log', label: t('nav.log'),        icon: ICONS.log },
+          { to: '/admin/cron-jobs',    label: t('nav.cron_jobs'),  icon: ICONS.cron },
+          { to: '/admin/update',       label: t('nav.updates'),    icon: ICONS.updates },
+        ] : []),
         ...(isAdmin ? [
           // Hosting — JEN spravovaná (hostovaná) instalace. Na self-hosted se
           // položka nesmí objevit vůbec: stránka mluví o zaplaceném prostoru,
@@ -758,6 +769,9 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/admin/diagnostics',   label: t('nav.diagnostics'),           icon: ICONS.diagnostics, dividerBefore: true },
           { to: '/admin/support',       label: t('nav.support'),               icon: ICONS.help },
         ] : []),
+        ...(isAdminPlus && auth.canRead('settings.signing') && accountantSigningProfilesEnabled.value
+          ? [{ to: '/admin/electronic-signatures', label: t('nav.electronic_signatures'), icon: ICONS.approvals }]
+          : []),
         // Manuál je poslední položka Systému — v novém tabu, ať člověk nepřijde
         // o rozdělanou práci.
         { to: '/manual', label: t('nav.manual'), icon: ICONS.documents, external: true },
@@ -766,7 +780,7 @@ const navSections = computed<NavSection[]>(() => {
     })
   }
 
-  if (!isAdmin && !auth.isDemo) {
+  if (!isAdmin && !isAdminPlus && !auth.isDemo) {
     const nonAdminSystemItems: NavItem[] = []
     if (supplierStore.hasMultiple) {
       nonAdminSystemItems.push({ to: '/portfolio', label: t('nav.portfolio'), icon: ICONS.stock_warehouses })
@@ -848,6 +862,7 @@ function filterNavigation(sections: NavSection[]): NavSection[] {
       if (item.to.startsWith('/admin/branding')) return auth.isDemo ? auth.canRead('settings.branding') : auth.canWrite('settings.branding')
       if (item.to.startsWith('/admin/electronic-signatures')) return auth.canWrite('settings.signing')
       if (item.to.startsWith('/admin/databox')) return auth.canWrite('settings.signing')
+      if (item.to.startsWith('/admin/suppliers')) return auth.isSuperadmin || auth.isAdminPlusRole
       const allowed = permission ? auth.can(permission, item.access ?? 'read') : auth.isSuperadmin
       return allowed && (item.additionalPermissions?.every(required => auth.canRead(required)) ?? true)
     }),

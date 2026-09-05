@@ -21,7 +21,8 @@ import OnboardingGuide from '@/components/dashboard/OnboardingGuide.vue'
 const router = useRouter()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
-const isAdmin = computed(() => auth.isSuperadmin)
+const canCreateSupplier = computed(() => auth.isSuperadmin || auth.isAdminPlusRole)
+const canReviewApprovals = computed(() => auth.canRead('invoices.approval'))
 const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 
 // Onboarding gate (#151): bez dodavatele je dashboard prázdný a všechny zakládací akce
@@ -79,7 +80,7 @@ function openWorkReport(id: number) {
 
 const kpiGridCols = computed(() => {
   if (!summary.value) return 'lg:grid-cols-6'
-  const showApprovals = isAdmin.value
+  const showApprovals = canReviewApprovals.value
     && (summary.value.pending_approvals?.requested ?? 0) > 0
   const currencies = summary.value.kpi?.per_currency?.length ?? 0
   // Revenue tile spans 2 cols (lg:col-span-2), standardní boxy 1 col.
@@ -156,7 +157,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
       </div>
       <h2 class="text-xl font-semibold mb-2">{{ t('dashboard.no_supplier.title') }}</h2>
       <p class="text-neutral-500 mb-6">{{ t('dashboard.no_supplier.intro') }}</p>
-      <RouterLink v-if="isAdmin" to="/admin/suppliers?create=supplier"
+      <RouterLink v-if="canCreateSupplier" to="/admin/suppliers?create=supplier"
         class="px-5 h-10 inline-flex items-center bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-md">
         {{ t('dashboard.no_supplier.cta_admin') }}
       </RouterLink>
@@ -416,7 +417,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="kpiGridCols">
         <!-- Pending approvals tile (admin only, jen pokud existují requested) -->
         <RouterLink
-          v-if="isAdmin && summary.pending_approvals && summary.pending_approvals.requested > 0"
+          v-if="canReviewApprovals && summary.pending_approvals && summary.pending_approvals.requested > 0"
           to="/admin/approvals"
           class="bg-surface border rounded-lg p-5 shadow-sm hover:bg-primary-50 transition cursor-pointer"
           :class="summary.pending_approvals.overdue > 0 ? 'border-warning-500/50' : 'border-primary-500/40'">

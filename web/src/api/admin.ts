@@ -236,7 +236,7 @@ export const adminApi = {
   resetEmailTemplate: (code: string, locale: string) =>
     api.delete(`/admin/email-templates/${code}/${locale}`),
 
-  // Globální šablony bankovních pravidel (superadmin only)
+  // Firemní šablony bankovních pravidel
   listBankRuleTemplates: () =>
     api.get<AdminBankRuleTemplateCatalog>('/admin/bank-rule-templates').then(r => r.data),
   createBankRuleTemplate: (payload: AdminBankRuleTemplatePayload) =>

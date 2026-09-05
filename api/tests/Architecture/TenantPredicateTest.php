@@ -40,6 +40,7 @@ final class TenantPredicateTest extends TestCase
         'bank_email_imap_settings',
         'bank_email_notice_providers',
         'bank_email_processed_messages',
+        'bank_rule_templates',
         'cars',
         'clients',
         'crm_action_item_dismissals',
@@ -403,8 +404,6 @@ final class TenantPredicateTest extends TestCase
         // Superadmin-only endpointy (jinak 403) — globální rozsah je jejich smysl.
         'ListSentEmailsAction.php::__invoke'         => 'superadmin přehled odeslaných e-mailů napříč instancí',
         'SetupSampleAction.php::__invoke'            => 'setup wizard nad prázdnou DB, superadmin-only',
-        'BankRuleTemplateAdminAction.php::templates' => 'globální šablony pravidel (supplier_id IS NULL)',
-        'BankRuleTemplateAdminAction.php::find'      => 'globální šablony pravidel (supplier_id IS NULL)',
         'SmtpLogAnalyzer.php::loadSentIndex'         => 'analýza SMTP logu instance (superadmin diagnostika)',
         'SmtpLogAnalyzer.php::fillFromSubject'       => 'analýza SMTP logu instance (superadmin diagnostika)',
 

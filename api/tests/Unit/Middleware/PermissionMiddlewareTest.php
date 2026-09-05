@@ -98,10 +98,40 @@ final class PermissionMiddlewareTest extends TestCase
             ->process($this->request('GET', '/api/admin/users'), $this->handler())->getStatusCode());
     }
 
+    public function testOnlyAdminPlusAndSuperadminCanCreateSupplier(): void
+    {
+        $access = new SupplierAccess(0, true, null);
+        $admin = new EffectiveRole(2, 'Admin', 'staff', true, ['settings.company.write' => 2], 'admin');
+        $adminPlus = new EffectiveRole(3, 'Admin Plus', 'staff', true, ['settings.company.write' => 2], 'admin_plus');
+        $superadmin = new EffectiveRole(1, 'Superadmin', 'superadmin', true, [], 'superadmin');
+
+        self::assertSame(403, $this->middleware($admin, $access)
+            ->process($this->request('POST', '/api/suppliers'), $this->handler())->getStatusCode());
+        self::assertSame(204, $this->middleware($adminPlus, $access)
+            ->process($this->request('POST', '/api/suppliers'), $this->handler())->getStatusCode());
+        self::assertSame(204, $this->middleware($superadmin, $access)
+            ->process($this->request('POST', '/api/suppliers'), $this->handler())->getStatusCode());
+    }
+
+    public function testBankTemplateAdminRouteUsesCompanyPermission(): void
+    {
+        $reader = new EffectiveRole(2, 'Reader', 'staff', true, ['bank.rules' => 1]);
+        $writer = new EffectiveRole(3, 'Writer', 'staff', true, ['bank.rules' => 2]);
+        $access = new SupplierAccess(1, false, null);
+
+        self::assertSame(204, $this->middleware($reader, $access)
+            ->process($this->request('GET', '/api/admin/bank-rule-templates'), $this->handler())->getStatusCode());
+        self::assertSame(403, $this->middleware($reader, $access)
+            ->process($this->request('POST', '/api/admin/bank-rule-templates'), $this->handler())->getStatusCode());
+        self::assertSame(204, $this->middleware($writer, $access)
+            ->process($this->request('POST', '/api/admin/bank-rule-templates'), $this->handler())->getStatusCode());
+    }
+
     private function middleware(EffectiveRole $role, SupplierAccess $access): PermissionMiddleware
     {
         $roles = $this->createStub(PermissionResolver::class);
         $roles->method('resolve')->willReturn($role);
+        $roles->method('resolveDefault')->willReturn($role);
         $suppliers = $this->createStub(SupplierAccessResolver::class);
         $suppliers->method('resolve')->willReturn($access);
         $catalog = new PermissionCatalog();

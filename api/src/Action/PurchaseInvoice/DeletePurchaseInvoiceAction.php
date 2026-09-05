@@ -66,7 +66,7 @@ final class DeletePurchaseInvoiceAction
         // (paid/cancelled stále chráněné — auditní stopa).
         $force = (string) ($request->getQueryParams()['force'] ?? '') === '1';
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $isAdmin = RequestAuthorization::isSuperadmin($request);
+        $isAdmin = RequestAuthorization::isCompanyAdmin($request);
         $allowedForce = ['received', 'booked'];
         if ($existing['status'] !== 'draft') {
             if (!($force && $isAdmin && in_array($existing['status'], $allowedForce, true))) {

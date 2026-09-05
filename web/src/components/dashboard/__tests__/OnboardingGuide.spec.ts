@@ -37,6 +37,8 @@ vi.mock('@/stores/auth', () => ({
     canRead: m.canRead,
     canWrite: m.canWrite,
     get isSuperadmin() { return m.isSuperadmin },
+    get isAdminPlusRole() { return false },
+    get isCompanyAdminRole() { return m.isSuperadmin },
     get license() { return m.license },
   }),
 }))

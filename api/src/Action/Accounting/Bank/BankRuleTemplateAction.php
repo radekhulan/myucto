@@ -44,9 +44,9 @@ final class BankRuleTemplateAction
             'SELECT t.*, r.id AS rule_id
                FROM bank_rule_templates t
                LEFT JOIN bank_posting_rules r ON r.supplier_id = ? AND r.system_template_key = t.template_key
-              WHERE t.is_active = 1 ORDER BY t.sort_order, t.id'
+              WHERE t.supplier_id = ? AND t.is_active = 1 ORDER BY t.sort_order, t.id'
         );
-        $stmt->execute([$supplierId]);
+        $stmt->execute([$supplierId, $supplierId]);
         $items = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $posting = $this->postingRules->resolve($supplierId, (string) $row['rule_key']);
@@ -80,8 +80,10 @@ final class BankRuleTemplateAction
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
-        $stmt = $this->db->pdo()->prepare('SELECT * FROM bank_rule_templates WHERE template_key = ? AND is_active = 1');
-        $stmt->execute([(string) $args['key']]);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM bank_rule_templates WHERE supplier_id = ? AND template_key = ? AND is_active = 1'
+        );
+        $stmt->execute([$supplierId, (string) $args['key']]);
         $template = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($template === false) {
             return Json::error($response, 'template_not_found', 'Šablona nenalezena.', 404);

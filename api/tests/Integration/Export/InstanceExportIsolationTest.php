@@ -255,7 +255,7 @@ final class InstanceExportIsolationTest extends TestCase
             'invoices', 'invoice_items', 'invoice_payments',
             'purchase_invoices', 'purchase_invoice_items',
             'journal_entries', 'journal_entry_lines', 'chart_of_accounts', 'accounting_periods',
-            'bank_statements', 'bank_transactions',
+            'bank_statements', 'bank_transactions', 'bank_rule_templates',
             'cash_registers', 'cash_documents',
             'assets', 'stock_items', 'documents',
             'payment_orders', 'payment_order_items',

@@ -9,6 +9,7 @@ final class RoutePermissionMap
     public const PUBLIC = 'public';
     public const SELF_SERVICE = 'self_service';
     public const SUPERADMIN = 'superadmin';
+    public const ADMIN_PLUS = 'admin_plus';
     public const PERMISSION = 'permission';
 
     /** @var list<string> */
@@ -666,6 +667,9 @@ final class RoutePermissionMap
      * @var list<array{0:string,1:string,2:string,3:AccessLevel}>
      */
     private const ADMIN_RULES = [
+        ['GET', '#^/api/admin/approvals$#', 'invoices.approval', AccessLevel::READ],
+        ['GET', '#^/api/admin/bank-rule-templates(/|$)#', 'bank.rules', AccessLevel::READ],
+        ['*', '#^/api/admin/bank-rule-templates(/|$)#', 'bank.rules', AccessLevel::WRITE],
         // Import dokladů (Pohoda XML / ISDOC, iDoklad, Fakturoid) — ImportAction,
         // Start{Idoklad,Fakturoid}ImportAction, ImportJobStatus/Cancel/DeleteImportJobAction.
         ['POST',   '#^/api/admin/import$#', 'utilities.import', AccessLevel::WRITE],
@@ -730,7 +734,10 @@ final class RoutePermissionMap
             return new RoutePermission(self::SUPERADMIN);
         }
         if ($method !== 'GET' && preg_match('#^/api/price-list-items(/|$)#', $path) === 1) {
-            return new RoutePermission(self::SUPERADMIN);
+            return new RoutePermission(self::PERMISSION, 'invoices', AccessLevel::WRITE);
+        }
+        if ($method === 'POST' && $path === '/api/suppliers') {
+            return new RoutePermission(self::ADMIN_PLUS);
         }
         if ($method !== 'GET' && preg_match('#^/api/suppliers(/[0-9]+)?$#', $path) === 1) {
             return new RoutePermission(self::SUPERADMIN);

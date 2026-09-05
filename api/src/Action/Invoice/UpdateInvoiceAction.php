@@ -96,7 +96,7 @@ final class UpdateInvoiceAction
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $isForce = $request->getQueryParams()['force'] ?? null;
-        $isAdmin = RequestAuthorization::isSuperadmin($request);
+        $isAdmin = RequestAuthorization::isCompanyAdmin($request);
 
         $body = (array) ($request->getParsedBody() ?? []);
 

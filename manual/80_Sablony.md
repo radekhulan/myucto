@@ -14,9 +14,9 @@ automat: každá záložka vstupuje do jiné části zpracování.
 Všechny tři záložky jsou firemní a zobrazují se jen v podvojném účetnictví.
 Používají firmu zvolenou v hlavní liště aplikace. U Pravidel účtování je
 jméno firmy uvedeno také nad seznamem; pravidla druhé firmy se nepřimíchávají.
-Globální katalog šablon bankovních pravidel je systémová agenda a má vlastní
-stránku **Systém → Šablony bank. pravidel** (viz 59.4). Změna pravidla se
-použije na nové návrhy; již zaúčtované zápisy sama zpětně nepřepočítává.
+Také katalog šablon bankovních pravidel je firemní a má vlastní stránku
+**Nástroje → Šablony bank. pravidel** (viz 80.4). Změna pravidla se použije
+na nové návrhy; již zaúčtované zápisy sama zpětně nepřepočítává.
 
 ## 80.1 Šablony účetních zápisů
 
@@ -124,18 +124,18 @@ stopu. Opakovaně odmítané pravidlo se může deaktivovat. Historický backfil
 vždy degraduje automatický režim na návrh, aby stará data neúčtoval bez
 kontroly.
 
-## 80.4 Šablony bankovních pravidel (globální katalog)
+## 80.4 Šablony bankovních pravidel
 
-**Cesta: `Systém → Šablony bank. pravidel`**
+**Cesta: `Nástroje → Šablony bank. pravidel`**
 
-Administrátor instance může spravovat katalog typických pravidel. Šablona má
-stabilní klíč, popis, výchozí kontaci, kritéria, režim a aktivní stav. Firemní
-uživatel z ní vytvoří vlastní pravidlo; další změna globální šablony již
-instalovanou firemní kopii potichu nepřepíše.
+Každá firma má vlastní katalog typických pravidel. Šablona má stabilní klíč,
+popis, výchozí kontaci, kritéria, režim a aktivní stav. Uživatel z ní vytvoří
+bankovní pravidlo pro aktuální firmu; další změna šablony již vytvořené pravidlo
+potichu nepřepíše. Katalogy jiných firem se nezobrazují ani nemění.
 
 Instalace ověřuje existenci účtů v osnově konkrétní firmy. Neplatná nebo
-neaktivní šablona se neinstaluje. Globální CRUD je oddělený od tenantových
-bankovních pravidel a je dostupný pouze administrátorovi.
+neaktivní šablona se nepoužije. Správa katalogu je oddělená od vytvořených
+bankovních pravidel a řídí se firemním oprávněním `bank.rules`.
 
 ## 80.5 Předkontace nejsou šablony
 
@@ -155,7 +155,8 @@ Při řešení chyby proto postupuj podle vrstvy:
 
 Čtení šablon vyžaduje `accounting.templates`; jejich změna zápisovou variantu
 téhož oprávnění. Pravidla nákladů používají účetní oprávnění, bankovní pravidla
-`bank.rules`. Globální katalog je jen pro administrátora. Demo režim může
+`bank.rules`. Stejné oprávnění řídí také firemní katalog šablon bankovních
+pravidel: čtení zobrazí katalog a zápis dovolí jeho správu. Demo režim může
 mutace blokovat i tehdy, když je tlačítko zobrazené.
 
 Backend všechny objekty omezuje na aktuální firmu a zaznamenává vytvoření,

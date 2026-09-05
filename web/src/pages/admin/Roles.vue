@@ -16,7 +16,12 @@ const saving = ref(false)
 const creating = ref(false)
 const form = reactive({ name: '', role_type: 'staff' as 'staff' | 'client', is_active: true, permissions: {} as Record<string, PermissionValue> })
 
-const locked = computed(() => selected.value?.system_key === 'superadmin')
+const fixedRoleKeys = new Set(['superadmin', 'admin', 'admin_plus'])
+const fixedRoleOrder: Record<string, number> = { superadmin: 0, admin_plus: 1, admin: 2 }
+const orderedRoles = computed(() => [...roles.value].sort((a, b) =>
+  (fixedRoleOrder[a.system_key ?? ''] ?? Number.MAX_SAFE_INTEGER)
+  - (fixedRoleOrder[b.system_key ?? ''] ?? Number.MAX_SAFE_INTEGER)))
+const locked = computed(() => fixedRoleKeys.has(selected.value?.system_key ?? ''))
 const applicableGroups = computed(() => Object.entries(catalog.value?.groups ?? {}).map(([key, permissions]) => ({
   key,
   permissions: permissions.filter(p => form.role_type === 'staff' ? p.role_types.includes('staff') : p.role_types.includes('client')),
@@ -26,6 +31,15 @@ function permissionLabel(permission: { key: string; label: string }): string {
   if (locale.value === 'cs') return permission.label
   const text = permission.key.replace(/[._]/g, ' ')
   return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+function isFixedRole(role: Pick<RoleListItem, 'system_key'>): boolean {
+  return fixedRoleKeys.has(role.system_key ?? '')
+}
+
+function roleDescription(systemKey: string | null): string {
+  if (!fixedRoleKeys.has(systemKey ?? '')) return ''
+  return t(`roles.system_descriptions.${systemKey}`)
 }
 
 async function load() {
@@ -115,19 +129,18 @@ onMounted(load)
       <button :class="btnFilled('primary')" @click="openCreate"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.plus" /></svg>{{ t('roles.new') }}</button>
     </header>
     <div v-if="loading" class="py-12 text-center text-neutral-500">{{ t('common.loading') }}</div>
-    <div v-else class="grid lg:grid-cols-[minmax(18rem,24rem)_1fr] gap-5 items-start">
+    <div v-else class="grid lg:grid-cols-[minmax(20rem,28rem)_1fr] gap-5 items-start">
       <div class="bg-surface border border-neutral-200 rounded-lg overflow-hidden divide-y divide-neutral-100">
-        <div v-for="role in roles" :key="role.id" class="p-3" :class="!creating && selected?.id === role.id ? 'bg-primary-50' : 'hover:bg-neutral-50'">
+        <div v-for="role in orderedRoles" :key="role.id" class="p-3" :class="!creating && selected?.id === role.id ? 'bg-primary-50' : 'hover:bg-neutral-50'">
           <button type="button" class="w-full text-left cursor-pointer" @click="openRole(role)">
-            <div class="flex items-center justify-between gap-2"><span class="font-medium">{{ role.name }}</span><span v-if="role.system_key === 'superadmin'">🔒</span><span v-else :class="role.is_active ? 'text-success-600' : 'text-neutral-400'">{{ role.is_active ? t('common.active') : t('roles.inactive') }}</span></div>
+            <div class="flex items-center justify-between gap-2"><span class="font-medium">{{ role.name }}</span><span v-if="isFixedRole(role)">🔒</span><span v-else :class="role.is_active ? 'text-success-600' : 'text-neutral-400'">{{ role.is_active ? t('common.active') : t('roles.inactive') }}</span></div>
             <div class="text-xs text-neutral-500 mt-1">{{ t(`roles.types.${role.role_type}`) }} · {{ t('roles.usage', { users: role.default_usage, overrides: role.override_usage }) }}</div>
+            <p v-if="roleDescription(role.system_key)" class="text-xs text-neutral-500 mt-1">{{ roleDescription(role.system_key) }}</p>
           </button>
-          <div class="flex flex-wrap gap-2 mt-2">
+          <div v-if="!isFixedRole(role)" class="flex flex-wrap gap-2 mt-2">
             <button type="button" :class="btnOutlineSm('primary')" @click="openRole(role)"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button>
-            <template v-if="role.system_key !== 'superadmin'">
-              <button type="button" :class="btnOutlineSm('neutral')" @click="duplicate(role)"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.copy" /></svg>{{ t('roles.duplicate') }}</button>
-              <button v-if="role.default_usage + role.override_usage === 0" type="button" :class="btnOutlineSm('danger')" @click="remove(role)"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.trash" /></svg>{{ t('common.delete') }}</button>
-            </template>
+            <button type="button" :class="btnOutlineSm('neutral')" @click="duplicate(role)"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.copy" /></svg>{{ t('roles.duplicate') }}</button>
+            <button v-if="role.default_usage + role.override_usage === 0" type="button" :class="btnOutlineSm('danger')" @click="remove(role)"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.trash" /></svg>{{ t('common.delete') }}</button>
           </div>
         </div>
       </div>
@@ -137,7 +150,9 @@ onMounted(load)
           <label class="text-sm"><span class="block font-medium mb-1">{{ t('roles.type') }}</span><select v-if="creating" v-model="form.role_type" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface"><option value="staff">{{ t('roles.types.staff') }}</option><option value="client">{{ t('roles.types.client') }}</option></select><div v-else class="h-10 px-3 flex items-center bg-neutral-50 rounded-md">{{ t(`roles.types.${selected?.role_type}`) }}</div></label>
         </div>
         <label v-if="!creating && !locked" class="flex items-center gap-2"><input v-model="form.is_active" type="checkbox" />{{ t('common.active') }}</label>
-        <div v-if="locked" class="rounded-md bg-primary-50 text-primary-700 p-3 text-sm">{{ t('roles.superadmin_locked') }}</div>
+        <div v-if="locked" class="rounded-md bg-primary-50 text-primary-700 p-3 text-sm">
+          {{ roleDescription(selected?.system_key ?? null) }}
+        </div>
         <div v-else class="space-y-4">
           <section v-for="group in applicableGroups" :key="group.key" class="border border-neutral-200 rounded-lg overflow-hidden">
             <h2 class="font-semibold px-3 py-2 bg-neutral-50">{{ t(`permissions.groups.${group.key}`, group.key) }}</h2>

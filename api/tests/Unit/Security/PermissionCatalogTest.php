@@ -88,6 +88,19 @@ final class PermissionCatalogTest extends TestCase
         self::assertTrue($checker->allows($superadmin, 'invoices.delete', AccessLevel::WRITE));
     }
 
+    public function testFixedCompanyAdminCapabilitiesAreDistinctFromSuperadmin(): void
+    {
+        $admin = new EffectiveRole(2, 'Admin', 'staff', true, [], 'admin');
+        $adminPlus = new EffectiveRole(3, 'Admin Plus', 'staff', true, [], 'admin_plus');
+
+        self::assertTrue($admin->isCompanyAdmin());
+        self::assertFalse($admin->isSuperadmin());
+        self::assertFalse($admin->canCreateSupplier());
+        self::assertTrue($adminPlus->isCompanyAdmin());
+        self::assertFalse($adminPlus->isSuperadmin());
+        self::assertTrue($adminPlus->canCreateSupplier());
+    }
+
     /**
      * Výmaz osobních údajů je nevratný, proto ho výchozí účetní role NEMÁ —
      * stejně jako schválení běhu. Retenční lhůty naopak ano: prodloužit lhůtu

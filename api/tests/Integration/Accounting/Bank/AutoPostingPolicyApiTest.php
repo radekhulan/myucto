@@ -77,6 +77,35 @@ final class AutoPostingPolicyApiTest extends BankPostingTestCase
         self::assertSame('template_already_instantiated', $duplicate['body']['error']['code']);
     }
 
+    public function testTemplateListAndInstantiationDoNotUseAnotherCompanyCatalog(): void
+    {
+        $otherSupplierId = (int) ($this->db->pdo()->query(
+            'SELECT id FROM supplier WHERE id <> ' . $this->supplierId . ' ORDER BY id LIMIT 1'
+        )->fetchColumn() ?: 0);
+        if ($otherSupplierId === 0) $this->markTestSkipped('Second supplier required');
+
+        $key = 'remit.social.own';
+        $this->db->pdo()->prepare(
+            'UPDATE bank_rule_templates SET name_cs = ? WHERE supplier_id = ? AND template_key = ?'
+        )->execute(['__TEST aktuální firma', $this->supplierId, $key]);
+        $this->db->pdo()->prepare(
+            'UPDATE bank_rule_templates SET name_cs = ? WHERE supplier_id = ? AND template_key = ?'
+        )->execute(['__TEST cizí firma', $otherSupplierId, $key]);
+
+        $action = $this->container->get(BankRuleTemplateAction::class);
+        $listed = $this->callAction($action, 'list', 'GET', 'admin');
+        self::assertSame(200, $listed['status']);
+        $templates = array_column($listed['body'], null, 'template_key');
+        self::assertSame('__TEST aktuální firma', $templates[$key]['name'] ?? null);
+
+        $this->db->pdo()->prepare(
+            'DELETE FROM bank_rule_templates WHERE supplier_id = ? AND template_key = ?'
+        )->execute([$this->supplierId, $key]);
+        $foreignOnly = $this->callAction($action, 'instantiate', 'POST', 'admin', [], ['key' => $key]);
+        self::assertSame(404, $foreignOnly['status']);
+        self::assertSame('template_not_found', $foreignOnly['body']['error']['code']);
+    }
+
     public function testTemplateVariableSymbolOverrideFillsMissingSupplierSetting(): void
     {
         $this->db->pdo()->prepare("UPDATE supplier SET cssz_vsdp=NULL WHERE id=?")->execute([$this->supplierId]);

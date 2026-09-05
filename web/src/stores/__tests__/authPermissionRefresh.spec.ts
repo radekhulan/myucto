@@ -74,4 +74,13 @@ describe('obnova oprávnění v auth store', () => {
     expect(store.canRead('dashboard')).toBe(true)
     expect(store.canWrite('accounting')).toBe(true)
   })
+
+  it('rozpozná systémovou roli Admin Plus', () => {
+    const store = useAuthStore()
+    store.user = { ...session().user, role: { ...session().user.role, system_key: 'admin_plus' } }
+    expect(store.isAdminPlusRole).toBe(true)
+
+    store.user = { ...session().user, role: { ...session().user.role, system_key: 'admin' } }
+    expect(store.isAdminPlusRole).toBe(false)
+  })
 })

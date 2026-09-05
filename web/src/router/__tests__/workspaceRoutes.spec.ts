@@ -114,5 +114,20 @@ describe('workspace route factory', () => {
       access: 'read',
     })
     expect(byName.get('admin-support')?.meta?.superadminOnly).not.toBe(true)
+    expect(byName.get('admin-bank-rule-templates')?.meta).toMatchObject({
+      permission: 'bank.rules',
+      access: 'read',
+      requiresDoubleEntry: true,
+    })
+    expect(byName.get('admin-bank-rule-templates')?.meta?.superadminOnly).not.toBe(true)
+    expect(byName.get('admin-suppliers')?.meta).toMatchObject({ adminPlusOnly: true })
+    expect(byName.get('admin-suppliers')?.meta?.superadminOnly).not.toBe(true)
+    for (const name of ['admin-price-list', 'admin-price-list-new', 'admin-price-list-edit']) {
+      expect(byName.get(name)?.meta).toMatchObject({
+        companyAdminOnly: true,
+        requiresNoStock: true,
+      })
+      expect(byName.get(name)?.meta?.superadminOnly).not.toBe(true)
+    }
   })
 })

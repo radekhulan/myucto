@@ -37,6 +37,16 @@ final class RequestAuthorization
         return self::effectiveRole($request)->isSuperadmin();
     }
 
+    public static function isCompanyAdmin(Request $request): bool
+    {
+        return self::effectiveRole($request)->isCompanyAdmin();
+    }
+
+    public static function canCreateSupplier(Request $request): bool
+    {
+        return self::effectiveRole($request)->canCreateSupplier();
+    }
+
     public static function isClientType(Request $request): bool
     {
         return self::effectiveRole($request)->isClientType();

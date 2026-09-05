@@ -57,6 +57,7 @@ final class ArchiveRestoreService
         'currencies',
         'clients',
         'posting_rules',
+        'bank_rule_templates',
         'cost_centers',
         'accounting_supplier_settings',
         'accounting_document_series',

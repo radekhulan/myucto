@@ -588,9 +588,11 @@ ze tří úrovní: **neviditelné**, **pouze čtení** nebo **zápis**. Zápis z
 čtení; chybějící nebo neznámé oprávnění znamená zákaz.
 
 Role typu **staff** jsou pro interní pracovníky. Role typu **client** mohou
-dostat jen katalogem povolené funkce klientského portálu. Systémová role
-**Superadmin** stojí mimo matici, má plný přístup ke všem firmám a jako jediná
-spravuje uživatele, role a globální administraci.
+dostat jen katalogem povolené funkce klientského portálu. Předdefinované role
+**Admin** a **Admin Plus** stojí mimo editovatelnou matici a mají pevný plný
+přístup k přiděleným firmám. Admin Plus navíc zakládá firmy, ke kterým
+automaticky získá práva Admin. **Superadmin** má plný přístup ke všem firmám
+a jako jediný spravuje uživatele, role a globální administraci.
 
 Každý non-superadmin potřebuje explicitní membership firmy. U jedné firmy může
 mít kompatibilní přepis role; role se nesčítají. Neaktivní role, neplatný přepis

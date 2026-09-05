@@ -55,7 +55,7 @@ final class DeleteImportBatchAction
         }
 
         $ackRetention = ($request->getQueryParams()['ack_retention'] ?? '') === '1'
-            && RequestAuthorization::isSuperadmin($request);
+            && RequestAuthorization::isCompanyAdmin($request);
 
         $result = $this->eraser->erase($supplierId, $batchId, null, null, $ackRetention);
 

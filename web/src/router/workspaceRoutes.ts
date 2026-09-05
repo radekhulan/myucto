@@ -289,12 +289,11 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'admin/databox', name: 'admin-databox', component: () => import('@/pages/admin/DataBox.vue'), meta: { requiresPayroll: true } },
       { path: 'admin/isds-gateway', name: 'admin-isds-gateway', component: () => import('@/pages/admin/IsdsGatewaySettings.vue'), meta: {  } },
       { path: 'isds-gateway/callback', name: 'isds-gateway-callback', component: () => import('@/pages/IsdsGatewayCallback.vue'), meta: { requiresSupplier: true } },
-      // Globální katalog šablon bankovních pravidel — systémová (ne per-firma) agenda,
-      // proto vlastní routa pod Systém místo záložky v per-firma /templates.
-      { path: 'admin/bank-rule-templates', name: 'admin-bank-rule-templates', component: () => import('@/pages/admin/BankRuleTemplates.vue'), meta: {  } },
+      // Firemní katalog šablon bankovních pravidel má samostatnou stránku v Nástrojích.
+      { path: 'admin/bank-rule-templates', name: 'admin-bank-rule-templates', component: () => import('@/pages/admin/BankRuleTemplates.vue'), meta: { requiresDoubleEntry: true } },
       {
         path: 'templates', name: 'templates', component: () => import('@/pages/TemplatesPage.vue'),
-        // Bookmark na bývalou superadmin záložku katalogu šablon → nová systémová routa.
+        // Bookmark na bývalou záložku katalogu šablon vede na jeho samostatnou stránku.
         beforeEnter: to => (to.query.section === 'bank' ? { path: '/admin/bank-rule-templates' } : true),
       },
       // Nástroje (reorg menu, audit 2026-07) — archivy, kurzový režim, repo sazba,

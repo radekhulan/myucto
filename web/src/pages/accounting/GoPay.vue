@@ -54,7 +54,7 @@ const form = reactive<GoPaySettings>({
 const canConfigure = computed(() => auth.canWrite('bank.post'))
 const canImport = computed(() => auth.canWrite('bank.import') && auth.canWrite('bank.post'))
 const canManagePdf = computed(() => auth.canWrite('bank.import'))
-const canDelete = computed(() => auth.isSuperadmin)
+const canDelete = computed(() => auth.isCompanyAdminRole)
 const account221 = computed(() => accountOptions.value.filter(a => a.account_code.startsWith('221')))
 const account311 = computed(() => accountOptions.value.filter(a => a.account_code.startsWith('311')))
 const account261 = computed(() => accountOptions.value.filter(a => a.account_code.startsWith('261')))

@@ -8,6 +8,7 @@
     { "name": "portal-company-settings", "path_pattern": "^/portal/settings/?$", "kind": "permission", "permission": "settings.company", "access": "write" },
 
     { "name": "admin-codebooks", "path_pattern": "^/admin/codebooks/?$", "kind": "permission", "permission": "settings.company", "access": "read" },
+    { "name": "admin-approvals", "path_pattern": "^/admin/approvals/?$", "kind": "permission", "permission": "invoices.approval", "access": "read" },
     { "name": "admin-support", "path_pattern": "^/admin/support/?$", "kind": "permission", "permission": "profile", "access": "read" },
 
     { "name": "clients", "path_pattern": "^/clients/?$", "kind": "permission", "permission": "clients", "access": "read" },

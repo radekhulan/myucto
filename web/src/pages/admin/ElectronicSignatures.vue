@@ -82,8 +82,8 @@ const signingProfileSlug = useAutoSlug(
   slug => { signingProfileDraft.code = slug },
   { maxLen: 80 },
 )
-const isAdmin = computed(() => auth.isSuperadmin)
-const isAccountant = computed(() => auth.canRead('settings.signing') && !auth.isSuperadmin)
+const isAdmin = computed(() => auth.isCompanyAdminRole)
+const isAccountant = computed(() => auth.canRead('settings.signing') && !auth.isCompanyAdminRole)
 const accountantProfilesEnabled = computed(() => signingSettings.value?.accountant_profiles_enabled === true)
 const canManageSigningProfiles = computed(() => isAdmin.value || (isAccountant.value && accountantProfilesEnabled.value))
 const canUseUserDefaults = computed(() => isAdmin.value || (isAccountant.value && accountantProfilesEnabled.value))

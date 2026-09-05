@@ -13,6 +13,7 @@ vi.mock('@/i18n', () => ({
 import { authorizationGuard, canonicalInternalUrl, router } from '../index'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
+import { useSupplierStore } from '@/stores/supplier'
 
 /**
  * Regrese #5: účet s `must_setup_mfa = true` skončil v nekonečné smyčce
@@ -145,6 +146,49 @@ describe('router guard vynuceného nastavení MFA', () => {
 
     expect(result).toEqual({ name: 'home' })
   })
+
+  it('pustí na Dodavatele roli Admin Plus, ale běžnou roli Admin odmítne', async () => {
+    signIn({ role: { type: 'staff', system_key: 'admin_plus' } })
+    await expect(authorizationGuard(resolveTarget({ name: 'admin-suppliers' }))).resolves.toBe(true)
+
+    signIn({ role: { type: 'staff', system_key: 'admin' } })
+    await expect(authorizationGuard(resolveTarget({ name: 'admin-suppliers' }))).resolves.toEqual({ name: 'home' })
+  })
+
+  it.each(['admin', 'admin_plus'])(
+    'pustí systémovou roli %s do firemního ceníku',
+    async (systemKey) => {
+      const auth = signIn({ role: { type: 'staff', system_key: systemKey } })
+      auth.permissions = { 'settings.company.write': 2 }
+      useSupplierStore().setAvailable([{
+        id: 7,
+        accounting_mode: 'double_entry',
+        stock_enabled: false,
+      }] as never, 7)
+
+      await expect(authorizationGuard(resolveTarget({ name: 'admin-price-list' }))).resolves.toBe(true)
+      await expect(authorizationGuard(resolveTarget({ name: 'admin-price-list-new' }))).resolves.toBe(true)
+    },
+  )
+
+  it.each([
+    ['accountant', 'staff'],
+    ['readonly', 'staff'],
+    ['client', 'client'],
+  ])(
+    'nepustí do firemního ceníku jinou systémovou roli %s',
+    async (systemKey, roleType) => {
+      const auth = signIn({ role: { type: roleType, system_key: systemKey } })
+      auth.permissions = { 'settings.company.write': 0 }
+      useSupplierStore().setAvailable([{
+        id: 7,
+        accounting_mode: 'double_entry',
+        stock_enabled: false,
+      }] as never, 7)
+
+      await expect(authorizationGuard(resolveTarget({ name: 'admin-price-list' }))).resolves.not.toBe(true)
+    },
+  )
 
   it('oddlužení vyžaduje zároveň oprávnění k exekucím', async () => {
     const auth = signIn()
