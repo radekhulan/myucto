@@ -34,6 +34,9 @@ const form = ref({
   scope: 'read' as 'read' | 'read_write',
   expires_at: '' as string,
   never_expires: false,
+  // Least-privilege i tady: mzdovou evidenci podání token nedostane, dokud
+  // ji člověk vědomě nezaškrtne.
+  allow_payroll_submission_docs: false,
   totp_code: '',
 })
 
@@ -83,6 +86,7 @@ function openCreate() {
     scope: 'read',
     expires_at: '',
     never_expires: false,
+    allow_payroll_submission_docs: false,
     totp_code: '',
   }
   createError.value = ''
@@ -150,6 +154,7 @@ async function submitCreate() {
       // never_expires posíláme jen bez konkrétního data — backend jinak vrátí 400.
       expires_at: form.value.expires_at || null,
       never_expires: canNeverExpire.value && !form.value.expires_at && form.value.never_expires,
+      allow_payroll_submission_docs: form.value.allow_payroll_submission_docs,
       totp_code: !proof && hasValidTotp ? form.value.totp_code : undefined,
       step_up_token: proof || undefined,
     })
@@ -478,6 +483,17 @@ onMounted(load)
               </label>
             </div>
           </fieldset>
+
+          <!-- ⚠️ Jediná mzdová evidence, kterou jde tokenu odemknout. Zdravotní
+               údaje, exekuce, insolvence a výplatní pásky zůstávají jen pro
+               přihlášenou relaci a tímhle se odemknout nedají. -->
+          <label class="flex items-start gap-2 text-sm">
+            <input type="checkbox" v-model="form.allow_payroll_submission_docs" class="mt-0.5" data-token-payroll-docs />
+            <span>
+              <strong>{{ t('api_tokens.payroll_docs') }}</strong>
+              <span class="text-neutral-500"> — {{ t('api_tokens.payroll_docs_desc') }}</span>
+            </span>
+          </label>
 
           <label class="block text-sm">
             <span class="text-neutral-700 font-medium">{{ t('api_tokens.col_expires') }} <span class="text-neutral-400">{{ t('common.optional') }}</span></span>

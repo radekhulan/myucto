@@ -24,7 +24,8 @@ K dispozici jsou **tři varianty** stejné dokumentace nad jedním OpenAPI spece
 > Detailní chování jednotlivých endpointů popisují kapitoly k dané agendě —
 > tady jde jen o to, že přes REST API se dá automatizovat i tahle část systému.
 > Samotná přítomnost operace ve specifikaci však neznamená, že ji lze zavolat
-> PAT tokenem: popis konkrétní operace může uvádět session-only přístup,
+> PAT tokenem: taková operace odpoví `403 session_required` a v popisu to má
+> uvedené. Popis konkrétní operace může uvádět session-only přístup,
 > superadmina nebo zákaz zápisu přes bearer token.
 
 ---
@@ -39,6 +40,15 @@ K dispozici jsou **tři varianty** stejné dokumentace nad jedním OpenAPI spece
      Doporučeno; token bound na konkrétního dodavatele nemůže přistupovat
      k datům jiných firem.
    - **Rozsah** — `read` (jen GET) nebo `read & write` (plné API).
+   - **Evidence mzdových podání v Dokumentech** — volitelné, výchozí vypnuto.
+     Dokumenty navázané na mzdová podání (doručenky datové schránky, protokoly
+     ČSSZ, odpovědi zdravotních pojišťoven) jsou pro tokeny normálně neviditelné;
+     výpis je přeskočí a detail vrátí `404`. Zaškrtni jen tehdy, když je
+     integrace opravdu potřebuje — třeba archivační skript, který je zakládá
+     a pak s nimi pracuje. **Zdravotní údaje, exekuce, insolvenci ani výplatní
+     pásky tím neodemkneš**, ty zůstávají jen pro přihlášení v prohlížeči.
+     Schopnost jde nastavit jen při vytváření tokenu; existujícímu ji doplnit
+     nelze, vyrob nový.
    - **Expirace** — volitelná. Bez expirace token platí, dokud ho ručně nezrušíš.
    - **Čerstvé ověření** — použij passkey nebo TOTP. Passkey otevře systémový
      dialog zařízení; TOTP vyžaduje aktuální šestimístný kód. Ověření je
@@ -225,6 +235,7 @@ Všechny chyby v unifikovaném formátu:
 | `insufficient_scope` | Token nemá `read_write` |
 | `token_endpoint_forbidden` | Endpoint není přes token dostupný (jen z webu) |
 | `token_write_forbidden` | Zápis do účetní / daňové vrstvy — přes token nikdy |
+| `session_required` | Operaci dělá člověk v aplikaci; token na ni nestačí ani se `read_write` |
 | `token_ip_forbidden` | Token není povolen z této IP adresy |
 | `validation_failed` | Tělo neprošlo validací |
 | `not_found` | Zdroj neexistuje (nebo nepatří aktuálnímu supplier-ovi) |

@@ -68,8 +68,8 @@ final class CreateTokenAction
     public function __invoke(Request $request, Response $response): Response
     {
         // Bearer auth nesmí vytvářet další tokeny (escalation guard)
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
-            return Json::error($response, 'forbidden_via_token', 'API tokeny lze spravovat jen z webového rozhraní.', 403);
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response, 'API tokeny lze spravovat jen z webového rozhraní.');
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
@@ -93,6 +93,10 @@ final class CreateTokenAction
             : null;
         // Default least-privilege: bez explicitního scope je token jen pro čtení.
         $scope = (string) ($body['scope'] ?? 'read');
+        // ⚠️ Také least-privilege: mzdovou evidenci podání token nedostane, dokud
+        // ji člověk výslovně nezaškrtne. Zbytek mzdové evidence nejde odemknout
+        // vůbec — viz RequestAuthorization::tokenAllowsPayrollSubmissionDocs().
+        $allowPayrollSubmissionDocs = !empty($body['allow_payroll_submission_docs']);
         $expiresRaw = trim((string) ($body['expires_at'] ?? ''));
         $neverExpires = ($body['never_expires'] ?? false) === true;
         $totpCode = trim((string) ($body['totp_code'] ?? ''));
@@ -255,7 +259,14 @@ final class CreateTokenAction
             }
         }
 
-        $out ??= $this->tokens->generate($userId, $supplierId, $name, $scope, $expiresAt);
+        $out ??= $this->tokens->generate(
+            $userId,
+            $supplierId,
+            $name,
+            $scope,
+            $expiresAt,
+            $allowPayrollSubmissionDocs,
+        );
 
         $this->activity->log(
             'api_token.created',
@@ -269,6 +280,7 @@ final class CreateTokenAction
                 'prefix' => $out['prefix'],
                 'expires_at' => $expiresAt?->format('Y-m-d H:i:s'),
                 'never_expires' => $expiresAt === null,
+                'allow_payroll_submission_docs' => $allowPayrollSubmissionDocs,
             ],
             $ip,
             $userAgent,

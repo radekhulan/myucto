@@ -8,6 +8,8 @@ export interface ApiToken {
   name: string
   prefix: string
   scope: 'read' | 'read_write'
+  /** Smí v Dokumentech vidět evidenci mzdových podání (doručenky, protokoly). */
+  allow_payroll_submission_docs: boolean
   last_used_at: string | null
   last_used_ip: string | null
   expires_at: string | null
@@ -67,6 +69,12 @@ export interface CreateTokenPayload {
   expires_at?: string | null
   /** Bez expirace — jen vědomá volba, pro read_write navíc jen superadmin. */
   never_expires?: boolean
+  /**
+   * Odemkne tokenu evidenci mzdových PODÁNÍ v Dokumentech (doručenky,
+   * protokoly ČSSZ, odpovědi pojišťoven). Ostatní mzdová evidence — zdraví,
+   * exekuce, insolvence, výplatní pásky — zůstává jen pro přihlášenou relaci.
+   */
+  allow_payroll_submission_docs?: boolean
   totp_code?: string
   step_up_token?: string
 }

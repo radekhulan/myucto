@@ -44,6 +44,7 @@ final class ApiTokenService
         string $name,
         string $scope,
         ?\DateTimeImmutable $expiresAt = null,
+        bool $allowPayrollSubmissionDocs = false,
     ): array {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
@@ -55,6 +56,7 @@ final class ApiTokenService
                 $name,
                 $scope,
                 $expiresAt,
+                $allowPayrollSubmissionDocs,
             );
             $pdo->commit();
             return $token;
@@ -76,6 +78,7 @@ final class ApiTokenService
         string $name,
         string $scope,
         ?\DateTimeImmutable $expiresAt = null,
+        bool $allowPayrollSubmissionDocs = false,
     ): array {
         if (!$pdo->inTransaction() || $userId < 1) {
             throw new \LogicException('Vytvoření API tokenu vyžaduje aktivní transakci a uživatele.');
@@ -96,8 +99,9 @@ final class ApiTokenService
 
         $expiresSql = $expiresAt !== null ? 'FROM_UNIXTIME(?)' : 'NULL';
         $stmt = $pdo->prepare(
-            'INSERT INTO api_tokens (user_id, supplier_id, name, token_hash, prefix, scope, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ' . $expiresSql . ')'
+            'INSERT INTO api_tokens (user_id, supplier_id, name, token_hash, prefix, scope,
+                                     allow_payroll_submission_docs, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ' . $expiresSql . ')'
         );
         $params = [
             $userId,
@@ -106,6 +110,7 @@ final class ApiTokenService
             $hash,
             $prefix,
             $scope,
+            $allowPayrollSubmissionDocs ? 1 : 0,
         ];
         if ($expiresAt !== null) {
             $params[] = $expiresAt->getTimestamp();
@@ -137,6 +142,7 @@ final class ApiTokenService
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.user_id, t.supplier_id, t.name, t.prefix, t.scope,
+                    t.allow_payroll_submission_docs,
                     t.expires_at, t.revoked_at,
                     u.email AS user_email, u.name AS user_name, u.role_id AS user_role_id,
                     r.name AS user_role_name, r.role_type AS user_role_type,
@@ -200,7 +206,7 @@ final class ApiTokenService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.supplier_id, s.display_name AS supplier_name, s.company_name AS supplier_company,
-                    t.name, t.prefix, t.scope,
+                    t.name, t.prefix, t.scope, t.allow_payroll_submission_docs,
                     t.last_used_at, t.last_used_ip,
                     t.expires_at, t.revoked_at, t.created_at,
                     (SELECT COUNT(*) FROM api_token_ips ip WHERE ip.token_id = t.id) AS ip_rule_count

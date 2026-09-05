@@ -16,7 +16,7 @@ final class DocumentViewerResolver
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = self::userId($user['id'] ?? null);
-        $isSession = $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'session';
+        $isSession = RequestAuthorization::isSessionAuth($request);
         $canViewPayrollEnforcementEvidence =
             $isSession
             && RequestAuthorization::allows(
@@ -31,8 +31,12 @@ final class DocumentViewerResolver
                 'payroll.insolvency',
                 AccessLevel::READ,
             );
+        // ⚠️ Jediná mzdová evidence, kterou smí vidět i API token — a jen ten,
+        // který tu schopnost dostal výslovně při vytvoření. Doručenky a protokoly
+        // podání potřebuje archivační integrace; zbytek mzdové evidence níž
+        // zůstává na `$isSession` bez výjimky.
         $canViewPayrollSubmissionEvidence =
-            $isSession
+            ($isSession || RequestAuthorization::tokenAllowsPayrollSubmissionDocs($request))
             && RequestAuthorization::allows(
                 $request,
                 'payroll.submissions',
