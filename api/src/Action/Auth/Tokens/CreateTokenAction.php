@@ -193,6 +193,7 @@ final class CreateTokenAction
                     $name,
                     $scope,
                     $expiresAt,
+                    $allowPayrollSubmissionDocs,
                 );
             } catch (OneTimeTokenException|StepUpOperationException) {
                 return Json::error(

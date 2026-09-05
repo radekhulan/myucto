@@ -20095,6 +20095,14 @@ components:
                 name: { type: string }
                 prefix: { type: string, example: "mi_pat_abcd" }
                 scope: { type: string, enum: [read, read_write] }
+                allow_payroll_submission_docs:
+                  type: boolean
+                  description: |
+                    Smí token v Dokumentech vidět evidenci mzdových PODÁNÍ
+                    (doručenky datové schránky, protokoly ČSSZ, odpovědi
+                    pojišťoven). `false` = takové dokumenty výpis přeskočí
+                    a detail vrátí 404 — zavřený kanál, ne prázdná data.
+                    Nastavuje se jen při vytváření tokenu.
                 expires_at: { type: [string, "null"], format: date-time }
             - { type: "null" }
 

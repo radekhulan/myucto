@@ -19,7 +19,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   - user: { id, email, name, role }
  *   - supplier: { id, company_name, display_name } — efektivní scope tokenu/session
  *   - auth_method: 'bearer' | 'session'
- *   - token: { id, prefix, scope, expires_at } | null   (jen pro bearer)
+ *   - token: { id, prefix, scope, allow_payroll_submission_docs, expires_at } | null
+ *     (jen pro bearer)
  */
 final class ApiMeAction
 {
@@ -56,6 +57,11 @@ final class ApiMeAction
                 'name'       => $tok['name'] ?? null,
                 'prefix'     => $tok['prefix'] ?? null,
                 'scope'      => $tok['scope'] ?? null,
+                // Volitelné schopnosti musí být vidět zvenčí. Bez nich se skript,
+                // kterému chybí přístup, nemá čeho chytit — vypadá to jako prázdná
+                // data, ne jako zavřený kanál.
+                'allow_payroll_submission_docs' =>
+                    RequestAuthorization::tokenAllowsPayrollSubmissionDocs($request),
                 'expires_at' => $tok['expires_at'] ?? null,
             ];
         }

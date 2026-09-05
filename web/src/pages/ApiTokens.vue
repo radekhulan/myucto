@@ -343,10 +343,19 @@ onMounted(load)
               {{ tk.supplier_id === null ? t('api_tokens.supplier_all') : (tk.supplier_name || tk.supplier_company) }}
             </td>
             <td class="px-3 py-2">
-              <span class="px-2 py-0.5 rounded text-xs font-medium"
-                :class="tk.scope === 'read' ? 'bg-neutral-100 text-neutral-600' : 'bg-primary-100 text-primary-700'">
-                {{ tk.scope === 'read' ? t('api_tokens.scope_read') : t('api_tokens.scope_read_write') }}
-              </span>
+              <div class="flex flex-wrap items-center gap-1">
+                <span class="px-2 py-0.5 rounded text-xs font-medium"
+                  :class="tk.scope === 'read' ? 'bg-neutral-100 text-neutral-600' : 'bg-primary-100 text-primary-700'">
+                  {{ tk.scope === 'read' ? t('api_tokens.scope_read') : t('api_tokens.scope_read_write') }}
+                </span>
+                <!-- Bez tohohle štítku nešlo z ničeho poznat, jestli token schopnost
+                     opravdu dostal — a step-up větev ji přitom tiše zahazovala. -->
+                <span v-if="tk.allow_payroll_submission_docs"
+                  class="px-2 py-0.5 rounded text-xs font-medium bg-warning-50 text-warning-600"
+                  :title="t('api_tokens.payroll_docs_desc')">
+                  {{ t('api_tokens.payroll_docs_badge') }}
+                </span>
+              </div>
             </td>
             <td class="px-3 py-2">
               <button
@@ -468,14 +477,14 @@ onMounted(load)
             <legend class="text-neutral-700 font-medium mb-1">{{ t('api_tokens.col_scope') }}</legend>
             <div class="space-y-1">
               <label class="flex items-start gap-2">
-                <input type="radio" v-model="form.scope" value="read" class="mt-0.5" />
+                <input type="radio" name="token-scope" v-model="form.scope" value="read" class="mt-0.5" />
                 <span>
                   <strong>{{ t('api_tokens.scope_read') }}</strong>
                   <span class="text-neutral-500"> — {{ t('api_tokens.scope_read_desc') }}</span>
                 </span>
               </label>
               <label class="flex items-start gap-2">
-                <input type="radio" v-model="form.scope" value="read_write" class="mt-0.5" />
+                <input type="radio" name="token-scope" v-model="form.scope" value="read_write" class="mt-0.5" />
                 <span>
                   <strong>{{ t('api_tokens.scope_read_write') }}</strong>
                   <span class="text-neutral-500"> — {{ t('api_tokens.scope_read_write_desc') }}</span>

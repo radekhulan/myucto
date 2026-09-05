@@ -25,6 +25,12 @@ final class MfaProtectedOperationService
     ) {}
 
     /**
+     * ⚠️ Volitelné schopnosti tokenu se sem musí PROPAGOVAT, jinak je tahle
+     * větev tiše zahodí. Uživatel s passkey chodí VŽDY tudy, takže zapomenutý
+     * parametr znamená, že zaškrtnuté políčko ve formuláři nemá žádný účinek —
+     * token vznikne, vypadá správně a jen se chová, jako by ho nikdo nezaškrtl.
+     * Přesně to potkalo `allow_payroll_submission_docs`.
+     *
      * @return array{plaintext:string,prefix:string,id:int}
      */
     public function createApiToken(
@@ -35,6 +41,7 @@ final class MfaProtectedOperationService
         string $name,
         string $scope,
         ?\DateTimeImmutable $expiresAt,
+        bool $allowPayrollSubmissionDocs = false,
     ): array {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
@@ -57,6 +64,7 @@ final class MfaProtectedOperationService
                 $name,
                 $scope,
                 $expiresAt,
+                $allowPayrollSubmissionDocs,
             );
             $pdo->commit();
             return $token;

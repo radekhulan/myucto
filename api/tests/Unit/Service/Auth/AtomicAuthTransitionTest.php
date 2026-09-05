@@ -551,6 +551,44 @@ final class AtomicAuthTransitionTest extends TestCase
         );
     }
 
+    /**
+     * Step-up větev je JEDINÁ cesta uživatele s passkey — a dřív do
+     * `generateInTransaction()` neposílala volitelné schopnosti tokenu vůbec.
+     * Zaškrtnuté políčko ve formuláři tak nemělo žádný účinek: token vznikl,
+     * v přehledu vypadal správně a jen tiše neviděl to, na co byl vyroben.
+     */
+    public function testStepUpPathKeepsOptionalTokenCapabilities(): void
+    {
+        $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
+        $proof = $this->proofs->issue(
+            $this->userId,
+            $session['token'],
+            MfaStepUpService::OPERATION_API_TOKEN_CREATE,
+            'totp',
+        );
+
+        $created = $this->protectedOperations->createApiToken(
+            $this->userId,
+            $session['token'],
+            $proof,
+            null,
+            'Synthetic payroll token',
+            'read_write',
+            null,
+            true,
+        );
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT scope, allow_payroll_submission_docs FROM api_tokens WHERE id = ?'
+        );
+        $stmt->execute([$created['id']]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+
+        self::assertSame('read_write', $row['scope'] ?? null);
+        self::assertSame(1, (int) ($row['allow_payroll_submission_docs'] ?? 0),
+            'Step-up větev nesmí zahodit schopnost, kterou uživatel zaškrtl');
+    }
+
     public function testPasskeyRevokePreservesCurrentFamilyAndRevokesOtherSessions(): void
     {
         [$targetId] = $this->createCredential(0, 'Target key');

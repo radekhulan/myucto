@@ -48,7 +48,8 @@ K dispozici jsou **tři varianty** stejné dokumentace nad jedním OpenAPI spece
      a pak s nimi pracuje. **Zdravotní údaje, exekuce, insolvenci ani výplatní
      pásky tím neodemkneš**, ty zůstávají jen pro přihlášení v prohlížeči.
      Schopnost jde nastavit jen při vytváření tokenu; existujícímu ji doplnit
-     nelze, vyrob nový.
+     nelze, vyrob nový. Jestli ji token opravdu má, poznáš podle štítku
+     v přehledu tokenů a podle `allow_payroll_submission_docs` v `api-me`.
    - **Expirace** — volitelná. Bez expirace token platí, dokud ho ručně nezrušíš.
    - **Čerstvé ověření** — použij passkey nebo TOTP. Passkey otevře systémový
      dialog zařízení; TOTP vyžaduje aktuální šestimístný kód. Ověření je
@@ -77,9 +78,17 @@ Response:
   "user":     { "id": 1, "email": "you@example.com", "name": "Petr", "role": "admin" },
   "supplier": { "id": 1, "company_name": "Acme s.r.o.", "display_name": "Acme" },
   "auth_method": "bearer",
-  "token":    { "id": 42, "name": "Make integrace", "prefix": "mi_pat_abcd", "scope": "read_write", "expires_at": null }
+  "token":    {
+    "id": 42, "name": "Make integrace", "prefix": "mi_pat_abcd",
+    "scope": "read_write", "allow_payroll_submission_docs": false, "expires_at": null
+  }
 }
 ```
+
+`allow_payroll_submission_docs` říká, jestli token dostal volitelnou schopnost
+z kroku 2. Když integrace nevidí doručenky ani protokoly podání, podívej se
+sem dřív, než začneš hledat chybu v datech — `false` znamená zavřený kanál,
+ne prázdný výsledek. Přepnout to u hotového tokenu nejde, vyrob nový.
 
 ### 99.3.1 Příklady
 

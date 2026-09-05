@@ -221,6 +221,9 @@ final class ApiTokenService
             $r['id']            = (int) $r['id'];
             $r['supplier_id']   = $r['supplier_id'] !== null ? (int) $r['supplier_id'] : null;
             $r['ip_rule_count'] = (int) $r['ip_rule_count'];
+            // PDO vrací TINYINT jako řetězec, a "0" je v JS pravdivé — bez tohohle
+            // přetypování by štítek schopnosti svítil i u tokenů, které ji nemají.
+            $r['allow_payroll_submission_docs'] = (int) $r['allow_payroll_submission_docs'] === 1;
             if ($r['last_used_ip'] !== null) {
                 $r['last_used_ip'] = @inet_ntop($r['last_used_ip']) ?: null;
             }
