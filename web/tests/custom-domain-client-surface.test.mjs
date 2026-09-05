@@ -16,8 +16,15 @@ const client = await readFile(new URL('api/client.ts', src), 'utf8')
 test('shared manifest persists the audited client surface and legacy aliases', () => {
   // Přesný počet je brána proti nechtěnému rozšíření klientské plochy, ne
   // konstanta — s každou novou auditovanou routou se vědomě posouvá.
-  assert.equal(manifest.routes.length, 39)
-  assert.equal(new Set(manifest.routes.map(route => route.name)).size, 39)
+  //
+  // 39 → 40: admin-approvals. Nejde o rozšíření práv, ale o srovnání manifestu
+  // s backendem. `invoices.approval` má klientská role ve výchozí sadě dávno
+  // (PermissionCatalog, 'client') a endpoint GET /api/admin/approvals jí byl
+  // přístupný taky (RoutePermissionMap). Chybělo jen UI k funkci, kterou klient
+  // přes API už měl — schvalování faktur je přitom právě to, co klient na
+  // vlastní doméně dělá. Přístup dál drží permission na routě i na endpointu.
+  assert.equal(manifest.routes.length, 40)
+  assert.equal(new Set(manifest.routes.map(route => route.name)).size, 40)
   assert.deepEqual(
     manifest.routes.slice(-3).map(route => route.name),
     ['data-exchange', 'admin-export', 'admin-import'],
