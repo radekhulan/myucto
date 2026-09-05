@@ -271,6 +271,7 @@ use MyInvoice\Action\Auth\SetupSampleAction;
 use MyInvoice\Action\Auth\SetupPreflightAction;
 use MyInvoice\Action\Auth\SetupStatusAction;
 use MyInvoice\Action\Auth\Tokens\CreateTokenAction;
+use MyInvoice\Action\Auth\Tokens\DeleteTokenAction;
 use MyInvoice\Action\Auth\Tokens\ListTokensAction;
 use MyInvoice\Action\Auth\Tokens\RevokeTokenAction;
 use MyInvoice\Action\Auth\TotpAction;
@@ -440,6 +441,9 @@ final class Routes
             $g->get   ('/tokens',                  ListTokensAction::class);
             $g->post  ('/tokens',                  CreateTokenAction::class);
             $g->delete('/tokens/{id:[0-9]+}',      RevokeTokenAction::class);
+            // Trvalé smazání — na rozdíl od zrušení po něm v přehledu nezůstane
+            // náhrobek a volání v api-logu ztratí přiřazení k tokenu.
+            $g->delete('/tokens/{id:[0-9]+}/purge', DeleteTokenAction::class);
             // Volitelný IP allowlist tokenu (IPv4/IPv6, adresa i CIDR rozsah)
             $g->get   ('/tokens/{id:[0-9]+}/ips',                  [\MyInvoice\Action\Auth\Tokens\TokenIpRuleAction::class, 'list']);
             $g->post  ('/tokens/{id:[0-9]+}/ips',                  [\MyInvoice\Action\Auth\Tokens\TokenIpRuleAction::class, 'create']);

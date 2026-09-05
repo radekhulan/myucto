@@ -94,6 +94,13 @@ export const tokensApi = {
 
   revoke: (id: number) => api.delete(`/auth/tokens/${id}`),
 
+  /**
+   * Trvalé smazání. Zrušení nechá v přehledu náhrobek a v api-logu celou
+   * historii volání; tohle uklidí i náhrobek a volání ztratí přiřazení
+   * k tokenu. Nevratné.
+   */
+  purge: (id: number) => api.delete(`/auth/tokens/${id}/purge`),
+
   // ── IP allowlist tokenu — prázdný seznam znamená bez omezení ──────────────
   listIps: (tokenId: number) =>
     api.get<{ rules: TokenIpRule[] }>(`/auth/tokens/${tokenId}/ips`).then((r) => r.data.rules),

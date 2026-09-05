@@ -358,6 +358,13 @@ curl -H "Authorization: Bearer $TOKEN" -OJ \
 - **Bound na supplier_id** — minimalizuje radius pádu při kompromitaci.
 - **Sleduj `last_used_at`** v UI — token, který se 3 měsíce nepoužil, asi nepotřebuješ.
 - **Při ztrátě/podezření** — okamžitě **Zrušit** v UI. Revokace je instantní (žádný cache).
+- **Zrušit, nebo Smazat?** Zrušení je bezpečná volba: přístup skončí okamžitě,
+  ale token zůstane v přehledu a v logu volání si drží celou historii — je pak
+  vidět, co s ním kdo dělal. Mazání je navíc úklid: token z přehledu zmizí
+  a jeho volání v logu ztratí přiřazení (zůstanou jako volání bez jména).
+  Při podezření na zneužití proto **nejdřív zruš a maž až po prošetření** —
+  jinak zahodíš právě ty stopy, které bys potřeboval. Kdo co smazal, zůstane
+  v Aktivitě (`api_token.deleted` včetně jména a prefixu).
 
 ## 99.15 Co API nepokrývá
 

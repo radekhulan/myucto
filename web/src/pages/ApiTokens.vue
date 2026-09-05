@@ -210,6 +210,27 @@ async function revoke(id: number, name: string) {
   }
 }
 
+/**
+ * Trvalé smazání. Zrušený token zůstává v přehledu jako náhrobek a v api-logu
+ * drží historii volání — mazání uklidí obojí, proto se ptáme jinak podle toho,
+ * jestli token ještě žije.
+ */
+async function purge(tk: ApiToken) {
+  if (!canManageTokens.value) return
+  const stillLive = !tk.is_revoked && !tk.is_expired
+  const question = stillLive
+    ? t('api_tokens.confirm_delete_active', { name: tk.name })
+    : t('api_tokens.confirm_delete', { name: tk.name })
+  if (!confirm(question)) return
+  try {
+    await tokensApi.purge(tk.id)
+    toast.success(t('api_tokens.deleted'))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
 async function openIps(tk: ApiToken) {
   ipToken.value = tk
   ipRules.value = []
@@ -378,13 +399,24 @@ onMounted(load)
             <td class="px-3 py-2">
               <span class="px-2 py-0.5 rounded text-xs font-medium" :class="badgeClass(tk)">{{ statusLabel(tk) }}</span>
             </td>
-            <td class="px-3 py-2 text-right">
+            <td class="px-3 py-2 text-right whitespace-nowrap">
               <button
                 v-if="canManageTokens && !tk.is_revoked"
                 @click="revoke(tk.id, tk.name)"
                 class="cursor-pointer text-danger-500 hover:text-danger-600 text-sm"
               >
                 {{ t('api_tokens.revoke') }}
+              </button>
+              <!-- Zrušení odřízne přístup, mazání navíc zahodí i záznam o tom,
+                   že token existoval. Dvě různé věci, dvě tlačítka. -->
+              <button
+                v-if="canManageTokens"
+                @click="purge(tk)"
+                data-token-delete
+                class="cursor-pointer text-neutral-500 hover:text-danger-600 text-sm ml-3"
+                :title="t('api_tokens.delete_hint')"
+              >
+                {{ t('api_tokens.delete') }}
               </button>
             </td>
           </tr>

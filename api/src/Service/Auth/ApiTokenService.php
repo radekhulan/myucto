@@ -375,4 +375,57 @@ final class ApiTokenService
         $stmt->execute([$tokenId, $userId]);
         return $stmt->rowCount() > 0;
     }
+
+    /**
+     * Trvale smaže vlastní token. Na rozdíl od {@see revoke()} po něm nezůstane
+     * v přehledu nic — proto vrací SNÍMEK smazaného řádku, ať má volající co
+     * zapsat do auditní stopy. Bez něj by mazání bylo jediná operace nad tokeny,
+     * která po sobě nenechá dohledatelné, co vlastně zmizelo.
+     *
+     * ⚠️ Řádky `api_request_log` přežijí, ale FK je `ON DELETE SET NULL`, takže
+     * ztratí přiřazení k tokenu (zůstanou jako volání bez jména). Zrušení tuhle
+     * historii zachová celou — mazat má smysl až na uklizení přehledu.
+     *
+     * @return array{id:int,name:string,prefix:string,scope:string,
+     *               allow_payroll_submission_docs:bool,revoked_at:?string}|null
+     *         null = token neexistuje nebo nepatří uživateli
+     */
+    public function delete(int $tokenId, int $userId): ?array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            // Zámek řádku, ať se snímek nerozejde se skutečně smazaným tokenem
+            // při souběžném mazání ze dvou záložek.
+            $stmt = $pdo->prepare(
+                'SELECT id, name, prefix, scope, allow_payroll_submission_docs, revoked_at
+                 FROM api_tokens WHERE id = ? AND user_id = ? FOR UPDATE'
+            );
+            $stmt->execute([$tokenId, $userId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!$row) {
+                $pdo->rollBack();
+                return null;
+            }
+
+            $del = $pdo->prepare('DELETE FROM api_tokens WHERE id = ? AND user_id = ?');
+            $del->execute([$tokenId, $userId]);
+            $pdo->commit();
+
+            return [
+                'id'     => (int) $row['id'],
+                'name'   => (string) $row['name'],
+                'prefix' => (string) $row['prefix'],
+                'scope'  => (string) $row['scope'],
+                'allow_payroll_submission_docs' =>
+                    (int) $row['allow_payroll_submission_docs'] === 1,
+                'revoked_at' => $row['revoked_at'] !== null ? (string) $row['revoked_at'] : null,
+            ];
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
 }
