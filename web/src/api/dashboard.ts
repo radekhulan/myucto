@@ -1,6 +1,21 @@
 import { api } from './client'
 
+/**
+ * Součet napříč všemi měnami přepočtený na CZK kurzem dokladu. Per-měnové řady zůstávají
+ * zdrojem pravdy pro čtení (euro se nesčítá s korunou); tohle je jediné číslo, které jde
+ * porovnat s jiným účetnictvím vedeným v korunách. `currency_count` říká, kolik měn se do
+ * něj sešlo — UI ho ukazuje až od dvou, u jednoměnového dodavatele by jen zdvojil KPI vedle.
+ */
+export interface TotalCzk {
+  currency_count: number
+  this_year: number
+  prev_year: number
+  prev_year_ytd: number
+  change_pct: number | null
+}
+
 export interface DashboardKpi {
+  total_czk?: TotalCzk
   per_currency: Array<{
     currency: string
     this_year: number

@@ -1600,8 +1600,12 @@ onBeforeUnmount(() => {
         @expand="setDesktopNavigationMode('side')"
         :class="[
           'sticky top-[calc(var(--instance-alert-h,0px)+3rem)] h-[calc(100vh-3rem-var(--instance-alert-h,0px))]',
+          // Lišta s přepínačem dodavatele (2,125rem) je uvnitř hlavičky, ale `lg:hidden` —
+          // od 1024 px má nulovou výšku. Bez `lg:` prefixu se o ni rail odsazoval i na
+          // desktopu, takže mu nad hlavou zůstal pruh plátna. Zrcadlí to, co níž dělá
+          // plný sidebar: pod lg offset s lištou, od lg bez ní.
           supplierStore.hasMultiple && supplierStore.currentSupplier
-            ? 'top-[calc(var(--instance-alert-h,0px)+5.125rem)] h-[calc(100vh-5.125rem-var(--instance-alert-h,0px))]'
+            ? 'top-[calc(var(--instance-alert-h,0px)+5.125rem)] h-[calc(100vh-5.125rem-var(--instance-alert-h,0px))] lg:top-[calc(var(--instance-alert-h,0px)+3rem)] lg:h-[calc(100vh-3rem-var(--instance-alert-h,0px))]'
             : '',
         ]"
       />

@@ -107,12 +107,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside ref="root" class="relative z-20 w-14 shrink-0 nav-inverted bg-surface border-r border-neutral-200 shadow-sm">
-    <nav class="flex h-full flex-col items-center gap-1 overflow-y-auto scrollbar-slim px-1.5 py-2" :aria-label="menuLabel">
+  <aside ref="root" class="relative z-20 w-[4.5rem] shrink-0 nav-inverted bg-surface border-r border-neutral-200 shadow-sm">
+    <nav class="flex h-full flex-col items-center gap-1.5 overflow-y-auto scrollbar-slim px-1 py-2" :aria-label="menuLabel">
       <button
         v-if="expandLabel"
         type="button"
-        class="mb-1 inline-flex h-9 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-neutral-200 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-primary-700"
+        class="mb-1 inline-flex h-8 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-neutral-200 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-primary-700"
         :title="expandLabel"
         :aria-label="expandLabel"
         @click="emit('expand')"
@@ -121,25 +121,45 @@ onBeforeUnmount(() => {
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 6l6 6-6 6" />
         </svg>
       </button>
+      <!-- Ikona + název sekce. Samotná ikona nutila uživatele hádat nebo čekat na tooltip;
+           dvoupísmenná zkratka to neřeší, protože Nákup i Nástroje dávají „Ná". Celý název
+           se do 4,5rem vejde a barevná dlaždice zůstává primárním vodítkem pro periferní
+           vidění — text je až potvrzení. -->
       <button
         v-for="section in railSections"
         :key="section.key"
         type="button"
-        class="relative inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl shadow-sm ring-1 transition-all hover:brightness-110 hover:shadow-md"
-        :class="[
-          ACCENT_TILE[section.accent ?? 'primary'],
-          sectionIsActive(section) ? 'ring-2' : '',
-          openKey === section.key ? 'scale-[1.04] ring-2 shadow-md' : '',
-        ]"
+        class="group relative flex w-full shrink-0 cursor-pointer flex-col items-center gap-1 rounded-lg px-0.5 py-1 transition-colors"
+        :class="sectionIsActive(section) || openKey === section.key ? 'bg-neutral-100' : 'hover:bg-neutral-50'"
         :title="section.title"
         :aria-label="section.title"
         :aria-expanded="openKey === section.key"
         @click.stop="toggleSection(section.key)"
       >
-        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.25" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" :d="section.icon" />
-        </svg>
-        <span v-if="sectionHasAttention(section)" class="absolute right-1 top-1 h-2 w-2 rounded-full bg-warning-500" aria-hidden="true"></span>
+        <!-- Aktivní sekce nese ještě pruh u hrany railu: ring kolem dlaždice se v řadě
+             deseti barevných čtverců ztrácel, svislý pruh je vidět na první pohled. -->
+        <span
+          v-if="sectionIsActive(section)"
+          class="absolute left-[-0.25rem] top-1 h-[calc(100%-0.5rem)] w-[3px] rounded-r-full bg-primary-600"
+          aria-hidden="true"
+        ></span>
+        <span
+          class="relative inline-flex h-9 w-9 items-center justify-center rounded-xl shadow-sm ring-1 transition-all group-hover:brightness-110 group-hover:shadow-md"
+          :class="[
+            ACCENT_TILE[section.accent ?? 'primary'],
+            sectionIsActive(section) ? 'ring-2' : '',
+            openKey === section.key ? 'scale-[1.04] ring-2 shadow-md' : '',
+          ]"
+        >
+          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.25" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="section.icon" />
+          </svg>
+          <span v-if="sectionHasAttention(section)" class="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-warning-500" aria-hidden="true"></span>
+        </span>
+        <span
+          class="w-full truncate text-center text-[10px] leading-tight tracking-tight transition-colors"
+          :class="sectionIsActive(section) ? 'font-semibold text-primary-700' : 'text-neutral-600 group-hover:text-neutral-900'"
+        >{{ section.title }}</span>
       </button>
     </nav>
 
