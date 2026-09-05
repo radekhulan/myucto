@@ -1,4 +1,25 @@
 -- MyÚčto.cz — MZ-03-W04/W06: účinné politiky zaměstnavatele a jejich audit.
+--
+-- Překryv období hlídá trigger, NE deklarativní `PERIOD FOR` + `UNIQUE ...
+-- WITHOUT OVERLAPS`. Náhrada byla zvážena a ověřena proti MariaDB 11.8.9,
+-- narazila na tři věci, které se s tímhle schématem nepotkávají:
+--
+--  1. Sloupce v PERIOD nesmí být NULL — MariaDB je při CREATE TABLE tiše
+--     překlopí na NOT NULL. Otevřená platnost (`valid_to IS NULL`) by musela
+--     přejít na sentinel '9999-12-31' napříč schématem, repository vrstvou
+--     i API. Jediný ostrý řádek policy je přitom právě otevřený.
+--  2. Obejít to generovaným sloupcem (`COALESCE(valid_to,'9999-12-31')`) nejde,
+--     MariaDB to odmítá: ERROR 4155 "Period field cannot be GENERATED ALWAYS AS".
+--  3. PERIOD je polootevřený interval [from, to) s vynuceným from < to, kdežto
+--     trigger níž implementuje uzavřený [from, to]. Pár 2026-01-01..2026-06-01
+--     a 2026-06-01..2026-09-01 trigger odmítne (oba si nárokují 6. 1.), PERIOD
+--     ho přijme. Jednodenní platnost (valid_from = valid_to), kterou dnešní
+--     CHECK dovoluje, by naopak přestala jít vložit (ERROR 4025).
+--
+-- Přechod na WITHOUT OVERLAPS tedy není refaktoring, ale migrace semantiky
+-- platnosti z uzavřeného intervalu na polootevřený včetně posunu všech
+-- existujících `valid_to` a změny významu pole "platnost do" v UI. Dokud to
+-- nikdo vědomě neodrozhodne, zůstává trigger.
 
 SET NAMES utf8mb4;
 

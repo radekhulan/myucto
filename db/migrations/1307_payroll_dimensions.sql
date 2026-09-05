@@ -18,6 +18,11 @@
 -- Použití ve schválené mzdové revizi (payroll_run_revisions.status='approved')
 -- blokuje smazání dimenze — jde jen ukončit účinnost (UPDATE valid_to).
 --
+-- Overlap guard je trigger, ne deklarativní `PERIOD FOR` + `UNIQUE ... WITHOUT
+-- OVERLAPS`; důvody jsou rozepsané v migraci 1276 a platí tu stejně (PERIOD
+-- neumí NULL konec platnosti, generovaný sloupec jako obcházku odmítá, a je
+-- polootevřený tam, kde tyhle tabulky pracují s uzavřeným intervalem).
+--
 -- Idempotence: CREATE TABLE IF NOT EXISTS, DROP TRIGGER IF EXISTS.
 
 SET NAMES utf8mb4;
