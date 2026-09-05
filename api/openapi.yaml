@@ -4603,21 +4603,23 @@ paths:
         '404': { description: Uživatel nenalezen }
 
   /api/v1/admin/bank-rule-templates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
     get:
       tags: [Accounting]
-      summary: Globální katalog šablon bankovních pravidel pro administraci
-      description: "Session-only, superadmin. Vrací šablony, povolené typy operací a globální předkontace."
+      summary: Firemní katalog šablon bankovních pravidel pro administraci
+      description: "Session-only, oprávnění bank.rules. Vrací šablony a efektivní předkontace aktuální firmy."
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AdminBankRuleTemplateCatalog' }
-        '403': { description: Pouze superadmin }
+        '403': { description: Chybí oprávnění bank.rules pro aktuální firmu }
     post:
       tags: [Accounting]
-      summary: Vytvoří globální šablonu bankovního pravidla
-      description: "Session-only, superadmin. Šablona se po aktivaci nabízí všem firmám."
+      summary: Vytvoří šablonu bankovního pravidla pro aktuální firmu
+      description: "Session-only, oprávnění bank.rules pro zápis."
       requestBody:
         required: true
         content:
@@ -4642,14 +4644,15 @@ paths:
 
   /api/v1/admin/bank-rule-templates/{id}:
     parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
       - in: path
         name: id
         required: true
         schema: { type: integer }
     put:
       tags: [Accounting]
-      summary: Upraví globální šablonu bankovního pravidla
-      description: "Session-only, superadmin. template_key je po vytvoření neměnný."
+      summary: Upraví šablonu bankovního pravidla aktuální firmy
+      description: "Session-only, oprávnění bank.rules pro zápis. template_key je po vytvoření neměnný."
       requestBody:
         required: true
         content:
@@ -4674,8 +4677,8 @@ paths:
         '422': { description: validation_failed / posting_rule_not_found / rule_account_forbidden }
     delete:
       tags: [Accounting]
-      summary: Smaže nepoužitou globální šablonu bankovního pravidla
-      description: "Session-only, superadmin. Použitou šablonu je nutné místo smazání deaktivovat."
+      summary: Smaže nepoužitou šablonu bankovního pravidla aktuální firmy
+      description: "Session-only, oprávnění bank.rules pro zápis. Použitou šablonu je nutné místo smazání deaktivovat."
       responses:
         '403':
           description: |
@@ -18916,9 +18919,10 @@ components:
       allOf:
         - $ref: '#/components/schemas/AdminBankRuleTemplateWrite'
         - type: object
-          required: [id, usage_count]
+          required: [id, supplier_id, usage_count]
           properties:
             id: { type: integer }
+            supplier_id: { type: integer }
             debit_account_code: { type: [string, "null"] }
             credit_account_code: { type: [string, "null"] }
             usage_count: { type: integer, minimum: 0 }

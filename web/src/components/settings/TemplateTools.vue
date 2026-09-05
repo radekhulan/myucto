@@ -16,8 +16,8 @@ const journalEnabled = computed(() => accountingMode.value === 'double_entry')
 type Tab = 'journal' | 'expense' | 'posting'
 
 // Dostupné záložky podle režimu účtování. Všechny jsou per-firma a dávají smysl jen
-// v podvojném účetnictví; globální katalog šablon bankovních pravidel je systémová
-// agenda a žije na /admin/bank-rule-templates (Systém).
+// v podvojném účetnictví; katalog šablon bankovních pravidel pro právě zvolenou
+// firmu má samostatnou stránku /admin/bank-rule-templates v Nástrojích.
 const availableTabs = computed<Tab[]>(() => (journalEnabled.value ? ['journal', 'expense', 'posting'] : []))
 
 function tabFromQuery(value: unknown): Tab {

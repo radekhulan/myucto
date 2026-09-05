@@ -322,7 +322,7 @@ const statementActions = computed<ActionItem[]>(() => {
       icon: 'trash',
       tier: 'advanced',
       variant: 'danger',
-      show: auth.isSuperadmin && isVirtual.value && s.matched_count === 0,
+      show: auth.isCompanyAdminRole && isVirtual.value && s.matched_count === 0,
       title: t('bank.statement_delete_hint'),
       disabled: deletingStatement.value,
       loading: deletingStatement.value,

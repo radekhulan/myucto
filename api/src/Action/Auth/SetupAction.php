@@ -9,6 +9,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionAuthContext;
@@ -830,6 +831,7 @@ final class SetupAction
         // importem výpisu. Do té doby si firma svůj vlastní účet neuměla přiřadit.
         // Registrace až tady, po obnovení FK: řádek se váže na `currencies.id`.
         OwnBankAccountRegistrar::syncSupplier($pdo, $supplierId, $this->bankOwnership);
+        BankRuleTemplateSeeder::seed($pdo, $supplierId);
 
         return $supplierId;
     }
@@ -908,4 +910,3 @@ final class SetupAction
         return $statement->fetchColumn();
     }
 }
-

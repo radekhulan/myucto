@@ -61,6 +61,9 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
         ) {
             return $handler->handle($request);
         }
+        if ($request->getMethod() === 'POST' && $path === '/api/suppliers') {
+            return $handler->handle($request->withAttribute(self::ATTR_CURRENT_ID, 0));
+        }
 
         $access = $this->resolver->resolve($request);
 

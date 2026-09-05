@@ -93,7 +93,7 @@ final class DeleteInvoiceAction
             return $deny;
         }
 
-        if ($status !== 'draft' && !RequestAuthorization::isSuperadmin($request)) {
+        if ($status !== 'draft' && !RequestAuthorization::isCompanyAdmin($request)) {
             return Json::error(
                 $response,
                 'admin_required',
@@ -117,7 +117,7 @@ final class DeleteInvoiceAction
         $childRows = $children->fetchAll(\PDO::FETCH_ASSOC);
 
         $forceDelete = ($request->getQueryParams()['force'] ?? '') === '1'
-            && RequestAuthorization::isSuperadmin($request);
+            && RequestAuthorization::isCompanyAdmin($request);
         $allUnposted = !$documentLock->booked && !$documentLock->posted;
         foreach ($childRows as $child) {
             $childLock = $this->locks->forInvoice($child);
@@ -150,7 +150,7 @@ final class DeleteInvoiceAction
                 );
             } catch (RetentionViolationException $e) {
                 $acknowledged = ($request->getQueryParams()['ack_retention'] ?? '') === '1'
-                    && RequestAuthorization::isSuperadmin($request);
+                    && RequestAuthorization::isCompanyAdmin($request);
                 if (!$acknowledged) {
                     return Json::error($response, 'retention_period', $e->getMessage(), 422);
                 }

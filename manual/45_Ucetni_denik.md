@@ -382,12 +382,12 @@ lze šablonu vytvořit, upravit její název, popis i jednotlivé řádky (úče
 výchozí částku, pojmenování a středisko), smazat ji nebo z ní rovnou založit nový
 ruční zápis.
 
-Superadmin má navíc stránku **Systém → Šablony bank. pravidel**. Ta spravuje globální
-katalog pravidel nabízených všem firmám přes **Banka → Pravidla účtování → Ze šablony**.
+Stránka **Nástroje → Šablony bank. pravidel** spravuje firemní katalog pravidel
+nabízených přes **Banka → Pravidla účtování → Ze šablony**.
 U šablony lze nastavit český a anglický název, směr, kritéria shody, typ operace,
-globální předkontaci, prioritu, pořadí a aktivní stav. Úprava se projeví jen při
+kontaci, prioritu, pořadí a aktivní stav. Úprava se projeví jen při
 budoucím vytvoření pravidla; již existující firemní pravidla zůstávají beze změny.
-Šablonu použitou některou firmou lze deaktivovat, nikoli smazat.
+Použitou šablonu lze deaktivovat, nikoli smazat.
 
 Firemní číselník středisek se spravuje v **Nástroje → Střediska**. Při založení se kód
 automaticky vytvoří z názvu a před uložením jej lze ručně upravit. Uložený kód je pak

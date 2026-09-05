@@ -104,7 +104,9 @@ final class RoutePermissionPathEscapeSweepTest extends TestCase
 
             $this->access = new SupplierAccess(1, false, null);
 
-            if ($policy->kind === RoutePermissionMap::PERMISSION) {
+            if ($policy->kind === RoutePermissionMap::ADMIN_PLUS) {
+                $this->role = new EffectiveRole(3, 'Admin Plus', 'staff', true, [], 'admin_plus');
+            } elseif ($policy->kind === RoutePermissionMap::PERMISSION) {
                 $key = (string) $policy->key;
                 if (!$catalog->has($key)) {
                     $failures[$method . ' ' . $pattern] = "klíč '$key' není v PermissionCatalog";
@@ -204,6 +206,7 @@ final class RoutePermissionPathEscapeSweepTest extends TestCase
         // ať se pro ~1000 dvojic nestaví tisíce test doubles.
         $roles = $this->createStub(PermissionResolver::class);
         $roles->method('resolve')->willReturnCallback(fn (): EffectiveRole => $this->role);
+        $roles->method('resolveDefault')->willReturnCallback(fn (): EffectiveRole => $this->role);
         $suppliers = $this->createStub(SupplierAccessResolver::class);
         $suppliers->method('resolve')->willReturnCallback(fn (): SupplierAccess => $this->access);
 

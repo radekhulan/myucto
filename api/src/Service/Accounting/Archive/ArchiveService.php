@@ -39,6 +39,7 @@ final class ArchiveService
         'accounting_periods',
         'chart_of_accounts',
         'posting_rules',
+        'bank_rule_templates',
         'cost_centers',
         'accounting_supplier_settings',
         'accounting_closing_steps',

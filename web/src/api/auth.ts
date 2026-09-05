@@ -7,6 +7,7 @@ export interface User {
   name: string
   role: RoleSummary
   is_superadmin: boolean
+  can_create_supplier?: boolean
   locale: 'cs' | 'en'
   totp_enabled?: boolean
   must_setup_totp?: boolean

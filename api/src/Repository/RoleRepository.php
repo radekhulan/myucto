@@ -82,7 +82,7 @@ final class RoleRepository
     public function update(int $id, string $name, bool $isActive, array $permissions, string $revision): array
     {
         $current = $this->find($id) ?? throw new \OutOfBoundsException('Role not found');
-        if (($current['system_key'] ?? null) === 'superadmin') throw new SystemRoleLocked();
+        if ($this->isLockedSystemRole($current)) throw new SystemRoleLocked();
         if ((string) $current['updated_at'] !== $revision) throw new RoleRevisionConflict();
         $name = $this->validateName($name, (string) $current['role_type'], $id);
         $levels = $this->validatePermissions((string) $current['role_type'], $permissions);
@@ -113,14 +113,14 @@ final class RoleRepository
     public function duplicate(int $id, string $name): array
     {
         $source = $this->find($id) ?? throw new \OutOfBoundsException('Role not found');
-        if ($source['role_type'] === 'superadmin') throw new SystemRoleLocked();
+        if ($this->isLockedSystemRole($source)) throw new SystemRoleLocked();
         return $this->create($name, (string) $source['role_type'], (array) $source['permissions']);
     }
 
     public function delete(int $id): void
     {
         $role = $this->find($id) ?? throw new \OutOfBoundsException('Role not found');
-        if (($role['system_key'] ?? null) === 'superadmin') throw new SystemRoleLocked();
+        if ($this->isLockedSystemRole($role)) throw new SystemRoleLocked();
         $usage = $this->usage($id);
         if ($usage['total'] > 0) throw new RoleInUse($usage);
         $this->db->pdo()->prepare('DELETE FROM roles WHERE id = ?')->execute([$id]);
@@ -171,6 +171,12 @@ final class RoleRepository
                 throw new SystemRoleLocked();
             }
         }
+    }
+
+    /** @param array<string, mixed> $role */
+    private function isLockedSystemRole(array $role): bool
+    {
+        return in_array($role['system_key'] ?? null, ['superadmin', 'admin', 'admin_plus'], true);
     }
 
     /** @param array<string, int|string|AccessLevel> $permissions @return array<string, int> */

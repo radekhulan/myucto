@@ -2518,7 +2518,7 @@ final class Routes
         $app->put    ('/api/admin/email-templates/{code:[a-z_]+}/{locale:cs|en}',    [EmailTemplateAction::class, 'put']);
         $app->delete ('/api/admin/email-templates/{code:[a-z_]+}/{locale:cs|en}',    [EmailTemplateAction::class, 'delete']);
 
-        // Globální katalog šablon bankovních pravidel (session + superadmin only).
+        // Firemní katalog šablon bankovních pravidel (session + bank.rules).
         $app->get    ('/api/admin/bank-rule-templates',              [BankRuleTemplateAdminAction::class, 'list']);
         $app->post   ('/api/admin/bank-rule-templates',              [BankRuleTemplateAdminAction::class, 'create']);
         $app->put    ('/api/admin/bank-rule-templates/{id:[0-9]+}',  [BankRuleTemplateAdminAction::class, 'update']);

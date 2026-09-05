@@ -51,7 +51,7 @@ trait GuardsDocumentLock
             return null;
         }
 
-        if (RequestAuthorization::isSuperadmin($request) && !empty($request->getQueryParams()['force'])) {
+        if (RequestAuthorization::isCompanyAdmin($request) && !empty($request->getQueryParams()['force'])) {
             $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
             $this->logger->log(
                 'document_lock.force_override',

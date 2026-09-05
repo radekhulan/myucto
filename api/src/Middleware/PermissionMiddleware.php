@@ -58,6 +58,13 @@ final class PermissionMiddleware implements MiddlewareInterface
             return Json::error($this->responseFactory->createResponse(401), 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
 
+        if ($route->kind === RoutePermissionMap::ADMIN_PLUS) {
+            $role = $this->roles->resolveDefault($request);
+            return $role->canCreateSupplier()
+                ? $handler->handle($this->withEffectiveRole($request, $role))
+                : $this->forbidden($request);
+        }
+
         if ($route->kind !== RoutePermissionMap::SUPERADMIN) {
             $access = $this->supplierAccess->resolve($request);
             if ($access->denied) {

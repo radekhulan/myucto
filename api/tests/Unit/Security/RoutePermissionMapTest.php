@@ -282,7 +282,6 @@ final class RoutePermissionMapTest extends TestCase
             ['GET', '/api/admin/roles'],
             ['GET', '/api/admin/export'],
             ['GET', '/api/admin/invoices-zip'],
-            ['GET', '/api/admin/approvals'],
             ['GET', '/api/admin/imports'],
             ['POST', '/api/admin/imports/idoklad/credentials/rotate'],
             ['GET', '/api/admin/imports/42/download'],
@@ -295,6 +294,42 @@ final class RoutePermissionMapTest extends TestCase
         ] as [$method, $path]) {
             self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match($method, $path)?->kind, "$method $path");
         }
+    }
+
+    public function testApprovalInboxUsesCompanyPermission(): void
+    {
+        $route = (new RoutePermissionMap())->match('GET', '/api/admin/approvals');
+
+        self::assertSame(RoutePermissionMap::PERMISSION, $route?->kind);
+        self::assertSame('invoices.approval', $route?->key);
+        self::assertSame(AccessLevel::READ, $route?->minimum);
+    }
+
+    public function testBankRuleTemplateAdminRoutesUseCompanyPermission(): void
+    {
+        $map = new RoutePermissionMap();
+        foreach ([
+            ['GET', AccessLevel::READ],
+            ['POST', AccessLevel::WRITE],
+            ['PUT', AccessLevel::WRITE],
+            ['DELETE', AccessLevel::WRITE],
+        ] as [$method, $level]) {
+            $path = in_array($method, ['PUT', 'DELETE'], true)
+                ? '/api/admin/bank-rule-templates/7'
+                : '/api/admin/bank-rule-templates';
+            $match = $map->match($method, $path);
+            self::assertSame(RoutePermissionMap::PERMISSION, $match?->kind, $method);
+            self::assertSame('bank.rules', $match?->key, $method);
+            self::assertSame($level, $match?->minimum, $method);
+        }
+    }
+
+    public function testSupplierCreationHasFixedAdminPlusClass(): void
+    {
+        $map = new RoutePermissionMap();
+        self::assertSame(RoutePermissionMap::ADMIN_PLUS, $map->match('POST', '/api/suppliers')?->kind);
+        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('PUT', '/api/suppliers/7')?->kind);
+        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('DELETE', '/api/suppliers/7')?->kind);
     }
 
     /** Metoda mimo pravidlo nesmí propadnout na permission větev (GET nespouští import). */
@@ -311,8 +346,8 @@ final class RoutePermissionMapTest extends TestCase
     {
         $map = new RoutePermissionMap();
         self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('GET', '/api/admin/users')?->kind);
-        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('POST', '/api/price-list-items')?->kind);
-        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('DELETE', '/api/price-list-items/7')?->kind);
+        self::assertSame(RoutePermissionMap::PERMISSION, $map->match('POST', '/api/price-list-items')?->kind);
+        self::assertSame(RoutePermissionMap::PERMISSION, $map->match('DELETE', '/api/price-list-items/7')?->kind);
         self::assertSame(RoutePermissionMap::SELF_SERVICE, $map->match('GET', '/api/auth/me')?->kind);
         self::assertSame(RoutePermissionMap::PUBLIC, $map->match('POST', '/api/auth/login')?->kind);
     }

@@ -222,7 +222,7 @@ final class SignatureDocumentSelectionAction
 
     private function isAdmin(Request $request): bool
     {
-        return RequestAuthorization::isSuperadmin($request);
+        return RequestAuthorization::isCompanyAdmin($request);
     }
 
     private function userId(Request $request): int

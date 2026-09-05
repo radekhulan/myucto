@@ -38,6 +38,7 @@ describe('contextual manual for application menu', () => {
     ['/isds-gateway/callback', '94_Odesilaci_brana_ISDS'],
     ['/admin/diagnostics', '999_Reseni_problemu'],
     ['/admin/support', '999_Reseni_problemu'],
+    ['/admin/bank-rule-templates', '80_Sablony'],
   ])('uses the subject-specific chapter for %s', (path, chapter) => {
     expect(manualChapter(path)).toBe(chapter)
   })

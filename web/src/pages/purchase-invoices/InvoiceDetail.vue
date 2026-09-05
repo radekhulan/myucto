@@ -344,7 +344,7 @@ async function remove() {
  */
 async function forceDelete() {
   if (!invoice.value) return
-  if (!auth.user || !auth.isSuperadmin) return
+  if (!auth.user || !auth.isCompanyAdminRole) return
   if (!confirm(t('purchase_invoice.confirm.force_delete_warning'))) return
   if (!confirm(t('purchase_invoice.confirm.force_delete_confirm'))) return
   try {
@@ -357,7 +357,7 @@ async function forceDelete() {
 }
 
 const canForceDelete = computed(() =>
-  invoice.value && auth.isSuperadmin
+  invoice.value && auth.isCompanyAdminRole
   && ['received', 'booked'].includes(invoice.value.status),
 )
 
@@ -395,7 +395,7 @@ const allowedTransitions = computed<PurchaseInvoiceStatus[]>(() => {
 const canEdit = computed(() => invoice.value?.status === 'draft')
 // Force-edit pro received/booked/paid — admin only (cancelled je immutable = audit trail)
 const canForceEdit = computed(() =>
-  auth.isSuperadmin &&
+  auth.isCompanyAdminRole &&
   invoice.value &&
   ['received', 'booked', 'paid'].includes(invoice.value.status)
 )

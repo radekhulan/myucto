@@ -32,6 +32,7 @@ require __DIR__ . '/../vendor/autoload.php';
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\PasswordHasher;
+use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
 
 $container = Bootstrap::buildApp()->getContainer();
 $pdo = $container->get(Connection::class)->pdo();
@@ -98,6 +99,7 @@ try {
         }
         $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')
             ->execute([$defaultCurrencyId, $supplierId]);
+        BankRuleTemplateSeeder::seed($pdo, $supplierId);
     }
 
     // `role_id` MUSÍ být vyplněné, ne jen legacy enum `role`: autorizace i

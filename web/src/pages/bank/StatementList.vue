@@ -26,7 +26,7 @@ const { t, tm, rt, locale } = useI18n()
 const toast = useToast()
 const authStore = useAuthStore()
 const supplierStore = useSupplierStore()
-const isAdmin = computed(() => authStore.isSuperadmin)
+const isAdmin = computed(() => authStore.isCompanyAdminRole)
 const isDoubleEntry = computed(() => authStore.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 
 const router = useRouter()

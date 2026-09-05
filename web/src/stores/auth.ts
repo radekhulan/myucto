@@ -53,6 +53,12 @@ export const useAuthStore = defineStore('auth', () => {
   const domainsFeatureEnabled = computed(() => domainContext.value?.feature_enabled === true)
 
   const isSuperadmin = computed(() => user.value?.is_superadmin === true)
+  const isAdminPlusRole = computed(() => user.value?.is_superadmin !== true && (
+    user.value?.can_create_supplier === true
+    || (user.value?.can_create_supplier === undefined && user.value?.role?.system_key === 'admin_plus')
+  ))
+  const isCompanyAdminRole = computed(() => isSuperadmin.value
+    || ['admin', 'admin_plus'].includes(user.value?.role?.system_key ?? ''))
   const isClientRole = computed(() => user.value?.role?.type === 'client')
   // Systémová role „účetní" — mění jen výchozí pořadí sekcí v menu, ne oprávnění.
   const isAccountantRole = computed(() => user.value?.role?.system_key === 'accountant')
@@ -262,6 +268,8 @@ export const useAuthStore = defineStore('auth', () => {
     permissionCatalogVersion,
     permissionsLoading,
     isSuperadmin,
+    isAdminPlusRole,
+    isCompanyAdminRole,
     isClientRole,
     isAccountantRole,
     can,

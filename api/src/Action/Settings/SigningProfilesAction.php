@@ -1031,12 +1031,12 @@ final class SigningProfilesAction
 
     private function isAdmin(Request $request): bool
     {
-        return RequestAuthorization::isSuperadmin($request);
+        return RequestAuthorization::isCompanyAdmin($request);
     }
 
     private function isAccountant(Request $request): bool
     {
-        return !RequestAuthorization::isSuperadmin($request)
+        return !RequestAuthorization::isCompanyAdmin($request)
             && RequestAuthorization::allows($request, 'settings.signing', AccessLevel::WRITE);
     }
 

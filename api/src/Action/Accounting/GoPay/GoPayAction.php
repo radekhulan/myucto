@@ -184,7 +184,7 @@ final class GoPayAction
 
     public function delete(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSuperadmin($request)) {
+        if (!RequestAuthorization::isCompanyAdmin($request)) {
             return Json::error($response, 'forbidden', 'Pouze admin smí mazat GoPay vyúčtování.', 403);
         }
         try {

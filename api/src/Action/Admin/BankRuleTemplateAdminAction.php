@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Admin;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Bank\BankRuleTemplateValidator;
 use MyInvoice\Service\Accounting\PostingException;
@@ -30,31 +32,33 @@ final class BankRuleTemplateAdminAction
 
     public function list(Request $request, Response $response): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->guard($request, $response, AccessLevel::READ, $err)) return $err;
+        $supplierId = $this->supplierId($request);
         return Json::ok($response, [
-            'templates' => $this->templates(),
+            'templates' => $this->templates($supplierId),
             'operation_types' => $this->validator->operationTypes(),
-            'posting_rules' => array_values($this->postingRuleMap()),
+            'posting_rules' => array_values($this->postingRuleMap($supplierId)),
         ]);
     }
 
     public function create(Request $request, Response $response): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->guard($request, $response, AccessLevel::WRITE, $err)) return $err;
+        $supplierId = $this->supplierId($request);
         try {
             $data = $this->validator->normalize((array) ($request->getParsedBody() ?? []));
-            $this->assertPostingRule($data);
+            $this->assertPostingRule($supplierId, $data);
             $stmt = $this->db->pdo()->prepare(
                 'INSERT INTO bank_rule_templates
-                    (template_key, name_cs, name_en, direction, operation_type, counterparty_bank,
+                    (supplier_id, template_key, name_cs, name_en, direction, operation_type, counterparty_bank,
                      counterparty_prefix, vs_placeholder, message_contains, rule_key,
                      default_priority, sort_order, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
-            $stmt->execute($this->values($data));
+            $stmt->execute([$supplierId, ...$this->values($data)]);
             $id = (int) $this->db->pdo()->lastInsertId();
-            $this->log($request, 'bank_rule_template.created', $id, ['template_key' => $data['template_key']]);
-            return Json::ok($response, $this->find($id), 201);
+            $this->log($request, $supplierId, 'bank_rule_template.created', $id, ['template_key' => $data['template_key']]);
+            return Json::ok($response, $this->find($supplierId, $id), 201);
         } catch (PostingException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (PDOException $e) {
@@ -67,9 +71,10 @@ final class BankRuleTemplateAdminAction
 
     public function update(Request $request, Response $response, array $args): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->guard($request, $response, AccessLevel::WRITE, $err)) return $err;
+        $supplierId = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        $current = $this->raw($id);
+        $current = $this->raw($supplierId, $id);
         if ($current === null) return Json::error($response, 'template_not_found', 'Šablona nenalezena.', 404);
         $body = (array) ($request->getParsedBody() ?? []);
         if (array_key_exists('template_key', $body) && trim((string) $body['template_key']) !== (string) $current['template_key']) {
@@ -77,19 +82,20 @@ final class BankRuleTemplateAdminAction
         }
         try {
             $data = $this->validator->normalize(array_replace($current, $body, ['template_key' => $current['template_key']]));
-            $this->assertPostingRule($data);
+            $this->assertPostingRule($supplierId, $data);
             $stmt = $this->db->pdo()->prepare(
                 'UPDATE bank_rule_templates SET
                     name_cs = ?, name_en = ?, direction = ?, operation_type = ?, counterparty_bank = ?,
                     counterparty_prefix = ?, vs_placeholder = ?, message_contains = ?, rule_key = ?,
                     default_priority = ?, sort_order = ?, is_active = ?
-                  WHERE id = ?'
+                  WHERE supplier_id = ? AND id = ?'
             );
             $values = array_slice($this->values($data), 1);
+            $values[] = $supplierId;
             $values[] = $id;
             $stmt->execute($values);
-            $this->log($request, 'bank_rule_template.updated', $id, ['template_key' => $data['template_key']]);
-            return Json::ok($response, $this->find($id));
+            $this->log($request, $supplierId, 'bank_rule_template.updated', $id, ['template_key' => $data['template_key']]);
+            return Json::ok($response, $this->find($supplierId, $id));
         } catch (PostingException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -97,50 +103,60 @@ final class BankRuleTemplateAdminAction
 
     public function delete(Request $request, Response $response, array $args): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->guard($request, $response, AccessLevel::WRITE, $err)) return $err;
+        $supplierId = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        $current = $this->raw($id);
+        $current = $this->raw($supplierId, $id);
         if ($current === null) return Json::error($response, 'template_not_found', 'Šablona nenalezena.', 404);
-        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_posting_rules WHERE system_template_key = ?');
-        $stmt->execute([(string) $current['template_key']]);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM bank_posting_rules WHERE supplier_id = ? AND system_template_key = ?'
+        );
+        $stmt->execute([$supplierId, (string) $current['template_key']]);
         $usage = (int) $stmt->fetchColumn();
         if ($usage > 0) {
             return Json::error($response, 'template_in_use', 'Použitou šablonu nelze smazat; lze ji deaktivovat.', 409, ['usage_count' => $usage]);
         }
-        $this->db->pdo()->prepare('DELETE FROM bank_rule_templates WHERE id = ?')->execute([$id]);
-        $this->log($request, 'bank_rule_template.deleted', $id, ['template_key' => $current['template_key']]);
+        $this->db->pdo()->prepare('DELETE FROM bank_rule_templates WHERE supplier_id = ? AND id = ?')
+            ->execute([$supplierId, $id]);
+        $this->log($request, $supplierId, 'bank_rule_template.deleted', $id, ['template_key' => $current['template_key']]);
         return Json::ok($response, ['deleted' => true]);
     }
 
     /** @return list<array<string,mixed>> */
-    private function templates(): array
+    private function templates(int $supplierId): array
     {
-        $stmt = $this->db->pdo()->query(
+        $stmt = $this->db->pdo()->prepare(
             'SELECT t.*,
-                    (SELECT COUNT(*) FROM bank_posting_rules r WHERE r.system_template_key = t.template_key) AS usage_count
+                    (SELECT COUNT(*) FROM bank_posting_rules r
+                      WHERE r.supplier_id = ? AND r.system_template_key = t.template_key) AS usage_count
                FROM bank_rule_templates t
+              WHERE t.supplier_id = ?
               ORDER BY t.sort_order, t.id'
         );
-        $rules = $this->postingRuleMap();
+        $stmt->execute([$supplierId, $supplierId]);
+        $rules = $this->postingRuleMap($supplierId);
         return array_map(fn (array $row): array => $this->cast($row, $rules), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /** @return array<string,array<string,mixed>> */
-    private function postingRuleMap(): array
+    private function postingRuleMap(int $supplierId): array
     {
-        $stmt = $this->db->pdo()->query(
-            'SELECT rule_key, description, debit_account_code, credit_account_code, priority
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT rule_key, description, debit_account_code, credit_account_code, priority, supplier_id
                FROM posting_rules
-              WHERE supplier_id IS NULL AND is_active = 1
-              ORDER BY rule_key, priority DESC, id DESC'
+              WHERE (supplier_id = ? OR supplier_id IS NULL) AND is_active = 1
+              ORDER BY (supplier_id IS NULL) DESC, priority ASC, id ASC'
         );
+        $stmt->execute([$supplierId]);
         $map = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $key = (string) $row['rule_key'];
-            if (isset($map[$key])) continue;
             $debit = (string) $row['debit_account_code'];
             $credit = (string) $row['credit_account_code'];
-            if (!$this->validPair($debit, $credit)) continue;
+            if (!$this->validPair($debit, $credit)) {
+                unset($map[$key]);
+                continue;
+            }
             $map[$key] = [
                 'rule_key' => $key,
                 'description' => (string) $row['description'],
@@ -152,11 +168,11 @@ final class BankRuleTemplateAdminAction
     }
 
     /** @param array<string,mixed> $data */
-    private function assertPostingRule(array $data): void
+    private function assertPostingRule(int $supplierId, array $data): void
     {
-        $rule = $this->postingRuleMap()[(string) $data['rule_key']] ?? null;
+        $rule = $this->postingRuleMap($supplierId)[(string) $data['rule_key']] ?? null;
         if ($rule === null || $rule['debit_account_code'] === null || $rule['credit_account_code'] === null) {
-            throw new PostingException('posting_rule_not_found', 'Vybraná globální předkontace neexistuje nebo nemá oba účty.', 422);
+            throw new PostingException('posting_rule_not_found', 'Vybraná předkontace neexistuje nebo nemá oba účty.', 422);
         }
         $debit = (string) $rule['debit_account_code'];
         $credit = (string) $rule['credit_account_code'];
@@ -188,23 +204,25 @@ final class BankRuleTemplateAdminAction
     }
 
     /** @return array<string,mixed>|null */
-    private function raw(int $id): ?array
+    private function raw(int $supplierId, int $id): ?array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT * FROM bank_rule_templates WHERE id = ?');
-        $stmt->execute([$id]);
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM bank_rule_templates WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : $row;
     }
 
     /** @return array<string,mixed> */
-    private function find(int $id): array
+    private function find(int $supplierId, int $id): array
     {
-        $row = $this->raw($id);
+        $row = $this->raw($supplierId, $id);
         if ($row === null) return [];
-        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_posting_rules WHERE system_template_key = ?');
-        $stmt->execute([(string) $row['template_key']]);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM bank_posting_rules WHERE supplier_id = ? AND system_template_key = ?'
+        );
+        $stmt->execute([$supplierId, (string) $row['template_key']]);
         $row['usage_count'] = (int) $stmt->fetchColumn();
-        return $this->cast($row, $this->postingRuleMap());
+        return $this->cast($row, $this->postingRuleMap($supplierId));
     }
 
     /** @param array<string,mixed> $row @param array<string,array<string,mixed>> $rules @return array<string,mixed> */
@@ -232,10 +250,10 @@ final class BankRuleTemplateAdminAction
         ];
     }
 
-    private function guard(Request $request, Response $response, ?Response &$err): bool
+    private function guard(Request $request, Response $response, AccessLevel $minimum, ?Response &$err): bool
     {
-        if (!RequestAuthorization::isSuperadmin($request)) {
-            $err = Json::error($response, 'forbidden_permission', 'Pouze superadmin.', 403);
+        if (!RequestAuthorization::allows($request, 'bank.rules', $minimum)) {
+            $err = Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
             return false;
         }
         $err = null;
@@ -243,7 +261,12 @@ final class BankRuleTemplateAdminAction
     }
 
     /** @param array<string,mixed> $payload */
-    private function log(Request $request, string $action, int $id, array $payload): void
+    private function supplierId(Request $request): int
+    {
+        return (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
+    }
+
+    private function log(Request $request, int $supplierId, string $action, int $id, array $payload): void
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $this->logger->log(
@@ -254,6 +277,7 @@ final class BankRuleTemplateAdminAction
             $payload,
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'),
+            $supplierId,
         );
     }
 }

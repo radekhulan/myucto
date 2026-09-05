@@ -234,8 +234,14 @@ nastavit oprávnění po modulech a významných akcích:
 
 Role má po vytvoření neměnný typ. Klientské role nabízejí jen funkce bezpečné
 pro klientský portál; interní účetnictví, banka a globální správa se jim
-nepovolí. Systémová role **Superadmin** je uzamčená, nelze ji deaktivovat,
-smazat ani upravit její matici a jako jediná smí spravovat uživatele a role.
+nepovolí. Tři předdefinované správcovské role mají pevná práva a nelze je
+deaktivovat, smazat ani upravit jejich matici:
+
+| Role | Rozsah |
+|---|---|
+| **Superadmin** | Plný přístup k firmám i celému systému. Jako jediný spravuje uživatele, role a přiřazení firem. |
+| **Admin** | Může dělat vše v přidělených firmách a pracovat s více firmami, které mu přidělí superadmin. Nemění celosystémové položky v menu Systém. |
+| **Admin Plus** | Má práva role Admin a navíc může v **Systém → Dodavatelé** založit novou firmu. K nové firmě automaticky získá práva Admin. |
 
 U klientské role má položka **Nastavení firmy** záměrně užší význam než interní
 právo **Měnit nastavení firmy**. Úroveň **Zápis** otevře v klientském menu pouze

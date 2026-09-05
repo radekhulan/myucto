@@ -71,9 +71,9 @@ final class AutomationRecommendationCacheTest extends BankPostingTestCase
         $generator->expects(self::exactly(2))->method('snapshotForSupplier')->willReturnOnConsecutiveCalls($good, $bad);
         $cache = $this->cache($generator);
         $cache->rebuildSupplier($this->supplierId);
-        $cache->requestRefresh(0, true, [$this->supplierId]);
+        self::assertSame(['queued' => 1], $cache->requestRefresh(0, true, [$this->supplierId]));
         try {
-            $cache->rebuildSupplier($this->supplierId);
+            $cache->rebuildSupplier($this->supplierId, null, 5, true);
             self::fail('Duplicate cache keys must abort the replacement.');
         } catch (\PDOException) {
             $result = $cache->recommendations(0, true, ['suppliers' => [$this->supplierId]]);

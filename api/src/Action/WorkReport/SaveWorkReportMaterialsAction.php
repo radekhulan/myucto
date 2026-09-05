@@ -56,7 +56,7 @@ final class SaveWorkReportMaterialsAction
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $isAdmin = RequestAuthorization::isSuperadmin($request);
+        $isAdmin = RequestAuthorization::isCompanyAdmin($request);
         $isForce = !empty($request->getQueryParams()['force']);
 
         // Zámek dokladu (Epic F6) — PŘED status guardem: výkaz materiálu je součást dokladu.

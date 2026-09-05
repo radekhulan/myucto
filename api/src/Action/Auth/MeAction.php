@@ -158,6 +158,7 @@ final class MeAction
         $requireTotp  = (bool) $this->config->get('auth.require_totp', false);
         $mustSetupTotp = $requireTotp && !$totpEnabled;
         $effectiveRole = $this->permissions->resolve($request);
+        $defaultRole = $this->permissions->resolveDefault($request);
         $roleSummary = $effectiveRole->id > 0 ? [
             'id' => $effectiveRole->id,
             'name' => $effectiveRole->name,
@@ -213,6 +214,7 @@ final class MeAction
                 'name'            => $user['name'] ?? '',
                 'role'            => $roleSummary,
                 'is_superadmin'   => $isSuperadmin,
+                'can_create_supplier' => $defaultRole->canCreateSupplier(),
                 'locale'          => $user['locale'] ?? 'cs',
                 'totp_enabled'    => $totpEnabled,
                 'must_setup_totp' => $mustSetupTotp,

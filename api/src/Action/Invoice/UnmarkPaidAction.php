@@ -48,7 +48,7 @@ final class UnmarkPaidAction
     public function __invoke(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (!RequestAuthorization::isSuperadmin($request)) {
+        if (!RequestAuthorization::isCompanyAdmin($request)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
 

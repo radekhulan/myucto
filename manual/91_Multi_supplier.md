@@ -31,7 +31,9 @@ Při přepnutí:
 
 ## 91.2 Přidání nového dodavatele
 
-V hlavním menu **Systém → Dodavatelé**.
+V hlavním menu **Systém → Dodavatelé**. Novou firmu může založit superadmin
+nebo uživatel s pevnou rolí **Admin Plus**. Běžná role **Admin** pracuje jen
+s firmami, které jí přidělí superadmin.
 
 ![Seznam dodavatelů](img/14_dodavatele_list.webp)
 
@@ -62,7 +64,8 @@ Tlačítko **+ Nový dodavatel** vpravo nahoře.
 | E-mail / telefon | Kontakt |
 | První bankovní účet | CZK účet (číslo + bank kód) — automaticky se založí v měně CZK |
 
-Po **Vytvořit** je dodavatel okamžitě v dropdownu, můžeš na něj přepnout.
+Po **Vytvořit** je dodavatel okamžitě v dropdownu. Admin Plus k nové firmě
+automaticky získá práva Admin a může na ni rovnou přepnout.
 
 ## 91.3 Co je per-dodavatel (izolované)
 
@@ -401,8 +404,8 @@ e-shop číselníky, inventury, sestavy) — podrobně viz [Sklad](33_Sklad.md).
 
 ## 91.7 Smazání dodavatele
 
-Na stránce **Systém → Dodavatelé** (`/admin/suppliers`, jen admin) má každý
-řádek tlačítko **Smazat**.
+Na stránce **Systém → Dodavatelé** (`/admin/suppliers`) má superadmin u každého
+řádku tlačítko **Smazat**.
 
 > [!WARNING]
 > **Firmu s účetními daty appka nedovolí smazat.** Před smazáním appka

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration;
 
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Security\PermissionCatalog;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -59,7 +60,29 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
         $this->runMigrator();
 
         $roles = $db->query('SELECT system_key, id FROM roles ORDER BY system_key')->fetchAll(PDO::FETCH_KEY_PAIR);
-        self::assertSame(['accountant', 'client', 'readonly', 'superadmin'], array_keys($roles));
+        self::assertSame(['accountant', 'admin', 'admin_plus', 'client', 'readonly', 'superadmin'], array_keys($roles));
+
+        $staffPermissions = array_keys(array_filter(
+            (new PermissionCatalog())->all(),
+            static fn (array $definition): bool => in_array('staff', $definition['role_types'], true),
+        ));
+        sort($staffPermissions);
+        foreach (['admin', 'admin_plus'] as $systemKey) {
+            $stmt = $db->prepare(
+                'SELECT permission_key FROM role_permissions WHERE role_id = ? AND access_level = 2 ORDER BY permission_key'
+            );
+            $stmt->execute([(int) $roles[$systemKey]]);
+            self::assertSame($staffPermissions, $stmt->fetchAll(PDO::FETCH_COLUMN), $systemKey);
+        }
+
+        $templateDefaults = (int) $db->query('SELECT COUNT(*) FROM bank_rule_template_defaults')->fetchColumn();
+        self::assertGreaterThan(0, $templateDefaults);
+        foreach ([$this->supplierA, $this->supplierB] as $supplierId) {
+            $stmt = $db->prepare('SELECT COUNT(*) FROM bank_rule_templates WHERE supplier_id = ?');
+            $stmt->execute([$supplierId]);
+            self::assertSame($templateDefaults, (int) $stmt->fetchColumn());
+        }
+        self::assertSame(0, (int) $db->query('SELECT COUNT(*) FROM bank_rule_templates WHERE supplier_id IS NULL')->fetchColumn());
 
         $users = $db->query('SELECT email, role_id FROM users ORDER BY email')->fetchAll(PDO::FETCH_KEY_PAIR);
         self::assertSame((int) $roles['superadmin'], (int) $users['admin@example.test']);
@@ -85,7 +108,13 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
         $permissionCount = (int) $db->query(
             'SELECT COUNT(*) FROM role_permissions WHERE role_id = ' . (int) $roles['accountant']
         )->fetchColumn();
-        $db->exec("DELETE FROM migrations WHERE filename = '1074_dynamic_roles_permissions.sql'");
+        $db->exec(
+            "DELETE FROM migrations WHERE filename IN (
+                '1074_dynamic_roles_permissions.sql',
+                '1747_predefined_admin_roles.sql',
+                '1748_bank_rule_templates_tenant_scope.sql'
+            )"
+        );
         $this->runMigrator();
 
         self::assertSame('Upravená účetní', $db->query(
@@ -94,7 +123,7 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
         self::assertSame($permissionCount, (int) $db->query(
             'SELECT COUNT(*) FROM role_permissions WHERE role_id = ' . (int) $roles['accountant']
         )->fetchColumn());
-        self::assertSame(4, (int) $db->query('SELECT COUNT(*) FROM roles')->fetchColumn());
+        self::assertSame(6, (int) $db->query('SELECT COUNT(*) FROM roles')->fetchColumn());
     }
 
     private function seedLegacyScenarios(PDO $db): void

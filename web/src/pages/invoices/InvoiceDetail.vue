@@ -40,7 +40,7 @@ const toast = useToast()
 const postingErrorToast = useAccountingPeriodToast()
 
 const auth = useAuthStore()
-const isAdmin = computed(() => auth.isSuperadmin)
+const isAdmin = computed(() => auth.isCompanyAdminRole)
 
 const supplierStore = useSupplierStore()
 const supplierIsVatPayer = computed(() => supplierStore.currentSupplier?.is_vat_payer ?? true)
@@ -200,7 +200,7 @@ async function load() {
     .then(items => { pdfHistory.value = items })
     .catch(() => {})
   // SMTP analýza — jen pro admina; levný probe, zda je log analýza zapnutá.
-  if (isAdmin.value) {
+  if (auth.isSuperadmin) {
     adminApi.smtpLogStatus()
       .then(s => { smtpEnabled.value = s.enabled })
       .catch(() => { smtpEnabled.value = false })
@@ -2947,7 +2947,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
       </div>
 
       <!-- SMTP analýza (admin + zapnutá log analýza; lazy-load na rozbalení) -->
-      <div v-if="invoice && isAdmin && smtpEnabled" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <div v-if="invoice && auth.isSuperadmin && smtpEnabled" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <button type="button" @click="toggleSmtp"
           class="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-neutral-50 cursor-pointer"
           :class="smtpOpen ? 'border-b border-neutral-200' : ''">

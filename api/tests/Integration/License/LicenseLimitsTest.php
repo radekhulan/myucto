@@ -13,6 +13,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\RoleRepository;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\License\LicenseClient;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseTokenVerifier;
@@ -296,6 +297,39 @@ final class LicenseLimitsTest extends TestCase
         self::assertSame($before + 1, $this->companyCount());
     }
 
+    public function testAdminPlusGetsAccessAndBankTemplatesForCreatedCompany(): void
+    {
+        $this->licenseWithToken($this->token(['max_companies' => null]));
+        $roles = $this->roleIds();
+        $userId = $this->insertUser('accountant', $roles['admin_plus']);
+        $adminPlus = new EffectiveRole(
+            $roles['admin_plus'],
+            'Admin Plus',
+            'staff',
+            true,
+            ['settings.company.write' => 2],
+            'admin_plus',
+        );
+
+        $resp = $this->createSupplier(valid: true, role: $adminPlus, userId: $userId);
+
+        self::assertSame(201, $resp->getStatusCode(), (string) $resp->getBody());
+        $supplierId = (int) (json_decode((string) $resp->getBody(), true)['id'] ?? 0);
+        self::assertGreaterThan(0, $supplierId);
+        $membership = $this->db->pdo()->prepare(
+            'SELECT role_id FROM user_suppliers WHERE user_id = ? AND supplier_id = ?'
+        );
+        $membership->execute([$userId, $supplierId]);
+        self::assertSame([['role_id' => null]], $membership->fetchAll(\PDO::FETCH_ASSOC));
+
+        $defaults = (int) $this->db->pdo()->query('SELECT COUNT(*) FROM bank_rule_template_defaults')->fetchColumn();
+        $templates = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_rule_templates WHERE supplier_id = ?');
+        $templates->execute([$supplierId]);
+        self::assertGreaterThan(0, $defaults);
+        self::assertSame($defaults, (int) $templates->fetchColumn());
+        self::assertTrue($adminPlus->isCompanyAdmin());
+    }
+
     public function testTrialHasNoCompanyLimit(): void
     {
         $this->trialLicense();
@@ -345,7 +379,11 @@ final class LicenseLimitsTest extends TestCase
         return $this->userSuppliers->replace($request, new Psr7Response(), ['id' => (string) $userId]);
     }
 
-    private function createSupplier(bool $valid = false): Psr7Response
+    private function createSupplier(
+        bool $valid = false,
+        ?EffectiveRole $role = null,
+        int $userId = 1,
+    ): Psr7Response
     {
         $body = $valid ? [
             'company_name' => 'License Gate s.r.o.',
@@ -356,8 +394,11 @@ final class LicenseLimitsTest extends TestCase
         ] : [];
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/suppliers')
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $userId, 'role' => $role === null ? 'admin' : 'accountant'])
             ->withParsedBody($body);
+        if ($role !== null) {
+            $request = $request->withAttribute('auth.effective_role', $role);
+        }
 
         return $this->settings->createSupplier($request, new Psr7Response());
     }
@@ -379,12 +420,12 @@ final class LicenseLimitsTest extends TestCase
         return (int) $this->db->pdo()->lastInsertId();
     }
 
-    /** @return array{accountant:int,readonly:int,client:int} */
+    /** @return array{accountant:int,readonly:int,client:int,admin_plus:int} */
     private function roleIds(): array
     {
         $pdo = $this->db->pdo();
         $ids = [];
-        foreach (['accountant', 'readonly', 'client'] as $key) {
+        foreach (['accountant', 'readonly', 'client', 'admin_plus'] as $key) {
             $stmt = $pdo->prepare('SELECT id FROM roles WHERE system_key = ? AND is_active = 1 LIMIT 1');
             $stmt->execute([$key]);
             $id = (int) $stmt->fetchColumn();
@@ -393,7 +434,7 @@ final class LicenseLimitsTest extends TestCase
             }
             $ids[$key] = $id;
         }
-        /** @var array{accountant:int,readonly:int,client:int} $ids */
+        /** @var array{accountant:int,readonly:int,client:int,admin_plus:int} $ids */
         return $ids;
     }
 

@@ -225,7 +225,7 @@ function applyAiSuggestion() {
   credit.value = aiSuggestion.value.credit_account_code
 }
 
-// Nabídka systémových šablon (bank_rule_templates) přímo v zaúčtovacím modalu — dřív bylo
+// Nabídka firemních šablon (bank_rule_templates) přímo v zaúčtovacím modalu - dřív byla
 // jen na stránce správy pravidel (RuleTemplatesModal). Instanciace šablony založí i reálné
 // pravidlo (stejně jako v BankPostingRules.vue), MD/D se navíc rovnou předvyplní pro tuto platbu.
 const templatesOpen = ref(false)

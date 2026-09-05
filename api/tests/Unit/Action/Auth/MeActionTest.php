@@ -47,6 +47,7 @@ final class MeActionTest extends TestCase
         $userSuppliers = $this->createMock(UserSupplierRepository::class);
         $permissions = $this->createMock(PermissionResolver::class);
         $permissions->method('resolve')->willReturn(EffectiveRole::denied());
+        $permissions->method('resolveDefault')->willReturn(EffectiveRole::denied());
         $license = $this->createMock(LicenseService::class);
 
         $credentials = $this->createMock(PasskeyCredentialRepository::class);
@@ -155,6 +156,7 @@ final class MeActionTest extends TestCase
 
         $permissions = $this->createMock(PermissionResolver::class);
         $permissions->method('resolve')->willReturn(EffectiveRole::denied());
+        $permissions->method('resolveDefault')->willReturn(EffectiveRole::denied());
         $credentials = $this->createMock(PasskeyCredentialRepository::class);
         $credentials->method('countActiveForUser')->willReturn(0);
         $clock = $this->createMock(ClockInterface::class);
@@ -214,7 +216,9 @@ final class MeActionTest extends TestCase
         $userSuppliers = $this->createMock(UserSupplierRepository::class);
         $userSuppliers->method('allowedSupplierIds')->willReturn([]);
         $permissions = $this->createMock(PermissionResolver::class);
-        $permissions->method('resolve')->willReturn(new EffectiveRole(9, 'Klient', 'client', true));
+        $clientRole = new EffectiveRole(9, 'Klient', 'client', true);
+        $permissions->method('resolve')->willReturn($clientRole);
+        $permissions->method('resolveDefault')->willReturn($clientRole);
         $credentials = $this->createMock(PasskeyCredentialRepository::class);
         $credentials->method('countActiveForUser')->willReturn(0);
         $clock = $this->createMock(ClockInterface::class);

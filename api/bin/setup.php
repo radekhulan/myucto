@@ -53,6 +53,7 @@ require __DIR__ . '/../vendor/autoload.php';
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
 use MyInvoice\Service\Ares\AresClient;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\WebAuthnConfig;
@@ -263,6 +264,7 @@ try {
     $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')
         ->execute([$defaultCurrencyId, $supplierId]);
     $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+    BankRuleTemplateSeeder::seed($pdo, $supplierId);
 
     // POZOR: hash MUSÍ projít přes PasswordHasher (bcrypt cost 12 + pepper z cfg.app.pepper),
     // protože LoginAction ověřuje pomocí PasswordHasher::verify() s pepperem.

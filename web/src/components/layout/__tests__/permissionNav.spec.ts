@@ -26,7 +26,7 @@ describe('navigace podle RBAC oprávnění', () => {
 
   it('nabízí firemní sekci i staff roli a její položky pak filtruje podle práv', () => {
     const companyAt = appLayout.indexOf("key: 'company'")
-    const adminSystemGateAt = appLayout.indexOf('if (isAdmin || auth.isDemo) {', companyAt)
+    const adminSystemGateAt = appLayout.indexOf('if (isAdmin || isAdminPlus || auth.isDemo) {', companyAt)
 
     expect(companyAt).toBeGreaterThan(-1)
     expect(adminSystemGateAt).toBeGreaterThan(companyAt)
@@ -99,20 +99,37 @@ describe('navigace podle RBAC oprávnění', () => {
     expect(appLayout).not.toContain('bank_cash: ICONS.bank')
   })
 
-  it('řadí asistenta jako druhou položku Nástrojů a ne do Systému', () => {
+  it('řadí firemní bankovní šablony za asistenta v Nástrojích a ne do Systému', () => {
     const toolsStart = appLayout.indexOf("key: 'accounting_tools'")
     const toolsEnd = appLayout.indexOf("key: 'tax_evidence'", toolsStart)
     const tools = appLayout.slice(toolsStart, toolsEnd)
     const templatesAt = tools.indexOf("to: '/templates'")
     const assistantAt = tools.indexOf("to: '/accounting/setup-assistant'")
+    const bankTemplatesAt = tools.indexOf("to: '/admin/bank-rule-templates'")
     const accountsAt = tools.indexOf("to: '/accounting/accounts'")
 
     expect(templatesAt).toBeGreaterThan(-1)
     expect(assistantAt).toBeGreaterThan(templatesAt)
-    expect(assistantAt).toBeLessThan(accountsAt)
+    expect(bankTemplatesAt).toBeGreaterThan(assistantAt)
+    expect(bankTemplatesAt).toBeLessThan(accountsAt)
+    expect(tools).toContain("permission: 'bank.rules' as PermissionKey")
 
     const systemStart = appLayout.indexOf("key: 'system_global'")
     const systemEnd = appLayout.indexOf("key: 'system_signing'", systemStart)
-    expect(appLayout.slice(systemStart, systemEnd)).not.toContain("to: '/accounting/setup-assistant'")
+    const system = appLayout.slice(systemStart, systemEnd)
+    expect(system).not.toContain("to: '/accounting/setup-assistant'")
+    expect(system).not.toContain("to: '/admin/bank-rule-templates'")
+  })
+
+  it('ukazuje Dodavatele v Systému superadminovi a roli Admin Plus', () => {
+    expect(appLayout).toContain('if (isAdmin || isAdminPlus || auth.isDemo)')
+    expect(appLayout).toContain("...((isAdmin || isAdminPlus) ? [{ to: '/admin/suppliers'")
+    expect(appLayout).toContain("if (item.to.startsWith('/admin/suppliers')) return auth.isSuperadmin || auth.isAdminPlusRole")
+  })
+
+  it('ukazuje firemní ceník předdefinovaným správcům firmy', () => {
+    expect(appLayout).toContain('...(auth.isCompanyAdminRole && !isStockEnabled ? [{')
+    expect(appLayout).toContain("to: '/admin/price-list'")
+    expect(appLayout).toContain("permission: 'settings.company.write' as PermissionKey")
   })
 })

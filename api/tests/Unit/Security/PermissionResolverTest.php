@@ -93,13 +93,42 @@ final class PermissionResolverTest extends TestCase
         self::assertSame(AccessLevel::NONE, $role->level('invoices'));
     }
 
+    public function testDefaultRoleCapabilityIgnoresCompanyOverride(): void
+    {
+        $this->insertRole(
+            2,
+            'Admin Plus',
+            'staff',
+            true,
+            ['settings.company.write' => AccessLevel::WRITE->value],
+            'admin_plus',
+        );
+        $this->insertRole(7, 'Čtenář', 'staff', true, ['settings.company.write' => AccessLevel::READ->value]);
+        $resolver = $this->resolver(new SupplierAccess(11, false, 7));
+
+        $companyRole = $resolver->resolve($this->request(2, 'staff'));
+        $defaultRole = $resolver->resolveDefault($this->request(2, 'staff'));
+
+        self::assertSame(7, $companyRole->id);
+        self::assertFalse($companyRole->canCreateSupplier());
+        self::assertSame(2, $defaultRole->id);
+        self::assertTrue($defaultRole->canCreateSupplier());
+    }
+
     /** @param array<string, int> $permissions */
-    private function insertRole(int $id, string $name, string $type, bool $active, array $permissions): void
+    private function insertRole(
+        int $id,
+        string $name,
+        string $type,
+        bool $active,
+        array $permissions,
+        ?string $systemKey = null,
+    ): void
     {
         $stmt = $this->pdo->prepare(
-            'INSERT INTO roles (id, system_key, name, role_type, is_active) VALUES (?, NULL, ?, ?, ?)'
+            'INSERT INTO roles (id, system_key, name, role_type, is_active) VALUES (?, ?, ?, ?, ?)'
         );
-        $stmt->execute([$id, $name, $type, $active ? 1 : 0]);
+        $stmt->execute([$id, $systemKey, $name, $type, $active ? 1 : 0]);
         $stmt = $this->pdo->prepare(
             'INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, ?, ?)'
         );

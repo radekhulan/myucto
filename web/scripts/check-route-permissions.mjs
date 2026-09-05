@@ -1,12 +1,12 @@
 // Brána proti zapomenuté permission u nové route (P1.5b, REAL_data_followup_UX.md).
 // Guard v router/index.ts je deny-by-default: autentizovaná route BEZ záznamu v
-// `routePermissions` (a bez superadminOnly/self-service výjimky) tiše skončí redirectem
+// `routePermissions` (a bez role/self-service výjimky) tiše skončí redirectem
 // na homepage — bez chyby, bez logu. Runtime to hlásí `console.warn` jen v dev buildu;
 // tenhle skript to posune do buildu (staticky, bez spuštění appky).
 //
 // Staticky se čte jen struktura `router/index.ts`: přímé děti routy `/` (ty jsou
 // requiresAuth), které renderují komponentu (ne redirect), musí mít klíč v
-// `routePermissions`, nebo být v superadminRouteNames / selfServiceRouteNames.
+// `routePermissions`, nebo být v některém pevném seznamu rolí či self-service.
 //
 // Spouští se z `npm run build`; samostatně `npm run check:routes`.
 
@@ -92,6 +92,8 @@ const routePermissions = new Set(
 
 const quoted = (block) => new Set([...block.matchAll(/'([\w-]+)'/g)].map((m) => m[1]))
 const superadminRouteNames = quoted(blockAfter('const superadminRouteNames = new Set('))
+const adminPlusRouteNames = quoted(blockAfter('const adminPlusRouteNames = new Set('))
+const companyAdminRouteNames = quoted(blockAfter('const companyAdminRouteNames = new Set('))
 const selfServiceRouteNames = quoted(blockAfter('const selfServiceRouteNames = new Set('))
 
 // Children routy `/` — hlavní větev s requiresAuth: true.
@@ -112,6 +114,8 @@ function offenders(block, requireAuthMeta) {
     if (/\bmfaSetupOnly:\s*true/.test(obj)) continue // výjimku nese meta, viz beforeEach
     if (routePermissions.has(name)) continue
     if (superadminRouteNames.has(name)) continue
+    if (adminPlusRouteNames.has(name)) continue
+    if (companyAdminRouteNames.has(name)) continue
     if (selfServiceRouteNames.has(name)) continue
     found.push(name)
   }

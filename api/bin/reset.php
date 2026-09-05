@@ -134,7 +134,7 @@ $keep = [
     'statement_rows',        // řádky výkazů — seed 1012
     'statement_account_map', // mapování účtů na řádky výkazů — seed 1012
     'cnb_repo_rates',        // repo sazby ČNB pro úrok z prodlení — seed 1048
-    'bank_rule_templates',   // globální šablony bankovních pravidel — seed 1056
+    'bank_rule_template_defaults', // výchozí katalog pro nové firmy
     'remittance_map',        // globální mapa odvodů na účty ČNB — seed 1056
     // Legislativní číselník sazeb členských států (seed 1152/1292/1294, dotah 1319).
     // NENÍ to uživatelský údaj: jsou to sazby DPH platné v EU. Když zmizí, import
@@ -209,7 +209,7 @@ if ($keepUsersSupplier) {
         'chart_of_accounts', 'accounting_supplier_settings', 'accounting_document_series',
         'auto_posting_policy', 'expense_classification_rules',
         'journal_entry_templates', 'journal_entry_template_lines',
-        'bank_posting_rules',
+        'bank_posting_rules', 'bank_rule_templates',
         // Per-supplier číselníky
         'expense_categories', 'revenue_categories', 'trip_categories',
         // Daňové profily VČETNĚ vazebních tabulek — samotné tax_profiles bez dětí

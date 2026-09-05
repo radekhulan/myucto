@@ -58,6 +58,29 @@ final class PermissionResolver
         return $resolved;
     }
 
+    public function resolveDefault(Request $request): EffectiveRole
+    {
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = (int) ($user['id'] ?? 0);
+        if ($userId <= 0) return EffectiveRole::denied();
+
+        $roleId = (int) ($user['role_id'] ?? ($user['role_summary']['id'] ?? 0));
+        $isSuperadmin = (bool) ($user['is_superadmin'] ?? false)
+            || (($user['role_summary']['type'] ?? null) === 'superadmin')
+            || (($user['role_summary']['system_key'] ?? null) === 'superadmin');
+        if ($isSuperadmin) {
+            return new EffectiveRole(
+                $roleId,
+                (string) ($user['role_summary']['name'] ?? 'Superadmin'),
+                'superadmin',
+                true,
+                [],
+                'superadmin',
+            );
+        }
+        return $roleId > 0 ? $this->load($roleId) : EffectiveRole::denied();
+    }
+
     private function load(int $roleId): EffectiveRole
     {
         $stmt = $this->db->pdo()->prepare(

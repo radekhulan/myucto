@@ -57,7 +57,7 @@ final class RebuildInvoiceSnapshotsAction
         if (!SupplierGuard::owns($request, $existing)) {
             return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
         }
-        if (!RequestAuthorization::isSuperadmin($request)) {
+        if (!RequestAuthorization::isCompanyAdmin($request)) {
             return Json::error($response, 'forbidden', 'Obnovit údaje stran na dokladu smí jen administrátor.', 403);
         }
 
