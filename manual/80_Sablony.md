@@ -12,6 +12,8 @@ automat: každá záložka vstupuje do jiné části zpracování.
 | Pravidla účtování | Návrh nebo automatizace opakovaných bankovních plateb |
 
 Všechny tři záložky jsou firemní a zobrazují se jen v podvojném účetnictví.
+Používají firmu zvolenou v hlavní liště aplikace. U Pravidel účtování je
+jméno firmy uvedeno také nad seznamem; pravidla druhé firmy se nepřimíchávají.
 Globální katalog šablon bankovních pravidel je systémová agenda a má vlastní
 stránku **Systém → Šablony bank. pravidel** (viz 59.4). Změna pravidla se
 použije na nové návrhy; již zaúčtované zápisy sama zpětně nepřepočítává.

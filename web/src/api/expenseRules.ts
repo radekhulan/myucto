@@ -3,7 +3,7 @@ import { apiErrorMessage } from './errors'
 
 // Druh nákladu → řídí nákladový účet: service→518, material→501,
 // small_asset→501 (+karta v evidenci), fixed_asset→042 (odpisy).
-export type ExpenseKind = 'service' | 'material' | 'small_asset' | 'fixed_asset'
+export type ExpenseKind = 'service' | 'material' | 'small_asset' | 'small_intangible' | 'fixed_asset'
 
 export interface ExpenseRule {
   id: number
@@ -32,6 +32,8 @@ export type ExpenseRulePayload = Omit<ExpenseRule,
 export const expenseRulesApi = {
   listRules: (params: { expense_kind?: ExpenseKind; active?: boolean; page?: number; per_page?: number } = {}) =>
     api.get<{ items: ExpenseRule[]; total: number; page: number; per_page: number }>('/accounting/expense-rules', { params }).then(r => r.data),
+  getRule: (id: number) =>
+    api.get<{ rule: ExpenseRule }>(`/accounting/expense-rules/${id}`).then(r => r.data.rule),
   createRule: (p: ExpenseRulePayload) =>
     api.post<{ rule: ExpenseRule }>('/accounting/expense-rules', p).then(r => r.data),
   // PATCH sémantika — posílají se jen změněné klíče (vč. samostatného is_active z inline toggle).

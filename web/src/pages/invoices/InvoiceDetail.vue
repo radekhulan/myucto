@@ -27,6 +27,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
+import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import { accountingApi } from '@/api/accounting'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { useSidePreview } from '@/composables/useSidePreview'
@@ -1430,6 +1431,8 @@ async function postToJournal() {
   }
 }
 
+const postingRuleOpen = ref(false)
+
 // ─── Lišta akcí (sdílená ActionBar) — primary se mění dle lifecyclu dokladu ───
 // Pravidlo „1 primární akce": je-li doklad po splatnosti, primární = Upomínka a Uhradit klesá
 // na sekundární; jinak je primární Uhradit.
@@ -1485,6 +1488,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
       show: isDoubleEntry.value && !!inv.booked_at,
       to: { name: 'accounting-journal', query: { source_type: 'invoice', source_id: String(inv.id) } } },
+    { key: 'posting-rule', label: t('accounting.template.create_posting_rule'), icon: 'doc', tier: 'overflow', variant: 'neutral',
+      show: isDoubleEntry.value && auth.canWrite('bank.rules'), run: () => { postingRuleOpen.value = true } },
     // ── overflow ──
     { key: 'public-link', label: t('invoice.public_link.btn'), icon: 'link', tier: 'overflow', variant: 'primary',
       show: !isDraft.value && w, disabled: b,
@@ -3029,5 +3034,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
       :file-name="invoice.imported_pdf_original_name"
       @close="importedPdfPreview.close()"
     />
+    <Teleport to="body">
+      <RuleFormModal v-if="postingRuleOpen && invoice"
+        :prefill="{ name: invoice.client_company_name || invoice.varsymbol || '', direction: invoice.total_with_vat < 0 ? 'outgoing' : 'incoming', applies_currency: invoice.currency, variable_symbol: invoice.varsymbol || null }"
+        @close="postingRuleOpen = false" @saved="postingRuleOpen = false" />
+    </Teleport>
   </div>
 </template>

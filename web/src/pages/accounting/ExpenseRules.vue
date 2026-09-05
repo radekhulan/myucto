@@ -21,11 +21,16 @@ import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import VendorPicker from '@/components/purchase/VendorPicker.vue'
+import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 // embedded = vykresleno jako záložka pod Šablony (menší nadpis, stránka má vlastní hlavičku).
-defineProps<{ embedded?: boolean }>()
+const props = defineProps<{
+  embedded?: boolean
+  initialDraft?: { vendorId: number | null; vendorName?: string | null; description?: string | null; ruleId?: number; rule?: Partial<ExpenseRulePayload> }
+}>()
+const emit = defineEmits<{ close: []; saved: [] }>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -34,12 +39,13 @@ const pageId = useId()
 
 const canWrite = computed(() => auth.canWrite('accounting'))
 
-const EXPENSE_KINDS: ExpenseKind[] = ['service', 'material', 'small_asset', 'fixed_asset']
+const EXPENSE_KINDS: ExpenseKind[] = ['service', 'material', 'small_asset', 'small_intangible', 'fixed_asset']
 // Účet odvozený z druhu nákladu, když pravidlo nemá vlastní target_account_code.
 const KIND_DEFAULT_ACCOUNT: Record<ExpenseKind, string> = {
   service: '518',
   material: '501',
   small_asset: '501',
+  small_intangible: '518',
   fixed_asset: '042',
 }
 function kindLabel(k: ExpenseKind): string {
@@ -72,7 +78,7 @@ function accountName(code: string): string {
 // Účty na výběr do cíle: jen nákladové (501/518/548…) a aktivní.
 const expenseAccounts = computed(() =>
   accounts.value
-    .filter(a => a.account_type === 'expense' && a.is_active && !a.is_synthetic)
+    .filter(a => (a.account_type === 'expense' || a.account_code.startsWith('04')) && a.is_active && !a.is_synthetic)
     .sort((a, b) => a.account_code.localeCompare(b.account_code)),
 )
 
@@ -154,6 +160,7 @@ async function removeRule(r: ExpenseRule) {
 const showForm = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
+const bindVendor = ref(true)
 const form = reactive({
   name: '',
   vendor_client_id: null as number | null,
@@ -174,6 +181,10 @@ const hasCriteria = computed(() =>
   form.vendor_name_contains.trim() !== '' ||
   form.description_contains.trim() !== '',
 )
+const recommendationCreate = computed(() => !!props.initialDraft && !props.initialDraft.ruleId)
+const validCriteria = computed(() => recommendationCreate.value
+  ? form.description_contains.trim() !== '' && (!bindVendor.value || form.vendor_client_id != null || form.vendor_name_contains.trim() !== '')
+  : hasCriteria.value)
 
 function resetForm() {
   form.name = ''
@@ -193,6 +204,11 @@ function openNew() {
   editingId.value = null
   resetForm()
   showForm.value = true
+}
+
+function closeForm() {
+  showForm.value = false
+  if (props.initialDraft) emit('close')
 }
 
 function openEdit(r: ExpenseRule) {
@@ -216,16 +232,16 @@ async function saveRule() {
     toast.error(t('accounting.expense_rules.name_required'))
     return
   }
-  if (!hasCriteria.value) {
-    toast.error(t('accounting.expense_rules.err_criteria_missing'))
+  if (!validCriteria.value) {
+    toast.error(t(recommendationCreate.value ? 'accounting.template.expense_description_hint' : 'accounting.expense_rules.err_criteria_missing'))
     return
   }
   saving.value = true
   try {
     const payload: ExpenseRulePayload = {
       name: form.name.trim(),
-      vendor_client_id: form.vendor_client_id,
-      vendor_name_contains: form.vendor_name_contains.trim() || null,
+      vendor_client_id: props.initialDraft && !bindVendor.value ? null : form.vendor_client_id,
+      vendor_name_contains: props.initialDraft && !bindVendor.value ? null : form.vendor_name_contains.trim() || null,
       description_contains: form.description_contains.trim() || null,
       amount_min: form.amount_min,
       amount_max: form.amount_max,
@@ -243,7 +259,8 @@ async function saveRule() {
       toast.success(t('accounting.expense_rules.updated'))
     }
     showForm.value = false
-    await load()
+    if (props.initialDraft) emit('saved')
+    else await load()
   } catch (e) {
     toast.error(expenseRuleErrorMessage(e, t))
   } finally {
@@ -251,11 +268,42 @@ async function saveRule() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  if (!props.initialDraft) return load()
+
+  try { accounts.value = await accountingApi.listAccounts() }
+  catch (e) { toast.error(expenseRuleErrorMessage(e, t)) }
+
+  if (props.initialDraft.ruleId) {
+    try {
+      const rule = await expenseRulesApi.getRule(props.initialDraft.ruleId)
+      openEdit(rule)
+      bindVendor.value = rule.vendor_client_id != null || !!rule.vendor_name_contains?.trim()
+    } catch (e) {
+      toast.error(expenseRuleErrorMessage(e, t))
+      emit('close')
+    }
+    return
+  }
+
+  openNew()
+  form.vendor_client_id = props.initialDraft.vendorId
+  form.name = props.initialDraft.vendorName || ''
+  form.description_contains = props.initialDraft.description || ''
+  if (props.initialDraft.rule) {
+    Object.assign(form, props.initialDraft.rule)
+    form.vendor_name_contains = props.initialDraft.rule.vendor_name_contains ?? ''
+    form.description_contains = props.initialDraft.rule.description_contains ?? form.description_contains ?? ''
+    form.target_account_code = props.initialDraft.rule.target_account_code ?? ''
+  }
+  bindVendor.value = form.vendor_client_id != null
+  form.application_mode = 'suggest'
+})
 </script>
 
 <template>
   <div>
+    <template v-if="!initialDraft">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
         <h1 v-if="!embedded" class="text-2xl font-semibold">{{ t('accounting.expense_rules.title') }}</h1>
@@ -379,34 +427,41 @@ onMounted(load)
       </div>
     </div>
 
+    </template>
     <!-- Modal: pravidlo -->
-    <Modal v-if="showForm" :title="editingId === null ? t('accounting.expense_rules.new') : t('accounting.expense_rules.edit')" @close="showForm = false">
+    <Modal v-if="showForm" :title="editingId === null ? t('accounting.expense_rules.new') : t('accounting.expense_rules.edit')" @close="closeForm">
       <p class="text-sm text-neutral-600 mb-4">{{ t('accounting.expense_rules.form_help') }}</p>
+          <p v-if="recommendationCreate" class="text-sm text-neutral-600 mb-4">{{ t('accounting.template.expense_hint') }}</p>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div class="sm:col-span-2">
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_name') }} *</label>
-          <input v-model="form.name" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+          <label :for="`${pageId}-name`" class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_name') }} *</label>
+          <input :id="`${pageId}-name`" v-model="form.name" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
         </div>
 
         <!-- Kritéria (AND) -->
         <div class="sm:col-span-2 border border-neutral-200 rounded-md p-3">
           <div class="text-xs font-medium text-neutral-500 mb-2">{{ t('accounting.expense_rules.criteria_group') }}</div>
           <div class="grid grid-cols-1 gap-3">
-            <div>
+            <label v-if="initialDraft" class="flex items-center gap-2 text-sm text-neutral-700 cursor-pointer">
+              <input :id="`${pageId}-bind-vendor`" v-model="bindVendor" type="checkbox" class="rounded border-neutral-300" />
+              {{ t('accounting.template.bind_vendor') }}
+            </label>
+            <p v-if="initialDraft && !bindVendor" class="text-xs text-neutral-500">{{ t('accounting.template.all_vendors') }}</p>
+            <div v-if="!initialDraft || bindVendor">
               <VendorPicker v-model="form.vendor_client_id" />
             </div>
-            <div>
-              <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_vendor_name_contains') }}</label>
-              <input v-model="form.vendor_name_contains" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+            <div v-if="!initialDraft || bindVendor">
+              <label :for="`${pageId}-vendor-name`" class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_vendor_name_contains') }}</label>
+              <input :id="`${pageId}-vendor-name`" v-model="form.vendor_name_contains" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_description_contains') }}</label>
-              <input v-model="form.description_contains" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+          <label :for="`${pageId}-description`" class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_description_contains') }}{{ recommendationCreate ? ' *' : '' }}</label>
+          <input :id="`${pageId}-description`" v-model="form.description_contains" :required="recommendationCreate" :placeholder="recommendationCreate ? t('accounting.template.expense_description_placeholder') : undefined" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
             </div>
           </div>
-          <p class="text-xs mt-2" :class="hasCriteria ? 'text-neutral-400' : 'text-danger-500'">
-            {{ t('accounting.expense_rules.criteria_hint') }}
+          <p class="text-xs mt-2" :class="validCriteria ? 'text-neutral-400' : 'text-danger-500'">
+            {{ t(recommendationCreate ? 'accounting.template.expense_description_hint' : 'accounting.expense_rules.criteria_hint') }}
           </p>
         </div>
 
@@ -433,12 +488,8 @@ onMounted(load)
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_target_account') }}</label>
-          <input v-model="form.target_account_code" :list="`${pageId}-er-expense-accounts`"
-                 :placeholder="KIND_DEFAULT_ACCOUNT[form.expense_kind]"
-                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono bg-surface" />
-          <datalist :id="`${pageId}-er-expense-accounts`">
-            <option v-for="a in expenseAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
-          </datalist>
+          <ChartAccountSelect v-model="form.target_account_code" :accounts="expenseAccounts"
+            :input-id="`${pageId}-target-account`" :aria-label="t('accounting.expense_rules.form_target_account')" />
           <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.expense_rules.target_account_hint') }}</p>
         </div>
 
@@ -464,9 +515,9 @@ onMounted(load)
         </div>
       </div>
 
-      <div class="flex justify-end gap-2 mt-4">
-        <button @click="showForm = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
-        <button :disabled="saving" @click="saveRule" :class="btnFilled('primary')">
+      <div class="flex flex-wrap justify-end gap-2 mt-4">
+        <button @click="closeForm" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
+        <button :disabled="saving || !validCriteria || !form.name.trim()" @click="saveRule" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ t('common.save') }}
         </button>

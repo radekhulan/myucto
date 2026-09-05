@@ -1386,11 +1386,11 @@ export interface CreateSettlementPayload {
 
 export const accountingApi = {
   // Účtová osnova
-  listAccounts: (opts?: { tree?: boolean; includeInactive?: boolean }) => {
+  listAccounts: (opts?: { tree?: boolean; includeInactive?: boolean; supplierId?: number }) => {
     const params: Record<string, string> = {}
     if (opts?.tree) params.tree = '1'
     if (opts?.includeInactive) params.include_inactive = '1'
-    return api.get<ChartAccount[]>('/accounting/accounts', { params }).then(r => r.data)
+    return api.get<ChartAccount[]>('/accounting/accounts', { params, ...(opts?.supplierId ? { headers: { 'X-Supplier-Id': String(opts.supplierId) } } : {}) }).then(r => r.data)
   },
   /** Karta účtu: kmen + analytiky se zůstatky + PS/obraty/KS za rozsah. */
   getAccountDetail: (id: number, params?: { from?: string; to?: string; after_closing?: 0 | 1 }) =>

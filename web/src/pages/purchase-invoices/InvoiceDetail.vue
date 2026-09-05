@@ -19,6 +19,8 @@ import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import PostingPreviewModal from '@/components/accounting/PostingPreviewModal.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
+import ExpenseRuleTemplateModal from '@/components/accounting/ExpenseRuleTemplateModal.vue'
+import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import StockReceiptModal from '@/components/stock/StockReceiptModal.vue'
 import { stockApi, type StockReceiptProposal } from '@/api/stock'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
@@ -554,10 +556,17 @@ const canPostToJournal = computed(() =>
 // v přenesené daňové povinnosti má zápis víc než dva řádky a odklepnout ho neviděný
 // znamená hledat případnou chybu až zpětně v deníku.
 const postingPreviewOpen = ref(false)
+const expenseRuleTemplateOpen = ref(false)
+const postingRuleOpen = ref(false)
 
 function postToJournal() {
   if (!invoice.value || !canPostToJournal.value) return
   postingPreviewOpen.value = true
+}
+
+function openExpenseRuleTemplate() {
+  if (!invoice.value || !auth.canWrite('accounting') || invoice.value.vendor_id <= 0) return
+  expenseRuleTemplateOpen.value = true
 }
 
 async function onPosted() {
@@ -621,6 +630,12 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
   items.push({ key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
     show: canPostToJournal.value, disabled: acting.value, loading: acting.value, run: postToJournal })
+
+  items.push({ key: 'expense-template', label: t('accounting.template.create_expense'), icon: 'doc', tier: 'overflow', variant: 'neutral',
+    show: isDoubleEntry.value && auth.canWrite('accounting') && inv.vendor_id > 0,
+    run: openExpenseRuleTemplate })
+  items.push({ key: 'posting-rule', label: t('accounting.template.create_posting_rule'), icon: 'doc', tier: 'overflow', variant: 'neutral',
+    show: isDoubleEntry.value && auth.canWrite('bank.rules'), run: () => { postingRuleOpen.value = true } })
 
   items.push({ key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
     show: isDoubleEntry.value && (!!inv.booked_at || !!inv.locked?.journal_entry_id),
@@ -1580,5 +1595,14 @@ const purchaseActions = computed<ActionItem[]>(() => {
       :doc-label="invoice.vendor_invoice_number || invoice.varsymbol"
       @close="postingPreviewOpen = false"
       @posted="onPosted" />
+
+    <ExpenseRuleTemplateModal v-if="expenseRuleTemplateOpen && invoice"
+      :vendor-id="invoice.vendor_id" :vendor-name="invoice.vendor_company_name"
+      @close="expenseRuleTemplateOpen = false" @saved="expenseRuleTemplateOpen = false" />
+    <Teleport to="body">
+      <RuleFormModal v-if="postingRuleOpen && invoice"
+        :prefill="{ name: invoice.vendor_company_name || invoice.vendor_invoice_number || '', direction: invoice.total_with_vat < 0 ? 'incoming' : 'outgoing', applies_currency: invoice.currency, variable_symbol: invoice.payment_variable_symbol || invoice.varsymbol || null }"
+        @close="postingRuleOpen = false" @saved="postingRuleOpen = false" />
+    </Teleport>
 
 </template>

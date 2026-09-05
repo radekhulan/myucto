@@ -9,6 +9,7 @@ export type SuggestionSource = 'rule' | 'learned' | 'payment_match' | 'transfer'
 
 export interface BankPostingRule {
   id: number
+  supplier_id: number
   name: string
   is_active: boolean
   direction: RuleDirection
@@ -39,7 +40,7 @@ export interface BankPostingRule {
 }
 
 export type BankPostingRulePayload = Omit<BankPostingRule,
-  'id' | 'hit_count' | 'rejected_streak' | 'approved_streak' | 'promotion_candidate' | 'last_hit_at' | 'created_at' | 'updated_at' | 'mode' | 'created_by_name' | 'system_template_key'>
+  'id' | 'supplier_id' | 'hit_count' | 'rejected_streak' | 'approved_streak' | 'promotion_candidate' | 'last_hit_at' | 'created_at' | 'updated_at' | 'mode' | 'created_by_name' | 'system_template_key'>
   & { mode?: RuleMode }   // create: BE vynutí 'suggest'; update změnu režimu ignoruje klient
 
 export interface PostingSuggestion {
@@ -176,8 +177,8 @@ export const bankPostingApi = {
     api.post<{ approved: number; failed: Array<{ id: number; code: string }> }>(
       '/accounting/bank-posting-suggestions/bulk-approve', { ids }).then(r => r.data),
 
-  listRules: (params: { direction?: RuleDirection; active?: boolean; page?: number; per_page?: number } = {}) =>
-    api.get<{ items: BankPostingRule[]; total: number; page: number; per_page: number }>('/accounting/bank-posting-rules', { params }).then(r => r.data),
+  listRules: (params: { direction?: RuleDirection; active?: boolean; page?: number; per_page?: number } = {}, supplierId?: number) =>
+    api.get<{ items: BankPostingRule[]; total: number; page: number; per_page: number }>('/accounting/bank-posting-rules', { params, ...(supplierId ? { headers: { 'X-Supplier-Id': String(supplierId) } } : {}) }).then(r => r.data),
   createRule: (p: BankPostingRulePayload & { backfill_suggestions?: boolean }) =>
     api.post<{ rule: BankPostingRule; backfilled?: number }>('/accounting/bank-posting-rules', p)
       .then(r => r.data),

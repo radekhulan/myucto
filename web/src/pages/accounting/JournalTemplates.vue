@@ -16,8 +16,18 @@ import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 
-defineProps<{ embedded?: boolean }>()
+const props = defineProps<{
+  embedded?: boolean
+  initialDraft?: {
+    description?: string
+    source?: 'invoices' | 'purchase-invoices'
+    docId?: number
+    lines?: Array<{ account_code: string; side: JournalSide; amount: number | null; cost_center?: string | null }>
+  }
+}>()
+const emit = defineEmits<{ close: []; saved: [] }>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -66,6 +76,27 @@ async function loadTemplates() {
 }
 
 onMounted(async () => {
+  if (props.initialDraft) {
+    startNew()
+    form.name = props.initialDraft.description || ''
+    loading.value = true
+    try {
+      const [loadedAccounts, loadedCenters] = await Promise.all([accountingApi.listAccounts(), accountingApi.listCostCenters()])
+      accounts.value = loadedAccounts
+      costCenters.value = loadedCenters
+      let sourceLines = props.initialDraft.lines || []
+      if (props.initialDraft.source && props.initialDraft.docId) {
+        const preview = await accountingApi.postingPreview(props.initialDraft.source, props.initialDraft.docId)
+        const actual = preview.already_posted ? (await accountingApi.getEntry(preview.already_posted)).lines : preview.lines
+        if (actual.some(line => !line.account_code)) throw new Error(t('accounting.templates.account_required'))
+        sourceLines = actual.map(line => ({ ...line, account_code: line.account_code! }))
+      }
+      if (sourceLines.length) form.lines = sourceLines.map(line => ({ ...emptyLine(), account_code: line.account_code, side: line.side, cost_center: line.cost_center || '' }))
+    } catch (e: any) {
+      error.value = e?.response?.data?.error?.message || t('common.error')
+    } finally { loading.value = false }
+    return
+  }
   await Promise.all([
     loadTemplates(),
     accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] }),
@@ -106,13 +137,17 @@ function fillForm(detail: JournalTemplateDetail) {
 
 function addLine() { form.lines.push(emptyLine()) }
 function removeLine(index: number) { if (form.lines.length > 1) form.lines.splice(index, 1) }
-function cancelEdit() { editingId.value = null; form.name = ''; form.description = ''; form.lines = [] }
+function cancelEdit() {
+  editingId.value = null; form.name = ''; form.description = ''; form.lines = []
+  if (props.initialDraft) emit('close')
+}
 
 function nullableAmount(value: unknown): number | null {
   return value === '' || value === null || value === undefined ? null : Number(value)
 }
 
 async function saveTemplate() {
+  if (loading.value || saving.value) return
   error.value = ''
   if (!form.name.trim()) { error.value = t('accounting.manual.template.name_required'); return }
   if (form.lines.some(line => !line.account_code.trim())) {
@@ -141,8 +176,8 @@ async function saveTemplate() {
       await accountingApi.updateJournalTemplate(editingId.value, payload)
     }
     toast.success(t('accounting.templates.saved'))
-    cancelEdit()
-    await loadTemplates()
+    if (props.initialDraft) emit('saved')
+    else { cancelEdit(); await loadTemplates() }
   } catch (e: any) {
     error.value = e?.response?.data?.error?.message || t('common.error')
   } finally {
@@ -166,6 +201,7 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
 
 <template>
   <div>
+    <template v-if="!initialDraft">
     <div v-if="!embedded" class="mb-4">
       <h1 class="text-2xl font-semibold">{{ t('accounting.templates.title') }}</h1>
     </div>
@@ -180,13 +216,6 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
         {{ t('accounting.templates.new') }}
       </button>
     </div>
-
-    <datalist :id="`${pageId}-journal-template-accounts`">
-      <option v-for="account in pickable" :key="account.id" :value="account.account_code">{{ account.account_code }} — {{ account.name }}</option>
-    </datalist>
-    <datalist :id="`${pageId}-journal-template-cost-centers`">
-      <option v-for="center in costCenters" :key="center.id" :value="center.code">{{ center.code }} — {{ center.name }}</option>
-    </datalist>
 
     <div v-if="error" class="mb-4 rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-600">{{ error }}</div>
     <div v-if="loading" class="py-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
@@ -235,10 +264,17 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
       </table>
     </div>
 
+    </template>
+    <datalist :id="`${pageId}-journal-template-cost-centers`">
+      <option v-for="center in costCenters" :key="center.id" :value="center.code">{{ center.code }} / {{ center.name }}</option>
+    </datalist>
     <Modal v-if="auth.canWrite('accounting.templates') && form.lines.length"
       :title="editingId === null ? t('accounting.templates.new') : t('accounting.templates.edit')"
       widthClass="max-w-4xl" @close="cancelEdit">
       <div class="space-y-4">
+      <p v-if="initialDraft" class="text-sm text-neutral-600">{{ t('accounting.template.journal_hint') }}</p>
+      <p v-if="error" role="alert" class="rounded-md bg-danger-50 p-3 text-sm text-danger-600">{{ error }}</p>
+      <p v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.manual.template.name') }}</label>
@@ -260,17 +296,19 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
         </div>
         <div class="space-y-2">
           <div v-for="(line, index) in form.lines" :key="index" class="grid grid-cols-12 gap-2 items-start">
-            <input v-model="line.account_code" :list="`${pageId}-journal-template-accounts`" type="text" :placeholder="t('accounting.manual.account_placeholder')" class="col-span-12 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
-            <select v-model="line.side" class="col-span-4 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <div class="col-span-12 sm:col-span-6 min-w-0">
+              <ChartAccountSelect v-model="line.account_code" :accounts="pickable" :disabled="loading" :aria-label="t('accounting.manual.account_placeholder')" />
+            </div>
+            <select v-model="line.side" :aria-label="t('accounting.template.side')" class="col-span-4 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
               <option value="debit">{{ t('accounting.journal.side.debit') }}</option>
               <option value="credit">{{ t('accounting.journal.side.credit') }}</option>
             </select>
-            <input v-model.number="line.default_amount" type="number" min="0" step="0.01" :placeholder="t('accounting.templates.default_amount')" class="col-span-7 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm text-right" />
-            <input v-model="line.label" type="text" maxlength="255" :placeholder="t('accounting.templates.line_label')" class="col-span-12 sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-            <input v-model="line.cost_center" :list="`${pageId}-journal-template-cost-centers`" type="text" maxlength="50" :placeholder="t('accounting.manual.cost_center')" class="col-span-10 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <input v-model.number="line.default_amount" type="number" min="0" step="0.01" :placeholder="t('accounting.templates.default_amount')" class="col-span-6 sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md text-sm text-right" />
             <button type="button" @click="removeLine(index)" :disabled="form.lines.length <= 1" class="col-span-2 sm:col-span-1 h-9 inline-flex items-center justify-center text-danger-500 hover:text-danger-600 disabled:opacity-30" :title="t('accounting.manual.remove_line')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             </button>
+            <input v-model="line.label" type="text" maxlength="255" :placeholder="t('accounting.templates.line_label')" class="col-span-12 sm:col-span-6 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <input v-model="line.cost_center" :list="`${pageId}-journal-template-cost-centers`" type="text" maxlength="50" :placeholder="t('accounting.manual.cost_center')" class="col-span-12 sm:col-span-6 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
         </div>
       </div>
@@ -280,7 +318,7 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}
         </button>
-        <button type="button" @click="saveTemplate" :disabled="saving" :class="btnFilled('primary')">
+        <button type="button" @click="saveTemplate" :disabled="saving || loading" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ saving ? t('common.saving') : t('common.save') }}
         </button>

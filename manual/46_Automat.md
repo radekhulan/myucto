@@ -8,10 +8,75 @@ skončila právě v dané skupině.
 
 Stránku otevřete přes **Účetnictví → Automat**. Je dostupná firmám s podvojným
 účetnictvím a respektuje oprávnění uživatele pro každou firmu zvlášť.
+Všechny záložky vždy zobrazují pouze firmu zvolenou v hlavní liště aplikace.
+Automat nemá vlastní výběr firmy ani společný přehled více firem.
 
 Pro prvotní nastavení celé firmy a návrh pravidel z již zaúčtované historie
 slouží samostatný [Asistent nastavení účtování](80_Sablony.md#807-asistent-nastaveni-uctovani).
-Automat zůstává provozní frontou pro každodenní návrhy a rozhodnutí.
+Automat spojuje každodenní frontu s doporučeními nad existujícími doklady.
+
+Výchozí karta **Doporučení** hledá konkrétní příležitosti pro automatizaci.
+Zobrazuje se pouze pro aktuálně zvolenou firmu v aplikaci a nemá vlastní
+přepínač firmy. Lze ji omezit obdobím a typem doporučení.
+U skupin se období vztahuje k poslednímu výskytu, zatímco počet a ukázky
+vycházejí z celé prověřené historie.
+
+- **Nové nákladové pravidlo** seskupuje opakované nákupy, které ještě nepokrývá
+  aktivní pravidlo. Ukazuje hledaný text, doporučený druh nákladu a účet,
+  počet výskytů a příklady dokladů. Akce **Vytvořit nákladové pravidlo** otevře
+  předvyplněný původní formulář z pravidel nákladů. Text je povinný; vazbu na
+  dodavatele lze změnit nebo vypnout a vytvořit obecné pravidlo podle textu.
+- **Existující pravidlo: zvážit automatiku** ukazuje nákladové pravidlo v režimu
+  návrhu a konkrétní případy, které rozpoznává. Námětem je přepnutí na automatické
+  použití, nikoli založení dalšího pravidla. Počet výskytů neznamená počet
+  potvrzení správnosti. Akce **Zkontrolovat a nastavit automatiku**
+  načte jeho aktuální nastavení do původního formuláře přímo nad přehledem.
+  Po kontrole můžete upravit kritéria nebo zvolit **Použít automaticky**.
+  Nevytváří se další kopie stejného pravidla.
+- **Pravidlo účtování** vychází z opakovaných bankovních pohybů. Akce
+  **Vytvořit pravidlo účtování** otevře původní formulář s kritérii, kontací
+  MD/D, rozsahem částky, měnou, prioritou a testem na historii. Nejde o
+  šablonu účetního zápisu s pevnou částkou.
+- **Předpis vydané nebo přijaté faktury** se nabízí jen pro nezaúčtovaný
+  doklad v otevřeném období s platným náhledem. Akce otevře aktuální náhled
+  konkrétního dokladu; zaúčtování potvrdíte až v něm.
+
+Uložení formuláře skutečně vytvoří nebo upraví pravidlo a vyžádá obnovu doporučení.
+Nové návrhy pravidel jsou předvyplněné v režimu návrhu. Historické doklady
+slouží jako podklady pro budoucí automatizaci, nikoli jako pokyn měnit
+uzavřená období. Případy pokryté automatickými pravidly ani samotný historický
+nesoulad s existujícím pravidlem se nenabízejí jako další úkol. Pravidlo
+ponechané v režimu návrhu se po přepočtu může znovu nabídnout k ověření.
+
+**Prověřit znovu** okamžitě spustí samostatnou úlohu na pozadí pro aktuální
+firmu, stejně jako analýza v Asistentovi nastavení účtování. Na cron nečeká.
+Stránka ukazuje postup po fázích: vydané faktury, přijaté faktury, nákladová
+pravidla, bankovní pravidla, souhrn a uložení výsledků. Procenta vyjadřují
+dokončené fáze, nikoli odhad zbývajícího času. Průběh se obnovuje i po návratu
+na stránku. Opakovaný klik nepustí druhý souběžný job pro stejnou firmu.
+Při chybě lze spuštění zopakovat; dosavadní výsledky zůstávají zachované.
+Po dokončení se přehled aktualizuje automaticky. Uložení pravidla rovněž
+spustí obnovu. Otevření stránky, filtrování ani stránkování analýzu nespouští.
+
+Pravidelná automatická obnova je součástí denní úlohy `cron-ai-rule-miner`
+(výchozí čas 04:00). Samostatný cron pro doporučení není potřeba. Ruční
+obnova z UI funguje i bez spuštěného cron dispatcheru.
+
+Tlačítkem **Otevřít podklad** přejdete na příslušnou fakturu nebo bankovní
+pohyb. Jde o doplňkovou kontrolu vedle konkrétní akce doporučení. Pravidlo
+lze vytvořit také v rozbalovacím menu akcí detailu. Otevření doporučení ani
+**Prověřit znovu** nic neúčtuje, nemění položky a neodesílá data externí AI.
+
+Úloha `cron-ai-rule-miner` vytváří návrhová bankovní pravidla
+z opakovaných potvrzených oprav a následně obnovuje doporučení.
+`cron-automation-digest` obnovuje starší
+bankovní návrhy a odesílá nastavený e-mailový souhrn. Přehled doporučení
+využívá existující analýzu bankovní historie a nákladovou klasifikaci;
+nezakládá pravidla při pouhém načtení stránky.
+
+Prázdná karta **Ke schválení** znamená, že nečekají uložené bankovní návrhy.
+Sama o sobě neznamená, že byly prověřeny všechny faktury. K tomu slouží
+**Doporučení** a karta **Vyžaduje zásah**.
 
 > [!IMPORTANT]
 > Automat nemění pravidla účetních období. Do uzavřeného nebo zamčeného období
@@ -23,8 +88,8 @@ Automat zůstává provozní frontou pro každodenní návrhy a rozhodnutí.
 Při každém rozhodnutí se uplatní několik pojistek:
 
 1. **Oprávnění k firmě** — uživatel vidí jen firmy, ke kterým je přiřazený.
-   U společné fronty více firem se každá akce provede v kontextu firmy daného
-   řádku; není nutné ručně přepínat firmu.
+   Fronta a její akce patří vždy aktuální firmě. Pro jinou firmu změňte
+   výběr v hlavní liště aplikace.
 2. **Otevřené účetní období** — datum dokladu nebo bankovního pohybu musí patřit
    do otevřeného a nezamčeného období.
 3. **Jednoznačná kontace** — automatické zaúčtování se použije jen tam, kde
@@ -52,10 +117,10 @@ několik dní kontrolujte výsledky a teprve ověřeným typům operací povolte
 
 ## 46.2 Orientace na stránce
 
-V horní části jsou filtry firmy, zdroje rozhodnutí, typu operace, jistoty,
+V horní části jsou filtry zdroje rozhodnutí, typu operace, jistoty,
 částky a období. Výsledky lze řadit podle data, jistoty, částky, typu operace
-nebo zdroje. Výběr firmy je společný pro frontu, pravidla, checklist i
-průvodce, takže editovaná pravidla vždy patří právě zobrazené firmě. Následují
+nebo zdroje. Firma zvolená v hlavní liště platí pro frontu, pravidla, checklist,
+historii i průvodce, takže editovaná pravidla vždy patří právě zobrazené firmě. Následují
 pracovní záložky:
 
 ### 46.2.1 Zaúčtováno dnes
@@ -222,9 +287,8 @@ Pro běžný den si vyhraďte několik minut:
 5. Nakonec otevřete **Denní checklist** a zkontrolujte, zda nezůstala důležitá
    nevyřízená položka.
 
-Při správě více firem ponechte filtr **Všechny firmy**. Fronta seřadí položky po
-firmách a akce odešle vždy do správné účetní jednotky. Pokud potřebujete souvisle
-pracovat jen na jedné firmě, vyberte ji ve filtru.
+Při správě více firem přepínejte firmu v hlavní liště aplikace. Všechny záložky
+Automatu se přizpůsobí tomuto výběru; data více firem se v přehledu neslučují.
 
 ## 46.5 Schválení, zamítnutí a hromadná práce
 

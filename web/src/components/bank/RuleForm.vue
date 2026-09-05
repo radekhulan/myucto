@@ -5,6 +5,7 @@ import type { ChartAccount } from '@/api/accounting'
 import { bankPostingApi, type BankPostingRulePayload, type RuleDryRunResult } from '@/api/bankPosting'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { settingsApi } from '@/api/settings'
+import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 
 // Saldokontní účty nepatří do pravidla (H2) — datalist je na ne-bankovní straně filtruje.
 const SALDO_PREFIXES = ['311', '321', '314', '324', '325']
@@ -44,18 +45,8 @@ function isSaldo(code: string): boolean {
 }
 // Ne-bankovní strana dle směru: incoming → protiúčet je credit; outgoing → debit.
 const nonBankSide = computed<'debit' | 'credit'>(() => form.direction === 'incoming' ? 'credit' : 'debit')
-const bankSideOptions = computed(() => activeAccounts.value)
+const bankSideOptions = computed(() => activeAccounts.value.filter(a => a.account_code.startsWith('221')))
 const nonBankOptions = computed(() => activeAccounts.value.filter(a => !isSaldo(a.account_code)))
-
-const accountByCode = computed<Record<string, ChartAccount>>(() => {
-  const m: Record<string, ChartAccount> = {}
-  for (const a of props.accounts) m[a.account_code] = a
-  return m
-})
-function accountName(code: string | null | undefined): string {
-  if (!code) return ''
-  return accountByCode.value[code]?.name ?? ''
-}
 
 // Helper „± %": z baseAmount dopočítá min/max lokálně (na BE jdou jen min/max, H4g).
 const bandPercent = ref(10)
@@ -181,28 +172,16 @@ defineExpose({ runDryRun, dryRun })
 
     <div class="grid grid-cols-2 gap-2">
       <div>
-        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.debit') }}</label>
-        <input v-model="form.debit_account_code" :list="debitListId" type="text"
-          class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-        <div class="text-xs text-neutral-500 mt-0.5 truncate">{{ accountName(form.debit_account_code) }}</div>
+        <label :for="debitListId" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.debit') }}</label>
+        <ChartAccountSelect v-model="form.debit_account_code" :input-id="debitListId"
+          :accounts="nonBankSide === 'debit' ? nonBankOptions : bankSideOptions" />
       </div>
       <div>
-        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.credit') }}</label>
-        <input v-model="form.credit_account_code" :list="creditListId" type="text"
-          class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-        <div class="text-xs text-neutral-500 mt-0.5 truncate">{{ accountName(form.credit_account_code) }}</div>
+        <label :for="creditListId" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.credit') }}</label>
+        <ChartAccountSelect v-model="form.credit_account_code" :input-id="creditListId"
+          :accounts="nonBankSide === 'credit' ? nonBankOptions : bankSideOptions" />
       </div>
     </div>
-    <datalist :id="debitListId">
-      <option v-for="a in (nonBankSide === 'debit' ? nonBankOptions : bankSideOptions)" :key="a.id" :value="a.account_code">
-        {{ a.account_code }} — {{ a.name }}
-      </option>
-    </datalist>
-    <datalist :id="creditListId">
-      <option v-for="a in (nonBankSide === 'credit' ? nonBankOptions : bankSideOptions)" :key="a.id" :value="a.account_code">
-        {{ a.account_code }} — {{ a.name }}
-      </option>
-    </datalist>
     <p class="text-xs text-neutral-500">{{ t('bank.posting.saldo_hint') }}</p>
 
     <div v-if="mode === 'edit'">

@@ -2007,6 +2007,7 @@ final class Routes
             // Pravidla klasifikace druhu výdaje (§DM) — předvyplňují expense_kind na řádku
             // přijaté faktury. Návrh je READ-ONLY: nic neúčtuje, uživatel ho potvrdí v editoru.
             $g->get   ('/expense-rules',                            [\MyInvoice\Action\Accounting\ExpenseClassificationRuleAction::class, 'list']);
+            $g->get   ('/expense-rules/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\ExpenseClassificationRuleAction::class, 'get']);
             $g->post  ('/expense-rules',                            [\MyInvoice\Action\Accounting\ExpenseClassificationRuleAction::class, 'create']);
             $g->put   ('/expense-rules/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\ExpenseClassificationRuleAction::class, 'update']);
             $g->delete('/expense-rules/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\ExpenseClassificationRuleAction::class, 'delete']);
@@ -2357,6 +2358,10 @@ final class Routes
         $app->get    ('/api/automation/overview',  [\MyInvoice\Action\Automation\AutomationFeedAction::class, 'overview']);
         $app->get    ('/api/automation/checklist', [\MyInvoice\Action\Automation\AutomationFeedAction::class, 'checklist']);
         $app->get    ('/api/automation/history',   [\MyInvoice\Action\Automation\AutomationFeedAction::class, 'history']);
+        $app->get    ('/api/automation/recommendations', [\MyInvoice\Action\Automation\AutomationRecommendationAction::class, 'recommendations']);
+        $app->post   ('/api/automation/recommendations/refresh', [\MyInvoice\Action\Automation\AutomationRecommendationAction::class, 'refresh']);
+        $app->get    ('/api/automation/recommendations/job', [\MyInvoice\Action\Automation\AutomationRecommendationJobAction::class, 'status']);
+        $app->post   ('/api/automation/recommendations/job', [\MyInvoice\Action\Automation\AutomationRecommendationJobAction::class, 'start']);
         $app->get    ('/api/automation/wizard/analysis', [\MyInvoice\Action\Automation\AutomationWizardAction::class, 'analysis']);
         $app->post   ('/api/automation/wizard/apply',    [\MyInvoice\Action\Automation\AutomationWizardAction::class, 'apply']);
         $app->post   ('/api/ai/suggestions/{id:[0-9]+}/accept', [\MyInvoice\Action\Ai\AiSuggestionAction::class, 'accept']);

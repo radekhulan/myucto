@@ -14,6 +14,19 @@ odcházejí z firmy. Oproti vystaveným fakturám:
 
 V hlavním menu **Přijaté faktury**.
 
+V detailu faktury otevřete rozbalovací menu akcí a zvolte **Vytvořit nákladovou
+šablonu**. Otevře se stejný plný editor jako v seznamu šablon. Dodavatel se
+předvyplní a můžete ho změnit. Přepínačem **Vázat pravidlo na dodavatele**
+vazbu vypnete, aby pravidlo platilo obecně podle textu pro všechny dodavatele
+této firmy. Text položky je vždy povinný, i při zapnuté vazbě. Můžete upravit i rozsah částky,
+prioritu a režim použití. Cílový účet nabízí hledání podle čísla i názvu.
+Uložení šablony samo nezmění fakturu ani její zaúčtování.
+Položka **Vytvořit pravidlo účtování** otevře původní formulář bankovního
+pravidla s názvem dodavatele, směrem, měnou a variabilním symbolem.
+Obsahuje rozsah částky od/do, prioritu, strop automatiky, účty MD/Dal
+a test na historii. Neobsahuje pevnou výchozí částku. Pravidlo samo
+nemění fakturu; úhrady faktur se nadále párují, nikoli účtují tímto pravidlem.
+
 > [!TIP]
 > Samostatné kapitoly k nákupní agendě: [Export přijatých faktur](24_Export_prijatych.md)
 > (naše PDF / ISDOC / Pohoda) a [AI extrakce](25_AI_extrakce.md) (import z PDF přes nastaveného poskytovatele AI).

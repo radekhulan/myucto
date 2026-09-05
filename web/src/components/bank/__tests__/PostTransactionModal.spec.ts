@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, shallowMount, flushPromises } from '@vue/test-utils'
+import { ref } from 'vue'
 import type { ChartAccount } from '@/api/accounting'
 import type { BankTransaction } from '@/api/bank'
 
@@ -7,6 +8,7 @@ const m = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   aiAvailability: vi.fn(),
   postTransaction: vi.fn(),
+  createRule: vi.fn(),
 }))
 
 vi.mock('@/api/accounting', () => ({
@@ -17,6 +19,7 @@ vi.mock('@/api/bankPosting', () => ({
   bankPostingApi: {
     aiAvailability: m.aiAvailability,
     postTransaction: m.postTransaction,
+    createRule: m.createRule,
   },
   bankPostingErrorMessage: (_e: unknown, t: (k: string) => string) => t('err'),
 }))
@@ -26,6 +29,7 @@ vi.mock('@/composables/useToast', () => ({
 }))
 
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: () => {} }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
 
 vi.mock('@/composables/useFormat', () => ({
   formatMoney: (v: number) => String(v),
@@ -37,6 +41,8 @@ vi.mock('vue-i18n', () => ({
 }))
 
 import PostTransactionModal from '@/components/bank/PostTransactionModal.vue'
+import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
+import type { BankTransactionActions } from '@/composables/useBankTransactionActions'
 
 function account(id: number, code: string, name: string, parentId: number | null): ChartAccount {
   return {
@@ -110,6 +116,36 @@ describe('PostTransactionModal — našeptávač účtů', () => {
     m.listAccounts.mockResolvedValue(CHART)
     m.aiAvailability.mockResolvedValue({ available: false })
     m.postTransaction.mockReset()
+    m.createRule.mockReset().mockResolvedValue({ rule: { id: 10 } })
+  })
+
+  it('opens the original rule dialog from the movement menu and only saves a rule', async () => {
+    const wrapper = shallowMount(BankTransactionRow, {
+      props: { tx: tx(-100), layout: 'mobile', isDoubleEntry: true, actions: {
+        expandedDocs: ref(new Set()), expandedSuggestions: ref(new Set()), suggestionFor: () => null,
+      } as unknown as BankTransactionActions },
+      global: { stubs: { RuleFormModal: false, RuleForm: true, Teleport: true } },
+    })
+    const menu = wrapper.findComponent({ name: 'RowActionsMenu' })
+    menu.props('actions').find((action: { key: string }) => action.key === 'create-posting-rule').run()
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'RuleFormModal' }).exists()).toBe(true)
+    expect(wrapper.find('[data-test="posting-debit"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('bank.posting.split_on')
+    const form = wrapper.findComponent({ name: 'RuleForm' })
+    expect(form.props('showDryRun')).toBe(true)
+    expect(form.props('modelValue')).toEqual(expect.objectContaining({ amount_min: null, amount_max: null, priority: 100, applies_currency: 'CZK' }))
+    const rule = { ...form.props('modelValue'), debit_account_code: '518', credit_account_code: '221.100', message_contains: 'hosting' }
+    form.vm.$emit('update:modelValue', rule)
+    await flushPromises()
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')!
+    await save.trigger('click')
+    await flushPromises()
+    expect(m.createRule).toHaveBeenCalledWith(expect.objectContaining({ debit_account_code: '518', credit_account_code: '221.100', message_contains: 'hosting', mode: 'suggest' }))
+    expect(m.createRule.mock.calls[0][0]).toHaveProperty('backfill_suggestions', false)
+    expect(m.postTransaction).not.toHaveBeenCalled()
+    expect(wrapper.emitted('changed')).toHaveLength(1)
+    expect(wrapper.emitted('posted')).toBeUndefined()
   })
 
   it('protiúčet příchozí platby nabízí saldokonto i s analytikou', async () => {

@@ -3931,6 +3931,26 @@ paths:
         '200': { description: "OK {items, pagination}", content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/automation/recommendations:
+    get:
+      tags: [Accounting]
+      summary: Doporučení účtování z dokladů a bankovních pohybů
+      description: Session-only, dynamický RBAC. Čte pouze výsledky předpočítané cronem pro povolené firmy; nikdy nespouští analýzu v HTTP požadavku. Filtry i stránkování běží nad uloženými výsledky. Zahrnuje kontrolu klasifikace již zaúčtovaných přijatých faktur.
+      parameters:
+        - { in: query, name: suppliers, schema: { type: string }, description: Čárkou oddělená ID firem. }
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: type, schema: { type: string, enum: [post_invoice, post_purchase, classify_purchase, bank_rule] } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Doporučení a počty prověřených podkladů
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutomationRecommendationsPage' }
+        '422': { description: Neplatné filtry nebo interval dat. }
+
   /api/v1/automation/feed:
     get:
       tags: [Accounting]
@@ -19010,6 +19030,115 @@ components:
         auto: { type: object, additionalProperties: true }
         rules: { type: object, additionalProperties: true }
         corrections: { type: object, additionalProperties: true }
+
+    AutomationRecommendationsPage:
+      type: object
+      required: [items, summary, total, page, per_page, snapshots]
+      properties:
+        snapshots:
+          type: array
+          description: Stav výsledků předpočítaných cronem pro jednotlivé firmy. Chybějící výsledek nespouští synchronní výpočet.
+          items:
+            type: object
+            required: [supplier_id, generated_at, refresh_pending]
+            properties:
+              supplier_id: { type: integer }
+              generated_at: { type: string, nullable: true, description: 'Čas posledního úspěšného přepočtu ve formátu YYYY-MM-DD HH:mm:ss v časové zóně instance.' }
+              refresh_pending: { type: boolean }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AutomationRecommendation' }
+        summary:
+          type: object
+          required: [sales, purchases, bank]
+          properties:
+            sales: { type: integer }
+            purchases: { type: integer }
+            bank: { type: integer }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+
+    AutomationRecommendation:
+      type: object
+      required: [id, type, supplier_id, supplier_name, date, description, amount, currency, booked, period_closed, reason, source, lines]
+      properties:
+        id: { type: string }
+        action:
+          type: string
+          enum: [create_expense_rule, edit_expense_rule, create_bank_rule, post_document]
+          description: Konkrétní akce po kontrole uživatelem. Čtení doporučení žádné pravidlo ani účetní zápis nevytváří.
+        vendor_id: { type: integer, nullable: true }
+        rule_id: { type: integer, nullable: true, description: 'U edit_expense_rule identifikátor existujícího nákladového pravidla, jehož aktuální definici má editor načíst.' }
+        occurrence_count: { type: integer, minimum: 1, description: 'Počet různých dokladů nebo bankovních pohybů podporujících návrh.' }
+        rule_payload:
+          type: object
+          nullable: true
+          description: Předvyplnění původního formuláře nákladového nebo bankovního pravidla. Historické ukázky nejsou dry-runem později upravených kritérií. U post_document je null.
+          additionalProperties: true
+          properties:
+            name: { type: string }
+            vendor_client_id: { type: integer, nullable: true }
+            description_contains: { type: string, nullable: true }
+            expense_kind: { type: string }
+            target_account_code: { type: string, nullable: true }
+            application_mode: { type: string, enum: [suggest, auto] }
+            direction: { type: string, enum: [incoming, outgoing] }
+            counterparty_account: { type: string, nullable: true }
+            counterparty_bank: { type: string, nullable: true }
+            variable_symbol: { type: string, nullable: true }
+            message_contains: { type: string, nullable: true }
+            amount_min: { type: number, nullable: true }
+            amount_max: { type: number, nullable: true }
+            debit_account_code: { type: string }
+            credit_account_code: { type: string }
+            applies_currency: { type: string }
+            priority: { type: integer }
+            mode: { type: string, enum: [suggest, auto] }
+        samples:
+          type: array
+          items:
+            type: object
+            required: [description, date]
+            properties:
+              description: { type: string }
+              date: { type: string, format: date }
+              document_id: { type: integer }
+              transaction_id: { type: integer }
+              statement_id: { type: integer, nullable: true }
+        type: { type: string, enum: [post_invoice, post_purchase, classify_purchase, bank_rule] }
+        supplier_id: { type: integer }
+        supplier_name: { type: string }
+        document_id: { type: integer, nullable: true }
+        item_id: { type: integer, nullable: true }
+        statement_id: { type: integer, nullable: true }
+        transaction_id: { type: integer, nullable: true }
+        date: { type: string, format: date, description: 'U skupiny datum posledního výskytu. Filtr období se vztahuje k tomuto datu, nikoliv ke všem historickým ukázkám.' }
+        document_no: { type: string, nullable: true }
+        description: { type: string }
+        counterparty: { type: string, nullable: true }
+        amount: { type: number }
+        currency: { type: string }
+        booked: { type: boolean }
+        period_closed: { type: boolean }
+        current_account_code: { type: string, nullable: true }
+        current_expense_kind: { type: string, nullable: true }
+        preview_error: { type: string, nullable: true }
+        suggested_account_code: { type: string, nullable: true }
+        expense_kind: { type: string, nullable: true }
+        confidence: { type: number, nullable: true }
+        reason: { type: string }
+        source: { type: string }
+        lines:
+          type: array
+          description: Náhled účetních řádků v Kč; prázdný, pokud vyžaduje ruční doplnění.
+          items:
+            type: object
+            required: [account_code, side, amount]
+            properties:
+              account_code: { type: string }
+              side: { type: string, enum: [debit, credit] }
+              amount: { type: number }
 
     AutomationFeedItem:
       type: object

@@ -15,6 +15,7 @@ import AutomationBadge from '@/components/automation/AutomationBadge.vue'
 import ConfidenceLabel from '@/components/automation/ConfidenceLabel.vue'
 import RuleForm from './RuleForm.vue'
 import RuleTemplatesModal from './RuleTemplatesModal.vue'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 /** Saldokonta — do PRAVIDLA nepatří (H2). Jednorázové ruční zaúčtování je smí. */
 const SALDO_PREFIXES = ['311', '321', '314', '324', '325']
@@ -54,8 +55,8 @@ const bankOptions = computed(() => accountPickerOptions(accounts.value, a => a.a
 // že po napsání „311" nepřišla ŽÁDNÁ nápověda: ani syntetika, ani 311.100.
 const counterOptions = activeAccounts
 
-const debit = ref(isIncoming.value ? BANK_PREFIX : '')
-const credit = ref(isIncoming.value ? '' : BANK_PREFIX)
+const debit = ref(props.tx.posting?.debit_account_code ?? (isIncoming.value ? BANK_PREFIX : ''))
+const credit = ref(props.tx.posting?.credit_account_code ?? (isIncoming.value ? '' : BANK_PREFIX))
 const description = ref(props.tx.description ?? props.tx.counterparty_name ?? '')
 const aiOpen = ref(false)
 const aiQuery = ref('')
@@ -467,16 +468,18 @@ onMounted(async () => {
       </label>
       <p v-if="!splitMode && counterIsSaldo" class="text-xs text-neutral-500 mt-0.5">{{ t('bank.posting.saldo_hint') }}</p>
       <div v-if="withRule && !splitMode" class="mt-3 border-t border-neutral-200 pt-3">
-        <RuleForm v-model="rulePayload" :accounts="accounts" mode="create" :base-amount="absAmount" />
+        <RuleForm :model-value="rulePayload" :accounts="accounts" mode="create" :base-amount="absAmount" @update:model-value="Object.assign(rulePayload, $event)" />
       </div>
 
-      <div class="flex justify-end gap-2 pt-4">
+      <div class="flex flex-wrap justify-end gap-2 pt-4">
         <button @click="emit('close')" :disabled="saving"
-          class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50">
+          :class="btnOutline('neutral')">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}
         </button>
         <button @click="submit" :disabled="!canSubmit || saving"
-          class="cursor-pointer px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
+          :class="btnFilled('primary')">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
           {{ saving ? '…' : t('bank.posting.action_post') }}
         </button>
       </div>

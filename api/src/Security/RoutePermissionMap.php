@@ -475,6 +475,8 @@ final class RoutePermissionMap
         ['*', '#^/api/accounting/(bank-rule-templates|auto-posting-policy)(/|$)#', 'bank.rules', AccessLevel::WRITE],
         ['POST', '#^/api/automation/wizard/apply$#', 'bank.rules', AccessLevel::WRITE],
         ['GET', '#^/api/automation(/|$)#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/automation/recommendations/refresh$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/automation/recommendations/job$#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/ai/suggestions/[0-9]+/(accept|reject)$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/bank-accounts(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/bank-accounts(/|$)#', 'accounting', AccessLevel::WRITE],

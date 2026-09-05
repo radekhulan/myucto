@@ -149,6 +149,10 @@ watch(() => route.params.id, (id, previous) => {
   statement.value = null
   load(true).then(highlightLinkedTx)
 })
+watch(() => route.query.tx, (id, previous) => {
+  if (id === previous || !statement.value) return
+  void highlightLinkedTx()
+})
 
 /**
  * `?tx=` z odkazu „Druhá noha" — doskroluje na protějšek a probleskne ho.
@@ -158,6 +162,11 @@ watch(() => route.params.id, (id, previous) => {
 async function highlightLinkedTx(): Promise<void> {
   const id = Number(route.query.tx)
   if (!Number.isInteger(id) || id <= 0) return
+  while (!paneDom.querySelector<HTMLElement>(`[data-tx-id="${id}"]`) && txPage.value < txPages.value) {
+    if (Number(route.query.tx) !== id) return
+    await load(false)
+    await nextTick()
+  }
   await nextTick()
   const row = paneDom.querySelector<HTMLElement>(`[data-tx-id="${id}"]`)
   if (!row) return

@@ -296,6 +296,8 @@
       "stock"
     ],
     "invoice-detail": [
+      "automation",
+      "bank",
       "cash",
       "cash_settlement",
       "documents",
@@ -367,13 +369,15 @@
     ],
     "purchase-invoice-detail": [
       "automation",
+      "bank",
       "cash",
       "cash_settlement",
       "documents",
       "lock",
       "payment_method",
       "purchase_invoice",
-      "stock"
+      "stock",
+      "vendor"
     ],
     "purchase-invoice-edit": [
       "automation",
@@ -729,7 +733,10 @@
     "automation-cockpit": [
       "automation",
       "bank",
-      "settings"
+      "imports",
+      "purchase_invoice",
+      "settings",
+      "vendor"
     ],
     "reports-dph": [
       "reports"
