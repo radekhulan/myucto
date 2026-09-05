@@ -60,6 +60,16 @@ final class ExpenseClassificationRuleAction
         ]);
     }
 
+    public function get(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $rule = $this->rules->find($supplierId, (int) $args['id']);
+        return $rule === null
+            ? Json::error($response, 'not_found', 'Pravidlo nenalezeno.', 404)
+            : Json::ok($response, ['rule' => $rule]);
+    }
+
     public function create(Request $request, Response $response): Response
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;

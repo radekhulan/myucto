@@ -14,7 +14,7 @@ const props = defineProps<{
   /** Editovaný záznam; null/undefined = zakládání nového. */
   rule?: BankPostingRule | null
   /** Prefill payload pro create (learned hint / z transakce). */
-  prefill?: BankPostingRulePayload
+  prefill?: Partial<BankPostingRulePayload>
   /** Základ částky pro helper „± %" (z transakce). */
   baseAmount?: number
 }>()
@@ -106,7 +106,7 @@ async function save() {
         {{ isEdit ? t('bank.posting.rule_edit_title') : t('bank.posting.rule_create_title') }}
       </h3>
 
-      <RuleForm ref="formRef" v-model="payload" :accounts="accounts"
+      <RuleForm ref="formRef" :model-value="payload" @update:model-value="Object.assign(payload, $event)" :accounts="accounts"
         :mode="isEdit ? 'edit' : 'create'" :base-amount="baseAmount" :show-dry-run="true" />
 
       <label v-if="dryRunCount > 0" class="flex items-center gap-2 mt-3 text-sm text-neutral-700 cursor-pointer">

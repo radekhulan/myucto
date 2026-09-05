@@ -11,12 +11,14 @@ withDefaults(defineProps<{
   job: ProgressJob | null
   percent: number | null
   cancelling: boolean
+  showCancel?: boolean
   countsKey?: string
   backgroundHintKey?: string
   runningKey?: string
   cancelKey?: string
   cancellingKey?: string
 }>(), {
+  showCancel: true,
   countsKey: 'imports.job_counts',
   backgroundHintKey: 'imports.job_background_hint',
   runningKey: 'imports.job_running',
@@ -36,7 +38,7 @@ const { t } = useI18n()
         {{ job.current_step || t(runningKey) }}
       </div>
       <button
-        v-if="job.status === 'queued' || job.status === 'running'"
+        v-if="showCancel && (job.status === 'queued' || job.status === 'running')"
         @click="$emit('cancel')"
         :disabled="cancelling"
         :class="btnOutline('danger')"

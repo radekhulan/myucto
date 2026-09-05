@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -6,8 +7,9 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import type { BankTransaction } from '@/api/bank'
 import type { AutomationProvenance } from '@/api/automation'
-import type { PostResult } from '@/api/bankPosting'
+import type { BankPostingRulePayload, PostResult } from '@/api/bankPosting'
 import PostingRowActions from './PostingRowActions.vue'
+import RuleFormModal from './RuleFormModal.vue'
 import PostingStatusBadge from './PostingStatusBadge.vue'
 import MatchSuggestionPanel from './MatchSuggestionPanel.vue'
 import WhyChip from '@/components/automation/WhyChip.vue'
@@ -50,6 +52,27 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const ruleTemplateOpen = ref(false)
+const rulePrefill = computed<BankPostingRulePayload>(() => ({
+  name: props.tx.counterparty_name || '',
+  is_active: true,
+  direction: props.tx.amount > 0 ? 'incoming' : 'outgoing',
+  counterparty_account: props.tx.counterparty_account,
+  counterparty_bank: props.tx.counterparty_bank,
+  counterparty_prefix: null,
+  variable_symbol: props.tx.variable_symbol,
+  message_contains: props.tx.description || null,
+  amount_min: null,
+  amount_max: null,
+  priority: 100,
+  operation_type: null,
+  auto_amount_cap: null,
+  applies_currency: currency(),
+  debit_account_code: props.tx.posting?.debit_account_code || (props.tx.amount > 0 ? '221' : ''),
+  credit_account_code: props.tx.posting?.credit_account_code || (props.tx.amount > 0 ? '' : '221'),
+  description: null,
+  mode: 'suggest',
+}))
 
 const {
   expandedSuggestions, expandedDocs, toggleSuggestion, toggleDocs, suggestionFor,
@@ -145,6 +168,11 @@ function matchActions(tx: BankTransaction): RowAction[] {
       key: 'documents', label: expandedDocs.value.has(tx.id) ? t('bank.documents_hide') : t('bank.documents_action'),
       icon: 'doc', variant: 'neutral',
       run: () => toggleDocs(tx.id),
+    },
+    {
+      key: 'create-posting-rule', label: t('bank.posting.create_rule_from_movement'), icon: 'doc', variant: 'neutral',
+      run: () => { ruleTemplateOpen.value = true },
+      show: props.isDoubleEntry && auth.canWrite('bank.rules') && tx.source !== 'email_notice' && st !== 'ignored',
     },
     {
       key: 'ignore', label: t('bank.ignore'), icon: 'x', variant: 'neutral',
@@ -361,4 +389,8 @@ function candidateReject() {
       <RowActionsMenu :actions="matchActions(tx)" :inline-count="1" />
     </div>
   </div>
+  <Teleport to="body">
+    <RuleFormModal v-if="ruleTemplateOpen" :prefill="rulePrefill" :base-amount="Math.abs(tx.amount)"
+      @saved="ruleTemplateOpen = false; emit('changed')" @close="ruleTemplateOpen = false" />
+  </Teleport>
 </template>

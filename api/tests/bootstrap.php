@@ -62,6 +62,8 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Service/Accounting/DocumentAutoPoster.php',
     '*/api/src/Service/Accounting/DocumentLockService.php',
     '*/api/src/Service/Accounting/PostingService.php',
+    '*/api/src/Service/Automation/AutomationRecommendationService.php',
+    '*/api/src/Service/Automation/AutomationRecommendationWorkerLauncher.php',
     '*/api/src/Service/Auth/ApiTokenService.php',
     '*/api/src/Service/Auth/BruteForceGuard.php',
     '*/api/src/Service/Auth/EmailOtpService.php',

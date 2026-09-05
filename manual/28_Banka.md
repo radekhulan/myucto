@@ -7,6 +7,13 @@ párování s doklady a v podvojném účetnictví připraví bezpečné zaúčt
 Návrhy zaúčtování, položky vyžadující zásah a historii automatických rozhodnutí
 najdete souhrnně v kapitole [Automat účtování](46_Automat.md).
 
+V rozbalovacím menu konkrétního pohybu je akce **Vytvořit účtovací pravidlo**.
+Předvyplní údaje protistrany a text pohybu; podmínky i účty můžete upravit.
+Používá plný editor bankovních pravidel. V polích MD a D hledáte účet podle
+čísla i názvu; bankovní strana nabízí účty 221 a nebankovní vynechává saldokonta.
+Uložení vytvoří pravidlo pro další podobné platby, samotný pohyb nezaúčtuje.
+Akci lze použít i u již zaúčtovaného pohybu.
+
 GPC (ABO) je standardní český formát pro elektronickou výměnu výpisů. Umí ho
 exportovat: **KB**, **Fio Bank**, **ČSOB**, **Raiffeisenbank**, **Česká
 spořitelna**, **mBank**, a další.
@@ -438,6 +445,12 @@ co má `suggest`, navrhne jako dosud. Firma bez nastavené automatiky má výcho
 přeskočí (`period_closed`) bez ohledu na přepínače.
 
 ### 28.7.2 Pravidla účtování opakovaných plateb
+
+Z rozbalovacího menu pohybu lze otevřít **Vytvořit účtovací pravidlo**.
+Otevře se stejný formulář jako na záložce **Pravidla účtování**, předvyplněný
+protistranou, zprávou, směrem, měnou a dostupnou kontací pohybu. Částka pohybu
+není výchozí účtovanou částkou; volitelný rozsah od/do zadáte sami nebo
+pomocí procentního rozpětí. Uložení pravidla samo pohyb nezaúčtuje.
 
 Platby bez faktury (odvody na OSSZ/ZP, bankovní poplatky, úroky, leasing…) se
 neúčtují samy od prvního výskytu — na záložce **Pravidla účtování** si pro ně

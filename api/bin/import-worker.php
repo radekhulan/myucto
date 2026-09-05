@@ -92,6 +92,8 @@ try {
         $container->get(FileImportJobService::class)->run($jobId);
     } elseif ($source === 'document_zip_import' || $source === 'document_zip_export' || $source === 'document_folder_import') {
         $container->get(DocumentJobService::class)->run($jobId);
+    } elseif ($source === 'automation_recommendations') {
+        $container->get(\MyInvoice\Service\Automation\AutomationRecommendationJobService::class)->run($jobId);
     } elseif ($source === 'accounting_setup_analysis') {
         $container->get(AccountingSetupAnalysisService::class)->run($jobId);
     } elseif ($source === 'accounting_history_reclassification') {

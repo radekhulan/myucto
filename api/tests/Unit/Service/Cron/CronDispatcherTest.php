@@ -71,6 +71,16 @@ final class CronDispatcherTest extends TestCase
         self::assertNotContains('cron-backup', $at0201['launched'], 'V 2:01 už zálohu spouštět nesmí.');
     }
 
+    public function testRecommendationsUseOnlyDailyRuleMinerSchedule(): void
+    {
+        $daily = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 04:00:00'));
+        self::assertContains('cron-ai-rule-miner', $daily['launched']);
+        self::assertNotContains('cron-automation-recommendations', $daily['due']);
+        $later = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 04:01:00'));
+        self::assertNotContains('cron-ai-rule-miner', $later['due']);
+        self::assertNotContains('cron-automation-recommendations', $later['due']);
+    }
+
     /**
      * Hodinová obnova licence patří JEN spravovanému provozu. Self-hosted instalace
      * má úlohu naplánovanou denně už dnes a admin si plán sám nepřenastaví — kdyby

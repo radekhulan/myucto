@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
@@ -20,6 +21,7 @@ const emit = defineEmits<{ 'counts-changed': [] }>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
 const toast = useToast()
 
 const COLUMNS: ColumnDef[] = [
@@ -43,6 +45,7 @@ const loading = ref(false)
 const busyId = ref<number | null>(null)
 const templatesOpen = ref(false)
 const historyRule = ref<BankPostingRule | null>(null)
+let loadSequence = 0
 
 const accountByCode = computed<Record<string, ChartAccount>>(() => {
   const m: Record<string, ChartAccount> = {}
@@ -54,9 +57,14 @@ function accountName(code: string): string {
 }
 
 async function load() {
+  const supplierId = supplierStore.currentSupplierId
+  const current = ++loadSequence
+  if (!supplierId) { rules.value = []; total.value = 0; loading.value = false; return }
   loading.value = true
   try {
-    const [r, accs] = await Promise.all([bankPostingApi.listRules({ page: page.value, per_page: perPage }), accountingApi.listAccounts()])
+    const [r, accs] = await Promise.all([bankPostingApi.listRules({ page: page.value, per_page: perPage }, supplierId), accountingApi.listAccounts({ supplierId })])
+    if (current !== loadSequence || supplierStore.currentSupplierId !== supplierId) return
+    if (r.items.some(rule => rule.supplier_id !== supplierId)) throw new Error('supplier_mismatch')
     if (r.items.length === 0 && r.total > 0 && page.value > 1) {
       page.value = Math.max(1, Math.ceil(r.total / r.per_page))
       return
@@ -64,12 +72,13 @@ async function load() {
     rules.value = r.items
     total.value = r.total
     accounts.value = accs
+  } catch (e) {
+    if (current === loadSequence) { rules.value = []; total.value = 0; toast.error(bankPostingErrorMessage(e, t)) }
   } finally {
-    loading.value = false
+    if (current === loadSequence) loading.value = false
   }
 }
-onMounted(load)
-watch(page, load)
+onUnmounted(() => { ++loadSequence })
 
 // Modal (create/edit)
 const modalOpen = ref(false)
@@ -160,12 +169,27 @@ function amountRange(r: BankPostingRule): string {
   const hi = formatMoney(r.amount_max, r.applies_currency)
   return `${lo} – ${hi}`
 }
+
+watch([() => supplierStore.currentSupplierId, page], ([supplierId], [previousSupplier]) => {
+  if (supplierId !== previousSupplier) {
+    ++loadSequence
+    rules.value = []
+    accounts.value = []
+    total.value = 0
+    modalOpen.value = false
+    editing.value = null
+    historyRule.value = null
+    templatesOpen.value = false
+    if (page.value !== 1) { page.value = 1; return }
+  }
+  void load()
+}, { immediate: true })
 </script>
 
 <template>
   <div>
     <div class="flex items-center justify-between gap-2 mb-3 flex-wrap">
-      <p class="text-sm text-neutral-500">{{ t('bank.posting.rules_subtitle') }}</p>
+      <div><p class="text-sm text-neutral-500">{{ t('bank.posting.rules_subtitle') }}</p><p class="mt-1 text-sm font-medium text-primary-700">{{ t('bank.posting.rules_company', { name: supplierStore.currentSupplier?.company_name || '' }) }}</p></div>
       <div class="flex items-center gap-2 flex-wrap">
         <ColumnPicker class="hidden md:block" :ctrl="tbl" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />

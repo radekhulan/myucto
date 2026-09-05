@@ -4,6 +4,14 @@ Faktury jsou srdce systému. Tato kapitola popisuje **seznam faktur** a **hromad
 akce**. Editaci jednotlivé faktury popisuje [15. Editor faktury](15_Faktura_editor.md),
 PDF a odeslání e-mailem [16. Faktura PDF](16_Faktura_PDF.md).
 
+V detailu faktury lze z rozbalovacího menu akcí zvolit **Vytvořit pravidlo
+účtování**. Otevře se původní formulář pravidla s předvyplněným názvem,
+směrem, měnou a variabilním symbolem. Obsahuje rozsah částky od/do,
+prioritu, strop automatiky, účty MD/Dal a test na historii.
+Pravidlo slouží pro bankovní pohyby; párování úhrad faktur nemění ani
+nevytváří další účetní zápis faktury. Pravidla podle dodavatele a textu položky se vytvářejí
+nákladovou šablonou v detailu [přijaté faktury](23_Prijate_faktury.md).
+
 ## 14.1 Seznam faktur
 
 V hlavním menu **Faktury**.
