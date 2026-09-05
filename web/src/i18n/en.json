@@ -16050,7 +16050,7 @@
       "title": "Run payroll",
       "label": "Run payroll",
       "hint": "Enables the standalone payroll module for this company in either accounting mode. It is disabled by default.",
-      "alpha_warning": "The payroll module is still a TESTING ALPHA and is by no means suitable for production use. Do not rely on its pay, contribution or filing calculations for social security, health insurance or the tax office — verify them against another source.",
+      "beta_warning": "The payroll module has been through testing, but we still consider it a beta. You can start using it in production, just please keep an eye on the pay, contribution and filing figures for social security, health insurers and the tax office and check them.","beta_report":"Please report any problems at","beta_report_thanks":"Thank you for them, we will fix them promptly.",
       "off_note": "Payroll disappears from the menu after saving. Payroll data is not deleted and remains available when enabled again.",
       "buy": "Activate payroll add-on"
     },
