@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Ai;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use PDO;
 use PDOException;
 
@@ -17,9 +18,14 @@ final class AiJobService
     public function enqueue(int $supplierId, string $jobType, string $entityType, int $entityId): bool
     {
         try {
-            $this->db->pdo()->prepare(
-                'INSERT INTO ai_jobs (supplier_id,job_type,entity_type,entity_id,available_at) VALUES (?,?,?,?,NOW())'
-            )->execute([$supplierId, $jobType, $entityType, $entityId]);
+            // Duplicita na uq_aij_open znamená „úloha už ve frontě je" — očekávaný
+            // výsledek, ne chyba. Bez tohohle rozsahu ji logovací PDO zapíše jako
+            // ERROR dřív, než se k ní dostane catch níž.
+            DbErrorLogger::expectingDuplicates(['uq_aij_open'], function () use ($supplierId, $jobType, $entityType, $entityId): void {
+                $this->db->pdo()->prepare(
+                    'INSERT INTO ai_jobs (supplier_id,job_type,entity_type,entity_id,available_at) VALUES (?,?,?,?,NOW())'
+                )->execute([$supplierId, $jobType, $entityType, $entityId]);
+            });
             return true;
         } catch (PDOException $e) {
             if (($e->errorInfo[0] ?? null) === '23000') {

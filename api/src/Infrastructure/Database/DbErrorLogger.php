@@ -52,15 +52,81 @@ final class DbErrorLogger
         '/\bciphertext\b/i',
     ];
 
+    /**
+     * Zásobník jmen indexů z {@see expectingDuplicates()}. Zásobník, ne jedna
+     * hodnota: zanořená volání (repository uvnitř služby, která si duplicitu taky
+     * hlídá) nesmí potlačení vypnout dřív, než skončí to vnější.
+     *
+     * @var list<list<string>>
+     */
+    private static array $expectedDuplicates = [];
+
+    /**
+     * Rozsah, ve kterém je kolize JMENOVANÉHO unikátního klíče očekávaný výsledek,
+     * ne chyba aplikace.
+     *
+     * PROČ. Vzor „vlož a při 1062 se spokoj s tím, co už tam je" (fronta AI úloh,
+     * bankovní návrhy), stejně jako „duplicitní doklad → 409 uživateli", je
+     * legitimní chování. Caller ho ošetří, jenže logovací PDO chybu zapíše dřív,
+     * než se k ní caller dostane — a v produkčním logu pak stojí ERROR nad
+     * situací, kterou nemá kdo řešit.
+     *
+     * PROČ SE JMÉNEM INDEXU. Potlačit každou duplicitu v rozsahu by ztišilo
+     * i kolizi na klíči, který nikdo neošetřuje — a ta se pak projeví jen jako
+     * 500 bez jediného záznamu. Downgraduje se proto výhradně 1062 na uvedených
+     * indexech; cokoli jiného (jiný index, cizí klíč 1452 pod týmž SQLSTATE
+     * 23000) zůstává ERROR.
+     *
+     * @template T
+     * @param list<string> $indexNames jména UNIQUE indexů, jejichž kolize je očekávaná
+     * @param callable():T $fn
+     * @return T
+     */
+    public static function expectingDuplicates(array $indexNames, callable $fn): mixed
+    {
+        self::$expectedDuplicates[] = $indexNames;
+        try {
+            return $fn();
+        } finally {
+            array_pop(self::$expectedDuplicates);
+        }
+    }
+
     /** @param array<array-key,mixed> $params */
     public static function log(LoggerInterface $logger, PDOException $e, string $sql, array $params): void
     {
-        $logger->error('DB error: ' . $e->getMessage(), [
+        $context = [
             'sqlstate' => $e->getCode(),
             'sql'      => self::normalize($sql),
             'params'   => self::redact($sql, $params),
             'caller'   => self::caller($e),
-        ]);
+        ];
+        if (self::isExpectedDuplicate($e)) {
+            $logger->debug('DB duplicate (očekávaná): ' . $e->getMessage(), $context);
+            return;
+        }
+        $logger->error('DB error: ' . $e->getMessage(), $context);
+    }
+
+    /**
+     * Jen 1062 (duplicate entry) na indexu, který si caller vyžádal. SQLSTATE 23000
+     * samo nestačí — nese i porušení cizího klíče, což očekávaný výsledek nikdy není.
+     */
+    private static function isExpectedDuplicate(PDOException $e): bool
+    {
+        if (self::$expectedDuplicates === [] || (int) ($e->errorInfo[1] ?? 0) !== 1062) {
+            return false;
+        }
+        $message = $e->getMessage();
+        foreach (self::$expectedDuplicates as $scope) {
+            foreach ($scope as $index) {
+                // MariaDB hlásí „... for key 'uq_xyz'", takže jméno indexu je ve zprávě.
+                if ($index !== '' && str_contains($message, $index)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static function normalize(string $sql): string

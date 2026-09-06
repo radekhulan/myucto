@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use PDO;
 use PDOException;
 
@@ -41,7 +42,10 @@ final class BankPostingSuggestionRepository
     {
         $pdo = $this->db->pdo();
         try {
-            $pdo->prepare(
+            // Kolize na uq_bps_pending znamená „návrh pro tuhle transakci už visí" —
+            // ošetřený a očekávaný výsledek. Bez tohohle rozsahu ji logovací PDO
+            // zapíše jako ERROR dřív, než se k ní dostane catch níž.
+            DbErrorLogger::expectingDuplicates(['uq_bps_pending'], fn (): bool => $pdo->prepare(
                 'INSERT INTO bank_posting_suggestions
                     (supplier_id, bank_transaction_id, rule_id, source, debit_account_code,
                      credit_account_code, amount, description, status, note, confidence, detector,
@@ -67,7 +71,7 @@ final class BankPostingSuggestionRepository
                 $data['ai_model'] ?? null,
                 $data['ai_provider'] ?? null,
                 $data['ai_prompt_version'] ?? null,
-            ]);
+            ]));
             return ['id' => (int) $pdo->lastInsertId(), 'created' => true];
         } catch (PDOException $e) {
             if (($e->errorInfo[0] ?? null) !== '23000') {

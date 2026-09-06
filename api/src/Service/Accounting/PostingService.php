@@ -130,7 +130,10 @@ final class PostingService
      *    To je podmnožina, ne náhrada: daň z nemovitostí ani silniční na ni nepatří.
      *    Bez téhle výjimky by přesměr nastal u KAŽDÉHO tenanta hned po naseedování.
      */
-    private const CONTEXT_DRIVEN_SYNTHETICS = ['211', '221', '343', '345'];
+    // Veřejná, protože totéž pravidlo potřebuje i náhled „Doplnit podle osnovy"
+    // ({@see PostingRuleChartAlignmentService}) — kdyby si seznam okopíroval, rozešel
+    // by se s enginem při první změně.
+    public const CONTEXT_DRIVEN_SYNTHETICS = ['211', '221', '343', '345'];
 
     public function __construct(
         private readonly Connection $db,

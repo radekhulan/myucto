@@ -2032,6 +2032,10 @@ final class Routes
             $g->delete('/cost-centers/{id:[0-9]+}',     [CostCenterAction::class, 'delete']);
             // Kontační pravidla
             $g->get   ('/posting-rules',                            [PostingRuleAction::class, 'list']);
+            // Srovnání kontací s analytickou osnovou. MUSÍ být nad {rule_key} — jinak by
+            // se `chart-alignment` chytlo jako název pravidla (vzor matchuje i pomlčku).
+            $g->get   ('/posting-rules/chart-alignment',            [PostingRuleAction::class, 'chartAlignment']);
+            $g->post  ('/posting-rules/chart-alignment',            [PostingRuleAction::class, 'applyChartAlignment']);
             $g->put   ('/posting-rules/{rule_key:[A-Za-z0-9._-]+}', [PostingRuleAction::class, 'put']);
             // Pravidla klasifikace druhu výdaje (§DM) — předvyplňují expense_kind na řádku
             // přijaté faktury. Návrh je READ-ONLY: nic neúčtuje, uživatel ho potvrdí v editoru.

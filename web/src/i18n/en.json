@@ -9847,7 +9847,28 @@
       "override": "Company",
       "global": "Global",
       "edit_title": "Edit posting rule",
-      "at_least_one": "Enter at least a debit or credit account."
+      "at_least_one": "Enter at least a debit or credit account.",
+      "alignment": {
+        "button": "Align with chart",
+        "title": "Align posting rules with the chart of accounts",
+        "subtitle": "Preview of posting rules against the company analytic chart. Nothing is written until you confirm.",
+        "status": "Status",
+        "status_ok": "Fine",
+        "status_auto": "Engine resolves",
+        "status_suggest": "Needs a decision",
+        "status_context": "Set by document",
+        "status_missing": "Account missing",
+        "only_todo": "Show only rows that need attention",
+        "nothing_todo": "Nothing to align — every rule points to a usable account.",
+        "keep": "Keep unchanged",
+        "by_engine": "engine redirects",
+        "missing_hint": "The account is not in the company chart — the rule cannot be posted.",
+        "context_hint": "The analytic account is chosen by the document (bank, cash, VAT).",
+        "redirect_off": "Redirect to a single analytic account is disabled for this company, so accounts with one analytic child are offered for a decision too.",
+        "selected": "Selected for change: {count}",
+        "apply": "Apply selected changes",
+        "applied": "Rules aligned: {count}"
+      }
     },
     "general_ledger": {
       "title": "General ledger",

@@ -9,6 +9,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Service\Accounting\PostingRuleChartAlignmentService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -17,8 +18,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Kontační pravidla (posting rules) — REST API (Epic F1).
  *
- *   GET /api/accounting/posting-rules              — efektivní mapa (globální + override)
- *   PUT /api/accounting/posting-rules/{rule_key}   — per-tenant override — účetní|admin
+ *   GET  /api/accounting/posting-rules                  — efektivní mapa (globální + override)
+ *   PUT  /api/accounting/posting-rules/{rule_key}       — per-tenant override — účetní|admin
+ *   GET  /api/accounting/posting-rules/chart-alignment  — náhled srovnání s osnovou (dry-run)
+ *   POST /api/accounting/posting-rules/chart-alignment  — zápis potvrzených voleb — účetní|admin
  *
  * Precedent vat_classifications: globální šablona (supplier_id NULL) + per-tenant
  * override (per-tenant vyhrává). Override drží jen MD/D účet (CODE); DPH a protiúčty
@@ -31,6 +34,7 @@ final class PostingRuleAction
 
     public function __construct(
         private readonly PostingRuleRepository $rules,
+        private readonly PostingRuleChartAlignmentService $alignment,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -85,6 +89,55 @@ final class PostingRuleAction
         ]);
 
         return Json::ok($response, $this->rules->resolve($supplierId, $ruleKey));
+    }
+
+    /**
+     * Náhled „Doplnit podle osnovy" — dry-run, nic nezapisuje. Zvlášť od `list()`,
+     * protože nese i kandidáty z osnovy a statistiku deníku; mapa kontací se čte
+     * na každé druhé obrazovce a tímhle by ztěžkla.
+     */
+    public function chartAlignment(Request $request, Response $response): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+
+        return Json::ok($response, $this->alignment->preview($supplierId));
+    }
+
+    public function applyChartAlignment(Request $request, Response $response): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+
+        $body = (array) ($request->getParsedBody() ?? []);
+        $items = $body['items'] ?? null;
+        if (!is_array($items) || $items === []) {
+            return Json::error($response, 'validation_failed', 'Chybí seznam pravidel k doplnění.', 422);
+        }
+
+        try {
+            $result = $this->alignment->apply($supplierId, array_map(
+                static fn (mixed $item): array => (array) $item,
+                array_values($items),
+            ));
+        } catch (\RuntimeException $e) {
+            // Zpráva nese strojový důvod (neznámý účet, cizí analytika) — klient ho
+            // ukáže u řádku, ať uživatel nehádá, které z desítek voleb se týká.
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        foreach ($result['applied'] as $ruleKey) {
+            $rule = $this->rules->resolve($supplierId, $ruleKey);
+            $this->log($request, 'accounting.posting_rule_overridden', (int) ($rule['id'] ?? 0), [
+                'rule_key'            => $ruleKey,
+                'debit_account_code'  => $rule['debit_account_code'] ?? null,
+                'credit_account_code' => $rule['credit_account_code'] ?? null,
+                'source'              => 'chart_alignment',
+            ]);
+        }
+
+        return Json::ok($response, $result);
     }
 
     private function nullableString(mixed $v): ?string

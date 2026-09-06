@@ -151,6 +151,27 @@ Při řešení chyby proto postupuj podle vrstvy:
 3. nestandardní vícerádkový zápis — použij nebo uprav šablonu,
 4. opakovaná platba bez dokladu — oprav bankovní pravidlo.
 
+### 80.5.1 Doplnit předkontace podle osnovy
+
+Systémová mapa předkontací mluví syntetickými účty, například `518` nebo `321`.
+Jakmile firma zavede analytiky, je potřeba kontace posunout na ně. Tlačítko
+**Doplnit podle osnovy** v Předkontacích otevře náhled, který každou stranu
+pravidla porovná s účtovou osnovou firmy a rozdělí ji do stavů:
+
+| Stav | Význam |
+| --- | --- |
+| V pořádku | účet je analytika, nebo syntetika bez daňových analytik |
+| Doplní engine | syntetika má jedinou daňovou analytiku, účtování na ni přejde samo |
+| K rozhodnutí | syntetika má dvě a více daňových analytik, vybrat musí účetní |
+| Určuje doklad | analytiku volí doklad sám (banka, pokladna, DPH) |
+| Chybí účet | účet z pravidla není v osnově firmy a pravidlo nelze zaúčtovat |
+
+Náhled nic nemění. Zapíší se jen zaškrtnuté řádky se stavem **K rozhodnutí**,
+a to jako firemní předkontace. Nabízené účty jsou pouze daňové analytiky
+původního účtu; nedaňová analytika (například `518.990`) mezi nimi není, protože
+ji vybírá daňový příznak dokladu, nikoli předkontace. U firmy, která už účtuje,
+je předvybraná ta analytika, kterou má nejčastěji v deníku.
+
 ## 80.6 Oprávnění, audit a chyby
 
 Čtení šablon vyžaduje `accounting.templates`; jejich změna zápisovou variantu

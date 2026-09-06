@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Http\GuardsDocumentLock;
@@ -270,7 +271,12 @@ final class UpdatePurchaseInvoiceAction
             // Optimistický zámek (L1): pro klienta UPDATE podmíněný booked_at IS NULL —
             // účetní mohla doklad zaúčtovat mezi guard-checkem a zápisem.
             $requireUnbooked = RequestAuthorization::isClientType($request);
-            if (!$this->repo->updateDraft($id, $body, $supplierId, $requireUnbooked)) {
+            // Viz CreatePurchaseInvoiceAction — kolize na těchhle dvou indexech je 409.
+            $updated = DbErrorLogger::expectingDuplicates(
+                ['uq_pi_vendor_invoice', 'uq_pi_supplier_varsymbol'],
+                fn (): bool => $this->repo->updateDraft($id, $body, $supplierId, $requireUnbooked),
+            );
+            if (!$updated) {
                 if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
                 return Json::error(
                     $response,

@@ -9847,7 +9847,28 @@
       "override": "Firemní",
       "global": "Globální",
       "edit_title": "Úprava předkontace",
-      "at_least_one": "Zadej alespoň MD nebo Dal účet."
+      "at_least_one": "Zadej alespoň MD nebo Dal účet.",
+      "alignment": {
+        "button": "Doplnit podle osnovy",
+        "title": "Doplnit předkontace podle osnovy",
+        "subtitle": "Náhled srovnání kontačních pravidel s analytickou osnovou firmy. Nic se nezapíše, dokud volby nepotvrdíš.",
+        "status": "Stav",
+        "status_ok": "V pořádku",
+        "status_auto": "Doplní engine",
+        "status_suggest": "K rozhodnutí",
+        "status_context": "Určuje doklad",
+        "status_missing": "Chybí účet",
+        "only_todo": "Zobrazit jen řádky k řešení",
+        "nothing_todo": "Není co doplnit — všechna pravidla ukazují na použitelný účet.",
+        "keep": "Ponechat beze změny",
+        "by_engine": "přesměruje engine",
+        "missing_hint": "Účet není v osnově firmy — pravidlo nelze zaúčtovat.",
+        "context_hint": "Analytiku vybírá doklad (banka, pokladna, DPH).",
+        "redirect_off": "Přesměr na jedinou analytiku je pro tuto firmu vypnutý, proto se nabízí k rozhodnutí i účty s jedinou analytikou.",
+        "selected": "Vybráno ke změně: {count}",
+        "apply": "Zapsat vybrané změny",
+        "applied": "Doplněno pravidel: {count}"
+      }
     },
     "general_ledger": {
       "title": "Hlavní kniha",

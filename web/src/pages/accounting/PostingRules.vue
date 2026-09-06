@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { useHotkey } from '@/composables/useHotkey'
 import CodebookImportDialog from '@/components/accounting/CodebookImportDialog.vue'
+import PostingRuleChartAlignmentDialog from '@/components/accounting/PostingRuleChartAlignmentDialog.vue'
 import { codebookTransferApi } from '@/api/codebookTransfer'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -25,6 +26,7 @@ const accounts = ref<ChartAccount[]>([])
 const loading = ref(false)
 const error = ref('')
 const importOpen = ref(false)
+const alignmentOpen = ref(false)
 
 const pickable = computed(() =>
   accounts.value.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)),
@@ -124,6 +126,10 @@ function accountName(code: string | null): string {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
           {{ t('codebookTransfer.import') }}
         </button>
+        <button v-if="auth.canWrite('accounting.templates')" @click="alignmentOpen = true" :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+          {{ t('accounting.posting_rules.alignment.button') }}
+        </button>
       </div>
     </div>
 
@@ -218,5 +224,6 @@ function accountName(code: string | null): string {
     </div>
 
     <CodebookImportDialog v-model="importOpen" kind="posting-rules" :title="t('codebookTransfer.title_posting_rules')" @imported="load" />
+    <PostingRuleChartAlignmentDialog v-model="alignmentOpen" @applied="load" />
   </div>
 </template>

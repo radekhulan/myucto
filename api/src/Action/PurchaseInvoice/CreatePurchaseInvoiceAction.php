@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Http\GuardsDocumentLock;
@@ -196,7 +197,13 @@ final class CreatePurchaseInvoiceAction
                     409,
                 );
             }
-            $id = $this->repo->createDraft($body, $userId, $supplierId);
+            // Obě kolize níž (interní číslo, doklad dodavatele) končí jako 409 —
+            // uživatelská situace, ne chyba serveru. V logu proto nemají svítit
+            // jako ERROR; jiný index ani cizí klíč se tím neztiší.
+            $id = DbErrorLogger::expectingDuplicates(
+                ['uq_pi_vendor_invoice', 'uq_pi_supplier_varsymbol'],
+                fn (): int => $this->repo->createDraft($body, $userId, $supplierId),
+            );
             // ZÁMĚRNĚ bezpodmínečně, na rozdíl od PUT ({@see \MyInvoice\Service\Invoice\DocumentItemsPayload}):
             // založení nemá co smazat a vzniká `draft`, kde je doklad bez řádků pracovní
             // stav — týž výklad, jaký import používá pro přijaté faktury. Ostatně u přijaté

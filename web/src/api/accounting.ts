@@ -642,6 +642,53 @@ export interface PostingRulePayload {
   credit_account_code?: string | null
 }
 
+/**
+ * Srovnání kontací s analytickou osnovou („Doplnit podle osnovy").
+ *  - `ok`      … kód je analytika, nebo syntetika bez potomků
+ *  - `auto`    … jediná analytika → engine přesměruje sám (nic se nezapisuje)
+ *  - `suggest` … dvě a víc analytik → volbu potvrzuje člověk
+ *  - `context` … analytiku volí kontext dokladu (211/221/343/345)
+ *  - `missing` … účet z pravidla není v osnově firmy
+ */
+export type ChartAlignmentStatus = 'ok' | 'auto' | 'suggest' | 'context' | 'missing'
+
+export interface ChartAlignmentCandidate {
+  account_code: string
+  name: string
+  is_deductible: boolean
+  is_dotted: boolean
+}
+
+export interface ChartAlignmentSide {
+  code: string | null
+  status: ChartAlignmentStatus
+  /** Účet, na který se doklad reálně zaúčtuje (u `auto` je jiný než `code`). */
+  effective_code: string | null
+  candidates: ChartAlignmentCandidate[]
+  suggested_code: string | null
+}
+
+export interface ChartAlignmentRule {
+  rule_key: string
+  description: string
+  is_override: boolean
+  status: ChartAlignmentStatus
+  debit: ChartAlignmentSide
+  credit: ChartAlignmentSide
+}
+
+export interface ChartAlignmentPreview {
+  redirect_enabled: boolean
+  counts: Record<ChartAlignmentStatus, number>
+  rules: ChartAlignmentRule[]
+}
+
+export interface ChartAlignmentApplyItem {
+  rule_key: string
+  debit_account_code?: string | null
+  credit_account_code?: string | null
+}
+
 // ── Mzdová rekapitulace (Fáze F) ───────────────────────────────────────────
 /** 521/331 zaměstnanec vs. 522/366 jednatel-společník. */
 export type PayrollTaxpayerType = 'employee' | 'managing_partner'
@@ -1694,6 +1741,12 @@ export const accountingApi = {
     api.get<PostingRuleMap>('/accounting/posting-rules').then(r => r.data),
   putPostingRule: (ruleKey: string, payload: PostingRulePayload) =>
     api.put<PostingRule>(`/accounting/posting-rules/${encodeURIComponent(ruleKey)}`, payload).then(r => r.data),
+  postingRuleChartAlignment: () =>
+    api.get<ChartAlignmentPreview>('/accounting/posting-rules/chart-alignment').then(r => r.data),
+  applyPostingRuleChartAlignment: (items: ChartAlignmentApplyItem[]) =>
+    api.post<{ applied: string[]; skipped: string[] }>(
+      '/accounting/posting-rules/chart-alignment', { items },
+    ).then(r => r.data),
 
   // Mzdová rekapitulace (Fáze F) — preview je POST kvůli vstupům v těle, ale nic nemění.
   previewPayroll: (payload: PayrollPayload) =>
