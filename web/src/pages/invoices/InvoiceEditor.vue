@@ -12,10 +12,15 @@ import { useI18n } from 'vue-i18n'
 const { t, locale } = useI18n()
 const toast = useToast()
 const pageId = useId()
+const editorForm = ref<HTMLFormElement | null>(null)
 const paneDom = usePaneDom()
 const { blockDemoMutation } = useDemoMode()
 
-useHotkey('ctrl+s', (e) => { e.preventDefault(); submit() })
+// requestSubmit() místo submit(): projde nativní validací formuláře (required,
+// DateInput.setCustomValidity) stejně jako klik na Uložit — přímé volání by
+// s rozepsaným neplatným datem tiše uložilo poslední platnou hodnotu. Bez
+// formuláře (ještě se načítá) zkratka nedělá nic — žádný obcházející fallback.
+useHotkey('ctrl+s', (e) => { e.preventDefault(); editorForm.value?.requestSubmit() })
 import { clientsApi, type Client, type ViesLookupResult } from '@/api/clients'
 import { projectsApi, type Project } from '@/api/projects'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
@@ -28,6 +33,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
@@ -1680,6 +1686,10 @@ function userChangedExchangeRate(): boolean {
 
 async function submit() {
   if (blockDemoMutation()) return
+  // Tlačítko Uložit je při odesílání disabled, ale requestSubmit() z Ctrl+S
+  // submit event vyvolá i tak — bez této pojistky by druhý stisk během
+  // rozběhnutého requestu založil doklad dvakrát (stejně jako v editoru přijatých).
+  if (submitting.value) return
   // Tiše vyhoď prázdné řádky (bez popisu i bez ceny) — uživatel přidal řádek a nezapsal ho.
   // Zároveň smaž z form.value.items, ať checkWorkReportSync vidí stejnou množinu jako payload.
   form.value.items = form.value.items.filter(it =>
@@ -1933,7 +1943,7 @@ async function deleteDraft() {
       </div>
     </div>
 
-    <form @submit.prevent="submit" class="space-y-4">
+    <form ref="editorForm" @submit.prevent="submit" class="space-y-4">
       <!-- Klient + zakázka + datumy -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
@@ -2160,18 +2170,18 @@ async function deleteDraft() {
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.issue_date') }} *</label>
-              <input v-model="form.issue_date" type="date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
+              <DateInput v-model="form.issue_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
             </div>
             <div v-if="form.invoice_type !== 'proforma'">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.tax_date') }} *</label>
-              <input v-model="form.tax_date" type="date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
+              <DateInput v-model="form.tax_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
             </div>
             <div v-else class="rounded-md bg-accent-50 border border-accent-100 p-3 text-sm text-accent-600">
               {{ t('invoice.proforma_no_tax_point') }}
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.due_date') }} *</label>
-              <input v-model="form.due_date" type="date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
+              <DateInput v-model="form.due_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
             </div>
             <div v-if="form.invoice_type !== 'credit_note' && remindersAvailable">
               <label class="flex items-center gap-2 text-sm text-neutral-700">
@@ -2671,7 +2681,7 @@ async function deleteDraft() {
               <tbody>
                 <tr v-for="(row, i) in form.payment_schedule" :key="i" class="border-t border-neutral-200">
                   <td class="py-2 pr-3">
-                    <input v-model="row.due_on" type="date" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface" />
+                    <DateInput v-model="row.due_on" class="w-36 h-9 px-2 border border-neutral-300 rounded-md bg-surface" />
                   </td>
                   <td class="py-2 pr-3">
                     <input v-model.number="row.base_amount" type="number" step="0.01"
@@ -2774,7 +2784,7 @@ async function deleteDraft() {
                   <input v-model="it.description" type="text" data-row-input="inv-wr" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm" />
                 </td>
                 <td class="px-2 py-1.5">
-                  <input v-model="it.work_date" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm font-mono" />
+                  <DateInput v-model="it.work_date" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm font-mono" />
                 </td>
                 <td class="px-2 py-1.5">
                   <input v-model.number="it.hours" type="number" step="0.25" min="0" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
@@ -2841,7 +2851,7 @@ async function deleteDraft() {
               <div class="grid grid-cols-2 gap-2">
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.wr_date') }}</label>
-                  <input v-model="it.work_date" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm font-mono bg-surface" />
+                  <DateInput v-model="it.work_date" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm font-mono bg-surface" />
                 </div>
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.wr_hours') }}</label>

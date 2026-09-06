@@ -13267,7 +13267,15 @@
       "October",
       "November",
       "December"
-    ]
+    ],
+    "date_input": {
+      "placeholder": "mm/dd/yyyy",
+      "invalid": "Enter a valid date as mm/dd/yyyy.",
+      "open_calendar": "Open calendar",
+      "out_of_range_between": "The date must be between {min} and {max}.",
+      "out_of_range_min": "The date must not be before {min}.",
+      "out_of_range_max": "The date must not be after {max}."
+    }
   },
   "codebookTransfer": {
     "export": "Export XLSX",

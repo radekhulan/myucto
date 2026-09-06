@@ -13267,7 +13267,15 @@
       "říjen",
       "listopad",
       "prosinec"
-    ]
+    ],
+    "date_input": {
+      "placeholder": "d. m. rrrr",
+      "invalid": "Zadejte platné datum ve tvaru d. m. rrrr.",
+      "open_calendar": "Otevřít kalendář",
+      "out_of_range_between": "Datum musí být mezi {min} a {max}.",
+      "out_of_range_min": "Datum nesmí být před {min}.",
+      "out_of_range_max": "Datum nesmí být po {max}."
+    }
   },
   "codebookTransfer": {
     "export": "Export XLSX",
