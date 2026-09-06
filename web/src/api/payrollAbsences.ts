@@ -107,6 +107,17 @@ export interface AverageEarningSuggestion {
   minimum_worked_days: number
   ready: boolean
   blockers: string[]
+  /**
+   * Ze kterého zdroje průměr vznikne: `actual` = skutečný průměr z uzavřených
+   * běhů, `probable` = pravděpodobný výdělek zadaný v podmínkách vztahu
+   * (§ 355 ZP). `null`, dokud je návrh blokovaný.
+   */
+  source_kind: 'actual' | 'probable' | null
+  /** Proč skutečný průměr nevyšel; u `source_kind: 'actual'` prázdné. */
+  actual_blockers: string[]
+  probable_hourly_minor: number | null
+  probable_rationale: string | null
+  probable_term_id: number | null
   gross_earnings_minor: number | null
   longer_period_allocated_minor: null
   worked_minutes: number | null

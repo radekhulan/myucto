@@ -67,8 +67,26 @@ use PDO;
  *
  *  * **Pravděpodobný výdělek (§ 355 ZP)** — když v rozhodném období nebyl
  *    odpracován zákonný minimální počet dnů (nováček, dlouhá nemoc), stanoví
- *    se průměr jinou úvahou, kterou z evidence odvodit nejde. Služba v takovém
- *    případě nenavrhne nic a vrátí blokátor `probable_earning_required`.
+ *    se průměr jinou úvahou, kterou z evidence odvodit nejde: „Jestliže
+ *    zaměstnanec v rozhodném období neodpracoval alespoň 21 dnů, použije se
+ *    pravděpodobný výdělek" (§ 355 odst. 1 zákona č. 262/2006 Sb.), a ten se
+ *    podle odst. 2 stanoví z hrubé mzdy, které by zaměstnanec zřejmě dosáhl,
+ *    s přihlédnutím k obvyklé výši složek mzdy nebo k odměně srovnatelných
+ *    zaměstnanců. Metodika MPSV, příručka pro personální agendu, kap. XXI.8:
+ *    https://ppropo.mpsv.cz/xxi8prumernyvydelek.
+ *
+ *    Vymyslet takové číslo aplikace nesmí, ale OPSAT ho umí: účetní ho zadává
+ *    do podmínek pracovního vztahu (`payroll_employment_terms.probable_hourly_earning_minor`
+ *    plus povinné odůvodnění), kde se zmrazuje do revize podmínek stejně jako
+ *    sjednaná mzda. Když je zadané, návrh z něj vznikne se `source_kind` =
+ *    `probable`; když zadané není, vrátí se blokátor
+ *    `probable_earning_not_recorded`, který účetní pošle na kartu vztahu.
+ *
+ *    Substituce platí JEN pro důvody, na které § 355 míří — chybějící běh,
+ *    málo odpracovaných dnů, nulová odpracovaná doba
+ *    ({@see PROBABLE_ELIGIBLE_BLOCKERS}). Vadná evidence (dva běhy za měsíc,
+ *    neschválená docházka, rozejité hodiny) se pravděpodobným výdělkem
+ *    nepřebíjí — tam se má opravit evidence, ne stanovit náhradní číslo.
  *
  * ── Proč jsou tři metody statické ───────────────────────────────────────────
  *
@@ -95,6 +113,23 @@ final class AverageEarningDerivationService
 
     /** Verze odvození pracovního souhrnu, ze které umíme číst rozpad směn. */
     public const SUPPORTED_WORK_SUMMARY_VERSION = 'jmhz-work-month.v2';
+
+    /**
+     * Důvody, kvůli kterým se místo skutečného průměru smí použít pravděpodobný
+     * výdělek podle § 355 ZP.
+     *
+     * Jsou to právě ty situace, kdy zaměstnanec v rozhodném období neodpracoval
+     * dost — nový vztah bez běhu, málo odpracovaných dnů, žádná odpracovaná
+     * doba. Zbývající blokátory (`multiple_runs_for_month`,
+     * `run_not_approved`, `time_month_not_approved`, `work_summary_*`) znamenají
+     * VADNOU evidenci: tam § 355 nedopadá a náhradní číslo by jen zakrylo, že
+     * se má opravit podklad.
+     */
+    public const PROBABLE_ELIGIBLE_BLOCKERS = [
+        'run_missing',
+        'probable_earning_required',
+        'worked_time_missing',
+    ];
 
     public function __construct(
         private readonly Connection $db,
@@ -155,7 +190,63 @@ final class AverageEarningDerivationService
             AbsenceRuleset::forDate($this->rulesets, $applicationStart->format('Y-m-d'))
                 ->averageEarningMinimumWorkedDays(),
             $this->existingSnapshot($supplierId, $employmentId, $year, $quarter) !== null,
+            self::probableFromTerms(
+                $this->terms($supplierId, $employmentId),
+                $applicationStart->format('Y-m-d'),
+            ),
         );
+    }
+
+    /**
+     * Pravděpodobný výdělek zmrazený v revizi podmínek platné pro použité období.
+     *
+     * Bere poslední revizi účinnou k prvnímu dni čtvrtletí, ve kterém se průměr
+     * používá — to je tatáž revize, ze které v tom období platí sjednaná mzda.
+     * Když k tomu dni ještě žádná účinná není (vztah začíná uprostřed
+     * čtvrtletí, což je typický důvod, proč se pravděpodobný výdělek vůbec
+     * stanovuje), použije se NEJSTARŠÍ revize, tedy podmínky, se kterými vztah
+     * vznikl. Pozdější revizí se zpětně nic nepřepisuje.
+     *
+     * @param list<array<string,mixed>> $terms revize seřazené libovolně
+     * @return array{hourly_minor:int,rationale:string,term_id:?int,effective_from:?string}|null
+     */
+    public static function probableFromTerms(array $terms, string $applicationStart): ?array
+    {
+        $rows = array_values(array_filter(
+            $terms,
+            static fn (array $row): bool => is_string($row['effective_from'] ?? null),
+        ));
+        usort(
+            $rows,
+            static fn (array $left, array $right): int =>
+                [$left['effective_from'], self::nullableInt($left['id'] ?? null) ?? 0]
+                <=> [$right['effective_from'], self::nullableInt($right['id'] ?? null) ?? 0],
+        );
+        if ($rows === []) {
+            return null;
+        }
+
+        $chosen = $rows[0];
+        foreach ($rows as $row) {
+            if ((string) $row['effective_from'] <= $applicationStart) {
+                $chosen = $row;
+            }
+        }
+
+        $hourly = self::nullableInt($chosen['probable_hourly_earning_minor'] ?? null);
+        $rationale = is_string($chosen['probable_earning_rationale'] ?? null)
+            ? trim($chosen['probable_earning_rationale'])
+            : '';
+        if ($hourly === null || $hourly <= 0 || $rationale === '') {
+            return null;
+        }
+
+        return [
+            'hourly_minor' => $hourly,
+            'rationale' => $rationale,
+            'term_id' => self::nullableInt($chosen['id'] ?? null),
+            'effective_from' => (string) $chosen['effective_from'],
+        ];
     }
 
     /**
@@ -165,14 +256,24 @@ final class AverageEarningDerivationService
      * hotové číslo a nikdo na něm nepozná, že měsíc chybí. Jakmile má aspoň
      * jeden měsíc blokátor, jsou všechna tři čísla `null`.
      *
+     * Když skutečný průměr nevznikne z důvodu, na který dopadá § 355 ZP, a u
+     * pracovního vztahu je zmrazený pravděpodobný výdělek, vrátí se návrh
+     * `source_kind` = `probable`. Tři čísla skutečného průměru zůstávají
+     * `null`, protože se nepoužila — a `actual_blockers` říká proč. Bez
+     * zadaného pravděpodobného výdělku je návrh blokovaný kódem
+     * `probable_earning_not_recorded`, ne mlčením.
+     *
      * @param list<array<string,mixed>> $months výstupy {@see monthFromRow()}
      *        doplněné o `period_start`
+     * @param array{hourly_minor:int,rationale:string,term_id:?int,effective_from:?string}|null $probable
+     *        výstup {@see probableFromTerms()}
      * @return array<string,mixed>
      */
     public static function combine(
         array $months,
         int $minimumWorkedDays,
         bool $hasExistingSnapshot,
+        ?array $probable = null,
     ): array {
         /** @var array<string,bool> $blockers */
         $blockers = [];
@@ -214,21 +315,50 @@ final class AverageEarningDerivationService
                 $blockers['worked_time_missing'] = true;
             }
         }
+
+        // § 355 ZP — skutečný průměr nevyšel, ale ne kvůli vadné evidenci.
+        // Teprve tady se sáhne po pravděpodobném výdělku; když ho nikdo
+        // nezadal, blokátor pojmenuje PRÁVĚ TOHLE, ne jen „nejde to".
+        $actualBlockers = array_keys($blockers);
+        $sourceKind = $blockers === [] ? 'actual' : null;
+        if ($blockers !== []
+            && array_diff($actualBlockers, self::PROBABLE_ELIGIBLE_BLOCKERS) === []
+        ) {
+            if ($probable !== null) {
+                $sourceKind = 'probable';
+                $blockers = [];
+            } else {
+                $blockers = ['probable_earning_not_recorded' => true];
+            }
+        }
+
         if ($hasExistingSnapshot) {
             $blockers['average_already_exists'] = true;
         }
 
         $ready = $blockers === [];
+        $actual = $ready && $sourceKind === 'actual';
 
         return [
             'minimum_worked_days' => $minimumWorkedDays,
             'ready' => $ready,
             'blockers' => array_keys($blockers),
-            'gross_earnings_minor' => $ready ? $grossMinor : null,
+            'source_kind' => $ready ? $sourceKind : null,
+            'actual_blockers' => $actualBlockers,
+            'probable_hourly_minor' => $sourceKind === 'probable' && $probable !== null
+                ? $probable['hourly_minor']
+                : null,
+            'probable_rationale' => $sourceKind === 'probable' && $probable !== null
+                ? $probable['rationale']
+                : null,
+            'probable_term_id' => $sourceKind === 'probable' && $probable !== null
+                ? $probable['term_id']
+                : null,
+            'gross_earnings_minor' => $actual ? $grossMinor : null,
             // § 358 ZP se z evidence odvodit nedá — viz docblock třídy.
             'longer_period_allocated_minor' => null,
-            'worked_minutes' => $ready ? $workedMinutes : null,
-            'worked_days' => $ready ? $workedDays : null,
+            'worked_minutes' => $actual ? $workedMinutes : null,
+            'worked_days' => $actual ? $workedDays : null,
             'months' => array_map(
                 static fn (array $month): array => [
                     'period_start' => $month['period_start'] ?? null,
@@ -243,7 +373,12 @@ final class AverageEarningDerivationService
                 ],
                 $months,
             ),
-            'input_version' => hash('sha256', CanonicalJson::encode($sources)),
+            // Do otisku patří i pravděpodobný výdělek: změní-li se v podmínkách
+            // vztahu, je to jiný vstup, i když se měsíce nezměnily.
+            'input_version' => hash('sha256', CanonicalJson::encode([
+                'months' => $sources,
+                'probable' => $probable,
+            ])),
         ];
     }
 
@@ -513,6 +648,31 @@ final class AverageEarningDerivationService
         }
 
         return array_values($latestByRun)[0];
+    }
+
+    /**
+     * Revize podmínek vztahu s pravděpodobným výdělkem.
+     *
+     * Čte se celá řada revizí (jsou jich jednotky) a vybírá se v čisté statické
+     * {@see probableFromTerms()}, aby šel výběr ověřit testem bez databáze —
+     * ze stejného důvodu jako u ostatních statických převodů této třídy.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function terms(int $supplierId, int $employmentId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, effective_from,
+                    probable_hourly_earning_minor, probable_earning_rationale
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?',
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+
+        /** @var list<array<string,mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return $rows;
     }
 
     private static function nullableInt(mixed $value): ?int

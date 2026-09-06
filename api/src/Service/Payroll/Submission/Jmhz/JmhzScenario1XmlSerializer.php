@@ -1744,12 +1744,22 @@ final class JmhzScenario1XmlSerializer
 
         $average = $this->object($employment['average_hourly'] ?? null);
         $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vydelek');
+        // 10345 je v XSD povinný bez `minOccurs=0`, takže tady hlášení skončí
+        // i u dohody v prvním měsíci, kde skutečný průměr neexistuje. Generická
+        // věta „atribut není doložený" účetní neřekne, kam jít — proto vlastní
+        // kód s návodem ze SSOT {@see JmhzBlockerExplainer::guidance()}.
+        if (!is_int($average['minor_units'] ?? null)) {
+            $this->invalid(
+                'jmhz_average_hourly_earning_probable_missing',
+                JmhzBlockerExplainer::guidance('jmhz_average_hourly_earning_probable_missing'),
+            );
+        }
         $this->text(
             $dom,
             $wrapper,
             JmhzSchemaCatalog::NS_FORM,
             'form:vydelekPrumernyHod',
-            $this->decimal($average['minor_units'] ?? null, 2, '10345'),
+            $this->decimal($average['minor_units'], 2, '10345'),
         );
         $node->appendChild($wrapper);
 

@@ -273,7 +273,11 @@ final class AverageEarningDerivationServiceTest extends TestCase
         );
 
         self::assertFalse($combined['ready']);
-        self::assertSame(['run_missing'], $combined['blockers']);
+        // Chybějící běh je důvod, na který § 355 ZP dopadá, takže se nabídne
+        // pravděpodobný výdělek; ten ale u vztahu zadaný není.
+        self::assertSame(['probable_earning_not_recorded'], $combined['blockers']);
+        self::assertSame(['run_missing'], $combined['actual_blockers']);
+        self::assertNull($combined['source_kind']);
         // Dva ze tří měsíců by dávaly číslo, které vypadá hotově — a není.
         self::assertNull($combined['gross_earnings_minor']);
         self::assertNull($combined['worked_minutes']);
@@ -289,7 +293,8 @@ final class AverageEarningDerivationServiceTest extends TestCase
         );
 
         self::assertFalse($combined['ready']);
-        self::assertSame(['probable_earning_required'], $combined['blockers']);
+        self::assertSame(['probable_earning_not_recorded'], $combined['blockers']);
+        self::assertSame(['probable_earning_required'], $combined['actual_blockers']);
         self::assertNull($combined['worked_days']);
     }
 
@@ -302,7 +307,8 @@ final class AverageEarningDerivationServiceTest extends TestCase
         );
 
         self::assertFalse($combined['ready']);
-        self::assertSame(['worked_time_missing'], $combined['blockers']);
+        self::assertSame(['probable_earning_not_recorded'], $combined['blockers']);
+        self::assertSame(['worked_time_missing'], $combined['actual_blockers']);
     }
 
     public function testExistingSnapshotIsNotOverwritten(): void
@@ -333,6 +339,160 @@ final class AverageEarningDerivationServiceTest extends TestCase
         $second = Derivation::combine([$changed], self::MINIMUM_WORKED_DAYS, false);
 
         self::assertNotSame($first['input_version'], $second['input_version']);
+    }
+
+    /**
+     * § 355 ZP — nováček bez uzavřeného běhu se pokryje pravděpodobným
+     * výdělkem zadaným v podmínkách vztahu, a v datech je vidět, že se použil
+     * ON, ne skutečný průměr.
+     */
+    public function testProbableEarningReplacesTheActualAverageWhenLawAllowsIt(): void
+    {
+        $combined = Derivation::combine(
+            [
+                ['period_start' => '2026-01-01', 'blockers' => ['run_missing']],
+                ['period_start' => '2026-02-01', 'blockers' => ['run_missing']],
+                ['period_start' => '2026-03-01', 'blockers' => ['run_missing']],
+            ],
+            self::MINIMUM_WORKED_DAYS,
+            false,
+            self::probable(),
+        );
+
+        self::assertTrue($combined['ready']);
+        self::assertSame([], $combined['blockers']);
+        self::assertSame('probable', $combined['source_kind']);
+        self::assertSame(['run_missing'], $combined['actual_blockers']);
+        self::assertSame(28_000, $combined['probable_hourly_minor']);
+        self::assertSame('Sjednaná odměna 280 Kč/hod za dohodnutý úkol.', $combined['probable_rationale']);
+        self::assertSame(41, $combined['probable_term_id']);
+        // Tři čísla skutečného průměru se nepoužila, takže se nesmí tvářit,
+        // že existují.
+        self::assertNull($combined['gross_earnings_minor']);
+        self::assertNull($combined['worked_minutes']);
+        self::assertNull($combined['worked_days']);
+    }
+
+    public function testActualAverageIsLabelledAsSuchAndProbableIsIgnored(): void
+    {
+        $combined = Derivation::combine(
+            [$this->readyMonth('2026-03-01', 6_000_000, 12_600, 21)],
+            self::MINIMUM_WORKED_DAYS,
+            false,
+            self::probable(),
+        );
+
+        self::assertTrue($combined['ready']);
+        self::assertSame('actual', $combined['source_kind']);
+        self::assertSame([], $combined['actual_blockers']);
+        self::assertNull($combined['probable_hourly_minor']);
+        self::assertSame(6_000_000, $combined['gross_earnings_minor']);
+    }
+
+    /**
+     * Vadná evidence se pravděpodobným výdělkem nepřebíjí: § 355 ZP míří na
+     * neodpracované dny, ne na dva mzdové běhy za jeden měsíc.
+     */
+    public function testBrokenEvidenceIsNotPapEredOverByProbableEarning(): void
+    {
+        $combined = Derivation::combine(
+            [['period_start' => '2026-03-01', 'blockers' => ['multiple_runs_for_month']]],
+            self::MINIMUM_WORKED_DAYS,
+            false,
+            self::probable(),
+        );
+
+        self::assertFalse($combined['ready']);
+        self::assertSame(['multiple_runs_for_month'], $combined['blockers']);
+        self::assertNull($combined['source_kind']);
+    }
+
+    /**
+     * Změna pravděpodobného výdělku je jiný vstup, i když se měsíce nezměnily.
+     */
+    public function testInputVersionTracksTheProbableEarning(): void
+    {
+        $months = [['period_start' => '2026-03-01', 'blockers' => ['run_missing']]];
+        $first = Derivation::combine($months, self::MINIMUM_WORKED_DAYS, false, self::probable());
+        $second = Derivation::combine(
+            $months,
+            self::MINIMUM_WORKED_DAYS,
+            false,
+            ['hourly_minor' => 30_000] + self::probable(),
+        );
+
+        self::assertNotSame($first['input_version'], $second['input_version']);
+    }
+
+    /**
+     * Výběr revize podmínek: platí ta účinná k prvnímu dni použitého čtvrtletí.
+     */
+    public function testProbableEarningComesFromTheTermEffectiveForThePeriod(): void
+    {
+        $terms = [
+            [
+                'id' => 2,
+                'effective_from' => '2026-04-01',
+                'probable_hourly_earning_minor' => 35_000,
+                'probable_earning_rationale' => 'Nová sazba',
+            ],
+            [
+                'id' => 1,
+                'effective_from' => '2026-01-01',
+                'probable_hourly_earning_minor' => 28_000,
+                'probable_earning_rationale' => 'Původní sazba',
+            ],
+        ];
+
+        self::assertSame(28_000, Derivation::probableFromTerms($terms, '2026-01-01')['hourly_minor']);
+        self::assertSame(35_000, Derivation::probableFromTerms($terms, '2026-07-01')['hourly_minor']);
+    }
+
+    /**
+     * Vztah, který vznikl uprostřed čtvrtletí, nemá k jeho prvnímu dni účinnou
+     * revizi — a přesně on pravděpodobný výdělek potřebuje. Bere se ta,
+     * se kterou vztah vznikl.
+     */
+    public function testProbableEarningFallsBackToTheOldestTermForANewRelationship(): void
+    {
+        $probable = Derivation::probableFromTerms([
+            [
+                'id' => 9,
+                'effective_from' => '2026-02-15',
+                'probable_hourly_earning_minor' => 28_000,
+                'probable_earning_rationale' => 'Sjednaná odměna',
+            ],
+        ], '2026-01-01');
+
+        self::assertSame(28_000, $probable['hourly_minor']);
+        self::assertSame('2026-02-15', $probable['effective_from']);
+    }
+
+    /**
+     * Částka bez odůvodnění se nepoužije — § 355 odst. 2 ZP po zaměstnavateli
+     * chce, z čeho ji stanovil, a stejnou dvojici hlídá i databázová podmínka.
+     */
+    public function testProbableEarningWithoutRationaleIsNotUsed(): void
+    {
+        self::assertNull(Derivation::probableFromTerms([
+            [
+                'id' => 9,
+                'effective_from' => '2026-01-01',
+                'probable_hourly_earning_minor' => 28_000,
+                'probable_earning_rationale' => '   ',
+            ],
+        ], '2026-04-01'));
+    }
+
+    /** @return array{hourly_minor:int,rationale:string,term_id:?int,effective_from:?string} */
+    private static function probable(): array
+    {
+        return [
+            'hourly_minor' => 28_000,
+            'rationale' => 'Sjednaná odměna 280 Kč/hod za dohodnutý úkol.',
+            'term_id' => 41,
+            'effective_from' => '2026-01-01',
+        ];
     }
 
     /**

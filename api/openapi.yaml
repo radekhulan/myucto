@@ -17873,6 +17873,20 @@ components:
           minimum: 0
           description: Sjednaná měsíční hrubá mzda v haléřích platná pro tuto verzi.
         weekly_hours: { type: [string, "null"] }
+        probable_hourly_earning_minor:
+          type: [integer, "null"]
+          minimum: 1
+          description: >-
+            Pravděpodobný hodinový výdělek v haléřích (§ 355 zákoníku práce).
+            Použije se místo skutečného průměrného výdělku, když zaměstnanec
+            v rozhodném období neodpracoval zákonné minimum dnů. Zadává ho
+            zaměstnavatel; vyplněná částka vyžaduje i odůvodnění.
+        probable_earning_rationale:
+          type: [string, "null"]
+          maxLength: 1000
+          description: >-
+            Z čeho byl pravděpodobný výdělek stanoven (§ 355 odst. 2 zákoníku
+            práce). Povinné, jakmile je vyplněná částka.
         workload_basis_points: { type: integer, minimum: 1, maximum: 10000 }
         work_place: { type: [string, "null"] }
         social_insurance_participation: { type: string }

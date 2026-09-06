@@ -851,6 +851,11 @@ final class PayrollRegistrationA1MasterDataWriter
         $body['leave_entitlement_weeks_override'] = $override === null
             ? null
             : (int) $override;
+        // Pravděpodobný výdělek (§ 355 ZP) se opisuje beze změny — oprava
+        // registračního údaje nesmí zahodit číslo, ze kterého se plní JMHZ 10345.
+        $probable = $current['probable_hourly_earning_minor'] ?? null;
+        $body['probable_hourly_earning_minor'] = $probable === null ? null : (int) $probable;
+        $body['probable_earning_rationale'] = $current['probable_earning_rationale'] ?? null;
         $body['change_reason'] = 'Oprava údaje z formuláře registrace REGZEC A1.';
 
         return $body;

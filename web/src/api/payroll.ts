@@ -291,6 +291,13 @@ export interface PayrollEmploymentTerms {
   monthly_gross_minor?: number | null
   weekly_hours: string | null
   leave_entitlement_weeks_override?: number | null
+  /**
+   * Pravděpodobný hodinový výdělek v haléřích (§ 355 ZP). Vyplňuje se jen
+   * tam, kde skutečný průměr vzniknout nemůže — u dohody bez odpracovaných
+   * dnů v rozhodném období. U běžného vztahu zůstává prázdný.
+   */
+  probable_hourly_earning_minor?: number | null
+  probable_earning_rationale?: string | null
   workload_basis_points: number
   work_place: string | null
   regular_workplace: string | null

@@ -1200,6 +1200,8 @@ final class PayrollEmploymentRepository
                     terms.actual_start_on, terms.fixed_term_end_on,
                     terms.monthly_gross_minor,
                     terms.weekly_hours, terms.leave_entitlement_weeks_override,
+                    terms.probable_hourly_earning_minor,
+                    terms.probable_earning_rationale,
                     terms.workload_basis_points,
                     terms.work_place, terms.regular_workplace,
                     terms.jmhz_workplace_municipality_code,
@@ -1389,6 +1391,7 @@ final class PayrollEmploymentRepository
                 (supplier_id, employment_id, office_id, effective_from,
                  contract_signed_on, planned_start_on, actual_start_on,
                  fixed_term_end_on, monthly_gross_minor, weekly_hours, leave_entitlement_weeks_override,
+                 probable_hourly_earning_minor, probable_earning_rationale,
                  workload_basis_points,
                  work_place, regular_workplace, cz_isco_code, activity_code,
                  jmhz_relationship_detail_code,
@@ -1412,7 +1415,7 @@ final class PayrollEmploymentRepository
                  social_part_time_discount_notified_on,
                  tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -1425,6 +1428,8 @@ final class PayrollEmploymentRepository
             $data['monthly_gross_minor'],
             $data['weekly_hours'],
             $data['leave_entitlement_weeks_override'],
+            $data['probable_hourly_earning_minor'],
+            $data['probable_earning_rationale'],
             $data['workload_basis_points'],
             $data['work_place'],
             $data['regular_workplace'],
@@ -1476,7 +1481,9 @@ final class PayrollEmploymentRepository
                  office_id = ?,
                  contract_signed_on = ?, planned_start_on = ?, actual_start_on = ?,
                  fixed_term_end_on = ?, monthly_gross_minor = ?, weekly_hours = ?,
-                 leave_entitlement_weeks_override = ?, workload_basis_points = ?,
+                 leave_entitlement_weeks_override = ?,
+                 probable_hourly_earning_minor = ?, probable_earning_rationale = ?,
+                 workload_basis_points = ?,
                  work_place = ?, regular_workplace = ?, cz_isco_code = ?,
                  activity_code = ?, jmhz_relationship_detail_code = ?,
                  jmhz_workplace_municipality_code = ?, jmhz_workplace_country_code = ?,
@@ -1508,6 +1515,8 @@ final class PayrollEmploymentRepository
             $data['monthly_gross_minor'],
             $data['weekly_hours'],
             $data['leave_entitlement_weeks_override'],
+            $data['probable_hourly_earning_minor'],
+            $data['probable_earning_rationale'],
             $data['workload_basis_points'],
             $data['work_place'],
             $data['regular_workplace'],
@@ -2096,6 +2105,7 @@ final class PayrollEmploymentRepository
             'employee_id',
             'office_id',
             'monthly_gross_minor',
+            'probable_hourly_earning_minor',
             'workload_basis_points',
             'row_version',
         ];

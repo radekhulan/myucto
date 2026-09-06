@@ -14,6 +14,18 @@ final class JmhzBlockerExplainer
         'component_jmhz_treatment_invalid' => 'Mzdové složky mají neplatné nastavení pro JMHZ.',
         'jmhz_average_hourly_earning_missing' => 'Chybí ověřený průměrný hodinový výdělek.',
         /*
+         * Atribut 10345 je v `formBezPriznaku.xsd` povinný bez výjimky, takže
+         * ho nelze vynechat ani u dohody v prvním měsíci. Skutečný průměr se
+         * tam ale spočítat nedá — není z čeho — a § 355 zákoníku práce na to
+         * má pravděpodobný výdělek. Generická hláška „atribut není doložený"
+         * účetní neřekne, že má co dělat, natož kde.
+         */
+        'jmhz_average_hourly_earning_probable_missing' => 'Chybí průměrný hodinový '
+            . 'výdělek a zaměstnanec v rozhodném období neodpracoval zákonné minimum '
+            . 'dnů, takže se skutečný průměr spočítat nedá. Podle § 355 zákoníku práce '
+            . 'se v takovém případě použije pravděpodobný výdělek, který stanoví '
+            . 'zaměstnavatel — aplikace ho vymyslet nesmí.',
+        /*
          * Názvy polí jsou DOSLOVA ty z formuláře (`payroll.people.jmhz_identity`
          * v `web/src/i18n/cs.json`) a ze slovníku
          * {@see \MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationFieldVocabulary}.
@@ -132,6 +144,12 @@ final class JmhzBlockerExplainer
         'component_jmhz_manual_review' => 'Otevřete Mzdy → Mzdové složky a potvrďte zařazení.',
         'component_jmhz_treatment_invalid' => 'Otevřete Mzdy → Mzdové složky a opravte nastavení.',
         'jmhz_average_hourly_earning_missing' => 'Otevřete Mzdy → Absence a průměry a doplňte výdělek.',
+        'jmhz_average_hourly_earning_probable_missing' => 'Otevřete Mzdy → Zaměstnanci, '
+            . 'na kartě pracovního vztahu vyplňte v části „Průměrný výdělek" pole '
+            . '„Pravděpodobný hodinový výdělek" a jeho odůvodnění (z čeho jste ho '
+            . 'stanovili — obvyklá výše složek mzdy nebo odměna srovnatelných '
+            . 'zaměstnanců) a uložte novou revizi podmínek. Pak se v Mzdy → Absence '
+            . 'a průměry průměr nabídne k založení a schválení.',
         'jmhz_verified_boolean_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního vztahu v části Evidence pro ČSSZ zvolte u všech tří otázek Ano nebo Ne a uložte.',
         'jmhz_work_month_not_approved' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
         'jmhz_work_summary_v2_missing' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
@@ -196,6 +214,21 @@ final class JmhzBlockerExplainer
         }
 
         return implode(' ', $descriptions);
+    }
+
+    /**
+     * Důvod a náprava jednoho kódu, bez vazby na seznam blokátorů.
+     *
+     * Veřejná proto, že tytéž věty potřebuje i serializér XML, který blokátory
+     * nemá — vyhazuje {@see JmhzXmlException}. Kdyby si je opsal, měl by ten
+     * kód dvě znění a jedno by se přestalo udržovat.
+     */
+    public static function guidance(string $code): string
+    {
+        $reason = self::REASONS[$code] ?? 'Chybí zákonný údaj potřebný pro měsíční hlášení.';
+        $action = self::ACTIONS[$code] ?? self::fallbackAction('');
+
+        return $reason . ' ' . $action;
     }
 
     private static function fallbackAction(string $entityType): string

@@ -195,6 +195,17 @@ const averageSuggestionEdited = computed(() => {
 const averageSuggestionBlockers = computed(() => (averageSuggestion.value?.blockers ?? [])
   .map(code => t(`payroll_absence.averages.blockers.${code}`)))
 /*
+ * Pravděpodobný výdělek (§ 355 ZP) se nabízí JEN tam, kde skutečný průměr
+ * vzniknout nemůže. U běžného vztahu se počítá z uzavřených běhů sám a pole
+ * navíc by běžnou cestu jen prodloužilo o otázku, na kterou se nemá odpovídat.
+ */
+const averageProbableApplies = computed(() => {
+  const suggestion = averageSuggestion.value
+  if (suggestion === null) return averageForm.probable_hourly_czk !== null
+  return suggestion.source_kind === 'probable'
+    || suggestion.blockers.includes('probable_earning_not_recorded')
+})
+/*
  * Firma bez jediného pracovního vztahu. Celá stránka stojí na výběru
  * zaměstnance, takže filtr ani záložky nemají co ukazovat — místo prázdných
  * ovládacích prvků se vykreslí rozcestník do evidence osob.
@@ -735,6 +746,15 @@ function applyAverageSuggestion(suggestion: AverageEarningSuggestion) {
   averageForm.gross_earnings_czk = gross
   averageForm.worked_hours = hours
   averageForm.worked_days = days
+  // § 355 ZP — skutečný průměr nevznikne, průměr se STANOVUJE z pravděpodobného
+  // výdělku zmrazeného v podmínkách vztahu. Účetní ho tady nepřepisuje, jen
+  // potvrzuje; přepsat ho jde na kartě vztahu, kde ho i odůvodnila.
+  averageForm.probable_hourly_czk = suggestion.source_kind === 'probable'
+    ? (suggestion.probable_hourly_minor ?? 0) / 100
+    : null
+  if (suggestion.source_kind === 'probable' && suggestion.probable_rationale !== null) {
+    averageForm.rationale = suggestion.probable_rationale
+  }
   averagePrefill.value = suggestion.ready ? { gross, hours, days } : null
 }
 
@@ -1390,7 +1410,14 @@ onMounted(async () => {
               to: averageSuggestion.decisive_to,
             }) }}
           </p>
-          <p class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_sources') }}</p>
+          <p
+            v-if="averageSuggestion.source_kind === 'probable'"
+            data-test="average-suggestion-probable"
+            class="mt-1 text-xs text-success-700"
+          >
+            {{ t('payroll_absence.averages.suggestion_probable') }}
+          </p>
+          <p v-else class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_sources') }}</p>
           <p class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_confirm') }}</p>
           <p
             v-if="averageSuggestionEdited"
@@ -1445,7 +1472,11 @@ onMounted(async () => {
             <input v-model.number="averageForm.worked_days" data-test="average-worked-days" min="0" step="1" type="number" :class="fieldClass">
             <span v-if="averagePrefill" class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.source_worked_days') }}</span>
           </label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.probable_minor') }}</span><input v-model.number="averageForm.probable_hourly_czk" data-test="average-probable-czk" min="0.01" step="0.01" type="number" :class="fieldClass"></label>
+          <label v-if="averageProbableApplies" data-test="average-probable-field">
+            <span class="form-label">{{ t('payroll_absence.averages.probable_minor') }}</span>
+            <input v-model.number="averageForm.probable_hourly_czk" data-test="average-probable-czk" min="0.01" step="0.01" type="number" :class="fieldClass">
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.source_probable') }}</span>
+          </label>
           <label class="sm:col-span-2 lg:col-span-3"><span class="form-label">{{ t('payroll_absence.averages.rationale') }}</span><input v-model="averageForm.rationale" maxlength="1000" type="text" :class="fieldClass"></label>
           <div class="flex flex-wrap justify-end sm:col-span-2 lg:col-span-4">
             <button :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll_absence.averages.create') }}</button>

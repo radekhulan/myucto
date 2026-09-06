@@ -17,6 +17,8 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelatio
  *   monthly_gross_minor:?int,
  *   weekly_hours:?string,
  *   leave_entitlement_weeks_override:?int,
+ *   probable_hourly_earning_minor:?int,
+ *   probable_earning_rationale:?string,
  *   workload_basis_points:int,
  *   work_place:?string,
  *   regular_workplace:?string,
@@ -332,6 +334,8 @@ final class PayrollEmploymentValidator
             $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode);
         }
 
+        $probableEarning = $this->probableEarning($input);
+
         return [
             'office_id' => $officeId,
             'effective_from' => $effectiveFrom,
@@ -344,6 +348,8 @@ final class PayrollEmploymentValidator
             'leave_entitlement_weeks_override' => $this->leaveWeeksOverride(
                 $input['leave_entitlement_weeks_override'] ?? null,
             ),
+            'probable_hourly_earning_minor' => $probableEarning['hourly_minor'],
+            'probable_earning_rationale' => $probableEarning['rationale'],
             'workload_basis_points' => $workload,
             'work_place' => $workPlace,
             'regular_workplace' => $this->optionalText($input, 'regular_workplace', 255),
@@ -397,6 +403,52 @@ final class PayrollEmploymentValidator
             'is_primary' => $this->requiredBool($input, 'is_primary', false),
             'change_reason' => $this->optionalText($input, 'change_reason', 500),
         ];
+    }
+
+    /**
+     * Pravděpodobný výdělek podle § 355 zákoníku práce.
+     *
+     * „Jestliže zaměstnanec v rozhodném období neodpracoval alespoň 21 dnů,
+     * použije se pravděpodobný výdělek" (§ 355 odst. 1 zákona č. 262/2006 Sb.);
+     * podle odst. 2 ho zaměstnavatel stanoví z hrubé mzdy, které zaměstnanec
+     * dosáhl, popřípadě které by zřejmě dosáhl, s přihlédnutím k obvyklé výši
+     * složek mzdy nebo k odměně zaměstnanců vykonávajících stejnou práci.
+     * Metodika MPSV to shrnuje v příručce pro personální agendu, kap. XXI.8
+     * (https://ppropo.mpsv.cz/xxi8prumernyvydelek).
+     *
+     * Číslo se proto nezadává samo o sobě — bez odůvodnění ho nikdo neobhájí
+     * a databázová podmínka `chk_payroll_employment_term_probable_earning` ho
+     * odmítne. Validace je tu, aby účetní dostala větu, ne SQL chybu.
+     *
+     * @param array<string,mixed> $input
+     * @return array{hourly_minor:?int,rationale:?string}
+     */
+    private function probableEarning(array $input): array
+    {
+        $raw = $input['probable_hourly_earning_minor'] ?? null;
+        $rationale = $this->optionalText($input, 'probable_earning_rationale', 1000);
+        if ($raw === null || $raw === '') {
+            if ($rationale !== null) {
+                throw new \InvalidArgumentException(
+                    'Odůvodnění pravděpodobného výdělku se ukládá jen spolu s jeho částkou.',
+                );
+            }
+
+            return ['hourly_minor' => null, 'rationale' => null];
+        }
+        if (!is_int($raw) || $raw <= 0) {
+            throw new \InvalidArgumentException(
+                'Pravděpodobný hodinový výdělek musí být kladná částka v haléřích.',
+            );
+        }
+        if ($rationale === null) {
+            throw new \InvalidArgumentException(
+                'K pravděpodobnému výdělku doplňte odůvodnění — z čeho jste ho stanovili'
+                . ' (§ 355 odst. 2 zákoníku práce).',
+            );
+        }
+
+        return ['hourly_minor' => $raw, 'rationale' => $rationale];
     }
 
     private function leaveWeeksOverride(mixed $value): ?int

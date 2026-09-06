@@ -3532,6 +3532,13 @@
       "weekly_hours": "Weekly hours",
       "leave_entitlement_weeks_override": "Leave allowance exception (weeks)",
       "leave_entitlement_weeks_override_hint": "Leave blank to inherit the company allowance. The minimum is 4 weeks.",
+      "probable_earning_open": "Record probable earnings (§ 355 of the Labour Code)",
+      "probable_earning_hourly": "Probable hourly earning (CZK)",
+      "probable_earning_hourly_hint": "Fill in only where an actual average cannot arise — the employee did not work at least 21 days in the decisive period (an agreement in its first month, a task fee). Leave blank for an ordinary employment; the average is computed from closed payroll runs.",
+      "probable_earning_rationale": "Probable earning justification",
+      "probable_earning_rationale_hint": "How the amount was set — the usual level of pay components or the pay of employees doing the same work (§ 355(2) of the Labour Code).",
+      "probable_earning_invalid": "The probable hourly earning must be an amount, for example 280 or 280.50.",
+      "probable_earning_rationale_required": "Add a justification explaining how the probable earning was set.",
       "workload_bps": "Workload in hundredths of a percent",
       "contract_signed": "Contract signed",
       "work_place": "Place of work",
@@ -19744,6 +19751,8 @@
       "source_allocated": "Enter manually — the application does not distinguish pay granted for a period longer than a quarter (§ 358 of the Labour Code).",
       "source_worked_hours": "Derived from confirmed attendance work summaries.",
       "source_worked_days": "Derived from the shifts the confirmed hours were built from.",
+      "source_probable": "Taken from the employment terms; change it there, where its justification lives.",
+      "suggestion_probable": "The actual average cannot be derived from closed runs, so the probable earning recorded in the employment terms was used (§ 355 of the Labour Code).",
       "blockers": {
         "run_missing": "One month of the decisive period has no payroll run; for a new starter the average is set as probable earnings (§ 355 of the Labour Code)",
         "run_not_approved": "The payroll run for the decisive period is not closed or is being corrected",
@@ -19759,7 +19768,8 @@
         "worked_time_not_derivable": "Recorded shifts cannot be summed without review (overlap, interval crossing a month boundary or negative duration)",
         "worked_time_missing": "The decisive period has no positive qualifying earnings and time worked",
         "probable_earning_required": "The statutory minimum number of days was not worked in the decisive period; the average is set as probable earnings (§ 355 of the Labour Code)",
-        "average_already_exists": "An average for this quarter already exists; the suggestion will not overwrite it"
+        "average_already_exists": "An average for this quarter already exists; the suggestion will not overwrite it",
+        "probable_earning_not_recorded": "The actual average cannot be derived from closed runs and no probable earning is recorded for the employment (§ 355 of the Labour Code). Open Payroll → People, fill in the probable hourly earning and its justification on the employment card and save."
       }
     },
     "average_source": {

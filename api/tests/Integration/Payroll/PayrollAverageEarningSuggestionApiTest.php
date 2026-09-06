@@ -122,7 +122,12 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         $suggestion = $this->suggest(2026, 2);
 
         self::assertFalse($suggestion['ready']);
-        self::assertContains('run_missing', $suggestion['blockers']);
+        // Chybějící běh je důvod pro pravděpodobný výdělek (§ 355 ZP), takže
+        // blokuje jeho ABSENCE v podmínkách vztahu; původní důvod zůstává
+        // dohledatelný v `actual_blockers`.
+        self::assertContains('probable_earning_not_recorded', $suggestion['blockers']);
+        self::assertContains('run_missing', $suggestion['actual_blockers']);
+        self::assertNull($suggestion['source_kind']);
         self::assertNull($suggestion['gross_earnings_minor']);
         self::assertNull($suggestion['worked_minutes']);
         self::assertNull($suggestion['worked_days']);

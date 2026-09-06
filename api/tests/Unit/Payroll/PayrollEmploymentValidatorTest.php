@@ -40,6 +40,40 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $this->validator()->terms($terms);
     }
 
+    /**
+     * Pravděpodobný výdělek (§ 355 ZP) je nepovinný, ale nikdy sám: bez
+     * odůvodnění, z čeho ho zaměstnavatel stanovil (§ 355 odst. 2), ho odmítne
+     * i databázová podmínka `chk_payroll_employment_term_probable_earning`.
+     */
+    public function testProbableEarningIsOptionalButNeverWithoutRationale(): void
+    {
+        $terms = $this->terms();
+        self::assertNull($this->validator()->terms($terms)['probable_hourly_earning_minor']);
+        self::assertNull($this->validator()->terms($terms)['probable_earning_rationale']);
+
+        $terms['probable_hourly_earning_minor'] = 28_000;
+        $terms['probable_earning_rationale'] = 'Sjednaná odměna 280 Kč/hod.';
+        $accepted = $this->validator()->terms($terms);
+        self::assertSame(28_000, $accepted['probable_hourly_earning_minor']);
+        self::assertSame('Sjednaná odměna 280 Kč/hod.', $accepted['probable_earning_rationale']);
+
+        $terms['probable_earning_rationale'] = '   ';
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('doplňte odůvodnění');
+        $this->validator()->terms($terms);
+    }
+
+    public function testProbableEarningRejectsNonPositiveAmount(): void
+    {
+        $terms = $this->terms();
+        $terms['probable_hourly_earning_minor'] = 0;
+        $terms['probable_earning_rationale'] = 'Nesmysl';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('kladná částka');
+        $this->validator()->terms($terms);
+    }
+
     public function testAcceptsActivityFamilyMatchingAgreement(): void
     {
         foreach ([['dpc', 'A'], ['dpp', 'T']] as [$relationType, $activityCode]) {

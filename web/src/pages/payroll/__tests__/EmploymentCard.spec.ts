@@ -440,6 +440,42 @@ describe('EmploymentCard', () => {
       .toBe(4500050)
   })
 
+  /**
+   * Pravděpodobný výdělek (§ 355 ZP) je výjimka, ne běžný krok: u HPP se průměr
+   * spočítá z uzavřených běhů sám. Pole proto na kartě není vidět, dokud si ho
+   * účetní nevyžádá — běžná cesta zůstává stejně dlouhá.
+   */
+  it('pravděpodobný výdělek nabídne až na vyžádání a pošle ho v haléřích', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
+
+    expect(wrapper.find('[data-test="terms-probable-earning-hourly"]').exists()).toBe(false)
+    await wrapper.get('[data-test="terms-probable-earning-open"]').trigger('click')
+    await wrapper.get('[data-test="terms-probable-earning-hourly"]').setValue('280,50')
+    await wrapper.get('[data-test="terms-probable-earning-rationale"]')
+      .setValue('Sjednaná odměna za úkol.')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    const payload = vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2]
+    expect(payload?.probable_hourly_earning_minor).toBe(28050)
+    expect(payload?.probable_earning_rationale).toBe('Sjednaná odměna za úkol.')
+  })
+
+  /** § 355 odst. 2 ZP — částka bez odůvodnění neprojde ani serverem, ani DB. */
+  it('pravděpodobný výdělek bez odůvodnění neodešle a řekne proč', async () => {
+    const wrapper = await mountCard()
+
+    await wrapper.get('[data-test="terms-probable-earning-open"]').trigger('click')
+    await wrapper.get('[data-test="terms-probable-earning-hourly"]').setValue('280')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.correctEmploymentTerms).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="terms-save-error"]').text())
+      .toContain('payroll.people.probable_earning_rationale_required')
+  })
+
   it('nesmyslnou mzdu neodešle a řekne proč', async () => {
     const wrapper = await mountCard()
 

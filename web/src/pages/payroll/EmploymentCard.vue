@@ -279,6 +279,14 @@ const wideRail = useMediaQuery('(min-width: 1280px)')
 type TermsSaveMode = 'correct' | 'version'
 const termsForm = ref<PayrollEmploymentTermsPayload | null>(null)
 const grossInput = ref('')
+const probableEarningInput = ref('')
+/**
+ * Pravděpodobný výdělek (§ 355 ZP) se u běžného vztahu nezadává — průměr se
+ * spočítá z uzavřených běhů sám. Pole je proto schované, dokud si ho účetní
+ * nevyžádá nebo dokud u vztahu nějaká hodnota není. Běžná cesta zůstává stejně
+ * dlouhá jako dosud.
+ */
+const probableEarningOpen = ref(false)
 const mealBasis = ref<PayrollMealEntitlementBasis>('shift')
 const saveMode = ref<TermsSaveMode>('correct')
 const versionEffectiveFrom = ref(todayIso())
@@ -310,7 +318,12 @@ function inputToMinor(value: string): number | null {
  * protože „je co ukládat" se ptá na CELOU kartu, ne jen na verzi podmínek.
  */
 function fingerprint(): string {
-  return JSON.stringify([termsForm.value, grossInput.value.trim(), mealBasis.value])
+  return JSON.stringify([
+    termsForm.value,
+    grossInput.value.trim(),
+    probableEarningInput.value.trim(),
+    mealBasis.value,
+  ])
 }
 
 const dirty = computed(() => baseline.value !== '' && fingerprint() !== baseline.value)
@@ -331,6 +344,7 @@ function hydrate(employment: PayrollEmployment) {
     fixed_term_end_on: terms.fixed_term_end_on,
     weekly_hours: terms.weekly_hours,
     leave_entitlement_weeks_override: terms.leave_entitlement_weeks_override ?? null,
+    probable_earning_rationale: terms.probable_earning_rationale ?? null,
     workload_basis_points: terms.workload_basis_points,
     work_place: terms.work_place,
     regular_workplace: terms.regular_workplace,
@@ -368,6 +382,8 @@ function hydrate(employment: PayrollEmployment) {
     change_reason: null,
   }
   grossInput.value = minorToInput(employment.monthly_gross_minor)
+  probableEarningInput.value = minorToInput(terms.probable_hourly_earning_minor ?? null)
+  probableEarningOpen.value = probableEarningInput.value !== ''
   mealBasis.value = employment.meal_entitlement_basis
   versionEffectiveFrom.value = minimumNewTermsDate.value
   saveMode.value = 'correct'
@@ -491,6 +507,17 @@ async function save() {
     saveError.value = t('payroll.people.new_terms_date_required')
     return
   }
+  const probableEarning = inputToMinor(probableEarningInput.value)
+  if (Number.isNaN(probableEarning)) {
+    saveError.value = t('payroll.people.probable_earning_invalid')
+    return
+  }
+  // § 355 odst. 2 ZP — částka bez odůvodnění neprojde ani serverem, ani
+  // databázovou podmínkou. Ať to účetní pozná dřív než z chyby 422.
+  if (probableEarning !== null && (form.probable_earning_rationale ?? '').trim() === '') {
+    saveError.value = t('payroll.people.probable_earning_rationale_required')
+    return
+  }
   saveError.value = ''
   busy.value = true
   try {
@@ -506,16 +533,20 @@ async function save() {
     }
 
     const { effective_from: _ignored, ...rest } = form
+    const shared = {
+      ...rest,
+      monthly_gross_minor: gross,
+      probable_hourly_earning_minor: probableEarning,
+      probable_earning_rationale: probableEarning === null
+        ? null
+        : form.probable_earning_rationale,
+    }
     const updated = saveMode.value === 'version'
       ? await payrollApi.addEmploymentTerms(props.employment.id, rowVersion, {
-        ...rest,
+        ...shared,
         effective_from: versionEffectiveFrom.value,
-        monthly_gross_minor: gross,
       })
-      : await payrollApi.correctEmploymentTerms(props.employment.id, rowVersion, {
-        ...rest,
-        monthly_gross_minor: gross,
-      })
+      : await payrollApi.correctEmploymentTerms(props.employment.id, rowVersion, shared)
     emit('updated', updated)
     hydrate(updated)
     toast.success(saveMode.value === 'version'
@@ -1073,6 +1104,50 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               data-test="terms-leave-weeks"
             >
           </label>
+
+          <!--
+            Pravděpodobný výdělek (§ 355 ZP). U běžného vztahu se průměr počítá
+            z uzavřených běhů sám, takže se pole nenabízí — jen odkaz, který ho
+            vyvolá tam, kde skutečný průměr vzniknout nemůže (dohoda v prvním
+            měsíci, odměna za úkol bez odpracovaných hodin).
+          -->
+          <div class="sm:col-span-2" data-test="terms-probable-earning">
+            <button
+              v-if="!probableEarningOpen"
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              :disabled="!canEditTerms || busy"
+              data-test="terms-probable-earning-open"
+              @click="probableEarningOpen = true"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
+              {{ t('payroll.people.probable_earning_open') }}
+            </button>
+            <div v-else :class="GRID">
+              <label :class="FIELD">
+                {{ t('payroll.people.probable_earning_hourly') }}
+                <input
+                  v-model="probableEarningInput"
+                  inputmode="decimal"
+                  :disabled="!canEditTerms || busy"
+                  :class="INPUT"
+                  data-test="terms-probable-earning-hourly"
+                >
+                <span :class="HINT">{{ t('payroll.people.probable_earning_hourly_hint') }}</span>
+              </label>
+              <label :class="FIELD">
+                {{ t('payroll.people.probable_earning_rationale') }}
+                <input
+                  v-model="termsForm.probable_earning_rationale"
+                  maxlength="1000"
+                  :disabled="!canEditTerms || busy"
+                  :class="INPUT"
+                  data-test="terms-probable-earning-rationale"
+                >
+                <span :class="HINT">{{ t('payroll.people.probable_earning_rationale_hint') }}</span>
+              </label>
+            </div>
+          </div>
 
           <!--
             Účtárna se dosud NEDALA VYBRAT nikde ve frontendu — karta ji jen

@@ -771,6 +771,33 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         }
     }
 
+    /**
+     * Chybějící průměrný hodinový výdělek (10345) je jediný důvod, na který
+     * zákon zná náhradní postup — § 355 ZP a pravděpodobný výdělek. Hlášku
+     * „atribut není doložený" účetní neumí použít, takže tenhle atribut má
+     * vlastní kód i návod, kam jít a co vyplnit.
+     */
+    public function testMissingAverageHourlyEarningExplainsTheProbableEarningProcedure(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['average_earning'] = null;
+
+        try {
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            );
+            self::fail('Chybějící průměrný výdělek musel podání zablokovat.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame(
+                'jmhz_average_hourly_earning_probable_missing',
+                $exception->validationCode,
+            );
+            self::assertStringContainsString('§ 355', $exception->getMessage());
+            self::assertStringContainsString('Pravděpodobný hodinový výdělek', $exception->getMessage());
+        }
+    }
+
     public function testEldpSectionWithDaysRequiresCode(): void
     {
         $payload = $this->payload();

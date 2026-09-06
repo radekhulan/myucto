@@ -100,7 +100,12 @@ function averageSuggestion(overrides: Record<string, unknown> = {}) {
     decisive_to: '2026-03-31',
     minimum_worked_days: 21,
     ready: false,
-    blockers: ['run_missing'],
+    blockers: ['probable_earning_not_recorded'],
+    source_kind: null,
+    actual_blockers: ['run_missing'],
+    probable_hourly_minor: null,
+    probable_rationale: null,
+    probable_term_id: null,
     gross_earnings_minor: null,
     longer_period_allocated_minor: null,
     worked_minutes: null,
@@ -509,6 +514,8 @@ describe('AbsenceManagement', () => {
     m.averageSuggestion.mockResolvedValue(averageSuggestion({
       ready: true,
       blockers: [],
+      source_kind: 'actual',
+      actual_blockers: [],
       gross_earnings_minor: 14_000_000,
       worked_minutes: 27_600,
       worked_days: 61,
@@ -547,6 +554,8 @@ describe('AbsenceManagement', () => {
     m.averageSuggestion.mockResolvedValue(averageSuggestion({
       ready: true,
       blockers: [],
+      source_kind: 'actual',
+      actual_blockers: [],
       gross_earnings_minor: 14_000_000,
       worked_minutes: 27_600,
       worked_days: 61,
@@ -583,6 +592,65 @@ describe('AbsenceManagement', () => {
     expect((wrapper.find('[data-test="average-gross-czk"]').element as HTMLInputElement).value)
       .toBe('0')
     expect(wrapper.text()).not.toContain('payroll_absence.averages.source_gross')
+    wrapper.unmount()
+  })
+
+  /*
+   * § 355 zákoníku práce — u dohody bez odpracovaných dnů skutečný průměr
+   * vzniknout nemůže a použije se pravděpodobný výdělek zadaný v podmínkách
+   * vztahu. Formulář ho předvyplní i s odůvodněním a řekne, odkud je.
+   */
+  it('offers the probable earning only where the actual average cannot arise', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: true,
+      blockers: [],
+      source_kind: 'probable',
+      actual_blockers: ['run_missing'],
+      probable_hourly_minor: 28_000,
+      probable_rationale: 'Sjednaná odměna 280 Kč/hod.',
+      probable_term_id: 41,
+    }))
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.find('[data-test="average-suggestion-probable"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="average-probable-field"]').exists()).toBe(true)
+    expect((wrapper.find('[data-test="average-probable-czk"]').element as HTMLInputElement).value)
+      .toBe('280')
+
+    await wrapper.find('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAverage).toHaveBeenCalledWith(expect.objectContaining({
+      probable_hourly_minor: 28_000,
+      rationale: 'Sjednaná odměna 280 Kč/hod.',
+    }))
+    wrapper.unmount()
+  })
+
+  /*
+   * Běžná cesta se nesmí prodloužit: kde se průměr spočítá z uzavřených běhů,
+   * se pole pravděpodobného výdělku vůbec nenabízí.
+   */
+  it('hides the probable earning field when the actual average is available', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: true,
+      blockers: [],
+      source_kind: 'actual',
+      actual_blockers: [],
+      gross_earnings_minor: 14_000_000,
+      worked_minutes: 27_600,
+      worked_days: 61,
+    }))
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.find('[data-test="average-probable-czk"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="average-probable-field"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="average-suggestion-probable"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

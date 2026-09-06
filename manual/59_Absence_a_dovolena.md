@@ -52,8 +52,17 @@ a minuty převádí aplikace až při uložení. Stejně se v hodinách zadává
 první nebo poslední den absence i ruční změna dovolené. Přesný důvod chyby
 zůstane viditelný přímo u příslušného formuláře.
 Při méně než 21 odpracovaných dnech je povinný pravděpodobný hodinový výdělek
-a jeho odůvodnění. Snapshot musí projít ruční kontrolou a schválením; teprve
-potom jej lze připojit k absenci s náhradou.
+a jeho odůvodnění. Zadává se **jednou** na kartě pracovního vztahu
+(**Mzdy → Zaměstnanci**, tlačítko *Zadat pravděpodobný výdělek*) a uloží se do
+revize podmínek, takže platí, dokud ho nová revize nezmění. Formulář průměru ho
+pak sám nabídne a označí, že průměr stojí na pravděpodobném výdělku, ne na
+uzavřených bězích. U běžného vztahu pole nevyplňuj — průměr se spočítá
+z uzavřených mzdových běhů sám a pole se ani nenabízí.
+
+Není-li pravděpodobný výdělek zadaný a skutečný průměr vzniknout nemůže, návrh
+i měsíční hlášení ČSSZ řeknou, že chybí právě on, a odkážou na kartu vztahu.
+Snapshot musí projít ruční kontrolou a schválením; teprve potom jej lze připojit
+k absenci s náhradou.
 
 Průměrný výdělek má zákonnou spodní hranici. Je-li vypočtený průměr nižší než
 minimální mzda, použije se podle § 357 odst. 1 zákoníku práce **minimální mzda**;
