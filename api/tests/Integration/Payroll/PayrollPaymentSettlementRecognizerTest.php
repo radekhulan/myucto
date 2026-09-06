@@ -35,7 +35,7 @@ final class PayrollPaymentSettlementRecognizerTest extends TestCase
     private const PERIOD_START = '2026-01-01';
     private const DUE_ON = '2026-02-21';
     private const AMOUNT_MINOR = 302_400;
-    private const VARIABLE_SYMBOL = '2137036200';
+    private const VARIABLE_SYMBOL = '9900112233';
 
     private Connection $connection;
     private PDO $pdo;
