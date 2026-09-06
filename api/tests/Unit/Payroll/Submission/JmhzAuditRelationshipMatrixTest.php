@@ -208,7 +208,12 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         return $payload;
     }
 
-    public function testChildCreditBlocksTheWholeReport(): void
+    /**
+     * Zvýhodnění na děti bez zmrazeného nároku zůstává fail-closed: částka bez
+     * pořadí a bez doložené domácnosti by byla nepodložený údaj v podání.
+     * Doplněný nárok už blokaci nezpůsobí — to hlídají testy N-05.
+     */
+    public function testChildCreditWithoutFrozenClaimStaysBlocked(): void
     {
         $payload = $this->payload();
         $payload['people'][0]['employments'][0]['term']['tax_declaration_signed'] = true;
@@ -217,7 +222,7 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         unset($tax);
 
         self::assertContains(
-            'jmhz_scenario1_child_credit_breakdown_unavailable',
+            'jmhz_scenario1_income_tax_result_not_calculated',
             $this->blockerCodes($this->resolutionFor($payload)),
         );
     }

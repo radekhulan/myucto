@@ -465,6 +465,104 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertStringNotContainsString('zakladniSlevaInvalidita12', $result['xml']);
     }
 
+    /**
+     * N-05: zaměstnanec s dětmi. Před opravou resolver hlásil
+     * `jmhz_scenario1_child_credit_breakdown_unavailable` a serializér blok
+     * 10303/10439/10440/10453 vůbec neuměl, takže tenhle test bez opravy padá
+     * na blokovaném dokumentu.
+     */
+    public function testMonthlyChildCreditEmitsFrozenBlockAndStaysXsdValid(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($this->payloadWithChildCredit()),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:danoveZvyhodneniDetiMesic>1617</form:danoveZvyhodneniDetiMesic>',
+            $result['xml'],
+        );
+        self::assertStringContainsString(
+            '<form:vyzivujeJinaOsoba>false</form:vyzivujeJinaOsoba>',
+            $result['xml'],
+        );
+        self::assertStringContainsString('<form:jmeno>Jana</form:jmeno>', $result['xml']);
+        self::assertStringContainsString(
+            '<form:prijmeni>Nováková</form:prijmeni>',
+            $result['xml'],
+        );
+        self::assertStringContainsString('<form:poradi>1</form:poradi>', $result['xml']);
+        self::assertStringContainsString(
+            '<form:slevaDite>1500</form:slevaDite>',
+            $result['xml'],
+        );
+        self::assertStringNotContainsString('form:jineOsoby', $result['xml']);
+        // Rodné číslo ani datum narození dítěte XSD u měsíčního bloku nechce,
+        // takže se do podání nedostávají.
+        self::assertStringNotContainsString('form:rodneCislo', $result['xml']);
+    }
+
+    /**
+     * Kontrola 127 (blocking): u 10453 = ANO musí být jiná osoba pojmenovaná.
+     */
+    public function testMonthlyChildCreditNamesTheOtherHouseholdCaregiver(): void
+    {
+        $payload = $this->payloadWithChildCredit();
+        $payload['people'][0]['child_credit_evidence'] = [
+            'other_household_caregiver_status' => 'present',
+            'other_household_caregivers' => [[
+                'given_name' => 'Petr',
+                'family_name' => 'Novák',
+                'birth_date' => '1990-04-11',
+            ]],
+            'children' => $payload['people'][0]['child_credit_evidence']['children'],
+        ];
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:vyzivujeJinaOsoba>true</form:vyzivujeJinaOsoba>',
+            $result['xml'],
+        );
+        self::assertStringContainsString('<form:jinaOsoba>', $result['xml']);
+        self::assertStringContainsString(
+            '<form:datumNarozeni>1990-04-11</form:datumNarozeni>',
+            $result['xml'],
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function payloadWithChildCredit(): array
+    {
+        $payload = $this->payload();
+        $tax = &$payload['people'][0]['person_summary']['statutory']['income_tax'];
+        $tax['advance_tax']['child_credit_minor_units'] = 161_700;
+        $tax['advance_tax']['tax_before_credits_minor_units'] = 15_000;
+        $tax['advance_tax']['tax_after_credits_minor_units'] = 0;
+        $tax['applied_child_credit_minor_units'] = 150_000;
+        unset($tax);
+        $payload['people'][0]['employments'][0]['term']
+            ['tax_declaration_signed'] = true;
+        $payload['people'][0]['child_credit_evidence'] = [
+            'other_household_caregiver_status' => 'none',
+            'other_household_caregivers' => [],
+            'children' => [[
+                'reference' => 'dependant-1',
+                'identity' => [
+                    'given_name' => 'Jana',
+                    'family_name' => 'Nováková',
+                ],
+                'order' => 1,
+                'ztp_p' => false,
+            ]],
+        ];
+
+        return $payload;
+    }
+
     public function testCreditWithoutSignedDeclarationIsRefused(): void
     {
         $payload = $this->payload();
@@ -526,6 +624,38 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             $result['xml'],
         );
         self::assertStringContainsString('<form:danBonus>', $result['xml']);
+    }
+
+    /**
+     * N-13: souhrnný `so:danBonus` (10035) se psal vždy, i s nulou, přestože
+     * XSD ho má `minOccurs=0` a formulářový protějšek 10306 se po opravě
+     * kontroly 244 řídí přítomností elementu. Bez opravy tenhle test padá na
+     * prvním tvrzení.
+     */
+    public function testSummaryTaxBonusIsOmittedWhenNobodyGotOne(): void
+    {
+        $zero = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($this->payload()),
+            $this->envelope(),
+        );
+
+        self::assertStringNotContainsString('<so:danBonus>', $zero['xml']);
+        self::assertStringContainsString('<so:danZalohaPoSleve>', $zero['xml']);
+
+        $resolved = $this->resolution()->requireResolvedDocument()->payload;
+        $resolved['employer']['summary_totals']['tax_bonus'] = 1_450;
+        $paid = (new JmhzScenario1XmlValidator())->dryRun(
+            new JmhzScenario1Resolution(
+                new JmhzScenario1NormalizedDocument($resolved),
+                [],
+            ),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<so:danBonus>1450</so:danBonus>',
+            $paid['xml'],
+        );
     }
 
     public function testBlockedResolutionIsNeverSerialized(): void
@@ -1473,7 +1603,6 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
               <so:souhrn>
                 <so:danUdajeMesic>
                   <so:danZalohaPoSleve>150</so:danZalohaPoSleve>
-                  <so:danBonus>0</so:danBonus>
                 </so:danUdajeMesic>
               </so:souhrn>
               <pvpoj:PVPOJ>

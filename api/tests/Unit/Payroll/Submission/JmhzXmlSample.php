@@ -160,7 +160,6 @@ final class JmhzXmlSample
               <so:souhrn>
                 <so:danUdajeMesic>
                   <so:danZalohaPoSleve>150</so:danZalohaPoSleve>
-                  <so:danBonus>0</so:danBonus>
                 </so:danUdajeMesic>
               </so:souhrn>
               <pvpoj:PVPOJ>

@@ -31,7 +31,11 @@ use InvalidArgumentException;
  *   other_claimant_excluded:bool,
  *   ztp_p:bool,
  *   effective_from:string,
- *   effective_to:?string
+ *   effective_to:?string,
+ *   other_household_caregiver_status:string,
+ *   other_caregiver_given_name:?string,
+ *   other_caregiver_family_name:?string,
+ *   other_caregiver_birth_date:?string
  * }
  */
 final class PayrollDependantValidator
@@ -53,6 +57,15 @@ final class PayrollDependantValidator
         'child_in_care',
         'child_of_spouse',
         'grandchild',
+    ];
+
+    /** JMHZ 10453: vyživuje tytéž děti i jiná osoba v téže domácnosti. */
+    public const OTHER_CAREGIVER_STATUSES = ['unknown', 'none', 'present'];
+
+    private const OTHER_CAREGIVER_FIELDS = [
+        'other_caregiver_given_name',
+        'other_caregiver_family_name',
+        'other_caregiver_birth_date',
     ];
 
     public const CLAIM_REASONS = [
@@ -88,6 +101,10 @@ final class PayrollDependantValidator
         'evidence_reference' => 'Odkaz na doklad',
         'shared_household_confirmed' => 'Společně hospodařící domácnost',
         'other_claimant_excluded' => 'Nikdo jiný zvýhodnění neuplatňuje',
+        'other_household_caregiver_status' => 'Jiná osoba vyživující tytéž děti',
+        'other_caregiver_given_name' => 'Jméno jiné vyživující osoby',
+        'other_caregiver_family_name' => 'Příjmení jiné vyživující osoby',
+        'other_caregiver_birth_date' => 'Datum narození jiné vyživující osoby',
         'effective_from' => 'Nárok od',
         'effective_to' => 'Nárok do',
     ];
@@ -210,6 +227,65 @@ final class PayrollDependantValidator
             'ztp_p' => $this->bool($input, 'ztp_p'),
             'effective_from' => $from,
             'effective_to' => $to,
+        ] + $this->otherCaregiver($input);
+    }
+
+    /**
+     * JMHZ 10453 + kontrola 127 (blocking): vyživuje-li tytéž děti v téže
+     * domácnosti i jiná osoba, chce ji ČSSZ pojmenovat. Nevyplněno zůstává
+     * `unknown` a měsíční hlášení na něm stojí — vydávat mlčení za „ne" by
+     * znamenalo podat tvrzení, které účetní neudělala.
+     *
+     * @param array<string,mixed> $input
+     * @return array{
+     *   other_household_caregiver_status:string,
+     *   other_caregiver_given_name:?string,
+     *   other_caregiver_family_name:?string,
+     *   other_caregiver_birth_date:?string
+     * }
+     */
+    private function otherCaregiver(array $input): array
+    {
+        $status = ($input['other_household_caregiver_status'] ?? null) === null
+            ? 'unknown'
+            : $this->enum(
+                $input,
+                'other_household_caregiver_status',
+                self::OTHER_CAREGIVER_STATUSES,
+            );
+        if ($status !== 'present') {
+            foreach (self::OTHER_CAREGIVER_FIELDS as $key) {
+                if (($input[$key] ?? null) !== null) {
+                    throw new InvalidArgumentException(
+                        'Údaje jiné vyživující osoby lze vyplnit jen tehdy, když ji nárok uvádí.',
+                    );
+                }
+            }
+
+            return [
+                'other_household_caregiver_status' => $status,
+                'other_caregiver_given_name' => null,
+                'other_caregiver_family_name' => null,
+                'other_caregiver_birth_date' => null,
+            ];
+        }
+
+        return [
+            'other_household_caregiver_status' => $status,
+            'other_caregiver_given_name' => $this->text(
+                $input,
+                'other_caregiver_given_name',
+                100,
+            ),
+            'other_caregiver_family_name' => $this->text(
+                $input,
+                'other_caregiver_family_name',
+                100,
+            ),
+            'other_caregiver_birth_date' => $this->date(
+                $input,
+                'other_caregiver_birth_date',
+            ),
         ];
     }
 

@@ -27,7 +27,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v13',
+            'payroll-jmhz-preparation-source.v14',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
@@ -216,7 +216,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
 
         $snapshot = (new JmhzPreparationSnapshotBuilder())->build(7, 'test', $source, [], []);
 
-        self::assertSame('payroll-jmhz-preparation-source.v13', $snapshot->payload['schema_reference']);
+        self::assertSame('payroll-jmhz-preparation-source.v14', $snapshot->payload['schema_reference']);
         self::assertArrayNotHasKey('scenario_key', $snapshot->payload['scope']);
         self::assertSame(['scenario_1', 'scenario_2'], $snapshot->payload['scope']['scenario_set']);
         self::assertSame(
@@ -758,9 +758,105 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
     }
 
     /** @return array<string,mixed> */
+    /**
+     * N-05: měsíční blok `zvyhodneniDetiMesic` potřebuje vedle nároku i jméno
+     * dítěte, které nárok nenese. Bez opravy `child_credit_evidence` v
+     * zmrazeném snímku vůbec není a tenhle test padá na chybějícím klíči.
+     */
+    public function testChildCreditEvidenceIsFrozenWithChildIdentity(): void
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $this->source(childClaims: [
+                [
+                    'child_reference' => 'dependant-9',
+                    'child_order' => 1,
+                    'ztp_p' => false,
+                    'evidence_status' => 'verified',
+                    'shared_household_confirmed' => true,
+                    'other_claimant_excluded' => true,
+                    'other_household_caregiver_status' => 'none',
+                    'other_caregiver_given_name' => null,
+                    'other_caregiver_family_name' => null,
+                    'other_caregiver_birth_date' => null,
+                ],
+                [
+                    // Nedoložený nárok se do výpočtu daně nepromítne, takže
+                    // nesmí být ani v podání.
+                    'child_reference' => 'dependant-8',
+                    'child_order' => 2,
+                    'ztp_p' => true,
+                    'evidence_status' => 'unverified',
+                    'shared_household_confirmed' => true,
+                    'other_claimant_excluded' => true,
+                    'other_household_caregiver_status' => 'none',
+                ],
+            ]),
+            [],
+            [],
+            childIdentitySources: [11 => [
+                'dependant-9' => [
+                    'given_name' => 'Jana',
+                    'family_name' => 'Nováková',
+                ],
+                'dependant-8' => [
+                    'given_name' => 'Petr',
+                    'family_name' => 'Novák',
+                ],
+            ]],
+        );
+
+        self::assertSame(
+            [
+                'other_household_caregiver_status' => 'none',
+                'other_household_caregivers' => [],
+                'children' => [[
+                    'reference' => 'dependant-9',
+                    'identity' => [
+                        'given_name' => 'Jana',
+                        'family_name' => 'Nováková',
+                    ],
+                    'order' => 1,
+                    'ztp_p' => false,
+                ]],
+            ],
+            $snapshot->payload['people'][0]['child_credit_evidence'],
+        );
+    }
+
+    /**
+     * Chybějící rozdělené jméno se nedoplňuje odhadem — zmrazí se jako `null`
+     * a resolver na něm zastaví podání.
+     */
+    public function testChildWithoutSplitNameIsFrozenWithoutIdentity(): void
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $this->source(childClaims: [[
+                'child_reference' => 'dependant-9',
+                'child_order' => 1,
+                'ztp_p' => false,
+                'evidence_status' => 'verified',
+                'shared_household_confirmed' => true,
+                'other_claimant_excluded' => true,
+                'other_household_caregiver_status' => 'unknown',
+            ]]),
+            [],
+            [],
+        );
+
+        $evidence = $snapshot->payload['people'][0]['child_credit_evidence'];
+        self::assertNull($evidence['children'][0]['identity']);
+        self::assertSame('unknown', $evidence['other_household_caregiver_status']);
+    }
+
+    /** @param list<array<string,mixed>>|null $childClaims */
     private function source(
         bool $tamperedComponent = false,
         bool $negativeIncomeComponent = false,
+        ?array $childClaims = null,
     ): array {
         $inputs = [];
         if ($tamperedComponent) {
@@ -858,6 +954,11 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                 'employments' => [$employment],
             ]],
         ];
+        if ($childClaims !== null) {
+            $input['people'][0]['statutory_evidence'] = [
+                'income_tax' => ['child_claims' => $childClaims],
+            ];
+        }
         $inputJson = CanonicalJson::encode($input);
         $inputHash = hash('sha256', $inputJson);
         $socialRelationship = [

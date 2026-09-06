@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
+use MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -26,7 +27,8 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V10_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v10';
     private const PREVIOUS_V11_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v11';
     private const PREVIOUS_V12_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v12';
-    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v13';
+    private const PREVIOUS_V13_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v13';
+    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v14';
     private const LEGACY_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v1';
     private const PREVIOUS_V2_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
     private const PREVIOUS_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v3';
@@ -39,7 +41,8 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V10_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v10';
     private const PREVIOUS_V11_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v11';
     private const PREVIOUS_V12_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v12';
-    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v13';
+    private const PREVIOUS_V13_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v13';
+    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v14';
 
     public function __construct(
         private JmhzPreparationSnapshotRepository $repository,
@@ -52,6 +55,7 @@ final readonly class JmhzPreparationSnapshotService
         private JmhzOrdinaryEvidenceService $ordinaryEvidence,
         private JmhzAnnualEvidenceService $annualEvidence,
         private JmhzEmployerAnnualEvidenceService $employerAnnualEvidence,
+        private PayrollDependantJmhzIdentityRepository $childIdentities,
     ) {}
 
     public function loadVerified(
@@ -258,6 +262,10 @@ final readonly class JmhzPreparationSnapshotService
                 $ordinaryEvidence['sources'],
                 $annualEvidence,
                 $employerAnnualEvidence,
+                $this->childIdentities->identitiesFor(
+                    $supplierId,
+                    $this->employeeIds($input),
+                ),
             );
             $snapshotJson = $snapshot->canonicalJson();
             $snapshotFingerprint = $this->sensitiveData->keyedFingerprint(
@@ -932,6 +940,11 @@ final readonly class JmhzPreparationSnapshotService
                 'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V12_SCHEMA_REFERENCE,
                 'manifest_schema' => self::PREVIOUS_V12_MANIFEST_SCHEMA,
                 'request_schema' => self::PREVIOUS_V12_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V13_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V13_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_V13_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_V13_REQUEST_SCHEMA,
             ],
             JmhzPreparationSnapshotBuilder::BUILDER_VERSION => [
                 'snapshot_schema' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,

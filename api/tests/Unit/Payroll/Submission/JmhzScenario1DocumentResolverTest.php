@@ -566,25 +566,139 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
-    public function testChildCreditStaysBlockedUntilItsOwnBlockIsFrozen(): void
+    /**
+     * N-05: zaměstnanec s dětmi a podepsaným prohlášením je běžný případ.
+     * Se zmrazenou identitou dítěte a rozhodnutou otázkou 10453 musí projít
+     * a nést blok `zvyhodneniDetiMesic`.
+     */
+    public function testChildCreditWithFrozenIdentityResolvesInsteadOfBlocking(): void
     {
-        $preparation = $this->preparation();
-        $payload = $preparation->payload;
-        $payload['people'][0]['person_summary']['statutory']['income_tax']
-            ['advance_tax']['child_credit_minor_units'] = 161_700;
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload(
+                $this->preparation(),
+                $this->payloadWithChildCredit(),
+            ),
+            $this->pvpoj(),
+        );
+
+        self::assertSame(
+            [],
+            array_values(array_filter(
+                array_map(
+                    static fn ($blocker): string => $blocker->code,
+                    $resolution->blockers,
+                ),
+                static fn (string $code): bool => str_contains($code, 'child'),
+            )),
+        );
+        self::assertNotNull($resolution->candidate);
+        $childCredit = $resolution->candidate
+            ->payload['people'][0]['summary']['child_credit'];
+        self::assertSame(1_617, $childCredit['monthly_credit_czk']);
+        self::assertSame(1_500, $childCredit['applied_credit_czk']);
+        self::assertFalse($childCredit['other_household_caregiver']);
+        self::assertSame(
+            [[
+                'identity' => ['given_name' => 'Jana', 'family_name' => 'Nováková'],
+                'ztp_p' => false,
+                'order' => '1',
+            ]],
+            $childCredit['children'],
+        );
+    }
+
+    /**
+     * @return iterable<string,array{array<string,mixed>,string}>
+     */
+    public static function childCreditFailClosedCases(): iterable
+    {
+        yield 'bez zmrazené evidence dětí' => [
+            ['children' => []],
+            'jmhz_scenario1_child_credit_source_inconsistent',
+        ];
+        yield 'nezodpovězená otázka na jinou vyživující osobu' => [
+            ['other_household_caregiver_status' => 'unknown'],
+            'jmhz_scenario1_child_credit_caregiver_unknown',
+        ];
+        yield 'rozporné odpovědi u téže domácnosti' => [
+            ['other_household_caregiver_status' => 'inconsistent'],
+            'jmhz_scenario1_child_credit_caregiver_inconsistent',
+        ];
+        yield 'jiná osoba bez identity' => [
+            ['other_household_caregiver_status' => 'present'],
+            'jmhz_scenario1_child_credit_caregiver_identity_missing',
+        ];
+        yield 'dítě bez rozděleného jména' => [
+            ['children' => [[
+                'reference' => 'dependant-1',
+                'identity' => null,
+                'order' => 1,
+                'ztp_p' => false,
+            ]]],
+            'jmhz_scenario1_child_identity_incomplete',
+        ];
+        yield 'pořadí mimo číselník 10440' => [
+            ['children' => [[
+                'reference' => 'dependant-1',
+                'identity' => ['given_name' => 'Jana', 'family_name' => 'Nováková'],
+                'order' => 4,
+                'ztp_p' => false,
+            ]]],
+            'jmhz_scenario1_child_order_unsupported',
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $evidenceOverride
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('childCreditFailClosedCases')]
+    public function testChildCreditStaysFailClosedWithoutCompleteEvidence(
+        array $evidenceOverride,
+        string $expectedCode,
+    ): void {
+        $payload = $this->payloadWithChildCredit();
+        $payload['people'][0]['child_credit_evidence'] = $evidenceOverride
+            + $payload['people'][0]['child_credit_evidence'];
 
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
-            $this->withPayload($preparation, $payload),
+            $this->withPayload($this->preparation(), $payload),
             $this->pvpoj(),
         );
 
         self::assertContains(
-            'jmhz_scenario1_child_credit_breakdown_unavailable',
+            $expectedCode,
             array_map(
                 static fn ($blocker): string => $blocker->code,
                 $resolution->blockers,
             ),
         );
+    }
+
+    /** @return array<string,mixed> */
+    private function payloadWithChildCredit(): array
+    {
+        $payload = $this->preparation()->payload;
+        $tax = &$payload['people'][0]['person_summary']['statutory']['income_tax'];
+        $tax['advance_tax']['child_credit_minor_units'] = 161_700;
+        $tax['applied_child_credit_minor_units'] = 150_000;
+        unset($tax);
+        $payload['people'][0]['employments'][0]['term']
+            ['tax_declaration_signed'] = true;
+        $payload['people'][0]['child_credit_evidence'] = [
+            'other_household_caregiver_status' => 'none',
+            'other_household_caregivers' => [],
+            'children' => [[
+                'reference' => 'dependant-1',
+                'identity' => [
+                    'given_name' => 'Jana',
+                    'family_name' => 'Nováková',
+                ],
+                'order' => 1,
+                'ztp_p' => false,
+            ]],
+        ];
+
+        return $payload;
     }
 
     /**

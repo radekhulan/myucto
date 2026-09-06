@@ -3226,6 +3226,11 @@
           "verified": "Doložený dokladem",
           "unverified": "Zatím nedoložený"
         },
+        "caregiver": {
+          "unknown": "Zatím nerozhodnuto",
+          "none": "Ne, nikdo další děti nevyživuje",
+          "present": "Ano, vyživuje je i jiná osoba"
+        },
         "blockers": {
           "relation_not_child": "Měsíční zvýhodnění náleží jen dítěti.",
           "evidence_unverified": "Chybí doklad k nároku — zvýhodnění se neuplatní.",
@@ -3265,6 +3270,11 @@
           "claim_ztp_p": "Uplatnit dvojnásobek za dítě ZTP/P",
           "shared_household": "Dítě žije ve společně hospodařící domácnosti",
           "other_claimant_excluded": "Druhý poplatník zvýhodnění v tomto období neuplatňuje",
+          "other_household_caregiver": "Vyživuje tytéž děti i jiná osoba v téže domácnosti",
+          "other_household_caregiver_hint": "ČSSZ se na to ptá v měsíčním hlášení (JMHZ 10453). Bez odpovědi se hlášení nesestaví; u odpovědi „ano“ musí být druhá osoba pojmenovaná.",
+          "other_caregiver_given_name": "Jméno jiné vyživující osoby",
+          "other_caregiver_family_name": "Příjmení jiné vyživující osoby",
+          "other_caregiver_birth_date": "Datum narození jiné vyživující osoby",
           "supersede_hint": "Zasahuje-li nárok do období schválené mzdové revize, uloží se změna jako nová účinná verze a původní záznam zůstane v historii."
         }
       },

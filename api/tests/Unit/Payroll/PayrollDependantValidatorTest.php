@@ -111,6 +111,55 @@ final class PayrollDependantValidatorTest extends TestCase
         $this->validator->validateClaim($input);
     }
 
+    /**
+     * JMHZ 10453: nevyplněná otázka po jiné vyživující osobě zůstává
+     * `unknown`. Vydat mlčení za „ne" by znamenalo podat tvrzení, které
+     * účetní neudělala — hlášení proto radši zastaví resolver.
+     */
+    public function testUnansweredOtherCaregiverStaysUnknown(): void
+    {
+        $result = $this->validator->validateClaim($this->claim());
+
+        self::assertSame('unknown', $result['other_household_caregiver_status']);
+        self::assertNull($result['other_caregiver_given_name']);
+    }
+
+    /** Kontrola 127 (blocking): u 10453 = ANO musí být osoba pojmenovaná. */
+    public function testPresentOtherCaregiverRequiresIdentity(): void
+    {
+        $input = $this->claim(['other_household_caregiver_status' => 'present']);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->validator->validateClaim($input);
+    }
+
+    public function testOtherCaregiverIdentityWithoutPresentStatusIsRefused(): void
+    {
+        $input = $this->claim([
+            'other_household_caregiver_status' => 'none',
+            'other_caregiver_given_name' => 'Petr',
+            'other_caregiver_family_name' => 'Novák',
+            'other_caregiver_birth_date' => '1990-04-11',
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->validator->validateClaim($input);
+    }
+
+    public function testPresentOtherCaregiverWithIdentityIsAccepted(): void
+    {
+        $result = $this->validator->validateClaim($this->claim([
+            'other_household_caregiver_status' => 'present',
+            'other_caregiver_given_name' => 'Petr',
+            'other_caregiver_family_name' => 'Novák',
+            'other_caregiver_birth_date' => '1990-04-11',
+        ]));
+
+        self::assertSame('present', $result['other_household_caregiver_status']);
+        self::assertSame('Novák', $result['other_caregiver_family_name']);
+        self::assertSame('1990-04-11', $result['other_caregiver_birth_date']);
+    }
+
     public function testClaimOrderMustBePositive(): void
     {
         $input = $this->claim(['child_order' => 0]);

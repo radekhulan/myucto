@@ -21,7 +21,8 @@ final class JmhzPreparationSnapshotBuilder
     public const PREVIOUS_V10_BUILDER_VERSION = 'jmhz-preparation-source.v10';
     public const PREVIOUS_V11_BUILDER_VERSION = 'jmhz-preparation-source.v11';
     public const PREVIOUS_V12_BUILDER_VERSION = 'jmhz-preparation-source.v12';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v13';
+    public const PREVIOUS_V13_BUILDER_VERSION = 'jmhz-preparation-source.v13';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v14';
 
     /**
      * Tri-state údaje vykonávané pozice, u kterých se NEVYPLNĚNÍ vykládá jako
@@ -73,6 +74,11 @@ final class JmhzPreparationSnapshotBuilder
      *        skutečnosti podle `employee_id`, načtené ve stejné transakci
      * @param array<string,mixed>|null $employerAnnualEvidence prosincová
      *        neměnná roční evidence zaměstnavatele
+     * @param array<int,array<string,array{given_name:string,family_name:string}>> $childIdentitySources
+     *        jméno a příjmení vyživovaného dítěte podle `employee_id` a
+     *        `child_reference`. Nárok sám nese jen neosobní referenci, XSD
+     *        (`osobaType`) ale u dítěte jméno vyžaduje — viz
+     *        {@see \MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository}.
      */
     public function build(
         int $supplierId,
@@ -85,6 +91,7 @@ final class JmhzPreparationSnapshotBuilder
         array $ordinaryEvidenceSources = [],
         ?array $annualEvidenceSources = null,
         ?array $employerAnnualEvidence = null,
+        array $childIdentitySources = [],
     ): JmhzPreparationSnapshot {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musi byt kladne cislo.');
@@ -562,6 +569,10 @@ final class JmhzPreparationSnapshotBuilder
                 'employee_id' => $employeeId,
                 'person_summary' => $personResult,
                 'annual_evidence' => $annualEvidence,
+                'child_credit_evidence' => $this->childCreditEvidence(
+                    $person,
+                    $childIdentitySources[$employeeId] ?? [],
+                ),
                 'employments' => $normalizedEmployments,
             ];
         }
@@ -1553,6 +1564,97 @@ final class JmhzPreparationSnapshotBuilder
             $this->invalid('jmhz_snapshot_hash_mismatch', "Otisk {$field} nesouhlasi.");
         }
         return $object;
+    }
+
+    /**
+     * Zmrazení měsíčního bloku JMHZ `zvyhodneniDetiMesic` (10439, 10440, 10453).
+     *
+     * Nároky bere ze zmrazené zákonné evidence mzdové revize, ne z živé
+     * tabulky — jinak by se podání rozešlo s výpočtem, ze kterého vzniklo.
+     * Identita dítěte se dohledává zvlášť (nárok ji nenese) a zmrazují se JEN
+     * jméno a příjmení, protože víc XSD u měsíčního bloku nechce.
+     *
+     * Nedoložený nárok (`evidence_status = unverified`) se vynechává stejně
+     * jako ve výpočtu daně — kalkulátor ho do zvýhodnění nepustí, takže by
+     * v podání stálo dítě, které se v částce neprojevilo.
+     *
+     * @param array<string,mixed> $person řádek `input.people[]`
+     * @param array<string,array{given_name:string,family_name:string}> $identities
+     * @return array<string,mixed>
+     */
+    private function childCreditEvidence(array $person, array $identities): array
+    {
+        // Chybějící evidence se NEVYKLÁDÁ jako „bez dětí": prázdný seznam
+        // proti nenulovému zvýhodnění resolver zastaví jako rozpor podkladu.
+        $evidence = $person['statutory_evidence'] ?? null;
+        $incomeTax = is_array($evidence) && !array_is_list($evidence)
+            ? $evidence['income_tax'] ?? null
+            : null;
+        $claims = is_array($incomeTax) && !array_is_list($incomeTax)
+            ? $incomeTax['child_claims'] ?? null
+            : null;
+        $children = [];
+        $statuses = [];
+        $caregivers = [];
+        foreach ($this->rows(
+            $claims ?? [],
+            'statutory_evidence.income_tax.child_claims',
+        ) as $claim) {
+            if (($claim['evidence_status'] ?? null) !== 'verified') {
+                continue;
+            }
+            $reference = is_string($claim['child_reference'] ?? null)
+                ? $claim['child_reference']
+                : null;
+            $order = $claim['child_order'] ?? null;
+            if ($reference === null || !is_int($order) || $order < 1) {
+                $this->invalid(
+                    'jmhz_child_claim_invalid',
+                    'Zmrazeny narok na zvyhodneni na dite nema referenci a poradi.',
+                );
+            }
+            $status = is_string($claim['other_household_caregiver_status'] ?? null)
+                ? $claim['other_household_caregiver_status']
+                : 'unknown';
+            $statuses[$status] = true;
+            if ($status === 'present') {
+                $caregivers[] = [
+                    'given_name' => (string) ($claim['other_caregiver_given_name'] ?? ''),
+                    'family_name' => (string) ($claim['other_caregiver_family_name'] ?? ''),
+                    'birth_date' => (string) ($claim['other_caregiver_birth_date'] ?? ''),
+                ];
+            }
+            $children[] = [
+                'reference' => $reference,
+                'identity' => $identities[$reference] ?? null,
+                'order' => $order,
+                'ztp_p' => ($claim['ztp_p'] ?? null) === true,
+            ];
+        }
+        usort(
+            $children,
+            static fn (array $left, array $right): int =>
+                [$left['order'], $left['reference']]
+                <=> [$right['order'], $right['reference']],
+        );
+        $unique = [];
+        foreach ($caregivers as $caregiver) {
+            $unique[implode('|', $caregiver)] = $caregiver;
+        }
+        ksort($unique);
+
+        return [
+            // Nároky se ptají po TÉŽE domácnosti, takže se odpovědi nesmí
+            // rozcházet. Rozpor se nesjednocuje, jen zmrazí — rozhodnout ho
+            // musí účetní, ne serializér.
+            'other_household_caregiver_status' => match (true) {
+                $children === [] => 'none',
+                count($statuses) > 1 => 'inconsistent',
+                default => (string) array_key_first($statuses),
+            },
+            'other_household_caregivers' => array_values($unique),
+            'children' => $children,
+        ];
     }
 
     /** @return array<string,mixed> */
