@@ -342,13 +342,21 @@ final class JmhzScenario1XmlSerializer
             'so:danZalohaPoSleve',
             (string) $this->int($totals['advance_tax_after_credits'] ?? null, '10034'),
         );
-        $this->text(
-            $dom,
-            $monthly,
-            JmhzSchemaCatalog::NS_SOUHRN,
-            'so:danBonus',
-            (string) $this->int($totals['tax_bonus'] ?? null, '10035'),
-        );
+        // Úhrn bonusů je souhrnný protějšek formulářového `form:danBonus`
+        // (10306), který se od opravy kontroly 244 bez podepsaného prohlášení
+        // nepíše vůbec — atribut se řídí PŘÍTOMNOSTÍ elementu, ne hodnotou.
+        // Nulový úhrn znamená, že bonus nevznikl nikomu, takže se souhrnný
+        // element (XSD `minOccurs=0`) vynechává stejnou úvahou.
+        $taxBonus = $this->int($totals['tax_bonus'] ?? null, '10035');
+        if ($taxBonus !== 0) {
+            $this->text(
+                $dom,
+                $monthly,
+                JmhzSchemaCatalog::NS_SOUHRN,
+                'so:danBonus',
+                (string) $taxBonus,
+            );
+        }
         $node->appendChild($monthly);
         $annual = $this->object(
             $this->object($payload['employer'] ?? null)['annual'] ?? null,
@@ -912,7 +920,9 @@ final class JmhzScenario1XmlSerializer
             ],
             static fn (array $pair): bool => ($credits[$pair[0]] ?? null) !== null,
         );
-        if ($claimed !== []) {
+        $childCredit = $summary['child_credit'] ?? null;
+        $childCredit = $childCredit === null ? null : $this->object($childCredit);
+        if ($claimed !== [] || $childCredit !== null) {
             if (!$declarationSigned) {
                 // Slevu lze uplatnit jen s podepsaným prohlášením; kdyby to
                 // vyšlo naopak, hlásili bychom vnitřně rozporný formulář.
@@ -934,6 +944,9 @@ final class JmhzScenario1XmlSerializer
                     $element,
                     (string) $this->int($credits[$key] ?? null, $attributeId),
                 );
+            }
+            if ($childCredit !== null) {
+                $this->monthlyChildCredit($dom, $block, $childCredit);
             }
             $node->appendChild($block);
         }
@@ -1186,6 +1199,114 @@ final class JmhzScenario1XmlSerializer
      * @param array<string,mixed> $identity
      * @param array{string,string,string,string} $attributeIds
      */
+    /**
+     * Měsíční blok `zvyhodneniDetiMesic` uvnitř `prohlaseniPoplatnikaDane`.
+     *
+     * Pořadí prvků drží sekvenci XSD (`prohlaseniPoplatnikaDaneType`):
+     * 10303 `danoveZvyhodneniDetiMesic`, pak blok dětí, teprve pak 10304
+     * `slevaDite`. `jineOsoby` se píše jen u 10453 = true — kontrola 127 tam
+     * identitu vyžaduje a jinde by šlo o osobní údaj bez účelu.
+     *
+     * @param array<string,mixed> $childCredit
+     */
+    private function monthlyChildCredit(
+        DOMDocument $dom,
+        DOMElement $block,
+        array $childCredit,
+    ): void {
+        $this->text(
+            $dom,
+            $block,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:danoveZvyhodneniDetiMesic',
+            (string) $this->int($childCredit['monthly_credit_czk'] ?? null, '10303'),
+        );
+        $children = $this->rows($childCredit['children'] ?? null);
+        if ($children === []) {
+            $this->invalid(
+                'jmhz_xml_child_credit_without_children',
+                'Měsíční zvýhodnění na děti nelze vykázat bez vyživovaných dětí.',
+            );
+        }
+        $childBlock = $this->node(
+            $dom,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:zvyhodneniDetiMesic',
+        );
+        $otherCaregiver = $this->bool(
+            $childCredit['other_household_caregiver'] ?? null,
+            '10453',
+        );
+        $this->text(
+            $dom,
+            $childBlock,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:vyzivujeJinaOsoba',
+            $otherCaregiver ? 'true' : 'false',
+        );
+        if ($otherCaregiver) {
+            $caregiverList = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:jineOsoby',
+            );
+            foreach (
+                $this->rows($childCredit['other_household_caregivers'] ?? null)
+                as $caregiver
+            ) {
+                $caregiverList->appendChild($this->annualPerson(
+                    $dom,
+                    $caregiver,
+                    'form:jinaOsoba',
+                    ['10431', '10432', '10433', '10434'],
+                ));
+            }
+            $childBlock->appendChild($caregiverList);
+        }
+        $childList = $this->node(
+            $dom,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:vyzivovaneDeti',
+        );
+        foreach ($children as $child) {
+            $childNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:vyzivovaneDite',
+            );
+            $childNode->appendChild($this->annualPerson(
+                $dom,
+                $this->object($child['identity'] ?? null),
+                'form:dite',
+                ['10435', '10436', '10437', '10438'],
+            ));
+            $this->text(
+                $dom,
+                $childNode,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:prukazZtpp',
+                $this->bool($child['ztp_p'] ?? null, '10439') ? 'true' : 'false',
+            );
+            $this->text(
+                $dom,
+                $childNode,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:poradi',
+                $this->string($child['order'] ?? null, '10440'),
+            );
+            $childList->appendChild($childNode);
+        }
+        $childBlock->appendChild($childList);
+        $block->appendChild($childBlock);
+        $this->text(
+            $dom,
+            $block,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:slevaDite',
+            (string) $this->int($childCredit['applied_credit_czk'] ?? null, '10304'),
+        );
+    }
+
     private function annualPerson(
         DOMDocument $dom,
         array $identity,

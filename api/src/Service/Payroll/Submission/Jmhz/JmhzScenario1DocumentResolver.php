@@ -494,6 +494,13 @@ final class JmhzScenario1DocumentResolver
                     'taxpayer_declaration_signed' => $declarationSigned,
                     'advance_tax_czk' => $advanceTaxCzk,
                     'tax_credits_czk' => $taxCreditsCzk,
+                    'child_credit' => $this->childCredit(
+                        $person['child_credit_evidence'] ?? null,
+                        $tax,
+                        $declarationSigned,
+                        $employeeId,
+                        $blockers,
+                    ),
                     'annual' => $annual,
                 ],
                 'employments' => $normalizedEmployments,
@@ -1094,18 +1101,202 @@ final class JmhzScenario1DocumentResolver
                     $employeeId,
                     $attributeIds,
                 );
-            } elseif ($value > 0 && $field === 'child_credit_minor_units') {
-                // Daňové zvýhodnění na děti přináší vedle 10303 i blok
-                // `zvyhodneniDetiMesic` (10453, 10440, 10451) a ten zmrazený
-                // nemáme; vykázat samotnou částku by zamlčelo pořadí dětí.
-                $blockers[] = $this->blocker(
-                    'jmhz_scenario1_child_credit_breakdown_unavailable',
-                    'person',
-                    $employeeId,
-                    ['10303', '10304', '10440', '10451', '10453'],
-                );
             }
         }
+    }
+
+    /**
+     * Měsíční daňové zvýhodnění na děti: 10303 (zvýhodnění), 10304 (uplatněná
+     * sleva) a blok `zvyhodneniDetiMesic` (10439, 10440, 10453).
+     *
+     * Vrací `null`, když se zvýhodnění neuplatňuje — blok se pak nepíše vůbec,
+     * protože kontrola 244 se u téhle skupiny řídí PŘÍTOMNOSTÍ elementu.
+     *
+     * Fail-closed zůstává tam, kde zmrazený podklad neodpovídá vypočtené
+     * částce: bez dětí, bez jména dítěte, s nerozhodnutou nebo rozpornou
+     * odpovědí na 10453 a bez podepsaného prohlášení se raději nevykáže nic.
+     *
+     * @param array<string,mixed> $tax
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array<string,mixed>|null
+     */
+    private function childCredit(
+        mixed $evidence,
+        array $tax,
+        ?bool $declarationSigned,
+        ?int $employeeId,
+        array &$blockers,
+    ): ?array {
+        $advance = $this->object($tax['advance_tax'] ?? null);
+        $claimed = $advance['child_credit_minor_units'] ?? null;
+        $applied = $tax['applied_child_credit_minor_units'] ?? null;
+        $frozen = $this->object($evidence);
+        $children = $this->rows($frozen['children'] ?? null);
+        if (!is_int($claimed) || $claimed <= 0) {
+            if ($children !== []) {
+                // Zmrazený nárok bez částky znamená, že se podklad a výpočet
+                // rozešly — vykázat jedno z toho by zakrylo, které je špatně.
+                $blockers[] = $this->blocker(
+                    'jmhz_scenario1_child_credit_source_inconsistent',
+                    'person',
+                    $employeeId,
+                    ['10303', '10304'],
+                );
+            }
+
+            return null;
+        }
+        if (!is_int($applied) || $applied < 0 || $applied > $claimed) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_income_tax_result_not_calculated',
+                'person',
+                $employeeId,
+                ['10303', '10304'],
+            );
+
+            return null;
+        }
+        if ($declarationSigned !== true) {
+            // § 35d odst. 1: zvýhodnění se měsíčně uplatní jen u plátce,
+            // u kterého je podepsané prohlášení. Rozpor je vada podkladu.
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_child_credit_without_declaration',
+                'person',
+                $employeeId,
+                ['10303', '10304', '10419'],
+            );
+
+            return null;
+        }
+        if ($children === []) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_child_credit_source_inconsistent',
+                'person',
+                $employeeId,
+                ['10303', '10304', '10440'],
+            );
+
+            return null;
+        }
+
+        $status = $frozen['other_household_caregiver_status'] ?? null;
+        if (!in_array($status, ['none', 'present'], true)) {
+            // 10453 je povinná položka bloku. `unknown` = otázku nikdo
+            // nezodpověděl, `inconsistent` = nároky si u téže domácnosti
+            // odporují; obojí musí rozhodnout účetní na kartě osoby.
+            $blockers[] = $this->blocker(
+                $status === 'inconsistent'
+                    ? 'jmhz_scenario1_child_credit_caregiver_inconsistent'
+                    : 'jmhz_scenario1_child_credit_caregiver_unknown',
+                'person',
+                $employeeId,
+                ['10453'],
+            );
+
+            return null;
+        }
+        $caregivers = [];
+        foreach ($this->rows($frozen['other_household_caregivers'] ?? null) as $row) {
+            $caregiver = [
+                'given_name' => $row['given_name'] ?? null,
+                'family_name' => $row['family_name'] ?? null,
+                'birth_date' => $row['birth_date'] ?? null,
+            ];
+            if (!$this->isPersonName($caregiver['given_name'])
+                || !$this->isPersonName($caregiver['family_name'])
+                || !is_string($caregiver['birth_date'])
+                || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $caregiver['birth_date']) !== 1
+            ) {
+                $caregivers = null;
+                break;
+            }
+            $caregivers[] = $caregiver;
+        }
+        // Kontrola 127 (blocking): u 10453 = ANO musí být jiná osoba
+        // pojmenovaná (10431, 10432, 10433/10434).
+        if ($caregivers === null
+            || ($status === 'present' && $caregivers === [])
+            || ($status === 'none' && $caregivers !== [])
+        ) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_child_credit_caregiver_identity_missing',
+                'person',
+                $employeeId,
+                ['10431', '10432', '10433', '10453'],
+            );
+
+            return null;
+        }
+
+        $normalized = [];
+        $orders = [];
+        foreach ($children as $child) {
+            $identity = $this->object($child['identity'] ?? null);
+            $order = $child['order'] ?? null;
+            if (!$this->isPersonName($identity['given_name'] ?? null)
+                || !$this->isPersonName($identity['family_name'] ?? null)
+            ) {
+                // Jméno dítěte nese karta vyživované osoby a `full_name` se
+                // úmyslně nedělí automaticky; bez rozdělených částí by do
+                // podání šla právně jiná identita.
+                $blockers[] = $this->blocker(
+                    'jmhz_scenario1_child_identity_incomplete',
+                    'person',
+                    $employeeId,
+                    ['10435', '10436'],
+                );
+
+                return null;
+            }
+            if (!is_int($order) || $order < 1 || $order > 3 || isset($orders[$order])) {
+                // Číselník 10440 zná jen 1, 2, 3 a N; čtvrté dítě v pořadí
+                // ani duplicitu formulář vyjádřit neumí.
+                $blockers[] = $this->blocker(
+                    'jmhz_scenario1_child_order_unsupported',
+                    'person',
+                    $employeeId,
+                    ['10440'],
+                );
+
+                return null;
+            }
+            $orders[$order] = true;
+            $normalized[] = [
+                'identity' => [
+                    'given_name' => trim((string) $identity['given_name']),
+                    'family_name' => trim((string) $identity['family_name']),
+                ],
+                'ztp_p' => ($child['ztp_p'] ?? null) === true,
+                'order' => (string) $order,
+            ];
+        }
+
+        return [
+            'monthly_credit_czk' => $this->wholeCzk(
+                $claimed,
+                '10303',
+                'person',
+                $employeeId,
+                $blockers,
+            ),
+            'applied_credit_czk' => $this->wholeCzk(
+                $applied,
+                '10304',
+                'person',
+                $employeeId,
+                $blockers,
+            ),
+            'other_household_caregiver' => $status === 'present',
+            'other_household_caregivers' => $caregivers,
+            'children' => $normalized,
+        ];
+    }
+
+    private function isPersonName(mixed $value): bool
+    {
+        return is_string($value)
+            && trim($value) !== ''
+            && mb_strlen(trim($value)) <= 100;
     }
 
     /**

@@ -504,7 +504,64 @@ final class PayrollPersonStatutoryEvidenceValidator
             ),
             'other_claimant_excluded' => $this->bool($row, 'other_claimant_excluded'),
             'evidence_reference' => $evidence,
+        ] + $this->taxChildOtherCaregiver($row);
+    }
+
+    /**
+     * JMHZ 10453 a kontrola 127: jiná osoba vyživující tytéž děti.
+     *
+     * Chybějící klíč je `unknown`, ne `none` — řádky zmrazené před migrací
+     * 1751 tuhle otázku nikdo nedostal a vydávat mlčení za „ne" by do podání
+     * dostalo tvrzení, které nikdo neučinil. Identita je povinná právě a jen
+     * u `present`, protože kontrola 127 ji tam vyžaduje a jinde by šlo o
+     * osobní údaj bez účelu.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function taxChildOtherCaregiver(array $row): array
+    {
+        $status = ($row['other_household_caregiver_status'] ?? null) === null
+            ? 'unknown'
+            : $this->enum(
+                $row,
+                'other_household_caregiver_status',
+                ['unknown', 'none', 'present'],
+            );
+        $givenName = $this->personName($row, 'other_caregiver_given_name');
+        $familyName = $this->personName($row, 'other_caregiver_family_name');
+        $birthDate = $this->nullableDateValue($row, 'other_caregiver_birth_date');
+        $identity = [$givenName, $familyName, $birthDate];
+        if ($status === 'present' && in_array(null, $identity, true)) {
+            throw new InvalidArgumentException(
+                'Jiná osoba vyživující dítě musí mít jméno, příjmení i datum narození.',
+            );
+        }
+        if ($status !== 'present' && $identity !== [null, null, null]) {
+            throw new InvalidArgumentException(
+                'Údaje jiné vyživující osoby smí nést jen nárok, který ji uvádí.',
+            );
+        }
+
+        return [
+            'other_household_caregiver_status' => $status,
+            'other_caregiver_given_name' => $givenName,
+            'other_caregiver_family_name' => $familyName,
+            'other_caregiver_birth_date' => $birthDate,
         ];
+    }
+
+    /** @param array<string,mixed> $row */
+    private function personName(array $row, string $key): ?string
+    {
+        $value = $this->nullableString($row, $key);
+        if ($value !== null && mb_strlen($value) > 100) {
+            throw new InvalidArgumentException(
+                "Pole {$key} smí mít nejvýše 100 znaků.",
+            );
+        }
+
+        return $value;
     }
 
     /** @param array<string,mixed> $row

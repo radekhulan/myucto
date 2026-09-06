@@ -7,6 +7,7 @@ import {
   type PayrollDependant,
   type PayrollDependantClaim,
   type PayrollDependantClaimPayload,
+  type PayrollDependantCaregiverStatus,
   type PayrollDependantClaimReason,
   type PayrollDependantPayload,
   type PayrollDependantRelation,
@@ -75,6 +76,10 @@ const claimForm = reactive({
   evidence_reference: '',
   shared_household_confirmed: true,
   other_claimant_excluded: true,
+  other_household_caregiver_status: 'unknown' as PayrollDependantCaregiverStatus,
+  other_caregiver_given_name: '',
+  other_caregiver_family_name: '',
+  other_caregiver_birth_date: '',
   ztp_p: false,
   effective_from: '',
   effective_to: '',
@@ -94,6 +99,11 @@ const reasonOptions = computed(() => CLAIM_REASONS.map(value => ({
 const evidenceOptions = computed<{ value: 'verified' | 'unverified'; label: string }[]>(() => ([
   { value: 'verified', label: t('payroll.people.dependants.evidence.verified') },
   { value: 'unverified', label: t('payroll.people.dependants.evidence.unverified') },
+]))
+const caregiverOptions = computed<{ value: PayrollDependantCaregiverStatus; label: string }[]>(() => ([
+  { value: 'unknown', label: t('payroll.people.dependants.caregiver.unknown') },
+  { value: 'none', label: t('payroll.people.dependants.caregiver.none') },
+  { value: 'present', label: t('payroll.people.dependants.caregiver.present') },
 ]))
 const editingDependant = computed(() =>
   dependants.value.find(item => item.id === editingDependantId.value) ?? null)
@@ -186,6 +196,10 @@ function openClaimEditor(dependant: PayrollDependant, claim: PayrollDependantCla
   claimForm.evidence_reference = claim?.evidence_reference ?? ''
   claimForm.shared_household_confirmed = claim?.shared_household_confirmed ?? true
   claimForm.other_claimant_excluded = claim?.other_claimant_excluded ?? true
+  claimForm.other_household_caregiver_status = claim?.other_household_caregiver_status ?? 'unknown'
+  claimForm.other_caregiver_given_name = claim?.other_caregiver_given_name ?? ''
+  claimForm.other_caregiver_family_name = claim?.other_caregiver_family_name ?? ''
+  claimForm.other_caregiver_birth_date = claim?.other_caregiver_birth_date ?? ''
   claimForm.ztp_p = claim?.ztp_p ?? dependant.ztp_p
   claimForm.effective_from = claim?.effective_from ?? monthStart(dependant.existence_from)
   claimForm.effective_to = claim?.effective_to ?? ''
@@ -249,6 +263,16 @@ function claimPayload(): PayrollDependantClaimPayload {
       : null,
     shared_household_confirmed: claimForm.shared_household_confirmed,
     other_claimant_excluded: claimForm.other_claimant_excluded,
+    other_household_caregiver_status: claimForm.other_household_caregiver_status,
+    other_caregiver_given_name: claimForm.other_household_caregiver_status === 'present'
+      ? claimForm.other_caregiver_given_name.trim() || null
+      : null,
+    other_caregiver_family_name: claimForm.other_household_caregiver_status === 'present'
+      ? claimForm.other_caregiver_family_name.trim() || null
+      : null,
+    other_caregiver_birth_date: claimForm.other_household_caregiver_status === 'present'
+      ? claimForm.other_caregiver_birth_date || null
+      : null,
     ztp_p: claimForm.ztp_p,
     effective_from: claimForm.effective_from,
     effective_to: claimForm.effective_to === '' ? null : claimForm.effective_to,
@@ -671,6 +695,25 @@ function creditLabel(claim: PayrollDependantClaim): string {
           <input v-model="claimForm.other_claimant_excluded" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
           {{ t('payroll.people.dependants.form.other_claimant_excluded') }}
         </label>
+        <label :class="labelClass">
+          {{ t('payroll.people.dependants.form.other_household_caregiver') }}<RequiredMark />
+          <SearchableSelect v-model="claimForm.other_household_caregiver_status" class="mt-1" :options="caregiverOptions" :clearable="false" accent="payroll" />
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.other_household_caregiver_hint') }}</span>
+        </label>
+        <template v-if="claimForm.other_household_caregiver_status === 'present'">
+          <label :class="labelClass">
+            {{ t('payroll.people.dependants.form.other_caregiver_given_name') }}<RequiredMark />
+            <input v-model="claimForm.other_caregiver_given_name" required maxlength="100" type="text" :class="inputClass" data-test="claim-caregiver-given-name">
+          </label>
+          <label :class="labelClass">
+            {{ t('payroll.people.dependants.form.other_caregiver_family_name') }}<RequiredMark />
+            <input v-model="claimForm.other_caregiver_family_name" required maxlength="100" type="text" :class="inputClass" data-test="claim-caregiver-family-name">
+          </label>
+          <label :class="labelClass">
+            {{ t('payroll.people.dependants.form.other_caregiver_birth_date') }}<RequiredMark />
+            <input v-model="claimForm.other_caregiver_birth_date" required type="date" :class="inputClass" data-test="claim-caregiver-birth-date">
+          </label>
+        </template>
         <p class="text-xs text-neutral-500 sm:col-span-2 lg:col-span-3">
           {{ t('payroll.people.dependants.form.supersede_hint') }}
         </p>

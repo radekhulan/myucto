@@ -153,4 +153,25 @@ final class PayrollJmhzPreparationSnapshotMigrationTest extends TestCase
         self::assertStringNotContainsString('UPDATE ', $sql);
         self::assertStringNotContainsString('DELETE ', $sql);
     }
+
+    /**
+     * Měsíční blok `zvyhodneniDetiMesic` přidal snímku `child_credit_evidence`,
+     * tedy nový tvar — v14. Migrace opět jen rozšiřuje výčet verzí.
+     */
+    public function testMonthlyChildCreditOnlyWidensBuilderVersions(): void
+    {
+        $sql = file_get_contents(
+            dirname(__DIR__, 4)
+            . '/db/migrations/1754_payroll_jmhz_monthly_child_credit.sql',
+        );
+        self::assertIsString($sql);
+        self::assertStringContainsString("'jmhz-preparation-source.v13'", $sql);
+        self::assertStringContainsString("'jmhz-preparation-source.v14'", $sql);
+        self::assertStringContainsString(
+            'DROP CONSTRAINT IF EXISTS chk_payroll_jmhz_preparation_builder',
+            $sql,
+        );
+        self::assertStringNotContainsString('UPDATE ', $sql);
+        self::assertStringNotContainsString('DELETE ', $sql);
+    }
 }

@@ -3221,6 +3221,11 @@
           "verified": "Documented",
           "unverified": "Not documented yet"
         },
+        "caregiver": {
+          "unknown": "Not decided yet",
+          "none": "No, nobody else supports the children",
+          "present": "Yes, another person supports them"
+        },
         "blockers": {
           "relation_not_child": "The monthly credit belongs to a child only.",
           "evidence_unverified": "The claim has no document — the credit will not be applied.",
@@ -3260,6 +3265,11 @@
           "claim_ztp_p": "Claim the double amount for a ZTP/P child",
           "shared_household": "The child lives in the shared household",
           "other_claimant_excluded": "The other taxpayer does not claim the credit for this period",
+          "other_household_caregiver": "Another person in the same household supports the same children",
+          "other_household_caregiver_hint": "The monthly report asks for this (JMHZ 10453). Without an answer the report cannot be built; answering yes requires naming the other person.",
+          "other_caregiver_given_name": "Other supporting person - given name",
+          "other_caregiver_family_name": "Other supporting person - family name",
+          "other_caregiver_birth_date": "Other supporting person - date of birth",
           "supersede_hint": "If the claim reaches into a period covered by an approved payroll revision, the change is stored as a new effective version and the original record stays in history."
         }
       },

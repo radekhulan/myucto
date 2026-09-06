@@ -680,6 +680,10 @@ final class PayrollDependantRepository
                             evidence_status = ?, evidence_reference = ?,
                             shared_household_confirmed = ?,
                             other_claimant_excluded = ?,
+                            other_household_caregiver_status = ?,
+                            other_caregiver_given_name = ?,
+                            other_caregiver_family_name = ?,
+                            other_caregiver_birth_date = ?,
                             effective_from = ?, effective_to = ?,
                             updated_by = ?, row_version = row_version + 1
                       WHERE supplier_id = ? AND employee_id = ?
@@ -693,6 +697,10 @@ final class PayrollDependantRepository
                     $data['evidence_reference'],
                     (int) $data['shared_household_confirmed'],
                     (int) $data['other_claimant_excluded'],
+                    $data['other_household_caregiver_status'],
+                    $data['other_caregiver_given_name'],
+                    $data['other_caregiver_family_name'],
+                    $data['other_caregiver_birth_date'],
                     $data['effective_from'],
                     $data['effective_to'],
                     $userId,
@@ -837,9 +845,11 @@ final class PayrollDependantRepository
                 (supplier_id, employee_id, dependant_id, child_reference,
                  child_order, claim_reason, ztp_p, evidence_status,
                  shared_household_confirmed, other_claimant_excluded,
+                 other_household_caregiver_status, other_caregiver_given_name,
+                 other_caregiver_family_name, other_caregiver_birth_date,
                  effective_from, effective_to, evidence_reference,
                  created_by, updated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insert->execute([
             $supplierId,
@@ -852,6 +862,10 @@ final class PayrollDependantRepository
             $data['evidence_status'],
             (int) $data['shared_household_confirmed'],
             (int) $data['other_claimant_excluded'],
+            $data['other_household_caregiver_status'],
+            $data['other_caregiver_given_name'],
+            $data['other_caregiver_family_name'],
+            $data['other_caregiver_birth_date'],
             $data['effective_from'],
             $data['effective_to'],
             $data['evidence_reference'],
@@ -1118,7 +1132,10 @@ final class PayrollDependantRepository
         $statement = $this->db->pdo()->prepare(
             'SELECT id, child_order, claim_reason, ztp_p, evidence_status,
                     evidence_reference, shared_household_confirmed,
-                    other_claimant_excluded, effective_from, effective_to,
+                    other_claimant_excluded, other_household_caregiver_status,
+                    other_caregiver_given_name, other_caregiver_family_name,
+                    other_caregiver_birth_date,
+                    effective_from, effective_to,
                     superseded_by_id, row_version
                FROM payroll_person_tax_child_claims
               WHERE supplier_id = ? AND employee_id = ? AND dependant_id = ?
@@ -1141,6 +1158,8 @@ final class PayrollDependantRepository
             'SELECT id, dependant_id, child_reference, child_order, claim_reason,
                     ztp_p, evidence_status, evidence_reference,
                     shared_household_confirmed, other_claimant_excluded,
+                    other_household_caregiver_status, other_caregiver_given_name,
+                    other_caregiver_family_name, other_caregiver_birth_date,
                     effective_from, effective_to, superseded_by_id, row_version
                FROM payroll_person_tax_child_claims
               WHERE supplier_id = ? AND employee_id = ? AND dependant_id IS NOT NULL
@@ -1213,6 +1232,20 @@ final class PayrollDependantRepository
                 : (string) $claim['evidence_reference'],
             'shared_household_confirmed' => (bool) $claim['shared_household_confirmed'],
             'other_claimant_excluded' => (bool) $claim['other_claimant_excluded'],
+            'other_household_caregiver_status' =>
+                (string) ($claim['other_household_caregiver_status'] ?? 'unknown'),
+            'other_caregiver_given_name' =>
+                $claim['other_caregiver_given_name'] === null
+                    ? null
+                    : (string) $claim['other_caregiver_given_name'],
+            'other_caregiver_family_name' =>
+                $claim['other_caregiver_family_name'] === null
+                    ? null
+                    : (string) $claim['other_caregiver_family_name'],
+            'other_caregiver_birth_date' =>
+                $claim['other_caregiver_birth_date'] === null
+                    ? null
+                    : (string) $claim['other_caregiver_birth_date'],
             'effective_from' => $from,
             'effective_to' => $to,
             'superseded_by_id' => $claim['superseded_by_id'] === null

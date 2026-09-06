@@ -5443,6 +5443,9 @@ export interface PayrollDependantCredit {
   manual_review_reason: string | null
 }
 
+/** JMHZ 10453: vyživuje tytéž děti v téže domácnosti i jiná osoba. */
+export type PayrollDependantCaregiverStatus = 'unknown' | 'none' | 'present'
+
 export interface PayrollDependantClaim {
   id: number
   child_reference: string
@@ -5453,6 +5456,10 @@ export interface PayrollDependantClaim {
   evidence_reference: string | null
   shared_household_confirmed: boolean
   other_claimant_excluded: boolean
+  other_household_caregiver_status: PayrollDependantCaregiverStatus
+  other_caregiver_given_name: string | null
+  other_caregiver_family_name: string | null
+  other_caregiver_birth_date: string | null
   effective_from: string
   effective_to: string | null
   superseded_by_id: number | null
@@ -5510,6 +5517,10 @@ export interface PayrollDependantClaimPayload {
   evidence_reference: string | null
   shared_household_confirmed: boolean
   other_claimant_excluded: boolean
+  other_household_caregiver_status: PayrollDependantCaregiverStatus
+  other_caregiver_given_name: string | null
+  other_caregiver_family_name: string | null
+  other_caregiver_birth_date: string | null
   ztp_p: boolean
   effective_from: string
   effective_to: string | null

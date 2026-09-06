@@ -165,7 +165,16 @@ s vlastním obdobím účinnosti, kde uvedeš:
   k počátku nároku; volitelně lze přidat odkaz do mzdové dokumentace, ale jeho
   vyplnění není podmínkou uložení ani výpočtu;
 - **potvrzení společně hospodařící domácnosti a druhého poplatníka** — chybí-li,
-  výpočet skončí v ruční kontrole.
+  výpočet skončí v ruční kontrole;
+- **jiná osoba vyživující tytéž děti v téže domácnosti** — na tuhle otázku se
+  ptá měsíční hlášení pro ČSSZ. Dokud u nároku zůstane „zatím nerozhodnuto",
+  hlášení se nesestaví; odpovíš-li „ano", doplň jméno, příjmení a datum
+  narození druhé osoby, jinak podání odmítne kontrola ČSSZ. Odpověď musí být
+  u všech dětí téže domácnosti stejná.
+
+Jméno a příjmení dítěte zadávej i zvlášť, ne jen v jednom poli — měsíční
+hlášení pro ČSSZ je vykazuje odděleně a aplikace celé jméno sama nedělí.
+Rodné číslo ani datum narození dítěte se do měsíčního hlášení neodesílají.
 
 Aplikace nedovolí dvě překrývající se uplatnění na totéž dítě u jednoho
 poplatníka ani uplatnění mimo období, kdy je osoba vedena jako vyživovaná.
