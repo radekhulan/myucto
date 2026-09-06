@@ -9751,6 +9751,26 @@
       "confirm_date_shift": "I understand that the reversal and the correction will be posted on {to} instead of the original {from}.",
       "hint": "The entry must balance (Σ debit = Σ credit). Double entry, period status and the date lock are enforced by the server — re-posting does not change VAT, that is corrected by editing the document."
     },
+    "posting_origin": {
+      "label": "What the posting came from",
+      "preset": "Posting preset",
+      "bank_rule": "Bank posting rule",
+      "edit_preset": "Edit preset",
+      "edit_bank_rule": "Edit rule",
+      "rule_deleted": "Rule #{id} no longer exists",
+      "scope_company": "company setting",
+      "scope_global": "system default",
+      "scope_missing": "no preset, accounts chosen by the service",
+      "preset_unused": "not used in this entry",
+      "preset_unused_hint": "The accounts in the journal do not match this preset — the entry was made manually or under different settings. Editing the preset only affects future postings.",
+      "detector": "Built-in detection ({detector})",
+      "learned": "Contation learned from previously posted movements — no rule behind it.",
+      "ai": "AI suggestion confirmed by the accountant.",
+      "schedule": "Recurring payment schedule.",
+      "manual_repost": "Re-posted manually on {date} ({user}) — the accounts were chosen by the accountant, not by a template.",
+      "unknown_user": "unknown user",
+      "none": "The source of this posting cannot be determined — a manual entry, or a document from before origin tracking."
+    },
     "posting_preview": {
       "title": "Proposed posting",
       "document": "Document",

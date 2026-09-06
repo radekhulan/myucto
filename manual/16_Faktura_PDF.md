@@ -136,6 +136,18 @@ omezená na **500 dokladů** — větší výběr rozděl.
 **Automatické zaúčtování při vystavení** (volitelné, nastavuje admin) —
 viz [§ 92.11 Automatické zaúčtování](92_Nastaveni.md#9211-automaticke-zauctovani-pri-vystaveniprijeti-dokladu).
 
+**Sekce Zaúčtování na detailu.** U zaúčtované faktury se pod položkami rozbalí sekce
+**Zaúčtování** s kontací tak, jak je v deníku. Kromě odkazu **Otevřít v deníku** má:
+
+- **Podle čeho se účtovalo** — [předkontaci](88_Ucetni_nastroje.md#883-predkontace),
+  ze které kontace vznikla (u vydané faktury podle klíče výnosu na hlavičce, výchozí
+  `invoice.services.issued`), její účty MD/Dal a jestli platí firemní, nebo systémové
+  výchozí nastavení. Tlačítko **Upravit předkontaci** otevře rovnou ten jeden klíč
+  v Nástrojích. Podrobně [§ 45.8.3](45_Ucetni_denik.md#4583-podle-ceho-se-uctovalo).
+- **Přeúčtovat** (admin/účetní) — opraví kontaci, která v deníku už je. V otevřeném
+  období se zápis přepíše, v zamčeném nebo uzavřeném vznikne storno a nový zápis;
+  viz [§ 45.8.2](45_Ucetni_denik.md#4582-preuctovani-z-dokladu-sekce-zauctovani).
+
 ## 16.2 PDF struktura
 
 Vygenerované PDF obsahuje:

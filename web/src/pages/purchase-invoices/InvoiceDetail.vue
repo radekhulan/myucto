@@ -20,7 +20,6 @@ import PostingBadge from '@/components/ui/PostingBadge.vue'
 import PostingPreviewModal from '@/components/accounting/PostingPreviewModal.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
 import ExpenseRuleTemplateModal from '@/components/accounting/ExpenseRuleTemplateModal.vue'
-import RepostModal from '@/components/accounting/RepostModal.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import StockReceiptModal from '@/components/stock/StockReceiptModal.vue'
 import { stockApi, type StockReceiptProposal } from '@/api/stock'
@@ -559,7 +558,6 @@ const canPostToJournal = computed(() =>
 const postingPreviewOpen = ref(false)
 const expenseRuleTemplateOpen = ref(false)
 const postingRuleOpen = ref(false)
-const repostOpen = ref(false)
 
 /**
  * Nákladové pravidlo, podle kterého se doklad zaúčtoval. `null` znamená, že za
@@ -597,15 +595,10 @@ function openExpenseRuleTemplate() {
   expenseRuleTemplateOpen.value = true
 }
 
-// Přeúčtovat = oprava kontace, která v deníku UŽ JE. Nabízí se jen u zaúčtovaného
-// dokladu; co se stane (přepis vs. storno + nový zápis) rozhoduje server podle stavu
-// období a popup to ukáže před potvrzením.
-const canRepost = computed(() =>
-  !!invoice.value
-  && isDoubleEntry.value
-  && (!!invoice.value.booked_at || !!invoice.value.locked?.journal_entry_id)
-  && auth.canWrite('accounting'))
-
+// Přeúčtovat = oprava kontace, která v deníku UŽ JE. Tlačítko proto NENÍ mezi akcemi
+// dokladu, ale uvnitř sekce Zaúčtování u toho zápisu, kterého se týká
+// ({@see DocumentPostingPanel}); tady se jen přenačte doklad, protože přeúčtování
+// mění i „kdo/kdy zaúčtoval".
 async function onReposted() {
   await load()
   toast.success(t('accounting.repost.done'))
@@ -672,10 +665,6 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
   items.push({ key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
     show: canPostToJournal.value, disabled: acting.value, loading: acting.value, run: postToJournal })
-
-  // Administrativní zásah do už zaúčtovaného dokladu → warning, ne primary.
-  items.push({ key: 'repost', label: t('accounting.repost.action'), icon: 'edit', tier: 'secondary', variant: 'warning',
-    show: canRepost.value, disabled: acting.value, run: () => { repostOpen.value = true } })
 
   items.push({ key: 'expense-template', label: t('accounting.template.create_expense'), icon: 'doc', tier: 'overflow', variant: 'neutral',
     show: isDoubleEntry.value && auth.canWrite('accounting') && inv.vendor_id > 0,
@@ -1141,7 +1130,8 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
       <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
            samotná kontace se dál načítá na pozadí. -->
-      <DocumentPostingPanel source="purchase-invoices" :doc-id="invoice.id" always-visible>
+      <DocumentPostingPanel source="purchase-invoices" :doc-id="invoice.id" always-visible
+        :doc-label="invoice.vendor_invoice_number || invoice.varsymbol" @reposted="onReposted">
         <dl class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-3 text-sm">
           <div class="flex justify-between gap-3">
             <dt class="text-neutral-500">{{ t('purchase_invoice.fields.document_kind') }}</dt>
@@ -1672,15 +1662,6 @@ const purchaseActions = computed<ActionItem[]>(() => {
       :doc-label="invoice.vendor_invoice_number || invoice.varsymbol"
       @close="postingPreviewOpen = false"
       @posted="onPosted" />
-
-    <RepostModal
-      v-if="invoice && repostOpen"
-      :open="repostOpen"
-      source="purchase-invoices"
-      :doc-id="invoice.id"
-      :doc-label="invoice.vendor_invoice_number || invoice.varsymbol"
-      @close="repostOpen = false"
-      @reposted="onReposted" />
 
     <ExpenseRuleTemplateModal v-if="expenseRuleTemplateOpen && invoice"
       :vendor-id="invoice.vendor_id" :vendor-name="invoice.vendor_company_name"

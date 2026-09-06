@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\ActivityLogger;
 
 /**
@@ -43,6 +44,9 @@ final class DocumentRepostService
     public const STRATEGY_REVERSE = 'reverse';
     public const STRATEGY_BLOCKED = 'blocked';
 
+    /** Zdroje, které přeúčtování umí. Mzdy schválně chybí — {@see PostingService::reverse()}. */
+    public const SOURCES = ['invoice', 'purchase_invoice', 'bank'];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PostingService $posting,
@@ -50,13 +54,14 @@ final class DocumentRepostService
         private readonly AccountingPeriodRepository $periods,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly ActivityLogger $activity,
+        private readonly BankPostingService $bankPosting,
     ) {}
 
     /**
      * Co se s dokladem stane, kdyby se přeúčtoval teď. Čte, nezapisuje — dialog z toho
      * staví hlášku a předvyplní řádky.
      *
-     * @param 'invoice'|'purchase_invoice' $sourceType
+     * @param 'invoice'|'purchase_invoice'|'bank' $sourceType
      *
      * @return array{entry_id:int, entry_date:string, document_no:?string, description:?string,
      *               period_status:?string, locked_until:?string, strategy:string,
@@ -191,7 +196,21 @@ final class DocumentRepostService
      * Provede přeúčtování. Storno i nový zápis běží v JEDNÉ transakci — půlka operace
      * by nechala doklad buď dvakrát zaúčtovaný, nebo bez zápisu vůbec.
      *
-     * @param 'invoice'|'purchase_invoice' $sourceType
+     * U zdroje `bank` projdou řádky NAVÍC bankovními invarianty
+     * ({@see BankPostingService::prepareRepostLines()}): pohyb na 221 musí sedět na
+     * částku výpisu a bankovní noha jde na analytiku vlastního účtu. Bez toho by
+     * obecné přeúčtování bylo dírou vedle ručního zaúčtování, kde tytéž kontroly
+     * platí — a přesně takhle vzniká drift mezi dvěma cestami k témuž zápisu.
+     *
+     * Storno ani idempotence banky se tím nemění: zápis vzniká přes
+     * {@see PostingService::postDocument()} se zdrojem ('bank', txId), takže platí týž
+     * unikát nad AKTIVNÍM zápisem a `findBySource` (ORDER BY id DESC) vrátí i po
+     * variantě `reverse` nový živý zápis — `unpost()` tedy stornuje ten správný.
+     * Návrhy v `bank_posting_suggestions` se schválně NEPŘEPISUJÍ: ukazují na zápis,
+     * který automatika opravdu vytvořila, a přeúčtování je ruční zásah účetní
+     * ({@see PostingOriginService} ho z activity_logu pozná a provenienci přebije).
+     *
+     * @param 'invoice'|'purchase_invoice'|'bank' $sourceType
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float}> $lines
      * @param array<string,mixed> $meta audit kontext (user_id, ip, user_agent) + description
      *
@@ -213,6 +232,12 @@ final class DocumentRepostService
             $pdo->beginTransaction();
         }
         try {
+            // Bankovní invarianty se ověřují UVNITŘ transakce a PŘED stornem: jinak by
+            // vadné řádky shodily operaci až po zrušení původního zápisu.
+            if ($sourceType === 'bank') {
+                $lines = $this->bankPosting->prepareRepostLines($supplierId, $docId, $lines);
+            }
+
             // Plán se počítá ZNOVU uvnitř transakce: mezi náhledem a potvrzením mohla
             // proběhnout uzávěrka nebo cizí storno a rozhodnutí by se rozešlo se stavem.
             $plan = $this->plan($supplierId, $sourceType, $docId);

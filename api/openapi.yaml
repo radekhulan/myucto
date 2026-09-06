@@ -9163,9 +9163,12 @@ paths:
         období nebo už stornovaný zápis), `blocked` znamená, že opravu není kam
         zapsat. `date_shifted` říká, že storno i oprava padnou na jiné datum než
         původní zápis — provedení to pak vyžaduje potvrdit.
+
+
+        `bank-transactions` je bankovní pohyb; v deníku má zdroj `bank`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: source, required: true, schema: { type: string, enum: [invoices, purchase-invoices] } }
+        - { in: path, name: source, required: true, schema: { type: string, enum: [invoices, purchase-invoices, bank-transactions] } }
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
         '200':
@@ -9191,9 +9194,14 @@ paths:
         zápisem. Když plán hlásí `date_shifted`, je nutné poslat
         `confirm_date_shift: true`; bez něj se operace odmítne s 409
         `repost_date_shift_confirmation_required` a datum se nikdy neposune samo.
+
+
+        U `bank-transactions` platí navíc bankovní invarianty ručního zaúčtování:
+        pohyb na účtu 221 musí sedět na částku výpisu a bankovní noha se doplní na
+        analytiku vlastního účtu. Nesedící řádky vrátí 422.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: source, required: true, schema: { type: string, enum: [invoices, purchase-invoices] } }
+        - { in: path, name: source, required: true, schema: { type: string, enum: [invoices, purchase-invoices, bank-transactions] } }
         - { in: path, name: id, required: true, schema: { type: integer } }
       requestBody:
         required: true
@@ -9238,6 +9246,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/journal/posting-origin/{source}/{id}:
+    get:
+      tags: [Accounting]
+      summary: Podle jaké šablony kontace dokladu vznikla
+      description: >-
+        Vrstvy, které o kontaci rozhodly, a kde se opraví. Vydaná faktura má
+        předkontaci podle klíče výnosu na hlavičce (výchozí `invoice.services.issued`),
+        přijatá faktura předkontace podle druhu výdaje na řádcích plus nákladové
+        pravidlo, bankovní pohyb pravidlo účtování, vestavěné rozpoznání, naučenou
+        kontaci nebo předkontace `payment.*` u spárované platby.
+
+
+        Šablona se odvozuje z DNEŠNÍHO nastavení, ne z okamžiku účtování — nikde se
+        neukládá „tenhle zápis vyrobila předkontace X". Proto `presets[].used` říká,
+        jestli se účty šablony v zápisu opravdu objevily, a `origin: manual_repost`
+        přebíjí všechno ostatní (kontaci ručně opravila účetní).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: source, required: true, schema: { type: string, enum: [invoices, purchase-invoices, bank-transactions] } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalPostingOrigin' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/journal/post-invoices-bulk:
@@ -22508,6 +22544,67 @@ components:
         reversal_entry_id: { type: [integer, "null"], description: Protizápis, když se původní zápis stornoval }
         entry_date: { type: string, format: date }
         date_shifted: { type: boolean }
+
+    JournalPostingOrigin:
+      type: object
+      description: >-
+        Vrstvy, které rozhodly o kontaci dokladu, a odkaz na jejich opravu.
+      properties:
+        source_type: { type: string, enum: [invoice, purchase_invoice, bank] }
+        entry_id:
+          type: [integer, "null"]
+          description: Aktivní (nestornovaný) zápis dokladu; null = doklad není zaúčtovaný
+        posted: { type: boolean }
+        origin:
+          type: string
+          enum: [preset, expense_rule, rule, detector, learned, matched, schedule, ai, manual, manual_repost, unknown]
+          description: >-
+            Hlavní vrstva. `manual_repost` znamená, že kontaci ručně opravila účetní
+            a šablona ji už nepopisuje; `manual` = zaúčtováno ručně bez šablony;
+            `unknown` = zdroj nelze určit (doklad z doby před evidencí původu).
+        manual_repost:
+          type: [object, "null"]
+          properties:
+            at: { type: string, format: date-time }
+            by: { type: [string, "null"] }
+        detector:
+          type: [string, "null"]
+          description: Klíč vestavěného rozpoznání bankovního pohybu (např. own_transfer)
+        presets:
+          type: array
+          description: Předkontace z `posting_rules`, které na doklad podle dnešního nastavení sedí
+          items:
+            type: object
+            properties:
+              rule_key: { type: string }
+              description: { type: [string, "null"] }
+              debit_account_code: { type: [string, "null"] }
+              credit_account_code: { type: [string, "null"] }
+              scope:
+                type: [string, "null"]
+                enum: [global, company, null]
+                description: '`company` = firemní override, `global` = systémový výchozí, null = předkontace chybí'
+              exists: { type: boolean }
+              reason:
+                type: string
+                enum: [revenue_key, expense_kind, payment_match, default]
+                description: Proč zrovna tenhle klíč
+              used:
+                type: boolean
+                description: >-
+                  Objevily se účty předkontace (prefixem, kvůli analytice) v zápisu?
+                  `false` = kontace vznikla jinak, šablona ji nepopisuje.
+        rules:
+          type: array
+          description: Pravidla, která o kontaci rozhodla — nákladové u přijaté faktury, bankovní u pohybu
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [expense, bank] }
+              id: { type: integer }
+              name: { type: [string, "null"] }
+              exists: { type: boolean, description: 'false = pravidlo se od zaúčtování smazalo, stopa zůstala' }
+              is_active: { type: [boolean, "null"] }
 
     PurchaseInvoiceExpenseClassification:
       type: object
