@@ -16659,7 +16659,9 @@
       "recurring_reminder_sent": "Recurring draft reminder",
       "test": "Test e-mail",
       "test_reminder": "Test reminder",
-      "profile_test": "Sending profile test"
+      "profile_test": "Sending profile test",
+      "password_link_sent": "Password setup link",
+      "forgot_sent": "Forgotten password reset"
     }
   },
   "smtp_logs": {

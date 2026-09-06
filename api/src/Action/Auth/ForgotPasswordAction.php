@@ -153,6 +153,7 @@ final class ForgotPasswordAction
             // Email se nepovedl, ale uživateli dál tváříme úspěch
             $sent = false;
             $this->logger->log('auth.forgot_mail_failed', (int) $user['id'], 'user', (int) $user['id'], [
+                'to' => [(string) $user['email']],
                 'error' => $e->getMessage(),
             ], $ip, $request->getHeaderLine('User-Agent'));
         }
@@ -188,7 +189,9 @@ final class ForgotPasswordAction
 
         // Per-IP limit řeší RateLimitMiddleware, per-email buckety výše.
         // Dříve jsme zde volali recordFailure i při success — matoucí semantika, RateLimit teď pokrývá lépe.
-        $this->logger->log('auth.forgot_sent', (int) $user['id'], 'user', (int) $user['id'], null, $ip, $request->getHeaderLine('User-Agent'));
+        $this->logger->log('auth.forgot_sent', (int) $user['id'], 'user', (int) $user['id'], [
+            'to' => [(string) $user['email']],
+        ], $ip, $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, ['ok' => true], 204);
     }

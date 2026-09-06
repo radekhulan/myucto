@@ -261,8 +261,9 @@ při výpočtu vezme poslední sazbu s datem platnosti ≤ rozhodný den. Admin 
 
 V **Systém → Odeslané e-maily** je přehled **všech** e-mailů, které aplikace
 rozeslala — odeslání faktur, upomínky, schvalovací upomínky, poděkování za
-úhradu, připomínky konceptů i testovací odeslání. Automatické (cron) odeslání
-jsou připsána „Systému".
+úhradu, připomínky konceptů, odkazy na nastavení hesla (pozvánka nového
+uživatele i znovuposlání), obnovu zapomenutého hesla a testovací odeslání.
+Automatické (cron) odeslání jsou připsána „Systému".
 
 Přehled ukazuje **i neúspěšná odeslání**: když odeslání selže (nedostupný SMTP,
 odmítnutý příjemce, chyba při generování PDF), zapíše se červený řádek se stavem

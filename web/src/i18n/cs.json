@@ -16659,7 +16659,9 @@
       "recurring_reminder_sent": "Koncept pravidelné faktury",
       "test": "Testovací e-mail",
       "test_reminder": "Testovací upomínka",
-      "profile_test": "Test odesílacího profilu"
+      "profile_test": "Test odesílacího profilu",
+      "password_link_sent": "Odkaz na nastavení hesla",
+      "forgot_sent": "Obnova zapomenutého hesla"
     }
   },
   "smtp_logs": {

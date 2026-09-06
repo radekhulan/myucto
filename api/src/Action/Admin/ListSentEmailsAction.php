@@ -45,6 +45,8 @@ final class ListSentEmailsAction
         'email.sent_test'                => 'email.test_failed',
         'email.sent_test_reminder'       => 'email.test_reminder_failed',
         'email.sent_profile_test'        => 'email.profile_test_failed',
+        'user.password_link_sent'        => 'user.invite_mail_failed',
+        'auth.forgot_sent'               => 'auth.forgot_mail_failed',
     ];
 
     public function __construct(private readonly Connection $db) {}

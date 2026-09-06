@@ -143,13 +143,17 @@ final class UserAdminAction
         if (!$sent) {
             return Json::error($response, 'mail_failed', 'Odkaz se nepodařilo odeslat. Zkontrolujte nastavení odchozí pošty.', 502);
         }
-        $this->log($request, 'user.password_link_sent', $id, ['email' => $row['email']]);
 
         return Json::ok($response, ['ok' => true]);
     }
 
     /**
      * Vydá jednorázový odkaz a pošle ho uživateli. Vrací, jestli mail odešel.
+     *
+     * Loguje se tady, ne u volajících: obě cesty (pozvánka při založení účtu
+     * i pozdější znovuposlání) posílají tentýž e-mail, takže musí skončit
+     * jedním párem akcí `user.password_link_sent` / `user.invite_mail_failed`
+     * — jinak jedna z nich chybí v přehledu odeslaných e-mailů.
      *
      * @param 'setup'|'reset' $purpose
      */
@@ -167,7 +171,7 @@ final class UserAdminAction
                 ? $this->passwordSetupLinks->issue($this->db->pdo(), $userId, $ip)
                 : $this->passwordSetupLinks->issueReset($this->db->pdo(), $userId, $ip);
             $appUrl = rtrim((string) $this->config->get('app.url', ''), '/');
-            $this->mailer->sendTemplate(
+            $smtpResponse = $this->mailer->sendTemplate(
                 'user_invite',
                 in_array($locale, ['cs', 'en'], true) ? $locale : 'cs',
                 [$email],
@@ -177,11 +181,18 @@ final class UserAdminAction
                     'expiresIn' => PasswordSetupLinkIssuer::SETUP_TTL_HOURS . ' hodin',
                 ],
             );
+            $this->log($request, 'user.password_link_sent', $userId, [
+                'to' => [$email],
+                'purpose' => $purpose,
+                'smtp_response' => $smtpResponse,
+            ]);
             return true;
         } catch (\Throwable $e) {
-            $this->logger->log('user.invite_mail_failed', $userId, 'user', $userId, [
+            $this->log($request, 'user.invite_mail_failed', $userId, [
+                'to' => [$email],
+                'purpose' => $purpose,
                 'error' => $e->getMessage(),
-            ], $ip, $request->getHeaderLine('User-Agent'));
+            ]);
             return false;
         }
     }

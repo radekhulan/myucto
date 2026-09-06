@@ -49,6 +49,8 @@ const EMAIL_TYPES: Record<string, { key: string; badge: string }> = {
   'email.sent_test':                { key: 'test',                    badge: 'bg-neutral-100 text-neutral-600' },
   'email.sent_test_reminder':       { key: 'test_reminder',           badge: 'bg-neutral-100 text-neutral-600' },
   'email.sent_profile_test':        { key: 'profile_test',            badge: 'bg-neutral-100 text-neutral-600' },
+  'user.password_link_sent':        { key: 'password_link_sent',      badge: 'bg-primary-100 text-primary-700' },
+  'auth.forgot_sent':               { key: 'forgot_sent',             badge: 'bg-primary-100 text-primary-700' },
 }
 
 function typeLabel(action: string): string {
