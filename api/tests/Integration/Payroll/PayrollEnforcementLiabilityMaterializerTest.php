@@ -769,7 +769,7 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         $payload['insolvency_mode'] = 'alert_only';
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('jen ke standardnímu schválenému oddlužení');
+        $this->expectExceptionMessage('jen ke schválenému oddlužení nebo k soudem určené splátce');
         $this->enforcement->saveMonthEvidence(
             $this->supplierId,
             $this->employeeId,

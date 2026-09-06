@@ -349,19 +349,43 @@ final class PostingServiceTest extends TestCase
         self::assertStringStartsWith('STORNO ', (string) $reversal['document_no']);
     }
 
-    public function testReversedEntryRepostRefused(): void
+    public function testRepostAfterReversalCreatesNewEntryInsteadOfTouchingTheOriginal(): void
     {
-        // Regrese (audit HIGH #2): re-post STORNOVANÉHO zápisu nesmí přepsat original
-        // in-place — jinak zůstane viset protizápis na staré částky → nevyrovnané knihy.
+        // Regrese (audit HIGH #2): re-post STORNOVANÉHO zápisu nesmí přepsat
+        // original in-place — jinak zůstane viset protizápis na staré částky
+        // → nevyrovnané knihy. Původně se proto odmítal úplně, jenže tím se
+        // stornovaný doklad nedal zaúčtovat vůbec. Idempotence se teď ptá na
+        // AKTIVNÍ zápis, takže vznikne NOVÝ; original i storno zůstanou.
         $client    = $this->client('Odběratel s.r.o.', true, false);
         $invoiceId = $this->sale('FV-2099-007', $client, '1', 1000.00, 210.00, 21.00);
         $lines     = $this->posting->buildFromInvoice($this->supplierId, $invoiceId);
         $entryId   = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, $lines, ['entry_date' => self::YEAR . '-06-15']);
         $this->posting->reverse($this->supplierId, $entryId, ['entry_date' => self::YEAR . '-06-30']);
 
-        $this->expectException(PostingException::class);
-        $this->expectExceptionMessageMatches('/stornov/u');
-        $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, $lines, ['entry_date' => self::YEAR . '-06-15']);
+        $repostedId = $this->posting->postDocument(
+            $this->supplierId,
+            'invoice',
+            $invoiceId,
+            $lines,
+            ['entry_date' => self::YEAR . '-06-15'],
+        );
+
+        self::assertNotSame($entryId, $repostedId, 'Přeúčtování musí založit nový zápis.');
+        $original = $this->fetchEntry($entryId);
+        self::assertNotNull($original['reversed_by'] ?? null, 'Původní zápis musí zůstat stornovaný.');
+    }
+
+    /** @return array<string,mixed> */
+    private function fetchEntry(int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM journal_entries WHERE supplier_id = ? AND id = ?',
+        );
+        $stmt->execute([$this->supplierId, $entryId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($row, 'Původní zápis musí v deníku zůstat.');
+
+        return $row;
     }
 
     public function testRepositoryReplaceRejectsStaleReversedEntry(): void
