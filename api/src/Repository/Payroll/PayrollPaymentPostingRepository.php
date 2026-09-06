@@ -100,9 +100,15 @@ final class PayrollPaymentPostingRepository
      * `reversed_by IS NULL` je podstatné: stornovaný bankovní zápis pohyb
      * neblokuje, protože v knihách po sobě nenechal zůstatek.
      *
+     * `evidence_source` je zdroj pohybu (`statement` = oficiální výpis,
+     * `email_notice`/`idoklad` = provizorní avízo). Mzdová strana ho potřebuje
+     * ze stejného důvodu jako {@see \MyInvoice\Service\Accounting\Bank\BankPostingService}:
+     * z avíza se neúčtuje, protože týž pohyb ještě jednou dorazí výpisem.
+     *
      * @return array{
      *   recipient_account:?string,
      *   recipient_bank:?string,
+     *   evidence_source:string,
      *   bank_entry_id:?int
      * }|null
      */
@@ -114,6 +120,7 @@ final class PayrollPaymentPostingRepository
         $statement = $this->db->pdo()->prepare(
             'SELECT statement.account_number AS recipient_account,
                     statement.bank_code AS recipient_bank,
+                    bank_tx.source AS evidence_source,
                     (SELECT entry.id
                        FROM journal_entries entry
                       WHERE entry.supplier_id = ?
@@ -145,6 +152,7 @@ final class PayrollPaymentPostingRepository
             'recipient_bank' => $row['recipient_bank'] === null
                 ? null
                 : (string) $row['recipient_bank'],
+            'evidence_source' => (string) ($row['evidence_source'] ?? 'statement'),
             'bank_entry_id' => $row['bank_entry_id'] === null
                 ? null
                 : (int) $row['bank_entry_id'],

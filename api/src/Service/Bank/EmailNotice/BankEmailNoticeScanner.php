@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Bank\EmailNotice;
 
 use MyInvoice\Repository\BankEmailNoticeRepository;
 use MyInvoice\Service\Bank\StatementMatcher;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeProvider;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository;
 
@@ -17,6 +18,11 @@ final class BankEmailNoticeScanner
         private readonly ImapMailboxClientInterface $imap,
         private readonly StatementMatcher $matcher,
         private readonly EmailAuthenticationVerifier $authVerifier = new EmailAuthenticationVerifier(),
+        /**
+         * Rozpoznání zaplacených mzdových odvodů. Nepovinné: skener musí běžet
+         * i na instalaci bez mzdového modulu a v jednotkových testech parserů.
+         */
+        private readonly ?PayrollPaymentSettlementRecognizer $payrollSettlements = null,
     ) {}
 
     /**
@@ -50,6 +56,20 @@ final class BankEmailNoticeScanner
             $summary['accounts'][] = $accountSummary;
             foreach (['fetched', 'processed', 'matched', 'known_skipped', 'old_skipped', 'security_rejected', 'errors', 'postprocess_errors'] as $key) {
                 $summary[$key] += (int) ($accountSummary[$key] ?? 0);
+            }
+        }
+
+        // Odvod na ZP/SP/daň má vlastní variabilní symbol, takže čerstvé avízo
+        // často jednoznačně říká „tenhle mzdový závazek je zaplacený". Hlídač
+        // termínů to má vědět hned, ne až z výpisu na konci měsíce.
+        if ($summary['processed'] > 0) {
+            try {
+                $summary['payroll_settlements'] = $this->payrollSettlements
+                    ?->recognizeForSupplier($supplierId);
+            } catch (\Throwable $exception) {
+                // Rozpoznani je nadstavba — nesmi shodit sken posty.
+                $summary['postprocess_errors']++;
+                $summary['payroll_settlement_error'] = $exception->getMessage();
             }
         }
 

@@ -186,6 +186,16 @@ final class PayrollPaymentPostingService
         if ($evidence['bank_entry_id'] !== null) {
             return self::outcome('posted_elsewhere', $evidence['bank_entry_id']);
         }
+        // Avízo je provizorní duplikát: týž pohyb dorazí ještě jednou oficiálním
+        // výpisem a teprve ten se účtuje (shodně
+        // {@see \MyInvoice\Service\Accounting\Bank\BankPostingService} „Avízo se
+        // neúčtuje"). Platba se přesto spáruje — závazek JE zaplacený a přehled
+        // termínů to má vědět hned. Zápis dožene
+        // {@see \MyInvoice\Service\Bank\EmailNoticeReconciler}, až párování
+        // převezme GPC transakce.
+        if ($evidence['evidence_source'] !== 'statement') {
+            return self::outcome('skipped', null, 'email_notice_provisional');
+        }
 
         $liability = $this->repository->liability(
             $supplierId,

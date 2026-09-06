@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Payment;
 
 use DomainException;
 use MyInvoice\Repository\Payroll\PayrollPaymentMatchRepository;
+use MyInvoice\Repository\Payroll\PayrollPaymentSettlementSignalRepository;
 
 final class PayrollPaymentReconciliationService
 {
@@ -21,7 +22,36 @@ final class PayrollPaymentReconciliationService
          * druhé viset.
          */
         private readonly ?PayrollPaymentPostingService $posting = null,
+        /**
+         * Provizorní signály úhrady (avízo, ruční prohlášení) — migrace 1750.
+         *
+         * Nepovinný ze stejného důvodu jako protizápis: platební kniha musí jít
+         * použít i bez nich. Kde repozitář je, uzavře skutečná úhrada signál
+         * VŽDY a na jednom místě — jinak by termín zůstal zhasnutý „z avíza"
+         * i poté, co ho zaplatila jiná platba, nebo by se naopak nezhasl vůbec.
+         */
+        private readonly ?PayrollPaymentSettlementSignalRepository $signals = null,
     ) {}
+
+    /**
+     * Skutečná úhrada přebíjí provizorní signál — ať přišel z avíza, nebo ho
+     * napsala účetní. Selhání se polyká: signál je informativní vrstva a nesmí
+     * shodit zaúčtovanou platbu.
+     */
+    private function resolveSignals(
+        int $supplierId,
+        ?int $liabilityId,
+        int $matchId,
+    ): void {
+        if ($liabilityId === null || $liabilityId <= 0) {
+            return;
+        }
+        try {
+            $this->signals?->resolveForLiability($supplierId, $liabilityId, $matchId);
+        } catch (\PDOException) {
+            // Starší schéma bez tabulky signálů.
+        }
+    }
 
     /**
      * Zaúčtuje pohyb spárování a výsledek vrátí v načteném řádku.
@@ -143,6 +173,11 @@ final class PayrollPaymentReconciliationService
                 );
             }
             $this->postMatch($command->supplierId, $stored, $command->matchedBy);
+            $this->resolveSignals(
+                $command->supplierId,
+                $allocation['liability_id'],
+                $matchId,
+            );
 
             return $this->result($stored, false);
         });
@@ -713,6 +748,22 @@ final class PayrollPaymentReconciliationService
             ) {
                 throw new DomainException(
                     'Bankovní pohyb už vlastní bankovní reconciliation.',
+                );
+            }
+            // Avízo (e-mail z banky, iDoklad) NENÍ platební důkaz. Týž pohyb
+            // dorazí ještě jednou oficiálním výpisem, jenže `payroll_payment_matches`
+            // je nemazatelný a needitovatelný — párování z avíza by se na výpis
+            // NEDALO přenést tak, jak to u faktur umí
+            // {@see \MyInvoice\Service\Bank\EmailNoticeReconciler}. Zůstal by
+            // uzavřený závazek bez zápisu v deníku a vedle něj volný pohyb
+            // z výpisu, který jde omylem spárovat podruhé.
+            //
+            // Že je odvod zaplacený, se z avíza pozná jinou cestou: provizorní
+            // signál ({@see \MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer}),
+            // který zhasne termín, ale salda se nedotkne.
+            if ($evidence['source'] !== 'statement') {
+                throw new DomainException(
+                    'Bankovní avízo je jen provizorní — úhradu spárujte až z výpisu.',
                 );
             }
             $signedMinor = $this->decimalToMinor(

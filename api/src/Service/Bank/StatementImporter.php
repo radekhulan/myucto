@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer;
 use PDO;
 
 /**
@@ -26,6 +27,9 @@ final class StatementImporter
         // Nullable — best-effort hook, fakturační tenant / tax_evidence = no-op.
         private readonly ?BankPostingService $bankPosting = null,
         private readonly ?SupplierBankAccountRepository $ownAccounts = null,
+        // Mzdové odvody: výpis je zdroj pravdy, takže tady vzniká SKUTEČNÁ úhrada
+        // a provizorní signál z avíza se uzavírá. Nullable — instalace bez mezd.
+        private readonly ?PayrollPaymentSettlementRecognizer $payrollSettlements = null,
     ) {}
 
     /**
@@ -283,6 +287,14 @@ final class StatementImporter
 
         $pdo->prepare('UPDATE bank_statements SET matched_count = ?, transaction_count = ? WHERE id = ?')
             ->execute([$matched, $inserted, $statementId]);
+
+        if ($statementSupplierId !== null && $inserted > 0) {
+            try {
+                $this->payrollSettlements?->recognizeForSupplier($statementSupplierId, $userId);
+            } catch (\Throwable) {
+                // Rozpoznání mzdových úhrad je nadstavba — nesmí shodit import výpisu.
+            }
+        }
 
         // Rozdíl „řádků v souboru" × „založených pohybů" se nesmí ztratit v tichu: přesně
         // tohle skrývalo tichou ztrátu dat, protože jediný způsob, jak si toho všimnout,

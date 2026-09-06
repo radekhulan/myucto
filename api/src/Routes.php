@@ -939,6 +939,15 @@ final class Routes
             $g->get('/payments/reconciliation', [PayrollPaymentAction::class, 'listReconciliation']);
             $g->get('/payments/reconciliation/options', [PayrollPaymentAction::class, 'searchReconciliationOptions']);
             $g->post('/payments/reconciliation/matches', [PayrollPaymentAction::class, 'matchPayment']);
+            $g->post('/payments/reconciliation/recognize', [PayrollPaymentAction::class, 'recognizeSettlements']);
+            $g->post(
+                '/payments/liabilities/{liabilityId:[0-9]+}/settlement-signal',
+                [PayrollPaymentAction::class, 'declareSettlement'],
+            );
+            $g->delete(
+                '/payments/liabilities/{liabilityId:[0-9]+}/settlement-signal',
+                [PayrollPaymentAction::class, 'revokeSettlementDeclaration'],
+            );
             $g->post('/payments/reconciliation/reversals', [PayrollPaymentAction::class, 'reversePayment']);
             $g->post(
                 '/payments/reconciliation/incoming-refunds',

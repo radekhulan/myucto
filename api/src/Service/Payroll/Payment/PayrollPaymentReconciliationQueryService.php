@@ -919,6 +919,10 @@ final class PayrollPaymentReconciliationQueryService
                 AND bank_transaction.amount <> 0
                 AND bank_transaction.matched_invoice_id IS NULL
                 AND bank_transaction.match_status = "unmatched"
+                -- Avízo se v nabídce neobjeví: párovat se smí až oficiální
+                -- výpis (viz PayrollPaymentReconciliationService::assertEvidence()).
+                -- Že odvod odešel, hlásí do té doby provizorní signál.
+                AND bank_transaction.source = "statement"
                 AND NOT EXISTS (
                   SELECT 1 FROM invoice_payments invoice_payment
                    WHERE invoice_payment.bank_transaction_id =

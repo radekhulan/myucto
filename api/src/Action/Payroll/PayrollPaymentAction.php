@@ -30,6 +30,8 @@ use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationResult;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReversalCommand;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementDeclarationService;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationConflictException;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
 use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
@@ -79,6 +81,10 @@ final class PayrollPaymentAction
          * přechod stavu nepovede.
          */
         private readonly PayrollRunAutoSettlementService $autoSettlement,
+        // Ruční „Zaplatil jsem" a rozpoznání úhrady z bankovních pohybů —
+        // obojí jen kolem platební knihy, nikdy místo ní.
+        private readonly PayrollPaymentSettlementDeclarationService $settlementDeclarations,
+        private readonly PayrollPaymentSettlementRecognizer $settlementRecognizer,
     ) {}
 
     /** @param array<string,string> $args */
@@ -365,6 +371,152 @@ final class PayrollPaymentAction
         return Json::ok($response, $result + ['kind' => trim($kindValue)])
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * POST /payroll/payments/liabilities/{liabilityId}/settlement-signal
+     *
+     * „Zaplatil jsem" — účetní potvrdí, že odvod odešel z banky, kterou
+     * aplikace nevidí. Termín zhasne, saldo se NEZMĚNÍ (viz
+     * {@see PayrollPaymentSettlementDeclarationService}).
+     *
+     * @param array<string,string> $args
+     */
+    public function declareSettlement(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize(
+            $request,
+            $response,
+            'payroll.payments',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $this->errorResponse($error);
+        }
+        $liabilityId = (int) ($args['liabilityId'] ?? 0);
+        $body = $request->getParsedBody();
+        if ($body !== null && (!is_array($body) || array_is_list($body))) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Tělo požadavku musí být objekt.',
+                422,
+            );
+        }
+        $body = is_array($body) ? $body : [];
+        $paidOn = $body['paid_on'] ?? null;
+        $note = $body['note'] ?? null;
+        if (($paidOn !== null && !is_string($paidOn))
+            || ($note !== null && !is_string($note))
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Datum úhrady i poznámka musí být text.',
+                422,
+            );
+        }
+        $userId = $this->userId($request);
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $result = $this->settlementDeclarations->declare(
+                $supplierId,
+                $liabilityId,
+                $paidOn,
+                $note,
+                $userId,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'settlement_declaration_blocked', $exception->getMessage(), 409);
+        }
+        if ($result['created'] && $userId !== null) {
+            $this->logPaymentActivity(
+                $request,
+                'payroll.settlement_declared',
+                'payroll_payment_liability',
+                $liabilityId,
+                [
+                    'paid_on' => $result['paid_on'],
+                    'amount_minor' => $result['amount_minor'],
+                ],
+                $supplierId,
+                $userId,
+            );
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * DELETE /payroll/payments/liabilities/{liabilityId}/settlement-signal
+     *
+     * @param array<string,string> $args
+     */
+    public function revokeSettlementDeclaration(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize(
+            $request,
+            $response,
+            'payroll.payments',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $this->errorResponse($error);
+        }
+        $liabilityId = (int) ($args['liabilityId'] ?? 0);
+        $supplierId = $this->currentSupplierId($request);
+        $removed = $this->settlementDeclarations->revoke($supplierId, $liabilityId);
+        $userId = $this->userId($request);
+        if ($removed && $userId !== null) {
+            $this->logPaymentActivity(
+                $request,
+                'payroll.settlement_declaration_revoked',
+                'payroll_payment_liability',
+                $liabilityId,
+                [],
+                $supplierId,
+                $userId,
+            );
+        }
+
+        return Json::ok($response, ['removed' => $removed]);
+    }
+
+    /**
+     * POST /payroll/payments/reconciliation/recognize
+     *
+     * Ruční spuštění téhož rozpoznání, které jinak běží po importu výpisu
+     * a po skenu e-mailových avíz.
+     *
+     * @param array<string,string> $args
+     */
+    public function recognizeSettlements(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize(
+            $request,
+            $response,
+            'payroll.payments',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $this->errorResponse($error);
+        }
+
+        return Json::ok($response, $this->settlementRecognizer->recognizeForSupplier(
+            $this->currentSupplierId($request),
+            $this->userId($request),
+        ));
     }
 
     /** @param array<string,string> $args */

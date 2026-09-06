@@ -20,24 +20,46 @@ Je nutný uzavřený běh, oprávnění `payroll.payments`, správné účty, te
 
 Připravená platba není odeslaná. Exportovaná čeká na autorizaci v bance. Uhrazená má odpovídající bankovní pohyb; částečně uhrazená nebo zamítnutá vyžaduje další krok.
 
-## 65.5 Kontroly a bezpečnost
+## 65.5 Rozpoznání zaplacených odvodů
+
+Odvod na zdravotní pojišťovnu, ČSSZ i zálohovou daň má vlastní variabilní
+symbol, takže odchozí platbu aplikace pozná sama. Rozpoznání běží automaticky
+po importu bankovního výpisu i po skenu e-mailových avíz; spustit ho ručně jde
+tlačítkem **Načíst platby z banky**. Přiřadí se jen pohyb, u kterého sedí
+variabilní symbol i částka a který je jednoznačný — dvě stejně vzdálené platby
+aplikace raději nechá účetní.
+
+Rozhoduje zdroj pohybu:
+
+- **Bankovní výpis** je doklad. Vznikne z něj skutečná úhrada se vším všudy:
+  zápis v platební knize, snížení salda i účetní protizápis.
+- **E-mailové avízo** dokladem není — týž pohyb dorazí ještě jednou výpisem.
+  Vznikne z něj proto jen poznámka **Zaplaceno dle avíza**: termín přestane
+  upomínat, ale závazek zůstane v saldu otevřený, dokud nedorazí výpis. Ten
+  poznámku automaticky vystřídá skutečnou úhradou.
+
+Když banka avíza neposílá, poslouží tlačítko **Zaplatil jsem** u konkrétního
+závazku. Platí pro něj totéž: termín zhasne, saldo se nemění a označení jde
+kdykoli zrušit. Účetně úhradu doloží až bankovní výpis.
+
+## 65.6 Kontroly a bezpečnost
 
 Jedna účetní může připravit i dokončit celý tok. Při změně účtu aplikace vyžaduje ověřený podklad; před vytvořením příkazu porovnejte součet plateb s uzavřeným během a účetními závazky. Bankovní export chraňte jako citlivý soubor a po přenosu jej nenechávejte na sdíleném místě.
 
-## 65.6 Časté chyby
+## 65.7 Časté chyby
 
 - Považování exportu za odeslanou platbu.
 - Starý účet zaměstnance nebo instituce.
 - Duplicitní export či ruční platba.
 - Spárování podobné částky z jiného období.
 
-## 65.7 Návaznosti
+## 65.8 Návaznosti
 
 Částky pocházejí z [mzdového běhu](63_Mzdove_behy.md), účetní závazky kontroluje [shoda účtování](64_Shoda_uctovani_mezd.md) a příjemce srážek popisují [kapitoly 58l](70_Dohody_o_srazkach.md) a [58m](71_Srazky_a_exekuce.md).
 
 
 
-## 65.8 Podrobný pracovní postup a kontroly
+## 65.9 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Mzdové příkazy a úhrady** vybereš mzdové období a připravíš platební
 závazky z aktuálních schválených revizí. Čistá mzda se vždy odvozuje z částky

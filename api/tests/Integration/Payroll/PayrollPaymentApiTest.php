@@ -579,6 +579,12 @@ final class PayrollPaymentApiTest extends TestCase
             $this->container->get(
                 \MyInvoice\Service\Payroll\Run\PayrollRunAutoSettlementService::class,
             ),
+            $this->container->get(
+                \MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementDeclarationService::class,
+            ),
+            $this->container->get(
+                \MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer::class,
+            ),
         );
 
         try {

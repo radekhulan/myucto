@@ -35,6 +35,14 @@ export interface PayrollPaymentLiability {
   allocated_minor: number
   settled_minor: number
   state: PayrollPaymentLiabilityState
+  /**
+   * Provizorní důkaz úhrady — bankovní avízo (`bank_notice`) nebo ruční
+   * prohlášení účetní (`manual`). NENÍ to platba: `settled_minor` ani `state`
+   * se jím nemění, závazek zůstává v saldu otevřený. Umí jen zhasnout termín
+   * v hlídači a ukázat se tady jako badge.
+   */
+  settlement_signal: 'bank_notice' | 'manual' | null
+  settlement_signal_paid_on: string | null
   created_at: string
 }
 
@@ -322,6 +330,24 @@ export const payrollPaymentsApi = {
     api.post<PayrollPaymentBatchResult>(
       '/payroll/payments/batches',
       payload,
+    ).then(response => response.data),
+  declareSettlement: (liabilityId: number, payload: { paid_on?: string; note?: string }) =>
+    api.post<{
+      liability_id: number
+      paid_on: string
+      amount_minor: number
+      created: boolean
+    }>(
+      `/payroll/payments/liabilities/${liabilityId}/settlement-signal`,
+      payload,
+    ).then(response => response.data),
+  revokeSettlementDeclaration: (liabilityId: number) =>
+    api.delete<{ removed: boolean }>(
+      `/payroll/payments/liabilities/${liabilityId}/settlement-signal`,
+    ).then(response => response.data),
+  recognizeSettlements: () =>
+    api.post<{ matched: number; signalled: number; ambiguous: number }>(
+      '/payroll/payments/reconciliation/recognize',
     ).then(response => response.data),
   reconciliation: (period: string, page?: PayrollPageParams) =>
     api.get<PayrollPaymentReconciliation>(

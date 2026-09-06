@@ -1300,6 +1300,24 @@
       "materialize_blocked": "Závazky vzniknou až ze schválené revize mzdového běhu. Nejdřív schvalte revizi za toto období v Mzdových bězích.",
       "materialize_blocked_unknown": "Nevíme, jestli je co připravit — mzdové běhy se pro toto období nenačetly. Zkuste načtení zopakovat.",
       "materialize_blocked_link": "Otevřít mzdové běhy",
+      "settlement_signal": {
+        "declare": "Zaplatil jsem",
+        "revoke": "Zrušit označení",
+        "declared": "Označeno jako zaplacené. Termín zhasne, závazek zůstane v saldu otevřený, dokud nedorazí bankovní výpis.",
+        "declare_failed": "Označit jako zaplacené se nepodařilo.",
+        "revoked": "Označení zrušeno.",
+        "revoke_failed": "Označení se nepodařilo zrušit.",
+        "hint": "Peníze už z účtu odešly ({date}). Do salda se úhrada promítne až z bankovního výpisu.",
+        "badge": {
+          "bank_notice": "Zaplaceno dle avíza",
+          "manual": "Označeno jako zaplacené"
+        },
+        "recognize": "Načíst platby z banky",
+        "recognize_hint": "Projde nespárované bankovní pohyby a přiřadí odvody, u kterých sedí variabilní symbol i částka.",
+        "recognized": "Spárováno z výpisu: {matched}, rozpoznáno z avíza: {signalled}.",
+        "recognized_none": "Žádnou další úhradu odvodu se v bankovních pohybech najít nepodařilo.",
+        "recognize_failed": "Načtení plateb z banky se nepodařilo."
+      },
       "load_failed_hint": "Závazky za toto období se nenačetly, takže seznam níže může být neúplný nebo zastaralý. Zkuste to prosím znovu."
     },
     "posting_reconciliation": {

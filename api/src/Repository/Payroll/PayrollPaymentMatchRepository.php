@@ -265,7 +265,8 @@ final class PayrollPaymentMatchRepository
      *   amount_decimal:string,
      *   currency_code:string,
      *   match_status:string,
-     *   matched_invoice_id:?int
+     *   matched_invoice_id:?int,
+     *   source:string
      * }|null
      */
     public function lockBankEvidence(
@@ -278,7 +279,8 @@ final class PayrollPaymentMatchRepository
                     CAST(bank_tx.amount AS CHAR) AS amount_decimal,
                     COALESCE(bank_tx.currency, statement.currency)
                         AS currency_code,
-                    bank_tx.match_status, bank_tx.matched_invoice_id
+                    bank_tx.match_status, bank_tx.matched_invoice_id,
+                    bank_tx.source
                FROM bank_statements statement
                JOIN bank_transactions bank_tx
                  ON bank_tx.statement_id = statement.id
@@ -306,6 +308,7 @@ final class PayrollPaymentMatchRepository
                 $row,
                 'matched_invoice_id',
             ),
+            'source' => self::text($row, 'source'),
         ];
     }
 

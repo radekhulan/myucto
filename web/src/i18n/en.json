@@ -1300,6 +1300,24 @@
       "materialize_blocked": "Liabilities are created from an approved payroll run revision. Approve the revision for this period in Payroll runs first.",
       "materialize_blocked_unknown": "We cannot tell whether there is anything to prepare — the payroll runs for this period failed to load. Please try again.",
       "materialize_blocked_link": "Open payroll runs",
+      "settlement_signal": {
+        "declare": "I have paid this",
+        "revoke": "Undo the mark",
+        "declared": "Marked as paid. The deadline stops nagging; the liability stays open in the ledger until the bank statement arrives.",
+        "declare_failed": "The liability could not be marked as paid.",
+        "revoked": "The mark was removed.",
+        "revoke_failed": "The mark could not be removed.",
+        "hint": "The money already left the account ({date}). The ledger is settled only from the bank statement.",
+        "badge": {
+          "bank_notice": "Paid per bank notice",
+          "manual": "Marked as paid"
+        },
+        "recognize": "Read payments from the bank",
+        "recognize_hint": "Scans unmatched bank movements and assigns levies whose variable symbol and amount agree.",
+        "recognized": "Matched from statements: {matched}, recognised from notices: {signalled}.",
+        "recognized_none": "No further levy payment was found in the bank movements.",
+        "recognize_failed": "Reading payments from the bank failed."
+      },
       "load_failed_hint": "The liabilities for this period did not load, so the list below may be incomplete or stale. Please try again."
     },
     "posting_reconciliation": {

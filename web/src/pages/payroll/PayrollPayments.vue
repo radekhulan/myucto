@@ -980,6 +980,70 @@ async function load(): Promise<void> {
   }
 }
 
+/*
+ * „Zaplatil jsem" — záchranná brzda pro odvod zaplacený mimo aplikaci.
+ * Úmyslně NEMĚNÍ saldo: závazek zůstane otevřený, dokud ho neuzavře skutečný
+ * bankovní pohyb. Zhasne jen termín v hlídači, ať účetní nestraší něco, co je
+ * dávno zaplacené (backend: PayrollPaymentSettlementDeclarationService).
+ */
+const declaringLiabilityId = ref<number | null>(null)
+const recognizing = ref(false)
+
+function canDeclareSettlement(item: PayrollPaymentLiability): boolean {
+  return auth.canWrite('payroll.payments')
+    && item.direction === 'outgoing'
+    && item.settlement_signal === null
+    && item.state !== 'settled'
+}
+
+async function declareSettlement(item: PayrollPaymentLiability): Promise<void> {
+  if (!canDeclareSettlement(item) || declaringLiabilityId.value !== null) return
+  declaringLiabilityId.value = item.id
+  try {
+    await payrollPaymentsApi.declareSettlement(item.id, {})
+    toast.success(t('payroll.payments.settlement_signal.declared'))
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.payments.settlement_signal.declare_failed')))
+  } finally {
+    declaringLiabilityId.value = null
+  }
+}
+
+async function revokeSettlement(item: PayrollPaymentLiability): Promise<void> {
+  if (item.settlement_signal !== 'manual' || declaringLiabilityId.value !== null) return
+  declaringLiabilityId.value = item.id
+  try {
+    await payrollPaymentsApi.revokeSettlementDeclaration(item.id)
+    toast.success(t('payroll.payments.settlement_signal.revoked'))
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.payments.settlement_signal.revoke_failed')))
+  } finally {
+    declaringLiabilityId.value = null
+  }
+}
+
+async function recognizeSettlements(): Promise<void> {
+  if (recognizing.value) return
+  recognizing.value = true
+  try {
+    const result = await payrollPaymentsApi.recognizeSettlements()
+    const found = result.matched + result.signalled
+    toast.success(found > 0
+      ? t('payroll.payments.settlement_signal.recognized', {
+          matched: result.matched,
+          signalled: result.signalled,
+        })
+      : t('payroll.payments.settlement_signal.recognized_none'))
+    if (found > 0) await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.payments.settlement_signal.recognize_failed')))
+  } finally {
+    recognizing.value = false
+  }
+}
+
 async function createBatch(): Promise<void> {
   if (!canCreateBatch.value || creatingBatch.value) return
   creatingBatch.value = true
@@ -1505,6 +1569,24 @@ onMounted(load)
           {{ t('payroll.payments.reload') }}
         </button>
         <!--
+          Totéž rozpoznání běží samo po importu výpisu i po skenu avíz; tady je
+          pro případ, kdy účetní nechce čekat na další běh.
+        -->
+        <button
+          v-if="auth.canWrite('payroll.payments')"
+          type="button"
+          :class="btnOutline('success')"
+          :disabled="recognizing"
+          :title="t('payroll.payments.settlement_signal.recognize_hint')"
+          data-test="recognize-settlements"
+          @click="recognizeSettlements"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.badgeCheck" />
+          </svg>
+          {{ t('payroll.payments.settlement_signal.recognize') }}
+        </button>
+        <!--
           Hlavní akce stránky. Když není co zhmotnit, nese s sebou i větu proč —
           dřív to vysvětlení viselo jen v prázdném stavu (`empty_blocked`), takže
           u neprázdného seznamu uživatel mačkal mrtvé tlačítko bez nápovědy.
@@ -1804,11 +1886,47 @@ onMounted(load)
                   </td>
                   <td v-if="tbl.isVisible('settled')" class="whitespace-nowrap px-4 py-3 text-right text-neutral-600">{{ formatMoney(signed(item, item.settled_minor), item.currency_code) }}</td>
                   <td v-if="tbl.isVisible('status')" class="px-4 py-3">
-                    <div class="flex flex-wrap gap-1">
+                    <div class="flex flex-wrap items-center gap-1">
                       <span class="rounded-full px-2 py-1 text-xs font-medium" :class="stateClass(item.state)">{{ stateLabel(item.state) }}</span>
                       <span v-if="item.revision_kind === 'correction'" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">
                         {{ t('payroll.payments.correction') }}
                       </span>
+                      <span
+                        v-if="item.settlement_signal"
+                        class="rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-700"
+                        :title="t('payroll.payments.settlement_signal.hint', {
+                          date: item.settlement_signal_paid_on ? formatDate(item.settlement_signal_paid_on) : '',
+                        })"
+                        data-test="settlement-signal"
+                      >
+                        {{ t(`payroll.payments.settlement_signal.badge.${item.settlement_signal}`) }}
+                      </span>
+                      <button
+                        v-if="canDeclareSettlement(item)"
+                        type="button"
+                        :class="btnOutlineSm('success')"
+                        :disabled="declaringLiabilityId !== null"
+                        data-test="declare-settlement"
+                        @click="declareSettlement(item)"
+                      >
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.checkCircle" />
+                        </svg>
+                        {{ t('payroll.payments.settlement_signal.declare') }}
+                      </button>
+                      <button
+                        v-else-if="item.settlement_signal === 'manual' && auth.canWrite('payroll.payments')"
+                        type="button"
+                        :class="btnOutlineSm('neutral')"
+                        :disabled="declaringLiabilityId !== null"
+                        data-test="revoke-settlement"
+                        @click="revokeSettlement(item)"
+                      >
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.uturn" />
+                        </svg>
+                        {{ t('payroll.payments.settlement_signal.revoke') }}
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1854,6 +1972,15 @@ onMounted(load)
                 <span v-if="item.revision_kind === 'correction'" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">
                   {{ t('payroll.payments.correction') }}
                 </span>
+                <span
+                  v-if="item.settlement_signal"
+                  class="rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-700"
+                  :title="t('payroll.payments.settlement_signal.hint', {
+                    date: item.settlement_signal_paid_on ? formatDate(item.settlement_signal_paid_on) : '',
+                  })"
+                >
+                  {{ t(`payroll.payments.settlement_signal.badge.${item.settlement_signal}`) }}
+                </span>
               </div>
             </div>
             <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -1885,6 +2012,32 @@ onMounted(load)
                 <dd class="mt-0.5 text-neutral-800">{{ formatMoney(signed(item, item.settled_minor), item.currency_code) }}</dd>
               </div>
             </dl>
+            <div v-if="canDeclareSettlement(item) || (item.settlement_signal === 'manual' && auth.canWrite('payroll.payments'))" class="mt-3 flex flex-wrap gap-2">
+              <button
+                v-if="canDeclareSettlement(item)"
+                type="button"
+                :class="btnOutlineSm('success')"
+                :disabled="declaringLiabilityId !== null"
+                @click="declareSettlement(item)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.checkCircle" />
+                </svg>
+                {{ t('payroll.payments.settlement_signal.declare') }}
+              </button>
+              <button
+                v-else
+                type="button"
+                :class="btnOutlineSm('neutral')"
+                :disabled="declaringLiabilityId !== null"
+                @click="revokeSettlement(item)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.uturn" />
+                </svg>
+                {{ t('payroll.payments.settlement_signal.revoke') }}
+              </button>
+            </div>
           </article>
         </section>
 

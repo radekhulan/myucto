@@ -155,7 +155,27 @@ final class PayrollPaymentQueryService
                          AND payment_match.allocation_id = allocation.id
                        WHERE allocation.supplier_id = liability.supplier_id
                          AND allocation.liability_id = liability.id
-                    ) AS settled_minor
+                    ) AS settled_minor,
+                    (
+                      SELECT settlement_signal.origin
+                        FROM payroll_payment_settlement_signals settlement_signal
+                       WHERE settlement_signal.supplier_id = liability.supplier_id
+                         AND settlement_signal.liability_id = liability.id
+                         AND settlement_signal.resolved_at IS NULL
+                       ORDER BY settlement_signal.origin = "manual" DESC,
+                                settlement_signal.id ASC
+                       LIMIT 1
+                    ) AS settlement_signal_origin,
+                    (
+                      SELECT settlement_signal.paid_on
+                        FROM payroll_payment_settlement_signals settlement_signal
+                       WHERE settlement_signal.supplier_id = liability.supplier_id
+                         AND settlement_signal.liability_id = liability.id
+                         AND settlement_signal.resolved_at IS NULL
+                       ORDER BY settlement_signal.origin = "manual" DESC,
+                                settlement_signal.id ASC
+                       LIMIT 1
+                    ) AS settlement_signal_paid_on
                FROM payroll_payment_liabilities liability
                JOIN payroll_run_revisions revision
                  ON revision.supplier_id = liability.supplier_id
@@ -329,6 +349,17 @@ final class PayrollPaymentQueryService
                 'allocated_minor' => $allocated,
                 'settled_minor' => $settled,
                 'state' => self::state($amount, $allocated, $settled),
+                // Provizorní důkaz úhrady (avízo / ruční prohlášení). NENÍ to
+                // platba: `settled_minor` ani `state` se jím nemění, jen
+                // uživatel vidí, že peníze už odešly.
+                'settlement_signal' => self::nullableText(
+                    $row,
+                    'settlement_signal_origin',
+                ),
+                'settlement_signal_paid_on' => self::nullableText(
+                    $row,
+                    'settlement_signal_paid_on',
+                ),
                 'created_at' => self::text($row, 'created_at'),
             ];
         }

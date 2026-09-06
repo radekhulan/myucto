@@ -624,10 +624,30 @@ final class Bootstrap
                 $c->get(\MyInvoice\Repository\AccountingModeRepository::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\BankAnalyticResolver::class),
             ),
-            // Totéž pro ?PayrollPaymentPostingService v párovací službě.
+            // Totéž pro ?PayrollPaymentPostingService a ?PayrollPaymentSettlementSignalRepository
+            // v párovací službě — bez explicitní vazby by zůstal viset zhasnutý
+            // termín z avíza i po skutečné úhradě.
             \MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService(
                 $c->get(\MyInvoice\Repository\Payroll\PayrollPaymentMatchRepository::class),
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollPaymentPostingService::class),
+                $c->get(\MyInvoice\Repository\Payroll\PayrollPaymentSettlementSignalRepository::class),
+            ),
+            // Totéž pro ?LoggerInterface v rozpoznávači úhrad.
+            \MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Repository\Payroll\PayrollPaymentSettlementSignalRepository::class),
+                $c->get(\MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService::class),
+                $c->get(LoggerInterface::class),
+            ),
+            // ?PayrollPaymentSettlementRecognizer je volitelný class-param, který
+            // PHP-DI s useAttributes(false) nevyplní — bez bindu by avízo nikdy
+            // nezhaslo termín zaplaceného odvodu.
+            \MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeScanner::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeScanner(
+                $c->get(\MyInvoice\Repository\BankEmailNoticeRepository::class),
+                $c->get(\MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository::class),
+                $c->get(\MyInvoice\Service\Bank\EmailNotice\ImapMailboxClientInterface::class),
+                $c->get(\MyInvoice\Service\Bank\StatementMatcher::class),
+                payrollSettlements: $c->get(\MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer::class),
             ),
             \MyInvoice\Service\Bank\StatementImporter::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\StatementImporter(
                 $c->get(Connection::class),
@@ -636,6 +656,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Bank\EmailNoticeReconciler::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\BankPostingService::class),
                 $c->get(\MyInvoice\Repository\SupplierBankAccountRepository::class),
+                $c->get(\MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer::class),
             ),
 
             // EntityCache je v obou službách volitelný class-param (kvůli testovacím

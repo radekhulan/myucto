@@ -98,6 +98,11 @@ final readonly class PayrollDeadlineOverviewRepository
      * v evidenci kvůli dohledatelnosti, ale platit se má ta poslední. Jinak
      * by přehled hlásil dva termíny na tentýž odvod.
      *
+     * „Nezaplacený" znamená bez úhrady V PLATEBNÍ KNIZE i bez provizorního
+     * signálu ({@see PayrollPaymentSettlementSignalRepository}). Signál sám
+     * závazek nezavírá — jen tvrdí, že peníze už odešly, a to stačí na to,
+     * aby hlídač termínů přestal strašit odvodem, který je dávno zaplacený.
+     *
      * @return list<array{
      *   liability_id:int,liability_kind:string,due_on:string,
      *   amount_minor:int,settled_minor:int,recipient_reference:string,
@@ -157,6 +162,17 @@ final readonly class PayrollDeadlineOverviewRepository
                 AND liability.due_on <= ?
                 AND liability.amount_minor
                     > COALESCE(settlement.settled_minor, 0)
+                -- Provizorní signál úhrady (bankovní avízo, ruční prohlášení
+                -- účetní — migrace 1750): peníze z účtu prokazatelně odešly,
+                -- jen ještě nedorazil výpis, kterým se to doúčtuje. Hlídač
+                -- termínů proto mlčí; v saldu závazek dál otevřený zůstává.
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_payment_settlement_signals settlement_signal
+                       WHERE settlement_signal.supplier_id = liability.supplier_id
+                         AND settlement_signal.liability_id = liability.id
+                         AND settlement_signal.resolved_at IS NULL
+                    )
               ORDER BY liability.due_on ASC, liability.id ASC'
         );
         $statement->execute([
