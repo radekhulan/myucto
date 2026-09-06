@@ -315,14 +315,31 @@ Automatika žije na stránce **Peníze → Bankovní účty**, kde firmě s podv
 
 Přímo v detailu výpisu ([§ 28.4](#284-detail-vypisu)) navíc uvidíš u každé
 transakce aktuální stav zaúčtování a tlačítko podle situace — **Zaúčtovat…**,
-**Schválit / Odmítnout**, nebo **Zrušit zaúčtování**.
+**Schválit / Odmítnout**, nebo u zaúčtovaného pohybu dvojici **Přeúčtovat** a
+**Zrušit zaúčtování**.
 Nad transakcemi lze filtrovat **všechny / nezaúčtované / zaúčtované** pohyby;
 filtr se kombinuje s filtrem stavu párování.
+
+**Přeúčtovat vs. Zrušit zaúčtování.** Obojí míří na už zaúčtovaný pohyb, ale dělá
+něco jiného:
+
+| Akce | Co udělá | Kdy jde |
+|---|---|---|
+| **Přeúčtovat** | otevře řádky existujícího zápisu k opravě a zapíše opravenou kontaci; pohyb zůstane zaúčtovaný | i v zamčeném nebo uzavřeném období (tam vznikne storno a nový zápis) |
+| **Zrušit zaúčtování** | zápis stornuje a pohyb vrátí nezaúčtovaný do fronty | jen když je období původního zápisu otevřené a nezamčené |
+
+Přeúčtování hlídá tytéž bankovní podmínky jako ruční zaúčtování: pohyb na účtu 221
+musí sedět na částku z výpisu a bankovní noha se sama doplní na analytiku vlastního
+účtu výpisu. Celý postup i chování v zamčeném období popisuje
+[§ 45.8.2](45_Ucetni_denik.md#4582-preuctovani-z-dokladu-sekce-zauctovani).
 
 Automaticky zaúčtovanou transakci od ručního zápisu odliší odznak **Automaticky**.
 U návrhů je v přehledu vidět také stručné **Proč** — například název pravidla nebo
 informace, že návrh vznikl ze shody platby. Podrobné auditní vysvětlení hotového zápisu
-najdete po jeho rozbalení v [Účetním deníku](45_Ucetni_denik.md).
+— tedy jestli za kontací stojí **pravidlo účtování**, vestavěné rozpoznání, naučená
+kontace, předkontace `payment.*` u spárované platby, nebo ruční přeúčtování — najdeš
+po jeho rozbalení v [Účetním deníku](45_Ucetni_denik.md), viz
+[§ 45.8.3](45_Ucetni_denik.md#4583-podle-ceho-se-uctovalo).
 
 ### 28.7.1 Spárované platby faktur — přímý zápis
 

@@ -15,18 +15,20 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   accountingApi, postingErrorI18nKey,
-  type ChartAccount, type RepostPlan,
+  type ChartAccount, type JournalPostingSource, type RepostPlan,
 } from '@/api/accounting'
 import Modal from '../ui/Modal.vue'
 import JournalLinesEditor, { type EditorLine } from './JournalLinesEditor.vue'
+import PostingOriginRow from './PostingOriginRow.vue'
 import { btnOutline, btnFilled } from '../ui/buttonStyles'
 import { formatDate } from '@/composables/useFormat'
 
 const props = defineProps<{
   open: boolean
-  source: 'invoices' | 'purchase-invoices'
+  /** `bank-transactions` = bankovní pohyb; bankovní invarianty (221 = částka výpisu) hlídá server. */
+  source: JournalPostingSource
   docId: number
-  /** Popisek dokladu do hlavičky (číslo faktury). */
+  /** Popisek dokladu do hlavičky (číslo faktury, u banky popis pohybu). */
   docLabel?: string | null
 }>()
 
@@ -160,6 +162,13 @@ async function submit(): Promise<void> {
             </dd>
           </div>
         </dl>
+
+        <!-- Podle čeho kontace vznikla. Právě tady to má cenu: než účetní kontaci
+             přepíše ručně, má vidět, jestli se nedá opravit rovnou šablona — jinak
+             se týž zásah bude opakovat u každého dalšího dokladu. U bankovního
+             pohybu je to zároveň jediné místo, kde se šablona ukazuje: řádek výpisu
+             na ni místo nemá. -->
+        <PostingOriginRow :source="source" :doc-id="docId" />
 
         <template v-if="!blocked">
           <label class="block text-sm">

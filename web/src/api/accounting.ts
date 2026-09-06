@@ -178,6 +178,13 @@ export interface JournalEntry {
 /** Doklad, ke kterému se hledá zaúčtování — segment URL /journal/for-document/{source}/{id}. */
 export type JournalDocumentSource = 'invoices' | 'purchase-invoices'
 
+/**
+ * Doklad, jehož ZÁPIS se přeúčtovává nebo u kterého se ptáme na původ kontace.
+ * Širší než {@link JournalDocumentSource}: bankovní pohyb vlastní sekci Zaúčtování
+ * nemá (kontace visí na řádku výpisu), ale zápis v deníku má a opravit se dá taky.
+ */
+export type JournalPostingSource = JournalDocumentSource | 'bank-transactions'
+
 /** Zápis i s řádky, jak ho vrací /journal/for-document/{source}/{id}. */
 export interface JournalEntryWithLines extends JournalEntry {
   lines: JournalLine[]
@@ -1426,6 +1433,48 @@ export interface RepostPayload {
   confirm_date_shift?: boolean
 }
 
+/**
+ * Předkontace (`posting_rules`), podle které kontace vznikla. `used = false` znamená,
+ * že se její účty v zápisu neobjevily — zápis tedy vznikl jinak (ruční úprava, jiné
+ * nastavení v době účtování) a UI to musí říct místo aby předstíralo šablonu.
+ */
+export interface PostingOriginPreset {
+  rule_key: string
+  description: string | null
+  debit_account_code: string | null
+  credit_account_code: string | null
+  scope: 'global' | 'company' | null
+  exists: boolean
+  /** Proč zrovna tenhle klíč: klíč výnosu na hlavičce, druh výdaje, spárovaná platba, výchozí. */
+  reason: 'revenue_key' | 'expense_kind' | 'payment_match' | 'default'
+  used: boolean
+}
+
+export interface PostingOriginRule {
+  type: 'expense' | 'bank'
+  id: number
+  name: string | null
+  exists: boolean
+  is_active: boolean | null
+}
+
+/**
+ * Podle čeho kontace dokladu vznikla — vrstvy se liší podle druhu dokladu
+ * (manuál § 43.2.1). `origin = 'manual_repost'` přebíjí všechno ostatní: za kontací
+ * stojí účetní, ne šablona.
+ */
+export interface PostingOrigin {
+  source_type: 'invoice' | 'purchase_invoice' | 'bank'
+  entry_id: number | null
+  posted: boolean
+  origin: 'preset' | 'expense_rule' | 'rule' | 'detector' | 'learned' | 'matched'
+    | 'schedule' | 'ai' | 'manual' | 'manual_repost' | 'unknown'
+  manual_repost: { at: string; by: string | null } | null
+  presets: PostingOriginPreset[]
+  rules: PostingOriginRule[]
+  detector: string | null
+}
+
 export const accountingApi = {
   // Účtová osnova
   listAccounts: (opts?: { tree?: boolean; includeInactive?: boolean; supplierId?: number }) => {
@@ -1502,11 +1551,14 @@ export const accountingApi = {
     api.post<BulkPostReport>('/accounting/journal/post-purchases-bulk', { ids }).then(r => r.data),
   // Přeúčtování už zaúčtovaného dokladu. Plán se ptá TÉŽE služby, která operaci
   // provede, takže se náhled s výsledkem nemůže rozejít.
-  repostPlan: (source: 'invoices' | 'purchase-invoices', id: number) =>
+  repostPlan: (source: JournalPostingSource, id: number) =>
     api.get<RepostPlan>(`/accounting/journal/repost-plan/${source}/${id}`).then(r => r.data),
-  repost: (source: 'invoices' | 'purchase-invoices', id: number, payload: RepostPayload) =>
+  repost: (source: JournalPostingSource, id: number, payload: RepostPayload) =>
     api.post<JournalEntryDetail & { repost: RepostResult }>(
       `/accounting/journal/repost/${source}/${id}`, payload).then(r => r.data),
+  /** Podle jaké šablony kontace vznikla a kde se ta šablona opraví. */
+  postingOrigin: (source: JournalPostingSource, id: number) =>
+    api.get<PostingOrigin>(`/accounting/journal/posting-origin/${source}/${id}`).then(r => r.data),
   reverseEntry: (id: number) =>
     api.post<JournalEntryDetail>(`/accounting/journal/${id}/reverse`).then(r => r.data),
   deleteEntry: (id: number) =>

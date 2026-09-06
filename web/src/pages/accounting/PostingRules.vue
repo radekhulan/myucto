@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { accountingApi, type PostingRule, type ChartAccount } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -16,6 +17,7 @@ defineProps<{ embedded?: boolean }>()
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
 const pageId = useId()
 
 const rules = ref<PostingRule[]>([])
@@ -46,7 +48,18 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+
+onMounted(async () => {
+  await load()
+  // Proklik „Upravit předkontaci" ze sekce Zaúčtování na detailu dokladu (?rule_key=…)
+  // otevře rovnou tu jednu předkontaci. Bez toho uživatel přistál na seznamu padesáti
+  // systémových klíčů a musel si ten svůj najít — a přesně proto se místo šablony
+  // opravovala kontace dokladu. Neznámý klíč se ignoruje: seznam je pořád správná
+  // obrazovka, jen bez předvyplnění.
+  const wanted = typeof route.query.rule_key === 'string' ? route.query.rule_key : null
+  const match = wanted === null ? undefined : rules.value.find(r => r.rule_key === wanted)
+  if (match && auth.canWrite('accounting.templates')) openEdit(match)
+})
 
 const showForm = ref(false)
 useHotkey('escape', () => { if (showForm.value) showForm.value = false })

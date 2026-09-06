@@ -16,13 +16,23 @@ vi.mock('@/api/accounting', () => ({
   accountingApi: { journalForDocument: (...args: unknown[]) => journalForDocumentMock(...args) },
 }))
 
-// Vnořené komponenty si tahají data samy (Souvisí) nebo mají vlastní testy
-// (rozpad na účty) — tady jde jen o to, kdy se sekce vůbec ukáže a co pošle dál.
+const canWriteMock = vi.fn(() => true)
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: canWriteMock }) }))
+
+// Vnořené komponenty si tahají data samy (Souvisí, Podle čeho se účtovalo) nebo mají
+// vlastní testy (rozpad na účty) — tady jde jen o to, kdy se sekce vůbec ukáže,
+// co pošle dál a kdy nabídne přeúčtování.
 vi.mock('@/components/accounting/JournalLinesTable.vue', () => ({
   default: { name: 'JournalLinesTable', props: ['lines', 'dense'], template: '<div class="lines-table" />' },
 }))
 vi.mock('@/components/accounting/JournalRelatedPanel.vue', () => ({
   default: { name: 'JournalRelatedPanel', props: ['entryId', 'showPreview'], template: '<div class="related" />' },
+}))
+vi.mock('@/components/accounting/PostingOriginRow.vue', () => ({
+  default: { name: 'PostingOriginRow', props: ['source', 'docId'], template: '<div class="origin" />' },
+}))
+vi.mock('@/components/accounting/RepostModal.vue', () => ({
+  default: { name: 'RepostModal', props: ['open', 'source', 'docId', 'docLabel'], template: '<div class="repost-modal" />' },
 }))
 
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
@@ -106,6 +116,59 @@ describe('DocumentPostingPanel', () => {
     await wrapper.get('button').trigger('click')
     expect((wrapper.find('.lines-table').element.parentElement?.parentElement as HTMLElement).style.display).toBe('')
     expect(wrapper.findComponent({ name: 'JournalRelatedPanel' }).props('entryId')).toBe(64157)
+  })
+
+  /**
+   * Tlačítko Přeúčtovat patří DOVNITŘ sekce Zaúčtování, k tomu zápisu, kterého se
+   * týká — a to platí pro vydanou i přijatou fakturu i pro bankovní pohyb, protože
+   * je to jedna a tatáž sekce. Dřív viselo mezi akcemi dokladu nahoře, kde nebylo
+   * poznat, ke kterému zaúčtování se vztahuje, a u vydané faktury chybělo úplně.
+   */
+  it('zaúčtovaný doklad nabídne Přeúčtovat vedle odkazu do deníku', async () => {
+    journalForDocumentMock.mockResolvedValueOnce([entry(64157)])
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('button').trigger('click')
+
+    const repost = wrapper.findAll('button').filter(b => b.text() === 'accounting.repost.action')
+    expect(repost).toHaveLength(1)
+    expect(wrapper.find('.repost-modal').exists()).toBe(false)
+
+    await repost[0].trigger('click')
+    expect(wrapper.findComponent({ name: 'RepostModal' }).props()).toMatchObject({
+      open: true, source: 'invoices', docId: 271,
+    })
+  })
+
+  /**
+   * Stornovaný zápis ani samotný protizápis se nepřeúčtovávají — opravu po stornu
+   * zapisuje server jako NOVÝ zápis. Nabídnout to u nich znamená slíbit operaci,
+   * kterou server odmítne.
+   */
+  it('u stornovaného zápisu ani u protizápisu se Přeúčtovat nenabízí', async () => {
+    journalForDocumentMock.mockResolvedValueOnce([
+      entry(64157, { reversed_by: 64160 }),
+      entry(64160, { document_no: 'ST-64160', source_id: null }),
+    ])
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('button').trigger('click')
+
+    expect(wrapper.findAll('button').filter(b => b.text() === 'accounting.repost.action')).toHaveLength(0)
+  })
+
+  it('bez práva na účetnictví se Přeúčtovat nenabízí', async () => {
+    canWriteMock.mockReturnValue(false)
+    try {
+      journalForDocumentMock.mockResolvedValueOnce([entry(64157)])
+      const wrapper = mountPanel()
+      await flushPromises()
+      await wrapper.get('button').trigger('click')
+
+      expect(wrapper.findAll('button').filter(b => b.text() === 'accounting.repost.action')).toHaveLength(0)
+    } finally {
+      canWriteMock.mockReturnValue(true)
+    }
   })
 
   it('protizápis se označí jako storno', async () => {

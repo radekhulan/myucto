@@ -700,23 +700,14 @@ pravidlo** — podle čeho se určil druh nákladu a účet:
 | „Ručně (bez automatické klasifikace)" | druh a účet zvolila účetní ručně |
 | „Pravidlo #N už neexistuje" | pravidlo se od zaúčtování smazalo; stopa po něm zůstává schválně |
 
-Tlačítko **Přeúčtovat** (u zaúčtovaného dokladu, jen admin/účetní) otevře dialog
-s **řádky účetního zápisu**, který v deníku je. Řádky jde změnit, smazat i
-přidat; zápis musí zůstat vyrovnaný (Σ MD = Σ Dal). Co se stane po potvrzení,
-řekne dialog dopředu a rozhoduje o tom stav účetního období:
+Nákladové pravidlo vybírá jen **druh** nákladu; účty MD/Dal k tomu druhu určuje až
+**předkontace**. Tu sekce ukazuje hned pod pravidlem, i s tlačítkem na její opravu —
+viz [§ 45.8.3](45_Ucetni_denik.md#4583-podle-ceho-se-uctovalo).
 
-| Stav období | Co se stane |
-|---|---|
-| otevřené a nezamčené | původní zápis se **přepíše** — staré řádky se smažou a zapíšou se nové; číslo i datum zápisu zůstávají |
-| uzavřené, nebo datum spadá pod [zámek k datu](87_Uzaverka.md) | původní zápis se **nemaže**: vznikne **storno** (protizápis) a oprava se zapíše jako nový zápis. Obojí zůstane v deníku kvůli auditu (§ 35 ZoÚ) |
-| zápis už někdo stornoval | protizápis se nedělá znovu, jen se zapíše opravený zápis k témuž datu |
-| do žádného otevřeného data se zapsat nedá | operace se **odmítne** s vysvětlením (zámek zasahuje i dnešek, nebo pro dnešek není otevřené období) |
-
-Když původní datum zapsat nejde, storno i oprava padnou na nejbližší otevřené
-datum — dialog to napíše a **vyžádá si potvrzení**. Datum se nikdy neposune samo.
-
-Přeúčtování se týká jen **kontace**. DPH se jím nemění: evidence DPH se počítá
-z řádků dokladu, takže daňový režim se opravuje editací dokladu, ne kontace.
+Sekce má u každého živého zápisu i tlačítko **Přeúčtovat** (jen admin/účetní), které
+otevře řádky existujícího zápisu k opravě. Podle stavu období se zápis buď přepíše,
+nebo stornuje a zapíše znovu; celý postup i chování v zamčeném období popisuje
+[§ 45.8.2](45_Ucetni_denik.md#4582-preuctovani-z-dokladu-sekce-zauctovani).
 
 ## 23.4 Scan inbox — automatický import z adresáře
 

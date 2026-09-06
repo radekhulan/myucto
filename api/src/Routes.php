@@ -1945,10 +1945,16 @@ final class Routes
                 [JournalAction::class, 'postingPreview']);
             // Přeúčtování už zaúčtovaného dokladu — plán (co se stane) + provedení.
             // KONKRÉTNÍ cesty PŘED generickým /journal/{id} (segmenty nejsou číselné).
-            $g->get   ('/journal/repost-plan/{source:invoices|purchase-invoices}/{id:[0-9]+}',
+            // `bank-transactions` = bankovní pohyb (v deníku zdroj `bank`); bankovní
+            // invarianty (221 = částka výpisu, analytika vlastního účtu) hlídá
+            // BankPostingService, ne obecná cesta.
+            $g->get   ('/journal/repost-plan/{source:invoices|purchase-invoices|bank-transactions}/{id:[0-9]+}',
                 [JournalAction::class, 'repostPlan']);
-            $g->post  ('/journal/repost/{source:invoices|purchase-invoices}/{id:[0-9]+}',
+            $g->post  ('/journal/repost/{source:invoices|purchase-invoices|bank-transactions}/{id:[0-9]+}',
                 [JournalAction::class, 'repost']);
+            // Podle jaké šablony (předkontace / pravidla) kontace vznikla a kde se opraví.
+            $g->get   ('/journal/posting-origin/{source:invoices|purchase-invoices|bank-transactions}/{id:[0-9]+}',
+                [JournalAction::class, 'postingOrigin']);
             // Hromadné zaúčtování z výběru v seznamu (A2) — tělo { ids: [...] }.
             $g->post  ('/journal/post-invoices-bulk',         [JournalAction::class, 'postInvoicesBulk']);
             $g->post  ('/journal/post-purchases-bulk',        [JournalAction::class, 'postPurchasesBulk']);

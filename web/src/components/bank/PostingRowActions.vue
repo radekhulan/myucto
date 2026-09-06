@@ -8,6 +8,7 @@ import type { BankTransaction } from '@/api/bank'
 import { bankPostingApi, bankPostingErrorMessage, type PostResult } from '@/api/bankPosting'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PostTransactionModal from './PostTransactionModal.vue'
+import RepostModal from '@/components/accounting/RepostModal.vue'
 
 const props = defineProps<{ tx: BankTransaction; currency: string }>()
 const emit = defineEmits<{ changed: []; posted: [{ result: PostResult; debit: string; credit: string }] }>()
@@ -30,6 +31,25 @@ const canPost = computed(() =>
 
 const busy = ref(false)
 const showModal = ref(false)
+const repostOpen = ref(false)
+
+/**
+ * Přeúčtovat = OPRAVA kontace, která v deníku je — na rozdíl od „Zrušit zaúčtování",
+ * které pohyb vrátí do fronty a nechá ho nezaúčtovaný. Bez toho se špatná kontace
+ * opravovala jen tou okliku (unpost → znovu zaúčtovat), která v zamčeném období
+ * vůbec nejde: `unpost` odmítne storno mimo otevřené a nezamčené období, kdežto
+ * přeúčtování tam zápis stornuje protizápisem a opravu zapíše novým zápisem (§35).
+ *
+ * Bankovní invarianty (pohyb na 221 = částka výpisu, analytika vlastního účtu) hlídá
+ * server toutéž cestou jako u ručního zaúčtování — viz BankPostingService::prepareRepostLines().
+ */
+const canRepost = computed(() =>
+  posting.value?.status === 'posted' && auth.canWrite('accounting'))
+
+async function onReposted() {
+  toast.success(t('accounting.repost.done'))
+  emit('changed')
+}
 
 // Inline override kontace při schvalování
 const overrideOpen = ref(false)
@@ -143,13 +163,27 @@ function onPosted(payload: { result: PostResult; debit: string; credit: string }
       </div>
     </template>
 
-    <!-- Zrušit zaúčtování -->
-    <button v-else-if="posting?.status === 'posted' && auth.canWrite('bank.unpost')" @click="unpost" :disabled="busy" :class="btnOutlineSm('neutral')">
-      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn"/></svg>
-      {{ t('bank.posting.action_unpost') }}
-    </button>
+    <!-- Zaúčtováno: opravit kontaci (Přeúčtovat) nebo zaúčtování zrušit úplně. -->
+    <div v-else-if="posting?.status === 'posted' && (canRepost || auth.canWrite('bank.unpost'))"
+      class="inline-flex flex-wrap items-center justify-end gap-1">
+      <!-- Administrativní zásah do už zaúčtovaného pohybu → warning, ne primary. -->
+      <button v-if="canRepost" @click="repostOpen = true" :disabled="busy" :class="btnOutlineSm('warning')">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit"/></svg>
+        {{ t('accounting.repost.action') }}
+      </button>
+      <button v-if="auth.canWrite('bank.unpost')" @click="unpost" :disabled="busy" :class="btnOutlineSm('neutral')">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn"/></svg>
+        {{ t('bank.posting.action_unpost') }}
+      </button>
+    </div>
 
     <PostTransactionModal v-if="showModal" :tx="tx" :currency="currency"
       @posted="onPosted" @close="showModal = false" />
+
+    <Teleport to="body">
+      <RepostModal v-if="repostOpen" :open="repostOpen" source="bank-transactions" :doc-id="tx.id"
+        :doc-label="tx.description || tx.variable_symbol"
+        @close="repostOpen = false" @reposted="onReposted" />
+    </Teleport>
   </div>
 </template>

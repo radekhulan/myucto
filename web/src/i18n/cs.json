@@ -9751,6 +9751,26 @@
       "confirm_date_shift": "Rozumím, že storno i oprava se zaúčtují k {to} místo k původnímu {from}.",
       "hint": "Zápis musí být vyrovnaný (Σ MD = Σ Dal). Kontrolu podvojnosti, otevřenosti období i zámku k datu dělá server — DPH se přeúčtováním nemění, ta se opravuje editací dokladu."
     },
+    "posting_origin": {
+      "label": "Podle čeho se účtovalo",
+      "preset": "Předkontace",
+      "bank_rule": "Pravidlo účtování banky",
+      "edit_preset": "Upravit předkontaci",
+      "edit_bank_rule": "Upravit pravidlo",
+      "rule_deleted": "Pravidlo #{id} už neexistuje",
+      "scope_company": "firemní nastavení",
+      "scope_global": "výchozí nastavení systému",
+      "scope_missing": "předkontace chybí, účty určila služba",
+      "preset_unused": "v zápisu se nepoužila",
+      "preset_unused_hint": "Účty v deníku neodpovídají téhle předkontaci — kontace vznikla ručně nebo za jiného nastavení. Oprava předkontace se projeví až u příštího zaúčtování.",
+      "detector": "Vestavěné rozpoznání ({detector})",
+      "learned": "Naučená kontace z historie zaúčtovaných pohybů — žádné pravidlo za ní nestojí.",
+      "ai": "Návrh AI potvrzený účetní.",
+      "schedule": "Plán opakovaných plateb.",
+      "manual_repost": "Ručně přeúčtováno {date} ({user}) — za kontací stojí účetní, ne šablona.",
+      "unknown_user": "neznámý uživatel",
+      "none": "Zdroj kontace nelze určit — ruční zápis nebo doklad z doby před evidencí původu."
+    },
     "posting_preview": {
       "title": "Návrh zaúčtování",
       "document": "Doklad",

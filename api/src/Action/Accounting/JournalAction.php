@@ -21,6 +21,7 @@ use MyInvoice\Service\Accounting\DocumentRepostService;
 use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\JournalLinkService;
+use MyInvoice\Service\Accounting\PostingOriginService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\JournalExportService;
@@ -82,6 +83,7 @@ final class JournalAction
         private readonly AccountingPeriodRepository $periods,
         private readonly DocumentAutoPoster $autoPoster,
         private readonly DocumentRepostService $repost,
+        private readonly PostingOriginService $postingOrigin,
         private readonly BankPostingService $bankPosting,
         private readonly AutomationProvenanceService $automationProvenance,
         private readonly JournalExportService $exportService,
@@ -490,6 +492,27 @@ final class JournalAction
     }
 
     /**
+     * Segment z URL na `journal_entries.source_type`.
+     *
+     * Jediné místo, kde se ten překlad dělá — tři endpointy (plán, přeúčtování,
+     * původ kontace) musí odpovědět na TENTÝŽ doklad, jinak by plán mluvil o jiném
+     * zápisu než operace. Bankovní pohyb má v deníku zdroj `bank`, ne
+     * `bank_transaction`.
+     *
+     * Veřejná schválně: špatné mapování by přeúčtovalo JINÝ doklad téhož id (bankovní
+     * pohyb #30628 vs. faktura #30628), a to je přesně druh chyby, kterou musí chytit
+     * test, ne až účetní v deníku.
+     */
+    public static function repostSourceType(string $segment): string
+    {
+        return match ($segment) {
+            'purchase-invoices' => 'purchase_invoice',
+            'bank-transactions' => 'bank',
+            default             => 'invoice',
+        };
+    }
+
+    /**
      * GET /api/accounting/journal/repost-plan/{source}/{id} — co se stane, když se
      * doklad přeúčtuje. Dialog „Přeúčtovat" z toho staví hlášku i předvyplněné řádky.
      *
@@ -501,7 +524,7 @@ final class JournalAction
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
 
-        $sourceType = (string) ($args['source'] ?? '') === 'purchase-invoices' ? 'purchase_invoice' : 'invoice';
+        $sourceType = self::repostSourceType((string) ($args['source'] ?? ''));
         $docId = (int) ($args['id'] ?? 0);
         if ($docId <= 0) {
             return Json::error($response, 'validation_failed', 'Neplatné ID dokladu.', 422);
@@ -512,6 +535,31 @@ final class JournalAction
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
+    }
+
+    /**
+     * GET /api/accounting/journal/posting-origin/{source}/{id} — podle jaké šablony
+     * kontace vznikla a kde se ta šablona opraví.
+     *
+     * Sekce Zaúčtování ukazovala jen výsledné účty; předkontace (`posting_rules`),
+     * která je určila, v UI nebyla nikde — takže se opravovala kontace dokladu
+     * místo šablony. Odpověď staví {@see PostingOriginService}.
+     */
+    public function postingOrigin(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+
+        $docId = (int) ($args['id'] ?? 0);
+        if ($docId <= 0) {
+            return Json::error($response, 'validation_failed', 'Neplatné ID dokladu.', 422);
+        }
+
+        return Json::ok($response, $this->postingOrigin->describe(
+            $supplierId,
+            self::repostSourceType((string) ($args['source'] ?? '')),
+            $docId,
+        ));
     }
 
     /**
@@ -527,13 +575,22 @@ final class JournalAction
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
 
-        $sourceType = (string) ($args['source'] ?? '') === 'purchase-invoices' ? 'purchase_invoice' : 'invoice';
-        $table = $sourceType === 'invoice' ? 'invoices' : 'purchase_invoices';
+        $sourceType = self::repostSourceType((string) ($args['source'] ?? ''));
+        // Bankovní pohyb žádnou hlavičku „zaúčtováno kým" nemá (a `bank_transactions`
+        // ani sloupec `supplier_id` — tenant se odvozuje z výpisu), takže se tabulka
+        // dokladu doplňuje jen u faktur. Vlastnictví pohybu ověřuje
+        // {@see \MyInvoice\Service\Accounting\Bank\BankPostingService::prepareRepostLines()}
+        // a nezávisle na něm i `findBySource`, který hledá zápis TÉTO firmy.
+        $table = match ($sourceType) {
+            'invoice'          => 'invoices',
+            'purchase_invoice' => 'purchase_invoices',
+            default            => null,
+        };
         $docId = (int) ($args['id'] ?? 0);
         if ($docId <= 0) {
             return Json::error($response, 'validation_failed', 'Neplatné ID dokladu.', 422);
         }
-        if ($this->fetchDocDate($table, $supplierId, $docId) === null) {
+        if ($table !== null && $this->fetchDocDate($table, $supplierId, $docId) === null) {
             return Json::error($response, 'not_found', 'Doklad nenalezen.', 404);
         }
 
@@ -568,12 +625,14 @@ final class JournalAction
         // Po stornu původního zápisu je doklad odemčený jen do chvíle, než opravu
         // zapíšeme — obojí je v jedné transakci, takže zámek dokladu má zůstat.
         // COALESCE zachová původního „kdo zaúčtoval" (§11), když už tam někdo je.
-        $this->db->pdo()->prepare(
-            "UPDATE {$table}
-                SET booked_at = COALESCE(booked_at, NOW()),
-                    booked_by = COALESCE(booked_by, ?)
-              WHERE id = ? AND supplier_id = ?"
-        )->execute([$this->userId($request), $docId, $supplierId]);
+        if ($table !== null) {
+            $this->db->pdo()->prepare(
+                "UPDATE {$table}
+                    SET booked_at = COALESCE(booked_at, NOW()),
+                        booked_by = COALESCE(booked_by, ?)
+                  WHERE id = ? AND supplier_id = ?"
+            )->execute([$this->userId($request), $docId, $supplierId]);
+        }
 
         $entry = $this->journal->find((int) $result['entry_id'], $supplierId);
         $entry['repost'] = $result;

@@ -663,12 +663,8 @@ mechanismy podle toho, zda je období, kam zápis patří, ještě **otevřené*
 - U zápisu se zdrojem vydaná/přijatá faktura storno navíc **odemyká zdrojový doklad**
   (zruší příznak „Zaúčtováno" na faktuře), pokud k dokladu neexistuje jiný aktivní
   zaúčtovaný zápis — doklad tak můžeš opravit a zaúčtovat znovu.
-- **Přeúčtování z detailu dokladu.** Všechny tři cesty výš (přepis, storno, odmítnutí)
-  má pod jedním tlačítkem i detail přijaté faktury — **Přeúčtovat** otevře řádky
-  existujícího zápisu k úpravě a podle stavu období sám zvolí, jestli se zápis přepíše,
-  nebo stornuje a zapíše znovu. Je to **tentýž mechanismus**, jen bez ručního
-  přepínání mezi deníkem a dokladem; viz
-  [§ 23.3.5](23_Prijate_faktury.md#2335-nakladove-pravidlo-a-preuctovani).
+- **Přeúčtování z dokladu.** Všechny tři cesty výš (přepis, storno, odmítnutí) má pod
+  jedním tlačítkem i doklad sám — viz [§ 45.8.2](#4582-preuctovani-z-dokladu-sekce-zauctovani).
 
 ### 45.8.1 Automatické storno při smazání nebo interním stornu dokladu
 
@@ -725,6 +721,66 @@ doklady k přijaté platbě). Selhání storna jediného potomka zastaví celé 
 >
 > V otevřeném období force-edit účetních polí automaticky přepíše existující zápis
 > podle opraveného dokladu; samostatná volba režimu se nevyžaduje.
+
+### 45.8.2 Přeúčtování z dokladu (sekce Zaúčtování)
+
+Storno a přepis z předchozích odstavců se dají spustit i z dokladu samotného, aniž
+by ses musel přepínat do deníku. Sekce **Zaúčtování** má u každého živého zápisu
+vedle odkazu **Otevřít v deníku** tlačítko **Přeúčtovat** (admin/účetní). Najdeš ji na:
+
+- detailu [vydané faktury](14_Faktury.md),
+- detailu [přijaté faktury](23_Prijate_faktury.md),
+- u zaúčtovaného [bankovního pohybu](29_Bankovni_ucty.md) (tam je tlačítko v řádku
+  pohybu vedle **Zrušit zaúčtování**).
+
+Dialog ukáže **řádky zápisu, který v deníku opravdu je** — ne nový návrh — a nechá je
+změnit, smazat i doplnit. Zápis musí zůstat vyrovnaný (Σ MD = Σ Dal). Co se stane po
+potvrzení, řekne dialog dopředu a rozhoduje o tom stav účetního období:
+
+| Stav období | Co se stane |
+|---|---|
+| otevřené a nezamčené | původní zápis se **přepíše** — staré řádky se smažou a zapíšou se nové; číslo i datum zápisu zůstávají |
+| uzavřené, nebo datum spadá pod [zámek k datu](#459-zamek-uctovani-k-datu) | původní zápis se **nemaže**: vznikne **storno** (protizápis) a oprava se zapíše jako nový zápis. Obojí zůstane v deníku kvůli auditu (§ 35 ZoÚ) |
+| zápis už někdo stornoval | protizápis se nedělá znovu, jen se zapíše opravený zápis k témuž datu |
+| do žádného otevřeného data se zapsat nedá | operace se **odmítne** s vysvětlením (zámek zasahuje i dnešek, nebo pro dnešek není otevřené období) |
+
+Když do původního data zapsat nejde, storno i oprava padnou na nejbližší otevřené
+datum — dialog to napíše a **vyžádá si potvrzení**. Datum se nikdy neposune samo.
+
+Přeúčtování se týká jen **kontace**. DPH se jím nemění: evidence DPH se počítá z řádků
+dokladu, takže daňový režim se opravuje editací dokladu, ne kontace.
+
+U **bankovního pohybu** platí navíc totéž, co u ručního zaúčtování z fronty: pohyb na
+účtu 221 musí sedět na částku z výpisu a bankovní noha se sama doplní na analytiku
+vlastního účtu výpisu. Přeúčtování se tím liší od **Zrušit zaúčtování** — to pohyb
+vrátí nezaúčtovaný do fronty a v zamčeném ani uzavřeném období ho provést nelze,
+kdežto přeúčtovat pohyb jde i tam (storno + nový zápis).
+
+### 45.8.3 Podle čeho se účtovalo
+
+Sekce **Zaúčtování** kromě samotné kontace říká i to, **z jaké šablony vznikla** — a
+dovolí ji rovnou opravit. Vrstvy popisuje
+[§ 43.2.1](43_Pruvodce_ucetniho.md#4321-ctyri-vrstvy-ktere-urcuji-kontaci); tady je,
+co se u kterého dokladu ukáže:
+
+| Doklad | Co určilo kontaci | Kam vede tlačítko |
+|---|---|---|
+| vydaná faktura | **předkontace** podle klíče výnosu na hlavičce (výchozí `invoice.services.issued`) | Nástroje → Účetní nastavení → Předkontace, rovnou na ten jeden klíč |
+| přijatá faktura | **nákladové pravidlo** vybralo druh nákladu, **předkontace** k tomu druhu určila účty | pravidlo: Šablony účtování → Pravidla nákladů (dialog přímo na detailu); předkontace: Nástroje → Účetní nastavení → Předkontace |
+| bankovní pohyb | **pravidlo účtování**, vestavěné rozpoznání, naučená kontace, nebo u spárované platby předkontace `payment.*` | pravidlo: Nástroje → Šablony účtování → Pravidla účtování; předkontace: Účetní nastavení → Předkontace |
+
+U předkontace je vidět i to, jestli platí **firemní nastavení**, nebo systémový
+výchozí stav, a jaké účty MD/Dal drží.
+
+Systém si nikde nepamatuje „tenhle zápis vyrobila předkontace X" — odvozuje ji z
+**dnešního** nastavení dokladu. Proto k ní přidává i kontrolu, jestli se její účty
+v zápisu opravdu objevily:
+
+- **„v zápisu se nepoužila"** — kontace vznikla jinak (ruční zápis, jiné nastavení
+  v době účtování). Oprava předkontace se pak projeví až u příštího zaúčtování.
+- **„Ručně přeúčtováno {datum} ({uživatel})"** — za účty stojí účetní, ne šablona.
+- **„Zdroj kontace nelze určit"** — ruční zápis nebo doklad z doby před evidencí
+  původu. Nepředstírá se šablona, která se nepoužila.
 
 ## 45.9 Zámek účtování k datu
 

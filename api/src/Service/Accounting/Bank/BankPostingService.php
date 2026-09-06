@@ -2285,6 +2285,55 @@ final class BankPostingService
     }
 
     /**
+     * Řádky pro PŘEÚČTOVÁNÍ bankovního pohybu — tytéž kontroly jako u ručního
+     * zaúčtování ({@see postManual}), ale bez zápisu. Volá {@see \MyInvoice\Service\Accounting\DocumentRepostService}.
+     *
+     * Existuje proto, že bankovní zápis má invarianty, které obecné přeúčtování
+     * dokladu nezná a nesmí je obejít:
+     *   - **pohyb na 221 musí sedět na částku výpisu** (Σ 221 MD − Σ 221 D = amount)
+     *     — kontroluje {@see manualLines}; bez toho by se dal pohyb zaúčtovat na jinou
+     *     částku, než jaká z účtu opravdu odešla,
+     *   - **bankovní noha patří na analytiku vlastního účtu výpisu** (#35) — doplní
+     *     {@see withBankAnalytic}; holé „221" z dialogu by skončilo na syntetice a
+     *     rozbilo jednoúčtovou (a tím jednoměnovou) analytiku,
+     *   - **avízo se neúčtuje** a ignorovaný pohyb taky ne,
+     *   - **tenant** se ověřuje přes vlastnictví výpisu, ne přes číslo účtu
+     *     (`bank_transactions` sloupec `supplier_id` nemá).
+     *
+     * Cizí měna se povoluje ze stejného důvodu jako u `postManual`: automatika ji
+     * odmítá, ale člověk s doklady v ruce ji opravit umí.
+     *
+     * @param list<array<string,mixed>> $rawLines
+     * @return list<array{account_code:string, side:string, amount:float}>
+     */
+    public function prepareRepostLines(int $supplierId, int $txId, array $rawLines): array
+    {
+        $tx = $this->loadTx($txId);
+        if ($tx === null || !$this->txOwnedBySupplier($txId, $supplierId)) {
+            throw new PostingException('not_found', 'Transakce nenalezena.', 404);
+        }
+        if ($this->supplierMode($supplierId) !== 'double_entry') {
+            throw new PostingException('not_double_entry', 'Firma nevede podvojné účetnictví.');
+        }
+        if ((string) ($tx['source'] ?? 'statement') !== 'statement') {
+            throw new PostingException('email_notice_provisional', 'Avízo se neúčtuje.');
+        }
+        $this->assertPostableTx($tx, allowForeign: true);
+
+        $signedAmount  = (float) $tx['amount'];
+        $currency      = strtoupper($this->effectiveCurrency($tx));
+        $foreignAmount = round(abs($signedAmount), 2);
+        $fxRate        = $currency === 'CZK'
+            ? null
+            : $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
+        $absAmount     = $fxRate === null ? $foreignAmount : round($foreignAmount * $fxRate, 2);
+
+        $lines = $this->manualLines($rawLines, $signedAmount, $absAmount, $currency, $fxRate, $foreignAmount);
+
+        return $this->withBankAnalytic($supplierId, $tx, $lines);
+    }
+
+    /**
      * Zrušení zaúčtování: reverse + detachSource (R10). Vrací id storna.
      *
      * @param array{user_id?:?int, posted_by?:?int, entry_date?:?string, description?:?string, reason?:?string} $meta

@@ -91,6 +91,18 @@ final class PostingService
     public const OUTPUT_VAT_ACCOUNT = '343.200';
     public const VAT_SETTLEMENT_ACCOUNT = '343.900';
 
+    /**
+     * Výchozí klíče předkontací, když si doklad vlastní nevybere.
+     *
+     * Konstanty, ne literály, protože se na tytéž hodnoty ptá i čtecí model
+     * {@see PostingOriginService} („podle jaké šablony zápis vznikl"). Dva
+     * nezávislé literály by se rozešly tiše a UI by ukazovalo předkontaci,
+     * podle které se neúčtovalo.
+     */
+    public const DEFAULT_ISSUED_RULE_KEY = 'invoice.services.issued';
+    public const DEFAULT_RECEIVED_RULE_KEY = 'invoice.services.received';
+    public const DEFAULT_RECEIVED_ASSET_RULE_KEY = 'invoice.dhm.received';
+
     /** @var array<int, ?string> per-request cache supplier_id => locked_until (B8). */
     private array $lockedUntilCache = [];
 
@@ -761,7 +773,7 @@ final class PostingService
         // ruční post, re-post po editaci) a stávající faktury (revenue_rule_key NULL) se nehnuly.
         $headerRuleKey = ($inv['revenue_rule_key'] ?? null) !== null && (string) $inv['revenue_rule_key'] !== ''
             ? (string) $inv['revenue_rule_key']
-            : 'invoice.services.issued';
+            : self::DEFAULT_ISSUED_RULE_KEY;
         $rule = $this->rules->resolve($supplierId, $opts['rule_key'] ?? $headerRuleKey);
         $receivable = $rule['debit_account_code'] ?? '311';
         $revenue    = $rule['credit_account_code'] ?? '602';
@@ -1036,7 +1048,7 @@ final class PostingService
             throw new PostingException('document_not_postable', 'Přijatá faktura #' . $purchaseInvoiceId . ' nemá řádky k zaúčtování.');
         }
 
-        $defaultKey = $isFixedAsset ? 'invoice.dhm.received' : 'invoice.services.received';
+        $defaultKey = $isFixedAsset ? self::DEFAULT_RECEIVED_ASSET_RULE_KEY : self::DEFAULT_RECEIVED_RULE_KEY;
         $rule = $this->rules->resolve($supplierId, $opts['rule_key'] ?? $defaultKey);
         $expense = $debitOverride ?? ($rule['debit_account_code'] ?? ($isFixedAsset ? '042' : '518'));
         if (!$taxDeductible) {

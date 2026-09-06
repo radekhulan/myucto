@@ -388,6 +388,13 @@ async function deletePayment(p: InvoicePayment) {
   }
 }
 
+// Přeúčtování běží uvnitř sekce Zaúčtování ({@see DocumentPostingPanel}) — tlačítko
+// patří k zápisu, kterého se týká. Doklad se přenačte, protože se mění „kdo/kdy zaúčtoval".
+async function onReposted() {
+  await load()
+  toast.success(t('accounting.repost.done'))
+}
+
 async function loadSignatureProfiles() {
   try {
     signingProfiles.value = await settingsApi.listSigningProfiles()
@@ -2045,7 +2052,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
       </div>
 
       <!-- Zaúčtování — sbalené, načítá se na pozadí a zobrazí se jen u zaúčtovaného dokladu. -->
-      <DocumentPostingPanel source="invoices" :doc-id="invoice.id" />
+      <DocumentPostingPanel source="invoices" :doc-id="invoice.id" :doc-label="invoice.varsymbol"
+        @reposted="onReposted" />
 
       <!-- Položky -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
