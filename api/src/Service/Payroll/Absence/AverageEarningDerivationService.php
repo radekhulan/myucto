@@ -111,8 +111,14 @@ final class AverageEarningDerivationService
         'approved', 'posted', 'payment_ready', 'paid', 'closed',
     ];
 
-    /** Verze odvození pracovního souhrnu, ze které umíme číst rozpad směn. */
-    public const SUPPORTED_WORK_SUMMARY_VERSION = 'jmhz-work-month.v2';
+    /**
+     * Verze odvození pracovního souhrnu, ze kterých umíme číst rozpad směn.
+     *
+     * v3 se od v2 liší jen o hodiny nepřítomností bez atributu hlášení;
+     * zdrojový snapshot směn a jeho `schema_version` mají obě verze shodné,
+     * takže se průměr počítá z obou stejně.
+     */
+    public const SUPPORTED_WORK_SUMMARY_VERSIONS = ['jmhz-work-month.v2', 'jmhz-work-month.v3'];
 
     /**
      * Důvody, kvůli kterým se místo skutečného průměru smí použít pravděpodobný
@@ -465,7 +471,7 @@ final class AverageEarningDerivationService
         $context['work_summary_sha256'] = is_string($summary['summary_sha256'] ?? null)
             ? $summary['summary_sha256']
             : null;
-        if (($summary['derivation_version'] ?? null) !== self::SUPPORTED_WORK_SUMMARY_VERSION) {
+        if (!in_array($summary['derivation_version'] ?? null, self::SUPPORTED_WORK_SUMMARY_VERSIONS, true)) {
             return ['blockers' => ['work_summary_version_unsupported']] + $context;
         }
 
@@ -483,7 +489,7 @@ final class AverageEarningDerivationService
 
         $source = self::decode($sourceJson);
         if ($source === null
-            || ($source['schema_version'] ?? null) !== self::SUPPORTED_WORK_SUMMARY_VERSION
+            || !in_array($source['schema_version'] ?? null, self::SUPPORTED_WORK_SUMMARY_VERSIONS, true)
             || !is_array($source['time_entries'] ?? null)
         ) {
             return ['blockers' => ['work_summary_source_corrupt']] + $context;

@@ -432,20 +432,28 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
     }
 
-    public function testKeepsMaternityLeaveFailClosedEvenThoughItHasAnExcludedAttribute(): void
+    /**
+     * PPM blokuje i nad souhrnem v3, a to úmyslně: vyloučenou dobou je podle
+     * § 16 odst. 4 věty třetí písm. a) zákona č. 155/1995 Sb. jen část před
+     * porodem (atribut 10359 se tak i jmenuje) a den porodu aplikace neeviduje.
+     */
+    public function testKeepsMaternityLeaveFailClosedEvenOnTheNewerWorkSummary(): void
     {
-        $source = $this->sicknessSource();
-        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
-        self::assertIsArray($input);
-        $input['people'][0]['employments'][0]['absences'][0]['absence_type'] = 'ppm';
-        $source = $this->withInput($source, $input);
+        $source = $this->absenceSource('ppm', '2026-07-07', '2026-07-18', [
+            'maternity_millihours' => 40_000,
+        ]);
 
         $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('dovolenou, nemoc, karanténu a ošetřovné');
+        $this->expectExceptionMessage('dovolenou, nemoc, karanténu, ošetřovné');
         (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
     }
 
-    public function testKeepsUnpaidLeaveFailClosedWithoutEldpInteractionEvidence(): void
+    /**
+     * Souhrn v2 pro nepřítomnosti bez atributu hlášení nemá hodinový blok,
+     * takže by se den nedal proti ničemu ověřit. Zmrazené v2 měsíce proto
+     * zůstávají fail-closed přesně jako dřív.
+     */
+    public function testKeepsUnpaidLeaveFailClosedOnTheOlderWorkSummary(): void
     {
         $source = $this->source();
         $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
@@ -459,8 +467,176 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $source = $this->withInput($source, $input);
 
         $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('dovolenou, nemoc, karanténu a ošetřovné');
+        $this->expectExceptionMessage('dovolenou, nemoc, karanténu, ošetřovné');
         (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
+    /**
+     * Otcovská je vyloučenou dobou v celé podpůrčí době — § 16 odst. 4 věta
+     * třetí písm. a) zákona č. 155/1995 Sb. jmenuje „dobu, po kterou trvala
+     * podpůrčí doba u dávky otcovské poporodní péče". Doba pojištění se nekrátí.
+     */
+    public function testDerivesPaternityAsExcludedDaysFromTheNewerWorkSummary(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->absenceSource('paternity', '2026-07-13', '2026-07-26', [
+            'paternity_millihours' => 80_000,
+        ]);
+
+        $snapshot = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        );
+        $section = $snapshot->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(14, $section['excluded_days']['otcovska']);
+        self::assertSame(14, $section['excluded_days_total']);
+        self::assertSame(0, $section['excluded_days']['docasNeschopnost']);
+    }
+
+    /**
+     * Neplacené volno, neomluvená absence ani rodičovská nejsou vyloučenou
+     * dobou (uzavřený výčet § 16 odst. 4 věty třetí písm. a) je neuvádí) a
+     * pojištění nepřerušují — § 10 odst. 9 zákona č. 187/2006 Sb. zná jediné
+     * přerušení, a to výkon trestu. V měsíci se zúčtovaným příjmem tedy ELDP
+     * vykáže plnou dobu pojištění a nulové vyloučené doby.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('incomeLessAbsenceKinds')]
+    public function testIncomeLessAbsenceKeepsFullInsuranceMonthWithoutExcludedDays(
+        string $absenceType,
+        string $field,
+    ): void {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->absenceSource($absenceType, '2026-07-13', '2026-07-14', [
+            $field => 16_000,
+        ]);
+
+        $snapshot = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        );
+        $section = $snapshot->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame('1++', $section['code']);
+        self::assertSame(0, $section['excluded_days_total']);
+        self::assertSame([], $section['excluded_days_provenance']);
+    }
+
+    /** @return array<string,array{string,string}> */
+    public static function incomeLessAbsenceKinds(): array
+    {
+        return [
+            'neplacené volno' => ['unpaid_leave', 'unpaid_leave_millihours'],
+            'neomluvená absence' => ['unexcused', 'unexcused_millihours'],
+            'rodičovská dovolená' => ['parental', 'parental_millihours'],
+        ];
+    }
+
+    /**
+     * Měsíc bez započitatelného příjmu se podle § 11 odst. 2 zákona
+     * č. 155/1995 Sb. za dobu pojištění nepovažuje a ELDP ho značí znakem „X".
+     * Jednosekční běžný řez to vyjádřit neumí, takže musí zastavit — jinak by
+     * vykázal dny pojištění, které podle zákona nevznikly.
+     */
+    public function testKeepsParentalLeaveFailClosedInMonthWithoutIncome(): void
+    {
+        $source = $this->absenceSource('parental', '2026-07-01', '2026-07-31', [
+            'parental_millihours' => 160_000,
+        ]);
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($result);
+        $relationship = &$result['people'][0]['statutory']['social_insurance']['relationships'][0];
+        $relationship['assessment_base_minor_units'] = 0;
+        $relationship['capped_assessment_base_minor_units'] = 0;
+        unset($relationship);
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('§ 11 odst. 2');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
+    /**
+     * Překážka na straně zaměstnance je v aplikaci vždy placená, náhrada mzdy
+     * vstupuje do vyměřovacího základu, a vyloučená doba by se s příjmem kryla
+     * (§ 16 odst. 4 věta třetí návětí). Blok 10471 se ale vykázat musí, a to
+     * s aktivní interakcí IN08.
+     */
+    public function testAllowsPaidEmployeeObstacleWithActiveInteractionIn08(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->absenceSource(
+            'employee_obstacle',
+            '2026-07-13',
+            '2026-07-13',
+            ['employee_obstacle_paid_millihours' => 8_000],
+            paidMillihours: 8_000,
+            obstacles: true,
+        );
+
+        $snapshot = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        );
+        $section = $snapshot->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(0, $section['excluded_days_total']);
+    }
+
+    /**
+     * Měsíc s nepřítomností, kterou v3 zná, sestaví ordinary řez ve stejném
+     * tvaru jako roční evidenční list: jeden zdroj vyloučených dob pro obojí.
+     *
+     * @param array<string,int> $extraValues
+     * @return array<string,mixed>
+     */
+    private function absenceSource(
+        string $absenceType,
+        string $from,
+        string $to,
+        array $extraValues,
+        ?int $paidMillihours = null,
+        bool $obstacles = false,
+    ): array {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $entry = &$input['people'][0]['employments'][0];
+        $entry['absences'] = [[
+            'id' => 910,
+            'absence_type' => $absenceType,
+            'date_from' => $from,
+            'date_to' => $to,
+        ]];
+        $summary = &$entry['time_month']['jmhz_work_summary'];
+        $summary['derivation_version'] = 'jmhz-work-month.v3';
+        $summary['interactions'] = ['IN07' => true, 'IN08' => $obstacles];
+        $summary['values'] += [
+            'maternity_millihours' => null,
+            'paternity_millihours' => null,
+            'parental_millihours' => null,
+            'unpaid_leave_millihours' => null,
+            'unexcused_millihours' => null,
+        ];
+        $summary['values'] = array_merge($summary['values'], $extraValues);
+        $summary['values']['unworked_total_millihours'] = array_sum($extraValues);
+        $summary['values']['unworked_paid_millihours'] = $paidMillihours ?? 0;
+        unset($summary, $entry);
+
+        return $this->withInput($source, $input);
     }
 
     public function testRejectsIntervalShorterThanFrozenEmploymentMonth(): void

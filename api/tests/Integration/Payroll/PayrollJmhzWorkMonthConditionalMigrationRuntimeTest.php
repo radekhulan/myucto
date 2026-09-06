@@ -133,6 +133,69 @@ final class PayrollJmhzWorkMonthConditionalMigrationRuntimeTest extends TestCase
         self::assertSame(2, (int) $count->fetchColumn());
     }
 
+    /**
+     * Hodiny nepřítomností bez atributu hlášení (PPM, otcovská, rodičovská,
+     * neplacené volno, neomluvená absence) smí nést jen souhrn v3.
+     *
+     * Verze se nesmí smíchat: obsahový otisk souhrnu se počítá z kanonického
+     * JSONu hodnot, takže by dřív zmrazený v2 řádek s doplněnými sloupci
+     * přestal sedět na svůj `summary_sha256`.
+     */
+    public function testAbsenceEvidenceColumnsBelongOnlyToTheThirdVersion(): void
+    {
+        $db = $this->databasePdo();
+        $this->runMigrator();
+
+        $this->assertRejected($db,
+            "INSERT INTO payroll_jmhz_work_month_revisions
+                (derivation_version, agreed_fund_millihours, worked_millihours,
+                 summary_sha256, conditional_blocks_confirmed,
+                 unworked_hours_occurred, work_obstacles_occurred,
+                 unworked_total_millihours, control_catalog_key,
+                 control_manifest_sha256, parental_millihours)
+             VALUES ('jmhz-work-month.v2', 168000, 160000, '" . str_repeat('1', 64)
+                . "', 1, 1, 0, 80000, 'jmhz-controls-1.4.2.8-source-v4', '"
+                . str_repeat('2', 64) . "', 80000)",
+            'chk_payroll_jmhz_work_month_absence_evidence',
+        );
+        // Bez interakce IN07 nemůže být vyplněná ani hodina bez atributu:
+        // je to neodpracovaná hodina, která vstupuje do úhrnu 10275.
+        $this->assertRejected($db,
+            "INSERT INTO payroll_jmhz_work_month_revisions
+                (derivation_version, agreed_fund_millihours, worked_millihours,
+                 summary_sha256, conditional_blocks_confirmed,
+                 unworked_hours_occurred, work_obstacles_occurred,
+                 control_catalog_key, control_manifest_sha256, unpaid_leave_millihours)
+             VALUES ('jmhz-work-month.v3', 168000, 160000, '" . str_repeat('3', 64)
+                . "', 1, 0, 0, 'jmhz-controls-1.4.2.8-source-v4', '"
+                . str_repeat('4', 64) . "', 8000)",
+            'chk_payroll_jmhz_work_month_absence_evidence',
+        );
+        $db->exec(
+            "INSERT INTO payroll_jmhz_work_month_revisions
+                (derivation_version, agreed_fund_millihours, worked_millihours,
+                 summary_sha256, conditional_blocks_confirmed,
+                 unworked_hours_occurred, work_obstacles_occurred,
+                 unworked_total_millihours, unworked_paid_millihours,
+                 control_catalog_key, control_manifest_sha256,
+                 maternity_millihours, paternity_millihours, parental_millihours,
+                 unpaid_leave_millihours, unexcused_millihours)
+             VALUES ('jmhz-work-month.v3', 168000, 160000, '" . str_repeat('5', 64)
+                . "', 1, 1, 0, 40000, 0, 'jmhz-controls-1.4.2.8-source-v4', '"
+                . str_repeat('6', 64) . "', 8000, 8000, 8000, 8000, 8000)",
+        );
+        $stored = $db->query(
+            'SELECT parental_millihours, unexcused_millihours
+               FROM payroll_jmhz_work_month_revisions
+              ORDER BY id DESC LIMIT 1'
+        );
+        self::assertInstanceOf(\PDOStatement::class, $stored);
+        self::assertSame(
+            ['parental_millihours' => 8000, 'unexcused_millihours' => 8000],
+            array_map('intval', (array) $stored->fetch(PDO::FETCH_ASSOC)),
+        );
+    }
+
     private function createLegacyTable(): void
     {
         $this->databasePdo()->exec(
@@ -198,7 +261,8 @@ final class PayrollJmhzWorkMonthConditionalMigrationRuntimeTest extends TestCase
             '--only=1351_payroll_jmhz_work_month_conditional_blocks.sql,'
                 . '1352_payroll_jmhz_work_month_conditional_contract.sql,'
                 . '1354_payroll_jmhz_work_month_control_binding.sql,'
-                . '1356_payroll_jmhz_work_month_control_binding_guard.sql',
+                . '1356_payroll_jmhz_work_month_control_binding_guard.sql,'
+                . '1752_payroll_jmhz_work_month_absence_evidence.sql',
         ];
         $environment = getenv();
         $environment['MYINVOICE_DB_NAME'] = $this->database;

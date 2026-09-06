@@ -189,8 +189,22 @@ absencí slouží jako podklad k ruční kontrole, nikoli jako automatická prá
 klasifikace. Nevyřízená absence nebo čekající oprava schválení měsíce blokuje.
 Schválená placená dovolená může projít běžným profilem JMHZ jen tehdy, když
 souhlasí s publikovanými směnami a potvrzený pracovní souhrn ji vykazuje celou
-jako placené neodpracované hodiny. Neplacené volno a ostatní nestandardní
-absence zůstávají bez doložených údajů pro ELDP bezpečně zablokované.
+jako placené neodpracované hodiny.
+
+Běžným profilem JMHZ projdou i **otcovská, rodičovská dovolená, neplacené
+volno, neomluvená absence a překážky v práci**. Otcovská je vyloučenou dobou
+v celé podpůrčí době; zbylé čtyři vyloučenou dobu netvoří a dobu pojištění
+nekrátí, takže evidenční list za ně vykáže plný měsíc bez vyloučených dnů.
+Aby šly dny doložit, ptá se potvrzení pracovní doby u těchto absencí navíc na
+jejich hodiny — pole se ale objeví **jen u druhu, který v měsíci opravdu je**,
+takže běžný měsíc žádné pole navíc nemá.
+
+Bezpečně zablokované zůstávají dva případy. **Peněžitá pomoc v mateřství**,
+protože vyloučenou dobou je jen její část před porodem a den porodu aplikace
+neeviduje. A **měsíc, ve kterém rodičovská, neplacené volno nebo neomluvená
+absence nenechaly žádný započitatelný příjem** — takový měsíc se za dobu
+pojištění nepovažuje a evidenční list ho značí zvláštním způsobem, který běžný
+profil vyjádřit neumí. Obojí vyřiďte ručně mimo aplikaci.
 
 > [!IMPORTANT]
 > Nové zacházení se svátkem a spodní hranice průměrného výdělku platí od

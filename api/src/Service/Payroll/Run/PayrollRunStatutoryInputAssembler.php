@@ -796,7 +796,7 @@ final class PayrollRunStatutoryInputAssembler
      * hodina, za kterou … náleží náhrada mzdy nebo platu").
      *
      * Rozpad placených neodpracovaných hodin nese teprve pracovní souhrn JMHZ
-     * verze `jmhz-work-month.v2`. Bez něj nelze úhrn sestavit a hodiny se
+     * verze `jmhz-work-month.v2` a novější. Bez něj nelze úhrn sestavit a hodiny se
      * nevracejí vůbec — kalkulátor pak nárok neuplatní a měsíc jde na ruční
      * posouzení.
      */
@@ -805,7 +805,11 @@ final class PayrollRunStatutoryInputAssembler
         $month = $this->object($timeMonth);
         $summary = $this->object($month['jmhz_work_summary'] ?? null);
         if ($summary === null
-            || ($summary['derivation_version'] ?? null) !== 'jmhz-work-month.v2'
+            || !in_array(
+                $summary['derivation_version'] ?? null,
+                ['jmhz-work-month.v2', 'jmhz-work-month.v3'],
+                true,
+            )
         ) {
             return null;
         }

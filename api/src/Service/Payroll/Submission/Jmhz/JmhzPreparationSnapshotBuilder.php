@@ -1434,7 +1434,11 @@ final class JmhzPreparationSnapshotBuilder
         $summary = $timeMonth['jmhz_work_summary'] ?? null;
         if (!is_array($summary) || array_is_list($summary)
             || ($timeMonth['jmhz_work_summary_status'] ?? null) !== 'frozen_work_summary'
-            || ($summary['derivation_version'] ?? null) !== 'jmhz-work-month.v2'
+            || !in_array(
+                $summary['derivation_version'] ?? null,
+                ['jmhz-work-month.v2', 'jmhz-work-month.v3'],
+                true,
+            )
         ) {
             $issues[] = $this->issue('jmhz_work_summary_v2_missing', 'employment', $employmentId, ['10259', '10260', '10261', '10265', '10268']);
         }

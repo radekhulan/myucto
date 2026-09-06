@@ -18,39 +18,44 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  * | druh absence          | atribut ELDP                        |
  * |-----------------------|-------------------------------------|
  * | `dpn`, `quarantine`   | 10358 dočasná pracovní neschopnost  |
- * | `ppm`                 | 10359 peněžitá pomoc v mateřství    |
  * | `ocr`,`long_term_care`| 10360 ošetřovné / dlouhodobé ošetř. |
  * | `paternity`           | 10362 otcovská                      |
  *
  * Součet 10357 = 10358 + 10359 + 10360 + 10362 + 10536 podle *Pravidel podání
  * JMHZ a souvisejících procesů* verze 1.4.4, kapitola 4 (ELDP).
  *
+ * Otcovská je vyloučenou dobou v celé podpůrčí době — § 16 odst. 4 věta třetí
+ * písm. a) zákona č. 155/1995 Sb. jmenuje „dobu, po kterou trvala podpůrčí doba
+ * u dávky otcovské poporodní péče" bez dalšího omezení (od 1. 1. 2022 dva týdny,
+ * § 38b zákona č. 187/2006 Sb.). Za ty dny mzda nenáleží, takže nevzniká krytí
+ * s příjmem, které návětí téhož ustanovení zapovídá.
+ *
  * ## Co vyloučenou dobu netvoří a nechává řádek beze změny
  *
  * `vacation` (dovolená se proplácí a pojištění běží dál), `employer_obstacle`
- * (překážka na straně zaměstnavatele s náhradou mzdy) a `compensatory_time_off`
- * (náhradní volno za přesčas podle § 114 odst. 3 zákoníku práce). Ani jedno
- * nesnižuje dobu pojištění ani netvoří vyloučenou dobu.
+ * a `employee_obstacle` (překážky v práci s náhradou mzdy, která je součástí
+ * vyměřovacího základu), `compensatory_time_off` (náhradní volno za přesčas
+ * podle § 114 odst. 3 zákoníku práce), `unpaid_leave`, `unexcused` a
+ * `parental`. Podrobné odůvodnění u konstanty {@see NEUTRAL_TYPES}.
  *
- * U náhradního volna je to úsudek z výčtu atributů, ne z primárního textu
- * zákona: žádný z atributů vyloučených dob, které ELDP zná, na něj nesedí —
- * 10358–10362 jsou dávky nemocenského pojištění a 10536 (§ 16 odst. 4 písm. j)
- * zákona č. 155/1995 Sb.) je o době, po kterou podle rozhodnutí soudu nebo
- * mimosoudní dohody nadále trval pracovní vztah po neplatném skončení. Úplný
- * výčet § 16 odst. 4 zákona č. 155/1995 Sb. v repozitáři doložený není; opora
- * je ve výčtu atributů ELDP a v doslovném znění písm. j) z podkladů ČSSZ.
+ * Výčet § 16 odst. 4 věty třetí písm. a) je uzavřený, takže „netvoří vyloučenou
+ * dobu" je u nich závěr ze zákona, ne úsudek z výčtu atributů. Zbývá jediný
+ * úsudkový případ: `compensatory_time_off` — na náhradní volno nesedí ani
+ * jeden atribut, který ELDP zná, a 10536 (§ 16 odst. 4 písm. j)) je o době
+ * trvání pracovního vztahu po neplatném skončení.
+ *
+ * ## Co modul NEUMÍ a co proto musí ošetřit volající
+ *
+ * Doba pojištění se u nepřítomnosti bez příjmu nekrátí po dnech, ale po CELÝCH
+ * MĚSÍCÍCH podle § 11 odst. 2 zákona č. 155/1995 Sb. („za dobu pojištění se
+ * nepovažuje kalendářní měsíc, ve kterém nebyly dosaženy příjmy … pokud nešlo
+ * o omluvné důvody"), v ELDP znakem „X". Tenhle modul počítá jen vyloučené
+ * doby a o příjmech nic neví — měsíc bez započitatelného příjmu musí rozpoznat
+ * a odmítnout ten, kdo modul volá.
  *
  * ## Co je fail-closed a proč
  *
- * - `unpaid_leave` — neplacené volno se podle situace promítá do 10473
- *   (omluvená nepřítomnost bez náhrady) nebo do 10468 (odečítané dny po
- *   dosažení důchodového věku). Rozhodnutí mezi nimi vyžaduje údaj, který
- *   modul nemá.
- * - `parental` — rodičovská dovolená je náhradní doba pojištění řešená kódem
- *   ELDP a přerušením pojištění, ne vyloučenou dobou; logiku změny kódu
- *   uvnitř roku modul zatím nemá.
- * - `employee_obstacle` — z druhu absence nejde poznat, jestli za ni náleží
- *   náhrada příjmu; placená překážka vyloučenou dobu netvoří, neplacená ano.
+ * - `ppm` — vyloučenou dobou je jen předporodní část, viz {@see UNSUPPORTED_TYPES}.
  * - `other` — nerozlišený druh.
  *
  * ## Co se z principu nevyplňuje
@@ -74,7 +79,6 @@ final class EldpExcludedPeriodDeriver
     private const EXCLUDED_ATTRIBUTES = [
         'dpn' => 'docasNeschopnost',
         'quarantine' => 'docasNeschopnost',
-        'ppm' => 'penezitaPomocMaterstvi',
         'ocr' => 'osetrovaniClenaRodiny',
         'long_term_care' => 'osetrovaniClenaRodiny',
         'paternity' => 'otcovska',
@@ -89,13 +93,77 @@ final class EldpExcludedPeriodDeriver
      * o době trvání pracovního vztahu po neplatném skončení, ne o volnu za
      * přesčas. Mez důkazu: úplný výčet § 16 odst. 4 v repozitáři doložený není.
      */
-    private const NEUTRAL_TYPES = ['vacation', 'employer_obstacle', 'compensatory_time_off'];
+    private const NEUTRAL_TYPES = [
+        'vacation',
+        'employer_obstacle',
+        'compensatory_time_off',
+        /*
+         * Neplacené volno, neomluvená absence a rodičovská dovolená.
+         *
+         * Žádná z nich není vyloučenou dobou: výčet § 16 odst. 4 věty třetí
+         * písm. a) zákona č. 155/1995 Sb. je UZAVŘENÝ (nemoc, karanténa,
+         * ošetřovné, dlouhodobé ošetřovné, otcovská, doba před porodem) a ani
+         * jedna z těchhle tří v něm není. Do ELDP se přitom vykazují jen doby
+         * podle písm. a) — Všeobecné zásady ČSSZ pro vyplňování ELDP:
+         * „Vyloučené doby: uvádí se doba trvání omluvných důvodů uvedených
+         * v § 16 odst. 4 písm. a) zákona č. 155/1995 Sb."
+         *
+         * Ani jedna z nich zároveň nepřerušuje pojištění. Jediné přerušení
+         * účasti uvnitř trvajícího zaměstnání zná § 10 odst. 9 zákona
+         * č. 187/2006 Sb. a týká se výkonu trestu a zabezpečovací detence.
+         *
+         * Rodičovská JE náhradní dobou pojištění (osobní péče o dítě do 4 let,
+         * § 5 odst. 2 písm. c) a § 12 odst. 1 zákona č. 155/1995 Sb.) a je
+         * i vyloučenou dobou — ale podle § 16 odst. 4 věty třetí písm. **e)**,
+         * ne písm. a). Tu ČSSZ nedostává od zaměstnavatele; pojištěnec ji
+         * dokládá čestným prohlášením až v důchodovém řízení. Zaměstnavatel
+         * ji na ELDP nevykazuje vůbec.
+         *
+         * Doba pojištění se u všech tří krátí jinou cestou — celým měsícem
+         * podle § 11 odst. 2 zákona č. 155/1995 Sb. (znak „X"), když v měsíci
+         * nebyl zúčtován započitatelný příjem. Ten případ řeší volající;
+         * do vyloučených dob nepatří ani tehdy.
+         */
+        'unpaid_leave',
+        'unexcused',
+        'parental',
+        /*
+         * Překážka na straně zaměstnance je v aplikaci vždy PLACENÁ (validátor
+         * absence jí vynucuje schválený snapshot průměru a sazbu 100 %).
+         * Náhrada mzdy je součástí vyměřovacího základu, takže by se vyloučená
+         * doba kryla s příjmem — a § 16 odst. 4 věta třetí návětí zákona
+         * č. 155/1995 Sb. vyloučenou dobu při krytí s příjmem zapovídá.
+         * Neplacenou variantu aplikace neeviduje.
+         */
+        'employee_obstacle',
+    ];
 
     /** Druhy absence, u kterých modul nemá doložený způsob výpočtu. */
     private const UNSUPPORTED_TYPES = [
-        'unpaid_leave' => 'neplacené volno nelze bez dalšího údaje rozdělit mezi omluvenou nepřítomnost a odečítané dny',
-        'parental' => 'rodičovská dovolená se řeší kódem ELDP a přerušením pojištění, ne vyloučenou dobou',
-        'employee_obstacle' => 'u překážky na straně zaměstnance není doloženo, zda za ni náleží náhrada příjmu',
+        /*
+         * Peněžitá pomoc v mateřství se na vyloučené doby NEPŘEVÁDÍ celá.
+         *
+         * Vyloučenou dobou je podle § 16 odst. 4 věty třetí písm. a) zákona
+         * č. 155/1995 Sb. jen doba PŘED PORODEM — „doby před porodem, po
+         * kterou nebyla vykonávána výdělečná činnost z důvodu těhotenství,
+         * nejdříve však od začátku osmého týdne před očekávaným dnem porodu do
+         * dne, který bezprostředně předcházel dni porodu". Totéž říká i název
+         * atributu 10359 v datovém slovníku JMHZ: „Počet dnů čerpání peněžité
+         * pomoci v mateřství (do dne předcházejícímu porodu)".
+         *
+         * Zbytek podpůrčí doby PPM (typicky 28 nebo 37 týdnů po porodu)
+         * vyloučenou dobou NENÍ; hodnotí se mimo ELDP jako péče o dítě do 4 let
+         * a měsíce bez příjmu se krátí znakem „X" podle § 11 odst. 2.
+         *
+         * Rozdělit jedno na druhé jde jen podle DNE PORODU, případně podle
+         * očekávaného dne porodu. Ani jeden aplikace neeviduje, takže by celou
+         * podpůrčí dobu vykázala jako vyloučenou a nadhodnotila osobní
+         * vyměřovací základ — chyba, která mění důchod. Dokud den porodu není
+         * ve zmrazeném snapshotu, musí PPM rozhodnout mzdová účetní ručně.
+         */
+        'ppm' => 'vyloučenou dobou je jen část peněžité pomoci v mateřství před porodem'
+            . ' (§ 16 odst. 4 věta třetí písm. a) zákona č. 155/1995 Sb.)'
+            . ' a den porodu aplikace neeviduje',
         'other' => 'nerozlišený druh absence',
     ];
 

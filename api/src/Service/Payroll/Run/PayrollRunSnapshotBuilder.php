@@ -24,6 +24,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
 use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
+use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 use PDO;
 
 final class PayrollRunSnapshotBuilder
@@ -1612,7 +1613,14 @@ final class PayrollRunSnapshotBuilder
             $derivationVersion = (string) $row['derivation_version'];
             $conditionalBlocksConfirmed = (int) $row['conditional_blocks_confirmed'] === 1;
             $interactions = null;
-            if ($derivationVersion === 'jmhz-work-month.v2') {
+            /*
+             * v3 nese navíc hodiny nepřítomností bez atributu hlášení. Verze se
+             * NESLUČUJÍ: obsahový otisk se počítá z kanonického JSONu hodnot,
+             * takže dřív zmrazený v2 souhrn musí i dál vydat přesně tentýž
+             * výčet klíčů, jaký měl při schválení.
+             */
+            $conditionalVersions = ['jmhz-work-month.v2', 'jmhz-work-month.v3'];
+            if (in_array($derivationVersion, $conditionalVersions, true)) {
                 if (!$conditionalBlocksConfirmed
                     || !in_array($row['unworked_hours_occurred'], [0, 1, '0', '1'], true)
                     || !in_array($row['work_obstacles_occurred'], [0, 1, '0', '1'], true)
@@ -1621,7 +1629,7 @@ final class PayrollRunSnapshotBuilder
                         'Podmíněné bloky pracovního souhrnu JMHZ nejsou potvrzené.',
                     );
                 }
-                foreach ([
+                $conditionalFields = [
                     'unworked_total_millihours',
                     'unworked_paid_millihours',
                     'dpn_without_employer_compensation_millihours',
@@ -1630,7 +1638,14 @@ final class PayrollRunSnapshotBuilder
                     'care_millihours',
                     'employee_obstacle_paid_millihours',
                     'employer_obstacle_millihours',
-                ] as $field) {
+                ];
+                if ($derivationVersion === 'jmhz-work-month.v3') {
+                    $conditionalFields = array_merge(
+                        $conditionalFields,
+                        PayrollJmhzWorkMonthSummaryBuilder::localEvidenceFields(),
+                    );
+                }
+                foreach ($conditionalFields as $field) {
                     $values[$field] = $row[$field] === null ? null : (int) $row[$field];
                 }
                 $interactions = [
@@ -1655,7 +1670,7 @@ final class PayrollRunSnapshotBuilder
                 ],
                 'source_snapshot_sha256' => $sourceHash,
             ];
-            if ($derivationVersion === 'jmhz-work-month.v2') {
+            if (in_array($derivationVersion, $conditionalVersions, true)) {
                 $summaryPayload['specification']['control_catalog_key'] =
                     (string) $row['control_catalog_key'];
                 $summaryPayload['specification']['control_manifest_sha256'] =
@@ -1688,7 +1703,11 @@ final class PayrollRunSnapshotBuilder
             'approved_at' => $row['approved_at'],
             'jmhz_work_summary_status' => $summary === null
                 ? 'unverified'
-                : ((string) $summary['derivation_version'] === 'jmhz-work-month.v2'
+                : (in_array(
+                    (string) $summary['derivation_version'],
+                    ['jmhz-work-month.v2', 'jmhz-work-month.v3'],
+                    true,
+                )
                     ? 'frozen_work_summary'
                     : 'frozen_core'),
             'jmhz_work_summary' => $summary,
