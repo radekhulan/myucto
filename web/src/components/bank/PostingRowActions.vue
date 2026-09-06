@@ -51,6 +51,13 @@ async function onReposted() {
   emit('changed')
 }
 
+/*
+ * Dialog přeúčtování zůstává TADY (spolu s kontrolou práva a stavu), ale
+ * spouští ho položka „…" nabídky, kterou skládá `BankTransactionRow`. Kdyby
+ * si nabídku otevírala sama, měl by řádek dvě „…" vedle sebe.
+ */
+defineExpose({ canRepost, openRepost: () => { repostOpen.value = true } })
+
 // Inline override kontace při schvalování
 const overrideOpen = ref(false)
 const accounts = ref<ChartAccount[]>([])
@@ -164,14 +171,15 @@ function onPosted(payload: { result: PostResult; debit: string; credit: string }
     </template>
 
     <!-- Zaúčtováno: opravit kontaci (Přeúčtovat) nebo zaúčtování zrušit úplně. -->
-    <div v-else-if="posting?.status === 'posted' && (canRepost || auth.canWrite('bank.unpost'))"
+    <!--
+      Přeúčtovat je vzácný administrativní zásah, takže patří do „…" nabídky
+      řádku (skládá ji `BankTransactionRow` a spouští přes `openRepost()`).
+      Dvě plná tlačítka pod sebou dělala z každého zaúčtovaného řádku dva
+      pruhy. Zrušit zaúčtování zůstává vidět — je to běžnější oprava.
+    -->
+    <div v-else-if="posting?.status === 'posted' && auth.canWrite('bank.unpost')"
       class="inline-flex flex-wrap items-center justify-end gap-1">
-      <!-- Administrativní zásah do už zaúčtovaného pohybu → warning, ne primary. -->
-      <button v-if="canRepost" @click="repostOpen = true" :disabled="busy" :class="btnOutlineSm('warning')">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit"/></svg>
-        {{ t('accounting.repost.action') }}
-      </button>
-      <button v-if="auth.canWrite('bank.unpost')" @click="unpost" :disabled="busy" :class="btnOutlineSm('neutral')">
+      <button @click="unpost" :disabled="busy" :class="btnOutlineSm('neutral')">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn"/></svg>
         {{ t('bank.posting.action_unpost') }}
       </button>

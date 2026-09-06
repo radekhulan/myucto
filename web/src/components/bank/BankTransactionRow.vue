@@ -10,6 +10,7 @@ import type { AutomationProvenance } from '@/api/automation'
 import type { BankPostingRulePayload, PostResult } from '@/api/bankPosting'
 import PostingRowActions from './PostingRowActions.vue'
 import RuleFormModal from './RuleFormModal.vue'
+import RepostModal from '@/components/accounting/RepostModal.vue'
 import PostingStatusBadge from './PostingStatusBadge.vue'
 import MatchSuggestionPanel from './MatchSuggestionPanel.vue'
 import WhyChip from '@/components/automation/WhyChip.vue'
@@ -53,6 +54,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const auth = useAuthStore()
 const ruleTemplateOpen = ref(false)
+// Dialog přeúčtování drží řádek, ne PostingRowActions: řádek se vykresluje ve
+// dvou podobách (tabulka i karta) a dvě instance dialogu by si přebíjely stav.
+const repostTx = ref<RowTx | null>(null)
 const rulePrefill = computed<BankPostingRulePayload>(() => ({
   name: props.tx.counterparty_name || '',
   is_active: true,
@@ -183,6 +187,18 @@ function matchActions(tx: BankTransaction): RowAction[] {
       key: 'unmatch', label: t('bank.unmatch'), icon: 'uturn', variant: 'neutral',
       run: () => unmatchTx(tx),
       show: canMatch && ['auto_exact', 'auto_partial', 'manual', 'ignored'].includes(st),
+    },
+    /*
+     * Přeúčtování je vzácný administrativní zásah do už hotového zápisu, proto
+     * patří do „…", ne mezi tlačítka řádku — dvě plná tlačítka pod sebou
+     * dělala z každého zaúčtovaného řádku dva pruhy. Dialog vlastní tenhle
+     * řádek (ne `PostingRowActions`), protože řádek se vykresluje ve dvou
+     * podobách (tabulka a karta) a dvě instance dialogu by si přebíjely stav.
+     */
+    {
+      key: 'repost', label: t('accounting.repost.action'), icon: 'edit', variant: 'warning',
+      run: () => { repostTx.value = tx },
+      show: props.isDoubleEntry && tx.posting?.status === 'posted' && auth.canWrite('accounting'),
     },
   ]
 }
@@ -390,6 +406,9 @@ function candidateReject() {
     </div>
   </div>
   <Teleport to="body">
+    <RepostModal v-if="repostTx" :open="true" source="bank-transactions" :doc-id="repostTx.id"
+      :doc-label="repostTx.description || repostTx.variable_symbol"
+      @close="repostTx = null" @reposted="repostTx = null; emit('changed')" />
     <RuleFormModal v-if="ruleTemplateOpen" :prefill="rulePrefill" :base-amount="Math.abs(tx.amount)"
       @saved="ruleTemplateOpen = false; emit('changed')" @close="ruleTemplateOpen = false" />
   </Teleport>

@@ -9,6 +9,7 @@ import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
 import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue'
 import PostingOriginRow from '@/components/accounting/PostingOriginRow.vue'
 import RepostModal from '@/components/accounting/RepostModal.vue'
+import { btnOutlineSm } from '@/components/ui/buttonStyles'
 import { journalEntryLink } from '@/utils/journalSourceLink'
 
 /**
@@ -112,15 +113,15 @@ async function onReposted(): Promise<void> {
             </span>
             <span v-if="entry.description" class="text-neutral-400 truncate max-w-[24rem]">{{ entry.description }}</span>
           </span>
-          <span class="flex flex-wrap items-center gap-3">
+          <span class="flex flex-wrap items-center gap-2">
             <!-- Administrativní zásah do už zaúčtovaného dokladu → warning, ne primary. -->
             <button v-if="canRepost(entry)" type="button" @click="repostOpen = true"
-              class="cursor-pointer text-xs text-warning-700 hover:underline inline-flex items-center gap-1 whitespace-nowrap">
+              :class="btnOutlineSm('warning')">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
               {{ t('accounting.repost.action') }}
             </button>
-            <RouterLink :to="journalEntryLink(entry.id)"
-              class="text-xs text-primary-600 hover:text-primary-700 hover:underline whitespace-nowrap">
+            <RouterLink :to="journalEntryLink(entry.id)" :class="btnOutlineSm('neutral')">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
               {{ t('accounting.journal.document_posting.open_in_journal') }}
             </RouterLink>
           </span>
