@@ -446,6 +446,34 @@ final class JournalEntryRepository
         return $row === false ? null : $this->cast($row);
     }
 
+    /**
+     * AKTIVNÍ (nestornovaný) zápis zdrojového dokladu, zamykajícím čtením — nosič
+     * idempotence zaúčtování od migrace 1752.
+     *
+     * `findBySourceForUpdate()` vrací i STORNOVANÝ zápis, což pro idempotenci není
+     * to, co se hledá: §35 ZoÚ (a docblock {@see PostingService::rewriteExisting()})
+     * říká, že oprava po stornu se dělá NOVÝM zápisem, ne mutací stornovaného. Dokud
+     * se ptalo na „poslední zápis dokladu", skončil re-post po stornu chybou
+     * `entry_reversed` a doklad se už nedal zaúčtovat vůbec. Unikát
+     * `uq_je_supplier_active_source` hlídá přesně tuhle množinu.
+     */
+    public function findActiveBySourceForUpdate(int $supplierId, string $sourceType, int $sourceId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, period_id, entry_date, document_date, document_no, description,
+                    source_type, source_id, posted_at, posted_by, reversed_by, row_version,
+                    created_at, updated_at
+               FROM journal_entries
+              WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL
+              ORDER BY id DESC
+              LIMIT 1
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $sourceType, $sourceId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : $this->cast($row);
+    }
+
     public function find(int $id, int $supplierId): ?array
     {
         $stmt = $this->db->pdo()->prepare(

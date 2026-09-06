@@ -29,6 +29,14 @@ final class ExpenseKindSuggestion
          * DPPO návrh (ř.40) ho podle něj zvýrazní. Nikdy neúčtuje sám (confidence zůstává WEAK).
          */
         public readonly bool $nonDeductible = false,
+        /**
+         * ID firemního pravidla (`expense_classification_rules`), které rozhodlo — jen
+         * pro `source === 'rule'` (a pro `'threshold'`, když práh §26/2 ZDP jen překlopil
+         * druh u návrhu, který vzešel z pravidla). Bez něj nešlo zpětně říct, PODLE ČEHO
+         * se doklad zaúčtoval: `source` rozliší pravidlo od katalogu, ale ne KTERÉ pravidlo,
+         * takže se ani nedalo nabídnout jeho opravu.
+         */
+        public readonly ?int $ruleId = null,
     ) {
     }
 
@@ -47,6 +55,7 @@ final class ExpenseKindSuggestion
             'confidence' => round($this->confidence, 2),
             'reason' => $this->reason,
             'source' => $this->source,
+            'expense_rule_id' => $this->ruleId,
             'non_deductible' => $this->nonDeductible,
             'auto' => $this->isAutoApplicable(),
         ];

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Expense;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\ExpenseClassificationRuleRepository;
 use MyInvoice\Service\ActivityLogger;
 use PDO;
 
@@ -36,6 +37,7 @@ final class ExpenseAutoClassifier
         private readonly Connection $db,
         private readonly ExpenseClassificationService $suggestions,
         private readonly ActivityLogger $activity,
+        private readonly ExpenseClassificationRuleRepository $rules,
     ) {}
 
     /**
@@ -83,7 +85,18 @@ final class ExpenseAutoClassifier
                 continue;
             }
 
-            $this->updateItem($itemId, $toKind, $toAccount);
+            // Provenience se ukládá spolu s výsledkem, ne vedle něj: jinak by na položce
+            // zůstalo „účet 501" bez jakékoli stopy, podle čeho se tam dostal.
+            $ruleId = isset($s['expense_rule_id']) ? (int) $s['expense_rule_id'] : null;
+            $source = isset($s['source']) ? (string) $s['source'] : null;
+            $this->updateItem($itemId, $toKind, $toAccount, $ruleId ?: null, $source);
+            // Pravidlo se „trefilo" právě teď — návrh se sám aplikoval na doklad, což je
+            // silnější přijetí než klik v náhledu. Bez tohohle volání zůstávaly hit_count
+            // a last_hit_at navždy prázdné, přestože je UI vypisuje a activeFor() podle
+            // hit_count řadí (týž vzor jako BankPostingService u bankovních pravidel).
+            if ($ruleId > 0 && $source === 'rule') {
+                $this->rules->recordHit($supplierId, $ruleId);
+            }
             $changes[] = [
                 'item_id'      => $itemId,
                 'description'  => $row['description'],
@@ -92,6 +105,8 @@ final class ExpenseAutoClassifier
                 'to_kind'      => $toKind,
                 'to_account'   => $toAccount,
                 'reason'       => (string) ($s['reason'] ?? ''),
+                'source'       => $source,
+                'rule_id'      => $ruleId ?: null,
             ];
         }
 
@@ -156,13 +171,26 @@ final class ExpenseAutoClassifier
         return $out;
     }
 
-    private function updateItem(int $itemId, string $kind, ?string $accountCode): void
-    {
+    private function updateItem(
+        int $itemId,
+        string $kind,
+        ?string $accountCode,
+        ?int $ruleId,
+        ?string $source,
+    ): void {
         // is_fixed_asset drží invariant s expense_kind (viz PurchaseInvoiceRepository).
         $this->db->pdo()->prepare(
             'UPDATE purchase_invoice_items
-                SET expense_kind = ?, expense_account_code = ?, is_fixed_asset = ?
+                SET expense_kind = ?, expense_account_code = ?, is_fixed_asset = ?,
+                    expense_rule_id = ?, expense_classification_source = ?
               WHERE id = ?'
-        )->execute([$kind, $accountCode, $kind === 'fixed_asset' ? 1 : 0, $itemId]);
+        )->execute([
+            $kind,
+            $accountCode,
+            $kind === 'fixed_asset' ? 1 : 0,
+            $ruleId,
+            in_array($source, ['rule', 'catalog', 'keyword', 'threshold', 'ai'], true) ? $source : null,
+            $itemId,
+        ]);
     }
 }

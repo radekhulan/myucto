@@ -17,6 +17,7 @@ use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
+use MyInvoice\Service\Accounting\DocumentRepostService;
 use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\JournalLinkService;
@@ -80,6 +81,7 @@ final class JournalAction
         private readonly AccountingSupplierSettingsRepository $settings,
         private readonly AccountingPeriodRepository $periods,
         private readonly DocumentAutoPoster $autoPoster,
+        private readonly DocumentRepostService $repost,
         private readonly BankPostingService $bankPosting,
         private readonly AutomationProvenanceService $automationProvenance,
         private readonly JournalExportService $exportService,
@@ -485,6 +487,97 @@ final class JournalAction
         }
 
         return Json::ok($response, ['posted' => $posted, 'failed' => $failed]);
+    }
+
+    /**
+     * GET /api/accounting/journal/repost-plan/{source}/{id} — co se stane, když se
+     * doklad přeúčtuje. Dialog „Přeúčtovat" z toho staví hlášku i předvyplněné řádky.
+     *
+     * Rozhodnutí přepsat × stornovat × odmítnout dělá {@see DocumentRepostService},
+     * tedy TATÁŽ služba, která ho pak provede — náhled se s výsledkem nemůže rozejít.
+     */
+    public function repostPlan(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+
+        $sourceType = (string) ($args['source'] ?? '') === 'purchase-invoices' ? 'purchase_invoice' : 'invoice';
+        $docId = (int) ($args['id'] ?? 0);
+        if ($docId <= 0) {
+            return Json::error($response, 'validation_failed', 'Neplatné ID dokladu.', 422);
+        }
+
+        try {
+            return Json::ok($response, $this->repost->plan($supplierId, $sourceType, $docId));
+        } catch (\Throwable $e) {
+            return $this->mapPostingError($response, $e);
+        }
+    }
+
+    /**
+     * POST /api/accounting/journal/repost/{source}/{id} — přeúčtování dokladu.
+     *
+     * Tělo: `{ lines: [{account_code, side, amount}], description?, confirm_date_shift? }`.
+     * Řádky jsou POVINNÉ: přeúčtování bez nich by bylo obyčejné znovuzaúčtování, na
+     * které je `post-purchase/{id}`.
+     */
+    public function repost(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+
+        $sourceType = (string) ($args['source'] ?? '') === 'purchase-invoices' ? 'purchase_invoice' : 'invoice';
+        $table = $sourceType === 'invoice' ? 'invoices' : 'purchase_invoices';
+        $docId = (int) ($args['id'] ?? 0);
+        if ($docId <= 0) {
+            return Json::error($response, 'validation_failed', 'Neplatné ID dokladu.', 422);
+        }
+        if ($this->fetchDocDate($table, $supplierId, $docId) === null) {
+            return Json::error($response, 'not_found', 'Doklad nenalezen.', 404);
+        }
+
+        $body = (array) ($request->getParsedBody() ?? []);
+        $lines = is_array($body['lines'] ?? null) ? $this->parsePostingLines($body['lines']) : null;
+        if ($lines === null) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Každý řádek potřebuje account_code, side (debit/credit) a kladnou částku.',
+                422,
+            );
+        }
+
+        $meta = array_merge($this->auditMeta($request), array_filter([
+            'description' => $this->nullableString($body['description'] ?? null),
+        ], static fn ($v) => $v !== null));
+
+        try {
+            $result = $this->repost->repost(
+                $supplierId,
+                $sourceType,
+                $docId,
+                $lines,
+                $meta,
+                (bool) ($body['confirm_date_shift'] ?? false),
+            );
+        } catch (\Throwable $e) {
+            return $this->mapPostingError($response, $e);
+        }
+
+        // Po stornu původního zápisu je doklad odemčený jen do chvíle, než opravu
+        // zapíšeme — obojí je v jedné transakci, takže zámek dokladu má zůstat.
+        // COALESCE zachová původního „kdo zaúčtoval" (§11), když už tam někdo je.
+        $this->db->pdo()->prepare(
+            "UPDATE {$table}
+                SET booked_at = COALESCE(booked_at, NOW()),
+                    booked_by = COALESCE(booked_by, ?)
+              WHERE id = ? AND supplier_id = ?"
+        )->execute([$this->userId($request), $docId, $supplierId]);
+
+        $entry = $this->journal->find((int) $result['entry_id'], $supplierId);
+        $entry['repost'] = $result;
+        return Json::ok($response, $entry);
     }
 
     /**

@@ -368,6 +368,21 @@ export interface PurchaseInvoice {
   project_name?: string | null
   project_number?: string | null
   ai_posting_suggestion?: AiPostingSuggestion | null
+  /**
+   * Podle čeho se určil druh nákladu a účet (jen detail, migrace 1751).
+   * `source: 'rule'` + `rule_id` = rozhodlo firemní pravidlo z Pravidel nákladů;
+   * ostatní zdroje pravidlo nemají a UI to musí říct, ne pravidlo předstírat.
+   * `rule_exists: false` = pravidlo se od zaúčtování smazalo, stopa zůstala.
+   */
+  expense_classification?: {
+    source: 'rule' | 'catalog' | 'keyword' | 'threshold' | 'ai' | 'mixed' | null
+    rule_id: number | null
+    rule_name: string | null
+    rule_exists: boolean
+    rule_is_active: boolean | null
+    classified_items: number
+    total_items: number
+  } | null
   /** Záloha (advance), kterou tato finální faktura vyúčtovává (vazba uložená na finální). */
   advance_purchase_invoice_id: number | null
   /** AI návrh propojení se zálohou (čeká na potvrzení uživatelem). */

@@ -508,6 +508,10 @@ final class RoutePermissionMap
         ['*', '#^/api/accounting/periods/[0-9]+/(closing|close|open-next|revert)(/|$)#', 'accounting.periods.close', AccessLevel::WRITE],
         ['*', '#^/api/accounting/periods(/|$)#', 'accounting.periods.manage', AccessLevel::WRITE],
         ['*', '#^/api/accounting/journal/(post|transfer)|^/api/accounting/journal/post-(invoice|purchase)/#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Přeúčtování dokladu je zápis do deníku, ne editace zápisu — TOTÉŽ právo jako
+        // zaúčtování výš. Bez explicitního pravidla by spadlo na obecné
+        // `accounting.journal.write` níž a mohl by ho spustit i ten, kdo účtovat nesmí.
+        ['POST', '#^/api/accounting/journal/repost/#', 'accounting.journal.post', AccessLevel::WRITE],
         // Doúčtování nezaúčtovaných dokladů na pozadí — TOTÉŽ právo jako hromadné
         // zaúčtování z výběru (PostingBackfillAction). Explicitně, ať o něm nerozhoduje
         // obecné `/api/accounting` níž: je to zápis do deníku, ne čtení nastavení.

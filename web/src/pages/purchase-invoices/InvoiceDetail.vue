@@ -20,6 +20,7 @@ import PostingBadge from '@/components/ui/PostingBadge.vue'
 import PostingPreviewModal from '@/components/accounting/PostingPreviewModal.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
 import ExpenseRuleTemplateModal from '@/components/accounting/ExpenseRuleTemplateModal.vue'
+import RepostModal from '@/components/accounting/RepostModal.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import StockReceiptModal from '@/components/stock/StockReceiptModal.vue'
 import { stockApi, type StockReceiptProposal } from '@/api/stock'
@@ -558,6 +559,32 @@ const canPostToJournal = computed(() =>
 const postingPreviewOpen = ref(false)
 const expenseRuleTemplateOpen = ref(false)
 const postingRuleOpen = ref(false)
+const repostOpen = ref(false)
+
+/**
+ * Nákladové pravidlo, podle kterého se doklad zaúčtoval. `null` znamená, že za
+ * klasifikací žádné firemní pravidlo nestojí (katalog frází, klíčová slova, práh
+ * §26/2, AI nebo ruční volba) — a to se v UI musí říct, ne mlčet: uživatel by jinak
+ * hledal pravidlo, které neexistuje.
+ */
+const expenseRule = computed(() => {
+  const c = invoice.value?.expense_classification
+  return c && c.rule_id ? c : null
+})
+
+/** Editace se otevírá jen u pravidla, které pořád existuje — smazané nemá co editovat. */
+const canEditExpenseRule = computed(() =>
+  !!expenseRule.value?.rule_exists && auth.canWrite('accounting'))
+
+const editingExpenseRuleId = ref<number | null>(null)
+
+function openExpenseRuleEdit() {
+  if (!canEditExpenseRule.value || !expenseRule.value) return
+  // TÝŽ formulář jako na /templates (ExpenseRuleTemplateModal → ExpenseRules),
+  // jen předvyplněný na konkrétní pravidlo — druhý formulář by se s ním rozešel.
+  editingExpenseRuleId.value = expenseRule.value.rule_id
+  expenseRuleTemplateOpen.value = true
+}
 
 function postToJournal() {
   if (!invoice.value || !canPostToJournal.value) return
@@ -566,7 +593,22 @@ function postToJournal() {
 
 function openExpenseRuleTemplate() {
   if (!invoice.value || !auth.canWrite('accounting') || invoice.value.vendor_id <= 0) return
+  editingExpenseRuleId.value = null
   expenseRuleTemplateOpen.value = true
+}
+
+// Přeúčtovat = oprava kontace, která v deníku UŽ JE. Nabízí se jen u zaúčtovaného
+// dokladu; co se stane (přepis vs. storno + nový zápis) rozhoduje server podle stavu
+// období a popup to ukáže před potvrzením.
+const canRepost = computed(() =>
+  !!invoice.value
+  && isDoubleEntry.value
+  && (!!invoice.value.booked_at || !!invoice.value.locked?.journal_entry_id)
+  && auth.canWrite('accounting'))
+
+async function onReposted() {
+  await load()
+  toast.success(t('accounting.repost.done'))
 }
 
 async function onPosted() {
@@ -630,6 +672,10 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
   items.push({ key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
     show: canPostToJournal.value, disabled: acting.value, loading: acting.value, run: postToJournal })
+
+  // Administrativní zásah do už zaúčtovaného dokladu → warning, ne primary.
+  items.push({ key: 'repost', label: t('accounting.repost.action'), icon: 'edit', tier: 'secondary', variant: 'warning',
+    show: canRepost.value, disabled: acting.value, run: () => { repostOpen.value = true } })
 
   items.push({ key: 'expense-template', label: t('accounting.template.create_expense'), icon: 'doc', tier: 'overflow', variant: 'neutral',
     show: isDoubleEntry.value && auth.canWrite('accounting') && inv.vendor_id > 0,
@@ -1133,6 +1179,37 @@ const purchaseActions = computed<ActionItem[]>(() => {
               <span v-else class="text-neutral-400">—</span>
             </dd>
           </div>
+          <!-- Podle čeho se účtovalo. Sekce dosud ukazovala jen VÝSLEDEK (druh, účet),
+               takže se nedalo poznat, jestli za ním stojí firemní pravidlo (a dá se
+               opravit), nebo jen dohad z klíčových slov. -->
+          <div class="flex justify-between gap-3 sm:col-span-2 xl:col-span-3">
+            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.expense_rule') }}</dt>
+            <dd class="font-medium text-right text-neutral-700">
+              <template v-if="expenseRule">
+                <span v-if="expenseRule.rule_exists">{{ expenseRule.rule_name }}</span>
+                <span v-else class="text-warning-700">
+                  {{ t('purchase_invoice.classification.expense_rule_deleted', { id: expenseRule.rule_id }) }}
+                </span>
+                <span v-if="expenseRule.rule_exists && expenseRule.rule_is_active === false"
+                  class="ml-1 text-xs text-warning-700">
+                  ({{ t('purchase_invoice.classification.expense_rule_inactive') }})
+                </span>
+                <button v-if="canEditExpenseRule" type="button" @click="openExpenseRuleEdit"
+                  class="ml-2 cursor-pointer text-primary-600 hover:text-primary-700 hover:underline inline-flex items-center gap-1 text-xs whitespace-nowrap">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                  {{ t('purchase_invoice.classification.expense_rule_edit') }}
+                </button>
+              </template>
+              <span v-else-if="invoice.expense_classification?.source"
+                class="text-neutral-500">
+                {{ t('purchase_invoice.classification.expense_rule_none') }}
+                <span class="text-neutral-400">
+                  ({{ t('purchase_invoice.classification.expense_source_' + invoice.expense_classification.source) }})
+                </span>
+              </span>
+              <span v-else class="text-neutral-400">{{ t('purchase_invoice.classification.expense_rule_manual') }}</span>
+            </dd>
+          </div>
           <!-- Zakázka (issue #29) — proklik na ekonomiku akce (výnos/náklad/marže). -->
           <div class="flex justify-between gap-3">
             <dt class="text-neutral-500">{{ t('purchase_invoice.classification.project') }}</dt>
@@ -1596,9 +1673,20 @@ const purchaseActions = computed<ActionItem[]>(() => {
       @close="postingPreviewOpen = false"
       @posted="onPosted" />
 
+    <RepostModal
+      v-if="invoice && repostOpen"
+      :open="repostOpen"
+      source="purchase-invoices"
+      :doc-id="invoice.id"
+      :doc-label="invoice.vendor_invoice_number || invoice.varsymbol"
+      @close="repostOpen = false"
+      @reposted="onReposted" />
+
     <ExpenseRuleTemplateModal v-if="expenseRuleTemplateOpen && invoice"
       :vendor-id="invoice.vendor_id" :vendor-name="invoice.vendor_company_name"
-      @close="expenseRuleTemplateOpen = false" @saved="expenseRuleTemplateOpen = false" />
+      :rule-id="editingExpenseRuleId"
+      @close="expenseRuleTemplateOpen = false"
+      @saved="() => { expenseRuleTemplateOpen = false; load() }" />
     <Teleport to="body">
       <RuleFormModal v-if="postingRuleOpen && invoice"
         :prefill="{ name: invoice.vendor_company_name || invoice.vendor_invoice_number || '', direction: invoice.total_with_vat < 0 ? 'incoming' : 'outgoing', applies_currency: invoice.currency, variable_symbol: invoice.payment_variable_symbol || invoice.varsymbol || null }"
