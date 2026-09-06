@@ -122,6 +122,100 @@ final class CzechPayrollRulesets2026Test extends TestCase
         );
     }
 
+    /**
+     * Vstupy nezabavitelných částek 2026 proti vyhlášenému znění.
+     *
+     * Konstrukce se od 1. 1. 2026 změnila (nař. vlády č. 548/2025 Sb.): podíl
+     * 2/3 → 85 %, násobek 1,5 → 1,9, normativní náklady na bydlení → normativní
+     * nájemné + energetický paušál. Integritní pin `ENFORCEMENT_DEDUCTIONS_HASH`
+     * pozná, že se hodnota změnila, ale neřekne, KTERÁ a jestli je špatně —
+     * proto tenhle test drží čísla i jejich právní zdroj čitelně vedle sebe.
+     *
+     * Podíly (85/100 a 19/10) do 9/2026 nehlídal ŽÁDNÝ test: křížová kontrola
+     * v {@see \MyInvoice\Service\Payroll\Garnishment\EnforcementDeductionPolicy2026}
+     * ověřuje jen SOULAD odvozených částek s podíly, takže záměna podílu spolu
+     * s odvozenou částkou by prošla.
+     *
+     * Zdroje hodnot:
+     *  • 4 860 Kč — životní minimum jednotlivce, nař. vlády č. 361/2025 Sb.;
+     *  • 9 430 Kč — normativní nájemné pro jednočlennou domácnost v obci
+     *    s alespoň 70 000 obyvateli, sdělení MPSV č. 526/2025 Sb. (§ 28 odst. 1
+     *    zák. č. 151/2025 Sb.);
+     *  • 2 300 Kč — energetický paušál, § 32 odst. 2 písm. a) zák. č. 151/2025 Sb.;
+     *  • 85 % a 1,9× — § 1 odst. 1 a § 2 nař. vlády č. 595/2006 Sb. ve znění
+     *    nař. vlády č. 548/2025 Sb.
+     */
+    public function testEnforcementDeductionInputsMatchTheDecreeAsAmendedFor2026(): void
+    {
+        $ruleset = CzechPayrollRulesets2026::provider()
+            ->forDate(PayrollRulesetDomain::EnforcementDeductions, '2026-01-01');
+
+        self::assertSame(486_000, $ruleset->parameter('life_minimum.monthly')->value);
+        self::assertSame(943_000, $ruleset->parameter('normative_rent.monthly')->value);
+        self::assertSame(230_000, $ruleset->parameter('energy_flat.monthly')->value);
+
+        self::assertSame(85, $ruleset->parameter('debtor_share.numerator')->value);
+        self::assertSame(100, $ruleset->parameter('debtor_share.denominator')->value);
+        self::assertSame(19, $ruleset->parameter('fully_attachable.factor_numerator')->value);
+        self::assertSame(10, $ruleset->parameter('fully_attachable.factor_denominator')->value);
+
+        // 4 860 + 9 430 + 2 300 = 16 590; 85 % = 14 101,50; 1,9× = 31 521.
+        self::assertSame(
+            1_659_000,
+            $ruleset->parameter('protected_amount.calculation_base.monthly')->value,
+        );
+        self::assertSame(
+            1_410_150,
+            $ruleset->parameter('protected_amount.debtor_base.monthly')->value,
+        );
+        self::assertSame(
+            3_152_100,
+            $ruleset->parameter('fully_attachable.threshold.monthly')->value,
+        );
+    }
+
+    /**
+     * § 4 nař. vlády č. 595/2006 Sb. ve znění nař. vlády č. 548/2025 Sb.: použije
+     * se částka životního minima jednotlivce, normativního nájemného
+     * i energetického paušálu ve výši K 1. LEDNU kalendářního roku, do něhož
+     * spadá výplata mzdy. Odkaz na normativy tedy dynamický není.
+     *
+     * Prakticky to rozhoduje spor: zvýšení životního minima jednotlivce na
+     * 5 500 Kč (odložené nař. vlády č. 57/2026 Sb. na 1. 10. 2026) se do srážek
+     * roku 2026 promítnout NESMÍ, i když část sekundárních zdrojů tvrdí opak.
+     * Sada proto smí nést jednu verzi na celý kalendářní rok — a tenhle test je
+     * ta podmínka: jakmile by někdo doménu rozdělil na období, spadne to tady.
+     */
+    public function testEnforcementAmountsAreFixedToTheFirstOfJanuaryForTheWholeYear(): void
+    {
+        $provider = CzechPayrollRulesets2026::provider();
+        $january = $provider->forDate(PayrollRulesetDomain::EnforcementDeductions, '2026-01-01');
+        $october = $provider->forDate(PayrollRulesetDomain::EnforcementDeductions, '2026-10-01');
+        $december = $provider->forDate(PayrollRulesetDomain::EnforcementDeductions, '2026-12-31');
+
+        foreach ([
+            'life_minimum.monthly',
+            'normative_rent.monthly',
+            'energy_flat.monthly',
+            'protected_amount.calculation_base.monthly',
+            'protected_amount.debtor_base.monthly',
+            'fully_attachable.threshold.monthly',
+        ] as $key) {
+            self::assertSame(
+                $january->parameter($key)->value,
+                $october->parameter($key)->value,
+                "{$key} se během roku 2026 změnil, § 4 nař. vlády č. 595/2006 Sb. to nedovoluje.",
+            );
+            self::assertSame(
+                $january->parameter($key)->value,
+                $december->parameter($key)->value,
+                "{$key} se během roku 2026 změnil, § 4 nař. vlády č. 595/2006 Sb. to nedovoluje.",
+            );
+        }
+
+        self::assertSame($january->id, $december->id);
+    }
+
     public function testAmountsUseMinorUnitsAndRatesUseCanonicalStrings(): void
     {
         $provider = CzechPayrollRulesets2026::provider();

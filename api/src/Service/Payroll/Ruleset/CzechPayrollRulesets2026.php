@@ -544,9 +544,58 @@ final class CzechPayrollRulesets2026
     }
 
     /**
-     * Nezabavitelné částky a pravidla pořadí exekučních srážek. Životní minimum
-     * i normativní náklady na bydlení mění vláda nařízením několikrát za rok,
-     * proto jsou hodnoty administrovatelné a výchozí sada je jen pinnutý default.
+     * Nezabavitelné částky a pravidla pořadí exekučních srážek.
+     *
+     * ── Odkud jsou vstupy roku 2026 ─────────────────────────────────────────
+     * Konstrukce se od 1. 1. 2026 MĚNÍ. Nařízení vlády č. 548/2025 Sb. (novela
+     * nařízení o nezabavitelných částkách č. 595/2006 Sb., účinnost 1. 1. 2026)
+     * nahradilo dosavadní základ „životní minimum + normativní náklady na
+     * bydlení" a dosavadní podíly (2/3 a 1,5×) tímto:
+     *
+     *  • § 1 odst. 1: nezabavitelná částka na povinného = 85 % součtu částky
+     *    životního minima jednotlivce, částky NORMATIVNÍHO NÁJEMNÉHO a částky
+     *    ENERGETICKÉHO PAUŠÁLU → `debtor_share` 85/100;
+     *  • § 2: hranice, nad kterou je zbytek čisté mzdy postižitelný bez omezení,
+     *    = 1,9násobek TÉHOŽ součtu → `fully_attachable.factor` 19/10.
+     *
+     * Normativní náklady na bydlení, ze kterých se počítalo do roku 2025, byly
+     * zrušeny zákonem č. 152/2025 Sb. spolu se zavedením dávky státní sociální
+     * pomoci (zákon č. 151/2025 Sb.). Nový základ proto tvoří:
+     *
+     *  • `life_minimum.monthly` = 4 860 Kč — životní minimum jednotlivce podle
+     *    § 2 zák. č. 110/2006 Sb. ve výši stanovené nař. vlády č. 361/2025 Sb.
+     *    Zvýšení na 5 500 Kč bylo nař. vlády č. 57/2026 Sb. odloženo na
+     *    1. 10. 2026, na srážky roku 2026 ale nemá vliv ani tak — viz § 4 níže.
+     *  • `normative_rent.monthly` = 9 430 Kč — normativní nájemné pro
+     *    JEDNOČLENNOU domácnost v obci s alespoň 70 000 obyvateli, vyhlášené
+     *    podle § 28 odst. 1 zák. č. 151/2025 Sb. sdělením MPSV č. 526/2025 Sb.
+     *    (vyhlášeno 12. 12. 2025, pro kalendářní rok 2026).
+     *    https://www.e-sbirka.cz/sb/2025/526
+     *  • `energy_flat.monthly` = 2 300 Kč — energetický paušál pro jednočlennou
+     *    domácnost podle § 32 odst. 2 písm. a) zák. č. 151/2025 Sb.
+     *    https://www.e-sbirka.cz/sb/2025/151
+     *
+     * Základ tedy činí 4 860 + 9 430 + 2 300 = 16 590 Kč, nezabavitelná částka
+     * na povinného 85 % = 14 101,50 Kč a hranice plně zabavitelného zbytku
+     * 1,9 × 16 590 = 31 521 Kč. Pozor na sekundární zdroje z podzimu 2025: než
+     * vyšlo sdělení č. 526/2025 Sb., počítaly s normativním nájemným 8 369 Kč
+     * (základ 15 529 Kč, částky 13 199,65 a 29 505 Kč). To je PŘEKONANÉ.
+     *
+     * Zdroje k rešerši: nař. vlády č. 548/2025 Sb.
+     * (https://www.e-sbirka.cz/sb/2025/548), NV č. 595/2006 Sb. ve znění od
+     * 1. 1. 2026 (https://www.e-sbirka.cz/sb/2006/595).
+     *
+     * ── Proč je sada pinnutá na celý rok, a ne „dynamická" ──────────────────
+     * Nový § 4 NV č. 595/2006 Sb. říká, že se použije částka životního minima
+     * jednotlivce, normativního nájemného i energetického paušálu VE VÝŠI
+     * K 1. LEDNU kalendářního roku, do něhož spadá výplata mzdy. Odkaz na
+     * normativy tedy dynamický NENÍ — je fixovaný k 1. lednu. Proto je správně,
+     * že sada 2026 nese jedno číslo s platností 2026-01-01 až 2026-12-31 a že
+     * odložené zvýšení životního minima od 1. 10. 2026 se do srážek roku 2026
+     * nepromítne. Hlídá to test, který čte sadu k 1. 1. i k 31. 12. 2026.
+     *
+     * Administrovatelné hodnoty přesto zůstávají: kdyby se v průběhu roku znění
+     * změnilo, přepíše je override z administrace s vlastní auditní stopou.
      *
      * Odvozené částky (základ pro výpočet, nezabavitelná částka na povinného,
      * hranice plně zabavitelného zbytku) se ZÁMĚRNĚ vezou jako samostatné
@@ -567,20 +616,43 @@ final class CzechPayrollRulesets2026
                 self::labourCodeDeductions(),
             ],
             [
+                // 85 % základu — § 1 odst. 1 nař. vlády č. 595/2006 Sb. ve znění
+                // nař. vlády č. 548/2025 Sb. (do roku 2025 to byly dvě třetiny).
                 'debtor_share.denominator' => PayrollRuleValue::integer(100),
                 'debtor_share.numerator' => PayrollRuleValue::integer(85),
+                // Čtvrtina na každou vyživovanou osobu — § 1 odst. 2 téhož nařízení.
                 'dependant_share.denominator' => PayrollRuleValue::integer(4),
                 'dependant_share.numerator' => PayrollRuleValue::integer(1),
+                // Vyhláška č. 485/2000 Sb. — 50 Kč měsíčně; přednostní pořadí podle
+                // novely účinné od 1. 1. 2022.
                 'employer_flat_fee.maximum.monthly' => PayrollRuleValue::moneyMinor(5_000),
                 'employer_flat_fee.order_effective_from' => PayrollRuleValue::text('2022-01-01'),
+                // Energetický paušál pro jednočlennou domácnost — § 32 odst. 2
+                // písm. a) zák. č. 151/2025 Sb., o dávce státní sociální pomoci.
+                // V roce 2025 se do základu nezapočítával vůbec (byl 0).
                 'energy_flat.monthly' => PayrollRuleValue::moneyMinor(230_000),
+                // § 279 odst. 5 o. s. ř. — pevná zákonná částka vložená zák. č. 286/2021 Sb.
+                // s účinností od 1. 1. 2022, na průměrnou mzdu ani na životní minimum
+                // navázaná není. Proto je tu totéž číslo jako v sadě 2025.
                 'four_enforcement_rule.pension_exception_limit' =>
                     PayrollRuleValue::moneyMinor(108_900),
+                // Hranice plně zabavitelného zbytku = 1,9 × 16 590 = 31 521 Kč
+                // (§ 2 nař. vlády č. 595/2006 Sb. ve znění nař. vlády
+                // č. 548/2025 Sb.; do roku 2025 to byl 1,5násobek).
                 'fully_attachable.factor_denominator' => PayrollRuleValue::integer(10),
                 'fully_attachable.factor_numerator' => PayrollRuleValue::integer(19),
                 'fully_attachable.threshold.monthly' => PayrollRuleValue::moneyMinor(3_152_100),
+                // Životní minimum jednotlivce 4 860 Kč — § 2 zák. č. 110/2006 Sb.
+                // ve výši podle nař. vlády č. 361/2025 Sb. Zvýšení na 5 500 Kč
+                // odložil nař. vlády č. 57/2026 Sb. na 1. 10. 2026; na srážky
+                // roku 2026 nedopadá, § 4 fixuje hodnoty k 1. lednu.
                 'life_minimum.monthly' => PayrollRuleValue::moneyMinor(486_000),
+                // Normativní nájemné pro jednočlennou domácnost v obci s alespoň
+                // 70 000 obyvateli — § 28 odst. 1 zák. č. 151/2025 Sb., vyhlášeno
+                // sdělením MPSV č. 526/2025 Sb. pro rok 2026. NENÍ to 8 369 Kč,
+                // se kterými pracovaly sekundární zdroje před 12. 12. 2025.
                 'normative_rent.monthly' => PayrollRuleValue::moneyMinor(943_000),
+                // Základ 4 860 + 9 430 + 2 300 = 16 590 Kč; 85 % = 14 101,50 Kč.
                 'protected_amount.calculation_base.monthly' =>
                     PayrollRuleValue::moneyMinor(1_659_000),
                 'protected_amount.debtor_base.monthly' => PayrollRuleValue::moneyMinor(1_410_150),
