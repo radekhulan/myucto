@@ -503,6 +503,86 @@ final class PurchaseInvoiceRepository
         return array_map(fn (array $r) => $this->castItem($r), $rows);
     }
 
+    /**
+     * Provenience klasifikace nákladu za CELÝ doklad — podle čeho se zaúčtoval druh
+     * výdaje a účet (migrace 1751).
+     *
+     * Agreguje se na hlavičku, protože sekce Zaúčtování je pohled na doklad, ne na
+     * řádek. Rozlišují se tři stavy, aby UI nemuselo hádat:
+     *   - `source = 'rule'` + `rule_id` → rozhodlo JEDNO firemní pravidlo,
+     *   - `source` = jiný zdroj (katalog / klíčová slova / práh / AI) → pravidlo nebylo,
+     *   - `source = 'mixed'` → řádky se rozhodly různě; jedno pravidlo se tvrdit nedá.
+     * `classified_items = 0` znamená ruční volbu účetní (nebo doklad z doby před 1751).
+     *
+     * `rule_exists = false` je legitimní stav: pravidlo se od zaúčtování smazalo a
+     * stopa má přežít (proto se sloupec drží bez FK). UI to musí říct, ne mlčet.
+     *
+     * @return array{source:?string, rule_id:?int, rule_name:?string, rule_exists:bool,
+     *               rule_is_active:?bool, classified_items:int, total_items:int}
+     */
+    public function expenseClassificationProvenance(int $supplierId, int $purchaseInvoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) AS total_items,
+                    COUNT(pii.expense_classification_source) AS classified_items,
+                    COUNT(DISTINCT pii.expense_classification_source) AS source_count,
+                    MIN(pii.expense_classification_source) AS source,
+                    COUNT(DISTINCT pii.expense_rule_id) AS rule_count,
+                    MIN(pii.expense_rule_id) AS rule_id
+               FROM purchase_invoice_items pii
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+              WHERE pii.purchase_invoice_id = ? AND pi.supplier_id = ?'
+        );
+        $stmt->execute([$purchaseInvoiceId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $out = [
+            'source'           => null,
+            'rule_id'          => null,
+            'rule_name'        => null,
+            'rule_exists'      => false,
+            'rule_is_active'   => null,
+            'classified_items' => (int) ($row['classified_items'] ?? 0),
+            'total_items'      => (int) ($row['total_items'] ?? 0),
+        ];
+        if ($out['classified_items'] === 0) {
+            return $out;
+        }
+
+        $out['source'] = (int) $row['source_count'] === 1 ? (string) $row['source'] : 'mixed';
+
+        // Pravidlo se hlásí jen tehdy, když je JEDNO a rozhodlo o všech klasifikovaných
+        // řádcích. Dvě pravidla na dokladu (nebo pravidlo + katalog) žádné jediné
+        // „účtovalo se podle" nemají a tvrdit ho by byla lež v UI.
+        if ((int) $row['rule_count'] !== 1 || $row['rule_id'] === null) {
+            return $out;
+        }
+        $ruleId = (int) $row['rule_id'];
+        $ruled = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ? AND expense_classification_source IS NOT NULL
+                AND (expense_rule_id IS NULL OR expense_rule_id <> ?)'
+        );
+        $ruled->execute([$purchaseInvoiceId, $ruleId]);
+        if ((int) $ruled->fetchColumn() > 0) {
+            return $out;
+        }
+
+        $out['rule_id'] = $ruleId;
+        $rule = $this->db->pdo()->prepare(
+            'SELECT name, is_active FROM expense_classification_rules WHERE id = ? AND supplier_id = ?'
+        );
+        $rule->execute([$ruleId, $supplierId]);
+        $found = $rule->fetch(PDO::FETCH_ASSOC);
+        if ($found !== false) {
+            $out['rule_exists'] = true;
+            $out['rule_name'] = (string) $found['name'];
+            $out['rule_is_active'] = (bool) $found['is_active'];
+        }
+
+        return $out;
+    }
+
     /** @return list<array<string,mixed>> */
     public function vatAllocationsFor(int $purchaseInvoiceId, int $supplierId): array
     {

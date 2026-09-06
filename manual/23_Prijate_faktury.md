@@ -486,6 +486,8 @@ Po uložení / přechodu na detail:
   kráceného. Typ dokladu, VAT klasifikaci (kód i popis), daňovou uznatelnost,
   dlouhodobý majetek, kategorii nákladu a zakázku najdeš ve sbalené sekci
   **Zaúčtování** spolu s kontací dokladu. Tato klasifikace je dostupná i před vznikem účetního zápisu.
+  Sekce navíc ukazuje **nákladové pravidlo**, podle kterého se druh nákladu a účet
+  určily — viz [§ 23.3.5](#2335-nakladove-pravidlo-a-preuctovani).
   Ceny včetně DPH najdeš v kartě Měna, u data přijetí je
   označené, jestli pochází z importu, nebo ho zadala účetní (viz [§ 23.2.4](#2324-danova-uznatelnost-a-narok-na-odpocet)).
 - U položek je vidět **druh nákladu** (služba / materiál / drobný nebo dlouhodobý
@@ -684,6 +686,37 @@ souhrn *„Zaúčtováno {ok}, chyby: {err}"*. Max 500 dokladů na dávku.
 
 **Automatické zaúčtování při přijetí** (volitelné, nastavuje admin — spustí se
 při přechodu na stav Přijatá) — viz [§ 92.11](92_Nastaveni.md#9211-automaticke-zauctovani-pri-vystaveniprijeti-dokladu).
+
+### 23.3.5 Nákladové pravidlo a přeúčtování
+
+Sekce **Zaúčtování** na detailu ukazuje kromě kontace i řádek **Nákladové
+pravidlo** — podle čeho se určil druh nákladu a účet:
+
+| Co je vidět | Znamená |
+|---|---|
+| název pravidla | rozhodlo tvoje [pravidlo nákladů](80_Sablony.md) — tlačítko **Upravit pravidlo** otevře rovnou jeho formulář |
+| „Bez pravidla (podle katalogu frází / klíčových slov / limitu §26/2 ZDP / návrhu AI)" | žádné firemní pravidlo za tím nestojí; chceš-li, aby se příště účtovalo podle tvého, založ ho v Šablonách |
+| „Bez pravidla (řádky se liší)" | řádky dokladu se rozhodly různě, jedno pravidlo za dokladem není |
+| „Ručně (bez automatické klasifikace)" | druh a účet zvolila účetní ručně |
+| „Pravidlo #N už neexistuje" | pravidlo se od zaúčtování smazalo; stopa po něm zůstává schválně |
+
+Tlačítko **Přeúčtovat** (u zaúčtovaného dokladu, jen admin/účetní) otevře dialog
+s **řádky účetního zápisu**, který v deníku je. Řádky jde změnit, smazat i
+přidat; zápis musí zůstat vyrovnaný (Σ MD = Σ Dal). Co se stane po potvrzení,
+řekne dialog dopředu a rozhoduje o tom stav účetního období:
+
+| Stav období | Co se stane |
+|---|---|
+| otevřené a nezamčené | původní zápis se **přepíše** — staré řádky se smažou a zapíšou se nové; číslo i datum zápisu zůstávají |
+| uzavřené, nebo datum spadá pod [zámek k datu](87_Uzaverka.md) | původní zápis se **nemaže**: vznikne **storno** (protizápis) a oprava se zapíše jako nový zápis. Obojí zůstane v deníku kvůli auditu (§ 35 ZoÚ) |
+| zápis už někdo stornoval | protizápis se nedělá znovu, jen se zapíše opravený zápis k témuž datu |
+| do žádného otevřeného data se zapsat nedá | operace se **odmítne** s vysvětlením (zámek zasahuje i dnešek, nebo pro dnešek není otevřené období) |
+
+Když původní datum zapsat nejde, storno i oprava padnou na nejbližší otevřené
+datum — dialog to napíše a **vyžádá si potvrzení**. Datum se nikdy neposune samo.
+
+Přeúčtování se týká jen **kontace**. DPH se jím nemění: evidence DPH se počítá
+z řádků dokladu, takže daňový režim se opravuje editací dokladu, ne kontace.
 
 ## 23.4 Scan inbox — automatický import z adresáře
 

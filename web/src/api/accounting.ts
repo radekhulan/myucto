@@ -1257,6 +1257,9 @@ export const POSTING_ERROR_CODES = [
   'advance_settlement_ambiguous',
   // DDKP (daňový doklad k platbě) v reverse-charge režimu se automaticky neúčtuje.
   'ddkp_reverse_charge_unsupported',
+  // Přeúčtování: datum je zamčené (§35 soft-close) resp. storno i oprava by padly
+  // na jiné datum než původní zápis a uživatel to ještě nepotvrdil.
+  'date_locked', 'repost_date_shift_confirmation_required',
 ] as const
 
 /** Vrátí i18n klíč pro hlášku k chybovému kódu zaúčtování (fallback = generic). */
@@ -1384,6 +1387,45 @@ export interface CreateSettlementPayload {
   note?: string | null
 }
 
+/**
+ * Plán přeúčtování dokladu — co se stane, kdyby se přeúčtoval teď.
+ *
+ * `replace` přepíše existující zápis na místě (otevřené a nezamčené období),
+ * `reverse` původní zápis stornuje a opravu zapíše novým zápisem (§35 — v uzavřeném
+ * ani zamčeném období se zápis nemaže), `blocked` = opravu není kam zapsat.
+ * `date_shifted` znamená, že storno i oprava padnou na JINÉ datum než původní zápis;
+ * bez potvrzení se operace odmítne, aby se datum nikdy neposunulo potichu.
+ */
+export interface RepostPlan {
+  entry_id: number
+  entry_date: string
+  document_no: string | null
+  description: string | null
+  period_status: string | null
+  locked_until: string | null
+  already_reversed: boolean
+  strategy: 'replace' | 'reverse' | 'blocked'
+  needs_reversal: boolean
+  target_date: string | null
+  date_shifted: boolean
+  reason_code: 'period_not_open' | 'date_locked' | 'entry_reversed' | null
+  lines: Array<{ account_code: string | null; account_name: string | null; side: 'debit' | 'credit'; amount: number }>
+}
+
+export interface RepostResult {
+  strategy: 'replace' | 'reverse'
+  entry_id: number
+  reversal_entry_id: number | null
+  entry_date: string
+  date_shifted: boolean
+}
+
+export interface RepostPayload {
+  lines: Array<{ account_code: string; side: 'debit' | 'credit'; amount: number }>
+  description?: string | null
+  confirm_date_shift?: boolean
+}
+
 export const accountingApi = {
   // Účtová osnova
   listAccounts: (opts?: { tree?: boolean; includeInactive?: boolean; supplierId?: number }) => {
@@ -1458,6 +1500,13 @@ export const accountingApi = {
     api.post<BulkPostReport>('/accounting/journal/post-invoices-bulk', { ids }).then(r => r.data),
   postPurchasesBulk: (ids: number[]) =>
     api.post<BulkPostReport>('/accounting/journal/post-purchases-bulk', { ids }).then(r => r.data),
+  // Přeúčtování už zaúčtovaného dokladu. Plán se ptá TÉŽE služby, která operaci
+  // provede, takže se náhled s výsledkem nemůže rozejít.
+  repostPlan: (source: 'invoices' | 'purchase-invoices', id: number) =>
+    api.get<RepostPlan>(`/accounting/journal/repost-plan/${source}/${id}`).then(r => r.data),
+  repost: (source: 'invoices' | 'purchase-invoices', id: number, payload: RepostPayload) =>
+    api.post<JournalEntryDetail & { repost: RepostResult }>(
+      `/accounting/journal/repost/${source}/${id}`, payload).then(r => r.data),
   reverseEntry: (id: number) =>
     api.post<JournalEntryDetail>(`/accounting/journal/${id}/reverse`).then(r => r.data),
   deleteEntry: (id: number) =>

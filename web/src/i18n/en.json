@@ -9726,7 +9726,30 @@
       "entry_reversed": "The document's entry has been reversed — post a correction as a new entry.",
       "empty_entry": "The document has no lines to post.",
       "advance_settlement_ambiguous": "The advance has several tax documents for payment, so the advance VAT to deduct cannot be determined unambiguously. Check the links between the advance and its tax documents for payment.",
-      "ddkp_reverse_charge_unsupported": "A tax document for payment under the reverse-charge regime is not posted automatically — post the VAT with a manual entry."
+      "ddkp_reverse_charge_unsupported": "A tax document for payment under the reverse-charge regime is not posted automatically — post the VAT with a manual entry.",
+      "date_locked": "The entry date falls into the locked part of the books. An admin can move the lock in accounting settings.",
+      "repost_date_shift_confirmation_required": "The original date is closed or locked — confirm that both the reversal and the correction will land on a different date."
+    },
+    "repost": {
+      "action": "Re-post",
+      "title": "Re-post document",
+      "document": "Document",
+      "entry": "Journal entry",
+      "entry_date": "Original entry date",
+      "target_date": "Correction date",
+      "description": "Entry description",
+      "confirm": "Re-post",
+      "done": "The document was re-posted.",
+      "strategy_replace": "The existing entry will be rewritten — its current lines are deleted and these are written instead.",
+      "strategy_reverse": "The existing entry is not deleted: it is reversed by a mirror entry and the correction is written as a new entry. Both stay in the journal (§35 of the Accounting Act).",
+      "strategy_blocked": "This document cannot be re-posted.",
+      "reason_period_not_open": "The original entry sits in a “{status}” period — closed periods must not be touched.",
+      "reason_date_locked": "The books are locked up to {date} — nothing may be written into a locked date.",
+      "reason_entry_reversed": "The original entry has already been reversed, so the correction goes in as a new entry.",
+      "blocked_date_locked": "The books are locked up to {date}, today included, so there is nowhere to write the correction. An admin can move the lock in accounting settings.",
+      "blocked_period_not_open": "The original entry sits in a “{status}” period and there is no open accounting period for today — there is nowhere to write the correction. Open a period in Accounting → Closing.",
+      "confirm_date_shift": "I understand that the reversal and the correction will be posted on {to} instead of the original {from}.",
+      "hint": "The entry must balance (Σ debit = Σ credit). Double entry, period status and the date lock are enforced by the server — re-posting does not change VAT, that is corrected by editing the document."
     },
     "posting_preview": {
       "title": "Proposed posting",
@@ -11915,7 +11938,19 @@
       "vat_deduction": "VAT deduction entitlement",
       "vat_deduction_hint": "“None” = invoice is excluded from the VAT ledger and DPHDP3/KH (accounting cost only). “Proportional” = partial deduction §75 — enter the % the deduction is reduced to.",
       "tax_deductible": "Tax-deductible expense",
-      "tax_deductible_hint": "Affects income tax (DPFO/DPPO) only, not VAT. Turn off for non-deductible costs (entertainment…)."
+      "tax_deductible_hint": "Affects income tax (DPFO/DPPO) only, not VAT. Turn off for non-deductible costs (entertainment…).",
+      "expense_rule": "Expense rule",
+      "expense_rule_edit": "Edit rule",
+      "expense_rule_none": "No rule",
+      "expense_rule_manual": "Manual (no automatic classification)",
+      "expense_rule_deleted": "Rule #{id} no longer exists",
+      "expense_rule_inactive": "inactive",
+      "expense_source_catalog": "from the phrase catalogue",
+      "expense_source_keyword": "from built-in keywords",
+      "expense_source_threshold": "from the §26/2 ITA threshold",
+      "expense_source_ai": "from an AI suggestion",
+      "expense_source_rule": "from a rule",
+      "expense_source_mixed": "lines differ"
     },
     "vat_deduction": {
       "full": "Full deduction",

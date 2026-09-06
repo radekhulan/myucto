@@ -203,6 +203,7 @@ final class ExpenseKindClassifier
                 $suggestion->source,
                 null,
                 $suggestion->nonDeductible,
+                $suggestion->ruleId,
             );
         }
 
@@ -228,6 +229,10 @@ final class ExpenseKindClassifier
                 'threshold',
                 null,
                 $suggestion->nonDeductible,
+                // Práh §26/2 ZDP jen překlopí DRUH; rozhodnutí pořád vzešlo z pravidla,
+                // takže se jeho id nesmí ztratit — jinak by detail dokladu u majetku
+                // nad limit tvrdil „bez pravidla", i když pravidlo bylo tím, co ho našlo.
+                $suggestion->ruleId,
             );
         }
 
@@ -297,6 +302,8 @@ final class ExpenseKindClassifier
                     . ($account !== null ? ' → účet ' . $account : ''),
                 'rule',
                 $account,
+                false,
+                isset($rule['id']) ? (int) $rule['id'] : null,
             );
         }
 

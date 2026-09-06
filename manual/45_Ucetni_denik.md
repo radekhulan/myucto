@@ -63,8 +63,10 @@ a přijaté faktury, banku, pokladnu, majetek, odpisy i vypořádání.
 
 ### 45.1.1 Idempotence — proč doklad nejde zaúčtovat dvakrát
 
-Dvojice `(typ zdroje, ID zdrojového dokladu)` je pro zápis **jedinečná** — v databázi
-ji hlídá unikátní klíč přímo nad tabulkou zápisů. Opětovné zaúčtování téhož dokladu
+Dvojice `(typ zdroje, ID zdrojového dokladu)` smí mít nejvýš **jeden aktivní
+(nestornovaný) zápis** — v databázi to hlídá unikátní klíč přímo nad tabulkou zápisů.
+Stornované zápisy se do něj nepočítají, aby po stornu bylo kam zapsat opravu; ochrana
+proti dvojímu zaúčtování tím ale nijak neslábne. Opětovné zaúčtování téhož dokladu
 (např. po opravě údajů na faktuře, nebo když stejný požadavek odejde omylem dvakrát)
 proto **nikdy nevytvoří druhý zápis**:
 
@@ -661,6 +663,12 @@ mechanismy podle toho, zda je období, kam zápis patří, ještě **otevřené*
 - U zápisu se zdrojem vydaná/přijatá faktura storno navíc **odemyká zdrojový doklad**
   (zruší příznak „Zaúčtováno" na faktuře), pokud k dokladu neexistuje jiný aktivní
   zaúčtovaný zápis — doklad tak můžeš opravit a zaúčtovat znovu.
+- **Přeúčtování z detailu dokladu.** Všechny tři cesty výš (přepis, storno, odmítnutí)
+  má pod jedním tlačítkem i detail přijaté faktury — **Přeúčtovat** otevře řádky
+  existujícího zápisu k úpravě a podle stavu období sám zvolí, jestli se zápis přepíše,
+  nebo stornuje a zapíše znovu. Je to **tentýž mechanismus**, jen bez ručního
+  přepínání mezi deníkem a dokladem; viz
+  [§ 23.3.5](23_Prijate_faktury.md#2335-nakladove-pravidlo-a-preuctovani).
 
 ### 45.8.1 Automatické storno při smazání nebo interním stornu dokladu
 

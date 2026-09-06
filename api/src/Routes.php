@@ -1943,6 +1943,12 @@ final class Routes
             // `source` je `invoices` nebo `purchase-invoices`.
             $g->get   ('/journal/posting-preview/{source:invoices|purchase-invoices}/{id:[0-9]+}',
                 [JournalAction::class, 'postingPreview']);
+            // Přeúčtování už zaúčtovaného dokladu — plán (co se stane) + provedení.
+            // KONKRÉTNÍ cesty PŘED generickým /journal/{id} (segmenty nejsou číselné).
+            $g->get   ('/journal/repost-plan/{source:invoices|purchase-invoices}/{id:[0-9]+}',
+                [JournalAction::class, 'repostPlan']);
+            $g->post  ('/journal/repost/{source:invoices|purchase-invoices}/{id:[0-9]+}',
+                [JournalAction::class, 'repost']);
             // Hromadné zaúčtování z výběru v seznamu (A2) — tělo { ids: [...] }.
             $g->post  ('/journal/post-invoices-bulk',         [JournalAction::class, 'postInvoicesBulk']);
             $g->post  ('/journal/post-purchases-bulk',        [JournalAction::class, 'postPurchasesBulk']);

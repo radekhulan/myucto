@@ -281,8 +281,15 @@ final class PostingService
                 'posted_by'     => $postedBy,
             ];
 
+            // Idempotence se ptá na AKTIVNÍ zápis dokladu (migrace 1752). Stornovaný
+            // zápis se úmyslně NEBERE: §35 ZoÚ opravuje po stornu novým zápisem, ne
+            // mutací stornovaného — a přesně to říká i docblock rewriteExisting(). Dokud
+            // se sem tahal poslední (byť stornovaný) zápis, skončilo přeúčtování
+            // stornovaného dokladu chybou `entry_reversed` a doklad se nedal zaúčtovat
+            // znovu vůbec. Kontrola `entry_reversed` v rewriteExisting zůstává jako
+            // pojistka pro volající, kteří si existující zápis dohledají jinak.
             $existing = $sourceId !== null
-                ? $this->journal->findBySourceForUpdate($supplierId, $sourceType, $sourceId)
+                ? $this->journal->findActiveBySourceForUpdate($supplierId, $sourceType, $sourceId)
                 : null;
 
             if ($existing !== null) {
@@ -321,7 +328,7 @@ final class PostingService
                     // snapshot z počátku transakce, kde vítězný (čerstvě commitnutý) řádek
                     // ještě není → null a re-throw. FOR UPDATE přečte poslední commitnutou
                     // verzi, takže retry dostane AKTUÁLNÍ vítězný zápis, ne stale/null.
-                    $raced = $this->journal->findBySourceForUpdate($supplierId, $sourceType, $sourceId);
+                    $raced = $this->journal->findActiveBySourceForUpdate($supplierId, $sourceType, $sourceId);
                     if ($raced === null) {
                         throw $e;
                     }

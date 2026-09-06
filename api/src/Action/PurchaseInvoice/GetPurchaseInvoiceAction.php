@@ -47,6 +47,13 @@ final class GetPurchaseInvoiceAction
             unset($aiSuggestion['input_hash']);
         }
         $invoice['ai_posting_suggestion'] = $aiSuggestion;
+        // Podle čeho se náklad zaúčtoval (migrace 1751). Sekce Zaúčtování dosud
+        // ukazovala jen VÝSLEDEK, takže uživatel nepoznal, jestli za účtem stojí
+        // firemní pravidlo (a dá se opravit), nebo jen dohad z klíčových slov.
+        $invoice['expense_classification'] = $this->repo->expenseClassificationProvenance(
+            SupplierGuard::currentId($request),
+            $id,
+        );
 
         return Json::ok($response, $invoice);
     }

@@ -9726,7 +9726,30 @@
       "entry_reversed": "Zápis dokladu je stornovaný — opravu zaúčtuj novým zápisem.",
       "empty_entry": "Doklad nemá žádné řádky k zaúčtování.",
       "advance_settlement_ambiguous": "K záloze existuje víc daňových dokladů k platbě a nelze jednoznačně určit, kterou zálohovou DPH odečíst. Zkontroluj vazby zálohy a daňových dokladů k platbě.",
-      "ddkp_reverse_charge_unsupported": "Daňový doklad k platbě v režimu přenesené daňové povinnosti (reverse charge) se automaticky neúčtuje — zaúčtuj DPH ručním zápisem."
+      "ddkp_reverse_charge_unsupported": "Daňový doklad k platbě v režimu přenesené daňové povinnosti (reverse charge) se automaticky neúčtuje — zaúčtuj DPH ručním zápisem.",
+      "date_locked": "Datum zápisu spadá do uzamčené části účetnictví. Zámek posuň v nastavení účetnictví (jen admin).",
+      "repost_date_shift_confirmation_required": "Původní datum je uzavřené nebo zamčené — potvrď, že storno i oprava padnou na jiné datum."
+    },
+    "repost": {
+      "action": "Přeúčtovat",
+      "title": "Přeúčtování dokladu",
+      "document": "Doklad",
+      "entry": "Účetní zápis",
+      "entry_date": "Datum původního zápisu",
+      "target_date": "Datum opravy",
+      "description": "Popis zápisu",
+      "confirm": "Přeúčtovat",
+      "done": "Doklad byl přeúčtován.",
+      "strategy_replace": "Původní zápis se přepíše — staré řádky se smažou a zapíšou se tyhle.",
+      "strategy_reverse": "Původní zápis se nemaže: stornuje se protizápisem a oprava se zapíše jako nový zápis. Obojí zůstane v deníku (§35 ZoÚ).",
+      "strategy_blocked": "Přeúčtovat nelze.",
+      "reason_period_not_open": "Období původního zápisu je „{status}“ — do uzavřeného období se nesahá.",
+      "reason_date_locked": "Účetnictví je zamčené k {date} — do zamčeného data se nesmí zapisovat.",
+      "reason_entry_reversed": "Původní zápis už někdo stornoval, oprava jde novým zápisem.",
+      "blocked_date_locked": "Účetnictví je zamčené k {date} včetně dneška, takže opravu není kam zapsat. Zámek posuň v nastavení účetnictví (jen admin).",
+      "blocked_period_not_open": "Období původního zápisu je „{status}“ a pro dnešek není otevřené účetní období — opravu není kam zapsat. Otevři účetní období v Účetnictví → Uzávěrka.",
+      "confirm_date_shift": "Rozumím, že storno i oprava se zaúčtují k {to} místo k původnímu {from}.",
+      "hint": "Zápis musí být vyrovnaný (Σ MD = Σ Dal). Kontrolu podvojnosti, otevřenosti období i zámku k datu dělá server — DPH se přeúčtováním nemění, ta se opravuje editací dokladu."
     },
     "posting_preview": {
       "title": "Návrh zaúčtování",
@@ -11915,7 +11938,19 @@
       "vat_deduction": "Nárok na odpočet DPH",
       "vat_deduction_hint": "„Bez nároku“ = faktura nevstupuje do Knihy DPH ani DPHDP3/KH (jen účetní náklad). „Krácený“ = poměrný odpočet §75 — zadáš %, kterým se odpočet zkrátí.",
       "tax_deductible": "Daňově uznatelný náklad",
-      "tax_deductible_hint": "Ovlivňuje jen daň z příjmů (DPFO/DPPO), ne DPH. Vypněte u neuznatelných nákladů (reprezentace…)."
+      "tax_deductible_hint": "Ovlivňuje jen daň z příjmů (DPFO/DPPO), ne DPH. Vypněte u neuznatelných nákladů (reprezentace…).",
+      "expense_rule": "Nákladové pravidlo",
+      "expense_rule_edit": "Upravit pravidlo",
+      "expense_rule_none": "Bez pravidla",
+      "expense_rule_manual": "Ručně (bez automatické klasifikace)",
+      "expense_rule_deleted": "Pravidlo #{id} už neexistuje",
+      "expense_rule_inactive": "neaktivní",
+      "expense_source_catalog": "podle katalogu frází",
+      "expense_source_keyword": "podle klíčových slov",
+      "expense_source_threshold": "podle limitu §26/2 ZDP",
+      "expense_source_ai": "podle návrhu AI",
+      "expense_source_rule": "podle pravidla",
+      "expense_source_mixed": "řádky se liší"
     },
     "vat_deduction": {
       "full": "Plný nárok",

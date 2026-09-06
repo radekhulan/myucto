@@ -9152,6 +9152,94 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/journal/repost-plan/{source}/{id}:
+    get:
+      tags: [Accounting]
+      summary: Plán přeúčtování zaúčtovaného dokladu
+      description: >-
+        Co se s dokladem stane, kdyby se přeúčtoval teď — bez zápisu. `replace`
+        přepíše existující zápis na místě (otevřené a nezamčené období), `reverse`
+        původní zápis stornuje a opravu zapíše novým zápisem (zamčené / uzavřené
+        období nebo už stornovaný zápis), `blocked` znamená, že opravu není kam
+        zapsat. `date_shifted` říká, že storno i oprava padnou na jiné datum než
+        původní zápis — provedení to pak vyžaduje potvrdit.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: source, required: true, schema: { type: string, enum: [invoices, purchase-invoices] } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalRepostPlan' }
+        '409':
+          description: Doklad není zaúčtovaný
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/journal/repost/{source}/{id}:
+    post:
+      tags: [Accounting]
+      summary: Přeúčtuje zaúčtovaný doklad opravenou kontací
+      description: >-
+        Účetní/admin. Řádky jsou povinné a musí být vyrovnané (Σ MD = Σ Dal) —
+        kontroluje je PostingService, stejně jako u běžného zaúčtování. V otevřeném
+        období se původní zápis přepíše, jinak se stornuje a oprava jde novým
+        zápisem. Když plán hlásí `date_shifted`, je nutné poslat
+        `confirm_date_shift: true`; bez něj se operace odmítne s 409
+        `repost_date_shift_confirmation_required` a datum se nikdy neposune samo.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: source, required: true, schema: { type: string, enum: [invoices, purchase-invoices] } }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                lines:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [account_code, side, amount]
+                    properties:
+                      account_code: { type: string }
+                      side: { type: string, enum: [debit, credit] }
+                      amount: { type: number, format: float, exclusiveMinimum: 0 }
+                description: { type: [string, "null"] }
+                confirm_date_shift:
+                  type: boolean
+                  default: false
+                  description: Souhlas s tím, že storno i oprava padnou na jiné datum než původní zápis.
+      responses:
+        '200':
+          description: Přeúčtováno
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/JournalEntry'
+                  - type: object
+                    properties:
+                      repost: { $ref: '#/components/schemas/JournalRepostResult' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >-
+            Není kam zapsat (`period_not_open` / `date_locked`) nebo chybí souhlas
+            s posunem data (`repost_date_shift_confirmation_required`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/journal/post-invoices-bulk:
     post:
       tags: [Accounting]
@@ -22378,6 +22466,69 @@ components:
         status: { type: string, enum: [pending, accepted, rejected, superseded, expired] }
         created_at: { type: string, format: date-time }
 
+    JournalRepostPlan:
+      type: object
+      description: >-
+        Rozhodnutí, jak se doklad přeúčtuje. Stejná služba, která ho pak provede —
+        náhled se s výsledkem nemůže rozejít.
+      properties:
+        entry_id: { type: integer, description: Existující zápis dokladu v deníku }
+        entry_date: { type: string, format: date }
+        document_no: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        period_status: { type: [string, "null"], enum: [open, closing, closed, reviewed, approved, null] }
+        locked_until: { type: [string, "null"], format: date, description: Zámek účetnictví k datu (§35, soft-close) }
+        already_reversed: { type: boolean, description: Zápis už někdo stornoval — oprava jde novým zápisem }
+        strategy:
+          type: string
+          enum: [replace, reverse, blocked]
+        needs_reversal: { type: boolean, description: Před opravou vznikne protizápis }
+        target_date: { type: [string, "null"], format: date, description: Datum, do kterého storno i oprava padnou }
+        date_shifted: { type: boolean, description: target_date se liší od entry_date — provedení vyžaduje potvrzení }
+        reason_code:
+          type: [string, "null"]
+          enum: [period_not_open, date_locked, entry_reversed, null]
+          description: Proč nejde přepsat na místě (resp. proč je operace blokovaná)
+        lines:
+          type: array
+          description: Aktuální řádky zápisu — dialog je předvyplní k úpravě
+          items:
+            type: object
+            properties:
+              account_code: { type: [string, "null"] }
+              account_name: { type: [string, "null"] }
+              side: { type: string, enum: [debit, credit] }
+              amount: { type: number, format: float }
+
+    JournalRepostResult:
+      type: object
+      properties:
+        strategy: { type: string, enum: [replace, reverse] }
+        entry_id: { type: integer, description: Zápis nesoucí opravenou kontaci }
+        reversal_entry_id: { type: [integer, "null"], description: Protizápis, když se původní zápis stornoval }
+        entry_date: { type: string, format: date }
+        date_shifted: { type: boolean }
+
+    PurchaseInvoiceExpenseClassification:
+      type: object
+      description: >-
+        Podle čeho se na dokladu určil druh nákladu a účet. `source = 'rule'` spolu
+        s `rule_id` znamená, že rozhodlo jedno firemní pravidlo z
+        `/accounting/expense-rules`; ostatní zdroje pravidlo nemají. `mixed` = řádky
+        se rozhodly různě. `classified_items = 0` = ruční volba účetní.
+        `rule_exists = false` je legitimní: pravidlo se od zaúčtování smazalo a stopa
+        má přežít.
+      properties:
+        source:
+          type: [string, "null"]
+          enum: [rule, catalog, keyword, threshold, ai, mixed, null]
+        rule_id: { type: [integer, "null"] }
+        rule_name: { type: [string, "null"] }
+        rule_exists: { type: boolean }
+        rule_is_active: { type: [boolean, "null"] }
+        classified_items: { type: integer }
+        total_items: { type: integer }
+
     PurchaseInvoice:
       type: object
       properties:
@@ -22398,6 +22549,10 @@ components:
         expense_category_id: { type: [integer, "null"], description: "FK do /expense-categories — kategorie nákladu pro CRM/dashboard" }
         expense_category_label: { type: [string, "null"] }
         expense_category_code: { type: [string, "null"] }
+        expense_classification:
+          allOf:
+            - $ref: '#/components/schemas/PurchaseInvoiceExpenseClassification'
+          description: Provenience klasifikace nákladu (jen detail dokladu, ne seznam).
         ai_posting_suggestion:
           allOf:
             - $ref: '#/components/schemas/AiPostingSuggestion'
