@@ -298,6 +298,7 @@ final class JmhzScenario1DocumentResolver
             $this->inspectUnsupportedTax($tax, $employeeId, $blockers);
             $this->inspectDeductions($net, $employeeId, $blockers);
             $advanceTaxCzk = $this->advanceTaxCzk($tax, $employeeId, $blockers);
+            $withholdingTaxCzk = $this->withholdingTaxCzk($tax, $employeeId, $blockers);
             $taxCreditsCzk = $this->taxCreditsCzk($tax, $employeeId, $blockers);
             $declarationSigned = null;
 
@@ -493,6 +494,7 @@ final class JmhzScenario1DocumentResolver
                         : ($personEvidence['attribute_values']['10116'] ?? null),
                     'taxpayer_declaration_signed' => $declarationSigned,
                     'advance_tax_czk' => $advanceTaxCzk,
+                    'withholding_tax_czk' => $withholdingTaxCzk,
                     'tax_credits_czk' => $taxCreditsCzk,
                     'annual' => $annual,
                 ],
@@ -1057,9 +1059,13 @@ final class JmhzScenario1DocumentResolver
             );
             return;
         }
-        if ($withholdingTax !== 0 || $withholdingGroups !== []) {
+        if (($withholdingTax !== 0 || $withholdingGroups !== [])
+            && !is_int($tax['withholding_base_minor_units'] ?? null)
+        ) {
+            // Bez základu není co do 10307 vykázat; sražená daň bez základu by
+            // byla formulář, který sám sobě neodpovídá.
             $blockers[] = $this->blocker(
-                'jmhz_scenario1_withholding_tax_unsupported',
+                'jmhz_scenario1_withholding_base_missing',
                 'person',
                 $employeeId,
                 ['10307', '10309'],
@@ -1152,24 +1158,56 @@ final class JmhzScenario1DocumentResolver
         if ($claimed === 0 && $applied === 0) {
             return $empty;
         }
-        if ($claimed !== $applied) {
-            $blockers[] = $this->blocker(
-                'jmhz_scenario1_partial_tax_credit_unsupported',
-                'person',
-                $employeeId,
-                ['10299', '10300', '10301', '10302'],
-            );
-
-            return $empty;
-        }
-        $result = $empty;
-        $total = 0;
-        foreach ([
+        $kindsByKey = [
             'basic' => 'taxpayer',
             'disability_basic' => 'disability_basic',
             'disability_extended' => 'disability_extended',
             'ztp_p' => 'ztp_p',
-        ] as $key => $kind) {
+        ];
+        if ($claimed !== $applied) {
+            /*
+             * Částečné uplatnění (záloha před slevou je nižší než nárok) je
+             * u hrubé mzdy pod ~17 200 Kč běžný stav, ne výjimka — částečné
+             * úvazky, dohody s prohlášením, měsíc s nemocí. Blokovat kvůli
+             * němu hlášení celé firmy nelze.
+             *
+             * Vykazuje se UPLATNĚNÁ částka: 10299 leží v XSD uvnitř bloku
+             * „Výpočet zálohy na daň", takže nese to, co do výpočtu skutečně
+             * vstoupilo — vykázaný nárok by s 10298 a 10305 aritmeticky
+             * neseděl. Rozdělit krácení mezi VÍC druhů slev ale zákon
+             * neurčuje, takže tam blokace zůstává.
+             */
+            $claimedKinds = [];
+            foreach ($kindsByKey as $key => $kind) {
+                $minor = $breakdown[$kind] ?? null;
+                if (is_int($minor) && $minor !== 0) {
+                    $claimedKinds[$key] = $minor;
+                }
+            }
+            if (count($claimedKinds) !== 1 || $applied > $claimed || $applied < 0) {
+                $blockers[] = $this->blocker(
+                    'jmhz_scenario1_partial_tax_credit_unsupported',
+                    'person',
+                    $employeeId,
+                    ['10299', '10300', '10301', '10302'],
+                );
+
+                return $empty;
+            }
+            $result = $empty;
+            $result[array_key_first($claimedKinds)] = $this->wholeCzk(
+                $applied,
+                '10299',
+                'person',
+                $employeeId,
+                $blockers,
+            );
+
+            return $result;
+        }
+        $result = $empty;
+        $total = 0;
+        foreach ($kindsByKey as $key => $kind) {
             $minor = $breakdown[$kind] ?? null;
             if ($minor === null) {
                 continue;
@@ -1197,6 +1235,42 @@ final class JmhzScenario1DocumentResolver
         }
 
         return $result;
+    }
+
+    /**
+     * Daň podle zvláštní sazby (§ 6 odst. 4 ZDP). Vykazuje se v samostatném
+     * bloku `zvlastniSazbaDane` (10307 základ, 10309 sražená daň); záloha na
+     * daň se u čistě srážkové osoby neuvádí vůbec, což řeší serializér.
+     *
+     * Vrací `null`, když srážková daň nenastala — pak se blok nepíše.
+     *
+     * @param array<string,mixed> $tax
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array{base:?int,tax:?int}|null
+     */
+    private function withholdingTaxCzk(
+        array $tax,
+        ?int $employeeId,
+        array &$blockers,
+    ): ?array {
+        $taxMinor = $tax['withholding_tax_minor_units'] ?? null;
+        $baseMinor = $tax['withholding_base_minor_units'] ?? null;
+        $groups = $tax['withholding_groups'] ?? null;
+        $hasWithholding = (is_int($taxMinor) && $taxMinor !== 0)
+            || (is_array($groups) && $groups !== []);
+        if (!$hasWithholding) {
+            return null;
+        }
+        if (!is_int($baseMinor) || !is_int($taxMinor)) {
+            // Blocker hlásí `inspectUnsupportedTax()`; tady se jen nevykazuje
+            // polovina bloku.
+            return null;
+        }
+
+        return [
+            'base' => $this->wholeCzk($baseMinor, '10307', 'person', $employeeId, $blockers),
+            'tax' => $this->wholeCzk($taxMinor, '10309', 'person', $employeeId, $blockers),
+        ];
     }
 
     /**
@@ -1368,14 +1442,14 @@ final class JmhzScenario1DocumentResolver
         ) {
             return;
         }
-        if ($deducted !== 0 || $deductions !== []) {
-            $blockers[] = $this->blocker(
-                'jmhz_scenario1_deductions_unsupported',
-                'person',
-                $employeeId,
-                ['10116', '10350', '10351', '10352', '10353'],
-            );
-        }
+        /*
+         * Srážka ze mzdy hlášení neblokuje. JMHZ o srážkách nechce částky —
+         * 10116 je v XSD prostý boolean a čistá mzda 10344 se vykazuje PŘED
+         * srážkami (`net_before_deductions_minor_units`), takže exekuce,
+         * insolvence ani dohoda o srážkách nemají do vykázaných čísel co
+         * mluvit. Samotný příznak nese ordinary evidence, odvozená ze zmrazené
+         * revize; tady se proto nekontroluje nic dalšího.
+         */
     }
 
     /**

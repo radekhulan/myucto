@@ -482,13 +482,50 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
-    public function testPartiallyAppliedTaxCreditIsBlockedInsteadOfSplitByGuess(): void
+    /**
+     * Jediná nárokovaná sleva se při částečném uplatnění nedělí odhadem —
+     * není co dělit. Vykáže se uplatněná částka, protože 10299 je součástí
+     * bloku „Výpočet zálohy na daň" a musí sedět na 10298 a 10305.
+     */
+    public function testPartiallyAppliedSingleTaxCreditIsReportedAsApplied(): void
     {
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
             $this->withPayload(
                 $this->preparation(),
                 $this->payloadWithCredits(257_000, 150_00, [
                     'taxpayer' => 257_000,
+                ]),
+            ),
+            $this->pvpoj(),
+        );
+        $codes = array_map(
+            static fn ($blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+
+        self::assertNotContains(
+            'jmhz_scenario1_partial_tax_credit_unsupported',
+            $codes,
+        );
+        self::assertSame(
+            150,
+            $resolution->candidate?->payload['people'][0]['summary']
+                ['tax_credits_czk']['basic'],
+        );
+    }
+
+    /**
+     * U víc druhů slev zákon neurčuje, která se zkrátila — tam blokace platí
+     * dál a rozpad se odhadem nedoplňuje.
+     */
+    public function testPartiallyAppliedMultipleTaxCreditsAreBlockedInsteadOfSplitByGuess(): void
+    {
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload(
+                $this->preparation(),
+                $this->payloadWithCredits(300_000, 150_00, [
+                    'taxpayer' => 257_000,
+                    'disability_basic' => 43_000,
                 ]),
             ),
             $this->pvpoj(),

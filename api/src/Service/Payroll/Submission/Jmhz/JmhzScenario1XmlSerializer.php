@@ -862,8 +862,28 @@ final class JmhzScenario1XmlSerializer
             '10419',
         );
         $advance = $this->object($summary['advance_tax_czk'] ?? null);
+        $withholding = $summary['withholding_tax_czk'] ?? null;
+        $withholding = is_array($withholding) && !array_is_list($withholding)
+            ? $withholding
+            : null;
+        /*
+         * Osoba zdaněná výhradně zvláštní sazbou (§ 6 odst. 4 ZDP — typicky
+         * podlimitní DPP bez prohlášení) žádnou zálohu nemá. Vypsat kvůli XSD
+         * `zalohaNaDan` s nulami je tatáž třída chyby jako nulový `danBonus`
+         * u kontroly 244, proto se celý blok vynechává; XSD ho má
+         * `minOccurs="0"`. Souběh zálohy a srážky (víc vztahů) je legitimní
+         * a vypíší se oba bloky.
+         */
+        $advanceIsEmpty = true;
+        foreach (['base', 'computed', 'after_credits', 'bonus'] as $key) {
+            if ($this->int($advance[$key] ?? null, '10297') !== 0) {
+                $advanceIsEmpty = false;
+                break;
+            }
+        }
+        $skipAdvance = $withholding !== null && $advanceIsEmpty;
         $tax = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:zalohaNaDan');
-        foreach ([
+        foreach ($skipAdvance ? [] : [
             'form:zakladDane' => ['base', '10297'],
             'form:vypoctenaZaloha' => ['computed', '10298'],
             'form:danZalohaPoSleve' => ['after_credits', '10305'],
@@ -893,7 +913,31 @@ final class JmhzScenario1XmlSerializer
                 (string) $this->int($advance[$key] ?? null, $attributeId),
             );
         }
-        $node->appendChild($tax);
+        if (!$skipAdvance) {
+            $node->appendChild($tax);
+        }
+        if ($withholding !== null) {
+            $block = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:zvlastniSazbaDane',
+            );
+            $this->text(
+                $dom,
+                $block,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:zakladDane',
+                (string) $this->int($withholding['base'] ?? null, '10307'),
+            );
+            $this->text(
+                $dom,
+                $block,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:srazenaDan',
+                (string) $this->int($withholding['tax'] ?? null, '10309'),
+            );
+            $node->appendChild($block);
+        }
 
         $this->text(
             $dom,
@@ -1647,31 +1691,56 @@ final class JmhzScenario1XmlSerializer
     {
         $earnings = $this->object($employment['earnings_by_attribute_czk'] ?? null);
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mzda');
+        $wageTotal = $this->int($this->earning($earnings, '10328'), '10328');
         $this->text(
             $dom,
             $node,
             JmhzSchemaCatalog::NS_FORM,
             'form:mzdaZuctovana',
-            (string) $this->int($this->earning($earnings, '10328'), '10328'),
+            (string) $wageTotal,
         );
-        $breakdown = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mzdaRozpad');
+        $components = [];
         foreach ([
             'form:tarif' => '10329',
             'form:odmenyPravidelne' => '10330',
             'form:odmenyNepravidelne' => '10331',
         ] as $element => $attributeId) {
-            $this->text(
-                $dom,
-                $breakdown,
-                JmhzSchemaCatalog::NS_FORM,
-                $element,
-                (string) $this->int(
-                    $this->earning($earnings, $attributeId),
-                    $attributeId,
-                ),
+            $components[$element] = $this->int(
+                $this->earning($earnings, $attributeId),
+                $attributeId,
             );
         }
-        $node->appendChild($breakdown);
+        /*
+         * Kontrola 267 zakazuje vyplnit rozpad při nulové zúčtované mzdě a
+         * „vyplněný" je pro ČSSZ — stejně jako u kontroly 244 (viz 40244,
+         * atribut 10306) — samotná přítomnost elementu, ne až nenulová částka.
+         * Měsíc bez zúčtované mzdy (nemoc po 14. dni, rodičovská, neplacené
+         * volno) proto `mzdaRozpad` neuvádí vůbec; XSD ho má `minOccurs="0"`,
+         * a jeho tři složky jsou uvnitř povinné, takže je to celý blok, nebo nic.
+         * Nenulová složka při nulovém úhrnu je rozpor ve zdrojových datech.
+         */
+        if ($wageTotal === 0) {
+            foreach ($components as $attributeId) {
+                if ($attributeId !== 0) {
+                    $this->invalid(
+                        'jmhz_xml_wage_breakdown_without_wage',
+                        'Rozpad mzdy nelze vykázat při nulové zúčtované mzdě.',
+                    );
+                }
+            }
+        } else {
+            $breakdown = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mzdaRozpad');
+            foreach ($components as $element => $value) {
+                $this->text(
+                    $dom,
+                    $breakdown,
+                    JmhzSchemaCatalog::NS_FORM,
+                    $element,
+                    (string) $value,
+                );
+            }
+            $node->appendChild($breakdown);
+        }
 
         $average = $this->object($employment['average_hourly'] ?? null);
         $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vydelek');

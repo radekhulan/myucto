@@ -46,13 +46,24 @@ final class JmhzOrdinaryEvidenceBuilder
                     'Každá právní skutečnost musí být výslovné Ano nebo Ne.',
                 );
             }
-            if ($facts[$key] !== false) {
+            /*
+             * `reportable_wage_deductions_recorded` (10116) se NEPOTVRZUJE,
+             * odvozuje se ze zmrazené revize — srážka ze mzdy je fakt v datech,
+             * ne rozhodnutí účetní. Hodnotu proto přepíše builder; tady se jen
+             * nevyžaduje „Ne", aby existující volání s `false` prošla.
+             * Zbylé čtyři skutečnosti potvrzuje účetní a profil je má za „Ne".
+             */
+            if ($key !== 'reportable_wage_deductions_recorded'
+                && $facts[$key] !== false
+            ) {
                 throw new JmhzOrdinaryEvidenceException(
                     'jmhz_ordinary_evidence_positive_unsupported',
-                    'První ordinary profil podporuje jen výslovné Ne u všech pěti skutečností.',
+                    'Ordinary profil podporuje jen výslovné Ne u potvrzovaných skutečností.',
                 );
             }
-            $normalized[$key] = false;
+            $normalized[$key] = $key === 'reportable_wage_deductions_recorded'
+                ? $facts[$key]
+                : false;
         }
         return $normalized;
     }
@@ -123,7 +134,8 @@ final class JmhzOrdinaryEvidenceBuilder
             $targetEmploymentId,
         );
         $profileSource = $this->ordinaryProfileSource($employment, $sourceKind);
-        $this->assertNoKnownDeductionConflict($person, $result, $employeeId);
+        $facts['reportable_wage_deductions_recorded'] =
+            $this->resolveWageDeductionsRecorded($person, $result, $employeeId);
         $term = $this->object($employment['term'] ?? null, 'term');
         $employmentSource = $this->object($employment['employment'] ?? null, 'employment');
         $selectorActivityCode = is_string($term['activity_code'] ?? null)
@@ -346,28 +358,34 @@ final class JmhzOrdinaryEvidenceBuilder
      * @param array<string,mixed> $person
      * @param array<string,mixed> $result
      */
-    private function assertNoKnownDeductionConflict(
+    private function resolveWageDeductionsRecorded(
         array $person,
         array $result,
         int $employeeId,
-    ): void
+    ): bool
     {
         $agreements = $person['deduction_agreements'] ?? null;
         if (!is_array($agreements) || !array_is_list($agreements)) {
             $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Zmrazená evidence dohod o srážkách není úplná.');
         }
-        $enforcement = $person['enforcement_evidence'] ?? null;
-        if ($agreements !== []) {
-            $this->invalid('jmhz_ordinary_evidence_deduction_conflict', 'Revize obsahuje evidovanou dohodu o srážkách.');
-        }
-        $enforcement = $this->object($enforcement, 'enforcement_evidence');
+        $enforcement = $this->object($person['enforcement_evidence'] ?? null, 'enforcement_evidence');
         $claims = $enforcement['claims'] ?? null;
         $insolvency = $this->object($enforcement['insolvency'] ?? null, 'insolvency');
         if (!is_array($claims) || !array_is_list($claims)
-            || $claims !== [] || ($insolvency['mode'] ?? null) !== 'none'
+            || !is_string($insolvency['mode'] ?? null)
         ) {
-            $this->invalid('jmhz_ordinary_evidence_deduction_conflict', 'Revize obsahuje exekuční nebo insolvenční evidenci.');
+            $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Zmrazená exekuční evidence není úplná.');
         }
+        /*
+         * 10116 je prostý boolean „vykazují se ze mzdy srážky". Odvozuje se ze
+         * zmrazené revize, ne z potvrzení účetní — dohoda o srážkách, exekuční
+         * pohledávka i insolvenční režim jsou fakt v datech. Částky JMHZ
+         * nechce a čistá mzda 10344 se vykazuje před srážkami, takže tenhle
+         * příznak je všechno, co se o srážkách hlásí.
+         */
+        $deductionsRecorded = $agreements !== []
+            || $claims !== []
+            || $insolvency['mode'] !== 'none';
         // Kontroluje se osoba, za jejíž vztah se evidence potvrzuje. Ostatní
         // osoby revize mají vlastní evidenci a vlastní kontrolu, takže se
         // nevyžaduje, aby byla v revizi osoba jediná.
@@ -397,10 +415,20 @@ final class JmhzOrdinaryEvidenceBuilder
         $deductions = $net['deductions'] ?? null;
         if (!is_array($deductions) || !array_is_list($deductions)
             || !is_int($net['deducted_minor_units'] ?? null)
-            || $deductions !== [] || $net['deducted_minor_units'] !== 0
         ) {
-            $this->invalid('jmhz_ordinary_evidence_deduction_conflict', 'Výsledek obsahuje evidovanou srážku ze mzdy.');
+            $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Zmrazený výsledek srážek není úplný.');
         }
+        $resultHasDeductions = $deductions !== [] || $net['deducted_minor_units'] !== 0;
+        if ($resultHasDeductions && !$deductionsRecorded) {
+            // Sražené peníze bez evidovaného titulu jsou rozpor: buď chybí
+            // dohoda/exekuce ve vstupu, nebo se srazilo něco, co nikdo
+            // nenařídil. Ani jedno se nesmí vykázat jako „bez srážek".
+            $this->invalid(
+                'jmhz_ordinary_evidence_deduction_conflict',
+                'Výsledek obsahuje srážku bez evidovaného titulu.',
+            );
+        }
+        $deductionsRecorded = $deductionsRecorded || $resultHasDeductions;
         $resultEnforcement = $this->object($resultPerson['enforcement'] ?? null, 'result.enforcement');
         $enforcementInput = $this->object($resultEnforcement['input'] ?? null, 'result.enforcement.input');
         $enforcementResult = $this->object($resultEnforcement['result'] ?? null, 'result.enforcement.result');
@@ -444,15 +472,30 @@ final class JmhzOrdinaryEvidenceBuilder
                 );
             }
         }
+        /*
+         * Výpočet srážek musí být DOKONČENÝ — `manual_review` nebo otevřený
+         * nález znamená, že sražená částka není doložená, a takový měsíc se
+         * hlásit nesmí (viz souběh exekuce a oddlužení). Samotná existence
+         * alokací ale chybou není; ta se do 10116 promítne jako `true`.
+         */
         if (($enforcementResult['status'] ?? null) !== 'supported'
             || ($enforcementResult['issues'] ?? null) !== []
             || CanonicalJson::encode($calculationEvidence->toCanonicalArray()) !== CanonicalJson::encode($enforcement)
-            || ($enforcementResult['allocations'] ?? null) !== []
-            || ($enforcementResult['total_withheld_minor_units'] ?? null) !== 0
-            || ($enforcementResult['insolvency_applied'] ?? null) !== false
         ) {
-            $this->invalid('jmhz_ordinary_evidence_deduction_conflict', 'Výsledek srážek neodpovídá potvrzení ordinary profilu.');
+            $this->invalid('jmhz_ordinary_evidence_deduction_conflict', 'Výpočet srážek není dokončený a doložený.');
         }
+        $withheld = $enforcementResult['total_withheld_minor_units'] ?? null;
+        if (!is_int($withheld)
+            || !is_array($enforcementResult['allocations'] ?? null)
+            || !is_bool($enforcementResult['insolvency_applied'] ?? null)
+        ) {
+            $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Výsledek srážek není úplný.');
+        }
+
+        return $deductionsRecorded
+            || $withheld !== 0
+            || $enforcementResult['allocations'] !== []
+            || $enforcementResult['insolvency_applied'] !== false;
     }
 
     /** @return array<string,mixed> */

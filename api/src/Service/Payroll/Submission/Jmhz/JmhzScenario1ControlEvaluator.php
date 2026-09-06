@@ -3448,8 +3448,13 @@ final class JmhzScenario1ControlEvaluator
     }
 
     /**
-     * „Je-li X nula, nesmí být vyplněné Y." Vykázaná nula hodnotou není —
-     * katalog zakazuje nabývat hodnot, ne uvést nulu.
+     * „Je-li X nula, nesmí být vyplněné Y."
+     *
+     * „Vyplněný" je pro ČSSZ samotná přítomnost elementu, ne až nenulová
+     * hodnota — týž výklad, který u kontroly 244 potvrdil protokol k hlášení
+     * za 08/2026 (nulový `form:danBonus` odmítnut chybou 40244). Dřívější
+     * odchylka „vykázaná nula hodnotou není" tuhle třídu chyb propouštěla,
+     * takže brána svítila zeleně a podání padalo až v DIS.
      *
      * @param list<string> $dependents
      * @return list<JmhzControlVerdict>
@@ -3467,11 +3472,7 @@ final class JmhzScenario1ControlEvaluator
                     return null;
                 }
                 foreach ($dependents as $attributeId) {
-                    if (!$form->has($attributeId)) {
-                        continue;
-                    }
-                    $value = $form->scaled($attributeId);
-                    if ($value === null || $value[0] !== 0) {
+                    if ($form->has($attributeId)) {
                         return "Atribut {$triggerId} je nula, ale {$attributeId}"
                             . ' je vyplněný.';
                     }

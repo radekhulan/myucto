@@ -211,13 +211,23 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertNotNull($snapshot->payload['specification']['eldp_code_row_sha256']);
     }
 
-    public function testKeepsNonParticipatingDpcFailClosed(): void
+    /**
+     * Podlimitní DPČ (pod rozhodnou částkou) není nemocensky pojištěná, takže
+     * jí nevzniká záznam ELDP — stejně jako podlimitní DPP. Dřív se bezkódová
+     * sekce připouštěla jen u DPP a DPČ shodila hlášení celé firmy; asymetrie
+     * neměla oporu, o ELDP rozhoduje účast, ne druh vztahu.
+     */
+    public function testDerivesNonParticipatingDpcAsCodelessSection(): void
     {
         $source = $this->agreementSource('dpc', 'A', 'dpc', 'does_not_participate', 300_000, 0, 0);
 
-        $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('účastný pracovní poměr, DPČ, DPP');
-        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+        $confirmation = (new JmhzEldpEvidenceBuilder())
+            ->deriveOrdinaryConfirmation(7, 101, $source);
+
+        self::assertNull($confirmation['code']);
+        self::assertSame(0, $confirmation['insurance_days']);
+        self::assertNull($confirmation['valid_from']);
+        self::assertNull($confirmation['assessment_base_czk']);
     }
 
     public function testRejectsFractionalCzechCrownWithoutRounding(): void

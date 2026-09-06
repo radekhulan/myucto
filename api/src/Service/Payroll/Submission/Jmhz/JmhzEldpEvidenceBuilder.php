@@ -304,6 +304,7 @@ final class JmhzEldpEvidenceBuilder
             $relationType,
             $absences,
             $excluded,
+            $participates ? $days : $inclusiveDays,
         );
         $code = $confirmation['code'] ?? null;
         $confirmedBase = $confirmation['assessment_base_czk'] ?? null;
@@ -494,13 +495,16 @@ final class JmhzEldpEvidenceBuilder
     {
         $participation = $this->object($relationship['participation'] ?? null, 'participation');
         $expectedKind = match ($relationType) {
-            'employment' => 'employment',
+            // Zaměstnání malého rozsahu je pro sociální pojištění pracovní
+            // poměr; liší se jen agregační skupinou účasti, ne druhem vztahu
+            // (viz `SocialRelationshipKindMapper`).
+            'employment', 'small_scale_employment' => 'employment',
             'dpc' => 'dpc',
             'dpp' => 'dpp',
             'partner_dependent', 'statutory_body' => 'corporate_body',
             default => $this->invalid(
                 'jmhz_eldp_relationship_kind_unsupported',
-                'ELDP podporuje pracovní poměr, DPČ, DPP a člena statutárního orgánu.',
+                'ELDP podporuje pracovní poměr, zaměstnání malého rozsahu, DPČ, DPP a člena statutárního orgánu.',
             ),
         };
         $status = $participation['status'] ?? null;
@@ -510,18 +514,21 @@ final class JmhzEldpEvidenceBuilder
         ) {
             $this->invalid('jmhz_eldp_social_relationship_unsupported', 'Druh vztahu a výsledek sociální účasti si odporují.');
         }
-        if (in_array($relationType, ['employment', 'dpc', 'dpp', 'partner_dependent', 'statutory_body'], true)
-            && $status === 'participates'
-        ) {
-            return true;
-        }
-        if ($relationType === 'dpp' && $status === 'does_not_participate') {
-            return false;
-        }
-        $this->invalid(
-            'jmhz_eldp_social_relationship_unsupported',
-            'ELDP podporuje účastný pracovní poměr, DPČ, DPP, člena statutárního orgánu a podlimitní neúčastnou DPP.',
-        );
+        /*
+         * Účast na nemocenském pojištění rozhoduje o ELDP bez ohledu na druh
+         * vztahu: účastný měsíc má kód a dny pojištění, neúčastný je bezkódová
+         * sekce s nulou dnů. Dřív se neúčast připouštěla jen u DPP, takže
+         * jednatel nebo DPČ pod rozhodnou částkou (3 000 Kč) shodily hlášení
+         * CELÉ firmy — a to je nejběžnější stav malé s. r. o.
+         */
+        return match ($status) {
+            'participates' => true,
+            'does_not_participate' => false,
+            default => $this->invalid(
+                'jmhz_eldp_social_relationship_unsupported',
+                'Výsledek účasti na sociálním pojištění není jednoznačný.',
+            ),
+        };
     }
 
     private function assertRelationActivityFamily(
@@ -567,11 +574,21 @@ final class JmhzEldpEvidenceBuilder
         string $relationType,
         array $absences,
         array $excluded,
+        int $expectedRelationshipDays,
     ): void
     {
         $values = $this->object($workSummary['values'] ?? null, 'work_summary.values');
         $interactions = $this->object($workSummary['interactions'] ?? null, 'work_summary.interactions');
-        $expectedEvidenceDays = in_array($relationType, ['dpc', 'dpp'], true) ? 0 : $insuranceDays;
+        /*
+         * Dny evidenčního stavu (10265) a dny pojištění jsou dva různé údaje:
+         * vztah může trvat celý měsíc a přitom nebýt účastný (jednatel nebo
+         * DPČ pod rozhodnou částkou). Porovnávat 10265 s počtem dnů pojištění
+         * proto jde jen u účastného vztahu; u neúčastného se očekává délka
+         * trvání vztahu. U DPČ a DPP zůstává 0 (viz `evidenceInterval`).
+         */
+        $expectedEvidenceDays = in_array($relationType, ['dpc', 'dpp'], true)
+            ? 0
+            : $expectedRelationshipDays;
         if (($workSummary['conditional_blocks_confirmed'] ?? null) !== true
             || ($values['evidence_days'] ?? null) !== $expectedEvidenceDays
             || ($interactions['IN08'] ?? null) !== false

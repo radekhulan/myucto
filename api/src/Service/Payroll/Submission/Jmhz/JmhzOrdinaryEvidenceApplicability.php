@@ -101,7 +101,21 @@ final class JmhzOrdinaryEvidenceApplicability
                 );
             }
         }
-        if (($payload['attribute_values'] ?? null) !== ['10116' => false, '10546' => false]) {
+        $attributeValues = $payload['attribute_values'] ?? null;
+        /*
+         * 10116 („vykazují se srážky ze mzdy") je odvozený údaj, ne potvrzená
+         * skutečnost — obě hodnoty jsou platné. 10546 (sleva zaměstnavatele na
+         * pojistném) profil dál podporuje jen jako „Ne".
+         */
+        // Číselný klíč pole je v PHP int, ne string — proto `array_key_exists`
+        // s celočíselnými indexy, ne porovnání `array_keys()` proti stringům.
+        if (!is_array($attributeValues)
+            || count($attributeValues) !== 2
+            || !array_key_exists(10116, $attributeValues)
+            || !array_key_exists(10546, $attributeValues)
+            || !is_bool($attributeValues[10116])
+            || $attributeValues[10546] !== false
+        ) {
             $this->invalid(
                 'jmhz_ordinary_evidence_values_mismatch',
                 'Ordinary evidence obsahuje nepodporovanou pravni skutecnost.',
