@@ -147,8 +147,16 @@ final class GarnishmentCalculator
             ],
         ];
 
-        if ($input->insolvency->mode === InsolvencyMode::ApprovedStandard) {
-            $withheld = min($income, self::addExactly(self::addExactly($third, $third), $excess));
+        if ($input->insolvency->mode->redirectsPaymentToAdministrator()) {
+            $capacity = min($income, self::addExactly(self::addExactly($third, $third), $excess));
+            $withheld = $this->insolvencyWithholding($input, $capacity, $roundingTrace);
+            $suspended = count($this->activeClaims($input->claims));
+            if ($suspended > 0) {
+                $roundingTrace[] = [
+                    'step' => 'enforcement_suspended_by_insolvency',
+                    'suspended_claims' => $suspended,
+                ];
+            }
             $allocations = $withheld === 0
                 ? []
                 : [new GarnishmentAllocation('insolvency-administrator', 0, $withheld)];
@@ -241,6 +249,73 @@ final class GarnishmentCalculator
     }
 
     /**
+     * Kolik plátce mzdy srazí ve prospěch insolvenčního správce.
+     *
+     * ── Schválené oddlužení (standardní rozsah) ─────────────────────────────
+     *
+     * § 398 odst. 3 zákona č. 182/2006 Sb. (insolvenční zákon): při oddlužení
+     * plněním splátkového kalendáře se zpeněžením majetkové podstaty dlužník
+     * vydává správci „z příjmů, které získá po schválení oddlužení, částku ve
+     * stejném rozsahu, v jakém z nich mohou být při výkonu rozhodnutí nebo při
+     * exekuci uspokojeny přednostní pohledávky". Srážka je tedy celá zabavitelná
+     * část, tedy obě třetiny i plně zabavitelný zbytek — přesně to, co spočítal
+     * volající. Paušál podle § 270 odst. 3 o. s. ř. se neúčtuje, protože nejde
+     * o výkon rozhodnutí srážkami ze mzdy.
+     *
+     * ── Soudem určená jiná výše měsíčních splátek ───────────────────────────
+     *
+     * § 398 odst. 5 IZ: „Dlužníku, který o to požádal v návrhu na povolení
+     * oddlužení nebo v odůvodněných případech nejpozději při jednání
+     * s insolvenčním správcem podle § 410 odst. 2, může insolvenční soud
+     * stanovit jinou výši měsíčních splátek." Žádost podává dlužník podle
+     * § 391 odst. 2 IZ, a to výslovně „o stanovení NIŽŠÍCH než zákonem
+     * určených měsíčních splátek". Takové usnesení určuje splátku ČÁSTKOU,
+     * ne rozsahem podle o. s. ř., a plátce mzdy podle § 406 odst. 3 písm. d)
+     * IZ provádí „stanovené srážky" — tedy srážky v rozsahu, který mu uložil
+     * výrok soudu. Sám výši nepočítá a nepřepočítává ji zpět na zákonnou.
+     *
+     * (Pozor na záměnu: § 398 odst. 4 IZ upravuje POŘADÍ uspokojování
+     * pohledávek za majetkovou podstatou, ne výši splátky.)
+     *
+     * Soudem určená částka se proto sráží tak, jak ji soud určil, ale NIKDY
+     * nad zákonnou kapacitu. Soud podle § 391 odst. 2 IZ splátku jen SNIŽUJE
+     * a nezabavitelná částka podle § 278 o. s. ř. ve spojení s nař. vlády
+     * č. 595/2006 Sb. je hranice, kterou plátce mzdy prolomit nesmí ani na
+     * příkaz. V měsíci s nízkým příjmem tedy kapacita na určenou splátku
+     * nestačí a srazí se jen kapacita — doplacení splátky je věc dlužníka
+     * a insolvenčního soudu, ne plátce mzdy.
+     *
+     * Zdroje: https://www.zakonyprolidi.cz/cs/2006-182#p398,
+     * https://www.zakonyprolidi.cz/cs/2006-182#p391,
+     * https://www.zakonyprolidi.cz/cs/2006-182#p406,
+     * https://www.zakonyprolidi.cz/cs/1963-99#p278.
+     *
+     * Chybějící částka se sem nedostane — {@see validateInput()} ji zastaví
+     * výtkou `court_determined_insolvency_amount_missing`.
+     *
+     * @param list<array<string, int|string|bool>> $roundingTrace
+     */
+    private function insolvencyWithholding(
+        GarnishmentInput $input,
+        int $capacity,
+        array &$roundingTrace,
+    ): int {
+        if ($input->insolvency->mode !== InsolvencyMode::CourtDeterminedAmount) {
+            return $capacity;
+        }
+        $courtAmount = $input->insolvency->courtDeterminedAmountMinorUnits ?? 0;
+        $withheld = min($capacity, $courtAmount);
+        $roundingTrace[] = [
+            'step' => 'court_determined_installment',
+            'court_amount_minor_units' => $courtAmount,
+            'statutory_capacity_minor_units' => $capacity,
+            'output_minor_units' => $withheld,
+        ];
+
+        return $withheld;
+    }
+
+    /**
      * Kolik z obecné (nepřednostní) kapacity zbylo po exekučních srážkách —
      * teprve z toho smí zaměstnavatel uspokojit dobrovolnou dohodu o srážkách
      * ze mzdy (§ 148 odst. 2 zákoníku práce: dohoda se provádí jen za podmínek
@@ -255,8 +330,14 @@ final class GarnishmentCalculator
      * nedostanou. Dohoda bez dne doručení se nepřemosťuje a dostane jen zbytek
      * po exekucích, přesně jako do 8/2026 (nález E-03).
      *
-     * Vrací 0, kdykoli výsledek není uzavřený nebo běží schválené oddlužení —
-     * fail-closed, protože v takovém případě není jisté, co exekuce ještě vezme.
+     * Vrací 0, kdykoli výsledek není uzavřený nebo běží oddlužení. U oddlužení
+     * to není opatrnost, ale zákon: § 109 odst. 1 písm. d) IZ říká, že po
+     * zahájení insolvenčního řízení „nelze uplatnit dohodou věřitele
+     * a dlužníka založené právo na výplatu srážek ze mzdy nebo jiných příjmů,
+     * s nimiž se při výkonu rozhodnutí nakládá jako se mzdou nebo platem"
+     * (https://www.zakonyprolidi.cz/cs/2006-182#p109). Dobrovolná dohoda se
+     * tedy neprovádí bez ohledu na to, kolik kapacity po insolvenční srážce
+     * zbylo.
      *
      * A stejnou nulu vrací, když nezabavitelná částka stojí na nedoloženém
      * nároku na vyživovanou osobu nebo manžela. V měsíci bez exekuce se ten
@@ -1076,19 +1157,21 @@ final class GarnishmentCalculator
             if (!$input->insolvency->recipientVerified) {
                 $issues[] = 'insolvency_recipient_not_verified';
             }
-            if ($input->insolvency->mode === InsolvencyMode::ApprovedStandard
+            if ($input->insolvency->mode->redirectsPaymentToAdministrator()
                 && !$input->insolvency->hasImmutablePaymentInstruction()
             ) {
                 $issues[] = 'insolvency_payment_instruction_missing';
             }
-            if ($activeClaims !== []) {
-                $issues[] = 'concurrent_enforcement_with_insolvency_requires_manual_review';
+            if ($input->insolvency->mode === InsolvencyMode::CourtDeterminedAmount
+                && $input->insolvency->courtDeterminedAmountMinorUnits === null
+            ) {
+                $issues[] = 'court_determined_insolvency_amount_missing';
+            }
+            foreach ($this->concurrentEnforcementIssues($activeClaims, $input) as $issue) {
+                $issues[] = $issue;
             }
             if ($input->insolvency->mode === InsolvencyMode::AlertOnly) {
                 $issues[] = 'insolvency_alert_cannot_redirect_payment';
-            }
-            if ($input->insolvency->mode === InsolvencyMode::CourtDeterminedAmount) {
-                $issues[] = 'court_determined_insolvency_amount_requires_manual_review';
             }
         } elseif ($input->insolvency->courtDeterminedAmountMinorUnits !== null) {
             $issues[] = 'court_determined_amount_without_insolvency';
@@ -1097,6 +1180,106 @@ final class GarnishmentCalculator
         sort($issues, SORT_STRING);
 
         return array_values(array_unique($issues));
+    }
+
+    /**
+     * Souběh evidované exekuce a insolvence — co se ještě smí vykonat.
+     *
+     * ── Proč evidovaná exekuce NESMÍ zastavit mzdu (nález N-09) ─────────────
+     *
+     * Do 9/2026 shodila jakákoli aktivní pohledávka v rejstříku každý měsíc
+     * osoby v oddlužení na ruční posouzení a nesrazilo se nic. Prakticky každý
+     * dlužník v oddlužení má přitom v evidenci starší exekuce, takže se
+     * takovému člověku mzda nespočítala vůbec — a to i tehdy, když je právní
+     * režim naprosto jednoznačný.
+     *
+     * Jednoznačný je proto, že exekuční srážky se insolvencí ZASTAVUJÍ:
+     *
+     *  • § 109 odst. 1 písm. c) zákona č. 182/2006 Sb. (insolvenční zákon):
+     *    „výkon rozhodnutí či exekuci, která by postihovala majetek ve
+     *    vlastnictví dlužníka … lze nařídit nebo zahájit, nelze jej však
+     *    provést"; k úkonům a rozhodnutím, které tomu odporují, se podle
+     *    § 109 odst. 6 IZ nepřihlíží. Účinky nastávají podle § 109 odst. 4 IZ
+     *    okamžikem zveřejnění vyhlášky o zahájení řízení v insolvenčním
+     *    rejstříku. „Provedením" je přitom až VÝPLATA oprávněnému, ne samotná
+     *    srážka — rozsudek Nejvyššího soudu sp. zn. 29 Cdo 5295/2016
+     *    (R 4/2020): „provádí plátce mzdy srážky ze mzdy povinného dále, ale
+     *    nevyplácí je oprávněnému, dokud tyto účinky nepominou";
+     *  • § 140e odst. 1 IZ: po rozhodnutí o úpadku nelze exekuci na majetek
+     *    v majetkové podstatě ani nařídit, ani zahájit;
+     *  • § 406 odst. 3 písm. d) a odst. 5 IZ: rozhodnutím o schválení
+     *    oddlužení soud přikáže plátci mzdy provádět stanovené srážky
+     *    a nevyplácet je dlužníku, doručí mu je do vlastních rukou a sražené
+     *    částky plátce mzdy zasílá insolvenčnímu správci — i před právní mocí.
+     *
+     * Od schválení oddlužení tedy exekuce nedostane nic a nemá se ani co
+     * deponovat: celá zabavitelná část patří insolvenčnímu správci. Právě
+     * proto se tahle úleva váže na režimy, ve kterých už výrok soudu existuje
+     * ({@see InsolvencyMode::redirectsPaymentToAdministrator()}). Pouhé
+     * upozornění na zahájené řízení zůstává fail-closed: tam se podle R 4/2020
+     * sráží a DEPONUJE, a deponaci mzdové jádro neumí.
+     *
+     * Starší exekuce se tím neruší, jen se nevykonává — v rejstříku zůstává
+     * evidovaná (v agendě případů stav
+     * {@see EnforcementCaseStatus::DeferredNoWithholding}) a pořadí podle
+     * § 280 odst. 5 o. s. ř. jí zůstává. Exekuční příkaz doručený plátci mzdy
+     * až později se rovněž jen eviduje. Kolik se srazí, řeší
+     * {@see insolvencyWithholding()}.
+     *
+     * Zdroje: https://www.zakonyprolidi.cz/cs/2006-182#p109,
+     * https://www.zakonyprolidi.cz/cs/2006-182#p140e,
+     * https://www.zakonyprolidi.cz/cs/2006-182#p406,
+     * https://sbirka.nsoud.cz/sbirka/5858/ (R 4/2020).
+     *
+     * ── Kde fail-closed ZŮSTÁVÁ ────────────────────────────────────────────
+     *
+     * Zákaz provedení exekuce má v témže § 109 odst. 1 písm. c) IZ dvě výjimky
+     * a obě míří přesně na přednostní pohledávky:
+     *
+     *  • věta druhá: pro pohledávky za majetkovou podstatou (§ 168 IZ)
+     *    a pohledávky jim postavené na roveň (§ 169 IZ) exekuci provést LZE,
+     *    ovšem jen „na základě rozhodnutí insolvenčního soudu vydaného podle
+     *    § 203 odst. 5 a s omezeními tímto rozhodnutím založenými";
+     *  • věta třetí: pro pohledávky věřitelů na výživném ZE ZÁKONA vzniklé po
+     *    zahájení insolvenčního řízení lze exekuci srážkami ze mzdy provádět
+     *    až do prohlášení konkursu nebo schválení oddlužení, ledaže soud
+     *    rozhodne jinak.
+     *
+     * Do které z těch škatulek konkrétní přednostní pohledávka patří, závisí
+     * na tom, KDY vznikla, zda jde o výživné ze zákona nebo smluvní a zda
+     * o ní insolvenční soud rozhodl — a nic z toho plátce mzdy z evidence
+     * nevyčte: rejstřík zná kategorii podle § 279 odst. 2 o. s. ř. a den
+     * doručení exekučního příkazu, ne původ pohledávky. Přednostní pohledávka
+     * vedle insolvence proto zůstává na ručním posouzení. Nepřednostní
+     * pohledávka do žádné z výjimek spadat nemůže (běžný dluh se uspokojuje
+     * v insolvenci), takže se jen eviduje.
+     *
+     * Zdroje: https://www.zakonyprolidi.cz/cs/2006-182#p168,
+     * https://www.zakonyprolidi.cz/cs/2006-182#p169,
+     * https://www.zakonyprolidi.cz/cs/2006-182#p203.
+     *
+     * @param list<DeductionClaim> $activeClaims
+     * @return list<string>
+     */
+    private function concurrentEnforcementIssues(
+        array $activeClaims,
+        GarnishmentInput $input,
+    ): array {
+        if (!$input->insolvency->mode->redirectsPaymentToAdministrator()) {
+            return [];
+        }
+        foreach ($activeClaims as $claim) {
+            if ($claim->legalBasis === DeductionLegalBasis::Statutory
+                && $claim->category->isPriority()
+            ) {
+                return [
+                    'concurrent_priority_enforcement_with_insolvency'
+                    . '_requires_manual_review',
+                ];
+            }
+        }
+
+        return [];
     }
 
     /**

@@ -50,13 +50,30 @@ const targetUnchanged = computed(() => storedTarget.value[0] === employmentId.va
   && storedTarget.value[1] === accountId.value
   && storedTarget.value[2] === documentId.value)
 const hasApprovedInstruction = computed(() => storedInstructionId.value !== null)
+/**
+ * Režimy, ve kterých se sráží ve prospěch insolvenčního správce, a proto se
+ * skládá neměnný platební pokyn — schválené oddlužení ve standardním rozsahu
+ * (§ 398 odst. 3 IZ) i soudem určená jiná výše měsíčních splátek
+ * (§ 398 odst. 5 IZ). Obě přikazuje plátci mzdy § 406 odst. 3 písm. d) IZ,
+ * takže obě potřebují vztah, účet správce i rozhodnutí.
+ */
+const redirectsPayment = computed(() => evidence.value?.insolvency_mode === 'approved_standard'
+  || evidence.value?.insolvency_mode === 'court_determined_amount')
+const courtAmountFilled = computed(() => {
+  const normalized = courtAmountCzk.value.trim().replace(',', '.')
+  if (normalized === '') return false
+  const amount = Number(normalized)
+  return Number.isFinite(amount) && amount > 0
+})
 const leavingApprovedInstruction = computed(() => hasApprovedInstruction.value
-  && evidence.value?.insolvency_mode !== 'approved_standard')
-const standardReady = computed(() => evidence.value?.insolvency_mode !== 'approved_standard'
+  && !redirectsPayment.value)
+const standardReady = computed(() => !redirectsPayment.value
   || (employmentId.value !== null
     && accountId.value !== null
     && documentId.value !== null
-    && canReadDocuments.value))
+    && canReadDocuments.value
+    && (evidence.value?.insolvency_mode !== 'court_determined_amount'
+      || courtAmountFilled.value)))
 const canSave = computed(() => canWrite.value
   && evidence.value !== null
   && !saving.value
@@ -68,23 +85,27 @@ const canSave = computed(() => canWrite.value
  *
  * Tři podmínky schváleného oddlužení (pracovní vztah, účet správce, rozhodnutí)
  * nejsou naše libovůle — z nich se skládá NEMĚNNÝ platební pokyn a
- * `PayrollEnforcementRepository::saveMonthEvidence()` bez nich režim
- * `approved_standard` odmítne. Zašedlé tlačítko bez věty ale účetní neřeklo,
+ * `PayrollEnforcementRepository::saveMonthEvidence()` bez nich režim se srážkou
+ * pro správce odmítne. Zašedlé tlačítko bez věty ale účetní neřeklo,
  * KTERÝ z těch tří údajů chybí; hlásilo se to až 409 z jiné obrazovky.
  *
- * Ostatní režimy (upozornění, částka určená soudem) žádnou z těch tří položek
- * nepotřebují — a částku určenou soudem lze uložit i prázdnou, protože měsíc
- * stejně padá do ručního posouzení (`court_determined_insolvency_amount_requires_manual_review`).
+ * U soudem určené splátky k nim přibývá samotná částka: bez ní výpočet neví,
+ * kolik má srazit, a měsíc by skončil na ručním posouzení
+ * (`court_determined_insolvency_amount_missing`). Režim Pouze upozornění
+ * nepotřebuje ani jedno — ten se stejně nesráží.
  */
 const saveBlockedReason = computed<string | null>(() => {
   if (!canWrite.value) return t('payroll.insolvency.blocked.read_only')
   if (evidence.value === null) return null
   if (leavingApprovedInstruction.value) return t('payroll.insolvency.explicit_cancel_required')
-  if (evidence.value.insolvency_mode !== 'approved_standard') return null
+  if (!redirectsPayment.value) return null
   if (!canReadDocuments.value) return t('payroll.insolvency.document_permission')
   if (employmentId.value === null) return t('payroll.insolvency.blocked.employment')
   if (accountId.value === null) return t('payroll.insolvency.blocked.account')
   if (documentId.value === null) return t('payroll.insolvency.blocked.document')
+  if (evidence.value.insolvency_mode === 'court_determined_amount' && !courtAmountFilled.value) {
+    return t('payroll.insolvency.blocked.court_amount')
+  }
   return null
 })
 
@@ -160,7 +181,7 @@ async function save() {
     payload.court_determined_amount_minor_units = current.insolvency_mode === 'court_determined_amount'
       ? minorUnits(courtAmountCzk.value)
       : null
-    if (current.insolvency_mode === 'approved_standard') {
+    if (redirectsPayment.value) {
       payload.insolvency_decision_verified = true
       payload.insolvency_recipient_verified = true
       payload.insolvency_employment_id = employmentId.value
@@ -328,7 +349,7 @@ watch([employeeId, period], load, { immediate: true })
         </p>
       </div>
 
-      <div v-if="evidence.insolvency_mode === 'approved_standard'" class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div v-if="redirectsPayment" class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <label class="text-xs font-medium text-neutral-600">
           {{ t('payroll.insolvency.employment') }}
           <select v-model="employmentId" :disabled="!canWrite || saving" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="insolvency-employment">
@@ -373,10 +394,10 @@ watch([employeeId, period], load, { immediate: true })
       </div>
 
       <!--
-        Částka určená soudem je NEPOVINNÁ. Režim stejně padá do ručního posouzení
-        (`court_determined_insolvency_amount_requires_manual_review`) a do žádného
-        výpočtu nevstupuje, takže není důvod držet zápis rukojmím čísla, které
-        účetní v okamžiku zaevidování usnesení často ještě nemá.
+        Částka určená soudem je POVINNÁ: od chvíle, co se podle ní sráží
+        (§ 398 odst. 5 IZ), je to vstup výpočtu, ne poznámka. Bez ní by měsíc
+        skončil na ručním posouzení, takže je lepší říct to hned tady než
+        po spuštění mzdového běhu.
       -->
       <label v-if="evidence.insolvency_mode === 'court_determined_amount'" class="mt-4 block text-xs font-medium text-neutral-600">
         {{ t('payroll.insolvency.court_amount') }}

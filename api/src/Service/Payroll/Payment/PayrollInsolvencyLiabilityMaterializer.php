@@ -227,7 +227,12 @@ final class PayrollInsolvencyLiabilityMaterializer
                 || ($inputSnapshot['supplier_id'] ?? null) !== $supplierId
                 || ($inputSnapshot['employee_id'] ?? null) !== $employeeId
                 || $input->period . '-01' !== $this->text($row, 'period_start')
-                || $input->insolvency->mode !== InsolvencyMode::ApprovedStandard
+                // Standardní rozsah i soudem určená splátka (§ 398 odst. 3
+                // a 4 IZ) poukazují na týž účet insolvenčního správce podle
+                // § 406 odst. 3 písm. d) IZ; liší se jen výší srážky, kterou
+                // už uzavřel výpočet. Viz
+                // {@see InsolvencyMode::redirectsPaymentToAdministrator()}.
+                || !$input->insolvency->mode->redirectsPaymentToAdministrator()
                 || !$input->insolvency->decisionVerified
                 || !$input->insolvency->recipientVerified
                 || $input->insolvency->paymentInstructionId !== $instructionId

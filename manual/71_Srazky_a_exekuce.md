@@ -47,12 +47,23 @@ vyživovaných osob spravuje jen při vzniku, zániku nebo ověření nároku; v
 měsíci se celý seznam znovu nevyplňuje.
 
 Volby insolvenčního režimu u každé možnosti popisují dopad na výpočet. Režim
-**Schválené oddlužení — srážet a deponovat** vypočte srážku, ale částku zatím
-nezařadí do automatické platební dávky; účetní ji odešle insolvenčnímu správci
-ručně a úhradu doloží. Volby **Pouze evidovat upozornění** a **Individuální
-částka určená soudem** vyvolají ruční kontrolu a samy částku nepoužijí ani
-neodešlou. Potvrzení příjemce v měsíčních podkladech nenahrazuje rozhodnutí ani
-ověřený platební účet.
+**Schválené oddlužení — srážet a deponovat** vypočte celou zabavitelnou část,
+ale částku zatím nezařadí do automatické platební dávky; účetní ji odešle
+insolvenčnímu správci ručně a úhradu doloží. Režim **Soudem určená jiná výše
+měsíčních splátek** funguje stejně, jen se místo zákonné srážky srazí částka
+z výroku usnesení — nejvýše však do zákonné zabavitelné části, takže v měsíci
+s nižším příjmem vyjde méně. Splátka je u tohoto režimu povinný údaj a stejně
+jako u schváleného oddlužení k němu patří pracovní vztah, ověřený účet správce
+a rozhodnutí. Volba **Pouze evidovat upozornění** vyvolá ruční kontrolu a sama
+částku nepoužije ani neodešle. Potvrzení příjemce v měsíčních podkladech
+nenahrazuje rozhodnutí ani ověřený platební účet.
+
+Exekuce evidované vedle schváleného oddlužení se po dobu oddlužení
+nevykonávají — zůstanou v rejstříku, srážka jde celá insolvenčnímu správci
+a mzda se normálně spočítá. Výjimkou jsou **přednostní** pohledávky (typicky
+výživné): u nich zákon připouští, že se za trvání insolvence vykonávat mohou,
+ale jen podle rozhodnutí insolvenčního soudu. Takový měsíc proto skončí na
+ručním posouzení a je nutné ho vyřešit podle konkrétních usnesení.
 
 ## 71.4 Stavy
 

@@ -6567,12 +6567,12 @@
       "mode_none": "Debt relief does not apply this month",
       "mode_standard": "Approved standard debt relief",
       "mode_alert": "Alert only — manual review",
-      "mode_court": "Court-determined amount — manual review",
+      "mode_court": "Court-determined monthly instalment",
       "impact": {
         "none": "No debt-relief deduction. This mode does not cancel an approved instruction; use explicit cancellation.",
-        "approved_standard": "The application creates an immutable payment instruction, calculates the standard deduction and prepares a real liability after payroll approval.",
+        "approved_standard": "The application creates an immutable payment instruction, calculates the standard deduction and prepares a real liability after payroll approval. Recorded non-priority enforcements are not carried out while debt relief runs.",
         "alert_only": "This mode stays fail-closed: it records an alert but does not calculate or remit an amount automatically.",
-        "court_determined_amount": "The individual mode remains manual and creates no automatic payment instruction."
+        "court_determined_amount": "The application creates an immutable payment instruction and withholds the court-determined amount, capped by the statutory attachable part. Recorded non-priority enforcements are not carried out while debt relief runs."
       },
       "employment": "Effective employment",
       "select_employment": "Select an employment",
@@ -6585,13 +6585,14 @@
       "document_selected": "Selected company document #{id}",
       "document_permission": "Selecting a decision requires permission to read Documents.",
       "document_search_failed": "The decision could not be found in Documents.",
-      "court_amount": "Court-determined amount (CZK)",
-      "court_amount_hint": "Optional — you can fill it in later. This mode is calculated manually anyway.",
+      "court_amount": "Court-determined monthly instalment (CZK)",
+      "court_amount_hint": "The amount from the court order. It is withheld exactly, but never above the statutory attachable part — a month with lower income yields less.",
       "blocked": {
         "read_only": "You only have read access to debt relief, so you cannot save it.",
         "employment": "Pick the employment the deduction comes from — the debt relief payment instruction cannot be created without it.",
         "account": "Pick a verified CZK account of the insolvency administrator. You add one in Payroll settings.",
-        "document": "Find the debt relief approval decision in Documents; the payment instruction cannot be evidenced without it."
+        "document": "Find the debt relief approval decision in Documents; the payment instruction cannot be evidenced without it.",
+        "court_amount": "Enter the court-determined monthly instalment. Without it the calculation does not know how much to withhold and payroll would end in manual review."
       },
       "instruction_bound": "The record is bound to immutable payment instruction #{id}.",
       "explicit_cancel_required": "An approved instruction cannot be cancelled by changing the mode. Use the separate Cancel approved debt relief button.",
@@ -6914,14 +6915,14 @@
         "insolvency_none": "Debt relief does not apply this month",
         "insolvency_alert": "Record an alert only",
         "insolvency_standard": "Approved debt relief — withhold and hold",
-        "insolvency_court": "Individual court-determined amount",
+        "insolvency_court": "Court-determined monthly instalment",
         "insolvency_impact": {
           "none": "No insolvency exception. The calculation follows the employee's ordinary evidence.",
           "alert_only": "The alert is recorded only. Payroll requires manual review and does not automatically remit an insolvency amount.",
           "approved_standard": "The deduction is calculated under the debt-relief regime but remains on hold for now. Payment to the insolvency administrator must be made and documented manually.",
-          "court_determined_amount": "The amount is recorded only. Payroll requires manual review and does not apply or remit it automatically."
+          "court_determined_amount": "The court-determined monthly instalment is withheld, capped by the statutory attachable part. Payment to the insolvency administrator must be made and documented manually."
         },
-        "court_amount_czk": "Court-determined amount (CZK)",
+        "court_amount_czk": "Court-determined monthly instalment (CZK)",
         "insolvency_decision": "The insolvency decision is verified",
         "insolvency_recipient": "The recipient was checked against the evidence (this does not replace the payment account or decision)"
       },

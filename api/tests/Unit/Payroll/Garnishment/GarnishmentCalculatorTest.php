@@ -1151,7 +1151,7 @@ final class GarnishmentCalculatorTest extends TestCase
         self::assertNull($secondSnapshot->allocationFor('latest'));
     }
 
-    public function testUnsupportedInsolvencyInstructionFailsClosed(): void
+    public function testCourtDeterminedInsolvencyWithoutPaymentInstructionFailsClosed(): void
     {
         $result = $this->calculate(
             4_000_000,
@@ -1165,8 +1165,168 @@ final class GarnishmentCalculatorTest extends TestCase
         );
 
         self::assertSame(GarnishmentStatus::ManualReview, $result->status);
-        self::assertContains('court_determined_insolvency_amount_requires_manual_review', $result->issues);
+        self::assertContains('insolvency_payment_instruction_missing', $result->issues);
         self::assertSame(0, $result->totalWithheldMinorUnits);
+    }
+
+    /**
+     * Ruční kontrolní výpočet (sada 2026, bezdětný dlužník, 40 000 Kč čistého):
+     * nezabavitelná částka 14 102 Kč, zbytek 25 898 Kč, po zaokrouhlení dolů na
+     * násobek tří 25 896 Kč, třetina 8 632 Kč, plně zabavitelný zbytek 0.
+     * Kapacita oddlužení = 2 × 8 632 = 17 264 Kč. Soud určil 5 000 Kč, což je
+     * méně, takže se srazí přesně soudem určená částka.
+     */
+    public function testCourtDeterminedInsolvencyWithholdsTheCourtAmount(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [],
+            insolvency: $this->courtDeterminedInsolvency(500_000),
+        );
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertTrue($result->insolvencyApplied);
+        self::assertSame(0, $result->employerFlatFeeMinorUnits);
+        self::assertSame(500_000, $result->totalWithheldMinorUnits);
+        self::assertSame(
+            500_000,
+            $result->allocationFor('insolvency-administrator')?->totalMinorUnits,
+        );
+        self::assertSame(3_500_000, $result->employeePaymentMinorUnits);
+    }
+
+    /**
+     * Soudem určená splátka nesmí prolomit nezabavitelnou částku: v měsíci,
+     * kdy zákonná kapacita (17 264 Kč) nestačí na určených 25 000 Kč, se srazí
+     * jen kapacita.
+     */
+    public function testCourtDeterminedInsolvencyNeverExceedsTheStatutoryCapacity(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [],
+            insolvency: $this->courtDeterminedInsolvency(2_500_000),
+        );
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertSame(1_726_400, $result->totalWithheldMinorUnits);
+        self::assertSame(
+            1_726_400,
+            $result->allocationFor('insolvency-administrator')?->totalMinorUnits,
+        );
+    }
+
+    public function testCourtDeterminedInsolvencyWithoutTheAmountFailsClosed(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [],
+            insolvency: $this->courtDeterminedInsolvency(null),
+        );
+
+        self::assertSame(GarnishmentStatus::ManualReview, $result->status);
+        self::assertContains(
+            'court_determined_insolvency_amount_missing',
+            $result->issues,
+        );
+        self::assertSame(0, $result->totalWithheldMinorUnits);
+    }
+
+    /**
+     * Nález N-09: starší nepřednostní exekuce v evidenci nesmí zastavit mzdu
+     * člověka ve schváleném oddlužení. Sráží se v insolvenčním režimu celá
+     * kapacita 17 264 Kč insolvenčnímu správci a exekuce nedostane nic.
+     */
+    public function testNonPriorityEnforcementIsSuspendedByApprovedInsolvency(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            insolvency: $this->approvedInsolvency(),
+        );
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertTrue($result->insolvencyApplied);
+        self::assertSame(1_726_400, $result->totalWithheldMinorUnits);
+        self::assertSame(
+            1_726_400,
+            $result->allocationFor('insolvency-administrator')?->totalMinorUnits,
+        );
+        self::assertNull($result->allocationFor('claim-1'));
+        self::assertSame(0, $result->employerFlatFeeMinorUnits);
+    }
+
+    public function testSuspendedEnforcementIsRecordedInTheTrace(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [
+                $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000),
+                $this->statutoryClaim('claim-2', ClaimCategory::NonPriority, 10_000_000),
+            ],
+            insolvency: $this->approvedInsolvency(),
+        );
+
+        $steps = array_values(array_filter(
+            $result->roundingTrace,
+            static fn (array $step): bool =>
+                ($step['step'] ?? null) === 'enforcement_suspended_by_insolvency',
+        ));
+        self::assertCount(1, $steps);
+        self::assertSame(2, $steps[0]['suspended_claims'] ?? null);
+    }
+
+    /**
+     * Fail-closed zůstává u přednostních pohledávek: exekuci pro pohledávku za
+     * majetkovou podstatou nebo jí na roveň postavenou (typicky zákonné
+     * výživné) lze podle § 109 odst. 1 písm. c) IZ provést i za insolvence,
+     * ovšem jen na základě rozhodnutí insolvenčního soudu. Z evidence plátce
+     * mzdy to poznat nejde.
+     */
+    public function testPriorityEnforcementConcurrentWithInsolvencyStaysManualReview(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [$this->statutoryClaim(
+                'maintenance',
+                ClaimCategory::CurrentMaintenance,
+                10_000_000,
+                maintenanceWeightMinorUnits: 300_000,
+            )],
+            insolvency: $this->approvedInsolvency(),
+        );
+
+        self::assertSame(GarnishmentStatus::ManualReview, $result->status);
+        self::assertContains(
+            'concurrent_priority_enforcement_with_insolvency_requires_manual_review',
+            $result->issues,
+        );
+        self::assertSame(0, $result->totalWithheldMinorUnits);
+    }
+
+    private function approvedInsolvency(): InsolvencyInstruction
+    {
+        return new InsolvencyInstruction(
+            InsolvencyMode::ApprovedStandard,
+            decisionVerified: true,
+            recipientVerified: true,
+            paymentInstructionId: 101,
+            paymentInstructionHash: str_repeat('a', 64),
+            employmentId: 202,
+        );
+    }
+
+    private function courtDeterminedInsolvency(?int $amountMinorUnits): InsolvencyInstruction
+    {
+        return new InsolvencyInstruction(
+            InsolvencyMode::CourtDeterminedAmount,
+            decisionVerified: true,
+            recipientVerified: true,
+            courtDeterminedAmountMinorUnits: $amountMinorUnits,
+            paymentInstructionId: 101,
+            paymentInstructionHash: str_repeat('a', 64),
+            employmentId: 202,
+        );
     }
 
     public function testRulesetSnapshotIsStableAndUsesOnlyOfficialSources(): void

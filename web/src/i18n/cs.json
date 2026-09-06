@@ -6567,12 +6567,12 @@
       "mode_none": "Oddlužení se tento měsíc neuplatní",
       "mode_standard": "Schválené standardní oddlužení",
       "mode_alert": "Pouze upozornění — ruční posouzení",
-      "mode_court": "Částka určená soudem — ruční posouzení",
+      "mode_court": "Soudem určená jiná výše měsíčních splátek",
       "impact": {
         "none": "Bez insolvenční srážky. Již schválený pokyn tímto režimem nezrušíte; použijte výslovné zrušení.",
-        "approved_standard": "Aplikace vytvoří neměnný platební pokyn, vypočte standardní srážku a po schválení mzdy připraví skutečný závazek.",
+        "approved_standard": "Aplikace vytvoří neměnný platební pokyn, vypočte standardní srážku a po schválení mzdy připraví skutečný závazek. Evidované nepřednostní exekuce se po dobu oddlužení nevykonávají.",
         "alert_only": "Režim zůstává fail-closed: uloží upozornění, ale částku automaticky nevypočte ani neodešle.",
-        "court_determined_amount": "Individuální režim zůstává ruční a automatický platební pokyn nevznikne."
+        "court_determined_amount": "Aplikace vytvoří neměnný platební pokyn a srazí částku určenou soudem, nejvýše však zákonnou zabavitelnou část. Evidované nepřednostní exekuce se po dobu oddlužení nevykonávají."
       },
       "employment": "Účinný pracovní vztah",
       "select_employment": "Vyberte pracovní vztah",
@@ -6585,13 +6585,14 @@
       "document_selected": "Vybraný firemní dokument #{id}",
       "document_permission": "Výběr rozhodnutí vyžaduje právo číst Dokumenty.",
       "document_search_failed": "Rozhodnutí v Dokumentech se nepodařilo vyhledat.",
-      "court_amount": "Částka určená soudem (Kč)",
-      "court_amount_hint": "Nepovinné — můžete doplnit později. Tenhle režim se stejně počítá ručně.",
+      "court_amount": "Měsíční splátka určená soudem (Kč)",
+      "court_amount_hint": "Částka z výroku usnesení. Sráží se přesně ona, nejvýše však do zákonné zabavitelné části — v měsíci s nižším příjmem se srazí méně.",
       "blocked": {
         "read_only": "Na oddlužení máte jen právo ke čtení, uložit ho nemůžete.",
         "employment": "Vyberte pracovní vztah, ze kterého se má srážet — bez něj nelze platební pokyn oddlužení vytvořit.",
         "account": "Vyberte ověřený CZK účet insolvenčního správce. Doplníte ho v Nastavení mezd.",
-        "document": "Najděte v Dokumentech rozhodnutí o schválení oddlužení; platební pokyn je bez něj nedoložitelný."
+        "document": "Najděte v Dokumentech rozhodnutí o schválení oddlužení; platební pokyn je bez něj nedoložitelný.",
+        "court_amount": "Zadejte měsíční splátku určenou soudem. Bez ní výpočet neví, kolik má srazit, a mzda by skončila na ručním posouzení."
       },
       "instruction_bound": "Evidence je svázaná s neměnným platebním pokynem #{id}.",
       "explicit_cancel_required": "Schválený pokyn nelze zrušit změnou režimu. Použijte samostatné tlačítko Zrušit schválené oddlužení.",
@@ -6914,14 +6915,14 @@
         "insolvency_none": "Oddlužení se tento měsíc neuplatní",
         "insolvency_alert": "Pouze evidovat upozornění",
         "insolvency_standard": "Schválené oddlužení — srážet a deponovat",
-        "insolvency_court": "Individuální částka určená soudem",
+        "insolvency_court": "Soudem určená jiná výše měsíčních splátek",
         "insolvency_impact": {
           "none": "Bez insolvenční výjimky. Výpočet se řídí běžnými podklady zaměstnance.",
           "alert_only": "Upozornění se pouze eviduje. Výpočet vyžádá ruční kontrolu a žádnou insolvenční částku automaticky neodešle.",
           "approved_standard": "Srážka se vypočte podle režimu oddlužení, ale zatím zůstane v depozitu. Úhradu insolvenčnímu správci je nutné provést a doložit ručně.",
-          "court_determined_amount": "Částka se pouze eviduje. Výpočet vyžádá ruční posouzení a automaticky ji nepoužije ani neodešle."
+          "court_determined_amount": "Srazí se měsíční splátka určená soudem, nejvýše však zákonná zabavitelná část. Úhradu insolvenčnímu správci je nutné provést a doložit ručně."
         },
-        "court_amount_czk": "Částka určená soudem (Kč)",
+        "court_amount_czk": "Měsíční splátka určená soudem (Kč)",
         "insolvency_decision": "Insolvenční rozhodnutí je ověřené",
         "insolvency_recipient": "Příjemce byl zkontrolován podle podkladu (nenahrazuje platební účet ani rozhodnutí)"
       },

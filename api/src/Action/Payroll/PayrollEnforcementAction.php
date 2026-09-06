@@ -24,6 +24,7 @@ use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseCommand;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseLifecycle;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseStatus;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementDecisionDocumentReference;
+use MyInvoice\Service\Payroll\Garnishment\InsolvencyMode;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -595,7 +596,14 @@ final class PayrollEnforcementAction
         }
         try {
             $body = $this->input($request);
-            if (($body['insolvency_mode'] ?? null) === 'approved_standard'
+            // Rozhodnutí soudu se vybírá z Dokumentů u KAŽDÉHO režimu, který
+            // skládá platební pokyn pro insolvenčního správce — tedy i u
+            // soudem určené splátky podle § 398 odst. 5 IZ. Viz
+            // {@see InsolvencyMode::redirectsPaymentToAdministrator()}.
+            $requestedMode = InsolvencyMode::tryFrom(
+                (string) ($body['insolvency_mode'] ?? ''),
+            );
+            if ($requestedMode?->redirectsPaymentToAdministrator() === true
                 && !$this->requirePermission(
                     $request,
                     $response,

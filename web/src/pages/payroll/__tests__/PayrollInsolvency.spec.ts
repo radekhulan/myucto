@@ -192,20 +192,38 @@ describe('PayrollInsolvency', () => {
   })
 
   /*
-   * Částka určená soudem je nepovinná — režim se stejně počítá ručně, takže
-   * zápis nesmí čekat na číslo, které účetní při zaevidování usnesení nemá.
+   * Soudem určená splátka (§ 398 odst. 5 IZ) je od nálezu N-09 vstupem
+   * výpočtu, takže bez ní nemá co uložit — a účetní se to dozví hned tady,
+   * ne až po spuštění mzdového běhu.
    */
-  it('saves the court-determined mode without an amount', async () => {
+  it('blocks the court-determined mode until the instalment is filled in', async () => {
     m.insolvencyEvidence.mockResolvedValue(evidence({
       insolvency_mode: 'court_determined_amount',
-      insolvency_payment_instruction_id: null,
       court_determined_amount_minor_units: null,
     }))
     const wrapper = mount(PayrollInsolvency)
     await flushPromises()
 
-    expect(wrapper.get('[data-test="insolvency-court-amount"]').attributes('required'))
-      .toBeUndefined()
+    expect(wrapper.get('[data-test="insolvency-save"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="insolvency-save-blocked"]').text())
+      .toBe('payroll.insolvency.blocked.court_amount')
+  })
+
+  /*
+   * Soudem určená splátka se sráží pro insolvenčního správce
+   * (§ 406 odst. 3 písm. d) IZ), takže potřebuje týž neměnný platební pokyn
+   * jako standardní oddlužení — vztah, účet i rozhodnutí zůstávají na
+   * obrazovce viditelné a odesílají se s ověřením.
+   */
+  it('saves the court-determined mode with the instalment and the payment target', async () => {
+    m.insolvencyEvidence.mockResolvedValue(evidence({
+      insolvency_mode: 'court_determined_amount',
+      court_determined_amount_minor_units: 500_000,
+    }))
+    const wrapper = mount(PayrollInsolvency)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="insolvency-employment"]').isVisible()).toBe(true)
     expect(wrapper.get('[data-test="insolvency-save"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-test="insolvency-save"]').trigger('click')
     await flushPromises()
@@ -213,7 +231,15 @@ describe('PayrollInsolvency', () => {
     expect(m.saveInsolvencyEvidence).toHaveBeenCalledWith(
       3,
       '2026-06',
-      expect.objectContaining({ court_determined_amount_minor_units: null }),
+      expect.objectContaining({
+        court_determined_amount_minor_units: 500_000,
+        insolvency_decision_verified: true,
+        insolvency_recipient_verified: true,
+        insolvency_employment_id: 20,
+        insolvency_institution_account_id: 30,
+        insolvency_decision_document_id: 40,
+        insolvency_payment_instruction_id: 10,
+      }),
     )
   })
 

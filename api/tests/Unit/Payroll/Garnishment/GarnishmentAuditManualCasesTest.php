@@ -109,8 +109,14 @@ final class GarnishmentAuditManualCasesTest extends TestCase
         self::assertSame(824_800, $result->allocationFor('insolvency-administrator')?->totalMinorUnits);
     }
 
-    /** Souběh exekuce a oddlužení je fail-closed (ruční posouzení), nic se nesrazí. */
-    public function testEnforcementConcurrentWithInsolvencyIsManualReview(): void
+    /**
+     * Nepřednostní exekuce vedle schváleného oddlužení se jen eviduje a
+     * nesráží se z ní: podle § 109 odst. 1 písm. c) insolvenčního zákona
+     * exekuci nelze PROVÉST, celá zabavitelná část jde insolvenčnímu správci.
+     * Dřív to celý výpočet zastavilo, takže dlužníkovi v oddlužení se mzda
+     * nespočítala vůbec — a starší exekuci v evidenci má prakticky každý.
+     */
+    public function testNonPriorityEnforcementConcurrentWithInsolvencyIsSuspendedNotBlocking(): void
     {
         $result = $this->calculate(
             3_000_000,
@@ -125,9 +131,17 @@ final class GarnishmentAuditManualCasesTest extends TestCase
             ),
         );
 
-        self::assertSame(GarnishmentStatus::ManualReview, $result->status);
-        self::assertContains('concurrent_enforcement_with_insolvency_requires_manual_review', $result->issues);
-        self::assertSame(0, $result->totalWithheldMinorUnits);
+        self::assertSame(GarnishmentStatus::Supported, $result->status, implode(',', $result->issues));
+        self::assertNotContains(
+            'concurrent_enforcement_with_insolvency_requires_manual_review',
+            $result->issues,
+        );
+        self::assertTrue($result->insolvencyApplied);
+        self::assertNotSame(0, $result->totalWithheldMinorUnits);
+        self::assertSame(
+            $result->totalWithheldMinorUnits,
+            $result->allocationFor('insolvency-administrator')?->totalMinorUnits,
+        );
     }
 
     /**

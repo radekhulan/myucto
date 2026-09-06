@@ -947,21 +947,24 @@ final class PayrollEnforcementRepository implements
             $currentInstructionId = self::nullableIntValue(
                 $currentRow['insolvency_payment_instruction_id'] ?? null,
             );
-            if ($currentInsolvencyMode === InsolvencyMode::ApprovedStandard->value
-                && $insolvency !== InsolvencyMode::ApprovedStandard
+            $currentRedirects = $currentInsolvencyMode !== null
+                && InsolvencyMode::tryFrom((string) $currentInsolvencyMode)
+                    ?->redirectsPaymentToAdministrator() === true;
+            if ($currentRedirects
+                && !$insolvency->redirectsPaymentToAdministrator()
             ) {
                 throw new \DomainException(
-                    'Schválené standardní oddlužení lze ukončit jen '
+                    'Schválené oddlužení lze ukončit jen '
                     . 'výslovným zrušením před použitím platebního pokynu.',
                 );
             }
             $instruction = null;
-            if ($insolvency === InsolvencyMode::ApprovedStandard) {
+            if ($insolvency->redirectsPaymentToAdministrator()) {
                 if (!self::boolValue($data, 'insolvency_decision_verified')
                     || !self::boolValue($data, 'insolvency_recipient_verified')
                 ) {
                     throw new \DomainException(
-                        'Standardní oddlužení vyžaduje ověřené rozhodnutí '
+                        'Schválené oddlužení vyžaduje ověřené rozhodnutí '
                         . 'i příjemce platby.',
                     );
                 }
@@ -995,8 +998,8 @@ final class PayrollEnforcementRepository implements
                 );
             } elseif ($this->hasInsolvencyPaymentTarget($data)) {
                 throw new \DomainException(
-                    'Platební pokyn lze připnout jen ke standardnímu '
-                    . 'schválenému oddlužení.',
+                    'Platební pokyn lze připnout jen ke schválenému '
+                    . 'oddlužení nebo k soudem určené splátce.',
                 );
             }
             $values = [
@@ -1122,8 +1125,10 @@ final class PayrollEnforcementRepository implements
             $instructionId = self::nullableIntValue(
                 $row['insolvency_payment_instruction_id'] ?? null,
             );
-            if (($row['insolvency_mode'] ?? null)
-                    !== InsolvencyMode::ApprovedStandard->value
+            $mode = InsolvencyMode::tryFrom(
+                (string) ($row['insolvency_mode'] ?? ''),
+            );
+            if ($mode?->redirectsPaymentToAdministrator() !== true
                 || $instructionId === null
             ) {
                 throw new \DomainException(
