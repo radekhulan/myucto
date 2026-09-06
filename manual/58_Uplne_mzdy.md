@@ -158,18 +158,191 @@ kontroly úplnosti nastavení a jednotlivých podání zůstanou zachované.
 
 ## 58.3 Doporučený měsíční postup
 
+Celý mzdový měsíc má **tři fáze**: nejdřív se zapíšou vstupy, pak se z nich
+udělá mzdový běh, a nakonec se z hotového běhu platí, účtuje, tisknou doklady a
+podává. Následující tabulka je rychlý přehled; podrobný klikací postup je hned
+za ní v [§ 58.3.1](#5831-krok-za-krokem-co-presne-klikat) a hlídá skutečné
+pořadí tlačítek v aplikaci.
+
 | Pořadí | Co účetní udělá | Kde pokračovat |
 |---:|---|---|
 | 1 | Otevře správnou firmu a měsíc, zkontroluje nástupy, výstupy a změny podmínek. | [Zaměstnanci](69_Zamestnanci.md) |
-| 2 | Doplní směny, odpracovanou dobu, absence, dovolenou a pracovní cesty. | [Docházka a směny](60_Dochazka_a_smeny.md), [Absence a dovolená](59_Absence_a_dovolena.md), [Cestovní náhrady](61_Cestovni_nahrady.md) |
-| 3 | Zadá odměny, náhrady, srážky a ostatní měsíční změny; pro větší počet lidí použije rychlý hromadný vstup a vyhledávání. | [Rychlý měsíční vstup](62_Rychly_mesicni_vstup.md), [Mzdové složky a vstupy](74_Mzdove_slozky_a_vstupy.md) |
-| 4 | Uzamkne vstupy (zbylé koncepty schválí jedním tlačítkem přímo u blokace), spustí výpočet a projde blokace i varování. | [Mzdové běhy](63_Mzdove_behy.md) |
-| 5 | Zkontroluje čisté mzdy, odvody, daně, součty podle zaměstnanců a případné srážky nebo exekuce. | [Mzdové běhy](63_Mzdove_behy.md), [Srážky a exekuce](71_Srazky_a_exekuce.md) |
-| 6 | Schválí výslednou revizi. Při nalezené chybě opraví zdrojový údaj a vytvoří novou revizi; nepřepisuje schválený otisk. | [Mzdové běhy](63_Mzdove_behy.md) |
-| 7 | Vygeneruje výplatní pásky a povinné dokumenty a zkontroluje stav po jednotlivých osobách. | [Dokumenty a výstupy](66_Dokumenty_a_vystupy.md) |
-| 8 | Připraví a provede výplaty, odvody a ostatní platby; následně je spáruje s bankou. | [Mzdové příkazy a úhrady](65_Platby_a_uhrady.md) |
-| 9 | Připraví JMHZ a hlášení zdravotním pojišťovnám, zkontroluje XML/PDF, zvolí kanál a každé odeslání výslovně potvrdí. | [Podání a hlášení](68_Podani_a_hlaseni.md) |
-| 10 | Zaúčtuje mzdy a porovná mzdovou revizi, platby, účetní zápisy a podání. | [Shoda účtování mezd](64_Shoda_uctovani_mezd.md) |
+| 2 | Doplní absence, dovolenou, docházku a pracovní cesty a **schválí měsíc docházky**. | [Absence a dovolená](59_Absence_a_dovolena.md), [Docházka a směny](60_Dochazka_a_smeny.md), [Cestovní náhrady](61_Cestovni_nahrady.md) |
+| 3 | Zadá mzdy, odměny, náhrady a srážky; pro víc lidí použije hromadný vstup. | [Rychlý měsíční vstup](62_Rychly_mesicni_vstup.md), [Mzdové složky a vstupy](74_Mzdove_slozky_a_vstupy.md) |
+| 4 | Založí mzdový běh, uzamkne vstupy a spočítá mzdy; projde blokace i varování. | [Mzdové běhy](63_Mzdove_behy.md) |
+| 5 | Zkontroluje čisté mzdy, odvody, daně, rozpad po zaměstnancích, srážky a exekuce. | [Mzdové běhy](63_Mzdove_behy.md), [Srážky a exekuce](71_Srazky_a_exekuce.md) |
+| 6 | Schválí revizi. Při chybě opraví zdrojový údaj a vytvoří novou revizi; schválený otisk nepřepisuje. | [Mzdové běhy](63_Mzdove_behy.md) |
+| 7 | Zaúčtuje mzdy a porovná mzdovou revizi, deník a platby. | [Shoda účtování mezd](64_Shoda_uctovani_mezd.md) |
+| 8 | Připraví závazky, vytvoří mzdové příkazy a po výpisu spáruje skutečné úhrady. | [Mzdové příkazy a úhrady](65_Platby_a_uhrady.md) |
+| 9 | Vygeneruje výplatní pásky a měsíční balíček a zkontroluje stav po osobách. | [Dokumenty a výstupy](66_Dokumenty_a_vystupy.md) |
+| 10 | Připraví JMHZ a hlášení zdravotním pojišťovnám, zkontroluje XML/PDF, zvolí kanál a každé odeslání výslovně potvrdí; nakonec měsíc uzavře. | [Podání a hlášení](68_Podani_a_hlaseni.md) |
+
+### 58.3.1 Krok za krokem: co přesně klikat
+
+Modul najdete v levém menu v sekci **Mzdy** (stojí za Nástroji a před Firmou;
+zobrazí se jen firmě, která má mzdy zapnuté). Položky menu jsou úmyslně
+seřazené v pořadí měsíčního kroku, takže se dá jít shora dolů:
+
+> **Přehled mezd → Absence a dovolená → Docházka a směny → Cestovní náhrady →
+> Rychlý měsíční vstup → Mzdové běhy → Shoda účtování mezd → Mzdové příkazy a
+> úhrady → Dokumenty a výstupy → Roční zúčtování → Podání a hlášení**
+
+Pod oddělovačem následuje kmenová evidence (**Zaměstnanci**, Dohody o srážkách,
+Srážky a exekuce, Součinnost exekutorům, Oddlužení, Koše benefitů) a pod druhým
+oddělovačem jednorázové nastavení (**Nastavení mezd**, Mzdové složky a vstupy,
+Legislativní pravidla mezd, Retenční lhůty, Výmaz osobních údajů).
+
+Na **Mzdy → Přehled mezd** je navíc rozcestník **Jak to funguje**, který vede
+stejným sledem devíti kroků a odkazuje rovnou na příslušné obrazovky.
+
+#### A. Vstupy — než se vůbec založí běh
+
+1. **Mzdy → Zaměstnanci.** Zkontrolujte nástupy, výstupy a změny podmínek za
+   zpracovávaný měsíc. Nového člověka lze založit i z tlačítka **+** v hlavičce
+   volbou **Nový zaměstnanec**.
+2. **Mzdy → Absence a dovolená.** Zapište dovolenou, nemoc a ostatní překážky
+   v práci.
+3. **Mzdy → Docházka a směny.** Doplňte odpracovanou dobu a přesčasy a měsíc
+   **schvalte** tlačítkem **Schválit měsíc**.
+
+   > [!WARNING]
+   > **Příplatky za noc, víkend, svátek a ztížené prostředí vznikají výhradně
+   > schválením docházky.** Po uzamčení vstupů se do běhu už nedostanou. Docházku
+   > proto schvalte dřív, než v dalším kroku spustíte výpočet.
+
+4. **Mzdy → Cestovní náhrady.** Zapište pracovní cesty a vyúčtování.
+5. **Mzdy → Rychlý měsíční vstup.** Zadejte hrubé mzdy, odměny a jednorázové
+   položky za měsíc. Máte-li právo mzdové vstupy schvalovat, ukládají se řádky
+   rovnou jako **schválené**; bez toho práva vznikají koncepty.
+6. **Mzdy → Mzdové složky a vstupy** použijte pro opakující se složky, benefity
+   a jednotlivé výjimky. Vstupy zadané tady vznikají **vždy jako koncept** —
+   schválit je jde hromadně tlačítkem **Schválit vše**, a to i později přímo
+   u blokace v kartě běhu.
+
+#### B. Mzdový běh — **Mzdy → Mzdové běhy**
+
+7. Nahoře vyplňte **Mzdové období** (měsíc) a **Datum výplaty**. Obojí je
+   povinné; datum výplaty je kotva, ze které se odvozují splatnosti odvodů
+   i termíny podání, a nesmí být později než poslední den měsíce následujícího
+   po měsíci, za který mzda přísluší (§ 141 odst. 1 zákoníku práce).
+8. Klikněte na **Nový mzdový běh**. Nejde-li to, aplikace pod tlačítkem napíše
+   proč — chybí období, chybí datum výplaty, nebo za měsíc už běh existuje.
+9. Nad seznamem se ukáže panel **Příprava vstupů za {měsíc}** s odkazy na
+   Měsíční zadání mezd, Docházku, Nepřítomnosti, Mzdové složky a Lidi, plus
+   přepínač **Zobrazit přehled odvodů**. Projděte jej, dokud je běh koncept —
+   potom už se vstupy měnit nedají.
+10. Na kartě běhu klikněte na primární (zvýrazněné) tlačítko **Spočítat mzdy**.
+    Zamkne vstupy a rovnou spočítá mzdy. Nejdřív se objeví **Kontrola před
+    zahájením**; každý nález má vyznačený dopad — **Bez tohohle se nedá počítat** /
+    **Pozdější oprava znamená opravnou revizi** / **Doplní se kdykoli, běh to
+    nezdrží** — a dialog **Opravdu zahájit mzdový běh?** nabídne
+    **Zkontrolovat znovu** nebo **Přesto zahájit**.
+
+    > [!IMPORTANT]
+    > Uzamčení vytvoří **neměnný snímek** zaměstnanců, vztahů, složek, data
+    > výplaty a podkladů srážek. Co zapíšete potom, se do výpočtu ani do hlášení
+    > nedostane, dokud běh znovu neotevřete novou revizí.
+
+11. Projděte sekci **Kontroly běhu** na kartě. Barva říká závažnost:
+    **červená = blokace** (bez opravy se dál nedá), **oranžová = varování**
+    (chce vaše rozhodnutí), šedá = informace. U nálezu s odkazem
+    **Otevřít místo k opravě** se prokliknete rovnou tam, kde se údaj opravuje.
+    - Zbyly-li neschválené mzdové vstupy, je přímo u blokace tlačítko
+      **Schválit vše** — nemusíte kvůli tomu odcházet na jinou obrazovku.
+      Schvaluje se najednou až 500 vstupů a už schválený se přeskočí, takže je
+      bezpečné ho použít znovu.
+    - U varování, které nejde odstranit, je tlačítko **Schválit výjimku**.
+      Vyžaduje odůvodnění celou větou (nejméně 20 znaků a tři slova) a zapíše se
+      do auditní stopy. Bez převzetí odpovědnosti běh schválit nejde.
+12. Zkontrolujte výsledek. Na kartě jsou tři dlaždice (**Peněžní příjem před
+    srážkou**, **Exekuční srážka a paušál**, **K výplatě po srážce**) a odkazy
+    **Zobrazit rozpad podle zaměstnanců** (čísla po osobách, **Rozklad čisté
+    mzdy**, **Rozklad sociálního a zdravotního pojištění**, **Rozpad daně ze
+    závislé činnosti**) a **Zobrazit historii a změny**.
+13. Musíte-li něco opravit, opravte **zdrojový údaj** a klikněte
+    **Přepočítat**. Přepočet pracuje pořád se stejným zmrazeným snímkem, takže
+    ho lze opakovat kolikrát chcete; jde-li o změnu samotného vstupu, otevřete
+    novou revizi. Vypočtený výsledek se nikdy neupravuje ručně.
+14. Klikněte **Schválit** (zelené tlačítko). Schválení uloží výsledek jako
+    závazný, **samo založí výplatní pásky** každé zpracované osoby, v podvojném
+    účetnictví připraví rozdílový mzdový deník a zapíše kontrolu i schválení do
+    historie běhu. Samostatné tlačítko **Zkontrolovat** aplikace nenabízí —
+    kontrola je součástí schválení.
+
+#### C. Po schválení — pořadí je dané a nedá se přeskočit
+
+Primární tlačítko na kartě běhu se po každém kroku samo přepne na ten další:
+
+| Stav běhu | Zvýrazněné tlačítko | Co se stane |
+|---|---|---|
+| Koncept | **Spočítat mzdy** | zamkne vstupy a spočítá |
+| Vstupy uzamčeny / Oprava otevřena | **Přepočítat** | přepočítá ze zmrazeného snímku |
+| Spočítáno / Zkontrolováno | **Schválit** | závazný výsledek + výplatní pásky |
+| Schváleno | **Zaúčtovat** | zápis do deníku (u daňové evidence se přeskočí) |
+| Zaúčtováno | **Připravit platby** | vznikne seznam platebních závazků |
+| Platby připraveny / Uhrazeno | **Uzavřít** | uzavře měsíc |
+| Čeká na opravu / Zrušeno | **Otevřít opravu** | nová revize nad opravenými vstupy |
+
+Vpravo jsou vedle toho méně časté akce (**Vyžádat opravu**, **Zrušit běh** —
+červeně úplně vpravo). Tlačítko **Označit za uhrazené** neexistuje: úhrada není
+rozhodnutí účetní, ale fakt — do stavu **Uhrazeno** běh překlopí server sám,
+jakmile poslední závazek dosedne na spárovanou platbu. Na kartě je proto věta
+**Úhrady doložené výpisem: {n} z {m} závazků** s odkazem **Zobrazit platby**.
+
+15. **Zaúčtování.** Klikněte **Zaúčtovat** přímo na kartě běhu. Použijí se
+    předkontace **zmrazené při uzamknutí vstupů**, takže pozdější změna
+    nastavení už zkontrolovanou revizi nezmění. Je-li účetní období uzamčené,
+    datum deníku se posune na první otevřený den. Výsledek zkontrolujte na
+    **Mzdy → Shoda účtování mezd** — porovná mzdovou revizi, skutečný deník
+    a platební závazky po kategoriích a ukáže, na které straně případný rozdíl
+    vznikl.
+16. **Platby.** Klikněte **Připravit platby** na kartě běhu a pokračujte na
+    **Mzdy → Mzdové příkazy a úhrady**. Stránka má tři záložky:
+    - **Co zaplatit** — tlačítkem **Připravit závazky** vzniknou přesné závazky
+      bez duplicit (čisté mzdy, sociální a zdravotní pojištění, záloha na daň,
+      srážková daň, standardní i exekuční srážky). Opakované spuštění nic
+      nezduplikuje.
+    - **Mzdové příkazy** — vyberte kompatibilní platby, zkontrolujte součet
+      a **Účet plátce** a klikněte **Vytvořit mzdový příkaz** (formát **ABO / KPC
+      pro českou banku**, **SEPA XML pro EUR**, nebo **ruční hotovostní výplata**).
+    - **Spárování úhrad** — po načtení bankovního výpisu se skutečné úhrady
+      spárují se závazky.
+17. **Dokumenty.** Otevřete **Mzdy → Dokumenty a výstupy**, záložka **Měsíční
+    výstupy**, a spusťte **Dávka dokumentů ({účtárna})**. Generování běží na
+    pozadí po osobách s ukazatelem průběhu; po dokončení všech osob vznikne
+    **Stáhnout měsíční ZIP**. Neúspěšnou položku lze jednotlivě **Opakovat**.
+18. **Podání.** Na **Mzdy → Podání a hlášení** připravte JMHZ a hlášení
+    zdravotním pojišťovnám. Záložka **Měsíční přehled pro účetní** ukáže
+    u každé povinnosti, co se generuje, kam a jakou cestou to jde, do kdy a
+    v jakém je to stavu. Zkontrolujte XML i PDF, zvolte kanál a **každé odeslání
+    výslovně potvrďte**. Nic se neodešle jen tím, že vzniklo XML nebo že se
+    záznam vložil do odchozí fronty.
+19. **Uzavření měsíce.** Až jsou platby doložené a podání odeslaná, klikněte na
+    kartě běhu **Uzavřít**. Uzavřený běh jde otevřít už jen přes
+    **Vyžádat opravu** a následné **Otevřít opravu** — vznikne nová revize,
+    původní zůstane dohledatelná a dřív vydané dokumenty zůstávají platné.
+
+#### D. Co potřebujete za oprávnění
+
+Bez potřebného práva se tlačítko **vůbec nezobrazí** (není zašedlé), takže
+chybějící akce je nejčastěji chybějící oprávnění, ne chyba:
+
+| Tlačítko / akce | Oprávnění |
+|---|---|
+| **Nový mzdový běh**, **Smazat prázdný běh** | `payroll.inputs.write` |
+| **Spočítat mzdy**, **Přepočítat**, **Uzamknout vstupy** | `payroll.calculate` |
+| **Vyžádat opravu** | `payroll.review` |
+| **Schválit**, **Uzavřít**, **Schválit vše**, **Schválit výjimku** | `payroll.approve` |
+| **Otevřít opravu**, **Zrušit běh** | `payroll.reopen` |
+| **Zaúčtovat** a stránka Shoda účtování mezd | `payroll.post` |
+| **Připravit platby** a celá stránka Mzdové příkazy a úhrady | `payroll.payments` |
+| **Dávka dokumentů**, mzdový list, potvrzení, archivní ZIPy | `payroll.documents` |
+| Podání a hlášení | `payroll.submissions` |
+| **Schválit měsíc** v docházce | `payroll.approve` (zápis docházky `payroll.time.write`) |
+
+Úplný seznam práv modulu je v [§ 58.9](#589-opravneni).
+
+### 58.3.2 Na co si dát pozor
 
 **Příplatky za práci v noci, o víkendu, ve svátek a ve ztíženém prostředí
 vznikají ze schválené docházky** — jinou cestou je zadat nelze, a docházku je
@@ -300,13 +473,22 @@ nevratné kroky jsou oddělené:
 |---|---|
 | Nastavení zaměstnavatele | `payroll.settings` |
 | Změna osoby a ověření výplatního účtu | `payroll.person.write` |
+| Odhalení citlivých osobních údajů | `payroll.person.read_sensitive` |
 | Vztahy, podmínky a životní cyklus | `payroll.employment.write` |
-| Schválení mzdových vstupů a běhu | `payroll.approve` |
+| Docházka a absence | `payroll.time.write` |
+| Mzdové vstupy (založení běhu, smazání prázdného běhu) | `payroll.inputs.write` |
+| Výpočet mezd (Spočítat mzdy, Přepočítat, Uzamknout vstupy) | `payroll.calculate` |
+| Kontrola běhu a vyžádání opravy | `payroll.review` |
+| Schválení mzdových vstupů, běhu, výjimky a uzavření | `payroll.approve` |
+| Znovuotevření schváleného nebo zrušeného běhu | `payroll.reopen` |
 | Platby, dávky a párování | `payroll.payments` |
 | Dokumenty a měsíční balíček | `payroll.documents` |
 | Podání a hlášení | `payroll.submissions` |
+| Důkazy zdravotního pojištění | `payroll.health_evidence` |
+| Mzdové sestavy a exporty | `payroll.reports` |
 | Zaúčtování | `payroll.post` |
 | Exekuce a nucené srážky | `payroll.enforcement` |
+| Součinnost exekutorům | `payroll.enforcement.cooperation` |
 | Insolvenční režim | `payroll.insolvency` |
 | Retence a zadržení výmazu | `payroll.retention` |
 | Schválení a provedení výmazu | `payroll.erasure` |

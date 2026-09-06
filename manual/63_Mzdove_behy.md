@@ -10,17 +10,25 @@ Musí být dokončeno nastavení zaměstnavatele, zaměstnanců, vztahů, kalend
 
 ## 63.3 Krokový postup
 
-1. Otevřete **Mzdy → Mzdové běhy**, zvolte rok a měsíc a vytvořte návrh.
-   Předtím schvalte měsíc docházky — zákonné příplatky vznikají jeho schválením
-   a po uzamčení vstupů už se do běhu nedostanou.
-2. Uzamkněte vstupy. Zůstal-li některý vstup v konceptu, běh to ohlásí jako
-   blokaci a přímo u ní nabídne **Schválit vše (N)**; nemusíte kvůli tomu
-   odcházet na jinou obrazovku.
-3. Spusťte výpočet a projděte chyby, varování i výsledky jednotlivých zaměstnanců.
+1. Otevřete **Mzdy → Mzdové běhy**, vyplňte **Mzdové období** a **Datum
+   výplaty** a klikněte **Nový mzdový běh**. Předtím schvalte měsíc docházky —
+   zákonné příplatky vznikají jeho schválením a po uzamčení vstupů už se do běhu
+   nedostanou.
+2. Klikněte **Spočítat mzdy**. Jedno tlačítko uzamkne vstupy i spustí výpočet;
+   před zmrazením ještě uvidíte **Kontrolu před zahájením** a potvrdíte ji
+   volbou **Přesto zahájit**. Zůstal-li některý vstup v konceptu, běh to ohlásí
+   jako blokaci a přímo u ní nabídne **Schválit vše**; nemusíte kvůli tomu
+   odcházet na jinou obrazovku. Samostatné **Uzamknout vstupy** se nabízí jen
+   tam, kde sloučený krok nelze použít.
+3. Projděte blokace, varování i výsledky jednotlivých zaměstnanců.
 4. Porovnejte souhrny s docházkou, vstupy, srážkami a očekávanými odvody.
-5. Po opravě zdroje spusťte nový výpočet; neupravujte vypočtený výsledek bez podkladu.
-6. Schvalte běh. Samostatný krok **Zkontrolovat** už není povinný — schválení
-   ho provede za vás. Následné činnosti provádějte z této schválené revize.
+5. Po opravě zdroje klikněte **Přepočítat**; neupravujte vypočtený výsledek bez
+   podkladu.
+6. Klikněte **Schválit**. Samostatný krok **Zkontrolovat** aplikace jako
+   tlačítko nenabízí — schválení ho provede za vás. Následné činnosti provádějte
+   z této schválené revize: **Zaúčtovat**, potom **Připravit platby** a nakonec
+   **Uzavřít**. Tlačítko pro potvrzení úhrady neexistuje; do stavu **Uhrazeno**
+   běh překlopí server sám podle spárovaných plateb.
 
 ## 63.4 Stavy
 
@@ -39,7 +47,12 @@ Kontrolujte hrubou a čistou mzdu, daň, pojistné, náhrady, srážky a náklad
 
 ## 63.7 Návaznosti
 
-Po uzavření zkontrolujte [shodu účtování](64_Shoda_uctovani_mezd.md), připravte [platby](65_Platby_a_uhrady.md), [dokumenty](66_Dokumenty_a_vystupy.md) a [podání](68_Podani_a_hlaseni.md).
+Po schválení pokračujte v tomto pořadí: **Zaúčtovat** a ověřit
+[shodu účtování](64_Shoda_uctovani_mezd.md) → **Připravit platby** a vypořádat
+[mzdové příkazy a úhrady](65_Platby_a_uhrady.md) → vydat
+[dokumenty](66_Dokumenty_a_vystupy.md) → odeslat [podání](68_Podani_a_hlaseni.md).
+Teprve potom měsíc **Uzavřít**. Celý klikací postup je v
+[§ 58.3.1](58_Uplne_mzdy.md#5831-krok-za-krokem-co-presne-klikat).
 
 
 
@@ -52,9 +65,12 @@ po měsíci, za který mzda přísluší (§ 141 odst. 1 zákoníku práce); poz
 datum aplikace odmítne jako chybu, protože je to kotva, ze které se odvozují
 všechny navazující termíny odvodů.
 
-Běžný běh má tři kroky: **Uzamknout vstupy → Vypočítat → Schválit**. Krok
+Běžný běh má dva kroky: **Spočítat mzdy → Schválit**. Uzamčení vstupů a výpočet
+jsou sloučené do jednoho tlačítka, protože je to tatáž práce; samostatné
+**Uzamknout vstupy** zůstává v API pro opravné revize. Krok
 **Zkontrolovat** zůstává jako samostatný příkaz pro firmu, která chce mít
-kontrolu vidět jako vlastní událost, ale povinný není — **schválení ji provede
+kontrolu vidět jako vlastní událost, ale povinný není a jako tlačítko se
+nenabízí — **schválení ji provede
 implicitně** a do historie běhu se zapíše jako kontrola provedená spolu se
 schválením. Všechny kroky může provést jedna účetní, pokud má mzdové oprávnění;
 pravidlo čtyř očí modul nezavádí. Jednotlivé změny a potvrzení zůstávají
