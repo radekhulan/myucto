@@ -31,6 +31,26 @@ final class DemoProvisioner
         private readonly SampleDataService $sampleData,
     ) {}
 
+    /**
+     * Práva na mzdy pro demo roli. `payroll.person.read_sensitive` tu záměrně
+     * není: ukázka nemá důvod odhalovat rodná čísla ani u syntetických dat.
+     */
+    private const PAYROLL_READ_PERMISSIONS = [
+        'payroll',
+        'payroll.settings',
+        'payroll.post',
+        'payroll.payments',
+        'payroll.submissions',
+        'payroll.enforcement',
+        'payroll.enforcement.cooperation',
+        'payroll.insolvency',
+        'payroll.reports',
+        'payroll.rulesets',
+        'payroll.documents',
+        'payroll.retention',
+        'payroll.erasure',
+    ];
+
     /** @return array{role_id:int,user_id:int,supplier_ids:list<int>,generated:list<int>,refreshed:list<int>,skipped:list<int>} */
     public function provision(bool $refreshSample = false): array
     {
@@ -94,6 +114,7 @@ final class DemoProvisioner
             $this->journalTemplates->ensureClosingTemplatesSeed($supplierId);
         }
 
+        $this->enablePayrollModule($supplierIds);
         $this->ensureDemoBankVisibility($supplierIds);
         $this->disableOutboundAutomation($supplierIds);
 
@@ -154,6 +175,12 @@ final class DemoProvisioner
         // Bez tohohle klíče vrátí GET /settings/currencies 403 a záložka „Měny a účty"
         // v ukázce spadne hned při mountu. Zápis stejně drží DemoReadOnlyMiddleware.
         $permissions['settings.bank_accounts'] = AccessLevel::READ->value;
+        // Mzdy nejsou v systémové roli readonly, takže by je demo účet vůbec
+        // neviděl — router i navigace je schovávají za práva níže. Všechno jen
+        // ke čtení; zápis stejně drží DemoReadOnlyMiddleware.
+        foreach (self::PAYROLL_READ_PERMISSIONS as $key) {
+            $permissions[$key] = AccessLevel::READ->value;
+        }
 
         if ($demo === null) {
             return (int) $this->roles->create('Demo', 'staff', $permissions)['id'];
@@ -304,6 +331,24 @@ final class DemoProvisioner
         }
         $this->accountingModes->record($supplierId, '1900-01-01', 'tax_evidence');
         return $supplierId;
+    }
+
+    /**
+     * Mzdy jsou opt-in (migrace 1290) a nová demo firma je má vypnuté, takže by
+     * modul zůstal skrytý i s právy. Licenci to neobchází — PayrollModuleAccess
+     * se pořád ptá i na ni.
+     *
+     * @param list<int> $supplierIds
+     */
+    private function enablePayrollModule(array $supplierIds): void
+    {
+        if ($supplierIds === [] || !$this->db->hasColumn('supplier', 'payroll_enabled')) {
+            return;
+        }
+        $placeholders = implode(',', array_fill(0, count($supplierIds), '?'));
+        $this->db->pdo()->prepare(
+            "UPDATE supplier SET payroll_enabled = 1 WHERE id IN ({$placeholders})"
+        )->execute($supplierIds);
     }
 
     /** @param list<int> $supplierIds */

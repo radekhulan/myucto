@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Auth;
 
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 
 /**
@@ -24,6 +25,7 @@ final class MfaOfferService
     public function __construct(
         private readonly Connection $db,
         private readonly MfaPolicyService $policy,
+        private readonly Config $config,
     ) {}
 
     /**
@@ -41,7 +43,20 @@ final class MfaOfferService
             return false;
         }
 
+        // V demu je nabídka slepá ulička: účet je sdílený a resetovaný, faktor si
+        // na něj nikdo registrovat nemá, a odmítnutí (POST) zablokuje
+        // DemoReadOnlyMiddleware — nabídka by se tedy vracela po každém
+        // přihlášení a rozbíjela by automatické přihlášení do dema.
+        if ($this->isDemo()) {
+            return false;
+        }
+
         return !$this->isDismissed($userId);
+    }
+
+    private function isDemo(): bool
+    {
+        return (bool) $this->config->get('demo.enabled', false);
     }
 
     public function isDismissed(int $userId): bool
