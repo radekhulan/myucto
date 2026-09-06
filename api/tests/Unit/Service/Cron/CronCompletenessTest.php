@@ -22,6 +22,44 @@ final class CronCompletenessTest extends TestCase
         self::assertSame($entrypoints, $this->scriptsFromGlob('cmd/cron-*.sh'), 'Linux wrappery musí přesně odpovídat cron entrypointům.');
     }
 
+    /**
+     * Každý cron entrypoint musí zapsat heartbeat přes {@see \MyInvoice\Service\Cron\CronRun}.
+     *
+     * Bez toho UI „Systém → Plánované úlohy" hlásí úlohu navždy jako „Neběželo",
+     * i když se poctivě spouští každou minutu — přesně to se stalo mzdovým
+     * workerům: wrapper nastavil `MYINVOICE_CRON_SCRIPT`, ale cílový skript tu
+     * konstantu nikde nečetl, takže se do `cron_heartbeat` nikdy nic nezapsalo.
+     * Tichá úloha, kterou provozní přehled nedokáže odlišit od nespuštěné, je
+     * horší než chybějící úloha.
+     *
+     * Kontrola jde i do souboru, který wrapper `require`uje — právě tam ta
+     * logika u workerů žije.
+     */
+    public function testEveryCronEntrypointRecordsHeartbeat(): void
+    {
+        foreach (glob($this->root() . '/api/bin/cron-*.php') ?: [] as $path) {
+            $source = (string) file_get_contents($path);
+            $sources = [$source];
+            if (preg_match_all("~require(?:_once)?\s+__DIR__\s*\.\s*'(/[^']+\.php)'~", $source, $matches) > 0) {
+                foreach ($matches[1] as $relative) {
+                    $included = $this->root() . '/api/bin' . $relative;
+                    if (is_file($included)) {
+                        $sources[] = (string) file_get_contents($included);
+                    }
+                }
+            }
+
+            self::assertStringContainsString(
+                'CronRun',
+                implode("\n", $sources),
+                sprintf(
+                    'Cron entrypoint %s nezapisuje heartbeat přes CronRun — v UI zůstane navždy „Neběželo".',
+                    basename($path),
+                ),
+            );
+        }
+    }
+
     public function testEveryReadmeCronSectionMatchesEntrypointsInBothDirections(): void
     {
         $entrypoints = $this->scriptsFromGlob('api/bin/cron-*.php');

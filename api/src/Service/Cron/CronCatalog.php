@@ -248,21 +248,37 @@ final class CronCatalog
                 'critical' => true,
             ],
             [
+                // Frontový worker, ne kalendářová úloha: minuta tu není perioda
+                // práce, ale STROP LATENCE. Uživatel klikne „vygenerovat pásky",
+                // dávka spadne do fronty a nikdo jiný ji nespustí — tenhle tick
+                // je jediná cesta ven. Delší perioda by se rovnou promítla do
+                // čekání účetní u obrazovky.
+                //
+                // Cenu za tu frekvenci platí `hasPayrollDocumentWork()`
+                // ({@see CronDispatcher::WORK_GATES}): prázdná fronta stojí jeden
+                // indexovaný dotaz v dispatcheru, ne stavbu DI kontejneru.
                 'script' => 'cron-payroll-document-worker',
                 'recommended' => 'every_1_min',
                 'linux_cron' => '* * * * *',
                 'windows_schtasks' => '/sc minute /mo 1',
                 'max_age_hours' => 1,
                 'weekdays_only' => false,
+                'requires_feature' => CronJobGate::FEATURE_PAYROLL,
                 'critical' => false,
             ],
             [
+                // Tady je minuta pojistka, ne hlavní cesta: běžně worker spouští
+                // rovnou aplikace ({@see \MyInvoice\Action\Payroll\PayrollPeriodExportAction})
+                // hned po zařazení jobu. Cron dobírá jen to, co spawn nestihl
+                // nebo co zůstalo po spadlém workerovi — a i pojistka má smysl
+                // jen tehdy, když se o ni uživatel neopře na hodiny.
                 'script' => 'cron-payroll-period-export-worker',
                 'recommended' => 'every_1_min',
                 'linux_cron' => '* * * * *',
                 'windows_schtasks' => '/sc minute /mo 1',
                 'max_age_hours' => 1,
                 'weekdays_only' => false,
+                'requires_feature' => CronJobGate::FEATURE_PAYROLL,
                 'critical' => false,
             ],
             [

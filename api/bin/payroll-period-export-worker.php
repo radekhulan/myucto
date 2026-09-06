@@ -5,8 +5,17 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Cron\CronPreflight;
+use MyInvoice\Service\Cron\CronRun;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportQueueService;
+
+// Heartbeat a preflight brána patří jen cronovému běhu. Spawn z aplikace
+// (`--job-id=`) míří na konkrétní archiv, na který někdo kouká — ten se bránou
+// zdržovat nesmí a do provozního přehledu nepatří.
+$cronScript = defined('MYINVOICE_CRON_SCRIPT') ? (string) MYINVOICE_CRON_SCRIPT : null;
 
 $limit = 1;
 $drain = false;
@@ -47,23 +56,49 @@ if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
     exit(0);
 }
 try {
-    $container = Bootstrap::buildContainer();
-    $worker = $container->get(PayrollPeriodExportQueueService::class);
-    if (!$worker instanceof PayrollPeriodExportQueueService) {
-        throw new RuntimeException('Worker exportu mezd není dostupný.');
+    // Preflight PŘED stavbou kontejneru: cron je tu jen pojistka za spawnem
+    // z aplikace, takže prázdná fronta je normální stav skoro každé minuty.
+    // Heartbeat se zapisuje i u prázdného ticku, aby úloha v přehledu nevypadala
+    // jako nespuštěná.
+    if ($cronScript !== null) {
+        $lightPdo = (new Connection(Config::load(Bootstrap::rootDir())))->pdo();
+        if (!CronPreflight::hasPayrollPeriodExportWork($lightPdo)) {
+            $idle = ['processed' => 0, 'gate' => 'empty_queue'];
+            CronRun::start($lightPdo, $cronScript)->finish('ok', $idle);
+            fwrite(STDOUT, json_encode(
+                $idle,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+            ) . PHP_EOL);
+            return;
+        }
     }
-    $summary = $drain
-        ? $worker->drain(
-            $supplierId !== null && $supplierId > 0 ? $supplierId : null,
-            $jobId !== null && $jobId > 0 ? $jobId : null,
-            $maxIterations,
-            $maxSeconds,
-        )
-        : $worker->processAvailable($limit);
-    fwrite(STDOUT, json_encode(
-        $summary,
-        JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
-    ) . PHP_EOL);
+
+    $container = Bootstrap::buildContainer();
+    $run = $cronScript === null
+        ? null
+        : CronRun::start($container->get(Connection::class)->pdo(), $cronScript);
+    try {
+        $worker = $container->get(PayrollPeriodExportQueueService::class);
+        if (!$worker instanceof PayrollPeriodExportQueueService) {
+            throw new RuntimeException('Worker exportu mezd není dostupný.');
+        }
+        $summary = $drain
+            ? $worker->drain(
+                $supplierId !== null && $supplierId > 0 ? $supplierId : null,
+                $jobId !== null && $jobId > 0 ? $jobId : null,
+                $maxIterations,
+                $maxSeconds,
+            )
+            : $worker->processAvailable($limit);
+        fwrite(STDOUT, json_encode(
+            $summary,
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+        ) . PHP_EOL);
+        $run?->finish('ok', $summary);
+    } catch (Throwable $e) {
+        $run?->finish('error', ['error' => $e->getMessage()], $e->getMessage(), 1);
+        throw $e;
+    }
 } finally {
     flock($lock, LOCK_UN);
     fclose($lock);

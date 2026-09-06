@@ -62,6 +62,65 @@ final class CronDispatcherTest extends TestCase
         self::assertSame([], $report['errors']);
     }
 
+    /**
+     * Mzdoví workeři běží každou minutu, takže bez brány by na každé instalaci
+     * dvakrát za minutu stavěli DI kontejner jen proto, aby zjistili, že fronta
+     * je prázdná. S prázdnými (ale existujícími) tabulkami se spustit nesmí.
+     */
+    public function testPayrollWorkersStayIdleWhileTheirQueuesAreEmpty(): void
+    {
+        $this->pdo->exec('CREATE TABLE payroll_document_batch_items (id INTEGER PRIMARY KEY, status TEXT NOT NULL)');
+        $this->pdo->exec('CREATE TABLE payroll_document_batches (id INTEGER PRIMARY KEY, status TEXT NOT NULL)');
+        $this->pdo->exec('CREATE TABLE payroll_annual_document_batch_items (id INTEGER PRIMARY KEY, status TEXT NOT NULL)');
+        $this->pdo->exec('CREATE TABLE payroll_document_access_links (id INTEGER PRIMARY KEY, dispatch_state TEXT NOT NULL, revoked_at TEXT)');
+        $this->pdo->exec('CREATE TABLE payroll_period_export_jobs (id INTEGER PRIMARY KEY, status TEXT NOT NULL)');
+
+        $idle = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 13:37:00'));
+        self::assertSame('no_work', $idle['skipped']['cron-payroll-document-worker'] ?? null);
+        self::assertSame('no_work', $idle['skipped']['cron-payroll-period-export-worker'] ?? null);
+        self::assertNotContains('cron-payroll-document-worker', $idle['launched']);
+        self::assertNotContains('cron-payroll-period-export-worker', $idle['launched']);
+
+        // A hned jak práce přibude, tichá brána nesmí frontu držet zavřenou.
+        $this->pdo->exec("INSERT INTO payroll_document_batch_items (status) VALUES ('queued')");
+        $this->pdo->exec("INSERT INTO payroll_period_export_jobs (status) VALUES ('queued')");
+
+        $busy = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 13:38:00'));
+        self::assertContains('cron-payroll-document-worker', $busy['launched']);
+        self::assertContains('cron-payroll-period-export-worker', $busy['launched']);
+    }
+
+    /**
+     * Sken bankovních avíz se v dispatcheru nesmí spouštět naprázdno: proces
+     * navíc každou půlhodinu není zadarmo a skener stejně skončí okamžitým
+     * „žádná zapnutá schránka".
+     */
+    public function testBankEmailScanStaysIdleWithoutEnabledMailbox(): void
+    {
+        $this->pdo->exec('CREATE TABLE bank_email_imap_settings (id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL)');
+
+        $idle = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 10:30:00'));
+        self::assertSame('no_work', $idle['skipped']['cron-bank-email-notices'] ?? null);
+        self::assertNotContains('cron-bank-email-notices', $idle['launched']);
+
+        $this->pdo->exec('INSERT INTO bank_email_imap_settings (enabled) VALUES (1)');
+
+        $busy = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 11:00:00'));
+        self::assertContains('cron-bank-email-notices', $busy['launched']);
+    }
+
+    /**
+     * `cron-jmhz-poll` si preflight dělá i sám, ale v dispatcheru se musí
+     * uplatnit dřív, než se kvůli prázdné frontě vůbec spustí proces. Sonda
+     * pracuje s `UTC_TIMESTAMP()`, kterou SQLite nezná (fail-open), takže se
+     * tady ověřuje registrace brány, ne její výsledek.
+     */
+    public function testJmhzPollIsWorkGated(): void
+    {
+        self::assertContains('cron-jmhz-poll', CronDispatcher::gatedScripts());
+        self::assertContains('cron-bank-email-notices', CronDispatcher::gatedScripts());
+    }
+
     public function testDailyJobFiresOnlyInItsMinute(): void
     {
         $at0200 = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 02:00:00'));

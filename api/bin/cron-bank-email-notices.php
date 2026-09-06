@@ -13,12 +13,22 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeScanner;
+use MyInvoice\Service\Cron\CronPreflight;
 use MyInvoice\Service\Cron\CronRun;
 
 $rootDir = Bootstrap::rootDir();
 $config  = Config::load($rootDir);
 $conn    = new Connection($config);
 $run     = CronRun::start($conn->pdo(), 'cron-bank-email-notices');
+
+// Preflight PŘED stavbou kontejneru, stejně jako u cron-bank-scan: bez jediné
+// zapnuté schránky nemá skener co dělat a zjišťovat to až přes DI kontejner
+// znamená u instalace bez IMAPu 48 zbytečných bootstrapů denně.
+if (!CronPreflight::hasBankEmailNoticeAccounts($conn->pdo())) {
+    fwrite(STDOUT, "[bank-email-notices] žádná zapnutá IMAP schránka — přeskočeno.\n");
+    $run->finish('ok', ['skipped' => 'no enabled imap accounts']);
+    exit(0);
+}
 
 $container = Bootstrap::buildContainer();
 $scanner = $container->get(BankEmailNoticeScanner::class);

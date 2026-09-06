@@ -395,6 +395,12 @@ final class TenantPredicateTest extends TestCase
         // dal predikát navěsit. Zúžit ho na jednoho dodavatele by bránu rozbilo:
         // přestala by pouštět práci ostatním.
         'CronPreflight.php::hasAiWork' => 'instance-wide brána cronu, vrací jen bool',
+        // Tentýž případ jako hasAiWork: vrací POUZE bool „má tahle instalace kde
+        // číst poštu?". Dodavatele vybírá až samotná úloha podle
+        // `app.scan_all_suppliers` — cron žádný uživatelský kontext nemá.
+        // Zúžení na jednu firmu by bránu rozbilo: instalace skenující všechny
+        // dodavatele by přestala skenovat ty ostatní.
+        'CronPreflight.php::hasBankEmailNoticeAccounts' => 'instance-wide brána cronu, vrací jen bool',
 
         // Licence platí pro CELOU instalaci, ne pro jednu firmu: účet s právem
         // zápisu nad pěti firmami je jedno licenční místo. Zúžit počítání na

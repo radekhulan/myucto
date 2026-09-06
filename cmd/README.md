@@ -137,7 +137,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-backup-documents` | 1× denně | 02:35 (po PDF backupu) |
 | `cron-backup-payroll` | 1× denně | 02:40 (po Dokumentech) |
 | `cron-bank-scan` | každých 15–30 minut | `*/30 * * * *` |
-| `cron-bank-email-notices` | každých 30 minut | `*/30 * * * *` |
+| `cron-bank-email-notices` | každých 30 minut (jen když je zapnutá aspoň jedna IMAP schránka) | `*/30 * * * *` |
 | `cron-scan-purchase-inbox` | každých 10 minut | `*/10 * * * *` |
 | `cron-send-reminders` | 1× denně (pracovní dny) | 09:00, Po–Pá |
 | `cron-send-approval-reminders` | 1× denně (pracovní dny) | 09:15, Po–Pá |
@@ -148,8 +148,8 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-generate-recurring-invoices` | 1× denně | 06:30 |
 | `cron-automation-digest` | každou hodinu v ranním okně | 06:00–08:00 |
 | `cron-ai-worker` | každých 10 minut | `*/10 * * * *` |
-| `cron-payroll-document-worker` | každou minutu | `* * * * *` |
-| `cron-payroll-period-export-worker` | každou minutu | `* * * * *` |
+| `cron-payroll-document-worker` | každou minutu (jen firmy se mzdami, jen když něco leží ve frontě) | `* * * * *` |
+| `cron-payroll-period-export-worker` | každou minutu (jen firmy se mzdami, jen když něco leží ve frontě) | `* * * * *` |
 | `cron-payroll-registration-changes` | 1× denně (jen firmy se mzdami) | 05:00 (`0 5 * * *`) |
 | `cron-ai-rule-miner` | 1× denně v noci | 04:00 |
 | `cron-vat-status-apply` | 1× denně (po půlnoci) | 00:30 |
@@ -161,6 +161,20 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-version-check` | 1× denně | 06:00 |
 | `cron-storage-usage` | 1× za hodinu | 15. minuta (`15 * * * *`) |
 | `cron-dispatch` | každou minutu — **jen v režimu dispatcher**, kde nahrazuje všechny položky výše | `* * * * *` |
+
+U frontových workerů (`cron-ai-worker`, `cron-payroll-document-worker`,
+`cron-payroll-period-export-worker`) není minuta perioda práce, ale **strop
+latence**: fronta se plní tím, co uživatel právě odklikl, a nikdo jiný ji
+nespustí. Aby ta frekvence nic nestála, rozhodne prázdnou frontu levná brána
+(`CronPreflight`) jedním indexovaným dotazem — DI kontejner se v takovém ticku
+vůbec nestaví. V přehledu **Systém → Plánované úlohy** se pak taková úloha hlásí
+jako „nečinná", ne jako zmeškaná.
+
+Stejnou bránu mají i často spouštěné úlohy, které závisí na tom, jestli si je
+vůbec někdo zapnul: `cron-epo-status`, `cron-jmhz-poll` a
+`cron-bank-email-notices`. Instalace bez podání do EPO/ČSSZ a bez IMAP schránky
+tak neplatí za nic, co nepoužívá. Brána je vždy **fail-open** — cokoli, co se
+nepodaří přečíst (chybějící tabulka před migrací, nedostupná DB), úlohu spustí.
 
 Logy se ukládají do `log/cron/<nazev>-YYYY-MM-DD.log`. Stav úloh sleduj
 v admin/activity-log (každý cron sám zapíše záznam `cron.<nazev>`).

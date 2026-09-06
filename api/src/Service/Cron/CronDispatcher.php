@@ -47,6 +47,12 @@ final class CronDispatcher
     private const WORK_GATES = [
         'cron-epo-status' => [CronPreflight::class, 'hasEpoWork'],
         'cron-ai-worker'  => [CronPreflight::class, 'hasAiWork'],
+        'cron-payroll-document-worker' => [CronPreflight::class, 'hasPayrollDocumentWork'],
+        'cron-payroll-period-export-worker' => [CronPreflight::class, 'hasPayrollPeriodExportWork'],
+        // Skript si tenhle preflight dělá i sám (běží i v režimu INDIVIDUAL);
+        // tady navíc ušetří i samotný spawn procesu.
+        'cron-jmhz-poll' => [CronPreflight::class, 'hasJmhzTransportWork'],
+        'cron-bank-email-notices' => [CronPreflight::class, 'hasBankEmailNoticeAccounts'],
     ];
 
     /** Minuta nárokována — úloha se spustí. */
