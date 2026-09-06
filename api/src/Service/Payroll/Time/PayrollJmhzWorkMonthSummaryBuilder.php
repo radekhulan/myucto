@@ -13,7 +13,46 @@ use PDO;
 
 final class PayrollJmhzWorkMonthSummaryBuilder
 {
-    public const DERIVATION_VERSION = 'jmhz-work-month.v2';
+    public const DERIVATION_VERSION = 'jmhz-work-month.v3';
+
+    /**
+     * Neodpracované hodiny bez vlastního atributu hlášení.
+     *
+     * PPM, otcovská, rodičovská dovolená, neplacené volno a neomluvená absence
+     * se ČSSZ nevykazují po hodinách — hlášení pro ně žádný blok 10275–10280
+     * ani 10471/10472 nemá. Do souhrnu patří ze dvou důvodů:
+     *
+     * 1. **Úhrn 10275 má být pravdivý.** „Celkový počet neodpracovaných hodin"
+     *    je úhrn VŠECH neodpracovaných hodin měsíce, ne jen těch, které mají
+     *    vlastní rozpad. Kdyby se hodiny rodičovské z úhrnu vypustily, hlásilo
+     *    by se menší číslo, než jaké odpovídá evidenci.
+     * 2. **Dny evidenčního listu potřebují protistranu.** Ordinary ELDP řez
+     *    páruje DNY z evidence absencí s HODINAMI z publikovaných směn; bez
+     *    tohohle rozpadu se PPM ani otcovská nedají proti ničemu ověřit, a
+     *    proto dosud blokovaly celé měsíční hlášení firmy.
+     *
+     * Do 10276 (hodiny s náhradou či nekrácením mzdy) NEPATŘÍ ani jedna z nich:
+     * PPM, otcovskou a ošetřovné platí dávka nemocenského pojištění, rodičovská,
+     * neplacené volno i neomluvená absence jsou bez příjmu.
+     *
+     * @var list<string>
+     */
+    private const LOCAL_EVIDENCE_FIELDS = [
+        'maternity_millihours',
+        'paternity_millihours',
+        'parental_millihours',
+        'unpaid_leave_millihours',
+        'unexcused_millihours',
+    ];
+
+    /** Verze souhrnu, které nesou {@see LOCAL_EVIDENCE_FIELDS}. */
+    public const VERSIONS_WITH_LOCAL_EVIDENCE = ['jmhz-work-month.v3'];
+
+    /** @return list<string> */
+    public static function localEvidenceFields(): array
+    {
+        return self::LOCAL_EVIDENCE_FIELDS;
+    }
 
     /**
      * Zákonná týdenní doba podle § 79 odst. 1 zákoníku práce.
@@ -153,7 +192,35 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 $absenceIssues,
             ),
             'requires_unworked_hours_followup' => $absences !== [],
+            /*
+             * Druhy nepřítomnosti, které v měsíci opravdu jsou.
+             *
+             * Dialog podle nich ukáže jen ta doplňková pole, ke kterým existuje
+             * evidovaná nepřítomnost. Rodičovská, neplacené volno ani otcovská
+             * jsou vzácné — kdyby se na ně ptal každý měsíc každé firmy, byl by
+             * to krok navíc pro všechny kvůli menšině.
+             */
+            'absence_types' => self::absenceTypes($absences),
         ];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $absences
+     * @return list<string>
+     */
+    private static function absenceTypes(array $absences): array
+    {
+        $types = [];
+        foreach ($absences as $absence) {
+            $type = $absence['absence_type'] ?? null;
+            if (is_string($type) && $type !== '') {
+                $types[$type] = true;
+            }
+        }
+        $list = array_keys($types);
+        sort($list);
+
+        return $list;
     }
 
     /**
@@ -194,6 +261,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'care_hours' => $derived['minutes']['care'],
             'employee_obstacle_paid_hours' => $derived['minutes']['employee_obstacle_paid'],
             'employer_obstacle_hours' => $derived['minutes']['employer_obstacle'],
+            'maternity_hours' => $derived['minutes']['maternity'],
+            'paternity_hours' => $derived['minutes']['paternity'],
+            'parental_hours' => $derived['minutes']['parental'],
+            'unpaid_leave_hours' => $derived['minutes']['unpaid_leave'],
+            'unexcused_hours' => $derived['minutes']['unexcused'],
         ];
         $suggestions = [];
         $expressible = true;
@@ -334,6 +406,26 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 $input['employer_obstacle_hours'] ?? null,
                 'employer_obstacle_hours',
             ),
+            'maternity_millihours' => self::nullableScaledDecimal(
+                $input['maternity_hours'] ?? null,
+                'maternity_hours',
+            ),
+            'paternity_millihours' => self::nullableScaledDecimal(
+                $input['paternity_hours'] ?? null,
+                'paternity_hours',
+            ),
+            'parental_millihours' => self::nullableScaledDecimal(
+                $input['parental_hours'] ?? null,
+                'parental_hours',
+            ),
+            'unpaid_leave_millihours' => self::nullableScaledDecimal(
+                $input['unpaid_leave_hours'] ?? null,
+                'unpaid_leave_hours',
+            ),
+            'unexcused_millihours' => self::nullableScaledDecimal(
+                $input['unexcused_hours'] ?? null,
+                'unexcused_hours',
+            ),
         ];
         self::validateConditionalValues(
             $unworkedHoursOccurred,
@@ -381,6 +473,18 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                     ? 'explicit_confirmation'
                     : 'not_applicable_by_IN08',
             ],
+            /*
+             * Hodiny bez atributu hlášení. Klíč není ID atributu datového
+             * slovníku, protože žádné nemají — ČSSZ se hlásí po dnech
+             * v evidenčním listu. Provenience to říká výslovně, aby se
+             * nepletly s bloky 10275–10280.
+             */
+            'local_evidence' => array_fill_keys(
+                self::LOCAL_EVIDENCE_FIELDS,
+                $unworkedHoursOccurred
+                    ? 'explicit_confirmation'
+                    : 'not_applicable_by_IN07',
+            ),
             'suggestions' => $preview['suggestions'],
             'source_contains_absences' =>
                 (bool) ($preview['requires_unworked_hours_followup'] ?? false),
@@ -836,6 +940,13 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'vacation_millihours',
             'care_millihours',
         ];
+        /*
+         * Hodiny bez atributu hlášení visí na téže interakci IN07 jako bloky
+         * 10275–10280: jsou to taky neodpracované hodiny a vstupují do úhrnu
+         * 10275. Bez IN07 tedy nesmí být vyplněné ani ony, jinak by úhrn
+         * a rozpad tvrdily každý něco jiného.
+         */
+        $unworkedFields = array_merge($unworkedFields, self::LOCAL_EVIDENCE_FIELDS);
         if (!$unworkedHoursOccurred) {
             foreach ($unworkedFields as $field) {
                 if ($values[$field] !== null) {

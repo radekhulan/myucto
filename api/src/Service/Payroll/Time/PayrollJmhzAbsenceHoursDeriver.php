@@ -46,15 +46,24 @@ use PDO;
  * ## Fail-closed
  *
  * Navrhuje se jen to, co je doložené. Jakmile měsíc obsahuje absenci, jejíž
- * druh nemá v hlášení jednoznačný atribut (neplacené volno, rodičovská, PPM,
- * otcovská, náhradní volno, neomluvená absence, nerozlišené „jiné"), nebo
- * absenci, která ještě není schválená, vrátí se `supported = false` a
+ * druh nemá v hlášení doložený rozpad (náhradní volno za přesčas, nerozlišené
+ * „jiné"), nebo absenci, která ještě není schválená, vrátí se `supported = false` a
  * nenavrhne se NIC. Částečný návrh by v součtu 10275 tiše chyběl a hlášení by
  * bylo nepravdivé; prázdný dialog je proti tomu jen práce navíc.
  */
 final class PayrollJmhzAbsenceHoursDeriver
 {
-    /** Prázdný rozpad — měsíc bez absencí i každý fail-closed případ. */
+    /**
+     * Prázdný rozpad — měsíc bez absencí i každý fail-closed případ.
+     *
+     * Prvních šest kbelíků má vlastní atribut hlášení (10277–10280, 10471,
+     * 10472). Zbytek žádný atribut NEMÁ: peněžitá pomoc v mateřství, otcovská,
+     * rodičovská dovolená, neplacené volno a neomluvená absence se ČSSZ
+     * nevykazují po hodinách, ale po DNECH v evidenčním listu. Hodiny se u nich
+     * počítají jen proto, aby šlo dny doložit proti druhému zmrazenému zdroji
+     * (viz {@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEldpEvidenceBuilder}),
+     * a aby do úhrnu 10275 nechyběly.
+     */
     private const EMPTY_BUCKETS = [
         'vacation' => 0,
         'dpn_with_employer_compensation' => 0,
@@ -62,6 +71,11 @@ final class PayrollJmhzAbsenceHoursDeriver
         'care' => 0,
         'employee_obstacle_paid' => 0,
         'employer_obstacle' => 0,
+        'maternity' => 0,
+        'paternity' => 0,
+        'parental' => 0,
+        'unpaid_leave' => 0,
+        'unexcused' => 0,
     ];
 
     /**
@@ -84,6 +98,11 @@ final class PayrollJmhzAbsenceHoursDeriver
         'long_term_care' => 'care',
         'employee_obstacle' => 'employee_obstacle_paid',
         'employer_obstacle' => 'employer_obstacle',
+        'ppm' => 'maternity',
+        'paternity' => 'paternity',
+        'parental' => 'parental',
+        'unpaid_leave' => 'unpaid_leave',
+        'unexcused' => 'unexcused',
     ];
 
     public function __construct(

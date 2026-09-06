@@ -1415,9 +1415,12 @@ final class PayrollTimeRepository
                  dpn_without_employer_compensation_millihours,
                  dpn_with_employer_compensation_millihours, vacation_millihours,
                  care_millihours, employee_obstacle_paid_millihours,
-                 employer_obstacle_millihours, confirmation_note, provenance_json, summary_sha256,
+                 employer_obstacle_millihours,
+                 maternity_millihours, paternity_millihours, parental_millihours,
+                 unpaid_leave_millihours, unexcused_millihours,
+                 confirmation_note, provenance_json, summary_sha256,
                  approved_by, approved_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $specification = PayrollTimeValue::row(
             $summary['specification'] ?? null,
@@ -1469,6 +1472,13 @@ final class PayrollTimeRepository
             $values['care_millihours'],
             $values['employee_obstacle_paid_millihours'],
             $values['employer_obstacle_millihours'],
+            // Hodiny bez atributu hlášení nese jen v3; starší souhrn je nemá
+            // v `values` vůbec a do sloupců jde NULL.
+            $values['maternity_millihours'] ?? null,
+            $values['paternity_millihours'] ?? null,
+            $values['parental_millihours'] ?? null,
+            $values['unpaid_leave_millihours'] ?? null,
+            $values['unexcused_millihours'] ?? null,
             PayrollTimeValue::string(
                 $summary['confirmation_note'] ?? null,
                 'confirmation_note',

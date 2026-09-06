@@ -27,11 +27,11 @@ final class JmhzEldpEvidenceBuilder
      * druh musí mít jednoznačné zacházení ve VYLOUČENÝCH DOBÁCH
      * ({@see EldpExcludedPeriodDeriver}) i v NEODPRACOVANÝCH HODINÁCH
      * ({@see \MyInvoice\Service\Payroll\Time\PayrollJmhzAbsenceHoursDeriver}).
-     * Jen tak jde jeden zmrazený zdroj ověřit druhým. Cokoliv jiného
-     * (neplacené volno, rodičovská, PPM, otcovská, náhradní volno, překážky
-     * v práci, nerozlišené „jiné") dál blokuje: PPM a otcovská sice mají
-     * atribut vyloučené doby, ale pracovní souhrn pro ně nemá blok, takže by
-     * se den nedal proti ničemu ověřit.
+     * Jen tak jde jeden zmrazený zdroj ověřit druhým.
+     *
+     * Blokovat dál zůstává `ppm` (vyloučenou dobou je jen předporodní část a
+     * den porodu aplikace neeviduje — viz {@see EldpExcludedPeriodDeriver}),
+     * `compensatory_time_off` a nerozlišené „jiné".
      */
     private const ABSENCE_WORK_SUMMARY_FIELDS = [
         'vacation' => ['vacation_millihours'],
@@ -47,12 +47,61 @@ final class JmhzEldpEvidenceBuilder
         'long_term_care' => ['care_millihours'],
     ];
 
+    /**
+     * Druhy nepřítomnosti, které umí až souhrn `jmhz-work-month.v3`.
+     *
+     * Starší souhrn pro ně nemá hodinový blok, takže by se den nedal proti
+     * ničemu ověřit — u v2 zůstávají fail-closed přesně jako dřív.
+     */
+    private const V3_ABSENCE_WORK_SUMMARY_FIELDS = [
+        'paternity' => ['paternity_millihours'],
+        'parental' => ['parental_millihours'],
+        'unpaid_leave' => ['unpaid_leave_millihours'],
+        'unexcused' => ['unexcused_millihours'],
+        'employee_obstacle' => ['employee_obstacle_paid_millihours'],
+        'employer_obstacle' => ['employer_obstacle_millihours'],
+    ];
+
+    /**
+     * Nepřítomnosti BEZ započitatelného příjmu.
+     *
+     * Rozhodují o tom, jestli měsíc vůbec je dobou pojištění: podle § 11
+     * odst. 2 zákona č. 155/1995 Sb. se za dobu pojištění nepovažuje
+     * kalendářní měsíc, ve kterém nebyly dosaženy příjmy započitatelné do
+     * vyměřovacího základu, nešlo-li o omluvné důvody podle § 16 odst. 4 věty
+     * třetí písm. a). V ELDP se takový měsíc značí znakem „X" a jeho dny se do
+     * úhrnu nezapočítávají — což jednosekční ordinary řez neumí vyjádřit.
+     *
+     * @var list<string>
+     */
+    private const INCOME_LESS_ABSENCE_TYPES = [
+        'parental',
+        'unpaid_leave',
+        'unexcused',
+    ];
+
     /** Bloky 10277–10280 pokryté ordinary řezem, v pořadí pracovního souhrnu. */
     private const UNWORKED_FIELDS = [
         'dpn_without_employer_compensation_millihours',
         'dpn_with_employer_compensation_millihours',
         'vacation_millihours',
         'care_millihours',
+    ];
+
+    /**
+     * Bloky navíc, které nese až souhrn `jmhz-work-month.v3`.
+     *
+     * 10471/10472 jsou překážky v práci (interakce IN08); zbytek jsou hodiny
+     * bez atributu hlášení, které do úhrnu 10275 patří, ale vlastní rozpad
+     * v hlášení nemají.
+     */
+    private const V3_UNWORKED_FIELDS = [
+        'employee_obstacle_paid_millihours',
+        'employer_obstacle_millihours',
+        'paternity_millihours',
+        'parental_millihours',
+        'unpaid_leave_millihours',
+        'unexcused_millihours',
     ];
 
     /**
@@ -65,6 +114,12 @@ final class JmhzEldpEvidenceBuilder
     private const PAID_UNWORKED_FIELDS = [
         'vacation_millihours',
         'dpn_with_employer_compensation_millihours',
+        // Obě překážky v práci se v aplikaci evidují jen s náhradou mzdy;
+        // 10276 je „hodiny s náhradou či nekrácením mzdy", takže tam patří.
+        // Otcovskou, rodičovskou, neplacené volno ani neomluvenou absenci
+        // zaměstnavatel neplatí, a proto do 10276 nevstupují.
+        'employee_obstacle_paid_millihours',
+        'employer_obstacle_millihours',
     ];
 
     /**
@@ -79,6 +134,7 @@ final class JmhzEldpEvidenceBuilder
             'dpn_without_employer_compensation_millihours',
         ],
         'osetrovaniClenaRodiny' => ['care_millihours'],
+        'otcovska' => ['paternity_millihours'],
     ];
 
     /** @var array{manifest_sha256:string,payload:array<string,mixed>}|null */
@@ -233,22 +289,28 @@ final class JmhzEldpEvidenceBuilder
         if (!is_array($absences) || !array_is_list($absences)) {
             $this->invalid('jmhz_eldp_source_invalid', 'Absence ELDP musí být seznam.');
         }
-        $this->assertOrdinaryAbsenceTypes($absences);
         $workSummary = is_array($entry['time_month'] ?? null)
             ? ($entry['time_month']['jmhz_work_summary'] ?? null)
             : null;
         if (!is_array($workSummary)
-            || ($workSummary['derivation_version'] ?? null) !== 'jmhz-work-month.v2'
+            || !in_array(
+                $workSummary['derivation_version'] ?? null,
+                ['jmhz-work-month.v2', 'jmhz-work-month.v3'],
+                true,
+            )
             || !is_int($workSummary['id'] ?? null)
             || $workSummary['id'] <= 0
             || !is_string($workSummary['summary_sha256'] ?? null)
             || preg_match('/^[a-f0-9]{64}$/D', $workSummary['summary_sha256']) !== 1
         ) {
-            $this->invalid('jmhz_eldp_work_summary_missing', 'ELDP vyžaduje zmrazený pracovní souhrn JMHZ v2.');
+            $this->invalid('jmhz_eldp_work_summary_missing', 'ELDP vyžaduje zmrazený pracovní souhrn JMHZ v2 nebo v3.');
         }
+        $summaryVersion = (string) $workSummary['derivation_version'];
+        $this->assertOrdinaryAbsenceTypes($absences, $summaryVersion);
         $relationship = $this->socialRelationship($result, $employeeId, $employmentId);
         $participates = $this->participationMode($relationType, $relationship, $employmentId);
         $uncappedBase = $this->nonNegativeInt($relationship['assessment_base_minor_units'] ?? null, 'assessment_base_minor_units');
+        $this->assertInsuranceMonthHasIncome($absences, $participates, $uncappedBase);
         $cappedBase = $this->nonNegativeInt($relationship['capped_assessment_base_minor_units'] ?? null, 'capped_assessment_base_minor_units');
         if ($uncappedBase % 100 !== 0 || intdiv($uncappedBase, 100) > 9_999_999_999) {
             $this->invalid('jmhz_eldp_assessment_base_not_whole_czk', 'Vyměřovací základ ELDP musí být celé Kč v rozsahu XSD.');
@@ -304,6 +366,7 @@ final class JmhzEldpEvidenceBuilder
             $relationType,
             $absences,
             $excluded,
+            $summaryVersion,
         );
         $code = $confirmation['code'] ?? null;
         $confirmedBase = $confirmation['assessment_base_czk'] ?? null;
@@ -567,6 +630,7 @@ final class JmhzEldpEvidenceBuilder
         string $relationType,
         array $absences,
         array $excluded,
+        string $summaryVersion,
     ): void
     {
         $values = $this->object($workSummary['values'] ?? null, 'work_summary.values');
@@ -574,27 +638,41 @@ final class JmhzEldpEvidenceBuilder
         $expectedEvidenceDays = in_array($relationType, ['dpc', 'dpp'], true) ? 0 : $insuranceDays;
         if (($workSummary['conditional_blocks_confirmed'] ?? null) !== true
             || ($values['evidence_days'] ?? null) !== $expectedEvidenceDays
-            || ($interactions['IN08'] ?? null) !== false
         ) {
             $this->invalid('jmhz_eldp_work_summary_mismatch', 'Pracovní souhrn nepotvrzuje běžný bezabsenční ELDP interval.');
         }
+        /*
+         * IN08 (překážky v práci) smí být aktivní jen tam, kde měsíc opravdu
+         * překážku eviduje. Souhrn v2 pro ni nemá doložený zápis do
+         * evidenčního listu, takže tam zůstává zakázaná přesně jako dřív.
+         */
+        $obstacleAbsences = self::hasObstacleAbsence($absences)
+            && $summaryVersion === 'jmhz-work-month.v3';
+        if (($interactions['IN08'] ?? null) !== $obstacleAbsences) {
+            $this->invalid(
+                'jmhz_eldp_work_summary_mismatch',
+                'Interakce IN08 pracovního souhrnu neodpovídá evidovaným překážkám v práci.',
+            );
+        }
         if ($absences !== []) {
-            $this->assertAbsenceSliceWorkSummary($values, $interactions, $absences, $excluded);
+            $this->assertAbsenceSliceWorkSummary(
+                $values,
+                $interactions,
+                $absences,
+                $excluded,
+                $summaryVersion,
+            );
             return;
         }
         if (($interactions['IN07'] ?? null) !== false) {
             $this->invalid('jmhz_eldp_work_summary_mismatch', 'Pracovní souhrn nepotvrzuje běžný bezabsenční ELDP interval.');
         }
-        foreach ([
-            'unworked_total_millihours',
-            'unworked_paid_millihours',
-            'dpn_without_employer_compensation_millihours',
-            'dpn_with_employer_compensation_millihours',
-            'vacation_millihours',
-            'care_millihours',
-            'employee_obstacle_paid_millihours',
-            'employer_obstacle_millihours',
-        ] as $field) {
+        foreach (self::unworkedFields($summaryVersion) as $field) {
+            if (!array_key_exists($field, $values) || $values[$field] !== null) {
+                $this->invalid('jmhz_eldp_work_summary_mismatch', 'Pracovní souhrn obsahuje neodpracované hodiny mimo ordinary ELDP řez.');
+            }
+        }
+        foreach (['unworked_total_millihours', 'unworked_paid_millihours'] as $field) {
             if (!array_key_exists($field, $values) || $values[$field] !== null) {
                 $this->invalid('jmhz_eldp_work_summary_mismatch', 'Pracovní souhrn obsahuje neodpracované hodiny mimo ordinary ELDP řez.');
             }
@@ -602,31 +680,123 @@ final class JmhzEldpEvidenceBuilder
     }
 
     /**
-     * Druh nepřítomnosti musí být takový, který ordinary řez umí doložit
-     * z obou zmrazených zdrojů zároveň. Kontrola stojí PŘED pracovním
-     * souhrnem záměrně: u nedoloženého druhu (neplacené volno, rodičovská,
-     * „jiné") má účetní vidět, že vadí DRUH nepřítomnosti, ne až rozpor
-     * v hodinách, který je jen jeho následkem.
+     * Hodinové bloky, které souhrn dané verze zná.
+     *
+     * @return list<string>
+     */
+    private static function unworkedFields(string $summaryVersion): array
+    {
+        return $summaryVersion === 'jmhz-work-month.v3'
+            ? array_merge(self::UNWORKED_FIELDS, self::V3_UNWORKED_FIELDS)
+            : array_merge(self::UNWORKED_FIELDS, [
+                'employee_obstacle_paid_millihours',
+                'employer_obstacle_millihours',
+            ]);
+    }
+
+    /** @param list<array<string,mixed>> $absences */
+    private static function hasObstacleAbsence(array $absences): bool
+    {
+        foreach ($absences as $absence) {
+            if (in_array(
+                $absence['absence_type'] ?? null,
+                ['employee_obstacle', 'employer_obstacle'],
+                true,
+            )) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Měsíc bez započitatelného příjmu není dobou pojištění.
+     *
+     * § 11 odst. 2 zákona č. 155/1995 Sb.: „za dobu pojištění … se nepovažuje
+     * kalendářní měsíc, ve kterém nebyly dosaženy příjmy započitatelné do
+     * vyměřovacího základu pojištěnce proto, že tyto osoby nevykonávaly činnost
+     * zakládající účast na pojištění, pokud nešlo o omluvné důvody; za omluvné
+     * důvody se považují skutečnosti uvedené v § 16 odst. 4 větě třetí
+     * písm. a)". V ELDP se takový měsíc značí znakem „X" a jeho dny se do
+     * úhrnu „Dny" nezapočítávají.
+     *
+     * Jednosekční ordinary řez tohle vyjádřit neumí — vždy staví jednu sekci
+     * s kódem a plným počtem dnů. Rodičovská, neplacené volno a neomluvená
+     * absence jsou přitom právě ty nepřítomnosti, u kterých měsíc bez příjmu
+     * reálně nastává. Nulový vyměřovací základ je proto tvrdá zastávka: dál by
+     * řez vykázal dny pojištění, které podle zákona nevznikly.
+     *
+     * Nemoc, karanténa ani ošetřovné sem nepatří — jsou omluvným důvodem podle
+     * § 16 odst. 4 věty třetí písm. a), takže měsíc dobou pojištění zůstává
+     * i bez příjmu.
      *
      * @param list<array<string,mixed>> $absences
      */
-    private function assertOrdinaryAbsenceTypes(array $absences): void
+    private function assertInsuranceMonthHasIncome(
+        array $absences,
+        bool $participates,
+        int $uncappedBase,
+    ): void {
+        if (!$participates || $uncappedBase > 0) {
+            return;
+        }
+        foreach ($absences as $absence) {
+            if (in_array(
+                $absence['absence_type'] ?? null,
+                self::INCOME_LESS_ABSENCE_TYPES,
+                true,
+            )) {
+                $this->invalid(
+                    'jmhz_eldp_insurance_month_without_income',
+                    'Měsíc bez započitatelného příjmu se podle § 11 odst. 2 zákona'
+                        . ' č. 155/1995 Sb. za dobu pojištění nepovažuje a ELDP ho'
+                        . ' značí znakem „X"; běžný řez umí jen měsíc, ve kterém'
+                        . ' byl zúčtován příjem.',
+                );
+            }
+        }
+    }
+
+    /**
+     * Druh nepřítomnosti musí být takový, který ordinary řez umí doložit
+     * z obou zmrazených zdrojů zároveň. Kontrola stojí PŘED pracovním
+     * souhrnem záměrně: u nedoloženého druhu (peněžitá pomoc v mateřství,
+     * náhradní volno, „jiné") má účetní vidět, že vadí DRUH nepřítomnosti, ne
+     * až rozpor v hodinách, který je jen jeho následkem.
+     *
+     * @param list<array<string,mixed>> $absences
+     */
+    private function assertOrdinaryAbsenceTypes(array $absences, string $summaryVersion): void
     {
+        $supported = self::absenceWorkSummaryFields($summaryVersion);
         foreach ($absences as $absence) {
             $type = is_array($absence) && !array_is_list($absence)
                 ? ($absence['absence_type'] ?? null)
                 : null;
-            if (!is_string($type)
-                || !array_key_exists($type, self::ABSENCE_WORK_SUMMARY_FIELDS)
-            ) {
+            if (!is_string($type) || !array_key_exists($type, $supported)) {
                 $this->invalid(
                     'jmhz_eldp_absences_unsupported',
                     'Ordinary ELDP automaticky podporuje jen nepřítomnost doloženou'
                         . ' zároveň vyloučenými dobami i pracovním souhrnem:'
-                        . ' dovolenou, nemoc, karanténu a ošetřovné.',
+                        . ' dovolenou, nemoc, karanténu, ošetřovné, otcovskou,'
+                        . ' rodičovskou, neplacené volno, neomluvenou absenci'
+                        . ' a překážky v práci.',
                 );
             }
         }
+    }
+
+    /**
+     * Druh nepřítomnosti → hodinové bloky, podle verze pracovního souhrnu.
+     *
+     * @return array<string,list<string>>
+     */
+    private static function absenceWorkSummaryFields(string $summaryVersion): array
+    {
+        return $summaryVersion === 'jmhz-work-month.v3'
+            ? self::ABSENCE_WORK_SUMMARY_FIELDS + self::V3_ABSENCE_WORK_SUMMARY_FIELDS
+            : self::ABSENCE_WORK_SUMMARY_FIELDS;
     }
 
     /**
@@ -712,6 +882,7 @@ final class JmhzEldpEvidenceBuilder
         array $interactions,
         array $absences,
         array $excluded,
+        string $summaryVersion,
     ): void {
         if (($interactions['IN07'] ?? null) !== true) {
             $this->invalid(
@@ -719,20 +890,11 @@ final class JmhzEldpEvidenceBuilder
                 'Měsíc s nepřítomností vyžaduje aktivní interakci IN07 v pracovním souhrnu.',
             );
         }
-        // 10471/10472 patří k IN08, kterou ordinary řez nepodporuje: překážky
-        // v práci nemají v tomhle výčtu doložený zápis do evidenčního listu.
-        foreach (['employee_obstacle_paid_millihours', 'employer_obstacle_millihours'] as $field) {
-            if (!array_key_exists($field, $values) || $values[$field] !== null) {
-                $this->invalid(
-                    'jmhz_eldp_work_summary_mismatch',
-                    'Pracovní souhrn vykazuje překážky v práci, které ordinary ELDP řez nepodporuje.',
-                );
-            }
-        }
+        $supported = self::absenceWorkSummaryFields($summaryVersion);
         $expected = [];
         foreach ($absences as $absence) {
             $type = (string) $absence['absence_type'];
-            $expected[$type] = self::ABSENCE_WORK_SUMMARY_FIELDS[$type];
+            $expected[$type] = $supported[$type];
         }
         $filled = [];
         foreach ($expected as $fields) {
@@ -742,7 +904,7 @@ final class JmhzEldpEvidenceBuilder
         }
         $total = 0;
         $paid = 0;
-        foreach (self::UNWORKED_FIELDS as $field) {
+        foreach (self::unworkedFields($summaryVersion) as $field) {
             if (!array_key_exists($field, $values)) {
                 $this->invalid(
                     'jmhz_eldp_work_summary_mismatch',
@@ -793,10 +955,10 @@ final class JmhzEldpEvidenceBuilder
             $days = $excluded['components'][$attribute] ?? 0;
             $fields = self::EXCLUDED_ATTRIBUTE_FIELDS[$attribute] ?? null;
             if ($fields === null) {
-                // 10359 PPM, 10362 otcovská a 10536 § 16 odst. 4 písm. j)
-                // nemají v ordinary řezu povolený druh nepřítomnosti, takže
-                // sem nemají jak přitéct; nenulová hodnota by znamenala, že
-                // se výčty druhů rozešly.
+                // 10359 PPM a 10536 § 16 odst. 4 písm. j) nemají v ordinary
+                // řezu povolený druh nepřítomnosti, takže sem nemají jak
+                // přitéct; nenulová hodnota by znamenala, že se výčty druhů
+                // rozešly.
                 if ($days !== 0) {
                     $this->invalid(
                         'jmhz_eldp_excluded_days_unsupported',

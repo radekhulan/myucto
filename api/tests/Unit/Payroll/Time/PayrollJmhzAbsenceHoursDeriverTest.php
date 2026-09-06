@@ -165,7 +165,7 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
     }
 
     /**
-     * Neplacené volno se do žádného z atributů hlášení jednoznačně nezapíše.
+     * Náhradní volno za přesčas se do žádného rozpadu hlášení nezapíše.
      * Návrh by v součtu 10275 tiše chyběl, takže se nenavrhuje vůbec nic.
      */
     public function testUndocumentedAbsenceKindSuggestsNothing(): void
@@ -174,7 +174,7 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
         $absences->expects(self::never())->method('publishedShiftSegments');
 
         $derived = $this->derive($absences, [
-            $this->absence(7, 'unpaid_leave', '2026-09-03', '2026-09-04'),
+            $this->absence(7, 'compensatory_time_off', '2026-09-03', '2026-09-04'),
         ]);
 
         self::assertFalse($derived['supported']);
@@ -183,6 +183,52 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
         foreach ($suggestions as $field => $value) {
             self::assertNull($value, $field);
         }
+    }
+
+    /**
+     * Nepřítomnosti bez atributu hlášení (PPM, otcovská, rodičovská, neplacené
+     * volno, neomluvená absence) mají vlastní hodinový rozpad, aby šlo dny
+     * evidenčního listu doložit — a aby v úhrnu 10275 nechyběly. Do 10276
+     * (hodiny s náhradou či nekrácením mzdy) ale nepatří ani jedna: zaměstnavatel
+     * je neplatí.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('absenceKindsWithoutReportBlock')]
+    public function testAbsenceWithoutReportBlockCountsIntoTotalButNotIntoPaid(
+        string $absenceType,
+        string $bucket,
+        string $suggestionField,
+    ): void {
+        $absences = $this->repositoryStub();
+        $absences->method('publishedShiftSegments')
+            ->willReturn($this->segments(['2026-09-03' => 480]));
+
+        $derived = $this->derive($absences, [
+            $this->absence(11, $absenceType, '2026-09-03', '2026-09-03'),
+        ]);
+
+        self::assertTrue($derived['supported']);
+        self::assertSame(480, $derived['minutes'][$bucket]);
+        self::assertSame(480, $derived['total']);
+        self::assertSame(0, $derived['paid']);
+
+        $suggestions = PayrollJmhzWorkMonthSummaryBuilder::conditionalSuggestions($derived);
+        self::assertSame('8', $suggestions[$suggestionField]);
+        self::assertSame('8', $suggestions['unworked_total_hours']);
+        self::assertNull($suggestions['unworked_paid_hours']);
+        self::assertTrue($suggestions['unworked_hours_occurred']);
+        self::assertFalse($suggestions['work_obstacles_occurred']);
+    }
+
+    /** @return array<string,array{string,string,string}> */
+    public static function absenceKindsWithoutReportBlock(): array
+    {
+        return [
+            'peněžitá pomoc v mateřství' => ['ppm', 'maternity', 'maternity_hours'],
+            'otcovská' => ['paternity', 'paternity', 'paternity_hours'],
+            'rodičovská dovolená' => ['parental', 'parental', 'parental_hours'],
+            'neplacené volno' => ['unpaid_leave', 'unpaid_leave', 'unpaid_leave_hours'],
+            'neomluvená absence' => ['unexcused', 'unexcused', 'unexcused_hours'],
+        ];
     }
 
     public function testUndecidedAbsenceSuggestsNothing(): void

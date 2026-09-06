@@ -203,6 +203,29 @@ const approvalVacation = ref('')
 const approvalCare = ref('')
 const approvalEmployeeObstacle = ref('')
 const approvalEmployerObstacle = ref('')
+/*
+ * Hodiny nepřítomností BEZ atributu měsíčního hlášení.
+ *
+ * PPM, otcovská, rodičovská, neplacené volno a neomluvená absence se ČSSZ
+ * hlásí po DNECH v evidenčním listu; hodiny slouží k doložení těch dnů
+ * a k tomu, aby v úhrnu 10275 nechyběly. Jsou to vzácné případy, takže
+ * pole existuje jen tehdy, když daná nepřítomnost v měsíci opravdu je —
+ * běžný měsíc žádné pole navíc nevidí.
+ */
+const approvalRareAbsences = ref<Record<string, string>>({
+  maternity: '',
+  paternity: '',
+  parental: '',
+  unpaid_leave: '',
+  unexcused: '',
+})
+const RARE_ABSENCE_BLOCKS = [
+  { key: 'maternity', absenceType: 'ppm', suggestion: 'maternity_hours' },
+  { key: 'paternity', absenceType: 'paternity', suggestion: 'paternity_hours' },
+  { key: 'parental', absenceType: 'parental', suggestion: 'parental_hours' },
+  { key: 'unpaid_leave', absenceType: 'unpaid_leave', suggestion: 'unpaid_leave_hours' },
+  { key: 'unexcused', absenceType: 'unexcused', suggestion: 'unexcused_hours' },
+] as const
 const approvalNote = ref('')
 const reopenItem = ref<PayrollTimeOverviewItem | null>(null)
 const reopenReason = ref('')
@@ -568,6 +591,9 @@ function openApproval(item: PayrollTimeOverviewItem) {
       = suggestions?.dpn_with_employer_compensation_hours ?? ''
     approvalVacation.value = suggestions?.vacation_hours ?? ''
     approvalCare.value = suggestions?.care_hours ?? ''
+    for (const block of RARE_ABSENCE_BLOCKS) {
+      approvalRareAbsences.value[block.key] = suggestions?.[block.suggestion] ?? ''
+    }
   }
   if (approvalObstaclesOccurred.value === true) {
     approvalEmployeeObstacle.value = suggestions?.employee_obstacle_paid_hours ?? ''
@@ -595,6 +621,18 @@ function fillWorkedAsAgreed() {
   clearConditionalValues()
 }
 
+/**
+ * Které z vzácných bloků dialog vůbec ukáže.
+ *
+ * Rozhoduje evidence měsíce, ne domněnka: server v náhledu posílá druhy
+ * nepřítomnosti, které v měsíci skutečně jsou. Firma bez rodičovské ani
+ * neplaceného volna tak nevidí o pole víc než dřív.
+ */
+const visibleRareAbsenceBlocks = computed(() => {
+  const types = approvalItem.value?.jmhz_work_summary.preview?.absence_types ?? []
+  return RARE_ABSENCE_BLOCKS.filter(block => types.includes(block.absenceType))
+})
+
 function clearConditionalValues() {
   approvalUnworkedTotal.value = ''
   approvalUnworkedPaid.value = ''
@@ -604,6 +642,9 @@ function clearConditionalValues() {
   approvalCare.value = ''
   approvalEmployeeObstacle.value = ''
   approvalEmployerObstacle.value = ''
+  for (const block of RARE_ABSENCE_BLOCKS) {
+    approvalRareAbsences.value[block.key] = ''
+  }
 }
 
 function setUnworkedOccurred(value: boolean) {
@@ -1044,6 +1085,11 @@ async function approve() {
         care_hours: optionalHours(approvalCare.value),
         employee_obstacle_paid_hours: optionalHours(approvalEmployeeObstacle.value),
         employer_obstacle_hours: optionalHours(approvalEmployerObstacle.value),
+        maternity_hours: optionalHours(approvalRareAbsences.value.maternity),
+        paternity_hours: optionalHours(approvalRareAbsences.value.paternity),
+        parental_hours: optionalHours(approvalRareAbsences.value.parental),
+        unpaid_leave_hours: optionalHours(approvalRareAbsences.value.unpaid_leave),
+        unexcused_hours: optionalHours(approvalRareAbsences.value.unexcused),
         confirmation_note: approvalNote.value.trim(),
       },
     })
@@ -1212,6 +1258,13 @@ async function approveSelected() {
           care_hours: null,
           employee_obstacle_paid_hours: null,
           employer_obstacle_hours: null,
+          // Hromadné schválení bere jen měsíce BEZ nepřítomnosti, takže vzácné
+          // druhy tu nemají jak vzniknout a zůstávají nevyplněné.
+          maternity_hours: null,
+          paternity_hours: null,
+          parental_hours: null,
+          unpaid_leave_hours: null,
+          unexcused_hours: null,
           confirmation_note: note,
         },
       })
@@ -2571,6 +2624,10 @@ onMounted(() => {
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.care') }}</span>
             <input v-model="approvalCare" data-test="jmhz-care" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label v-for="block in visibleRareAbsenceBlocks" :key="block.key" class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t(`payroll.time.jmhz.${block.key}`) }}</span>
+            <input v-model="approvalRareAbsences[block.key]" :data-test="`jmhz-${block.key}`" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
           </label>
         </div>
         <fieldset class="space-y-2 rounded-lg border border-neutral-200 p-3">

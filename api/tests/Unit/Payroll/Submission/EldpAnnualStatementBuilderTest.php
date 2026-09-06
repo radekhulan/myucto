@@ -126,7 +126,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
             employmentEnd: '2025-02-10',
             absences: [[
                 'id' => 9002,
-                'absence_type' => 'ppm',
+                'absence_type' => 'paternity',
                 'date_from' => '2025-02-05',
                 'date_to' => '2025-02-28',
             ]],
@@ -134,7 +134,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
 
         $section = $this->build($revisions)->sections()[0];
 
-        self::assertSame(6, $section['excluded_days']['penezitaPomocMaterstvi']);
+        self::assertSame(6, $section['excluded_days']['otcovska']);
         self::assertSame('2025-02-05', $section['excluded_days_provenance'][0]['counted_from']);
         self::assertSame('2025-02-10', $section['excluded_days_provenance'][0]['counted_to']);
     }
@@ -158,7 +158,16 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         }
     }
 
-    public function testUnsupportedAbsenceKindBlocksAndNamesTheAbsence(): void
+    /**
+     * Peněžitá pomoc v mateřství se na vyloučené doby nepřevádí celá.
+     *
+     * Vyloučenou dobou je podle § 16 odst. 4 věty třetí písm. a) zákona
+     * č. 155/1995 Sb. jen doba PŘED PORODEM (a nejdříve od osmého týdne před
+     * očekávaným dnem porodu); zbytek podpůrčí doby vyloučenou dobou není.
+     * Bez dne porodu ve zmrazeném snapshotu by modul vykázal celou podpůrčí
+     * dobu a nadhodnotil osobní vyměřovací základ — tedy i důchod.
+     */
+    public function testMaternityBlocksBecauseOnlyThePreBirthPartIsExcluded(): void
     {
         $revisions = $this->wholeYear(2025);
         $revisions[5] = $this->revision(
@@ -166,7 +175,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
             6,
             absences: [[
                 'id' => 9100,
-                'absence_type' => 'unpaid_leave',
+                'absence_type' => 'ppm',
                 'date_from' => '2025-06-02',
                 'date_to' => '2025-06-06',
             ]],
@@ -174,8 +183,9 @@ final class EldpAnnualStatementBuilderTest extends TestCase
 
         try {
             $this->build($revisions);
-            self::fail('Neplacené volno nesmí projít bez doloženého způsobu zápisu.');
+            self::fail('PPM nesmí projít jako vyloučená doba v celé podpůrčí době.');
         } catch (EldpValidationException $exception) {
+            self::assertStringContainsString('před porodem', $exception->getMessage());
             self::assertStringContainsString('#9100', $exception->getMessage());
             self::assertStringContainsString('červen 2025', $exception->getMessage());
             self::assertSame(
@@ -210,6 +220,47 @@ final class EldpAnnualStatementBuilderTest extends TestCase
             self::assertSame(0, $days, "Náhradní volno se promítlo do {$component}.");
         }
         self::assertSame([], $sections[0]['excluded_days_provenance']);
+    }
+
+    /**
+     * Neplacené volno, neomluvená absence ani rodičovská nejsou vyloučenou
+     * dobou: výčet § 16 odst. 4 věty třetí písm. a) zákona č. 155/1995 Sb. je
+     * uzavřený a ani jedna z nich v něm není. Doba pojištění se u nich krátí
+     * jinak — celým měsícem podle § 11 odst. 2 (znak „X"), ne po dnech.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('incomeLessAbsenceKinds')]
+    public function testIncomeLessAbsenceIsNeutralAndDoesNotBlockTheStatement(
+        string $absenceType,
+    ): void {
+        $revisions = $this->wholeYear(2025);
+        $revisions[5] = $this->revision(
+            2025,
+            6,
+            absences: [[
+                'id' => 9300,
+                'absence_type' => $absenceType,
+                'date_from' => '2025-06-02',
+                'date_to' => '2025-06-06',
+            ]],
+        );
+
+        $sections = $this->build($revisions)->sections();
+
+        self::assertCount(1, $sections);
+        self::assertSame(365, $sections[0]['insurance_days']);
+        self::assertSame(0, $sections[0]['excluded_days_total']);
+        self::assertSame([], $sections[0]['excluded_days_provenance']);
+    }
+
+    /** @return array<string,array{string}> */
+    public static function incomeLessAbsenceKinds(): array
+    {
+        return [
+            'neplacené volno' => ['unpaid_leave'],
+            'neomluvená absence' => ['unexcused'],
+            'rodičovská dovolená' => ['parental'],
+            'překážka na straně zaměstnance' => ['employee_obstacle'],
+        ];
     }
 
     public function testDeductedDaysMustBeConfirmedExplicitly(): void

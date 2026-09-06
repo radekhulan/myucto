@@ -1083,9 +1083,23 @@ export interface PayrollJmhzWorkSummaryPreview {
     care_hours: string | null
     employee_obstacle_paid_hours: string | null
     employer_obstacle_hours: string | null
+    /*
+     * Hodiny nepřítomností BEZ atributu hlášení (PPM, otcovská, rodičovská,
+     * neplacené volno, neomluvená absence). ČSSZ se hlásí po dnech
+     * v evidenčním listu, ne po hodinách — hodiny slouží k doložení dnů
+     * a k pravdivému úhrnu 10275. Dialog se na ně ptá jen tehdy, když daný
+     * druh nepřítomnosti v měsíci opravdu je (viz `absence_types`).
+     */
+    maternity_hours: string | null
+    paternity_hours: string | null
+    parental_hours: string | null
+    unpaid_leave_hours: string | null
+    unexcused_hours: string | null
   }
   issues: Array<{ code: string; message: string }>
   requires_unworked_hours_followup: boolean
+  /** Druhy nepřítomnosti evidované v měsíci, seřazené abecedně. */
+  absence_types: string[]
 }
 
 export interface PayrollJmhzWorkSummaryRevision {
@@ -1107,6 +1121,11 @@ export interface PayrollJmhzWorkSummaryRevision {
   care_millihours: number | null
   employee_obstacle_paid_millihours: number | null
   employer_obstacle_millihours: number | null
+  maternity_millihours: number | null
+  paternity_millihours: number | null
+  parental_millihours: number | null
+  unpaid_leave_millihours: number | null
+  unexcused_millihours: number | null
   approved_at: string
 }
 
@@ -1126,6 +1145,11 @@ export interface PayrollJmhzWorkSummaryApproval {
   care_hours: string | null
   employee_obstacle_paid_hours: string | null
   employer_obstacle_hours: string | null
+  maternity_hours: string | null
+  paternity_hours: string | null
+  parental_hours: string | null
+  unpaid_leave_hours: string | null
+  unexcused_hours: string | null
   confirmation_note?: string
 }
 
