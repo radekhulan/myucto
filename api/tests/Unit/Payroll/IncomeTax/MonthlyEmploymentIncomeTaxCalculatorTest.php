@@ -174,7 +174,80 @@ final class MonthlyEmploymentIncomeTaxCalculatorTest extends TestCase
         );
     }
 
+    /**
+     * Nad rozhodnou částkou se odměna nerezidentního člena orgánu daní zálohou.
+     *
+     * Od 1. 1. 2026 pro ni neplatí zvláštní sazba daně podle § 36 odst. 1:
+     * zákon č. 360/2025 Sb. (čl. VI body 24 a 25, účinnost podle čl. XXXIV
+     * k 1. 1. 2026) vyňal odměnu člena orgánu — FYZICKÉ OSOBY z § 22 odst. 1
+     * písm. g) bodu 6 do nového bodu 15 a § 36 odst. 1 písm. a) bod 1 dál
+     * vyjmenovává jen „body 1, 2, 6, 12 až 14“.
+     */
     public function testNonresidentStatutoryBodyRemunerationUsesAdvanceTaxIn2026(): void
+    {
+        $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-08-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [$this->relationship(
+                'director',
+                EmploymentRelationshipKind::StatutoryBody,
+                3_000_000,
+                OtherWithholdingEligibility::IneligibleVerified,
+            )],
+            declarations: [$this->unsignedDeclaration()],
+            residence: $this->nonResidence(),
+        ));
+
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
+        self::assertSame(TaxRegime::Advance, $result->relationships[0]->regime);
+        self::assertSame(0, $result->withholdingTaxMinorUnits);
+        self::assertSame(450_000, $result->advanceTax?->taxAfterCreditsMinorUnits);
+    }
+
+    /**
+     * Pod rozhodnou částkou a bez prohlášení poplatníka se nerezidentní člen
+     * orgánu daní SRÁŽKOU podle § 6 odst. 4 písm. b) ZDP, sazbou 15 % podle
+     * § 36 odst. 2 písm. m) — přesně jako rezident.
+     *
+     * § 6 odst. 4 žádnou podmínku daňové rezidence nemá a zvláštní sazba 35 %
+     * (§ 36 odst. 1 písm. c)) se váže na „příjmy uvedené v písmenech a) a b)“,
+     * takže na tenhle příjem nedopadá. Cílem novely bylo právě sjednocení
+     * postupu s jednateli — rezidenty (tisková zpráva GFŘ „Daňové novinky pro
+     * rok 2026“ z 5. 1. 2026).
+     *
+     * Do 9/2026 výpočet tuhle kombinaci odmítal jako „rozpor zařazení“ —
+     * zbytek pravidla platného do 31. 12. 2025, kdy odměna nerezidentního člena
+     * orgánu šla vždy zvláštní sazbou podle § 36 odst. 1 a § 6 odst. 4 na ni
+     * nedopadal.
+     */
+    public function testNonresidentStatutoryBodyUsesSection6Paragraph4LikeAResident(): void
+    {
+        $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-08-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [$this->relationship(
+                'director',
+                EmploymentRelationshipKind::StatutoryBody,
+                300_000,
+                OtherWithholdingEligibility::EligibleVerified,
+            )],
+            declarations: [$this->unsignedDeclaration()],
+            residence: $this->nonResidence(),
+        ));
+
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status, implode(',', $result->issues));
+        self::assertSame(TaxRegime::Withholding, $result->relationships[0]->regime);
+        self::assertSame(45_000, $result->withholdingTaxMinorUnits);
+        self::assertSame(0, $result->advanceTax?->taxAfterCreditsMinorUnits);
+    }
+
+    /**
+     * Bez prohlášení PLÁTCE o zařazení podle § 6 odst. 4 zůstává i u nerezidenta
+     * ruční posouzení. Rezidence na tom nic nemění a měnit nesmí: rozhodná je
+     * sjednaná odměna, kterou aplikace nezná, a tichá záloha by za plátce
+     * rozhodla o jeho ručení.
+     */
+    public function testNonresidentStatutoryBodyWithoutPayerStatementRequiresManualReview(): void
     {
         $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
             calculationDate: '2026-08-31',
@@ -183,17 +256,21 @@ final class MonthlyEmploymentIncomeTaxCalculatorTest extends TestCase
                 $this->relationship('director', EmploymentRelationshipKind::StatutoryBody, 400_000),
             ],
             declarations: [$this->unsignedDeclaration()],
-            residence: new TaxResidenceEvidence(
-                TaxResidence::NonResident,
-                '2026-01-01',
-                null,
-                'synthetic-residence-evidence',
-            ),
+            residence: $this->nonResidence(),
         ));
 
-        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
-        self::assertSame(TaxRegime::Advance, $result->relationships[0]->regime);
-        self::assertSame(60_000, $result->advanceTax?->taxAfterCreditsMinorUnits);
+        self::assertSame(TaxCalculationStatus::ManualReview, $result->status);
+        self::assertContains('other-withholding-eligibility-unverified', $result->issues);
+    }
+
+    private function nonResidence(): TaxResidenceEvidence
+    {
+        return new TaxResidenceEvidence(
+            TaxResidence::NonResident,
+            '2026-01-01',
+            null,
+            'synthetic-residence-evidence',
+        );
     }
 
     public function testDpcDoesNotBecomeWithholdingFromPaidAmountAlone(): void
@@ -616,11 +693,12 @@ final class MonthlyEmploymentIncomeTaxCalculatorTest extends TestCase
             OtherWithholdingEligibility::IneligibleVerified,
             TaxResidence::CzechResident,
         ];
-        yield 'nerezidentní člen orgánu jde § 22, ne § 6 odst. 4' => [
-            EmploymentRelationshipKind::StatutoryBody,
-            OtherWithholdingEligibility::EligibleVerified,
-            TaxResidence::NonResident,
-        ];
+        // Kombinace „nerezidentní člen orgánu + zařazení podle § 6 odst. 4"
+        // tady BÝVALA a rozporem už není: od 1. 1. 2026 je odměna člena orgánu
+        // — fyzické osoby vyňatá z § 22 odst. 1 písm. g) bodu 6 do nového bodu
+        // 15 (zák. č. 360/2025 Sb., čl. VI body 24 a 25), a ten § 36 odst. 1
+        // nevyjmenovává. Nerezident se proto zařazuje stejně jako rezident —
+        // viz `testNonresidentStatutoryBodyUsesSection6Paragraph4LikeAResident`.
     }
 
     /**

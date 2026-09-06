@@ -99,7 +99,6 @@ final class MonthlyEmploymentIncomeTaxCalculator
             }
             $classification = $this->candidateGroup(
                 $relationship,
-                $input->residence->residence,
                 $signed,
             );
             $groups[$index] = $classification['group'];
@@ -291,11 +290,16 @@ final class MonthlyEmploymentIncomeTaxCalculator
     }
 
     /**
+     * Zařazení vztahu do skupiny zvláštní sazby daně podle § 6 odst. 4 ZDP.
+     *
+     * DAŇOVÁ REZIDENCE do zařazení nevstupuje a parametr tu proto není — od
+     * 1. 1. 2026 je to jediné správné chování, viz odůvodnění se zdroji uvnitř
+     * metody. Kdyby ho sem někdo vracel, musí nejdřív přečíst to odůvodnění.
+     *
      * @return array{group:?string,issue:?string}
      */
     private function candidateGroup(
         EmploymentRelationshipTaxInput $relationship,
-        TaxResidence $residence,
         bool $signed,
     ): array {
         if (
@@ -328,24 +332,69 @@ final class MonthlyEmploymentIncomeTaxCalculator
                 'issue' => 'relationship-tax-classification-conflict',
             ];
         }
-        if (
-            $relationship->kind === EmploymentRelationshipKind::StatutoryBody
-            && $residence === TaxResidence::NonResident
-            && $relationship->otherWithholdingEligibility
-                === OtherWithholdingEligibility::EligibleVerified
-        ) {
-            return [
-                'group' => null,
-                'issue' => 'relationship-tax-classification-conflict',
-            ];
-        }
+        /*
+         * ODMĚNA ČLENA ORGÁNU PRÁVNICKÉ OSOBY — NEREZIDENTA se od 1. 1. 2026
+         * posuzuje STEJNĚ jako u rezidenta, tedy touhle metodou dál beze změny.
+         * Zvláštní větev tu nestojí, a to je rozhodnutí, ne opomenutí.
+         *
+         * ── Proč tu do 9/2026 zvláštní větve byly a proč jsou pryč ─────────────
+         * Do 31. 12. 2025 byla odměna člena orgánu — nerezidenta příjmem podle
+         * § 22 odst. 1 písm. g) bodu 6 ZDP, § 36 odst. 1 písm. a) bod 1 na něj
+         * ukládal zvláštní sazbu 15 % (35 % podle písm. c) mimo EU/EHP a mimo
+         * smluvní státy) a § 38h odst. 5 zálohu výslovně vylučoval — srazilo se
+         * tedy VŽDY, bez ohledu na výši odměny i na prohlášení poplatníka.
+         * Kód to nedělal: kombinaci s `EligibleVerified` hlásil jako rozpor
+         * zařazení a zbylé dvě zdanil zálohou. Nález N-07 auditu mzdového modulu
+         * (private/MZDY-AUDIT.md) mířil právě sem.
+         *
+         * ── Co se změnilo od 1. 1. 2026 ───────────────────────────────────────
+         * Zákon č. 360/2025 Sb. (doprovodný zákon k jednotnému měsíčnímu hlášení
+         * zaměstnavatele), čl. VI body 24 a 25, účinné podle čl. XXXIV k
+         * 1. 1. 2026 (v odloženém výčtu k 1. 1. 2027 tyhle body NEJSOU):
+         *   bod 24: „V § 22 odst. 1 písm. g) se na konci textu bodu 6 doplňují
+         *           slova ‚, s výjimkou uvedenou v bodě 15‘.“
+         *   bod 25: „V § 22 odst. 1 písm. g) se doplňuje bod 15, který zní:
+         *           ‚15. odměny členů orgánů právnických osob, které jsou
+         *           fyzickými osobami, bez ohledu na to, z jakého právního
+         *           vztahu plynou,‘.“
+         * § 36 odst. 1 písm. a) bod 1 zůstal beze změny a vyjmenovává „§ 22
+         * odst. 1 písm. c), f) a g) bodech 1, 2, 6, 12 až 14“ — bod 15 v něm
+         * NENÍ. Odměna člena orgánu, který je FYZICKOU OSOBOU, tedy pod zvláštní
+         * sazbu podle § 36 odst. 1 nespadá; bod 6 dál pokrývá jen člena orgánu,
+         * který je právnickou osobou (a ten mzdovým modulem neprochází).
+         * Sazba 35 % podle § 36 odst. 1 písm. c) se váže na „příjmy uvedené
+         * v písmenech a) a b)“, takže na tenhle příjem nedopadá vůbec.
+         *
+         * Tisková zpráva GFŘ „Daňové novinky pro rok 2026“ (5. 1. 2026):
+         * „Od 1. ledna 2026 dochází ke zrušení srážkové daně u odměn členů
+         * orgánů právnických osob, kteří jsou fyzickými osobami a zároveň
+         * daňovými nerezidenty České republiky. … Nově se bude uplatňovat
+         * zdanění prostřednictvím záloh na daň ve výši 15 % z příjmů do
+         * 36násobku průměrné mzdy a ve výši 23 % z příjmů nad tuto hranici.“
+         * https://financnisprava.gov.cz/cs/financni-sprava/media-a-verejnost/tiskove-zpravy-gfr/tiskove-zpravy-2026/danove-novinky-pro-rok-2026
+         *
+         * ── Co z toho plyne pro tenhle kód ────────────────────────────────────
+         * Nerezidentní člen orgánu je od 2026 poplatníkem jako každý jiný:
+         *   - odměna ≥ rozhodné částky nebo podepsané prohlášení → ZÁLOHA
+         *     (§ 38h odst. 2, sazby 15 % a 23 %),
+         *   - odměna pod rozhodnou částkou BEZ prohlášení a s potvrzeným
+         *     zařazením plátce → SRÁŽKA 15 % podle § 6 odst. 4 písm. b) ZDP
+         *     ve spojení s § 36 odst. 2 písm. m). § 6 odst. 4 žádnou podmínku
+         *     daňové rezidence nemá a 35 % se ho netýká (stojí na odst. 2).
+         * Právě tuhle druhou možnost stará zvláštní větev nerezidentovi upírala:
+         * `EligibleVerified` končilo rozporem zařazení a `Automatic` zálohou.
+         * Proto jsou obě větve zrušené a rezidence do zařazení nevstupuje.
+         *
+         * ── Co tím NENÍ vyřešeno ──────────────────────────────────────────────
+         * Přechodná ustanovení (čl. VII zákona č. 360/2025 Sb.) nechávají pro
+         * měsíce započaté před 1. 1. 2026 staré znění, tedy srážku podle § 36
+         * odst. 1 bez ohledu na výši i prohlášení. Tenhle výpočet je vázaný na
+         * sadu pro rok 2026 a časovou větev nemá; přepočet měsíce roku 2025
+         * u nerezidentního člena orgánu proto musí posoudit mzdová účetní.
+         * A od 1. 1. 2027 padá i § 36 odst. 2 písm. m) (čl. VI bod 36 téhož
+         * zákona), takže srážka podle § 6 odst. 4 skončí úplně.
+         */
         if ($signed) {
-            return ['group' => null, 'issue' => null];
-        }
-        if (
-            $relationship->kind === EmploymentRelationshipKind::StatutoryBody
-            && $residence === TaxResidence::NonResident
-        ) {
             return ['group' => null, 'issue' => null];
         }
 
