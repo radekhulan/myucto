@@ -3,7 +3,7 @@
  */
 
 import { i18n } from '@/i18n'
-import { overdueDays } from '@/utils/date'
+import { isInvoiceDateOverdue } from '@/utils/invoiceOverdue'
 
 // Per-currency default decimals (ISO 4217). JPY/KRW/HUF = 0, BHD/JOD = 3, ostatní 2.
 // Volající může override přes parametr `decimals`.
@@ -233,7 +233,7 @@ export function taxDateClass(taxDate: string | null | undefined, issueDate: stri
 
 export function isOverdue(dueDate: string, status: string): boolean {
   if (status !== 'issued' && status !== 'sent' && status !== 'reminded') return false
-  return overdueDays(dueDate) > 0
+  return isInvoiceDateOverdue(dueDate)
 }
 
 /**

@@ -103,11 +103,32 @@ neschová.
 
 ## 14.2 Stavy faktur
 
-Faktura je ve splatnosti po celý den uvedený jako datum splatnosti. Mezi doklady
+Ve výchozím nastavení je faktura ve splatnosti po celý den uvedený jako datum splatnosti. Mezi doklady
 **po splatnosti** patří až následující kalendářní den, pokud zůstává neuhrazená;
 teprve tehdy se také nabízí běžná upomínka. Rozhoduje datum v časové zóně aplikace
 (Europe/Prague), nikoli časové pásmo prohlížeče. Stejná hranice platí pro filtr
 přijatých faktur, dashboard a souhrny klientů a zakázek.
+
+Provozovatel může v `cfg.local.php` zapnout zahrnutí dnešních dokladů do označení
+a filtrů „po splatnosti“ v seznamech vystavených a přijatých faktur a do souhrnů
+dashboardu, klientů a zakázek:
+
+```php
+return [
+    'invoices' => [
+        'overdue_includes_today' => true,
+    ],
+];
+```
+
+Jde o položku instalační konfigurace; pokud už `cfg.local.php` obsahuje jiné
+volby, doplňte ji do existujícího pole. Alternativou je proměnná prostředí
+`MYINVOICE_OVERDUE_INCLUDES_TODAY=true`. Hodnota `false` vrací výchozí hranici
+a chybějící příznak znamená `false`. Po změně znovu načtěte aplikaci.
+Nastavení platí pro všechny firmy v instalaci. Nemění skutečný počet dnů
+prodlení ani pravidla upomínek: běžnou upomínku lze nabídnout a odeslat
+až následující den. Veřejný náhled faktury a pásma stáří pohledávek nadále
+pracují se skutečným prodlením.
 
 | Stav | Význam | Co lze udělat |
 |---|---|---|

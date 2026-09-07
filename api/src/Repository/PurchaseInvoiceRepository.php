@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Vat\VatStatusService;
+use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Support\ExchangeRateSources;
 use MyInvoice\Support\PaymentMethods;
 use MyInvoice\Support\PublicAuthorityFeeText;
@@ -36,6 +37,7 @@ final class PurchaseInvoiceRepository
         private readonly Connection $db,
         private readonly TaxConstantsRepository $taxConstants,
         private readonly AccountingModeRepository $accountingModes,
+        private readonly OverduePolicy $overduePolicy,
     ) {}
 
     /** @var array<int,bool> currency_id → je to CZK; viz isCzkCurrency() */
@@ -844,7 +846,8 @@ final class PurchaseInvoiceRepository
             $where[] = PayablePredicate::outstandingBalanceCondition('pi');
         }
         if (!empty($filters['overdue'])) {
-            $where[] = "pi.status IN ('received','booked') AND pi.due_date < CURDATE()";
+            $operator = $this->overduePolicy->comparisonOperator();
+            $where[] = "pi.status IN ('received','booked') AND pi.due_date {$operator} CURDATE()";
             $where[] = PayablePredicate::outstandingBalanceCondition('pi');
         }
         // Neuhrazené K DATU X (task #4) — historický protějšek `unpaid_only`/`overdue`

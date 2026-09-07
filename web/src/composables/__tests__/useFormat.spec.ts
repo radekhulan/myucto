@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { i18n } from '@/i18n'
+import { setOverdueIncludesToday } from '@/utils/invoiceOverdue'
+import { overdueDays } from '@/utils/date'
 import {
   formatCompactNumber,
   formatDateTime,
@@ -12,12 +14,28 @@ import {
 } from '@/composables/useFormat'
 
 afterEach(() => {
+  setOverdueIncludesToday(false)
   vi.useRealTimers()
   vi.unstubAllEnvs()
   i18n.global.locale.value = 'cs'
 })
 
 describe('isOverdue', () => {
+  it.each(['UTC', 'Europe/Prague', 'America/New_York', 'Asia/Tokyo'])(
+    'umí zahrnout dnešní splatnost v zóně %s, aniž změní dny pro upomínku', (timezone) => {
+      vi.stubEnv('TZ', timezone)
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-09-07T12:00:00Z'))
+      setOverdueIncludesToday(true)
+      expect(isOverdue('2026-09-06', 'issued')).toBe(true)
+      expect(isOverdue('2026-09-07', 'issued')).toBe(true)
+      expect(isOverdue('2026-09-08', 'issued')).toBe(false)
+      expect(isOverdue('2026-09-07', 'paid')).toBe(false)
+      expect(overdueDays('2026-09-07')).toBe(0)
+      setOverdueIncludesToday(false)
+      expect(isOverdue('2026-09-07', 'issued')).toBe(false)
+    },
+  )
   it.each(['UTC', 'America/New_York', 'Asia/Tokyo'])('nezávisí na zóně prohlížeče %s', (timezone) => {
     vi.stubEnv('TZ', timezone)
     vi.useFakeTimers()

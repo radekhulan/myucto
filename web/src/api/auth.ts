@@ -74,6 +74,7 @@ export interface SupplierBrief {
 export interface SetupStatus {
   needs_setup: boolean
   version: string
+  overdue_includes_today?: boolean
   /**
    * Spravovaná instalace — konfiguraci drží provozovatel, ne uživatel. Zamyká
    * self-update, adresu aplikace, vlastní SMTP transport, skenování adresářů
@@ -443,4 +444,3 @@ export const authApi = {
       { code },
     ).then(r => r.data),
 }
-

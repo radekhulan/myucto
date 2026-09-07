@@ -8,13 +8,18 @@ use MyInvoice\Action\Client\GetClientAction;
 use MyInvoice\Action\Dashboard\SummaryAction;
 use MyInvoice\Action\Project\GetProjectAction;
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Invoice\OverduePolicy;
+use MyInvoice\Service\Invoice\ReminderService;
+use MyInvoice\Service\Mail\Mailer;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -32,6 +37,8 @@ final class OverdueDateBoundaryTest extends TestCase
     private int $projectId;
     private int $overdueInvoiceId;
     private int $overduePurchaseId;
+    private int $todayInvoiceId;
+    private int $todayPurchaseId;
 
     protected function setUp(): void
     {
@@ -67,6 +74,7 @@ final class OverdueDateBoundaryTest extends TestCase
                  VALUES (?, ?, ?, ?, CURDATE(), ?, ?, 100, 100, 'issued', ?)"
             )->execute([$this->supplierId, 'DUE-' . $offset, $this->clientId, $this->projectId, $due, $currencyId, $userId]);
             if ($offset === -1) $this->overdueInvoiceId = (int) $this->pdo->lastInsertId();
+            if ($offset === 0) $this->todayInvoiceId = (int) $this->pdo->lastInsertId();
 
             $this->pdo->prepare(
                 "INSERT INTO purchase_invoices (supplier_id, vendor_id, vendor_invoice_number, issue_date,
@@ -74,6 +82,7 @@ final class OverdueDateBoundaryTest extends TestCase
                  VALUES (?, ?, ?, CURDATE(), ?, CURDATE(), ?, 100, 100, 'received', ?, '{}')"
             )->execute([$this->supplierId, $this->clientId, 'DUE-' . $offset, $due, $currencyId, $userId]);
             if ($offset === -1) $this->overduePurchaseId = (int) $this->pdo->lastInsertId();
+            if ($offset === 0) $this->todayPurchaseId = (int) $this->pdo->lastInsertId();
         }
     }
 
@@ -82,59 +91,103 @@ final class OverdueDateBoundaryTest extends TestCase
         if (isset($this->pdo) && $this->pdo->inTransaction()) $this->pdo->rollBack();
     }
 
-    public function testIssuedInvoiceFilterExcludesTodayIncludingPagination(): void
+    public static function boundaries(): array
     {
+        return ['after due date' => [false, 1], 'including due date' => [true, 2]];
+    }
+
+    private function setIncludesToday(bool $includesToday): void
+    {
+        $this->container->set(OverduePolicy::class, new OverduePolicy(
+            new Config(['invoices' => ['overdue_includes_today' => $includesToday]]),
+        ));
+    }
+
+    #[DataProvider('boundaries')]
+    public function testIssuedInvoiceFilterRespectsBoundaryIncludingPagination(bool $includesToday, int $count): void
+    {
+        $this->setIncludesToday($includesToday);
         $result = $this->container->get(InvoiceRepository::class)->listGroupedByMonth(
             ['supplier_id' => $this->supplierId, 'overdue' => true], 1, 10,
         );
-        self::assertSame(1, $result['meta']['total']);
-        self::assertSame([$this->overdueInvoiceId], array_column($result['data'][0]['invoices'], 'id'));
+        self::assertSame($count, $result['meta']['total']);
+        self::assertEqualsCanonicalizing(
+            $includesToday ? [$this->overdueInvoiceId, $this->todayInvoiceId] : [$this->overdueInvoiceId],
+            array_column($result['data'][0]['invoices'], 'id'),
+        );
     }
 
-    public function testPurchaseInvoiceFilterExcludesTodayIncludingPagination(): void
+    #[DataProvider('boundaries')]
+    public function testPurchaseInvoiceFilterRespectsBoundaryIncludingPagination(bool $includesToday, int $count): void
     {
+        $this->setIncludesToday($includesToday);
         $result = $this->container->get(PurchaseInvoiceRepository::class)->listGroupedByMonth(
             ['supplier_id' => $this->supplierId, 'overdue' => true], 1, 10,
         );
-        self::assertSame(1, $result['meta']['total']);
-        self::assertSame([$this->overduePurchaseId], array_column($result['data'][0]['invoices'], 'id'));
+        self::assertSame($count, $result['meta']['total']);
+        self::assertEqualsCanonicalizing(
+            $includesToday ? [$this->overduePurchaseId, $this->todayPurchaseId] : [$this->overduePurchaseId],
+            array_column($result['data'][0]['invoices'], 'id'),
+        );
     }
 
-    public function testDashboardCountsOnlyYesterdayAsOverdue(): void
+    #[DataProvider('boundaries')]
+    public function testDashboardRespectsBoundary(bool $includesToday, int $count): void
     {
+        $this->setIncludesToday($includesToday);
         $action = $this->container->get(SummaryAction::class);
         $year = (int) date('Y');
         $kpi = new \ReflectionMethod($action, 'kpi')->invoke($action, $this->pdo, $year, $year - 1, $this->supplierId, true);
-        self::assertSame(1, $kpi['overdue_count']);
-        self::assertEquals(100, $kpi['overdue_per_currency'][0]['total']);
+        self::assertSame($count, $kpi['overdue_count']);
+        self::assertEquals(100 * $count, $kpi['overdue_per_currency'][0]['total']);
         $rows = new \ReflectionMethod($action, 'overdue')->invoke($action, $this->pdo, $this->supplierId);
-        self::assertSame([$this->overdueInvoiceId], array_column($rows, 'id'));
+        self::assertSame(
+            $includesToday ? [$this->overdueInvoiceId, $this->todayInvoiceId] : [$this->overdueInvoiceId],
+            array_column($rows, 'id'),
+        );
         self::assertSame(1, $rows[0]['days_overdue']);
         $upcoming = new \ReflectionMethod($action, 'unpaidUpcoming')->invoke($action, $this->pdo, $this->supplierId);
         self::assertCount(2, $upcoming);
         self::assertNotContains($this->overdueInvoiceId, array_column($upcoming, 'id'));
     }
 
-    public function testClientSummaryExcludesToday(): void
+    #[DataProvider('boundaries')]
+    public function testClientSummaryRespectsBoundary(bool $includesToday, int $count): void
     {
-        $this->assertSummary(GetClientAction::class, $this->clientId);
+        $this->setIncludesToday($includesToday);
+        $this->assertSummary(GetClientAction::class, $this->clientId, $count);
     }
 
-    public function testProjectSummaryExcludesToday(): void
+    #[DataProvider('boundaries')]
+    public function testProjectSummaryRespectsBoundary(bool $includesToday, int $count): void
     {
-        $this->assertSummary(GetProjectAction::class, $this->projectId);
+        $this->setIncludesToday($includesToday);
+        $this->assertSummary(GetProjectAction::class, $this->projectId, $count);
     }
 
-    private function assertSummary(string $actionClass, int $id): void
+    private function assertSummary(string $actionClass, int $id, int $count): void
     {
         $request = new ServerRequestFactory()->createServerRequest('GET', '/')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId);
         $response = ($this->container->get($actionClass))($request, new Response(), ['id' => $id]);
         self::assertSame(200, $response->getStatusCode());
         $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
-        self::assertSame(1, $data['unpaid_summary'][0]['overdue_count']);
-        self::assertEquals(100, $data['unpaid_summary'][0]['overdue_total']);
-        self::assertEquals(100, $data['unpaid_summary'][0]['overdue_total_czk']);
+        self::assertSame($count, $data['unpaid_summary'][0]['overdue_count']);
+        self::assertEquals(100 * $count, $data['unpaid_summary'][0]['overdue_total']);
+        self::assertEquals(100 * $count, $data['unpaid_summary'][0]['overdue_total_czk']);
         self::assertSame(3, $data['unpaid_summary'][0]['unpaid_count']);
+    }
+
+    #[DataProvider('boundaries')]
+    public function testTodayCannotBeRemindedInEitherMode(bool $includesToday, int $count): void
+    {
+        $this->setIncludesToday($includesToday);
+        $mailer = $this->createMock(Mailer::class);
+        $mailer->expects(self::never())->method('sendTemplate');
+        $mailer->expects(self::never())->method('sendTemplateDetailed');
+        $this->container->set(Mailer::class, $mailer);
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Faktura ještě není po splatnosti.');
+        $this->container->get(ReminderService::class)->send($this->todayInvoiceId);
     }
 }

@@ -33,7 +33,7 @@ import PostingBadge from '@/components/ui/PostingBadge.vue'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import { ACCOUNTING_PERIOD_MISSING_CODES, accountingPeriodRoute } from '@/api/errors'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
-import { appIsoDate } from '@/utils/date'
+import { appIsoDate, overdueDays } from '@/utils/date'
 
 const { t, tm, rt } = useI18n()
 const toast = useToast()
@@ -615,7 +615,7 @@ const reminderSelected = computed(() => {
       if (!['issued', 'sent', 'reminded'].includes(inv.status)) return false
       if (!hasPositiveAmountToPay(inv)) return false
       if ((inv.payment_method ?? 'bank_transfer') !== 'bank_transfer') return false
-      return isOverdue(inv.due_date, inv.status)
+      return overdueDays(inv.due_date) > 0
     })
 })
 

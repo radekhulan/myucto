@@ -290,6 +290,7 @@ final class Config
     private static function baselineDefaults(): array
     {
         return [
+            'invoices' => ['overdue_includes_today' => false],
             'epo_test' => false,
             'epo' => [
                 // Bundle se nasazuje spolu s aplikací, takže výchozí instalace ověří pečeť
@@ -405,6 +406,7 @@ final class Config
             // App
             'MYINVOICE_APP_ENV'     => ['app.env', 'string'],
             'MYINVOICE_APP_DEBUG'   => ['app.debug', 'bool'],
+            'MYINVOICE_OVERDUE_INCLUDES_TODAY' => ['invoices.overdue_includes_today', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
             'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],
             'MYINVOICE_APP_MANAGED'  => ['app.managed', 'bool'],

@@ -487,7 +487,11 @@ final class DocumentLockTest extends TestCase
         $sid = $this->mkSupplier('tax_evidence');
         $invoiceId = $this->mkInvoice($sid, 'draft', '2026-05-10');
 
-        $repo = new InvoiceRepository($this->db, new \MyInvoice\Repository\TaxConstantsRepository($this->db));
+        $repo = new InvoiceRepository(
+            $this->db,
+            new \MyInvoice\Repository\TaxConstantsRepository($this->db),
+            new \MyInvoice\Service\Invoice\OverduePolicy(new \MyInvoice\Infrastructure\Config\Config([])),
+        );
         $data = [
             'client_id'   => $this->clientIds[$sid],
             'issue_date'  => '2026-05-10',
