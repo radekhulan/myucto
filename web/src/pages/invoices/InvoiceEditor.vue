@@ -33,7 +33,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
-import DateInput from '@/components/ui/DateInput.vue'
+import { rowKey } from '@/utils/rowKey'
 import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
@@ -44,6 +44,7 @@ import { assetsApi, type AssetListItem } from '@/api/assets'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
 import { cashApi, type CashRegister } from '@/api/cash'
 import { appIsoDate, addDaysIso } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
@@ -2679,7 +2680,7 @@ async function deleteDraft() {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(row, i) in form.payment_schedule" :key="i" class="border-t border-neutral-200">
+                <tr v-for="(row, i) in form.payment_schedule" :key="rowKey(row)" class="border-t border-neutral-200">
                   <td class="py-2 pr-3">
                     <DateInput v-model="row.due_on" class="w-36 h-9 px-2 border border-neutral-300 rounded-md bg-surface" />
                   </td>
@@ -2771,7 +2772,7 @@ async function deleteDraft() {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-200">
-              <tr v-for="(it, i) in wrItems" :key="i">
+              <tr v-for="(it, i) in wrItems" :key="rowKey(it)">
                 <td class="px-2 py-2 text-center text-xs text-neutral-400">
                   <button type="button" @click="moveWrItem(i, -1)" :disabled="i === 0"
                           :title="t('invoice.wr_move_up')"
@@ -2826,7 +2827,7 @@ async function deleteDraft() {
 
           <!-- Mobile: stack karet -->
           <div class="md:hidden space-y-2">
-            <div v-for="(it, i) in wrItems" :key="`m-${i}`"
+            <div v-for="(it, i) in wrItems" :key="`m-${rowKey(it)}`"
               class="border border-neutral-200 rounded-md p-3 space-y-2 bg-neutral-50/30">
               <div class="flex items-center justify-between text-xs text-neutral-500">
                 <span class="font-mono">#{{ i + 1 }}</span>

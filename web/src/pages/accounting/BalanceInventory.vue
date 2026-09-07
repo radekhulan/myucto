@@ -14,6 +14,7 @@ import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -289,7 +290,7 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.balance_inventory.inventory_date') }}</label>
-          <input v-model="header.inventory_date" :disabled="!editable" type="date"
+          <DateInput v-model="header.inventory_date" :disabled="!editable"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface disabled:bg-neutral-50" />
         </div>
         <div>

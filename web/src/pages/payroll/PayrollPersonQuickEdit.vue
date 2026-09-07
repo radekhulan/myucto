@@ -21,6 +21,7 @@ import { todayIso } from './employmentLifecycleUi'
 import PayrollPersonContactQuickFields from './PayrollPersonContactQuickFields.vue'
 import PayrollPersonIdentityQuickFields from './PayrollPersonIdentityQuickFields.vue'
 import { addDaysIso } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   personId: number
@@ -738,13 +739,11 @@ onMounted(load)
           -->
           <label v-if="employmentChanged" :class="labelClass" data-test="employment-effective-from-field">
             {{ t('payroll.people.quick_edit.effective_from') }} <RequiredMark />
-            <input
+            <DateInput
               v-model="form.employment_effective_from"
               required
-              type="date"
               :class="inputClass"
-              data-test="employment-effective-from"
-            >
+              data-test="employment-effective-from" />
             <span class="mt-1 block text-xs font-normal text-neutral-500">
               {{ t('payroll.people.quick_edit.employment_history_hint') }}
             </span>

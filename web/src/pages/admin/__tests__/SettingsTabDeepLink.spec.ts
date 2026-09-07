@@ -39,7 +39,7 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
 }))
 vi.mock('@/composables/useDemoMode', () => ({ useDemoMode: () => ({ blockDemoMutation: () => false }) }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'tax_evidence' }, refresh: vi.fn(), setCurrent: vi.fn() }),
 }))

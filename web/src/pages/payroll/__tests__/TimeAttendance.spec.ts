@@ -47,7 +47,7 @@ vi.mock('@/composables/useToast', () => ({
 // proto musí původní modul rozprostřít, ne nahradit.
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string, values?: Record<string, unknown>) =>
       values?.name ? `${key}:${values.name}` : key,
   }),

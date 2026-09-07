@@ -4,7 +4,7 @@ import type { ChartAccount } from '@/api/accounting'
 import type { BankPostingRulePayload } from '@/api/bankPosting'
 import RuleForm from '../RuleForm.vue'
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 vi.mock('@/composables/useFormat', () => ({ formatMoney: String, formatDate: String }))
 vi.mock('@/api/settings', () => ({ settingsApi: { listCurrencies: async () => [] } }))
 

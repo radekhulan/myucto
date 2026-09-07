@@ -34,7 +34,7 @@ vi.mock('@/components/ui/buttonStyles', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key) }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key) }),
 }))
 
 // `route.query` pohání deep-link `?period_id=&as_of=&account=&view=…`; testy

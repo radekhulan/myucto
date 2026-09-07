@@ -16,7 +16,7 @@ vi.mock('@/api/payroll', () => ({
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }) }))
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string, parameters?: Record<string, string | number>) =>
       parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
     te: () => true,

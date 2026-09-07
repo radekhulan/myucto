@@ -13,6 +13,7 @@ import { useToast } from '@/composables/useToast'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { addDaysIso } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   personId: number
@@ -301,11 +302,11 @@ onMounted(() => { void load() })
           </div>
           <label class="text-xs text-neutral-600">
             {{ t('payroll.people.foreign_permits.effective_from') }}
-            <input v-model="form.effective_from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm" data-test="foreign-permit-effective-from">
+            <DateInput v-model="form.effective_from" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm" data-test="foreign-permit-effective-from" />
           </label>
           <label class="text-xs text-neutral-600">
             {{ t('payroll.people.foreign_permits.valid_until') }}
-            <input v-model="form.valid_until" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm">
+            <DateInput v-model="form.valid_until" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm" />
           </label>
           <label class="relative text-xs text-neutral-600">
             {{ t('payroll.people.foreign_permits.document_label') }}

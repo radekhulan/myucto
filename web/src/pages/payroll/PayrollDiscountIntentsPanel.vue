@@ -35,6 +35,7 @@ import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate } from '@/composables/useFormat'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -433,23 +434,19 @@ onMounted(async () => {
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.discountIntents.intentFrom') }}
           </span>
-          <input
+          <DateInput
             v-model="intentFrom"
-            type="date"
             class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
-            data-test="discount-intent-from"
-          >
+            data-test="discount-intent-from" />
         </label>
         <label class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.discountIntents.employeeInformedOn') }}
           </span>
-          <input
+          <DateInput
             v-model="employeeInformedOn"
-            type="date"
             class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
-            data-test="discount-intent-informed-on"
-          >
+            data-test="discount-intent-informed-on" />
           <span class="mt-1 block text-xs text-neutral-500">
             {{ t('payroll.discountIntents.employeeInformedHint') }}
           </span>
@@ -552,12 +549,10 @@ onMounted(async () => {
             <span class="mb-1 block font-medium text-neutral-700">
               {{ t('payroll.discountIntents.acceptedOnInput') }}
             </span>
-            <input
+            <DateInput
               v-model="acceptedOn[item.id]"
-              type="date"
               class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
-              :data-test="`discount-intent-accepted-on-${item.id}`"
-            >
+              :data-test="`discount-intent-accepted-on-${item.id}`" />
           </label>
           <label v-if="item.status === 'submitted'" class="block text-xs">
             <span class="mb-1 block font-medium text-neutral-700">
@@ -575,12 +570,10 @@ onMounted(async () => {
             <span class="mb-1 block font-medium text-neutral-700">
               {{ t('payroll.discountIntents.endOnInput') }}
             </span>
-            <input
+            <DateInput
               v-model="endOn[item.id]"
-              type="date"
               class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
-              :data-test="`discount-intent-end-on-${item.id}`"
-            >
+              :data-test="`discount-intent-end-on-${item.id}`" />
           </label>
         </div>
 

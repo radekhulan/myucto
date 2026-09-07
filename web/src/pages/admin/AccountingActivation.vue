@@ -12,6 +12,7 @@ import OpeningBalanceEditor from '@/components/settings/activation/OpeningBalanc
 import BackfillReportView from '@/components/settings/activation/BackfillReportView.vue'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -342,7 +343,7 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
       <div v-if="busy && !status" class="py-12 text-center text-neutral-400">{{ t('common.loading') }}</div>
       <template v-else-if="currentStep === 1">
         <h2 class="mb-4 text-lg font-semibold">{{ t('activation.step1') }}</h2>
-        <label class="block max-w-xs text-sm font-medium">{{ t('activation.starts_on') }}<input v-model="startsOn" type="date" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3" /></label>
+        <label class="block max-w-xs text-sm font-medium">{{ t('activation.starts_on') }}<DateInput v-model="startsOn" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3" /></label>
         <p class="mt-3 max-w-3xl text-sm text-neutral-500">{{ t('activation.starts_on_hint') }}</p>
         <div v-if="status?.locked_until" class="mt-4 rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700">{{ t('activation.locked_notice', { date: status.locked_until }) }}</div>
       </template>

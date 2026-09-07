@@ -16,6 +16,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useAutoSlug } from '@/composables/useAutoSlug'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   canWrite: boolean
@@ -526,13 +527,13 @@ onMounted(load)
           <span class="mb-1 block text-sm font-medium text-neutral-700">
             {{ t('payroll.employer.dimensions.valid_from') }}
           </span>
-          <input v-model="form.valid_from" type="date" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+          <DateInput v-model="form.valid_from" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" />
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">
             {{ t('payroll.employer.dimensions.valid_to') }}
           </span>
-          <input v-model="form.valid_to" type="date" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+          <DateInput v-model="form.valid_to" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" />
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">

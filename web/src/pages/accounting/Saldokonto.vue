@@ -15,6 +15,7 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -305,7 +306,7 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.saldo.filter_as_of') }}</label>
-          <input v-model="filters.as_of" type="date" @change="load"
+          <DateInput v-model="filters.as_of" @change="load"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>

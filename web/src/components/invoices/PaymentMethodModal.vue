@@ -20,6 +20,7 @@ import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatMoney } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 type Method = 'plain' | 'cash' | 'settlement'
 
@@ -203,7 +204,7 @@ async function submit() {
 
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.pay_common.date') }}</label>
-          <input v-model="settledOn" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="settledOn" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
 
         <div v-if="loading" class="py-3 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>

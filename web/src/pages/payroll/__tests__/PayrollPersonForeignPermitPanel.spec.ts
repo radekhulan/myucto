@@ -26,7 +26,7 @@ vi.mock('@/composables/useToast', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
 import PayrollPersonForeignPermitPanel from '@/pages/payroll/PayrollPersonForeignPermitPanel.vue'
@@ -122,8 +122,9 @@ describe('PayrollPersonForeignPermitPanel', () => {
     expect(renew).toBeDefined()
     await renew!.trigger('click')
 
+    // DateInput zobrazuje datum v jazyce aplikace, ne ISO.
     expect((wrapper.get('[data-test="foreign-permit-effective-from"]').element as HTMLInputElement).value)
-      .toBe('2026-09-16')
+      .toBe('16. 09. 2026')
   })
 
   it('stát bere z číselníku, ne jako dvě písmena psaná z hlavy', async () => {

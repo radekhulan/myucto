@@ -17,6 +17,7 @@ import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{ environment: PayrollRegzelEnvironment }>()
 const emit = defineEmits<{
@@ -446,7 +447,7 @@ watch(period, load)
               ? 'payroll.submissions.statutory.form.paid_on'
               : 'payroll.submissions.statutory.form.completed_on') }}
           </span>
-          <input v-model="completedOn" data-test="statutory-completed-on" type="date" class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          <DateInput v-model="completedOn" data-test="statutory-completed-on" class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">

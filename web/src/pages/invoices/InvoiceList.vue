@@ -34,6 +34,7 @@ import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import { ACCOUNTING_PERIOD_MISSING_CODES, accountingPeriodRoute } from '@/api/errors'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, tm, rt } = useI18n()
 const toast = useToast()
@@ -1287,9 +1288,9 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
           <option :value="''">{{ t('invoice.all_months') }}</option>
           <option v-for="(label, i) in monthOptions" :key="i + 1" :value="i + 1">{{ label }}</option>
         </select>
-        <input v-model="dateFrom" type="date" placeholder="Od"
+        <DateInput v-model="dateFrom" placeholder="Od"
           class="h-9 px-2 border border-neutral-300 rounded-md text-sm" title="Datum od" />
-        <input v-model="dateTo" type="date" placeholder="Do"
+        <DateInput v-model="dateTo" placeholder="Do"
           class="h-9 px-2 border border-neutral-300 rounded-md text-sm" title="Datum do" />
         <button v-if="dateFrom || dateTo" @click="dateFrom = ''; dateTo = ''"
           class="cursor-pointer h-9 px-2 text-xs text-neutral-500 hover:text-neutral-700">{{ t('invoice.clear_date_filter') }}</button>
@@ -1306,7 +1307,7 @@ const monthOptions = computed(() => (tm('common.months_short') as unknown as str
              ne další zaškrtávátko vedle stejnojmenného filtru. -->
         <label class="flex items-center gap-1.5 text-sm text-neutral-700 px-2" :title="t('invoice.unpaid_as_of_hint')">
           {{ t('invoice.unpaid_as_of_label') }}
-          <input v-model="unpaidAsOf" type="date"
+          <DateInput v-model="unpaidAsOf"
             class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </label>
         <button v-if="unpaidAsOf" @click="unpaidAsOf = ''"

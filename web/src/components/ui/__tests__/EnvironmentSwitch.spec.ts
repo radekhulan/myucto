@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'

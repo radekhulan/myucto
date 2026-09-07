@@ -8,6 +8,7 @@ import { useYearOptions } from '@/composables/useYearOptions'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { downloadApiFile } from '@/utils/downloadFile'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -177,7 +178,7 @@ onMounted(async () => {
       </select>
       <template v-if="isFollowUp">
         <label class="text-sm text-neutral-600">{{ t('reports.kh.variant.d_zjist') }}</label>
-        <input type="date" v-model="dZjist"
+        <DateInput v-model="dZjist"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
       </template>
       <template v-if="needsVyzvaRef">

@@ -7,6 +7,7 @@ import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -94,7 +95,7 @@ onMounted(async () => {
         </div>
         <div v-if="tab === 'valuation'">
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_date') }}</label>
-          <input v-model="filters.date" type="date" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="filters.date" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div class="flex flex-wrap gap-2 ml-auto">
           <button :disabled="loading" @click="exportFile('pdf')" :class="btnOutline('primary')">

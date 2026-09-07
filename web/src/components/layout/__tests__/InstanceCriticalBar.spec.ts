@@ -29,7 +29,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => auth }))
 
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string) => {
       const value = key.split('.').reduce<unknown>(
         (node, part) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined),

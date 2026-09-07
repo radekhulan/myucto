@@ -24,7 +24,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({ t: (key: string) => key, te: () => true }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key, te: () => true }),
 }))
 
 import PayrollStatutoryObligationsPanel from '@/pages/payroll/PayrollStatutoryObligationsPanel.vue'

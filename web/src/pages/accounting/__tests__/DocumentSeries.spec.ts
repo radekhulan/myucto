@@ -38,7 +38,7 @@ vi.mock('@/components/ui/buttonStyles', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
 import DocumentSeries from '@/pages/accounting/DocumentSeries.vue'

@@ -16,6 +16,7 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -170,7 +171,7 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.income_statement.filter_as_of') }}</label>
-          <input v-model="filters.as_of" type="date" @change="load"
+          <DateInput v-model="filters.as_of" @change="load"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>

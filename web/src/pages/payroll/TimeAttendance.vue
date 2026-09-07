@@ -49,6 +49,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { isApplePlatform } from '@/utils/clientPlatform'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -2773,7 +2774,7 @@ onMounted(() => {
           <div class="grid gap-4 sm:grid-cols-2">
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_from') }}</span>
-              <input v-model="consentValidFrom" data-test="overtime-consent-valid-from" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <DateInput v-model="consentValidFrom" data-test="overtime-consent-valid-from" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
               <span
                 v-if="prefilledDateNotice(consentValidFrom)"
                 data-test="overtime-consent-prefilled-date"
@@ -2784,7 +2785,7 @@ onMounted(() => {
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_to') }}</span>
-              <input v-model="consentValidTo" data-test="overtime-consent-valid-to" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <DateInput v-model="consentValidTo" data-test="overtime-consent-valid-to" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
             </label>
           </div>
           <label class="block">
@@ -2843,7 +2844,7 @@ onMounted(() => {
           <div class="grid gap-4 sm:grid-cols-2">
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_from') }}</span>
-              <input v-model="protectionValidFrom" data-test="overtime-protection-valid-from" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <DateInput v-model="protectionValidFrom" data-test="overtime-protection-valid-from" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
               <span
                 v-if="prefilledDateNotice(protectionValidFrom)"
                 data-test="overtime-protection-prefilled-date"
@@ -2854,7 +2855,7 @@ onMounted(() => {
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_to') }}</span>
-              <input v-model="protectionValidTo" data-test="overtime-protection-valid-to" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <DateInput v-model="protectionValidTo" data-test="overtime-protection-valid-to" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
             </label>
           </div>
           <label class="block">
@@ -2906,7 +2907,7 @@ onMounted(() => {
           <div class="grid gap-4 sm:grid-cols-2">
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.compensation_overtime_date') }}</span>
-              <input v-model="compensationDate" data-test="overtime-compensation-date" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <DateInput v-model="compensationDate" data-test="overtime-compensation-date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
               <span
                 v-if="prefilledDateNotice(compensationDate)"
                 data-test="overtime-compensation-prefilled-date"
@@ -2922,7 +2923,7 @@ onMounted(() => {
           </div>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.compensation_granted_on') }}</span>
-            <input v-model="compensationGrantedOn" data-test="overtime-compensation-granted-on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            <DateInput v-model="compensationGrantedOn" data-test="overtime-compensation-granted-on" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_reference') }}</span>
@@ -2982,7 +2983,7 @@ onMounted(() => {
           <div class="grid gap-4 sm:grid-cols-2">
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_from') }}</span>
-              <input v-model="averagingValidFrom" data-test="overtime-averaging-valid-from" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <DateInput v-model="averagingValidFrom" data-test="overtime-averaging-valid-from" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
               <span
                 v-if="prefilledDateNotice(averagingValidFrom)"
                 data-test="overtime-averaging-prefilled-date"
@@ -2993,7 +2994,7 @@ onMounted(() => {
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_to') }}</span>
-              <input v-model="averagingValidTo" data-test="overtime-averaging-valid-to" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <DateInput v-model="averagingValidTo" data-test="overtime-averaging-valid-to" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.averaging_weeks') }}</span>

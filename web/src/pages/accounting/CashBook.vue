@@ -13,6 +13,7 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -146,11 +147,11 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.date_from') }}</label>
-          <input v-model="filters.from" type="date" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="filters.from" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.date_to') }}</label>
-          <input v-model="filters.to" type="date" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="filters.to" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.type') }}</label>

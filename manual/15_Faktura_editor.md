@@ -48,7 +48,7 @@ Datumová pole se zadávají ve formátu jazyka aplikace — v češtině `d. m.
 (např. `1. 9. 2026` nebo zkráceně `1.9.26`), v angličtině `mm/dd/yyyy`. Formát
 se neřídí jazykem prohlížeče ani systému. Ikona vpravo v poli otevře kalendář;
 neplatné datum (např. `31. 2.`) pole označí a faktura se neuloží, dokud ho
-neopravíte.
+neopravíte. Platí to stejně ve všech agendách, viz [§ 1.1](01_Uvod.md).
 
 ### 15.2.4 Měna a DPH
 

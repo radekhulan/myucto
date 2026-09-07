@@ -18,6 +18,7 @@ import { formatMoney } from '@/composables/useFormat'
 import CashVatBreakdown from '@/components/cash/CashVatBreakdown.vue'
 import { ICONS, btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -617,7 +618,7 @@ async function save(post = true) {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.date') }}</label>
-            <input v-model="form.issue_date" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="form.issue_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
         </div>
         <p class="text-xs text-neutral-400 -mt-2">{{ t('cash.form.number_hint') }}</p>
@@ -773,7 +774,7 @@ async function save(post = true) {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.tax_date') }}</label>
-              <input v-model="form.tax_date" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <DateInput v-model="form.tax_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
           </div>
           <CashVatBreakdown v-model="vatLines" :total="Number(form.total_amount) || 0" :rates="availableRates"

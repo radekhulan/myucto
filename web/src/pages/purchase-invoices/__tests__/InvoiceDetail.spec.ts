@@ -16,7 +16,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
 // API klient — jen get + activity, ostatní URL/akce jsou no-op (v testu se nevolají).

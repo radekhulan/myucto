@@ -31,6 +31,7 @@ import JournalRelatedPanel from '@/components/accounting/JournalRelatedPanel.vue
 import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
 import { journalSourceLink } from '@/utils/journalSourceLink'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -723,12 +724,12 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_date_from') }}</label>
-          <input v-model="filters.date_from" type="date" @change="applyFilters"
+          <DateInput v-model="filters.date_from" @change="applyFilters"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_date_to') }}</label>
-          <input v-model="filters.date_to" type="date" @change="applyFilters"
+          <DateInput v-model="filters.date_to" @change="applyFilters"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>

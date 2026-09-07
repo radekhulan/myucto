@@ -53,6 +53,7 @@ import {
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -1295,7 +1296,7 @@ onMounted(async () => {
         </label>
         <label class="min-w-0 text-xs text-neutral-600">
           {{ t('payroll.people.create.planned_start') }} <RequiredMark />
-          <input v-model="employeeForm.planned_start_on" required type="date" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-planned-start">
+          <DateInput v-model="employeeForm.planned_start_on" required class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-planned-start" />
         </label>
       </div>
 
@@ -1323,7 +1324,7 @@ onMounted(async () => {
           </label>
           <label class="min-w-0 text-xs text-neutral-600">
             {{ t('payroll.people.create.birth_date') }}
-            <input v-model="employeeForm.birth_date" type="date" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+            <DateInput v-model="employeeForm.birth_date" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
           </label>
           <label class="min-w-0 text-xs text-neutral-600">
             {{ t('payroll.people.create.monthly_gross') }}
@@ -1598,7 +1599,7 @@ onMounted(async () => {
             {{ t('payroll.people.relation_type') }} <RequiredMark />
             <SearchableSelect v-model="newEmployment.relation_type" class="mt-1" :options="relationOptions" :clearable="false" accent="payroll" />
           </label>
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }} <RequiredMark /><input v-model="newEmployment.terms.planned_start_on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }} <RequiredMark /><DateInput v-model="newEmployment.terms.planned_start_on" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label>
           <label v-if="officeOptions.length > 0" class="text-xs text-neutral-600">
             {{ t('payroll.people.office_label') }} <RequiredMark />
             <SearchableSelect

@@ -45,6 +45,16 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   'blur': [event: FocusEvent]
+  /**
+   * Hodnota potvrzená uživatelem, se sémantikou nativního `change`: až při
+   * opuštění pole (a jen když se opravdu změnila) nebo hned po výběru
+   * z kalendáře — NE při každém stisku klávesy.
+   *
+   * Filtry sestav na tom stojí (`@change="load"`): kdyby to jelo po znacích,
+   * střílel by se dotaz na server po každé číslici; kdyby to nejelo vůbec,
+   * výběr z kalendáře by sestavu tiše nepřenačetl.
+   */
+  'change': [value: string]
 }>()
 
 const attrs = useAttrs()
@@ -61,6 +71,8 @@ const focused = ref(false)
  */
 const unparsable = ref(false)
 const outOfRange = ref(false)
+/** Hodnota při vstupu do pole — proti ní se na blur pozná, jestli se opravdu změnila. */
+const valueOnFocus = ref(props.modelValue ?? '')
 const generatedId = `date-input-${useId()}`
 
 const id = computed(() => props.inputId ?? (attrs.id as string | undefined) ?? generatedId)
@@ -71,6 +83,15 @@ const inactive = computed(() => props.disabled || props.readonly)
 /** Třídy z místa použití patří na textové pole (velikost, rámeček); wrapper jen drží ikonu. */
 const passedClass = computed(() => (attrs.class as string | undefined) ?? '')
 const wrapperClass = computed(() => /\bw-full\b/.test(passedClass.value) ? 'relative block w-full' : 'relative inline-block')
+/**
+ * Nativní `<input type="date">` má vlastní vnitřní šířku podle formátu, takže
+ * spousta míst v aplikaci žádnou třídu šířky nepředává. Textové pole má proti
+ * tomu výchozí šířku ~20 znaků a bez náhrady by filtry a tabulky roztáhlo.
+ * Když volající šířku neurčí, držíme ji sami; jakákoli `w-*` třída z místa
+ * použití má přednost.
+ */
+const widthClass = computed(() =>
+  /\bw-(full|auto|screen|fit|min|max|px|\d|\[)/.test(passedClass.value) ? '' : 'w-40')
 const accentClass = computed(() => props.accent === 'payroll'
   ? 'focus:ring-payroll-500/20 focus:border-payroll-500'
   : 'focus:ring-primary-500/20 focus:border-primary-500')
@@ -133,17 +154,22 @@ function applyText(value: string, { allowShortYear }: { allowShortYear: boolean 
   if (iso === null) {
     unparsable.value = true
     outOfRange.value = false
-  } else if (!withinBounds(iso)) {
-    unparsable.value = false
-    outOfRange.value = true
-  } else {
-    // Platné už během psaní: watchery (splatnost z data vystavení) reagují hned,
-    // stejně jako u nativního inputu. Text se kanonizuje až na blur, ať kurzor neskáče.
-    commit(iso)
-    return iso
+    syncValidity()
+    return null
   }
-  syncValidity()
-  return null
+  // Platné už během psaní: watchery (splatnost z data vystavení) reagují hned,
+  // stejně jako u nativního inputu. Text se kanonizuje až na blur, ať kurzor neskáče.
+  commit(iso)
+  // Datum mimo min/max nativní pole PŘIJME a jen ho označí za neplatné
+  // (rangeUnderflow/rangeOverflow). Držíme se toho: stránky, které si na rozsah
+  // hlídají vlastní hlášku (konec platnosti před začátkem), ji musí dostat do
+  // modelu, jinak by jejich kontrola neměla co vyhodnotit. Odeslání formuláře
+  // přesto blokujeme přes setCustomValidity.
+  if (!withinBounds(iso)) {
+    outOfRange.value = true
+    syncValidity()
+  }
+  return iso
 }
 
 function onInput(event: Event): void {
@@ -159,7 +185,15 @@ function onBlur(event: FocusEvent): void {
   // Kanonizovat z právě potvrzeného ISO, ne z props.modelValue — rodič ho po
   // emitu přepíše až v dalším ticku.
   const iso = applyText(text.value, { allowShortYear: true })
-  if (iso !== null) text.value = formatIsoForInput(iso, locale.value)
+  if (iso !== null) {
+    text.value = formatIsoForInput(iso, locale.value)
+    // Nativní `change` chodí na blur a jen při skutečné změně. Rozepsaný
+    // nesmysl (iso === null) hodnotu nepotvrzuje, takže ani nehlásí změnu.
+    if (iso !== valueOnFocus.value) {
+      valueOnFocus.value = iso
+      emit('change', iso)
+    }
+  }
   emit('blur', event)
 }
 
@@ -167,8 +201,14 @@ function onNativeChange(event: Event): void {
   const iso = (event.target as HTMLInputElement).value
   // Prázdná hodnota = tlačítko „Vymazat" v kalendáři (Firefox). Nativní input
   // by emitoval '', tak i my — kontrakt 1:1.
+  const changed = iso !== (props.modelValue ?? '')
   commit(iso)
   text.value = formatIsoForInput(iso, locale.value)
+  // Výběr z kalendáře je potvrzení hodnoty, ne rozepsaný text — `change` letí
+  // hned, stejně jako u nativního pole. Bez toho by filtr sestavy po kliknutí
+  // do kalendáře nepřenačetl data.
+  valueOnFocus.value = iso
+  if (changed) emit('change', iso)
   // Fokus zpět textovému poli: nativní input tím ztratí fokus a Safari zavře
   // popover kalendáře (Chrome ho po výběru zavírá sám). Uživatel navíc může
   // rovnou pokračovat psaním nebo Tabem na další pole.
@@ -268,13 +308,14 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
       :aria-label="ariaLabel"
       :aria-invalid="isInvalid || undefined"
       :class="[
+        widthClass,
         passedClass,
         'pr-9 bg-surface text-neutral-900 placeholder:text-neutral-500',
         `focus:ring-2 outline-none ${accentClass}`,
         'disabled:bg-neutral-50 disabled:text-neutral-400 disabled:cursor-not-allowed',
         isInvalid ? 'border-danger-500' : '',
       ]"
-      @focus="focused = true"
+      @focus="focused = true; valueOnFocus = modelValue ?? ''"
       @input="onInput"
       @blur="onBlur"
     >

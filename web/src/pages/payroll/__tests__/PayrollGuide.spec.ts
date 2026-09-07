@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string) => key,
   }),
 }))

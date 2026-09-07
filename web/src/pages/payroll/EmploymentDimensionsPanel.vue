@@ -11,6 +11,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   employmentId: number
@@ -280,11 +281,11 @@ onMounted(load)
         </div>
         <label class="text-xs text-neutral-600">
           {{ t('payroll.people.dimensions.valid_from') }}
-          <input v-model="form.valid_from" type="date" :disabled="!canWrite" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          <DateInput v-model="form.valid_from" :disabled="!canWrite" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
         </label>
         <label class="text-xs text-neutral-600">
           {{ t('payroll.people.dimensions.valid_to') }}
-          <input v-model="form.valid_to" type="date" :disabled="!canWrite" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          <DateInput v-model="form.valid_to" :disabled="!canWrite" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
         </label>
       </div>
 

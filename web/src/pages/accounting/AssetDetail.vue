@@ -18,6 +18,7 @@ import { ICONS, btnFilled, btnOutline, btnIconSm } from '@/components/ui/buttonS
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -632,7 +633,7 @@ const yearOptions = computed(() => {
       <!-- Modal: zařazení do užívání -->
       <Modal v-if="showPutIntoUse" :title="t('accounting.assets.lifecycle.put_into_use')" widthClass="max-w-md" @close="showPutIntoUse = false">
         <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.lifecycle.put_into_use_date') }}</label>
-        <input v-model="putIntoUseDate" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-3" />
+        <DateInput v-model="putIntoUseDate" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-3" />
         <label class="inline-flex items-center gap-2 text-sm mb-4">
           <input v-model="putIntoUseBook" type="checkbox" class="rounded border-neutral-300" />
           {{ t('accounting.assets.lifecycle.put_into_use_book') }}
@@ -653,7 +654,7 @@ const yearOptions = computed(() => {
         <div class="grid grid-cols-2 gap-3 mb-3">
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.improvement.col_date') }} *</label>
-            <input v-model="impForm.completed_on" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="impForm.completed_on" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.improvement.col_amount') }} *</label>
@@ -703,7 +704,7 @@ const yearOptions = computed(() => {
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.fields.disposal_date') }}</label>
-            <input v-model="disposeForm.date" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="disposeForm.date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div v-if="disposeForm.type === 'sold'">
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.fields.disposal_price') }}</label>

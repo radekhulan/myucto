@@ -23,6 +23,7 @@ import Modal from '@/components/ui/Modal.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm, btnIconSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate, appYear } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -651,11 +652,11 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.col_acquired') }} *</label>
-          <input v-model="form.acquisition_date" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+          <DateInput v-model="form.acquisition_date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.col_put_into_use') }}</label>
-          <input v-model="form.put_into_use_date" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+          <DateInput v-model="form.put_into_use_date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.col_quantity') }}</label>
@@ -701,7 +702,7 @@ onMounted(async () => {
       <div class="grid grid-cols-1 gap-3">
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.disposed_at') }} *</label>
-          <input v-model="disposeForm.disposed_at" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+          <DateInput v-model="disposeForm.disposed_at" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.disposal_reason') }}</label>
@@ -754,7 +755,7 @@ onMounted(async () => {
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.sold_at') }} *</label>
-            <input v-model="sellForm.sold_at" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+            <DateInput v-model="sellForm.sold_at" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.sale_price') }}</label>
@@ -782,7 +783,7 @@ onMounted(async () => {
         <div class="flex flex-wrap items-end gap-2">
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.as_of') }}</label>
-            <input v-model="reportForm.as_of" type="date" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+            <DateInput v-model="reportForm.as_of" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
           <button :disabled="exporting" @click="exportReport('inventory', 'pdf')" :class="btnOutline('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
@@ -801,11 +802,11 @@ onMounted(async () => {
         <div class="flex flex-wrap items-end gap-2">
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.from') }}</label>
-            <input v-model="reportForm.from" type="date" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+            <DateInput v-model="reportForm.from" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.to') }}</label>
-            <input v-model="reportForm.to" type="date" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+            <DateInput v-model="reportForm.to" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
           <button :disabled="exporting" @click="exportReport('movements', 'pdf')" :class="btnOutline('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
@@ -824,11 +825,11 @@ onMounted(async () => {
         <div class="flex flex-wrap items-end gap-2">
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.from') }}</label>
-            <input v-model="reportForm.from" type="date" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+            <DateInput v-model="reportForm.from" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.to') }}</label>
-            <input v-model="reportForm.to" type="date" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+            <DateInput v-model="reportForm.to" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
           <button :disabled="exporting" @click="exportReport('expense-breakdown', 'pdf')" :class="btnOutline('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>

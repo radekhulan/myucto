@@ -10,6 +10,7 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { downloadApiFile } from '@/utils/downloadFile'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -146,7 +147,7 @@ onMounted(loadPreview)
       </select>
       <template v-if="isFollowUp">
         <label class="text-sm text-neutral-600">{{ t('reports.shv.variant.d_zjist') }}</label>
-        <input type="date" v-model="dZjist"
+        <DateInput v-model="dZjist"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
       </template>
       <span class="text-xs text-neutral-500">{{ t('reports.shv.variant.hint') }}</span>

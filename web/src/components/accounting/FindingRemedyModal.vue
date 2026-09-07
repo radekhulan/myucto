@@ -8,6 +8,7 @@ import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { closingApi, type FindingRemedy } from '@/api/closing'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
+import DateInput from '@/components/ui/DateInput.vue'
 
 /**
  * Doúčtování nálezu kontroly spárovaných plateb.
@@ -146,7 +147,7 @@ async function submit() {
           <div class="grid grid-cols-2 gap-3">
             <label class="text-sm">
               <span class="block text-neutral-500 mb-1">{{ t('accounting.finding_remedy.entry_date') }}</span>
-              <input v-model="entryDate" type="date"
+              <DateInput v-model="entryDate"
                 class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
             </label>
             <label class="text-sm">

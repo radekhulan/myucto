@@ -91,7 +91,7 @@ vi.mock('@/composables/useToast', () => ({
 // proto musí původní modul rozprostřít, ne nahradit.
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string, params?: Record<string, unknown>) =>
       key === 'payroll.people.exit_documents.blockers.weekly_hours_evidence_missing'
         ? 'Chybí doložená týdenní pracovní doba.'

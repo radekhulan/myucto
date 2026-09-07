@@ -52,6 +52,7 @@ import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchS
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -616,12 +617,10 @@ onMounted(() => void load())
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.sicknessCases.incapacityFrom') }}
           </span>
-          <input
+          <DateInput
             v-model="newIncapacityFrom"
-            type="date"
             class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm"
-            data-test="sickness-case-incapacity-from"
-          >
+            data-test="sickness-case-incapacity-from" />
         </label>
       </div>
 
@@ -697,7 +696,7 @@ onMounted(() => void load())
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.incapacityTo') }}</span>
-                <input v-model="draft.incapacity_to" type="date" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-incapacity-to">
+                <DateInput v-model="draft.incapacity_to" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-incapacity-to" />
               </label>
             </div>
           </section>
@@ -741,7 +740,7 @@ onMounted(() => void load())
               </label>
               <label v-if="draftHasUnpaidLeaveSection" class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.unpaidLeaveFrom') }}</span>
-                <input v-model="draft.unpaid_leave_from" type="date" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
+                <DateInput v-model="draft.unpaid_leave_from" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" />
               </label>
             </div>
           </section>
@@ -756,7 +755,7 @@ onMounted(() => void load())
             <div class="grid gap-3 md:grid-cols-3">
               <label class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.issuedOn') }}</span>
-                <input v-model="draft.issued_on" type="date" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-issued-on">
+                <DateInput v-model="draft.issued_on" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-issued-on" />
               </label>
               <label class="flex items-center gap-2 text-sm">
                 <input v-model.number="draft.returned_to_work" type="checkbox" :true-value="1" :false-value="0">
@@ -764,7 +763,7 @@ onMounted(() => void load())
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.returnedOn') }}</span>
-                <input v-model="draft.returned_on" type="date" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
+                <DateInput v-model="draft.returned_on" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" />
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.hoursWorkedLastDay') }}</span>
@@ -792,11 +791,11 @@ onMounted(() => void load())
             >
               <label class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.workedFrom') }}</span>
-                <input v-model="interval.from" type="date" class="rounded-lg border border-neutral-300 p-2 text-sm">
+                <DateInput v-model="interval.from" class="rounded-lg border border-neutral-300 p-2 text-sm" />
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.workedTo') }}</span>
-                <input v-model="interval.to" type="date" class="rounded-lg border border-neutral-300 p-2 text-sm">
+                <DateInput v-model="interval.to" class="rounded-lg border border-neutral-300 p-2 text-sm" />
               </label>
               <button
                 type="button"
@@ -832,12 +831,10 @@ onMounted(() => void load())
         <div v-else class="mt-3 grid gap-3 md:grid-cols-2">
           <label class="block text-sm">
             <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.acceptedOn') }}</span>
-            <input
+            <DateInput
               v-model="receiptDate[item.id]"
-              type="date"
               class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
-              :data-test="`sickness-case-accepted-on-${item.id}`"
-            >
+              :data-test="`sickness-case-accepted-on-${item.id}`" />
           </label>
           <label class="block text-sm">
             <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.rejectionReason') }}</span>

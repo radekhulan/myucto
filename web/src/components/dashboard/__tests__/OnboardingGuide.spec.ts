@@ -49,7 +49,7 @@ vi.mock('@/stores/supplier', () => ({
   }),
 }))
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 
 import OnboardingGuide from '../OnboardingGuide.vue'
 

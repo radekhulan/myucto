@@ -7,6 +7,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 /**
  * Karta účtu — rozcestník drill-through nad osnovou.
@@ -214,12 +215,12 @@ onMounted(async () => {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.accounts.detail.filter_from') }}</label>
-            <input v-model="filters.from" type="date" @change="load"
+            <DateInput v-model="filters.from" @change="load"
               class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.accounts.detail.filter_to') }}</label>
-            <input v-model="filters.to" type="date" @change="load"
+            <DateInput v-model="filters.to" @change="load"
               class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div class="sm:col-span-2 lg:col-span-2">

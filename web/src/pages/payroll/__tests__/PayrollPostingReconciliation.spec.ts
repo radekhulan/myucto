@@ -28,7 +28,7 @@ vi.mock('@/pages/payroll/payrollComponentsUi', () => ({
   payrollWorkingPeriod: () => '2026-08',
 }))
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string) => key,
     // Vysvětlivky má jen část kategorií, `te` proto rozhoduje o jejich zobrazení.
     te: (key: string) => [

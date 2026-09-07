@@ -32,6 +32,7 @@ import { accountingApi } from '@/api/accounting'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { useSidePreview } from '@/composables/useSidePreview'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, te, locale } = useI18n()
 const toast = useToast()
@@ -1679,7 +1680,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
           <input v-model="partialAmount" type="number" step="0.01" min="0.01" :placeholder="String(remainingToPay)"
             class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-3 font-mono" />
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.modals.mark_paid_date') }}</label>
-          <input v-model="partialDate" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-3" />
+          <DateInput v-model="partialDate" class="w-full h-10 px-3 border border-neutral-300 rounded-md mb-3" />
           <div class="grid grid-cols-2 gap-2 mb-3">
             <div>
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.payments.vs') }}</label>

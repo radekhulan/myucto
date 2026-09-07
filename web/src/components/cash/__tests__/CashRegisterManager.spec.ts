@@ -41,7 +41,7 @@ vi.mock('@/components/ui/buttonStyles', () => ({
   BTN_DISABLED_NOTE: 'note',
 }))
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key) }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key) }),
 }))
 vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },

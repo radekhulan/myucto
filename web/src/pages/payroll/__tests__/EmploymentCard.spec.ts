@@ -85,7 +85,7 @@ vi.mock('@/composables/useToast', () => ({
 // `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
   }),
@@ -393,9 +393,14 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="terms-weekly-hours"]').setValue('30.00')
     await wrapper.get('[data-test="save-mode-version"]').setValue()
 
+    // DateInput píše datum v jazyce aplikace; ISO drží skryté pole pro kalendář,
+    // které nese i dolní mez (`min` je prop komponenty, ne atribut textového pole).
     const effectiveFrom = wrapper.get('[data-test="terms-effective-from"]')
-    expect((effectiveFrom.element as HTMLInputElement).value).toBe('2100-01-01')
-    expect(effectiveFrom.attributes('min')).toBe('2100-01-01')
+    expect((effectiveFrom.element as HTMLInputElement).value).toBe('01. 01. 2100')
+    const effectiveFromNative = effectiveFrom.element.parentElement!
+      .querySelector('input[type="date"]') as HTMLInputElement
+    expect(effectiveFromNative.value).toBe('2100-01-01')
+    expect(effectiveFromNative.min).toBe('2100-01-01')
 
     await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     await flushPromises()

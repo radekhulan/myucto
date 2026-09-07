@@ -12,6 +12,7 @@ import { useAuthStore } from '@/stores/auth'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { downloadApiFile } from '@/utils/downloadFile'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -335,7 +336,7 @@ onMounted(() => {
       </select>
       <template v-if="isAmendment">
         <label class="text-sm text-neutral-600">{{ t('reports.dph.variant.d_zjist') }}</label>
-        <input type="date" v-model="dZjist"
+        <DateInput v-model="dZjist"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
         <label class="text-sm text-neutral-600">{{ t('reports.dph.variant.reason') }}</label>
         <input type="text" v-model="reason" :placeholder="t('reports.dph.variant.reason_placeholder')"

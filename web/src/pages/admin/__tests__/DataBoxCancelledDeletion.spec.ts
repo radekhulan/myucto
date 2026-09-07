@@ -38,7 +38,7 @@ vi.mock('@/api/dataBox', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}|${JSON.stringify(params)}` : key,
   }),

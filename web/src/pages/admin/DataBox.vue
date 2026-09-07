@@ -50,6 +50,7 @@ import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/butt
 import EmptyState from '@/components/ui/EmptyState.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -3171,11 +3172,11 @@ onUnmounted(clearReceiptsTimer)
           </label>
           <label class="block">
             <span class="mb-1 block text-sm">{{ t('databox.notices.deliveredOn') }}</span>
-            <input v-model="noticeForm.delivered_on" type="date" class="form-input w-full" />
+            <DateInput v-model="noticeForm.delivered_on" class="form-input w-full" />
           </label>
           <label class="block">
             <span class="mb-1 block text-sm">{{ t('databox.notices.respondBy') }}</span>
-            <input v-model="noticeForm.respond_by_on" type="date" class="form-input w-full" />
+            <DateInput v-model="noticeForm.respond_by_on" class="form-input w-full" />
           </label>
           <label class="block">
             <span class="mb-1 block text-sm">{{ t('databox.notices.periodDays') }}</span>
@@ -3231,7 +3232,7 @@ onUnmounted(clearReceiptsTimer)
         <div v-if="answerFor === n.id" class="mt-3 flex flex-wrap items-end gap-2">
           <label class="block">
             <span class="mb-1 block text-sm">{{ t('databox.notices.answeredOn') }}</span>
-            <input v-model="answerDate" type="date" class="form-input" />
+            <DateInput v-model="answerDate" class="form-input" />
           </label>
           <button type="button" :class="btnFilled('primary')" :disabled="busyId === n.id" @click="submitAnswer(n)">
             {{ t('databox.notices.answerSave') }}

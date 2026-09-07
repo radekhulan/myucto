@@ -23,6 +23,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import BulkImpactDialog from '@/components/automation/BulkImpactDialog.vue'
 import RejectReasonDialog from '@/components/automation/RejectReasonDialog.vue'
 import SourceDetailDrawer from '@/components/automation/SourceDetailDrawer.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 type CockpitTab = AutomationFeedTab | 'recommendations' | 'rules' | 'checklist' | 'history'
 const route = useRoute(); const router = useRouter(); const { t } = useI18n()
@@ -340,8 +341,8 @@ onMounted(async () => {
         <label class="text-xs text-neutral-500"><span>{{ t('automation.filter_amount_max') }}</span><input v-model="maxAmount" type="number" min="0" step="100" class="mt-1 block w-28 rounded border border-neutral-300 px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-500"><span>{{ t('automation.sort_label') }}</span><select v-model="sort" class="mt-1 block rounded border border-neutral-300 px-3 py-2 text-sm"><option value="default">{{ t('automation.sort_default') }}</option><option value="date">{{ t('automation.sort_date') }}</option><option value="confidence">{{ t('automation.sort_confidence') }}</option><option value="amount">{{ t('automation.sort_amount') }}</option><option value="operation_type">{{ t('automation.sort_operation') }}</option><option value="source">{{ t('automation.sort_source') }}</option></select></label>
         <button type="button" class="h-10 whitespace-nowrap rounded border border-neutral-300 px-3 text-sm" @click="direction = direction === 'desc' ? 'asc' : 'desc'">{{ direction === 'desc' ? '↓' : '↑' }} {{ t(`automation.sort_${direction}`) }}</button>
-        <label class="text-xs text-neutral-500">{{ t('common.from') }}<input v-model="from" type="date" class="mt-1 block rounded border border-neutral-300 px-3 py-2 text-sm"></label>
-        <label class="text-xs text-neutral-500">{{ t('common.to') }}<input v-model="to" type="date" class="mt-1 block rounded border border-neutral-300 px-3 py-2 text-sm"></label>
+        <label class="text-xs text-neutral-500">{{ t('common.from') }}<DateInput v-model="from" class="mt-1 block rounded border border-neutral-300 px-3 py-2 text-sm" /></label>
+        <label class="text-xs text-neutral-500">{{ t('common.to') }}<DateInput v-model="to" class="mt-1 block rounded border border-neutral-300 px-3 py-2 text-sm" /></label>
       </template>
     </div>
     <!-- Hromadné schválení/zamítnutí v plovoucí liště u spodní hrany (jen tab pending). -->

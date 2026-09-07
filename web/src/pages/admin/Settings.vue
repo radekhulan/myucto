@@ -16,6 +16,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierDomainsSettings from '@/components/settings/SupplierDomainsSettings.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -1319,12 +1320,12 @@ async function confirmTaxRepDelete() {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_valid_from') }}</label>
-              <input v-model="(supplier as any).oss_valid_from" type="date"
+              <DateInput v-model="(supplier as any).oss_valid_from"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.oss_valid_to') }}</label>
-              <input v-model="(supplier as any).oss_valid_to" type="date"
+              <DateInput v-model="(supplier as any).oss_valid_to"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             </div>
           </div>
@@ -1482,7 +1483,7 @@ async function confirmTaxRepDelete() {
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.vat_status.form_date') }}</label>
-                    <input v-model="vatFormDate" type="date" :disabled="vatFormEditingId !== null"
+                    <DateInput v-model="vatFormDate" :disabled="vatFormEditingId !== null"
                       class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100 disabled:text-neutral-500" />
                     <p v-if="vatFormEditingId !== null" class="text-xs text-neutral-400 mt-1">{{ t('settings.vat_status.form_date_locked_hint') }}</p>
                   </div>
@@ -1597,7 +1598,7 @@ async function confirmTaxRepDelete() {
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_date') }}</label>
-                    <input v-model="taxRepFormDate" type="date" :disabled="taxRepFormEditingId !== null"
+                    <DateInput v-model="taxRepFormDate" :disabled="taxRepFormEditingId !== null"
                       class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100 disabled:text-neutral-500" />
                   </div>
                   <div>
@@ -1629,7 +1630,7 @@ async function confirmTaxRepDelete() {
                     </div>
                     <div>
                       <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_poa_date') }}</label>
-                      <input v-model="taxRepFormPoaDate" type="date"
+                      <DateInput v-model="taxRepFormPoaDate"
                         class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
                     </div>
                   </div>

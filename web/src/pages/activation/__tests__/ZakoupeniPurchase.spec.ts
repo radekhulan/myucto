@@ -26,7 +26,7 @@ vi.mock('@/api/instanceStatus', () => ({
 }))
 vi.mock('@/api/instanceHealth', () => ({ resolveBillingNarrative: () => null }))
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string) => key,
     te: () => false,
     tm: () => [],

@@ -6,6 +6,7 @@ import { payrollApi, type PayrollAccidentInsuranceRate } from '@/api/payroll'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
 import AccidentInsuranceRatePicker from '@/components/payroll/AccidentInsuranceRatePicker.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{ canWrite: boolean }>()
 
@@ -218,11 +219,9 @@ onMounted(load)
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.accident_insurance.effective_from') }}</span>
-          <input
+          <DateInput
             v-model="form.effective_from"
-            type="date"
-            class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"
-          >
+            class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
         </label>
         <div class="sm:col-span-3">
           <div

@@ -32,6 +32,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
+    locale: { value: 'cs' },
     t: (key: string, parameters?: Record<string, string | number>) =>
       parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
     // Neznámý klíč se musí umět chovat jako neznámý — jinak by fallbacky

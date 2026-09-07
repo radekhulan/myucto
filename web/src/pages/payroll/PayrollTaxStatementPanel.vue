@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { downloadApiFile } from '@/utils/downloadFile'
+import DateInput from '@/components/ui/DateInput.vue'
 
 /**
  * Roční vyúčtování daně ze závislé činnosti (DPZVD6) a daně vybírané srážkou
@@ -258,12 +259,10 @@ onMounted(load)
           <span class="mb-1 block text-xs font-medium">
             {{ t('payroll.tax_statement.discovered_on') }}
           </span>
-          <input
+          <DateInput
             v-model="discoveredOn"
-            type="date"
             class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
-            data-test="tax-statement-discovered-on"
-          >
+            data-test="tax-statement-discovered-on" />
         </label>
       </div>
     </div>

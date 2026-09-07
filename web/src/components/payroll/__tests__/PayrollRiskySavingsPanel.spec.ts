@@ -25,7 +25,7 @@ vi.mock('@/composables/useToast', () => ({
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (_: unknown, fallback: string) => fallback }))
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string, params?: Record<string, unknown>) =>
       `${key}${params ? JSON.stringify(params) : ''}`,
   }),

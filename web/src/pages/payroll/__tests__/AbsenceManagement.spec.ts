@@ -332,7 +332,9 @@ describe('AbsenceManagement', () => {
       .find(button => button.text() === 'payroll_absence.tabs.averages')
     await averagesTab!.trigger('click')
 
-    const formInputs = wrapper.findAll('input[type="number"], input[type="date"], input[type="text"]')
+    // `input[type="date"]` je u DateInput skryté pole pod ikonou kalendáře —
+    // viditelné je textové, a to sem patří. Skryté nemá (a nemá mít) rámeček.
+    const formInputs = wrapper.findAll('input[type="number"], input[type="text"]')
     expect(formInputs.length).toBeGreaterThan(0)
     for (const input of formInputs) {
       expect(input.classes()).toContain('border-neutral-300')

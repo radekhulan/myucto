@@ -38,7 +38,7 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 
 import PayrollSetupGuide from '../PayrollSetupGuide.vue'
 

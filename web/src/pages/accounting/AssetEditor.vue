@@ -8,6 +8,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -343,7 +344,7 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
           </div>
           <div>
             <label :class="labelCls">{{ t('accounting.assets.fields.acquisition_date') }} *</label>
-            <input v-model="form.acquisition_date" type="date"
+            <DateInput v-model="form.acquisition_date"
               :disabled="locks.acquisition" :title="locks.acquisition ? lockedTitle : undefined" :class="inputCls" />
           </div>
           <div v-if="form.purchase_invoice_id">
@@ -448,7 +449,7 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
         <div v-if="isHistorical" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
           <div>
             <label :class="labelCls">{{ t('accounting.assets.fields.put_into_use_date') }} *</label>
-            <input v-model="form.put_into_use_date" type="date" :disabled="isEdit" :class="inputCls" />
+            <DateInput v-model="form.put_into_use_date" :disabled="isEdit" :class="inputCls" />
           </div>
           <div>
             <label :class="labelCls">{{ t('accounting.assets.fields.opening_tax_years') }}</label>

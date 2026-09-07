@@ -588,8 +588,9 @@ describe('Roční zúčtování', () => {
 
     const from = wrapper.find('[data-test="certificate-employment-from"]')
     const to = wrapper.find('[data-test="certificate-employment-to"]')
-    expect((from.element as HTMLInputElement).value).toBe('2026-01-01')
-    expect((to.element as HTMLInputElement).value).toBe('2026-06-30')
+    // DateInput zobrazuje datum v jazyce aplikace (ISO drží model a payload níže).
+    expect((from.element as HTMLInputElement).value).toBe('01. 01. 2026')
+    expect((to.element as HTMLInputElement).value).toBe('30. 06. 2026')
     // Nepovinné: prázdné pole nesmí formulář blokovat.
     expect(from.attributes('required')).toBeUndefined()
     expect(to.attributes('required')).toBeUndefined()

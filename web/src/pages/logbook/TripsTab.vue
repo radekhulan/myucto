@@ -12,6 +12,7 @@ import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -449,7 +450,7 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.date') }} *</label>
-              <input v-model="draft.trip_date" type="date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <DateInput v-model="draft.trip_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.time_start') }}</label>
@@ -566,11 +567,11 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.date_from') }}</label>
-            <input v-model="exportFrom" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="exportFrom" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.date_to') }}</label>
-            <input v-model="exportTo" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="exportTo" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
         </div>
         <div class="flex flex-wrap justify-end gap-2 pt-2 border-t border-neutral-100">

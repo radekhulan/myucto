@@ -19,6 +19,7 @@ import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/compos
 import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -281,15 +282,15 @@ onMounted(async () => {
       </select>
       <label class="inline-flex items-center gap-1.5 text-sm text-neutral-600">
         {{ t('stock.orders.filter_from') }}
-        <input v-model="filters.from" type="date" @change="applyFilters" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        <DateInput v-model="filters.from" @change="applyFilters" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
       </label>
       <label class="inline-flex items-center gap-1.5 text-sm text-neutral-600">
         {{ t('stock.orders.filter_to') }}
-        <input v-model="filters.to" type="date" @change="applyFilters" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        <DateInput v-model="filters.to" @change="applyFilters" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
       </label>
       <label class="inline-flex items-center gap-1.5 text-sm text-neutral-600">
         {{ t('stock.orders.filter_expected_to') }}
-        <input v-model="filters.expected_to" type="date" @change="applyFilters" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        <DateInput v-model="filters.expected_to" @change="applyFilters" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
       </label>
 
       <template #actions>

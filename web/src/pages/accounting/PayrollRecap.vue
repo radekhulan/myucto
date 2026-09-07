@@ -13,6 +13,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney, formatPeriod } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import DateInput from '@/components/ui/DateInput.vue'
 
 /**
  * Mzdová rekapitulace (Fáze F) — měsíc + typ poplatníka + hrubá mzda → rozpad → zaúčtování.
@@ -869,7 +870,7 @@ const remittanceRows = computed(() => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_birth_date') }}</label>
-          <input v-model="employeeForm.birth_date" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+          <DateInput v-model="employeeForm.birth_date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.taxpayer_type') }}</label>

@@ -13,6 +13,7 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { journalSourceLink, journalEntryLink } from '@/utils/journalSourceLink'
 import { appIsoDate, appYear } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -168,12 +169,12 @@ onMounted(load)
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.account_statement.filter_from') }}</label>
-          <input v-model="filters.from" type="date" @change="applyFilters"
+          <DateInput v-model="filters.from" @change="applyFilters"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.account_statement.filter_to') }}</label>
-          <input v-model="filters.to" type="date" @change="applyFilters"
+          <DateInput v-model="filters.to" @change="applyFilters"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
       </div>

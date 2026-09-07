@@ -35,6 +35,7 @@ import {
   payrollAccountOptions,
   type PayrollAccountKey,
 } from './payrollEmployerAccounts'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -1032,7 +1033,7 @@ onMounted(async () => {
         <p class="text-sm text-neutral-600">{{ t('payroll.employer.registration_dialog_hint') }}</p>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.registration_effective_from') }}</span>
-          <input v-model="registrationForm.effective_from" type="date" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          <DateInput v-model="registrationForm.effective_from" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.office_social_security_variable_symbol') }}<RequiredMark /></span>

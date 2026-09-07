@@ -25,7 +25,7 @@ vi.mock('@/composables/useToast', () => ({
 // musí rozprostřít, jinak by se rozbily komponenty tahající skutečné createI18n.
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
   }),
@@ -254,7 +254,7 @@ describe('EmploymentSurchargePolicyPanel', () => {
 
     await wrapper.find('[data-test="surcharge-policy-edit"]').trigger('click')
     const validFrom = wrapper.get('[data-test="surcharge-policy-valid-from"]')
-    expect((validFrom.element as HTMLInputElement).value).toBe('2026-01-01')
+    expect((validFrom.element as HTMLInputElement).value).toBe('01. 01. 2026')
     expect(validFrom.attributes('disabled')).toBeDefined()
 
     await wrapper.find('[data-test="surcharge-policy-rate-overtime"]').setValue('35')

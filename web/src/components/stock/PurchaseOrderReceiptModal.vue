@@ -7,6 +7,7 @@ import { stockApi, type Warehouse } from '@/api/stock'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 /**
  * Příjem na sklad z objednávky dodavateli (Epic SKLAD, fáze 4).
@@ -156,7 +157,7 @@ async function submit() {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.orders.receipt_modal.field_date') }}</label>
-              <input v-model="docDate" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+              <DateInput v-model="docDate" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.orders.receipt_modal.field_description') }}</label>

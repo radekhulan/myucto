@@ -25,6 +25,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -552,7 +553,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
         </div>
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('payment_order.payment_date') }}</label>
-          <input v-model="paymentDate" type="date"
+          <DateInput v-model="paymentDate"
             class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
         </div>
         <div>

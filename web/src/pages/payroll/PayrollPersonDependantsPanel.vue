@@ -21,6 +21,7 @@ import { useToast } from '@/composables/useToast'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{ personId: number; canWrite: boolean }>()
 
@@ -620,7 +621,7 @@ function creditLabel(claim: PayrollDependantClaim): string {
         </label>
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.birth_date') }} <RequiredMark />
-          <input v-model="dependantForm.birth_date" required type="date" :class="inputClass">
+          <DateInput v-model="dependantForm.birth_date" required :class="inputClass" />
         </label>
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.birth_number') }}
@@ -629,11 +630,11 @@ function creditLabel(claim: PayrollDependantClaim): string {
         </label>
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.existence_from') }} <RequiredMark />
-          <input v-model="dependantForm.existence_from" required type="date" :class="inputClass">
+          <DateInput v-model="dependantForm.existence_from" required :class="inputClass" />
         </label>
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.existence_to') }}
-          <input v-model="dependantForm.existence_to" type="date" :class="inputClass">
+          <DateInput v-model="dependantForm.existence_to" :class="inputClass" />
         </label>
         <label class="flex items-center gap-2 text-sm text-neutral-700">
           <input v-model="dependantForm.ztp_p" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
@@ -676,11 +677,11 @@ function creditLabel(claim: PayrollDependantClaim): string {
         </label>
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.effective_from') }} <RequiredMark />
-          <input v-model="claimForm.effective_from" required type="date" :class="inputClass" data-test="claim-effective-from">
+          <DateInput v-model="claimForm.effective_from" required :class="inputClass" data-test="claim-effective-from" />
         </label>
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.effective_to') }}
-          <input v-model="claimForm.effective_to" type="date" :class="inputClass" data-test="claim-effective-to">
+          <DateInput v-model="claimForm.effective_to" :class="inputClass" data-test="claim-effective-to" />
           <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.effective_to_hint') }}</span>
         </label>
         <label class="flex items-center gap-2 text-sm text-neutral-700">
@@ -711,7 +712,7 @@ function creditLabel(claim: PayrollDependantClaim): string {
           </label>
           <label :class="labelClass">
             {{ t('payroll.people.dependants.form.other_caregiver_birth_date') }}<RequiredMark />
-            <input v-model="claimForm.other_caregiver_birth_date" required type="date" :class="inputClass" data-test="claim-caregiver-birth-date">
+            <DateInput v-model="claimForm.other_caregiver_birth_date" required :class="inputClass" data-test="claim-caregiver-birth-date" />
           </label>
         </template>
         <p class="text-xs text-neutral-500 sm:col-span-2 lg:col-span-3">

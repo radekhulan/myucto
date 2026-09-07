@@ -47,7 +47,7 @@ vi.mock('@/composables/useFormat', () => ({
   formatPeriod: (value: string) => value,
 }))
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() }),

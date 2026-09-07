@@ -33,6 +33,7 @@ import {
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -342,7 +343,7 @@ onMounted(async () => {
           </label>
           <label class="text-sm text-neutral-600">
             <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.birth_date') }}</span>
-            <input v-model="payee.birth_date" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            <DateInput v-model="payee.birth_date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
           </label>
           <label v-if="isIncomeNotice" class="text-sm text-neutral-600">
             <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.birth_place') }}</span>
@@ -432,7 +433,7 @@ onMounted(async () => {
         </label>
         <label class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.payment_date') }}</span>
-          <input v-model="notice.payment_date" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" data-test="foreign-income-payment-date">
+          <DateInput v-model="notice.payment_date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" data-test="foreign-income-payment-date" />
         </label>
         <label v-if="allowsExempt" class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.payment_year') }}</span>
@@ -453,11 +454,11 @@ onMounted(async () => {
         </label>
         <label class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.withholding_due_on') }}</span>
-          <input v-model="notice.withholding_due_on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          <DateInput v-model="notice.withholding_due_on" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
         </label>
         <label class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.remittance_due_on') }}</span>
-          <input v-model="notice.remittance_due_on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          <DateInput v-model="notice.remittance_due_on" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
         </label>
         <label class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.payment_currency') }}</span>
@@ -477,7 +478,7 @@ onMounted(async () => {
         </label>
         <label v-if="notice.variant === 'N'" class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.discovered_on') }}</span>
-          <input v-model="notice.discovered_on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          <DateInput v-model="notice.discovered_on" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
         </label>
         <label class="text-sm text-neutral-600 sm:col-span-3">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.note') }}</span>
@@ -492,7 +493,7 @@ onMounted(async () => {
       <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <label class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.remittance_paid_on') }}</span>
-          <input v-model="notice.remittance_paid_on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          <DateInput v-model="notice.remittance_paid_on" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
         </label>
         <label class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.remittance_amount') }}</span>
@@ -539,15 +540,15 @@ onMounted(async () => {
         </label>
         <label class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.receivable_on') }}</span>
-          <input v-model="security.receivable_on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" data-test="foreign-income-receivable-on">
+          <DateInput v-model="security.receivable_on" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" data-test="foreign-income-receivable-on" />
         </label>
         <label class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.decisive_on') }}</span>
-          <input v-model="security.decisive_on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" data-test="foreign-income-decisive-on">
+          <DateInput v-model="security.decisive_on" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" data-test="foreign-income-decisive-on" />
         </label>
         <label class="text-sm text-neutral-600">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.remitted_on') }}</span>
-          <input v-model="security.remitted_on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          <DateInput v-model="security.remitted_on" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
         </label>
         <label class="text-sm text-neutral-600 sm:col-span-2">
           <span class="mb-1 block text-xs font-medium">{{ t('foreign_income.establishment') }}</span>

@@ -22,7 +22,7 @@ vi.mock('@/composables/useFormat', () => ({
   formatPeriod: (value: string) => `period:${value}`,
 }))
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string, params?: unknown) => {
       if (typeof params === 'number') return `${key}:${params}`
       if (params && typeof params === 'object') {

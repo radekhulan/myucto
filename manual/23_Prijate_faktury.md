@@ -149,8 +149,8 @@ Limity:
 
 Datumová pole (vystaveno, DUZP, splatnost, datum přijetí i časové rozlišení
 u položek) se zadávají ve formátu jazyka aplikace — česky `d. m. rrrr`, anglicky
-`mm/dd/yyyy`, stejně jako u [vydaných faktur](15_Faktura_editor.md). Ikona v poli
-otevře kalendář.
+`mm/dd/yyyy`, stejně jako všude jinde v aplikaci (viz [§ 1.1](01_Uvod.md)).
+Ikona v poli otevře kalendář.
 
 > [!NOTE]
 > **Datum přijetí a období odpočtu DPH.** U ručně založené (tzn. **ne** importované)

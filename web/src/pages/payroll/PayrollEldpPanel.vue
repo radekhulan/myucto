@@ -34,6 +34,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate } from '@/composables/useFormat'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -551,12 +552,10 @@ watch(requestedByAuthority, value => {
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.eldp.authorityRequestReceivedOn') }}
           </span>
-          <input
+          <DateInput
             v-model="authorityRequestReceivedOn"
-            type="date"
             class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
-            data-test="eldp-authority-request-date"
-          >
+            data-test="eldp-authority-request-date" />
           <span class="mt-1 block text-xs text-neutral-500">
             {{ t('payroll.eldp.authorityRequestReceivedOnHint') }}
           </span>
@@ -784,12 +783,10 @@ watch(requestedByAuthority, value => {
             </label>
             <label class="text-sm font-medium text-neutral-700">
               {{ t('payroll.eldp.manual.confirmedOnLabel') }}
-              <input
+              <DateInput
                 v-model="confirmedOn"
-                type="date"
                 class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-neutral-900"
-                data-test="eldp-confirmed-on"
-              >
+                data-test="eldp-confirmed-on" />
             </label>
           </div>
 

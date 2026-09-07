@@ -38,6 +38,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -980,9 +981,9 @@ async function bulkSetKind() {
           <option :value="''">{{ t('invoice.all_months') }}</option>
           <option v-for="(label, i) in monthOptions" :key="i + 1" :value="i + 1">{{ label }}</option>
         </select>
-        <input v-model="dateFrom" type="date" :placeholder="t('common.from')"
+        <DateInput v-model="dateFrom" :placeholder="t('common.from')"
           class="h-9 px-2 border border-neutral-300 rounded-md text-sm" :title="t('common.from')" />
-        <input v-model="dateTo" type="date" :placeholder="t('common.to')"
+        <DateInput v-model="dateTo" :placeholder="t('common.to')"
           class="h-9 px-2 border border-neutral-300 rounded-md text-sm" :title="t('common.to')" />
         <button v-if="dateFrom || dateTo" @click="dateFrom = ''; dateTo = ''"
           class="cursor-pointer h-9 px-2 text-xs text-neutral-500 hover:text-neutral-700">{{ t('invoice.clear_date_filter') }}</button>
@@ -999,7 +1000,7 @@ async function bulkSetKind() {
              ne další zaškrtávátko vedle stejnojmenného filtru. -->
         <label class="flex items-center gap-1.5 text-sm text-neutral-700 px-2" :title="t('purchase_invoice.filters.unpaid_as_of_hint')">
           {{ t('purchase_invoice.filters.unpaid_as_of_label') }}
-          <input v-model="unpaidAsOf" type="date"
+          <DateInput v-model="unpaidAsOf"
             class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </label>
         <button v-if="unpaidAsOf" @click="unpaidAsOf = ''"

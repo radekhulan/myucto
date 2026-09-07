@@ -18,6 +18,7 @@ import { renderVarsymbolTemplate, hasCounterPlaceholder } from '@/utils/varsymbo
 import { formatMonth } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -1396,7 +1397,7 @@ watch(tab, (newTab) => {
               <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
                 <h3 class="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('codebooks.tax_g_dates') }}</h3>
                 <label><span class="text-xs text-neutral-500">{{ t('codebooks.tax_f_mortgage_pre2021_cutoff') }}</span>
-                  <input v-model="taxModel.mortgage_pre2021_cutoff" type="date" class="mt-0.5 h-9 w-full px-2 border border-neutral-300 rounded text-sm font-mono" /></label>
+                  <DateInput v-model="taxModel.mortgage_pre2021_cutoff" class="mt-0.5 h-9 w-full px-2 border border-neutral-300 rounded text-sm font-mono" /></label>
               </div>
             </div>
           </template>
@@ -1476,7 +1477,7 @@ watch(tab, (newTab) => {
             <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
               <h3 class="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('codebooks.tax_g_extraordinary') }}</h3>
               <div class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3"><label v-for="key in ['eligible_from', 'eligible_to', 'total_months', 'phase1_months', 'phase1_share']" :key="key"><span class="text-xs text-neutral-500">{{ t(`codebooks.tax_f_extra_${key}`) }}</span>
-                <input v-if="key.startsWith('eligible_')" v-model="taxModel.extraordinary_depreciation[key]" type="date" class="mt-0.5 h-9 w-full px-2 border border-neutral-300 rounded text-sm font-mono" />
+                <DateInput v-if="key.startsWith('eligible_')" v-model="taxModel.extraordinary_depreciation[key]" class="mt-0.5 h-9 w-full px-2 border border-neutral-300 rounded text-sm font-mono" />
                 <input v-else v-model.number="taxModel.extraordinary_depreciation[key]" type="number" step="any" class="mt-0.5 h-9 w-full px-2 border border-neutral-300 rounded text-sm font-mono" /></label></div>
             </div>
             <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm overflow-x-auto">
@@ -1623,7 +1624,7 @@ watch(tab, (newTab) => {
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('oss_rates.valid_to_override') }}</label>
-            <input v-model="ossDraft.valid_to_override" type="date"
+            <DateInput v-model="ossDraft.valid_to_override"
               class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
           </div>
         </div>
@@ -1651,12 +1652,12 @@ watch(tab, (newTab) => {
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('oss_rates.valid_from') }} *</label>
-              <input v-model="ossDraft.valid_from" type="date"
+              <DateInput v-model="ossDraft.valid_from"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('oss_rates.valid_to') }}</label>
-              <input v-model="ossDraft.valid_to" type="date"
+              <DateInput v-model="ossDraft.valid_to"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
             </div>
           </div>
@@ -1823,9 +1824,9 @@ watch(tab, (newTab) => {
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div><label class="block text-sm font-medium mb-1">{{ t('codebooks.valid_from') }}</label>
-              <input v-model="vatDraft.valid_from" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" /></div>
+              <DateInput v-model="vatDraft.valid_from" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" /></div>
             <div><label class="block text-sm font-medium mb-1">{{ t('codebooks.valid_to') }}</label>
-              <input v-model="vatDraft.valid_to" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" /></div>
+              <DateInput v-model="vatDraft.valid_to" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" /></div>
           </div>
           <label class="flex items-center gap-2 text-sm">
             <input v-model="vatDraft.is_default" type="checkbox" class="rounded border-neutral-300 text-primary-600" /> {{ t('codebooks.is_default_for_country') }}

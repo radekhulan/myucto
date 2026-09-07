@@ -33,6 +33,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -1110,11 +1111,11 @@ function onImgError(e: Event) {
                         class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
                     </td>
                     <td class="py-2 pr-3">
-                      <input v-model="p.valid_from" type="date"
+                      <DateInput v-model="p.valid_from"
                         class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                     </td>
                     <td class="py-2 pr-3">
-                      <input v-model="p.valid_to" type="date"
+                      <DateInput v-model="p.valid_to"
                         class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                     </td>
                     <td class="py-2 pr-3">

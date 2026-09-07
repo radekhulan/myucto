@@ -235,17 +235,23 @@ describe('DateInput', () => {
     expect(wrapper.get('button').attributes('disabled')).toBeDefined()
   })
 
-  it('min/max: zápis mimo rozsah je neplatný s hláškou o rozsahu, ne o formátu', async () => {
+  /**
+   * Hodnotu mimo rozsah nativní pole PŘIJME a jen ji označí za neplatnou
+   * (rangeUnderflow). Stránky, které si na rozsah hlídají vlastní hlášku
+   * („konec platnosti před začátkem"), ji musí dostat do modelu, jinak nemají
+   * co vyhodnotit — proto se emituje i sem, jen s blokujícím customValidity.
+   */
+  it('min/max: zápis mimo rozsah se do modelu dostane, ale blokuje odeslání', async () => {
     const wrapper = mount(DateInput, { props: { modelValue: '', min: '2026-01-01', max: '2026-12-31' } })
     const input = textField(wrapper)
 
     await input.setValue('1.1.2025')
-    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.emitted('update:modelValue')).toEqual([['2025-01-01']])
     expect(input.attributes('aria-invalid')).toBe('true')
     expect(input.element.validationMessage).toBe('common.date_input.out_of_range_between')
 
     await input.setValue('1.6.2026')
-    expect(wrapper.emitted('update:modelValue')).toEqual([['2026-06-01']])
+    expect(wrapper.emitted('update:modelValue')).toEqual([['2025-01-01'], ['2026-06-01']])
     expect(input.attributes('aria-invalid')).toBeUndefined()
     expect(input.element.validity.customError).toBe(false)
 
@@ -327,5 +333,64 @@ describe('DateInput ve formuláři', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+  /**
+   * Filtry sestav visí na `@change="load"`. Nativní pole hlásí změnu na blur
+   * a po výběru z kalendáře; kdyby to komponenta dělala po znacích, střílela
+   * by dotaz na server po každé číslici.
+   */
+  describe('událost change (sémantika nativního pole)', () => {
+    it('nehlásí změnu během psaní, ale až na blur', async () => {
+      const wrapper = mount(DateInput, { props: { modelValue: '' } })
+      const input = textField(wrapper)
+
+      await input.trigger('focus')
+      await input.setValue('1.9.2026')
+      expect(wrapper.emitted('update:modelValue')).toEqual([['2026-09-01']])
+      expect(wrapper.emitted('change')).toBeUndefined()
+
+      await wrapper.setProps({ modelValue: '2026-09-01' })
+      await input.trigger('blur')
+      expect(wrapper.emitted('change')).toEqual([['2026-09-01']])
+    })
+
+    it('nehlásí změnu, když uživatel hodnotu nezměnil', async () => {
+      const wrapper = mount(DateInput, { props: { modelValue: '2026-09-01' } })
+      const input = textField(wrapper)
+
+      await input.trigger('focus')
+      await input.trigger('blur')
+      expect(wrapper.emitted('change')).toBeUndefined()
+    })
+
+    it('rozepsaný nesmysl hodnotu nepotvrzuje, takže změnu nehlásí', async () => {
+      const wrapper = mount(DateInput, { props: { modelValue: '2026-09-01' } })
+      const input = textField(wrapper)
+
+      await input.trigger('focus')
+      await input.setValue('31.2.2026')
+      await input.trigger('blur')
+      expect(wrapper.emitted('change')).toBeUndefined()
+      expect(input.element.validity.customError).toBe(true)
+    })
+
+    it('výběr z kalendáře hlásí změnu hned', async () => {
+      const wrapper = mount(DateInput, { props: { modelValue: '2026-09-01' } })
+      const native = nativeField(wrapper)
+
+      native.element.value = '2026-09-15'
+      await native.trigger('change')
+      expect(wrapper.emitted('update:modelValue')).toEqual([['2026-09-15']])
+      expect(wrapper.emitted('change')).toEqual([['2026-09-15']])
+    })
+
+    it('vymazání v kalendáři hlásí prázdnou hodnotu', async () => {
+      const wrapper = mount(DateInput, { props: { modelValue: '2026-09-01' } })
+      const native = nativeField(wrapper)
+
+      native.element.value = ''
+      await native.trigger('change')
+      expect(wrapper.emitted('change')).toEqual([['']])
+    })
   })
 })

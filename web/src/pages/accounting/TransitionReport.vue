@@ -13,6 +13,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -84,7 +85,7 @@ onMounted(load)
         </select>
         <label class="flex items-center gap-2 text-sm text-neutral-600">
           {{ t('accounting.transition.as_of') }}
-          <input v-model="asOf" type="date" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
+          <DateInput v-model="asOf" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
         </label>
       </div>
     </div>

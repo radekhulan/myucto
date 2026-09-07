@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { adminApi, type SmtpLogAnalysis } from '@/api/admin'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 
@@ -193,9 +194,9 @@ function toggleStatus(s: string) {
           <option value="error">{{ t('smtp_logs.status.error') }}</option>
           <option value="rejected_error">{{ t('smtp_logs.status.rejected_error') }}</option>
         </select>
-        <input v-model="filter.date_from" type="date" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
+        <DateInput v-model="filter.date_from" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
         <span class="text-neutral-400 text-sm">–</span>
-        <input v-model="filter.date_to" type="date" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
+        <DateInput v-model="filter.date_to" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
         <button @click="load" :class="btnOutline('neutral')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
           {{ t('smtp_logs.refresh') }}

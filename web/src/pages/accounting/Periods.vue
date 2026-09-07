@@ -16,6 +16,7 @@ import { useHotkey } from '@/composables/useHotkey'
 import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 // embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
 defineProps<{ embedded?: boolean }>()
@@ -371,11 +372,11 @@ function statusBadge(status: string): string {
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.periods.starts_on') }}</label>
-              <input v-model="form.starts_on" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <DateInput v-model="form.starts_on" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.periods.ends_on') }}</label>
-              <input v-model="form.ends_on" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <DateInput v-model="form.ends_on" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
           </div>
           <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
