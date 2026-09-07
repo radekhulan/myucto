@@ -8,6 +8,9 @@
     "confirm": "Send payroll batch {reference} with {count} payments totaling {amount} through {provider}? Review and authorize payments in online banking."
   },
   "creditas_bank": {
+    "error_token_rejected": "The bank denied access (HTTP 401/403). Check key validity, allowed operations and any access restrictions in CREDITAS. A certificate is not mandatory for token-only access.",
+    "error_inactive": "This account is inactive in MyÚčto. Activate it in Currencies and accounts first.",
+    "error_response": "The CREDITAS response does not match the expected format. Give your administrator the time of the attempt so the server-side cause can be checked.",
     "title": "Connect Banka CREDITAS",
     "prerequisites": "Security token and account identifier",
     "mtls_hint": "Enter your security token and Account ID to connect. The client certificate is optional; attach it only if your specific bank access requires mutual TLS authentication (mTLS).",
@@ -51,7 +54,7 @@
     "prerequisites_title": "Before you connect",
     "prerequisite_bank": "Business accounts require KB+ with a paid Standard Business, Komfort Business or Exclusive Business tariff and a separately activated Extra service API Business. KB+ alone or the free Start Business tariff is not sufficient. KB's FAQ also permits private individuals with an active Premium service; confirm eligibility for your account with KB.",
     "prerequisite_plan": "The Business banking tariff and API Business service variant are separate products. For both transactions and payment batches, select API Business Plus or Pro. Basic is insufficient for batch submission. KB specifies Plus limits of once per 61 minutes and Pro once per 10 minutes; data pages count towards read limits. Confirm current pricing, scope and limits with the bank.",
-    "prerequisite_activation": "First select an Extra service API Business variant in KB+ and conclude the agreement. Then connect in MyÚčto. Manage existing consents in KB+: Settings → Service settings → Account access → Third-party access. Contact kbplus@kb.cz if options or permissions are missing.",
+    "prerequisite_activation": "First select an Extra service API Business variant in KB+ and conclude the agreement. Then connect in MyÚčto. Manage existing consents in KB+: Settings → Service settings → Account access → Third-party access. Contact kbplus{'@'}kb.cz if options or permissions are missing.",
     "prerequisite_subscriptions": "Technical application registration is a separate administrator step: access to Client Registration, OAuth, ADAA and BatchDA APIs at developers.kb.cz. Each API may have its own key. These keys do not replace the bank service agreement or the account owner's consent.",
     "official_service": "KB API Business terms and variants",
     "official_faq": "Activation and consent management in KB+",
@@ -14733,6 +14736,15 @@
     "default_revenue_category_backfilled": "Default revenue category applied to {count} project invoices without a category."
   },
   "bank": {
+    "gpc_calculated_hint": "The ČSOB/CREDITAS-profile GPC export includes all recorded booked account transactions in this period, excluding notices. This is a MyÚčto export, not an original bank statement. Calculated balances assume complete transaction records. Long bank references are included in the description.",
+    "balance_calculated": "Balance calculated from recorded transactions",
+    "balance_confirmed": "Calculated balance agrees with the bank statement",
+    "balance_bank_evidence": "The transactions are backed by a bank GPC statement. The GPC button downloads the bank original; matching and accounting entries are preserved.",
+    "balance_missing_anchor": "Opening balance unavailable. Upload a previous bank statement with a closing balance.",
+    "balance_mismatch": "Calculated and bank-confirmed balances differ. Export is blocked.",
+    "balance_unavailable": "Cannot safely calculate the balance. Check the account and bank statements.",
+    "balance_period": "Monthly records from {from} to {to}, transactions: {count}.",
+    "balance_difference": "Difference against the bank statement: {amount}. Check for missing or duplicate transactions; accounting entries are unchanged.",
     "title": "Bank statements",
     "subtitle": "Import GPC/ABO statements + auto-matching to invoices by VS.",
     "scan_folder": "Scan folder",

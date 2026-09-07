@@ -35,6 +35,7 @@ final class GpcParser
 
         $lines = preg_split('/\r\n|\n|\r/', $content);
         $header = null;
+        $reconstructed = false;
         $transactions = [];
         $lastTxIndex = -1; // index poslední 075 transakce (pro navázání 078 avíza)
 
@@ -43,6 +44,7 @@ final class GpcParser
             $type = substr($line, 0, 3);
             if ($type === '074') {
                 $header = $this->parseHeader($line);
+                $reconstructed = $reconstructed || $header['reconstructed'];
             } elseif ($type === '075') {
                 $transactions[] = $this->parseTransaction($line);
                 $lastTxIndex = count($transactions) - 1;
@@ -61,6 +63,7 @@ final class GpcParser
             throw new \RuntimeException('GPC: chybí header (074 řádek).');
         }
 
+        $header['reconstructed'] = $reconstructed;
         return ['header' => $header, 'transactions' => $transactions];
     }
 
@@ -104,6 +107,7 @@ final class GpcParser
 
         return [
             'account_number'   => $accountNumber,
+            'reconstructed'    => trim(substr($pad, 19, 20)) === 'MYUCTO EXPORT',
             'statement_date'   => $statementDate,
             'statement_number' => $statementNumber,
             'prev_balance'     => $prevBalance,

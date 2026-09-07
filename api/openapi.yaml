@@ -2973,6 +2973,32 @@ paths:
             výpisu jsou doklad o vyplacení mezd (`error.blocked_by` uvádí počty
             po druzích vazby).
 
+  /api/v1/bank-statements/{id}/export-gpc:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Bank]
+      summary: Export měsíční evidence účtu do GPC
+      description: |
+        Rekonstruovaný export v profilu ČSOB/CREDITAS, CP1250, řádky 128 bajtů.
+        Zahrnuje všechny evidované zaúčtované pohyby účtu od začátku měsíce
+        do data zvoleného výpisu. Vylučuje avíza, sdílené pohyby počítá jednou.
+        Vyžaduje předchozí bankovní výpis se zůstatkem. Není originálem banky.
+        Při nesouladu s bankovním zůstatkem export odmítne. Záznamy nemění.
+        Dlouhé reference ukládá do popisu a používá lokální identifikátor.
+      responses:
+        '200':
+          description: Rekonstruované GPC
+          content:
+            text/plain:
+              schema: { type: string, format: binary }
+        '404': { description: Výpis nenalezen }
+        '422': { description: Chybějící nebo konfliktní zůstatky či nepodporované údaje }
+
   /api/v1/bank-statements/{id}/download:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -21795,6 +21821,25 @@ components:
         - $ref: '#/components/schemas/BankStatement'
         - type: object
           properties:
+            balance_calculation:
+              type: [object, "null"]
+              description: Read-only přepočet měsíční evidence z předchozího bankovního zůstatku. Nikdy nepřepisuje originální zůstatky ani účetní zápisy.
+              properties:
+                status: { type: string, enum: [calculated, confirmed, missing_anchor, mismatch, unavailable] }
+                account_number: { type: string }
+                bank_code: { type: string }
+                currency: { type: [string, "null"] }
+                from: { type: string, format: date }
+                to: { type: string, format: date }
+                anchor_date: { type: [string, "null"], format: date }
+                opening: { type: [number, "null"] }
+                closing: { type: [number, "null"] }
+                credit: { type: number }
+                debit: { type: number }
+                confirmed_closing: { type: [number, "null"] }
+                bank_statement_id: { type: [integer, "null"], description: Originální GPC pokrývající všechny pohyby měsíční evidence; má přednost před rekonstruovaným exportem. }
+                difference: { type: [number, "null"] }
+                transaction_count: { type: integer }
             file_hash: { type: string, description: "SHA-256 originálního souboru" }
             credit_total: { type: [number, "null"], format: float }
             debit_total: { type: [number, "null"], format: float }

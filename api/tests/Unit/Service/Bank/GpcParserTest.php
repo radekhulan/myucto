@@ -13,6 +13,24 @@ use PHPUnit\Framework\TestCase;
  */
 final class GpcParserTest extends TestCase
 {
+    public function testReconstructedFlagSurvivesLaterOrdinaryHeader(): void
+    {
+        $export = (new \MyInvoice\Service\Bank\GpcExporter())->export([
+            'status' => 'calculated', 'account_number' => '1000000005', 'bank_code' => '0100',
+            'currency' => 'CZK', 'from' => '2026-01-01', 'to' => '2026-01-31',
+            'opening' => 100, 'closing' => 110, 'credit' => 10, 'debit' => 0,
+            'transactions' => [[
+                'id' => 1, 'posted_at' => '2026-01-02', 'amount' => '10.00', 'bank_ref' => '123',
+                'counterparty_account' => null, 'counterparty_bank' => null, 'counterparty_name' => null,
+                'description' => null, 'variable_symbol' => null, 'constant_symbol' => null, 'specific_symbol' => null,
+            ]],
+        ]);
+        $ordinaryHeader = substr_replace(explode("\r\n", $export, 2)[0], str_pad('BANK EXPORT', 20), 19, 20);
+        $parsed = (new GpcParser())->parse($export . $ordinaryHeader . "\r\n");
+        self::assertTrue($parsed['header']['reconstructed']);
+        self::assertCount(1, $parsed['transactions']);
+    }
+
     public function testParsesHeaderAnd075Transactions(): void
     {
         // 074 header — fixed-width per zdechov wiki:

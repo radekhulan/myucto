@@ -53,6 +53,8 @@ function safeError(caught: unknown): string {
   const messages: Record<string, string> = {
     certificate_invalid: 'certificate', certificate_required: 'certificate', credential_invalid: 'credentials',
     creditas_invalid_credentials: 'credentials', creditas_invalid_account_id: 'account_id',
+    invalid_token: 'token_rejected', token_invalid: 'credentials', account_inactive: 'inactive',
+    invalid_response: 'response', statement_invalid: 'response',
     certificate_runtime_unavailable: 'certificate_runtime',
     encryption_key_unavailable: 'encryption', credential_unavailable: 'encryption', credential_format_invalid: 'encryption',
     statement_account_mismatch: 'account', provider_account_mismatch: 'account', creditas_account_mismatch: 'account',

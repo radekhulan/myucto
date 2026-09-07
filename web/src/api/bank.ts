@@ -15,6 +15,19 @@ export interface BankStatement {
   statement_number: string | null
   prev_balance: number | null
   curr_balance: number | null
+  balance_calculation?: {
+    status: 'calculated' | 'confirmed' | 'missing_anchor' | 'mismatch' | 'unavailable'
+    from?: string
+    to?: string
+    opening?: number | null
+    closing?: number | null
+    confirmed_closing?: number | null
+    bank_statement_id?: number | null
+    difference?: number | null
+    credit?: number
+    debit?: number
+    transaction_count?: number
+  } | null
   transaction_count: number
   matched_count: number
   ignored_count?: number
@@ -446,6 +459,10 @@ export const bankApi = {
    * Build download URL pro originální GPC. Vrací absolutní URL — UI ji použije
    * v `<a href>` (browser stáhne přímo). Auth cookie se posílá automaticky.
    */
+  gpcExportUrl: (id: number): string => {
+    const base = api.defaults.baseURL ?? ''
+    return `${base.replace(/\/$/, '')}/bank-statements/${id}/export-gpc`
+  },
   downloadUrl: (id: number): string => {
     const base = api.defaults.baseURL ?? ''
     return `${base.replace(/\/$/, '')}/bank-statements/${id}/download`

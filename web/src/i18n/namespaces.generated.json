@@ -661,7 +661,6 @@
     "bank-detail": [
       "automation",
       "bank",
-      "bank_connection",
       "document_requests",
       "documents",
       "errors",

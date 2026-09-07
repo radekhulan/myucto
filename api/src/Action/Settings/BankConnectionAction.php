@@ -18,7 +18,8 @@ final class BankConnectionAction
 {
     private const PERMISSION = 'settings.bank_accounts';
 
-    public function __construct(private readonly BankConnectionService $service) {}
+    public function __construct(private readonly BankConnectionService $service,
+        private readonly \Psr\Log\LoggerInterface $diagnostics) {}
 
     public function list(Request $request, Response $response): Response
     {
@@ -99,6 +100,7 @@ final class BankConnectionAction
 
     private function operationError(Response $response, BankConnectorOperationException $e): Response
     {
+        $this->diagnostics->warning('bank_connection_operation_failed', ['code' => $e->errorCode]);
         $status = match ($e->errorCode) {
             'connection_not_found' => 404,
             'bank_connection_busy', 'bank_rate_limited', 'history_gap' => 409,

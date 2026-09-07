@@ -162,6 +162,14 @@ describe('CREDITAS connection setup', () => {
     expect(wrapper.text()).toContain('creditas_bank.error_account')
     expect(wrapper.text()).not.toContain('unsafe-provider-token')
   })
+  it('explains a token rejected by the bank without requiring a certificate', async () => {
+    const wrapper = open(stored)
+    m.save.mockRejectedValue({ response: { data: { error: { code: 'invalid_token', message: 'unsafe-secret' } } } })
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('creditas_bank.error_token_rejected')
+    expect(wrapper.text()).not.toContain('unsafe-secret')
+  })
   it('requires confirmation before disconnecting and preserves the account scope', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const wrapper = open(stored)

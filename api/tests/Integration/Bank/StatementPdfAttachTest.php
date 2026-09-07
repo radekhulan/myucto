@@ -221,6 +221,80 @@ final class StatementPdfAttachTest extends TestCase
         self::assertSame($apiId, $this->target($this->parsedPdf(self::TX, account: '1000000005')));
     }
 
+    public function testMonthlyBalanceUsesCanonicalMovementsAndReconcilesLaterGpc(): void
+    {
+        $pdo = $this->db->pdo();
+        $anchor = $this->insertGpcStatement([], date: '2099-06-30');
+        $pdo->prepare('UPDATE bank_statements SET curr_balance = 100 WHERE id = ?')->execute([$anchor]);
+        $apiId = $this->insertGpcStatement([['2099-07-02', 10], ['2099-07-03', -3]]);
+        $pdo->prepare("UPDATE bank_statements SET source = 'bank_api' WHERE id = ?")->execute([$apiId]);
+        $service = new \MyInvoice\Service\Bank\StatementBalanceService($this->db);
+        $before = $service->snapshot($this->supplierId, $apiId);
+        self::assertEquals(100, $before['opening']);
+        self::assertEquals(107, $before['closing']);
+        self::assertSame('calculated', $before['status']);
+        $gpc = $this->insertGpcStatement([]);
+        $pdo->prepare("UPDATE bank_statements SET curr_balance = 107, file_content = 'synthetic' WHERE id = ?")->execute([$gpc]);
+        $pdo->prepare('INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id)
+            SELECT ?, id, SHA2(CONCAT(?, id), 256), ?, statement_id FROM bank_transactions WHERE statement_id = ?')
+            ->execute([$gpc, 'synthetic-balance-alias', $this->supplierId, $apiId]);
+        $after = $service->snapshot($this->supplierId, $apiId);
+        self::assertEquals(107, $after['closing']);
+        self::assertCount(2, $after['transactions']);
+        self::assertSame('confirmed', $after['status']);
+        self::assertSame($gpc, $after['bank_statement_id']);
+        self::assertSame(array_column($before['transactions'], 'id'), array_column($after['transactions'], 'id'));
+        $pdo->prepare('UPDATE bank_statements SET curr_balance = 108 WHERE id = ?')->execute([$gpc]);
+        $mismatch = $service->snapshot($this->supplierId, $apiId);
+        self::assertSame('mismatch', $mismatch['status']);
+        self::assertEquals(1, $mismatch['difference']);
+        self::assertNull($pdo->query('SELECT curr_balance FROM bank_statements WHERE id = ' . $apiId)->fetchColumn());
+    }
+
+    public function testMonthlyBalanceWithoutAnchorDoesNotInventZero(): void
+    {
+        $id = $this->insertGpcStatement([['2099-07-02', 10]]);
+        $service = new \MyInvoice\Service\Bank\StatementBalanceService($this->db);
+        $result = $service->snapshot($this->supplierId, $id);
+        self::assertSame('missing_anchor', $result['status']);
+        self::assertNull($result['opening']);
+        self::assertNull($result['closing']);
+        $this->expectException(\InvalidArgumentException::class);
+        $service->snapshot($this->supplierId, PHP_INT_MAX);
+    }
+
+    public function testInvalidOfficialBalanceEquationCannotConfirmApi(): void
+    {
+        $id = $this->insertGpcStatement([]);
+        $this->db->pdo()->prepare('UPDATE bank_statements SET prev_balance=200, credit_total=10, debit_total=3, curr_balance=107 WHERE id=?')->execute([$id]);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('balance_conflict');
+        (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->snapshot($this->supplierId, $id);
+    }
+
+    public function testLaterApiDoesNotHideIntermediateBalanceMismatch(): void
+    {
+        $pdo = $this->db->pdo();
+        $anchor = $this->insertGpcStatement([], date: '2099-06-30');
+        $pdo->prepare('UPDATE bank_statements SET curr_balance=100 WHERE id=?')->execute([$anchor]);
+        $checkpoint = $this->insertGpcStatement([], date: '2099-07-15');
+        $pdo->prepare('UPDATE bank_statements SET curr_balance=120 WHERE id=?')->execute([$checkpoint]);
+        $id = $this->insertGpcStatement([['2099-07-02', 10]]);
+        $pdo->prepare("UPDATE bank_statements SET source='bank_api' WHERE id=?")->execute([$id]);
+        $result = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->snapshot($this->supplierId, $id);
+        self::assertSame('mismatch', $result['status']);
+        self::assertEquals(10, $result['difference']);
+    }
+
+    public function testUnparsedAttachedPdfDoesNotPermitCalculatedExport(): void
+    {
+        $id = $this->insertGpcStatement([], withPdf: true);
+        $this->db->pdo()->prepare("UPDATE bank_statements SET source='bank_api' WHERE id=?")->execute([$id]);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('balance_pdf_unverified');
+        (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->snapshot($this->supplierId, $id);
+    }
+
     /** Prázdný měsíc (banka pošle výpis bez pohybů) — přiložit taky. */
     public function testEmptyStatementAttaches(): void
     {

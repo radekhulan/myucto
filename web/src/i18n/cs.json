@@ -8,6 +8,9 @@
     "confirm": "Odeslat mzdovou dávku {reference} s {count} platbami v celkové částce {amount} přes {provider}? Platby zkontrolujte a autorizujte v bankovnictví."
   },
   "creditas_bank": {
+    "error_token_rejected": "Banka odmítla přístup (HTTP 401/403). Ověřte platnost klíče, povolené operace a případné omezení přístupu v CREDITAS. Certifikát není pro tokenové připojení povinný.",
+    "error_inactive": "Účet je v MyÚčtu neaktivní. Nejprve jej aktivujte v nastavení Měny a účty.",
+    "error_response": "Odpověď CREDITAS neodpovídá očekávanému formátu. Předejte správci čas pokusu; příčinu je potřeba ověřit na serveru.",
     "title": "Připojení Banky CREDITAS",
     "prerequisites": "Bezpečnostní token a identifikátor účtu",
     "mtls_hint": "Pro připojení zadejte bezpečnostní token a Account ID. Klientský certifikát je nepovinný; přiložte jej pouze tehdy, pokud váš konkrétní přístup k bance vyžaduje vzájemnou TLS autentizaci (mTLS).",
@@ -51,7 +54,7 @@
     "prerequisites_title": "Co potřebujete před připojením",
     "prerequisite_bank": "Pro podnikatelský nebo firemní účet potřebujete KB+ s placeným tarifem Standard Business, Komfort Business nebo Exclusive Business a zvlášť sjednanou Extra službu API Business. Samotné KB+ ani bezplatný Start Business nestačí. FAQ KB uvádí také možnost pro nepodnikající osoby s aktivní službou Premium; podmínky konkrétního účtu ověřte u KB.",
     "prerequisite_plan": "Bankovní tarif Business a varianta API Business jsou dvě různé věci. Pro pohyby i dávkové příkazy zvolte API Business Plus nebo Pro. Basic není dostačující pro odesílání dávek. KB uvádí limity Plus jednou za 61 minut a Pro jednou za 10 minut; u čtení se započítávají datové stránky. Aktuální cenu, rozsah a limity ověřte u banky.",
-    "prerequisite_activation": "Nejdříve v KB+ vyberte variantu Extra služby API Business a uzavřete smlouvu. Potom pokračujte připojením v MyÚčtu. Již udělené souhlasy spravujete v KB+: Nastavení → Nastavení služeb → Přístupy k účtům → Přístupy třetích stran. Chybějící nabídku nebo oprávnění řešte s KB na kbplus@kb.cz.",
+    "prerequisite_activation": "Nejdříve v KB+ vyberte variantu Extra služby API Business a uzavřete smlouvu. Potom pokračujte připojením v MyÚčtu. Již udělené souhlasy spravujete v KB+: Nastavení → Nastavení služeb → Přístupy k účtům → Přístupy třetích stran. Chybějící nabídku nebo oprávnění řešte s KB na kbplus{'@'}kb.cz.",
     "prerequisite_subscriptions": "Technická registrace aplikace je samostatný krok správce: přístupy k API Client Registration, OAuth, ADAA a BatchDA na developers.kb.cz. Každé API může mít vlastní klíč. Tyto klíče nenahrazují smlouvu o API službě ani souhlas majitele účtu.",
     "official_service": "Podmínky a varianty API Business u KB",
     "official_faq": "Aktivace a správa souhlasů v KB+",
@@ -14733,6 +14736,15 @@
     "default_revenue_category_backfilled": "Výchozí kategorie tržby doplněna do {count} faktur zakázky bez kategorie."
   },
   "bank": {
+    "gpc_calculated_hint": "Export GPC v profilu ČSOB/CREDITAS obsahuje všechny evidované zaúčtované pohyby účtu za uvedené období, bez avíz. Jde o export MyÚčta, nikoli originální výpis banky. Vypočtený zůstatek předpokládá úplnou evidenci pohybů. Dlouhé bankovní reference se přenášejí do popisu.",
+    "balance_calculated": "Zůstatek vypočtený z evidovaných pohybů",
+    "balance_confirmed": "Vypočtený zůstatek souhlasí s bankovním výpisem",
+    "balance_bank_evidence": "Pohyby jsou doložené bankovním GPC. Tlačítko GPC stáhne originál banky; párování i zaúčtování zůstávají zachované.",
+    "balance_missing_anchor": "Chybí počáteční zůstatek. Nahrajte předchozí bankovní výpis se zůstatkem.",
+    "balance_mismatch": "Vypočtený a bankou potvrzený zůstatek se liší. Export je zablokován.",
+    "balance_unavailable": "Zůstatek nelze bezpečně vypočítat. Zkontrolujte účet a bankovní výpisy.",
+    "balance_period": "Měsíční evidence {from} až {to}, počet pohybů: {count}.",
+    "balance_difference": "Rozdíl proti bankovnímu výpisu: {amount}. Zkontrolujte chybějící nebo duplicitní pohyby; účetní zápisy se nemění.",
     "title": "Bankovní výpisy",
     "subtitle": "Import GPC/ABO výpisů + auto-matching na faktury podle VS.",
     "scan_folder": "Skenovat adresář",

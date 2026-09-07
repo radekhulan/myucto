@@ -135,6 +135,47 @@ dokladu, ignorování i ruční zaúčtování. Po provedené akci se aktualizuj
 
 Klik na řádek → detail.
 
+### Zůstatky z API a export GPC
+
+U pohybů z API tlačítko **GPC** vytváří export v profilu ČSOB/CREDITAS
+(CP1250, řádky 074/075/078/079). Export obsahuje všechny evidované zaúčtované
+pohyby stejného účtu a měny od začátku měsíce do data zvoleného výpisu.
+Není omezený stránkováním ani filtrem tabulky. Avíza se nezahrnují a pohyb
+sdílený mezi API a GPC se započítá jednou. Původní JSON z API slouží interně,
+v uživatelském rozhraní se nenabízí ke stažení.
+
+Výpočet navazuje na poslední předchozí GPC nebo PDF se známým konečným
+zůstatkem. Přičte příjmy a odečte výdaje, včetně evidovaných pohybů mezi
+výchozím výpisem a začátkem měsíce. Bez výchozího zůstatku je GPC export
+zablokovaný; nahraj předchozí bankovní výpis. Nula se automaticky nedoplňuje.
+
+Zůstatek je označený jako **vypočtený** a předpokládá úplnou evidenci pohybů.
+Po nahrání originálního bankovního výpisu ke stejnému koncovému dni se
+porovná s bankovním zůstatkem. Shoda se zobrazí jako potvrzená, rozdíl
+zablokuje nový export a ukáže částku ke kontrole. Výpočet probíhá při čtení,
+takže není potřeba ruční přepočet. Původní zůstatky, párování ani účetní
+zápisy se nepřepisují a nevytváří se dorovnávací platba.
+
+Export má označení MYUCTO EXPORT a není originálním výpisem banky.
+Zpětný import tohoto exportu do MyÚčta je odmítnutý, aby se vypočtené údaje
+nevydávaly za bankou potvrzené. Pro ověření nahraj originální GPC z banky.
+Dlouhé bankovní reference se přesouvají do doplňujícího textu a základní
+řádek dostává lokální identifikátor. Formát není totožný s KB KM ani
+s rozšířeným ABO České spořitelny; v cílovém programu zvol profil GPC
+kompatibilní s ČSOB. Zahraniční protiúčet, který se nevejde do domácího
+pole, se uvádí v popisu. Delší popisy se zkracují na kapacitu formátu.
+
+Technické specifikace: [ČSOB GPC](https://www.csob.cz/portal/documents/10710/1927786/format-gpc.pdf)
+a [CREDITAS GPC](https://www.creditas.cz/files/popis-formatu-abo-gpc-pro-platebni-prikazy-172021.pdf).
+
+Po nahrání originálního GPC se jeho pohyby propojí s již evidovanými pohyby
+z API. Jejich ID, párování i zaúčtování zůstávají zachované. Pokud GPC pokrývá
+pohyby zobrazeného období, detail API nabídne odkaz na bankovní výpis a tlačítko
+GPC stáhne originál místo dopočítaného exportu. Původní API podklad zůstává
+zachovaný pro dohledatelnost. Nejednoznačné shody import zastaví k prověření.
+Samotná PDF příloha u API výpisu bez zpracovaných zůstatků nepotvrzuje výpočet;
+v takovém případě je dopočítaný export zablokovaný, dokud jej nenahradí GPC.
+
 Tabulka transakcí:
 
 | Sloupec | Význam |

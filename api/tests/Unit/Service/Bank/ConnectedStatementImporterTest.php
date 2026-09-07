@@ -62,6 +62,15 @@ final class ConnectedStatementImporterTest extends TestCase
         self::assertNull($this->pdo->query('SELECT curr_balance FROM bank_statements LIMIT 1')->fetchColumn());
     }
 
+    public function testReconstructedExportCannotBecomeConfirmedBankEvidence(): void
+    {
+        $this->matcher->expects(self::never())->method('matchBatch');
+        $parsed = (new GpcParser())->parse($this->gpc());
+        $parsed['header']['reconstructed'] = true;
+        $this->expectException(\InvalidArgumentException::class);
+        $this->importer->importConnectedParsed($parsed, 'synthetic-export', 'synthetic.gpc', null, 1, 10, 'gpc');
+    }
+
     public function testSlovakIbanOnlyAccountPreservesBankCodeAndEuroCurrency(): void
     {
         $this->pdo->exec("UPDATE currencies SET account_number = NULL, iban = 'SK0383300000001000000005', bank_code = '8330'");

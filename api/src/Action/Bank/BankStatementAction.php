@@ -1590,6 +1590,17 @@ final class BankStatementAction
         $s['notice_summary'] = (string) ($s['source'] ?? '') === 'email_notice'
             ? $this->statementNoticeSummary($id)
             : null;
+        $s['balance_calculation'] = null;
+        if (\MyInvoice\Service\Bank\BankStatementSource::isStatement((string) $s['source'])) {
+            try {
+                $calculation = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->snapshot($sid, $id);
+                $calculation['transaction_count'] = count($calculation['transactions']);
+                unset($calculation['transactions']);
+                $s['balance_calculation'] = $calculation;
+            } catch (\InvalidArgumentException) {
+                $s['balance_calculation'] = ['status' => 'unavailable'];
+            }
+        }
         return Json::ok($response, $s);
     }
 

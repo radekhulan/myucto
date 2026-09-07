@@ -281,12 +281,17 @@ const statementActions = computed<ActionItem[]>(() => {
     },
     {
       key: 'gpc',
-      label: s.source === 'bank_api' ? 'JSON' : 'GPC',
+      label: 'GPC',
       icon: 'download',
       tier: 'secondary',
-      show: s.has_file,
-      title: t(s.source === 'bank_api' ? 'bank_connection.download_json' : 'bank.download_gpc'),
-      href: bankApi.downloadUrl(s.id),
+      show: s.has_file || s.source === 'bank_api',
+      disabled: s.source === 'bank_api' && !s.balance_calculation?.bank_statement_id && !['calculated', 'confirmed'].includes(s.balance_calculation?.status ?? ''),
+      disabledReason: t(`bank.balance_${s.balance_calculation?.status ?? 'unavailable'}`),
+      title: t(s.source === 'bank_api' && !s.balance_calculation?.bank_statement_id ? 'bank.gpc_calculated_hint' : 'bank.download_gpc'),
+      href: s.source === 'bank_api'
+        ? (s.balance_calculation?.bank_statement_id ? bankApi.downloadUrl(s.balance_calculation.bank_statement_id)
+          : ['calculated', 'confirmed'].includes(s.balance_calculation?.status ?? '') ? bankApi.gpcExportUrl(s.id) : undefined)
+        : bankApi.downloadUrl(s.id),
     },
     {
       key: 'pdf',
@@ -387,11 +392,11 @@ const statementActions = computed<ActionItem[]>(() => {
     <div v-else-if="!isVirtual" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 mb-4">
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.prev_balance') }}</div>
-        <div class="text-lg font-mono">{{ formatMoney(statement.prev_balance, statement.currency ?? 'CZK') }}</div>
+        <div class="text-lg font-mono">{{ (statement.prev_balance ?? statement.balance_calculation?.opening) == null ? '-' : formatMoney(statement.prev_balance ?? statement.balance_calculation?.opening, statement.currency ?? 'CZK') }}</div>
       </div>
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.curr_balance') }}</div>
-        <div class="text-lg font-mono font-semibold">{{ statement.curr_balance == null ? '-' : formatMoney(statement.curr_balance, statement.currency ?? 'CZK') }}</div>
+        <div class="text-lg font-mono font-semibold">{{ (statement.curr_balance ?? statement.balance_calculation?.confirmed_closing ?? statement.balance_calculation?.closing) == null ? '-' : formatMoney(statement.curr_balance ?? statement.balance_calculation?.confirmed_closing ?? statement.balance_calculation?.closing, statement.currency ?? 'CZK') }}</div>
       </div>
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.credit_total') }}</div>
@@ -401,6 +406,20 @@ const statementActions = computed<ActionItem[]>(() => {
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.debit_total') }}</div>
         <div class="text-lg font-mono text-danger-500">−{{ formatMoney(Math.abs(statement.debit_total), statement.currency ?? 'CZK') }}</div>
       </div>
+    </div>
+
+    <div v-if="statement.balance_calculation" class="mt-4 mb-4 rounded-lg border border-neutral-200 bg-surface p-4 text-sm" role="status">
+      <strong>{{ t(`bank.balance_${statement.balance_calculation.status}`) }}</strong>
+      <p v-if="statement.balance_calculation.bank_statement_id" class="mt-1">
+        <RouterLink :to="`/bank/${statement.balance_calculation.bank_statement_id}`" class="text-primary-600 underline">{{ t('bank.balance_bank_evidence') }}</RouterLink>
+      </p>
+      <p v-if="statement.balance_calculation.from" class="mt-1">
+        {{ t('bank.balance_period', { from: formatDate(statement.balance_calculation.from), to: formatDate(statement.balance_calculation.to ?? ''), count: statement.balance_calculation.transaction_count }) }}
+      </p>
+      <p v-if="statement.balance_calculation.status === 'mismatch'" class="text-danger-600 mt-1">
+        {{ t('bank.balance_difference', { amount: formatMoney(statement.balance_calculation.difference, statement.currency ?? 'CZK') }) }}
+      </p>
+      <p class="text-neutral-500 mt-1">{{ t('bank.gpc_calculated_hint') }}</p>
     </div>
 
     <RuleHintBanner v-if="isDoubleEntry && hintTx && hintData" class="mt-4"

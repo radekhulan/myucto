@@ -188,6 +188,9 @@ final class StatementImporter
         $hash = hash('sha256', $rawBytes);
         $pdo = $this->db->pdo();
 
+        if (!empty($parsed['header']['reconstructed'])) {
+            throw new \InvalidArgumentException('GPC vytvořené MyÚčtem je export pro jiný systém, nikoli bankou potvrzený výpis. Nahrajte originální výpis banky.');
+        }
         // Dedupe
         $exists = $pdo->prepare('SELECT id FROM bank_statements WHERE file_hash = ?');
         $exists->execute([$hash]);
