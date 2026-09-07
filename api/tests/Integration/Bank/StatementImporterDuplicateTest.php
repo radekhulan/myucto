@@ -78,6 +78,7 @@ final class StatementImporterDuplicateTest extends TestCase
         }
         $pdo = $this->db->pdo();
         foreach ($this->statementIds as $id) {
+            $pdo->prepare('DELETE FROM bank_transaction_imports WHERE original_statement_id = ? OR statement_id = ?')->execute([$id, $id]);
             $pdo->prepare('DELETE FROM bank_transactions WHERE statement_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
         }
@@ -186,6 +187,33 @@ final class StatementImporterDuplicateTest extends TestCase
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
+    public function testImportLockExcludesSecondConnectionUntilMatchingFinishes(): void
+    {
+        $second = Connection::withoutSharedTestConnection(static fn (): PDO => Bootstrap::buildContainer()->get(Connection::class)->pdo());
+        $name = \MyInvoice\Infrastructure\Database\NamedLockName::for($this->db, 'bank-import', $this->supplierId);
+        $matcher = $this->createMock(StatementMatcher::class);
+        $matcher->expects(self::once())->method('matchBatch')->willReturnCallback(function (array $ids) use ($second, $name): array {
+            self::assertCount(1, $ids);
+            self::assertFalse($this->db->pdo()->inTransaction());
+            $attempt = $second->prepare('SELECT GET_LOCK(?, 0)');
+            $attempt->execute([$name]);
+            self::assertSame(0, (int) $attempt->fetchColumn(), 'Import serialization must outlive the storage transaction.');
+            return [];
+        });
+        $reconciler = $this->createStub(EmailNoticeReconciler::class);
+        $reconciler->method('takeOverFromEmailNotice')->willReturn(null);
+        $this->importer = new StatementImporter($this->db, new GpcParser(), $matcher, $reconciler);
+        try {
+            $currencyId = $this->registerCurrency('1000000005', '2010');
+            $this->import($this->gpc('1000000005', ['1001'], '097'), $currencyId);
+            $attempt = $second->prepare('SELECT GET_LOCK(?, 0)');
+            $attempt->execute([$name]);
+            self::assertSame(1, (int) $attempt->fetchColumn(), 'Completed import must release its lock.');
+        } finally {
+            $second->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]);
+        }
+    }
+
     /** @return array{statement_id:int, transactions:int, matched:int, duplicate:bool, parsed_transactions:int, skipped_duplicates:int, warnings:list<array<string,mixed>>} */
     private function import(string $content, ?int $currencyId): array
     {
@@ -233,6 +261,7 @@ final class StatementImporterDuplicateTest extends TestCase
     private function cleanupLeftovers(): void
     {
         $pdo = $this->db->pdo();
+        $pdo->prepare('DELETE bti FROM bank_transaction_imports bti JOIN bank_statements bs ON bs.id = bti.original_statement_id WHERE bs.file_name = ?')->execute([self::FILE_NAME]);
         $pdo->prepare(
             'DELETE bt FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bs.file_name = ?'

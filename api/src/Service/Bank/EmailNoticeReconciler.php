@@ -309,7 +309,7 @@ final class EmailNoticeReconciler
                     bs.account_number AS stmt_account, bs.bank_code AS stmt_bank,
                     bs.currency AS stmt_currency
               FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE bt.source = 'statement' AND bs.source IN ('gpc','pdf')
+              WHERE bt.source = 'statement' AND bs.source IN " . BankStatementSource::sqlList() . "
                 AND bs.supplier_id = ?
                 AND ABS(bt.amount - ?) <= ?
                 AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND DATE_ADD(?, INTERVAL ? DAY)"

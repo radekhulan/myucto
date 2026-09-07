@@ -115,11 +115,11 @@ final class MatchSuggestionService
                FROM bank_match_suggestions s
                JOIN bank_transactions bt ON bt.id = s.bank_transaction_id
                JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE bs.id = ? AND s.supplier_id = ? AND s.status = 'pending'
+              WHERE " . \MyInvoice\Service\Bank\StatementTransactionScope::sql($statementId) . " AND s.supplier_id = ? AND s.status = 'pending'
                 AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sqlForColumn('s.supplier_id') . "
               ORDER BY s.created_at, s.id"
         );
-        $stmt->execute([$statementId, $supplierId]);
+        $stmt->execute([$supplierId]);
         return array_map(static function (array $row): array {
             return [
                 'id' => (int) $row['id'], 'bank_transaction_id' => (int) $row['bank_transaction_id'],

@@ -35,6 +35,18 @@ final class AccountNumberNormalizer
      */
     public static function equals(string $a, string $b): bool
     {
+        $ibanA = self::czechSlovakIbanAccountPart($a);
+        $ibanB = self::czechSlovakIbanAccountPart($b);
+        if ($ibanA !== null || $ibanB !== null) {
+            $banks = [];
+            foreach ([$a, $b] as $value) {
+                $compact = strtoupper((string) preg_replace('/\s+/', '', $value));
+                $banks[] = preg_match('/^(?:CZ|SK)\d{2}(\d{4})\d{16}$/D', $compact, $m)
+                    || preg_match('#/(\d{4})$#D', $compact, $m) ? $m[1] : null;
+            }
+            if ($banks[0] !== null && $banks[1] !== null && $banks[0] !== $banks[1]) return false;
+            return self::equalsCzech($ibanA ?? $a, $ibanB ?? $b);
+        }
         if (self::normalize($a) === self::normalize($b)) {
             return true;
         }
@@ -78,6 +90,23 @@ final class AccountNumberNormalizer
         return true;
     }
 
+    public static function equalsCzech(string $a, string $b): bool
+    {
+        $identities = [];
+        foreach ([$a, $b] as $raw) {
+            $compact = preg_replace('/\s+/', '', $raw) ?? '';
+            $national = self::czechIbanAccountPart($compact)
+                ?? preg_replace('#/\d{4}$#', '', $compact);
+            if (!is_string($national) || preg_match('/^(?:(?:\d{1,6}-)?\d{1,10}|\d{16})$/D', $national) !== 1) {
+                return false;
+            }
+            $base = self::czechAccountBase($national);
+            if ($base === null) return false;
+            $identities[] = [self::czechAccountPrefix($national), $base];
+        }
+        return $identities[0] === $identities[1];
+    }
+
     /**
      * Domácí část (předčíslí+číslo, 16 cifer) z českého IBANu — porovnatelná
      * s GPC account_number. Vrací NULL, pokud vstup není validně tvarovaný CZ IBAN.
@@ -92,6 +121,12 @@ final class AccountNumberNormalizer
             return null;
         }
         return $m[1];
+    }
+
+    public static function czechSlovakIbanAccountPart(string $iban): ?string
+    {
+        $compact = strtoupper((string) preg_replace('/\s+/', '', $iban));
+        return preg_match('/^(?:CZ|SK)\d{2}\d{4}(\d{16})$/D', $compact, $m) === 1 ? $m[1] : null;
     }
 
     /** Předčíslí českého účtu z národního, GPC nebo IBAN zápisu. */
@@ -164,16 +199,16 @@ final class AccountNumberNormalizer
     public static function matchesAny(string $statementAccount, ?string $accountNumber, ?string $iban = null): bool
     {
         if (is_string($accountNumber) && trim($accountNumber) !== '') {
-            if (self::equals($accountNumber, $statementAccount)) {
+            if (self::equalsCzech($accountNumber, $statementAccount) || self::equals($accountNumber, $statementAccount)) {
                 return true;
             }
             // Defenzivně: IBAN vepsaný do pole account_number porovnej přes domácí část.
-            $part = self::czechIbanAccountPart($accountNumber);
+            $part = self::czechSlovakIbanAccountPart($accountNumber);
             if ($part !== null && self::equals($part, $statementAccount)) {
                 return true;
             }
         }
-        $ibanPart = is_string($iban) ? self::czechIbanAccountPart($iban) : null;
+        $ibanPart = is_string($iban) ? self::czechSlovakIbanAccountPart($iban) : null;
         return $ibanPart !== null && self::equals($ibanPart, $statementAccount);
     }
 

@@ -3,7 +3,7 @@ import { api } from './client'
 export interface BankStatement {
   id: number
   /** Zdroj výpisu: 'gpc' = nahraný/importovaný GPC výpis, 'pdf' = rozparsovaný PDF výpis (banka bez GPC exportu), 'email_notice' = měsíční agregát e-mailových avíz, 'idoklad' = měsíční agregát pohybů z iDokladu. */
-  source?: 'gpc' | 'pdf' | 'email_notice' | 'idoklad'
+  source?: 'gpc' | 'pdf' | 'email_notice' | 'idoklad' | 'bank_api'
   file_name: string
   account_number: string
   /** Kód banky (4místný), pokud je u výpisu evidovaný — pro zobrazení „účet / kód". */
@@ -13,8 +13,8 @@ export interface BankStatement {
   currency: string | null
   statement_date: string
   statement_number: string | null
-  prev_balance: number
-  curr_balance: number
+  prev_balance: number | null
+  curr_balance: number | null
   transaction_count: number
   matched_count: number
   ignored_count?: number
@@ -318,7 +318,7 @@ export interface AccountBalance {
   /** Datum, ke kterému aktuální stav platí (výpis / avízo). */
   statement_date: string
   /** Odkud aktuální stav pochází: GPC výpis, nebo disponibilní zůstatek z avíza. */
-  current_source: 'gpc' | 'pdf' | 'email_notice' | 'idoklad'
+  current_source: 'gpc' | 'pdf' | 'email_notice' | 'idoklad' | 'bank_api'
   statement_count: number
   months: AccountBalanceMonth[]
 }

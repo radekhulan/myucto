@@ -168,6 +168,8 @@ export interface CreatePaymentOrderResponse {
 export type PaymentOrderFormat = 'abo' | 'csv' | 'pdf' | 'sepa'
 
 export const paymentOrdersApi = {
+  delete: (id: number) => api.delete(`/purchase-invoices/payment-orders/${id}`),
+  archiveAfterBankCancellation: (id: number) => api.post(`/purchase-invoices/payment-orders/${id}/archive`, { bank_cancellation_confirmed: true }),
   /**
    * Kandidáti + plátcovské účty, volitelně filtrované měnou plátce. Stránkovaně (load-more).
    *

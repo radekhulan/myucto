@@ -48,7 +48,121 @@ final class StatementImporter
     public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null): array
     {
         $parsed = $this->parser->parse($content);
+        $account = $currencyId !== null ? $this->loadCurrencyById($currencyId) : $this->lookupAccount($parsed['header']['account_number']);
+        $owner = $currencyId !== null ? $account : $this->lookupRegisteredOwner($parsed['header']['account_number']);
+        if (!empty($account['id']) && !empty($owner['supplier_id']) && $owner['supplier_id'] === $account['supplier_id']) {
+            return $this->importScoped($parsed, $content, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'gpc', false);
+        }
         return $this->persist($parsed, $content, $fileName, $userId, $currencyId, 'gpc');
+    }
+
+    public function importConnected(string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId): array
+    {
+        return $this->importConnectedParsed($this->parser->parse($content), $content, $fileName, $userId, $currencyId, $supplierId, 'gpc');
+    }
+
+    public function importConnectedParsed(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source = 'bank_api'): array
+    {
+        return $this->importScoped($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, true);
+    }
+
+    private function importScoped(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive): array
+    {
+        $pdo = $this->db->pdo();
+        if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'mysql') {
+            return $this->importScopedLocked($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, $requireActive);
+        }
+        $name = \MyInvoice\Infrastructure\Database\NamedLockName::for($this->db, 'bank-import', (string) $supplierId);
+        $lock = $pdo->prepare('SELECT GET_LOCK(?, 30)');
+        $lock->execute([$name]);
+        if ((int) $lock->fetchColumn() !== 1) throw new \RuntimeException('Probíhá jiný import bankovních pohybů této firmy. Opakujte načtení později.');
+        try {
+            return $this->importScopedLocked($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, $requireActive);
+        } finally {
+            $release = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+            $release->execute([$name]);
+        }
+    }
+
+    private function importScopedLocked(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive): array
+    {
+        if (!in_array($source, ['gpc', 'bank_api'], true)) {
+            throw new \InvalidArgumentException('Unsupported connected statement source.');
+        }
+        $pdo = $this->db->pdo();
+        if ($pdo->inTransaction()) {
+            throw new \LogicException('Connected import requires its own transaction.');
+        }
+        $accountQuery = $pdo->prepare('SELECT account_number, iban, code, bank_code FROM currencies WHERE id = ? AND supplier_id = ?' . ($requireActive ? ' AND is_active = 1' : ''));
+        $accountQuery->execute([$currencyId, $supplierId]);
+        $account = $accountQuery->fetch(PDO::FETCH_ASSOC);
+        if (!$account || !AccountNumberNormalizer::matchesAny(
+            (string) $parsed['header']['account_number'], $account['account_number'], $account['iban'],
+        )) {
+            throw new \InvalidArgumentException('Bankovní výpis neodpovídá připojenému účtu firmy.');
+        }
+        $pdo->beginTransaction();
+        try {
+            if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                $lock = $pdo->prepare('SELECT id FROM currencies WHERE supplier_id = ? ORDER BY id FOR UPDATE');
+                $lock->execute([$supplierId]);
+                $lock->fetchAll(PDO::FETCH_COLUMN);
+            }
+            $accountQuery->execute([$currencyId, $supplierId]);
+            if ($accountQuery->fetch(PDO::FETCH_ASSOC) !== $account) {
+                throw new \InvalidArgumentException('Nastavení účtu se během importu změnilo. Opakujte načtení.');
+            }
+            $processingIds = [];
+            $result = $this->persist($parsed, $content, $fileName, $userId, $currencyId, $source, true, $processingIds);
+            $scope = $pdo->prepare("SELECT id FROM bank_statements WHERE id = ? AND supplier_id = ? AND source = ? AND currency = ? AND COALESCE(bank_code, '') = ?");
+            $scope->execute([$result['statement_id'], $supplierId, $source, $account['code'], $account['bank_code'] ?? '']);
+            if ($scope->fetchColumn() === false) {
+                throw new \InvalidArgumentException('Výpis nelze přiřadit připojenému účtu firmy.');
+            }
+            $affectedStatements = [$result['statement_id']];
+            $transactionScope = $pdo->prepare('SELECT bs.id, bs.supplier_id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ?');
+            foreach ($processingIds as $txId) {
+                $transactionScope->execute([$txId]);
+                $owner = $transactionScope->fetch(PDO::FETCH_ASSOC);
+                if (!$owner || (int) $owner['supplier_id'] !== $supplierId) {
+                    throw new \InvalidArgumentException('Pohyb nelze přiřadit připojenému účtu firmy.');
+                }
+                $affectedStatements[] = (int) $owner['id'];
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+
+        $pendingIds = [];
+        $state = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ?');
+        foreach (array_unique($processingIds) as $txId) {
+            $state->execute([$txId]);
+            if ($state->fetchColumn() === 'unmatched') {
+                $pendingIds[] = $txId;
+            } else {
+                $this->bankPosting?->handleTransaction($txId, $userId);
+            }
+        }
+        $this->processTransactions($pendingIds, $userId);
+        $count = $pdo->prepare("SELECT COUNT(*) FROM bank_transactions WHERE statement_id = ? AND match_status IN ('auto_exact', 'auto_partial', 'manual')");
+        $update = $pdo->prepare('UPDATE bank_statements SET matched_count = ? WHERE id = ?');
+        foreach (array_unique($affectedStatements) as $statementId) {
+            $count->execute([$statementId]);
+            $matched = (int) $count->fetchColumn();
+            $update->execute([$matched, $statementId]);
+            if ($statementId === $result['statement_id']) $result['matched'] = $matched;
+        }
+        $result['matched'] = (int) $pdo->query(
+            "SELECT COUNT(*) FROM bank_transactions bt WHERE " . StatementTransactionScope::sql((int) $result['statement_id'])
+            . " AND bt.match_status IN ('auto_exact', 'auto_partial', 'manual')"
+        )->fetchColumn();
+        try {
+            $this->payrollSettlements?->recognizeForSupplier($supplierId, $userId);
+        } catch (\Throwable) {
+        }
+        return $result;
     }
 
     /**
@@ -69,7 +183,7 @@ final class StatementImporter
      * @param string $rawBytes Originální bajty souboru — hashují se pro dedup a ukládají
      *   se buď do file_content (source='gpc') nebo pdf_content (source='pdf').
      */
-    private function persist(array $parsed, string $rawBytes, string $fileName, ?int $userId, ?int $currencyId, string $source): array
+    private function persist(array $parsed, string $rawBytes, string $fileName, ?int $userId, ?int $currencyId, string $source, bool $deferProcessing = false, ?array &$processingIds = null): array
     {
         $hash = hash('sha256', $rawBytes);
         $pdo = $this->db->pdo();
@@ -79,6 +193,11 @@ final class StatementImporter
         $exists->execute([$hash]);
         $existingId = $exists->fetchColumn();
         if ($existingId !== false) {
+            if ($deferProcessing) {
+                $query = $pdo->prepare('SELECT bt.id FROM bank_transactions bt WHERE ' . StatementTransactionScope::sql((int) $existingId) . ' ORDER BY bt.id');
+                $query->execute();
+                $processingIds = array_map('intval', $query->fetchAll(PDO::FETCH_COLUMN));
+            }
             return [
                 'statement_id' => (int) $existingId,
                 'transactions' => 0,
@@ -124,6 +243,12 @@ final class StatementImporter
         $statementCurrency = $accountCurrency
             ?? $this->detectStatementCurrency($parsed['transactions']);
 
+        $crossSource = $deferProcessing && $statementSupplierId !== null
+            ? (new AuthoritativeTransactionReconciler($pdo))->candidates(
+                $parsed['transactions'], $statementSupplierId, (string) $h['account_number'],
+                (string) $accountBankCode, (string) $statementCurrency, $source,
+            ) : [];
+
         if ($statementSupplierId !== null) {
             $this->ownAccounts?->registerSeen(
                 $statementSupplierId,
@@ -138,7 +263,7 @@ final class StatementImporter
         // pdf_content (existující sloupce z migrace 0052 — „Stáhnout PDF" tak funguje
         // bez jakékoli FE změny i pro tyto výpisy; file_content zůstává NULL, protože
         // žádný GPC ekvivalent neexistuje).
-        $fileContent   = $source === 'gpc' ? $rawBytes : null;
+        $fileContent   = in_array($source, ['gpc', 'bank_api'], true) ? $rawBytes : null;
         $pdfContent    = $source === 'pdf' ? $rawBytes : null;
         $pdfName       = $source === 'pdf' ? $fileName : null;
         $pdfHash       = $source === 'pdf' ? $hash : null;
@@ -170,6 +295,15 @@ final class StatementImporter
         $findDuplicateTx = $pdo->prepare(
             'SELECT id FROM bank_transactions WHERE import_fingerprint = ? LIMIT 1'
         );
+        $linkImport = $deferProcessing ? $pdo->prepare(
+            'INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id)
+             SELECT ?, ?, ?, bs.supplier_id, bs.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ?'
+        ) : null;
+        $findAlias = $deferProcessing ? $pdo->prepare(
+            'SELECT bti.bank_transaction_id FROM bank_transaction_imports bti
+             JOIN bank_statements bs ON bs.id = bti.statement_id
+             WHERE bti.import_fingerprint = ? AND bs.supplier_id = ? LIMIT 1'
+        ) : null;
 
         // Bankovní reference je identitou pohybu jen tehdy, když je v souboru JEDINEČNÁ.
         // Některé banky do pole čísla dokladu píšou konstantu nebo denní pořadí — kdyby
@@ -188,7 +322,7 @@ final class StatementImporter
         $inserted = 0;
         $skipped = 0;
         $matchIds = [];
-        foreach ($parsed['transactions'] as $tx) {
+        foreach ($parsed['transactions'] as $index => $tx) {
             // Měna registrovaného účtu přebíjí i per-tx pole (#109): výpis je
             // jednoměnový a Fio do 075 píše konstantně CZK i u EUR účtu — per-tx
             // hodnota by rozbila currency guard v matcheru. Per-tx kód se použije
@@ -236,14 +370,28 @@ final class StatementImporter
                 }
             }
             $alreadyStored = false;
+            $duplicateId = $crossSource[$index] ?? false;
+            if ($duplicateId === false && $findAlias !== null) {
+                $findAlias->execute([$fingerprint, $statementSupplierId]);
+                $duplicateId = $findAlias->fetchColumn();
+            }
+            if ($duplicateId !== false) {
+                $processingIds[] = (int) $duplicateId;
+                $linkImport?->execute([$statementId, $duplicateId, $fingerprint, $duplicateId]);
+                $skipped++;
+                continue;
+            }
             foreach ($candidates as $candidate) {
                 $findDuplicateTx->execute([$candidate]);
-                if ($findDuplicateTx->fetchColumn() !== false) {
+                $duplicateId = $findDuplicateTx->fetchColumn();
+                if ($duplicateId !== false) {
+                    if ($deferProcessing) $processingIds[] = (int) $duplicateId;
                     $alreadyStored = true;
                     break;
                 }
             }
             if ($alreadyStored) {
+                $linkImport?->execute([$statementId, $duplicateId, $fingerprint, $duplicateId]);
                 $skipped++;
                 continue;
             }
@@ -257,38 +405,28 @@ final class StatementImporter
             } catch (\PDOException $e) {
                 if (($e->errorInfo[0] ?? null) === '23000'
                     && str_contains($e->getMessage(), 'uq_bt_import_fingerprint')) {
+                    if ($deferProcessing) {
+                        $findDuplicateTx->execute([$fingerprint]);
+                        $processingIds[] = (int) $findDuplicateTx->fetchColumn();
+                    }
                     $skipped++;
                     continue;
                 }
                 throw $e;
             }
             $txId = (int) $pdo->lastInsertId();
+            if ($deferProcessing) $processingIds[] = $txId;
             $inserted++;
-
-            // Cross-source dedup: pokud tato platba už dorazila e-mailovým avízem a je
-            // spárovaná, převezmi párování (i manuální/split) na oficiální GPC transakci
-            // místo dvojího párování (jinak falešný přeplatek). GPC = zdroj pravdy.
-            $takeover = $this->reconciler->takeOverFromEmailNotice($txId);
-            if ($takeover !== null) {
-                $matched++;
-                $this->bankPosting?->handleTransaction($txId, $userId);
-                continue;
-            }
 
             $matchIds[] = $txId;
         }
 
-        foreach ($this->matcher->matchBatch($matchIds) as $txId => $r) {
-            if (in_array($r['status'], ['auto_exact', 'auto_partial'], true)) {
-                $matched++;
-            }
-            $this->bankPosting?->handleTransaction((int) $txId, $userId, !empty($r['requires_review']));
-        }
+        $matched = $deferProcessing ? 0 : $this->processTransactions($matchIds, $userId);
 
         $pdo->prepare('UPDATE bank_statements SET matched_count = ?, transaction_count = ? WHERE id = ?')
             ->execute([$matched, $inserted, $statementId]);
 
-        if ($statementSupplierId !== null && $inserted > 0) {
+        if (!$deferProcessing && $statementSupplierId !== null && $inserted > 0) {
             try {
                 $this->payrollSettlements?->recognizeForSupplier($statementSupplierId, $userId);
             } catch (\Throwable) {
@@ -325,6 +463,28 @@ final class StatementImporter
             'skipped_duplicates'  => $skipped,
             'warnings'            => $warnings,
         ];
+    }
+
+    private function processTransactions(array $transactionIds, ?int $userId): int
+    {
+        if ($transactionIds === []) return 0;
+        $matched = 0;
+        $matchIds = [];
+        foreach ($transactionIds as $txId) {
+            if ($this->reconciler->takeOverFromEmailNotice($txId) !== null) {
+                $matched++;
+                $this->bankPosting?->handleTransaction($txId, $userId);
+            } else {
+                $matchIds[] = $txId;
+            }
+        }
+        foreach ($this->matcher->matchBatch($matchIds) as $txId => $result) {
+            if (in_array($result['status'], ['auto_exact', 'auto_partial'], true)) {
+                $matched++;
+            }
+            $this->bankPosting?->handleTransaction((int) $txId, $userId, !empty($result['requires_review']));
+        }
+        return $matched;
     }
 
     /**

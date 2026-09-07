@@ -83,6 +83,7 @@ final class StatementPdfAttachTest extends TestCase
     private function cleanup(): void
     {
         $pdo = $this->db->pdo();
+        $pdo->prepare('DELETE bti FROM bank_transaction_imports bti JOIN bank_statements bs ON bs.id = bti.original_statement_id WHERE bs.file_name LIKE ?')->execute(['%' . self::FILE_MARKER . '%']);
         $pdo->prepare('DELETE FROM bank_statements WHERE file_name LIKE ?')->execute(['%' . self::FILE_MARKER . '%']);
         $pdo->prepare('DELETE FROM currencies WHERE supplier_id = ? AND label = ?')
             ->execute([$this->supplierId, self::FILE_MARKER]);
@@ -169,12 +170,55 @@ final class StatementPdfAttachTest extends TestCase
         self::assertSame($gpcId, $this->target($this->parsedPdf(self::TX)));
     }
 
+    public function testPdfAttachesToApiStatementWithMatchingNumberAndMovements(): void
+    {
+        $transactions = [['2099-07-02', 100.0]];
+        $id = $this->insertGpcStatement($transactions);
+        $this->db->pdo()->prepare("UPDATE bank_statements SET source='bank_api' WHERE id=?")->execute([$id]);
+        self::assertSame($id, $this->target($this->parsedPdf($transactions)));
+    }
+
+    public function testPdfPrefersGpcEvidenceWhenApiAndGpcShareCanonicalMovements(): void
+    {
+        $apiId = $this->insertGpcStatement(self::TX);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE bank_statements SET source = 'bank_api' WHERE id = ?")->execute([$apiId]);
+        $gpcId = $this->insertGpcStatement([]);
+        $pdo->prepare('INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id)
+            SELECT ?, id, SHA2(CONCAT(?, id), 256), ?, statement_id FROM bank_transactions WHERE statement_id = ?')
+            ->execute([$gpcId, 'synthetic-pdf-alias', $this->supplierId, $apiId]);
+        self::assertSame($gpcId, $this->target($this->parsedPdf(self::TX)));
+    }
+
+    public function testCompleteGpcEvidenceWinsOverPartiallyCoveredApi(): void
+    {
+        $transactions = [['2099-07-02', 1.0], ['2099-07-03', 2.0], ['2099-07-04', 3.0], ['2099-07-05', 4.0], ['2099-07-06', 5.0]];
+        $apiId = $this->insertGpcStatement(array_slice($transactions, 0, 4));
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE bank_statements SET source = 'bank_api' WHERE id = ?")->execute([$apiId]);
+        $gpcId = $this->insertGpcStatement(array_slice($transactions, 4));
+        $pdo->prepare('INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id)
+            SELECT ?, id, SHA2(CONCAT(?, id), 256), ?, statement_id FROM bank_transactions WHERE statement_id = ?')
+            ->execute([$gpcId, 'synthetic-pdf-superset', $this->supplierId, $apiId]);
+        self::assertSame($gpcId, $this->target($this->parsedPdf($transactions)));
+    }
+
     /** Číslo výpisu je v GPC nulami vycpané („007"), v PDF holé („7") — musí sednout. */
     public function testStatementNumberPaddingIsIgnored(): void
     {
         $gpcId = $this->insertGpcStatement(self::TX, statementNumber: '007');
 
         self::assertSame($gpcId, $this->target($this->parsedPdf(self::TX, statementNumber: '7')));
+    }
+
+    public function testApiIbanMatchesDomesticPdfAccount(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE currencies SET account_number = ?, bank_code = ? WHERE id = ?')
+            ->execute(['1000000005', '0800', $this->currencyId]);
+        $apiId = $this->insertGpcStatement(self::TX, account: 'CZ7508000000001000000005');
+        $pdo->prepare("UPDATE bank_statements SET source = 'bank_api', bank_code = '0800' WHERE id = ?")->execute([$apiId]);
+        self::assertSame($apiId, $this->target($this->parsedPdf(self::TX, account: '1000000005')));
     }
 
     /** Prázdný měsíc (banka pošle výpis bez pohybů) — přiložit taky. */
@@ -239,13 +283,14 @@ final class StatementPdfAttachTest extends TestCase
         self::assertSame($gpcId, $this->target($this->parsedPdf($pdfTx)), '4 z 5 pohybů = 80 %');
     }
 
-    /** Dva stejně vypadající kandidáti → nechat na uživateli, založit nový výpis. */
+    /** Dva odlišní kandidáti vyžadují ruční volbu bez založení nových pohybů. */
     public function testAmbiguousCandidatesDoNotAttach(): void
     {
         $this->insertGpcStatement(self::TX);
         $this->insertGpcStatement(self::TX);
 
-        self::assertNull($this->target($this->parsedPdf(self::TX)));
+        $this->expectException(\InvalidArgumentException::class);
+        $this->target($this->parsedPdf(self::TX));
     }
 
     /** Výpis mimo datové okno není tentýž měsíc. */

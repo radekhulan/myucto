@@ -36,12 +36,14 @@
     "automation",
     "bank",
     "bank_accounts",
+    "bank_connection",
     "bank_template_admin",
     "cash",
     "cash_settlement",
     "checks",
     "codebookTransfer",
     "costs",
+    "creditas_bank",
     "cron_jobs",
     "dashboard",
     "databox",
@@ -61,6 +63,7 @@
     "imports",
     "instance_export",
     "integrations",
+    "kb_plus",
     "lock",
     "logbook",
     "manualQueue",
@@ -74,6 +77,7 @@
     "payroll",
     "payrollDocumentAccess",
     "payroll_absence",
+    "payroll_bank",
     "payroll_travel",
     "period_filter",
     "permissions",
@@ -117,12 +121,14 @@
       "automation",
       "bank",
       "bank_accounts",
+      "bank_connection",
       "bank_template_admin",
       "cash",
       "cash_settlement",
       "checks",
       "codebookTransfer",
       "costs",
+      "creditas_bank",
       "cron_jobs",
       "dashboard",
       "databox",
@@ -142,6 +148,7 @@
       "imports",
       "instance_export",
       "integrations",
+      "kb_plus",
       "lock",
       "logbook",
       "manualQueue",
@@ -155,6 +162,7 @@
       "payroll",
       "payrollDocumentAccess",
       "payroll_absence",
+      "payroll_bank",
       "payroll_travel",
       "period_filter",
       "permissions",
@@ -352,6 +360,7 @@
       "purchase_invoice"
     ],
     "purchase-invoices-payment-orders": [
+      "bank_connection",
       "payment_method",
       "payment_order",
       "purchase_invoice"
@@ -411,7 +420,9 @@
       "payroll"
     ],
     "payroll-payments": [
-      "payroll"
+      "bank_connection",
+      "payroll",
+      "payroll_bank"
     ],
     "payroll-posting-reconciliation": [
       "payroll"
@@ -634,9 +645,12 @@
       "automation",
       "bank",
       "bank_accounts",
+      "bank_connection",
+      "creditas_bank",
       "document_requests",
       "documents",
       "errors",
+      "kb_plus",
       "payment_method",
       "purchase_invoice",
       "vendor"
@@ -647,6 +661,7 @@
     "bank-detail": [
       "automation",
       "bank",
+      "bank_connection",
       "document_requests",
       "documents",
       "errors",

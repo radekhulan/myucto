@@ -18,14 +18,15 @@ import {
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { bankNameByCode } from '@/utils/czBankCodes'
 import { useToast } from '@/composables/useToast'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, OUTLINE, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import BankPaymentSubmission from '@/components/bank/BankPaymentSubmission.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -41,6 +42,32 @@ const selectedPayerId = ref<number | ''>('')
 const loading = ref(true)
 const error = ref('')
 const creating = ref(false)
+const deletingOrderId = ref<number | null>(null)
+
+async function deleteOrder(item: PaymentOrderListItem) {
+  if (!auth.canWrite('purchase_invoices.payment_orders') || deletingOrderId.value !== null) return
+  if (!window.confirm(t('payment_order.delete_confirm', { id: item.id }))) return
+  deletingOrderId.value = item.id
+  try {
+    let archived = false
+    try {
+      await paymentOrdersApi.delete(item.id)
+    } catch (e) {
+      if (apiErrorCode(e) !== 'payment_order_delete_protected') throw e
+      if (!window.confirm(t('bank_connection.archive_cancelled_confirm', { id: item.id }))) return
+      await paymentOrdersApi.archiveAfterBankCancellation(item.id)
+      archived = true
+    }
+    history.value = history.value.filter(order => order.id !== item.id)
+    if (bankOrderId.value === item.id) bankOrderId.value = null
+    toast.success(t(archived ? 'bank_connection.archived_cancelled' : 'payment_order.deleted'))
+    await loadHistory()
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('payment_order.delete_failed')))
+  } finally {
+    deletingOrderId.value = null
+  }
+}
 
 // Stránkování kandidátů (load-more).
 const candPage = ref(1)
@@ -57,6 +84,7 @@ const markPaid = ref(false)
 
 // Historie
 const history = ref<PaymentOrderListItem[]>([])
+const bankOrderId = ref<number | null>(null)
 const historyLoading = ref(false)
 const historyLoadingMore = ref(false)
 const historyPage = ref(1)
@@ -462,8 +490,9 @@ const reasonText = (reason: string): string => {
   return v === key ? reason : v
 }
 
-async function createAndDownload(format: PaymentOrderFormat) {
+async function createAndDownload(format: PaymentOrderFormat | 'bank') {
   if (!auth.canWrite('purchase_invoices.payment_orders') || creating.value) return
+  if (format === 'bank' && (!auth.canWrite('settings.bank_accounts') || !isCzk.value)) return
   if (selectedIds.value.length === 0) {
     toast.error(t('payment_order.no_selection'))
     return
@@ -488,7 +517,7 @@ async function createAndDownload(format: PaymentOrderFormat) {
       payment_date: paymentDate.value,
       constant_symbol: constantSymbol.value || undefined,
       note: note.value || undefined,
-      mark_paid: markPaid.value || undefined,
+      mark_paid: format === 'bank' ? false : markPaid.value || undefined,
     })
 
     if (res.clamped_date) {
@@ -500,12 +529,13 @@ async function createAndDownload(format: PaymentOrderFormat) {
     }
 
     toast.success(t('payment_order.created', { n: res.view.item_count }))
-    paymentOrdersApi.downloadPaymentOrder(res.order_id, format)
+    if (format !== 'bank') paymentOrdersApi.downloadPaymentOrder(res.order_id, format)
 
     // Reset výběru + přenačtení (uhrazené/zařazené faktury vypadnou) a historie.
     selectedIds.value = []
     await refreshCandidatesKeepSelection()
     await loadHistory()
+    if (format === 'bank') bankOrderId.value = res.order_id
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
@@ -607,6 +637,11 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
       <span class="px-1.5 text-sm font-mono font-semibold text-neutral-900 whitespace-nowrap">
         {{ formatMoney(selectedTotal, payerCurrency || 'CZK') }}
       </span>
+      <button v-if="auth.canWrite('purchase_invoices.payment_orders') && auth.canWrite('settings.bank_accounts') && isCzk" type="button" @click="createAndDownload('bank')"
+        :disabled="creating || selectedIds.length === 0" :class="btnFilled('primary')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>
+        {{ t('bank_connection.payment_prepare') }}
+      </button>
       <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="markOnly"
         :disabled="creating || selectedIds.length === 0"
         :title="t('payment_order.mark_only_hint')"
@@ -1000,6 +1035,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
     <!-- ═══ Historie příkazů ═══ -->
     <section class="mt-8">
       <h2 class="text-lg font-semibold mb-3">{{ t('payment_order.history_title') }}</h2>
+      <BankPaymentSubmission v-model="bankOrderId" :orders="history" />
 
       <div v-if="historyLoading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <TableSkeleton :rows="3" :cols="5" />
@@ -1033,7 +1069,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                   <span v-else class="text-neutral-300">—</span>
                 </td>
                 <td class="px-4 py-2.5 text-right">
-                  <div class="inline-flex items-center gap-1.5">
+                  <div class="inline-flex flex-wrap items-center justify-end gap-1.5">
                     <button type="button" @click="redownload(item, 'csv')"
                       class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded hover:bg-neutral-100 text-neutral-600">
                       CSV
@@ -1053,6 +1089,12 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                       :title="!item.payer_iban ? t('payment_order.no_payer_iban') : ''"
                       class="cursor-pointer text-xs px-2 py-1 border border-primary-300 rounded hover:bg-primary-50 text-primary-700 disabled:opacity-40 disabled:cursor-not-allowed">
                       SEPA
+                    </button>
+                    <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="deleteOrder(item)"
+                      :disabled="deletingOrderId !== null" :class="OUTLINE.danger"
+                      class="inline-flex items-center gap-1 whitespace-nowrap cursor-pointer text-xs px-2 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>
+                      {{ t('common.delete') }}
                     </button>
                   </div>
                 </td>

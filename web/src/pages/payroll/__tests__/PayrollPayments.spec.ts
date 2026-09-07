@@ -58,6 +58,7 @@ vi.mock('@/api/payroll', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canWrite: m.canWrite,
+    canRead: () => false,
   }),
 }))
 vi.mock('@/composables/useToast', () => ({

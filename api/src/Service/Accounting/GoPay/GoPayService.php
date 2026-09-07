@@ -874,7 +874,7 @@ final class GoPayService
                 'SELECT bt.id,bt.amount,bt.currency,bt.posted_at,bt.variable_symbol,
                         bt.counterparty_account,bt.counterparty_bank
                    FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id
-                  WHERE bs.supplier_id=? AND bt.source="statement" AND bs.source IN ("gpc","pdf")
+                  WHERE bs.supplier_id=? AND bt.source="statement" AND bs.source IN ' . \MyInvoice\Service\Bank\BankStatementSource::sqlList() . '
                     AND bt.amount=? AND COALESCE(bt.currency,bs.currency)=?
                     AND bt.variable_symbol=?
                     AND bt.posted_at BETWEEN DATE_SUB(?,INTERVAL ? DAY) AND DATE_ADD(?,INTERVAL ? DAY)'
@@ -1000,7 +1000,7 @@ final class GoPayService
         $source = (string) ($transaction['source'] ?? '');
         $statementSource = (string) ($transaction['statement_source'] ?? '');
         $valid = ($source === 'email_notice' && $statementSource === 'email_notice')
-            || ($source === 'statement' && in_array($statementSource, ['gpc', 'pdf'], true));
+            || ($source === 'statement' && \MyInvoice\Service\Bank\BankStatementSource::isStatement($statementSource));
         if (!$valid) {
             throw new GoPayException('unsupported_bank_source', 'Pohyb není avízo ani položka bankovního výpisu.', 409);
         }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Support\Sql\PayablePredicate;
 use PDO;
 
 /**
@@ -16,6 +17,46 @@ use PDO;
 final class PaymentOrderRepository
 {
     public function __construct(private readonly Connection $db) {}
+
+    public function archiveAfterBankCancellation(int $id, int $supplierId, int $userId): bool
+    {
+        $query = $this->db->pdo()->prepare('UPDATE payment_orders
+            SET archived_at = CURRENT_TIMESTAMP, archived_by_user_id = ?
+            WHERE id = ? AND supplier_id = ? AND archived_at IS NULL
+              AND EXISTS (SELECT 1 FROM bank_payment_order_submissions s
+                          WHERE s.payment_order_id = payment_orders.id AND s.supplier_id = payment_orders.supplier_id)');
+        $query->execute([$userId, $id, $supplierId]);
+        return $query->rowCount() === 1;
+    }
+
+    public function deleteUnsubmitted(int $id, int $supplierId): string
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $delete = $pdo->prepare(
+                'DELETE FROM payment_orders WHERE id = ? AND supplier_id = ?
+                  AND NOT EXISTS (SELECT 1 FROM bank_payment_order_submissions s
+                                   WHERE s.payment_order_id = payment_orders.id
+                                     AND s.supplier_id = payment_orders.supplier_id)'
+            );
+            $delete->execute([$id, $supplierId]);
+            if ($delete->rowCount() === 0) {
+                $exists = $pdo->prepare('SELECT id FROM payment_orders WHERE id = ? AND supplier_id = ?');
+                $exists->execute([$id, $supplierId]);
+                $result = $exists->fetchColumn() === false ? 'not_found' : 'submitted';
+                $pdo->rollBack();
+                return $result;
+            }
+            $pdo->prepare('DELETE FROM payment_order_items WHERE payment_order_id = ?')->execute([$id]);
+            $pdo->commit();
+            return 'deleted';
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($e instanceof \PDOException && (string) $e->getCode() === '23000') return 'submitted';
+            throw $e;
+        }
+    }
 
     /**
      * Bankovní účty plátce (z `currencies`) pro výběr „z jakého účtu platit".
@@ -154,7 +195,7 @@ final class PaymentOrderRepository
         // LIMIT/OFFSET inlinujeme jako validované inty (vzor StockItemRepository::list) —
         // native prepared statements neumí LIMIT/OFFSET s parametrem typu string.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payment_orders WHERE supplier_id = ? ORDER BY created_at DESC, id DESC'
+            'SELECT * FROM payment_orders WHERE supplier_id = ? AND archived_at IS NULL ORDER BY created_at DESC, id DESC'
             . ' LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset)
         );
         $stmt->execute([$supplierId]);
@@ -164,9 +205,36 @@ final class PaymentOrderRepository
     /** COUNT(*) dávek tenanta (bez LIMIT), pro paginaci historie. */
     public function countHistory(int $supplierId): int
     {
-        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payment_orders WHERE supplier_id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payment_orders WHERE supplier_id = ? AND archived_at IS NULL');
         $stmt->execute([$supplierId]);
         return (int) $stmt->fetchColumn();
+    }
+
+    public function allItemsStillPayable(int $orderId, int $supplierId, string $currency): bool
+    {
+        $outstanding = PayablePredicate::outstandingBalanceCondition('pi');
+        $remaining = '(' . PayablePredicate::remainingExpression('pi') . ') + COALESCE(pi.rounding, 0)';
+        $payableDocument = PayablePredicate::advanceVatDocumentCondition('pi');
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) AS total_count,
+                    SUM(CASE WHEN pi.id IS NOT NULL
+                                  AND pi.status IN ('received','booked')
+                                  AND {$payableDocument}
+                                  AND pi.payment_method = 'bank_transfer'
+                                  AND cur.code = ?
+                                  AND {$outstanding}
+                                  AND GREATEST({$remaining}, 0) + 0.005 >= poi.amount
+                             THEN 1 ELSE 0 END) AS payable_count
+               FROM payment_order_items poi
+          LEFT JOIN purchase_invoices pi
+                 ON pi.id = poi.purchase_invoice_id AND pi.supplier_id = ?
+          LEFT JOIN currencies cur ON cur.id = pi.currency_id AND cur.supplier_id = pi.supplier_id
+              WHERE poi.payment_order_id = ?"
+        );
+        $stmt->execute([strtoupper($currency), $supplierId, $orderId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $total = (int) ($row['total_count'] ?? 0);
+        return $total > 0 && $total === (int) ($row['payable_count'] ?? 0);
     }
 
     /** @return list<array<string,mixed>> */

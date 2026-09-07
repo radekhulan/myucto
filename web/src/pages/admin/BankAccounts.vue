@@ -24,6 +24,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useDemoMode } from '@/composables/useDemoMode'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import BankConnectionsPanel from '@/components/bank/BankConnectionsPanel.vue'
 
 // embedded = vykresleno jako záložky uvnitř BankPage.vue (Finance → Bankovní účty);
 // hlavičku a lištu záložek pak dodává obálka, aktivní tab řídí přes ?tab=.
@@ -894,6 +895,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
           {{ t('bank_accounts.multi_account_hint') }}
         </div>
       </section>
+      <BankConnectionsPanel v-if="tab === 'accounts'" :accounts="currencies" :can-manage="canManageAccounts" />
       </div>
 
       <!-- Stavy na účtech — tabulka + měsíční vývoj + celkový CZK graf (dle GPC výpisů) -->

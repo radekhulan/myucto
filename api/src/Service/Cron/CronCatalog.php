@@ -165,6 +165,15 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                'script' => 'cron-bank-connections',
+                'recommended' => 'every_30_min',
+                'linux_cron' => '*/30 * * * *',
+                'windows_schtasks' => '/sc minute /mo 30',
+                'max_age_hours' => 4,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-scan-purchase-inbox',
                 'recommended' => 'every_10_min',
                 'linux_cron' => '*/10 * * * *',

@@ -564,6 +564,10 @@ return [
     //     ],
     // ],
 
+    'bank_connectors' => [
+        'csas' => ['sandbox' => false],
+    ],
+
     // Auto-import bankovních výpisů (GPC/ABO) z monitorovaného adresáře.
     // Manuální upload přes UI funguje vždy bez ohledu na tuto sekci.
     'bank_import' => [

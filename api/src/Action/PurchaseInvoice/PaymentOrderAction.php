@@ -36,6 +36,42 @@ final class PaymentOrderAction
 {
     private const PERMISSION = 'purchase_invoices.payment_orders';
 
+    public function archive(Request $request, Response $response, array $args): Response
+    {
+        if ($err = $this->denied($request, $response, AccessLevel::WRITE)) return $err;
+        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
+        $body = $request->getParsedBody();
+        if (!is_array($body) || ($body['bank_cancellation_confirmed'] ?? null) !== true) {
+            return Json::error($response, 'bank_cancellation_confirmation_required', 'Potvrďte zrušení dávky v bance.', 422);
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = (int) ($user['id'] ?? 0);
+        if ($userId <= 0) return Json::sessionRequired($response);
+        if (!$this->service->archiveAfterBankCancellation($id, $supplierId, $userId)) {
+            return Json::error($response, 'payment_order_archive_unavailable', 'Příkaz nelze archivovat.', 409);
+        }
+        $this->logger->log('payment_order.archived', $userId, 'payment_order', $id,
+            ['bank_cancellation_confirmed_by_user' => true, 'bank_cancellation_verified_by_api' => false],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'), $supplierId);
+        return $response->withStatus(204);
+    }
+
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if ($err = $this->denied($request, $response, AccessLevel::WRITE)) return $err;
+        $supplierId = SupplierGuard::currentId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $result = $this->service->delete($id, $supplierId);
+        if ($result === 'not_found') return Json::error($response, 'not_found', 'Platební příkaz nenalezen.', 404);
+        if ($result === 'submitted') return Json::error($response, 'payment_order_delete_protected', 'Příkaz s evidovaným pokusem o odeslání do banky nelze smazat.', 409);
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $this->logger->log('payment_order.deleted', (int) ($user['id'] ?? 0) ?: null, 'payment_order', $id, [],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'), $supplierId);
+        return $response->withStatus(204);
+    }
+
     public function __construct(
         private readonly PaymentOrderService $service,
         private readonly ActivityLogger $logger,

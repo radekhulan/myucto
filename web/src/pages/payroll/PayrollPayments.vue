@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import PayrollBankPaymentSubmission from '@/components/bank/PayrollBankPaymentSubmission.vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { payrollApi, type PayrollRun } from '@/api/payroll'
 import {
@@ -2051,6 +2052,7 @@ onMounted(load)
     </template>
 
     <template v-else-if="activeTab === 'batches'">
+      <PayrollBankPaymentSubmission :batches="batches" :can-write="auth.canWrite('payroll.payments')" />
       <div v-if="loading" class="space-y-3">
         <div v-for="index in 3" :key="index" class="h-24 animate-pulse rounded-xl bg-neutral-100" />
       </div>

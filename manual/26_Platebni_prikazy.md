@@ -175,6 +175,32 @@ totožné s původním, nezávisle na pozdějších změnách faktur.
 
 ## 26.11 Omezení a tipy
 
+V historii lze uložený příkaz odstranit tlačítkem **Smazat** po potvrzení.
+Příkaz s evidovaným pokusem o odeslání přes bankovní konektor smazat nelze,
+ani při odmítnutém nebo nejasném výsledku. Smazání nemění stav faktur ani
+jejich označení k úhradě a nezruší platbu, kterou jsi do banky nahrál ručně.
+
+Pro aktivně propojený účet Fio ČR (2010), ČSOB (0300), Raiffeisenbank (5500),
+Banky CREDITAS (2250) nebo KB+ (0100) lze tuzemský příkaz v CZK také
+**odeslat přímo do banky**, pokud napojení má potřebná oprávnění.
+Napojení Fio SR (8330) zatím slouží k načítání pohybů, nikoli k přímému odesílání EUR příkazů.
+Akce **Připravit příkaz pro banku** příkaz uloží bez označení faktur jako
+zaplacených. V sekci pod přehledem faktur pak vyber uložený příkaz a potvrď
+**Odeslat do banky**. Přijatý příkaz je potřeba autorizovat v internetovém
+bankovnictví; odeslání samo nepotvrzuje úhradu. Zahájený import dávky ještě
+nepotvrzuje přijetí jednotlivých plateb. U nejasného výsledku ověř stav
+v bance, opakované odeslání stejného příkazu je blokované. Nastavení a úplný
+postup jsou v kapitole [Bankovní účty](29_Bankovni_ucty.md#2914-odeslani-prikazu-do-banky).
+
+V internetovém bankovnictví CREDITAS najdeš předanou dávku v **Transakce → Zadané → Hromadné**. Zde zkontroluj její stav a příkazy k autorizaci.
+
+Pokud jsi celou dávku v bance zrušil, zvol v historii příkazu **Smazat**.
+U předaného příkazu aplikace nabídne místo trvalého smazání archivaci
+s výslovným potvrzením, že žádná platba z dávky nebude provedena.
+Příkaz zmizí z přehledu, ale jeho položky, historie odeslání a ochrana
+proti opakovanému odeslání zůstanou zachované. Jde o tvé potvrzení,
+nikoli o ověření bankovním API. Stav faktur a označení k úhradě se nemění.
+
 - **ABO jen CZK** + tuzemský účet příjemce. **SEPA jen EUR** + IBAN plátce i příjemce.
   Ostatní cizí měny se platí přes CSV/PDF, nebo zahraničním příkazem ve své bance.
 - **Jeden příkaz = jedna měna** (dle účtu plátce).

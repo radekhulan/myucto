@@ -71,6 +71,7 @@ final class StatementImporterCurrencyTest extends TestCase
         }
         $pdo = $this->db->pdo();
         foreach ($this->statementIds as $id) {
+            $pdo->prepare('DELETE FROM bank_transaction_imports WHERE original_statement_id = ? OR statement_id = ?')->execute([$id, $id]);
             $pdo->prepare('DELETE FROM bank_transactions WHERE statement_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
         }
@@ -101,6 +102,18 @@ final class StatementImporterCurrencyTest extends TestCase
         $this->assertTransactionCurrencies($r['statement_id'], 'EUR',
             'per-tx CZK z Fio výpisu by rozbilo currency guard v matcheru');
         $this->assertStatementSupplier($r['statement_id'], $this->supplierId);
+    }
+
+    public function testCreditasApiHeaderCanBeStoredInRealSchema(): void
+    {
+        $currencyId = $this->registerCurrency('CZK', '1000000005', '2250');
+        $this->db->pdo()->prepare('UPDATE currencies SET is_active = 1 WHERE id = ?')->execute([$currencyId]);
+        $parsed = (new \MyInvoice\Service\Bank\CreditasTransactionParser())->parse([], '1000000005', '2026-09-07');
+        $result = $this->importer->importConnectedParsed($parsed, 'synthetic-creditas-' . bin2hex(random_bytes(8)), 'synthetic.json', null, $currencyId, $this->supplierId);
+        $this->statementIds[] = $result['statement_id'];
+        $query = $this->db->pdo()->prepare('SELECT statement_number, source FROM bank_statements WHERE id = ? AND supplier_id = ?');
+        $query->execute([$result['statement_id'], $this->supplierId]);
+        self::assertSame(['statement_number' => $parsed['header']['statement_number'], 'source' => 'bank_api'], $query->fetch(PDO::FETCH_ASSOC));
     }
 
     public function testFioEurStatementMatchesAccountRegisteredByIbanOnly(): void
@@ -449,6 +462,7 @@ final class StatementImporterCurrencyTest extends TestCase
     private function cleanupSyntheticStatements(): void
     {
         $pdo = $this->db->pdo();
+        $pdo->exec("DELETE bti FROM bank_transaction_imports bti JOIN bank_statements bs ON bs.id = bti.original_statement_id WHERE bs.file_name = 'TEST-109.gpc'");
         $pdo->prepare(
             "DELETE bt FROM bank_transactions bt
               JOIN bank_statements bs ON bs.id = bt.statement_id
