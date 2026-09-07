@@ -125,6 +125,15 @@ final class CronPreflight
         ');
     }
 
+    public static function hasBankConnections(PDO $pdo): bool
+    {
+        return self::probe($pdo, '
+            SELECT 1 FROM bank_connections
+             WHERE enabled = 1 AND token_ciphertext IS NOT NULL
+             LIMIT 1
+        ');
+    }
+
     /**
      * Leží něco ve frontě mzdových dokumentů?
      *

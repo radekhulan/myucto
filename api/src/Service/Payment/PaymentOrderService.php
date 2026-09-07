@@ -29,6 +29,16 @@ use MyInvoice\Support\PaymentMethods;
  */
 final class PaymentOrderService
 {
+    public function archiveAfterBankCancellation(int $id, int $supplierId, int $userId): bool
+    {
+        return $this->orders->archiveAfterBankCancellation($id, $supplierId, $userId);
+    }
+
+    public function delete(int $id, int $supplierId): string
+    {
+        return $this->orders->deleteUnsubmitted($id, $supplierId);
+    }
+
     public function __construct(
         private readonly PurchaseInvoiceRepository $invoices,
         private readonly PaymentOrderRepository $orders,

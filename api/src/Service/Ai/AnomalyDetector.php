@@ -74,6 +74,7 @@ final class AnomalyDetector
         $stmt = $this->db->pdo()->prepare(
             "SELECT 1 FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id
               WHERE bs.supplier_id=? AND bt.id<>? AND bs.account_number=? AND COALESCE(bs.bank_code,'')=COALESCE(?, '')
+                AND bs.source <> 'email_notice'
                 AND REGEXP_REPLACE(COALESCE(bt.variable_symbol,''),'[^0-9]','')=?
                 AND SIGN(bt.amount)=SIGN(?) AND ABS(ABS(bt.amount)-ABS(?))<=0.01
                 AND ABS(DATEDIFF(bt.posted_at,?))<=10 LIMIT 1"

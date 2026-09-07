@@ -10,6 +10,34 @@ use PHPUnit\Framework\TestCase;
 
 final class AccountNumberNormalizerTest extends TestCase
 {
+    public function testIbanComparisonUsesDomesticIdentityAndBank(): void
+    {
+        self::assertTrue(AccountNumberNormalizer::equals('CZ7508000000001000000005', '1000000005/0800'));
+        self::assertTrue(AccountNumberNormalizer::equals('1000000005', 'CZ7508000000001000000005'));
+        self::assertTrue(AccountNumberNormalizer::equals('SK0383300000001000000005', '0000001000000005'));
+        self::assertFalse(AccountNumberNormalizer::equals('CZ7508000000001000000005', '1000000005/0100'));
+        self::assertFalse(AccountNumberNormalizer::equals('CZ7508000000001000000005', 'SK0383300000001000000005'));
+    }
+
+    public function testSlovakIbanMatchesDomesticGpcAccount(): void
+    {
+        $iban = 'SK0383300000001000000005';
+        self::assertSame('0000001000000005', AccountNumberNormalizer::czechSlovakIbanAccountPart($iban));
+        self::assertTrue(AccountNumberNormalizer::matchesAny('0000001000000005', null, $iban));
+        self::assertTrue(AccountNumberNormalizer::matchesAny('0000001000000005', $iban));
+        self::assertFalse(AccountNumberNormalizer::matchesAny('0000002000000018', null, $iban));
+        self::assertNull(AccountNumberNormalizer::czechIbanAccountPart($iban));
+    }
+
+    public function testPrefixedShortAccountMatchesPaddedGpcWithoutLosingPrefix(): void
+    {
+        self::assertTrue(AccountNumberNormalizer::matchesAny('0000190000000019', '19-19'));
+        self::assertTrue(AccountNumberNormalizer::equalsCzech('19-19', '0000190000000019'));
+        self::assertFalse(AccountNumberNormalizer::equalsCzech('19-19', '19'));
+        self::assertFalse(AccountNumberNormalizer::equalsCzech('19-19', '1900000019'));
+        self::assertFalse(AccountNumberNormalizer::equalsCzech('19-1*', '19-19'));
+    }
+
     #[DataProvider('normalizeCases')]
     public function testNormalize(string $input, string $expected): void
     {

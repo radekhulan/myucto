@@ -1,4 +1,4 @@
-# 29. Bankovní účty a e-mailová avíza (IMAP)
+# 29. Bankovní účty, přímé napojení a e-mailová avíza (IMAP)
 
 **Cesta: `Peníze → Bankovní účty`**
 
@@ -85,6 +85,250 @@ nikdy nepřidělí, aby nový účet nezdědil cizí zůstatek.
 > doklad (`221.xxx` / 221) v **otevřeném** období; do uzavřených a schválených let se
 > nezasahuje a rozvahový řádek „Peněžní prostředky na účtech" se rozpadem uvnitř
 > 221 stejně nemění.
+
+### 29.1.3 Přímé napojení na banku
+
+Na záložce **Měny a účty** je pod seznamem účtů sekce **Přímé napojení na banku**.
+Napojení je v testovacím režimu. Pokud používáš účet u některé z uvedených
+bank, kontaktuj nás pro společné ověření připojení. U názvů bank se nezobrazuje
+označení dostupnosti; seznam účtů obsahuje pouze účty podporované konektorem.
+Každý měnový účet má vlastní nastavení a přístupové údaje. Načítání pohybů podporuje
+Fio ČR (kód **2010**) i Fio SR (kód **8330**) přes stejné API. Slovenský účet
+lze zadat i slovenským IBANem, se správným kódem banky a měnou EUR.
+
+V dolním seznamu se zobrazují jen účty s dostupným konektorem. Přehled bank
+a celý box zůstávají viditelné i bez podporovaných účtů.
+
+**ČSOB (0300)** používá službu CEB Business Connector. V CEB aktivuj službu,
+získej komunikační certifikát a povol mu požadovaná oprávnění ke smlouvě.
+V MyÚčto vyplň číslo smlouvy, vyber certifikát `.p12` nebo `.pfx` a zadej
+jeho heslo, pokud je chráněný. Účet musí mít zapnuté **Aktivní účet**.
+Ověření kontroluje certifikát a přístup ke smlouvě, nikoli existenci pohybů.
+Připojit lze i nový účet bez výpisů. Samotný přístup ke smlouvě nepotvrzuje
+bankovní oprávnění ke konkrétnímu účtu; číslo účtu a měna se kontrolují
+při importu každého výpisu. Prázdný seznam nevytváří žádný umělý výpis.
+Datum při načítání určuje vytvoření souboru výpisu v bance. Pro import
+musí být v CEB dostupný formát GPC. Předané příkazy je nutné zkontrolovat
+a autorizovat v bankovnictví.
+
+**Česká spořitelna (0800)** používá Premium Accounts API v3. Na
+[Erste Developer Portal](https://developers.erstegroup.com) vytvoř aplikaci,
+přidej Premium Accounts API a OAuth2 Authorization Code. V jejím nastavení
+zaregistruj přesnou návratovou adresu z formuláře MyÚčta. Produkční přístup
+musí být schválený a služba aktivovaná u banky. Zadej produkční WEB-API-key,
+Client ID a Client Secret a pokračuj do banky k udělení souhlasu.
+MyÚčto vybere pouze účet se shodným číslem a měnou, další účty připoj samostatně.
+Přístupové údaje jsou šifrované, přístup se automaticky obnovuje refresh tokenem.
+Po vypršení nebo odvolání souhlasu připojení zopakuj. Správce má vypnout
+logování citlivých parametrů návratu z banky; samotné upozornění připojení neblokuje.
+
+Pro testování nastav v `cfg.php` volbu `bank_connectors.csas.sandbox` na `true`:
+
+```php
+'bank_connectors' => [
+    'csas' => ['sandbox' => true],
+],
+```
+
+Výchozí hodnota je `false` (produkce). Přepínač společně mění adresy Accounts API,
+OAuth přihlášení a obnovování tokenů; připravená adresa Payments API používá stejné
+prostředí, jeho odesílání ale zatím není implementováno. Sandbox je v nastavení účtu
+výrazně označený a vyžaduje sandboxový WEB-API-key, Client ID a Client Secret.
+V registraci aplikace připoj Accounts API v3 a nastav scope `siblings.accounts`
+jako required. Použij uvedenou callback adresu a samostatnou testovací firmu s číslem
+účtu ze sandboxu. Sandbox vrací statická data, ne pohyby tvého skutečného účtu.
+Po změně prostředí připoj účet znovu: uložený token z jiného prostředí se nikdy
+neodešle do banky. Starší uložené přístupy bez označení prostředí se považují za produkční.
+
+Konektor načítá zaúčtované pohyby (`BOOK`) jako `bank_api` do společné evidence
+výpisů a automatického načítání. Informační položky (`INFO`) se neúčtují.
+Prázdný účet lze připojit. Identita účtu se ověřuje podle IBANu, nikoli podle
+proměnlivého systémového ID. Načítání má bezpečnostní limit 10 000 pohybů;
+při jeho překročení zvol kratší interval. Zůstatek se z pohybů neodhaduje.
+Přímé odesílání příkazů, notifikace a originální soubory výpisů tento konektor
+zatím nepodporuje. Pro platby zůstává export KPC/PDF.
+
+**Raiffeisenbank (5500)** používá Premium API. Nejdříve kontaktuj bankéře,
+který ověří dostupnost pro daný účet a nastaví službu i oprávnění
+**import hromadných plateb a stažení výpisů**. Služba může být zpoplatněna.
+[Postup RB](https://www.rb.cz/podnikatele/ucty-a-platebni-styk/prime-bankovnictvi/premium-api)
+a [návod k certifikátu](https://www.rb.cz/attachments/podnikatele/vytvoreni-certifikatu-premium-api-rbcz.pdf).
+Pokud generování certifikátu v bankovnictví chybí, ověř aktivaci a oprávnění s bankéřem.
+Samotná registrace aplikace nedává přístup k bankovnímu účtu. V portálu
+[developers.rb.cz](https://developers.rb.cz/premium/documentation/01rbczpremiumapi)
+zaregistruj aplikaci a získej Client ID. V nastavení internetového bankovnictví
+vytvoř certifikát pro Premium API, povol přístup k účtu a stáhni soubor `.p12`.
+V napojení zadej Client ID, certifikát a jeho heslo. Ověření kontroluje číslo
+účtu včetně předčíslí a aktivní měnovou složku. Certifikát i heslo se ukládají
+šifrovaně; soukromý klíč se při komunikaci předává pouze v paměti.
+
+RB poskytuje pohyby nejvýše 90 dní zpětně. Aplikace načte všechny stránky
+požadovaného období; původní odpověď lze stáhnout jako JSON. Tento přehled
+pohybů neobsahuje konečný zůstatek výpisu. Certifikát je potřeba pravidelně
+odblokovat v bankovnictví. Při zachování přístupu nech všechna pole prázdná;
+při výměně zadej znovu všechny přístupové údaje.
+
+**KB Business (KB+, 0100)** napojuje bankovní produkt **Extra služba API Business**.
+KB+ je název bankovnictví, nikoli API služby. Nezaměňuj jej se starším
+**KB Business API** pro MojeBanku / MojeBanku Business.
+
+Pro podnikatelský či firemní účet KB požaduje placený bankovní tarif
+**Standard Business, Komfort Business nebo Exclusive Business** a zvlášť
+sjednanou Extra službu API Business. Samotné KB+ nebo Start Business nestačí.
+KB ve svém FAQ uvádí také možnost pro nepodnikající osoby s aktivní službou
+Premium; konkrétní dostupnost ověř u banky.
+
+Bankovní tarif Business není totéž co varianta API Business **Basic / Plus / Pro**.
+Pro pohyby i odesílání dávek potřebuješ **Plus nebo Pro**. Basic nezahrnuje
+odesílání dávek. KB uvádí u Plus interval 61 minut a u Pro 10 minut; u čtení
+se do limitů započítávají datové stránky. Cena a rozsah podléhají aktuálním
+podmínkám banky. Přehled variant a detail ADAA nejsou v popisu Basic jednotné:
+detail ADAA uvádí omezený počet čtení i pro Basic. Dostupnost samotného čtení
+v této variantě proto ověř u KB; tento návod ji neslibuje.
+
+Nejprve v KB+ vyber variantu API služby a uzavři smlouvu, potom pokračuj
+v MyÚčtu. Již udělené souhlasy spravuješ přes **Nastavení → Nastavení služeb →
+Přístupy k účtům → Přístupy třetích stran**. Chybějící volbu či oprávnění řeš
+s KB na `kbplus@kb.cz`.
+[Podmínky a varianty](https://www.kb.cz/cs/kbapi/extra-sluzba-api-business),
+[FAQ a správa souhlasů](https://www.kb.cz/cs/kbapi/caste-dotazy-rozcestnik/caste-dotazy-extra-sluzba-api-business),
+[limity ADAA](https://www.kb.cz/cs/kbapi/extra-sluzba-api-business/primy-pristup-k-uctu-v-kb).
+
+Náš konektor používá **ADAA** pro pohyby a **BATCHDA** pro příkazy. Import
+pohybů do evidence výpisů není stažení originálního souboru přes **STATDA**;
+STATDA ani notifikace **NOTDA** zde nejsou implementované.
+Registrace aplikace a následné udělení přístupu k účtu probíhá přes OAuth.
+Technické klíče nenahrazují smlouvu o API službě ani souhlas majitele účtu.
+Před prvním připojením správce připraví čtyři API klíče pro příslušné
+služby: **Client Registration**, **OAuth**, **ADAA** (účty a pohyby)
+a **BATCHDA** (platební dávky). Potřebuješ také kvalifikovaný certifikát
+v souboru `.p12` nebo `.pfx` včetně soukromého klíče a jeho heslo, pokud
+je chráněný. Samotné číslo účtu nebo jeden API klíč k připojení nestačí.
+
+Správce musí předem nastavit veřejnou HTTPS adresu aplikace (`app.url`),
+serverový šifrovací klíč a platný kontaktní e-mail (`smtp.from_email`,
+nejvýše 43 znaků). Pro oba návratové endpointy KB musí zajistit,
+že webový server, reverzní proxy ani aplikační logy neukládají parametry
+URL obsahující registrační nebo autorizační údaje:
+
+- `/api/settings/bank-connections/kb-plus/registration/callback`
+- `/api/settings/bank-connections/kb-plus/oauth/callback`
+
+Aplikace na riziko logování upozorňuje, ale připojení kvůli němu neblokuje.
+Žádný potvrzovací příznak pro logování není vyžadován. Upozornění samo
+nastavení logů nemění; doporučujeme citlivé parametry nelogovat nebo anonymizovat.
+
+U účtu otevři napojení KB+, vyplň požadované údaje a zvol **Pokračovat do KB+**.
+Na stránkách banky dokonči registraci a uděl souhlas s přístupem ke správnému
+účtu. Bankovní návrat zpracuje server a vrátí tě do záložky **Měny a účty**;
+žádné kódy ani návratové URL ručně nekopíruj. Připojení je dokončené až po
+ověření účtu a měny bankou. Pokud už má dodavatel aplikaci zaregistrovanou,
+znovu nezadáváš API klíče ani certifikát a pokračuješ rovnou udělením přístupu
+k dalšímu účtu. Při přerušení použij **Obnovit stav připojení**. Nové ověření
+zneplatní předchozí nedokončený odkaz; vypršelý postup je nutné zahájit znovu.
+
+**Banka CREDITAS (2250)** vyžaduje bezpečnostní klíč (**Bearer token**)
+pro konkrétní účet a jeho systémový identifikátor. Přístup pomocí ručně
+vygenerovaného klíče lze použít bez klientského certifikátu. Certifikát
+pro vzájemnou TLS autentizaci (**mTLS**) je volitelný, pokud jej banka
+vyžaduje pro konkrétní typ přístupu.
+
+V internetovém bankovnictví vytvoř klíč s potřebnými oprávněními. V MyÚčto
+zadej jeho 64 písmen a číslic, **Account ID** z detailu účtu u aktivního API
+klíče a zvol typ **Běžný účet** nebo **Spořicí účet**. Account ID je systémový
+identifikátor banky, nikoli číslo účtu ani IBAN. Pokud tvůj přístup vyžaduje
+certifikát, vyber `.p12` nebo `.pfx` včetně soukromého klíče a případně zadej heslo. Po volbě
+**Ověřit a uložit připojení** aplikace kontroluje shodu účtu a měny. Pro
+odesílání příkazů musí klíč navíc dovolovat zadávání plateb.
+
+Uložené údaje zůstávají skryté. Pozastavení nebo opětovné zapnutí nevyžaduje
+jejich nové zadání. Při volbě **Změnit přístupové údaje** vyplň znovu celou
+sadu přístupových údajů. Certifikát přilož jen při použití mTLS; jeho
+vynechání při změně údajů přepne CREDITAS na přístup bez certifikátu.
+Certifikáty pro KB+ a CREDITAS lze vybrat do velikosti 24 KiB. Přístupové
+údaje se ukládají na serveru šifrovaně, nikoli do úložiště prohlížeče.
+
+**Fio: vytvoření tokenu a první načtení**
+
+1. Založ účet se správným číslem, kódem banky a měnou.
+2. Ve Fio internetovém bankovnictví vytvoř API token pro tento konkrétní účet.
+   Pro načítání pohybů stačí právo číst. Pro odesílání příkazů musí token umožňovat
+   i import plateb. Token má omezenou platnost podle nastavení v bance.
+3. U účtu otevři **Napojení banky**, vlož token a zvol **Ověřit a uložit**.
+   Aplikace při ukládání ověří, že bankovní účet odpovídá připojení.
+4. Klikni na **Načíst pohyby**. Prázdné datum **Od data** automaticky navazuje
+   na předchozí načítání; pole **Do data** je v tomto režimu vypnuté a nepoužívá se.
+   Pro ruční načtení vyplň obě data, nejvýše 31 dní včetně krajních dnů.
+   Starší historii může být potřeba dočasně odemknout
+   u tokenu v internetovém bankovnictví.
+
+Token se ukládá šifrovaně a nelze jej zpětně zobrazit. Správce instalace musí
+mít nastavený samostatný šifrovací klíč serveru (`app.secret_encryption_key`
+v konfiguraci nebo proměnná prostředí `MYINVOICE_SECRET_KEY`, 32 náhodných
+bajtů v base64). Klíč bezpečně zálohuj, bez něj uložené tokeny nelze přečíst.
+Při změně nastavení nech token
+prázdný, pokud jej chceš zachovat; nový token původní nahradí. Po vypršení
+platnosti vytvoř token v bance znovu a zde jej vyměň.
+
+Výsledek načítání ukáže počet nových, spárovaných a přeskočených duplicitních
+pohybů a odkaz na výpis. Pohyby vstupují do stejného párování a účtování jako
+ručně nahrané výpisy, včetně převzetí vazeb z odpovídajících e-mailových avíz.
+Překrývající se období můžeš načíst znovu.
+
+Měsíční GPC při jednoznačné shodě použije již načtený pohyb z API. Zachová jeho
+ID, párování faktur, mzdové vazby i účetní zápisy a připojí k němu další zdrojový
+výpis. Pohyb je vidět také v detailu GPC, v účetní evidenci však existuje pouze
+jednou. Původní API údaje se nepřepisují méně podrobným GPC. Stejná ochrana platí
+i při následném načtení API po GPC. Dosud nespárované pohyby se znovu zkusí spárovat.
+
+Shoda vyžaduje stejnou firmu, vlastní účet, banku, měnu, den a částku se znaménkem.
+Kontrolují se dostupné symboly a protiúčet; automatické spojení vyžaduje společnou
+bankovní referenci (u číselných referencí se ignorují úvodní nuly).
+Samotná shoda částky, dne a protiúčtu nestačí, protože může jít o další skutečnou platbu.
+Pokud nelze bezpečně odlišit několik stejných plateb nebo chybí potřebná identita,
+import se zastaví bez uložení nového výpisu a vyžádá kontrolu. Již zaúčtované pohyby
+se tím nemění. Historické duplicity vytvořené staršími importy se automaticky nemažou.
+
+Seznam i detail výpisu ukazují také připojené pohyby z jiného importu, včetně
+stavu párování a zaúčtování. Sdílený pohyb je v účetních součtech stále jen jednou.
+
+Vypnutím napojení pozastavíš jeho používání. **Odpojit** odstraní uložený token;
+načtené pohyby a historie odeslaných příkazů zůstanou zachované. Správa napojení
+a ruční načítání vyžadují právo zápisu k bankovním účtům.
+
+### 29.1.4 Odeslání příkazu do banky
+
+V **Nákup → Platební příkazy** vyber tuzemské faktury a účet plátce v CZK.
+Akce **Připravit příkaz pro banku** uloží příkaz a nabídne jej v sekci
+**Odeslání platebního příkazu do banky** pod přehledem faktur. Tento způsob
+přípravy faktury neoznačí jako zaplacené ani při zaškrtnuté volbě pro ruční
+označení úhrady. Vybrat lze i dříve uložený příkaz z historie.
+
+Pro přímé odeslání musí existovat aktivní ověřené napojení stejného účtu plátce
+v CZK s podporou příkazů: Fio ČR (2010), ČSOB (0300), Raiffeisenbank (5500),
+Banka CREDITAS (2250) nebo KB+ (0100). Přímé odesílání slovenských EUR příkazů
+zatím není implementované; přímé předání je určené pro tuzemské CZK příkazy.
+Příkaz, který už při vytvoření označil faktury jako
+zaplacené, se tímto způsobem znovu neposílá. Odeslání vyžaduje právo zápisu
+k bankovním účtům i platebním příkazům.
+
+Po **Odeslat do banky** zkontroluj potvrzení s účtem, počtem plateb a částkou.
+Přijetí bankou znamená pouze předání příkazu k autorizaci. Příkaz musíš dále
+zkontrolovat a potvrdit v internetovém bankovnictví. Skutečná úhrada se prokáže
+bankovním pohybem, samotné odeslání ji nepotvrzuje.
+
+Aplikace ukládá výsledek odeslání a referenci banky. Pokud banka vrátí počty
+přijatých a odmítnutých položek, zobrazí se u výsledku také tyto počty.
+Částečné přijetí příkazu vyžaduje kontrolu v bance. **Načíst uložený stav**
+znovu načte tuto evidenci aplikace, ne stav autorizace nebo provedení v bance.
+Přijatý, odmítnutý i nejasný výsledek blokuje další odeslání stejného příkazu.
+Při výpadku spojení nebo nejasném výsledku nejdříve ověř příkaz v internetovém
+bankovnictví, než vytvoříš jakoukoli další platbu.
+
+Stav zahájeného importu znamená pouze převzetí dávky ke zpracování,
+nikoli dokončenou kontrolu jednotlivých příkazů, autorizaci nebo provedení
+platby. Výsledek importu i následnou autorizaci zkontroluj v bankovnictví.
+Datum splatnosti se při přenosu automaticky neposouvá.
 
 ## 29.2 Mapování bankovních avíz
 

@@ -6,6 +6,10 @@ platby, vratky, poplatky i souhrnnou částku odeslanou na bankovní účet.
 
 Funkce je dostupná firmám s podvojným účetnictvím.
 
+Příchozí převod se dohledává ve výpisech GPC, PDF i v pohybech načtených
+přes bankovní API. Tyto zdroje jsou pro zaúčtování rovnocenné. E-mailové
+avízo je pouze předběžné a samo zaúčtování převodu nedokládá.
+
 ## První nastavení
 
 Před prvním importem vyberte analytické účty:

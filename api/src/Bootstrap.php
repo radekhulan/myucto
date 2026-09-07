@@ -961,6 +961,47 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Bank\Pdf\KbStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\RaiffeisenbankStatementPdfParser::class),
             ]),
+            \MyInvoice\Service\Bank\Connector\FioBankConnector::class => fn ()
+                => new \MyInvoice\Service\Bank\Connector\FioBankConnector(new \GuzzleHttp\Client()),
+            \MyInvoice\Service\Bank\Connector\RaiffeisenbankPremiumClient::class => fn ()
+                => new \MyInvoice\Service\Bank\Connector\RaiffeisenbankPremiumClient(new \GuzzleHttp\Client([
+                    'handler' => \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\CurlHandler([
+                        'handle_factory' => new \MyInvoice\Service\Bank\Connector\BankCertificateCurlFactory(),
+                    ])),
+                ])),
+            \MyInvoice\Service\Bank\Connector\CsobBusinessConnectorClient::class => fn ()
+                => new \MyInvoice\Service\Bank\Connector\CsobBusinessConnectorClient(new \GuzzleHttp\Client([
+                    'handler' => \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\CurlHandler([
+                        'handle_factory' => new \MyInvoice\Service\Bank\Connector\BankCertificateCurlFactory(),
+                    ])),
+                ])),
+            \MyInvoice\Service\Bank\Connector\CreditasPremiumClient::class => fn ()
+                => new \MyInvoice\Service\Bank\Connector\CreditasPremiumClient(new \GuzzleHttp\Client([
+                    'handler' => \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\CurlHandler([
+                        'handle_factory' => new \MyInvoice\Service\Bank\Connector\BankCertificateCurlFactory(allowTokenOnly: true),
+                    ])),
+                ])),
+            \MyInvoice\Service\Bank\Connector\KbPlusApiClient::class => fn ()
+                => new \MyInvoice\Service\Bank\Connector\KbPlusApiClient(new \GuzzleHttp\Client()),
+            \MyInvoice\Service\Bank\Connector\CsasApiClient::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Bank\Connector\CsasApiClient(new \GuzzleHttp\Client(),
+                    filter_var($c->get(Config::class)->get('bank_connectors.csas.sandbox', false), FILTER_VALIDATE_BOOL),
+                    $c->get(LoggerInterface::class)),
+            \MyInvoice\Service\Bank\Connector\KbPlusRegistrationClient::class => fn ()
+                => new \MyInvoice\Service\Bank\Connector\KbPlusRegistrationClient(new \GuzzleHttp\Client([
+                    'handler' => \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\CurlHandler([
+                        'handle_factory' => new \MyInvoice\Service\Bank\Connector\BankCertificateCurlFactory(),
+                    ])),
+                ])),
+            \MyInvoice\Service\Bank\Connector\BankConnectorRegistry::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Bank\Connector\BankConnectorRegistry([
+                    $c->get(\MyInvoice\Service\Bank\Connector\CsasBankConnector::class),
+                    $c->get(\MyInvoice\Service\Bank\Connector\FioBankConnector::class),
+                    $c->get(\MyInvoice\Service\Bank\Connector\RaiffeisenbankConnector::class),
+                    $c->get(\MyInvoice\Service\Bank\Connector\CsobBankConnector::class),
+                    $c->get(\MyInvoice\Service\Bank\Connector\KbPlusConnector::class),
+                    $c->get(\MyInvoice\Service\Bank\Connector\CreditasBankConnector::class),
+                ]),
         ]);
 
         $container = $builder->build();

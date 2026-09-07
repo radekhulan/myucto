@@ -281,11 +281,11 @@ const statementActions = computed<ActionItem[]>(() => {
     },
     {
       key: 'gpc',
-      label: 'GPC',
+      label: s.source === 'bank_api' ? 'JSON' : 'GPC',
       icon: 'download',
       tier: 'secondary',
       show: s.has_file,
-      title: t('bank.download_gpc'),
+      title: t(s.source === 'bank_api' ? 'bank_connection.download_json' : 'bank.download_gpc'),
       href: bankApi.downloadUrl(s.id),
     },
     {
@@ -391,7 +391,7 @@ const statementActions = computed<ActionItem[]>(() => {
       </div>
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.curr_balance') }}</div>
-        <div class="text-lg font-mono font-semibold">{{ formatMoney(statement.curr_balance, statement.currency ?? 'CZK') }}</div>
+        <div class="text-lg font-mono font-semibold">{{ statement.curr_balance == null ? '-' : formatMoney(statement.curr_balance, statement.currency ?? 'CZK') }}</div>
       </div>
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.credit_total') }}</div>

@@ -67,6 +67,8 @@ use MyInvoice\Action\Settings\ClientPaymentQrSettingsAction;
 use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
+use MyInvoice\Action\Settings\BankConnectionAction;
+use MyInvoice\Action\Settings\KbPlusOnboardingAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
 use MyInvoice\Action\Payroll\AnnualTaxCertificateAction;
 use MyInvoice\Action\Payroll\PayrollAnnualDocumentBatchAction;
@@ -202,6 +204,7 @@ use MyInvoice\Action\PurchaseInvoice\GetPurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\ImportStructuredPurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\PaymentQrAction;
 use MyInvoice\Action\PurchaseInvoice\PaymentOrderAction;
+use MyInvoice\Action\PurchaseInvoice\BankPaymentOrderSubmissionAction;
 use MyInvoice\Action\PurchaseInvoice\ListPurchaseInvoicesAction;
 use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceImportBatchesAction;
 use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceDocumentKindAction;
@@ -719,7 +722,11 @@ final class Routes
         $app->post   ('/api/purchase-invoices/payment-orders',                      [PaymentOrderAction::class, 'create']);
         $app->post   ('/api/purchase-invoices/payment-orders/mark',                 [PaymentOrderAction::class, 'markOrdered']);
         $app->get    ('/api/purchase-invoices/payment-orders/{id:[0-9]+}/download', [PaymentOrderAction::class, 'download']);
+        $app->get    ('/api/purchase-invoices/payment-orders/{orderId:[0-9]+}/submission', [BankPaymentOrderSubmissionAction::class, 'get']);
+        $app->post   ('/api/purchase-invoices/payment-orders/{orderId:[0-9]+}/submit', [BankPaymentOrderSubmissionAction::class, 'post']);
         $app->get    ('/api/purchase-invoices/payment-orders/{id:[0-9]+}',          [PaymentOrderAction::class, 'show']);
+        $app->delete ('/api/purchase-invoices/payment-orders/{id:[0-9]+}',          [PaymentOrderAction::class, 'delete']);
+        $app->post   ('/api/purchase-invoices/payment-orders/{id:[0-9]+}/archive',  [PaymentOrderAction::class, 'archive']);
 
         // Pravidelné fakturace (recurring templates)
         $app->get    ('/api/recurring',                       [RecurringTemplateAction::class, 'list']);
@@ -923,6 +930,8 @@ final class Routes
             $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);
             $g->get('/payments/payer-options', [PayrollPaymentAction::class, 'listPayerOptions']);
             $g->get('/payments/batches', [PayrollPaymentAction::class, 'listBatches']);
+            $g->get('/payments/batches/{batchId:[0-9]+}/bank-submission', [\MyInvoice\Action\Payroll\PayrollBankSubmissionAction::class, 'get']);
+            $g->post('/payments/batches/{batchId:[0-9]+}/bank-submission', [\MyInvoice\Action\Payroll\PayrollBankSubmissionAction::class, 'post']);
             $g->post('/payments/batches', [PayrollPaymentAction::class, 'createBatch']);
             // Legislativní rulesety — globální číselník (default v kódu + DB override),
             // konkrétnější cesty musí být před `/rulesets/{rulesetId}`.
@@ -2792,6 +2801,17 @@ final class Routes
         $app->post   ('/api/settings/currencies',                     [SettingsAction::class, 'createCurrency']);
         $app->put    ('/api/settings/currencies/{id:[0-9]+}',         [SettingsAction::class, 'updateCurrency']);
         $app->delete ('/api/settings/currencies/{id:[0-9]+}',         [SettingsAction::class, 'deleteCurrency']);
+        $app->get    ('/api/settings/bank-connections', [BankConnectionAction::class, 'list']);
+        $app->get    ('/api/settings/bank-connections/{currencyId:[0-9]+}/kb-plus/onboarding', [KbPlusOnboardingAction::class, 'status']);
+        $app->get    ('/api/settings/bank-connections/{currencyId:[0-9]+}/csas/onboarding', [\MyInvoice\Action\Settings\CsasOnboardingAction::class, 'status']);
+        $app->post   ('/api/settings/bank-connections/{currencyId:[0-9]+}/csas/onboarding', [\MyInvoice\Action\Settings\CsasOnboardingAction::class, 'start']);
+        $app->get    ('/api/settings/bank-connections/csas/oauth/callback', [\MyInvoice\Action\Settings\CsasOnboardingAction::class, 'callback']);
+        $app->post   ('/api/settings/bank-connections/{currencyId:[0-9]+}/kb-plus/onboarding', [KbPlusOnboardingAction::class, 'start']);
+        $app->get    ('/api/settings/bank-connections/kb-plus/registration/callback', [KbPlusOnboardingAction::class, 'registrationCallback']);
+        $app->get    ('/api/settings/bank-connections/kb-plus/oauth/callback', [KbPlusOnboardingAction::class, 'oauthCallback']);
+        $app->put    ('/api/settings/bank-connections/{currencyId:[0-9]+}', [BankConnectionAction::class, 'put']);
+        $app->delete ('/api/settings/bank-connections/{currencyId:[0-9]+}', [BankConnectionAction::class, 'delete']);
+        $app->post   ('/api/settings/bank-connections/{currencyId:[0-9]+}/sync', [BankConnectionAction::class, 'sync']);
         $app->get    ('/api/settings/bank-email-notices',             [BankEmailNoticeAction::class, 'overview']);
         $app->put    ('/api/settings/bank-email-notices/imap',        [BankEmailNoticeAction::class, 'updateImap']);
         $app->post   ('/api/settings/bank-email-notices/imap/test',   [BankEmailNoticeAction::class, 'testImap']);

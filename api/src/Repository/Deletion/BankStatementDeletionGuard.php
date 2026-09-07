@@ -27,6 +27,12 @@ final class BankStatementDeletionGuard extends ForeignKeyDeletionGuard
     protected static function blockers(): array
     {
         return [
+            'bank_import_evidence' => [
+                'message' => 'Výpis nelze smazat, protože %d jeho pohybů je doloženo také jiným importem. Nejprve odstraňte navazující výpis.',
+                'references' => [
+                    ['table' => 'bank_transaction_imports', 'column' => 'original_statement_id'],
+                ],
+            ],
             'payroll_payment_evidence' => [
                 'message' => 'Výpis nelze smazat — %d jeho položek je použito jako doklad o vyplacení '
                     . 'mezd. Nejdřív to spárování zrušte v Mzdy → Platby, teprve pak půjde výpis smazat.',

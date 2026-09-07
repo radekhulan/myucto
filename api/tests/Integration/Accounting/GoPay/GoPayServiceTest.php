@@ -192,6 +192,22 @@ final class GoPayServiceTest extends TestCase
         self::assertSame(5, (int) $entryCount->fetchColumn());
     }
 
+    public function testApiBankMovementIsAnAuthoritativePayoutSource(): void
+    {
+        $this->configureAccounts();
+        [$invoiceId, $creditNoteId] = $this->documents();
+        $this->postDocuments($invoiceId, $creditNoteId);
+        $this->payment($invoiceId);
+        $transactionId = $this->bankPayout();
+        $update = $this->db->pdo()->prepare("UPDATE bank_statements SET source='bank_api' WHERE id=(SELECT statement_id FROM bank_transactions WHERE id=?)");
+        $update->execute([$transactionId]);
+        self::assertSame(1, $update->rowCount());
+        $result = $this->service->import($this->supplierId, $this->userId, 'synthetic-api.xml', $this->xml());
+        self::assertSame($transactionId, $result['clearing']['bank_transaction_id']);
+        self::assertNotNull($result['clearing']['bank_journal_entry_id']);
+        self::assertNull($result['clearing']['payout_issue_code']);
+    }
+
     public function testEmailNoticeAssociationIsTransferredAndPostedByOfficialStatement(): void
     {
         $this->configureAccounts();

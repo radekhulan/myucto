@@ -53,6 +53,7 @@ final class CronDispatcher
         // tady navíc ušetří i samotný spawn procesu.
         'cron-jmhz-poll' => [CronPreflight::class, 'hasJmhzTransportWork'],
         'cron-bank-email-notices' => [CronPreflight::class, 'hasBankEmailNoticeAccounts'],
+        'cron-bank-connections' => [CronPreflight::class, 'hasBankConnections'],
     ];
 
     /** Minuta nárokována — úloha se spustí. */

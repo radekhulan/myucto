@@ -15752,7 +15752,7 @@ paths:
                         current_balance: { type: number }
                         current_balance_czk: { type: [number, "null"] }
                         statement_date: { type: [string, "null"], format: date }
-                        current_source: { type: string, enum: [gpc, email_notice] }
+                        current_source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api] }
                         statement_count: { type: integer }
                         months:
                           type: array
@@ -21732,7 +21732,7 @@ components:
       properties:
         statement_id: { type: integer, format: int64 }
         transactions: { type: integer, description: Počet skutečně založených pohybů. }
-        matched: { type: integer, description: Kolik z nich se rovnou spárovalo s fakturou. }
+        matched: { type: integer, description: Počet spárovaných pohybů výpisu včetně již evidovaných pohybů připojených z API/GPC. }
         duplicate:
           type: boolean
           description: |
@@ -21743,7 +21743,14 @@ components:
         warnings:
           type: array
           description: "Např. `transactions_skipped_as_duplicate` při překryvu výpisů."
-          items: { type: string }
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              message: { type: string }
+              parsed: { type: integer }
+              inserted: { type: integer }
+              skipped: { type: integer }
 
     BankPostingSummary:
       type: [object, "null"]
@@ -21763,15 +21770,15 @@ components:
       description: "Položka seznamu výpisů (GET /bank-statements). Bankovní spojení dodavatele je per-měna na /settings/currencies, ne tady."
       properties:
         id: { type: integer, format: int64 }
-        source: { type: string, enum: [gpc, pdf, email_notice, idoklad], description: "Původ výpisu: gpc/pdf = oficiální bankovní výpis, email_notice/idoklad = virtuální měsíční výpis." }
+        source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api], description: "Původ výpisu: gpc/pdf = bankovní výpis, bank_api = pohyby z přímého API bez konečného zůstatku, email_notice/idoklad = virtuální měsíční výpis." }
         file_name: { type: string, example: "vypis_2026_05.gpc" }
         account_number: { type: string, example: "1234567890/0100" }
         bank_code: { type: [string, "null"], example: "0100", description: "Kód banky účtu — autoritativně z konfigurovaného účtu (currencies.bank_code), fallback z výpisu. GPC výpisy ho samy nenesou." }
         currency: { type: [string, "null"], example: EUR, description: "ISO 4217. Odvozeno z transakcí výpisu nebo z currencies.account_number. NULL u výpisů importovaných před v4.1.0." }
         statement_date: { type: string, format: date }
         statement_number: { type: [string, "null"] }
-        prev_balance: { type: number, format: float }
-        curr_balance: { type: number, format: float }
+        prev_balance: { type: [number, "null"], format: float }
+        curr_balance: { type: [number, "null"], format: float }
         transaction_count: { type: integer }
         matched_count: { type: integer }
         ignored_count: { type: integer, description: "Počet sekundárních pohybů převzatých autoritativním výpisem a označených jako ignorované." }
@@ -21783,6 +21790,7 @@ components:
         account_label: { type: [string, "null"], description: "Odvozeno z currencies.label" }
 
     BankStatementDetail:
+      description: Detail i seznam zahrnují také pohyby připojené z jiného API/GPC importu. Sdílená transakce má stále jediné ID a jedinou účetní evidenci.
       allOf:
         - $ref: '#/components/schemas/BankStatement'
         - type: object
@@ -21800,7 +21808,7 @@ components:
       properties:
         id: { type: integer, format: int64 }
         source: { type: string, enum: [statement, email_notice, idoklad] }
-        statement_id: { type: integer, format: int64 }
+        statement_id: { type: integer, format: int64, description: ID původního výpisu pohybu. U pohybu sdíleného mezi API a GPC se může lišit od ID právě zobrazeného výpisu. }
         posted_at: { type: string, format: date }
         amount: { type: number, format: float, example: 12500.00 }
         balance: { type: [number, "null"], format: float, description: "Disponibilní zůstatek účtu z e-mailového avíza (Creditas/Fio/RB); u transakcí z GPC výpisu null." }
@@ -22037,7 +22045,7 @@ components:
       properties:
         id: { type: integer, format: int64 }
         statement_id: { type: integer, format: int64 }
-        statement_source: { type: string, enum: [gpc, pdf, email_notice, idoklad] }
+        statement_source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api] }
         posted_at: { type: string, format: date }
         amount: { type: number, format: float }
         currency: { type: [string, "null"] }

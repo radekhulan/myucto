@@ -1,0 +1,3 @@
+ALTER TABLE payment_orders
+    ADD COLUMN IF NOT EXISTS archived_at DATETIME NULL,
+    ADD COLUMN IF NOT EXISTS archived_by_user_id BIGINT UNSIGNED NULL;

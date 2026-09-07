@@ -11,6 +11,11 @@ Stránku otevřete přes **Účetnictví → Automat**. Je dostupná firmám s p
 Všechny záložky vždy zobrazují pouze firmu zvolenou v hlavní liště aplikace.
 Automat nemá vlastní výběr firmy ani společný přehled více firem.
 
+Kontrola duplicitních bankovních úhrad nepovažuje e-mailové avízo za další
+platbu. Pohyby načtené přes bankovní API se kontrolují stejně jako řádné
+výpisy ABO/GPC nebo PDF; skutečná shoda dvou pohybů ve výpisech nadále
+vyžaduje prověření.
+
 Pro prvotní nastavení celé firmy a návrh pravidel z již zaúčtované historie
 slouží samostatný [Asistent nastavení účtování](80_Sablony.md#807-asistent-nastaveni-uctovani).
 Automat spojuje každodenní frontu s doporučeními nad existujícími doklady.

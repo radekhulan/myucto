@@ -18,6 +18,10 @@ Je nutný uzavřený běh, oprávnění `payroll.payments`, správné účty, te
 
 ## 65.4 Stavy
 
+Na kartě mzdových příkazů lze uložený bankovní příkaz v CZK (ABO) předat přímo přes ověřené napojení účtu plátce. Přenos vyžaduje oprávnění k mzdovým platbám i bankovním účtům. Používá stejné bankovní konektory a evidenci odeslání jako příkazy přijatých faktur; stažení KPC a PDF zůstává dostupné.
+
+Před odesláním potvrďte dávku, částku, počet plateb a banku. Samotné předání neoznačuje mzdy jako uhrazené; příkazy zkontrolujte a autorizujte v bankovnictví. Odeslanou dávku nelze poslat znovu. Při nejasném výsledku ověřte stav v bance, nevytvářejte duplicitní platbu. Přenos je blokován také u minulého data splatnosti a závazků s evidovanou úhradou nebo nevyřešeným avízem.
+
 Připravená platba není odeslaná. Exportovaná čeká na autorizaci v bance. Uhrazená má odpovídající bankovní pohyb; částečně uhrazená nebo zamítnutá vyžaduje další krok.
 
 ## 65.5 Rozpoznání zaplacených odvodů

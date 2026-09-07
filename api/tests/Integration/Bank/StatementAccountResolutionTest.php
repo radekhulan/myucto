@@ -73,6 +73,7 @@ final class StatementAccountResolutionTest extends TestCase
         }
         $pdo = $this->db->pdo();
         foreach ($this->statementIds as $id) {
+            $pdo->prepare('DELETE FROM bank_transaction_imports WHERE original_statement_id = ? OR statement_id = ?')->execute([$id, $id]);
             $pdo->prepare('DELETE FROM bank_transactions WHERE statement_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
         }
@@ -234,7 +235,49 @@ final class StatementAccountResolutionTest extends TestCase
         $this->assertSame(2000.0, (float) ($rbMonths['2026-06'] ?? 0));
     }
 
+    public function testApiBalanceIsAuthoritativeOnlyWhenProvided(): void
+    {
+        $account = '1000000005';
+        $currencyId = $this->registerCurrency('CZK', $account, '2250');
+        $this->insertStatement('bank_api', $account, '2250', '2099-06-30', 100.0, 'api-known');
+        $unknown = $this->insertStatement('bank_api', $account, '2250', '2099-07-31', 0.0, 'api-unknown');
+        $this->db->pdo()->prepare('UPDATE bank_statements SET curr_balance=NULL WHERE id=?')->execute([$unknown]);
+        $response = $this->action->accountBalances($this->mockRequest($this->supplierId, 'admin', [], []), new Response());
+        $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $accounts = array_column($body['accounts'], null, 'id');
+        self::assertArrayHasKey($currencyId, $accounts);
+        self::assertSame(100.0, (float) $accounts[$currencyId]['current_balance']);
+        self::assertSame('bank_api', $accounts[$currencyId]['current_source']);
+        self::assertSame('2099-06-30', $accounts[$currencyId]['statement_date']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    public function testLinkedApiMovementAppearsInGpcListFiltersAndSuggestions(): void
+    {
+        $account = '1000000005';
+        $this->registerCurrency('CZK', $account, '2250');
+        $apiId = $this->insertStatement('bank_api', $account, '2250', '2099-07-31', 100.0, 'alias-api');
+        $gpcId = $this->insertStatement('gpc', $account, '2250', '2099-07-31', 100.0, 'alias-gpc');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id IN (?, ?)')->execute([$this->supplierId, $apiId, $gpcId]);
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-15', 100, 'CZK')")->execute([$apiId]);
+        $txId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$gpcId, $txId, hash('sha256', 'synthetic-list-alias'), $this->supplierId, $apiId]);
+        $request = $this->mockRequest($this->supplierId, 'admin', [], [], ['filter' => ['year' => 2099, 'month' => 7, 'amount' => 100]]);
+        $response = $this->action->list($request, new Response());
+        self::assertSame(200, $response->getStatusCode());
+        $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $rows = array_column($body['items'], null, 'id');
+        self::assertArrayHasKey($gpcId, $rows);
+        self::assertSame(1, $rows[$gpcId]['transaction_count']);
+        self::assertSame(0, $rows[$gpcId]['matched_count']);
+        self::assertSame(1, $rows[$gpcId]['unposted_count']);
+        $pdo->prepare("INSERT INTO bank_match_suggestions (supplier_id, bank_transaction_id, kind, reason, candidates_json, top_score) VALUES (?, ?, 'single', 'no_vs', '[]', 0)")->execute([$this->supplierId, $txId]);
+        $suggestions = Bootstrap::buildContainer()->get(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class)->listForStatement($gpcId, $this->supplierId);
+        self::assertSame([$txId], array_column($suggestions, 'bank_transaction_id'));
+    }
 
     private function registerCurrency(string $code, string $accountNumber, string $bankCode, bool $isDefault = false): int
     {

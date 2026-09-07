@@ -19,6 +19,7 @@ use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\StatementImporter;
+use MyInvoice\Service\Bank\StatementTransactionScope;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Bank\Match\MatchSuggestionException;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
@@ -288,7 +289,11 @@ final class BankStatementAction
         // Týž výpis už je v systému z GPC/ABO — PDF je jen jeho oficiální podoba,
         // ne druhý výpis. Přiložíme ho k němu (transakce už tam jsou; zakládat je
         // znovu by navíc rozešlo párování mezi dva doklady téhož období).
-        $target = $this->findStatementForPdfAttachment($sid, $parsed, $resolved['currency_id'], $accountNumber);
+        try {
+            $target = $this->findStatementForPdfAttachment($sid, $parsed, $resolved['currency_id'], $accountNumber);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'statement_overlap', $e->getMessage(), 409);
+        }
         if ($target !== null) {
             $this->db->pdo()->prepare(
                 'UPDATE bank_statements
@@ -375,9 +380,9 @@ final class BankStatementAction
         }
 
         $candidates = $this->db->pdo()->prepare(
-            "SELECT id, account_number, currency, statement_number
+            "SELECT id, account_number, currency, statement_number, source
                FROM bank_statements
-              WHERE source IN ('gpc','pdf')
+              WHERE source IN " . \MyInvoice\Service\Bank\BankStatementSource::sqlList() . "
                 AND (pdf_content IS NULL OR OCTET_LENGTH(pdf_content) = 0)
                 AND statement_date BETWEEN DATE_SUB(?, INTERVAL 10 DAY) AND DATE_ADD(?, INTERVAL 10 DAY)
               ORDER BY id"
@@ -386,6 +391,7 @@ final class BankStatementAction
 
         $pdfNumber = ltrim(trim((string) ($parsed['header']['statement_number'] ?? '')), '0');
         $matches = [];
+        $sources = [];
         foreach ($candidates->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             if (!AccountNumberNormalizer::equals($accountNumber, (string) ($row['account_number'] ?? ''))) {
                 continue;
@@ -405,6 +411,25 @@ final class BankStatementAction
                 continue;
             }
             $matches[] = (int) $row['id'];
+            $sources[(int) $row['id']] = $row['source'];
+        }
+
+        if (count($matches) > 1) {
+            $sets = [];
+            foreach ($matches as $candidateId) {
+                $ids = $this->db->pdo()->query('SELECT bt.id FROM bank_transactions bt WHERE '
+                    . StatementTransactionScope::sql($candidateId) . ' ORDER BY bt.id')->fetchAll(\PDO::FETCH_COLUMN);
+                $sets[$candidateId] = array_map('intval', $ids);
+            }
+            $union = array_unique(array_merge(...array_values($sets)));
+            $complete = array_values(array_filter($matches, static fn (int $candidateId): bool =>
+                $union !== [] && array_diff($union, $sets[$candidateId]) === []));
+            if ($complete !== []) {
+                usort($complete, static fn (int $a, int $b): int =>
+                    (($sources[$a] === 'bank_api') <=> ($sources[$b] === 'bank_api')) ?: ($b <=> $a));
+                return $complete[0];
+            }
+            throw new \InvalidArgumentException('PDF odpovídá více výpisům. Přiložte jej ručně ke správnému výpisu; nové pohyby nebyly založeny.');
         }
 
         return count($matches) === 1 ? $matches[0] : null;
@@ -420,9 +445,9 @@ final class BankStatementAction
     private function pdfCoversStatement(int $statementId, array $transactions): bool
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT posted_at, amount FROM bank_transactions WHERE statement_id = ?'
+            'SELECT bt.posted_at, bt.amount FROM bank_transactions bt WHERE ' . StatementTransactionScope::sql($statementId)
         );
-        $stmt->execute([$statementId]);
+        $stmt->execute();
 
         $pool = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
@@ -603,7 +628,7 @@ final class BankStatementAction
         $transactionSql = '';
         $transactionParams = [];
         if ($counterpartyAccount !== '' || $clientId !== null || $amount !== null || $postingStatus !== '') {
-            $transactionConditions = ['bt.statement_id = bs.id'];
+            $transactionConditions = [StatementTransactionScope::sql('bs.id')];
             if ($counterpartyAccount !== '') {
                 $transactionConditions[] = "UPPER(REGEXP_REPLACE(CONCAT(IFNULL(bt.counterparty_account, ''), IFNULL(bt.counterparty_bank, '')), '[^A-Z0-9]', ''))
                     LIKE CONCAT('%', ?, '%')";
@@ -692,13 +717,15 @@ final class BankStatementAction
                       )
                     ) AS bank_code,
                     bs.currency, bs.statement_date, bs.statement_number,
-                    bs.prev_balance, bs.curr_balance, bs.transaction_count, bs.matched_count, bs.imported_at,
+                    bs.prev_balance, bs.curr_balance, bs.imported_at,
+                    (SELECT COUNT(*) FROM bank_transactions cbt WHERE " . StatementTransactionScope::sql('bs.id', 'cbt') . ") AS transaction_count,
+                    (SELECT COUNT(*) FROM bank_transactions mbt WHERE " . StatementTransactionScope::sql('bs.id', 'mbt') . " AND mbt.match_status IN ('auto_exact', 'auto_partial', 'manual')) AS matched_count,
                     (bs.file_content IS NOT NULL) AS has_file,
                     (bs.pdf_content IS NOT NULL) AS has_pdf, bs.pdf_name,
                     (SELECT COUNT(*) FROM bank_transactions ibt
-                      WHERE ibt.statement_id = bs.id AND ibt.match_status = 'ignored') AS ignored_count,
+                      WHERE " . StatementTransactionScope::sql('bs.id', 'ibt') . " AND ibt.match_status = 'ignored') AS ignored_count,
                     (SELECT COUNT(*) FROM bank_transactions ubt
-                      WHERE ubt.statement_id = bs.id AND ubt.source = 'statement'
+                      WHERE " . StatementTransactionScope::sql('bs.id', 'ubt') . " AND ubt.source = 'statement'
                         AND ubt.match_status <> 'ignored'
                         AND NOT EXISTS (
                             SELECT 1 FROM journal_entries uje
@@ -732,8 +759,8 @@ final class BankStatementAction
             $r['matched_count'] = (int) $r['matched_count'];
             $r['ignored_count'] = (int) $r['ignored_count'];
             $r['unposted_count'] = (int) $r['unposted_count'];
-            $r['prev_balance'] = (float) $r['prev_balance'];
-            $r['curr_balance'] = (float) $r['curr_balance'];
+            $r['prev_balance'] = $r['prev_balance'] === null ? null : (float) $r['prev_balance'];
+            $r['curr_balance'] = $r['curr_balance'] === null ? null : (float) $r['curr_balance'];
             $r['has_file'] = (bool) $r['has_file'];
             $r['has_pdf'] = (bool) $r['has_pdf'];
         }
@@ -869,7 +896,7 @@ final class BankStatementAction
                     bs.curr_balance   AS bal,
                     bs.source         AS src
                FROM bank_statements bs
-              WHERE bs.source IN ('gpc', 'pdf')
+              WHERE bs.source IN " . \MyInvoice\Service\Bank\BankStatementSource::sqlList() . "
                 AND $scopeSql
                 AND bs.statement_date IS NOT NULL
                 AND bs.curr_balance IS NOT NULL
@@ -1208,7 +1235,7 @@ final class BankStatementAction
         }
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT bs.file_name, bs.file_content
+            'SELECT bs.file_name, bs.file_content, bs.source
                FROM bank_statements bs
               WHERE bs.id = ? AND ' . \MyInvoice\Repository\BankStatementOwnershipResolver::sql()
         );
@@ -1229,7 +1256,7 @@ final class BankStatementAction
 
         $response->getBody()->write((string) $row['file_content']);
         return $response
-            ->withHeader('Content-Type', 'text/plain; charset=windows-1250')
+            ->withHeader('Content-Type', ($row['source'] ?? '') === 'bank_api' ? 'application/json; charset=utf-8' : 'text/plain; charset=windows-1250')
             ->withHeader('Content-Disposition', 'attachment; filename="' . $safeName . '"')
             ->withHeader('Content-Length', (string) strlen((string) $row['file_content']))
             ->withHeader('X-Content-Type-Options', 'nosniff');
@@ -1452,8 +1479,8 @@ final class BankStatementAction
 
         // Filtr dle stavu spárování (server-side — viz FE statusFilter) + stránkování.
         // total (transactions_meta.total) je COUNT přes STEJNÝ filtr, bez LIMIT.
-        $txWhere = 'bt.statement_id = ?';
-        $txParams = [$id];
+        $txWhere = StatementTransactionScope::sql($id);
+        $txParams = [];
         if ($statusFilter !== '') {
             $txWhere .= ' AND bt.match_status = ?';
             $txParams[] = $statusFilter;
@@ -1548,6 +1575,12 @@ final class BankStatementAction
         $s['has_file'] = (bool) ($s['has_file'] ?? false);
         $s['has_pdf'] = (bool) ($s['has_pdf'] ?? false);
         $s['transactions'] = $transactions;
+        $summary = $this->db->pdo()->query(
+            "SELECT COUNT(*) AS total, SUM(bt.match_status IN ('auto_exact', 'auto_partial', 'manual')) AS matched
+             FROM bank_transactions bt WHERE " . StatementTransactionScope::sql($id)
+        )->fetch(\PDO::FETCH_ASSOC);
+        $s['transaction_count'] = (int) $summary['total'];
+        $s['matched_count'] = (int) $summary['matched'];
         // Stránkování transakcí — FE dělá „Načíst další" (viz `transactions_meta.pages`).
         // `transaction_count` v hlavičce zůstává CELKOVÝ počet transakcí výpisu (bez filtru).
         $s['transactions_meta'] = Pagination::meta($txTotal, $p['page'], $p['per_page']);
@@ -1613,7 +1646,7 @@ final class BankStatementAction
         $stmt = $pdo->prepare(
             "SELECT COUNT(*)
                FROM bank_transactions bt
-              WHERE bt.statement_id = ?
+              WHERE " . StatementTransactionScope::sql($statementId) . "
                 AND bt.source = 'statement'
                 AND bt.match_status <> 'ignored'
                 AND NOT EXISTS (
@@ -1622,7 +1655,7 @@ final class BankStatementAction
                      AND je.reversed_by IS NULL AND je.source_id = bt.id
                 )"
         );
-        $stmt->execute([$statementId, $supplierId]);
+        $stmt->execute([$supplierId]);
         return (int) $stmt->fetchColumn();
     }
 
@@ -3409,11 +3442,11 @@ final class BankStatementAction
         }
 
         $txs = $pdo->prepare(
-            "SELECT id FROM bank_transactions
-              WHERE statement_id = ?
-                AND match_status IN ('unmatched', 'auto_partial')"
+            "SELECT bt.id FROM bank_transactions bt
+              WHERE " . StatementTransactionScope::sql($statementId) . "
+                AND bt.match_status IN ('unmatched', 'auto_partial')"
         );
-        $txs->execute([$statementId]);
+        $txs->execute();
         $txIds = $txs->fetchAll(\PDO::FETCH_COLUMN);
 
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
