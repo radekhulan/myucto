@@ -200,7 +200,8 @@ final class PayrollSubmissionOverviewAction
      * @param array<string,mixed> $item
      * @param array<int,array<string,mixed>> $outboxes
      * @return array{
-     *   authority_reports_result:bool,can_settle:bool,delivery_proof:?string
+     *   authority_reports_result:bool,can_settle:bool,
+     *   can_file_externally:bool,delivery_proof:?string
      * }
      */
     private function settlement(array $item, array $outboxes): array
@@ -211,6 +212,7 @@ final class PayrollSubmissionOverviewAction
             return [
                 'authority_reports_result' => $capability->authorityReportsResult,
                 'can_settle' => false,
+                'can_file_externally' => false,
                 'delivery_proof' => null,
             ];
         }
@@ -219,6 +221,14 @@ final class PayrollSubmissionOverviewAction
         return [
             'authority_reports_result' => $capability->authorityReportsResult,
             'can_settle' => $this->settlements->blockedReason(
+                (string) $item['agenda_code'],
+                (string) $item['status'],
+                (string) $submission['status'],
+                $outbox,
+            ) === null,
+            // Podání odeslané na portálu úřadu má vlastní, širší bránu —
+            // aplikace ho nikdy neodeslala, takže na něj protokol nedorazí.
+            'can_file_externally' => $this->settlements->externalFilingBlockedReason(
                 (string) $item['agenda_code'],
                 (string) $item['status'],
                 (string) $submission['status'],

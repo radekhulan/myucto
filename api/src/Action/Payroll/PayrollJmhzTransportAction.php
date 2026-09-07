@@ -11,7 +11,10 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAttemptDeletionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
@@ -49,6 +52,9 @@ final class PayrollJmhzTransportAction
         private readonly PayrollSubmissionTransportAttemptRepository $attempts,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollProductionGate $productionGate,
+        private readonly PayrollSubmissionAttemptDeletionService $deletion,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
     ) {}
 
     /** @param array{submissionId:string} $args */
@@ -231,6 +237,67 @@ final class PayrollJmhzTransportAction
             'already_closed' => $result['already_closed'],
             'attempt' => $result['attempt'],
         ]));
+    }
+
+    /**
+     * Trvale smaže pokus o odeslání z historie.
+     *
+     * Běžná cesta ven je ZAHOZENÍ pokusu — řádek zůstane i s odpovědí úřadu.
+     * Tohle je pro záznam, který nic nedokládá a v přehledu jen mate: pokus,
+     * který úřad nikdy nepřijal a nemá k sobě dodejku. Co smazat nejde a proč,
+     * rozhoduje {@see PayrollSubmissionAttemptDeletionService}.
+     *
+     * Verze řádku je povinná — bez ní by šlo smazat pokus, do kterého mezitím
+     * dorazil protokol.
+     *
+     * @param array{attemptId:string} $args
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        if ($environment === null) {
+            return $this->invalid($response, 'Prostředí musí být test nebo production.');
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $rowVersion = $body['row_version'] ?? null;
+        if (!is_int($rowVersion)
+            && (!is_string($rowVersion) || preg_match('/^[1-9][0-9]*$/D', $rowVersion) !== 1)
+        ) {
+            return $this->invalid(
+                $response,
+                'Verze pokusu musí být kladné celé číslo — bez ní by se dal smazat'
+                    . ' pokus, který se mezitím pohnul.',
+            );
+        }
+
+        try {
+            $deleted = $this->deletion->delete(
+                $this->currentSupplierId($request),
+                $environment,
+                $this->id($args, 'attemptId'),
+                (int) $rowVersion,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return $this->noStore(Json::error($response, 'conflict', $exception->getMessage(), 409));
+        }
+
+        // Po řádku nezůstane nic — auditní zápis je jediná stopa, že tu byl.
+        $this->logger->log(
+            'payroll_submission.transport_attempt_deleted',
+            $this->userId($request),
+            'payroll_submission',
+            $deleted['submission_id'],
+            $deleted + ['environment' => $environment],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+        );
+
+        return $this->noStore(Json::ok($response, $deleted));
     }
 
     /** @param callable(string):JmhzDispatchOutcome $operation */

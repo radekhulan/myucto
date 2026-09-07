@@ -159,6 +159,22 @@ Tlačítko se objeví jen tam, kde je doložené, že odpověď nepřijde. U mě
 hlášení ČSSZ ani u registrací zaměstnanců ho nenajdete — tam protokol dorazí
 sám a aplikace podle něj podání uzavře.
 
+### Podáno mimo aplikaci
+
+Jiný případ je hlášení, které jste vyplnili a odeslali **na portálu úřadu**,
+ne z aplikace — typicky JMHZ přímo na ePortálu ČSSZ. Protokol na ně nikdy
+nedorazí, protože aplikace nic neodeslala, a povinnost by visela navždy.
+
+U takového řádku je tlačítko **Podáno mimo aplikaci**. Vyžádá si den podání
+a poznámku, čím je doložené (například číslo protokolu z ePortálu). Povinnost
+se uzavře jako splněná, ale v historii zůstane výslovně zapsané, že podal
+člověk jinudy a kdy — z přehledu tedy nejde usoudit, že hlášení odeslala
+aplikace.
+
+Tlačítko se neobjeví u podání, o kterém už úřad rozhodl (není co potvrzovat),
+ani když zpráva ještě leží neodeslaná v odchozí frontě datové schránky —
+tu je potřeba nejdřív z fronty zrušit, jinak by totéž hlášení odešlo podruhé.
+
 ### Měsíc uzavírá protokol, ne jedno podání
 
 Obsahová oprava měsíčního hlášení řádné podání záměrně nenahrazuje: přijaté
@@ -572,6 +588,25 @@ Detekce má dvě hranice, které je dobré znát:
   aby byla mezera vidět.
 
 Testovací a produkční prostředí mají návrhy oddělené a nemíchají se.
+
+### Uklizení neúspěšného pokusu
+
+Pokus, který ČSSZ převzala, ale odmítla zpracovat (třeba proto, že certifikát
+není u OSSZ v registru podávajících), zůstane v historii ve stavu **Převzato,
+čeká na protokol** a aplikace se dál doptává na výsledek, který nikdy nepřijde.
+
+Jsou na to dvě cesty a liší se tím, co po nich zůstane:
+
+| Akce | Kde | Co udělá |
+|---|---|---|
+| **Zahodit** (Fronta „K odeslání") | u podání | Pokus dostane konečný stav a přestane blokovat další odeslání. V historii zůstane i s tím, co úřad odpověděl. |
+| **Smazat pokus** | u pokusu v historii | Řádek z historie zmizí úplně. Zůstane po něm jen záznam v auditním logu. |
+
+Zahození je běžná cesta — historie pokusů je záměrně úplná, aby šlo dohledat,
+co se kdy komu odeslalo. Smazání je pro záznam, který **nic nedokládá** a jen
+mate: typicky první nepovedený pokus u podání, které nakonec odešlo jinou
+cestou. Aplikace proto smazat nedovolí pokus, ke kterému úřad vydal protokol
+nebo dodejku, ani pokus, jehož identifikátorem je podání u úřadu vedené.
 
 ## 68.9 Storno a obsahová oprava JMHZ
 

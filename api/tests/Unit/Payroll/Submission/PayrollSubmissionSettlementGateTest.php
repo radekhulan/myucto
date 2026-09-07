@@ -30,6 +30,97 @@ final class PayrollSubmissionSettlementGateTest extends TestCase
         );
     }
 
+    /**
+     * ═══════════════════════════════════════════════════════════════════════
+     * Podání odeslané MIMO aplikaci (portál úřadu)
+     * ═══════════════════════════════════════════════════════════════════════
+     *
+     * Běžné uzavření se u JMHZ vědomě zavírá, protože ČSSZ výsledek pošle sama.
+     * Jenže na hlášení, které účetní vyplnila a odeslala na portálu ČSSZ, žádný
+     * protokol NEDORAZÍ — aplikace ho nikdy neposlala. Povinnost by tak visela
+     * navždy. Druhá brána proto `authorityReportsResult` neřeší; laťkou je
+     * výslovné prohlášení účetní (den podání a poznámku vyžaduje služba).
+     */
+    public function testJmhzFiledOnAuthorityPortalCanBeClosed(): void
+    {
+        self::assertNotNull(
+            $this->policy->blockedReason(
+                JmhzSubmissionBridgeService::AGENDA_CODE,
+                'submitted',
+                'submitted',
+                null,
+            ),
+            'Falzifikace: běžné uzavření musí u JMHZ dál blokovat.',
+        );
+        self::assertNull($this->policy->externalFilingBlockedReason(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+            'submitted',
+            'submitted',
+            null,
+        ));
+    }
+
+    /**
+     * Hlášení podané na portálu aplikace nikdy neodeslala, takže podání zůstane
+     * `ready`. Kdyby brána brala jen `submitted` jako ta běžná, nešlo by
+     * uzavřít právě ten případ, kvůli kterému vznikla.
+     */
+    public function testNeverDispatchedSubmissionCanBeClosedAsFiledExternally(): void
+    {
+        foreach (['prepared', 'ready', 'submitted', 'processing'] as $status) {
+            self::assertNull(
+                $this->policy->externalFilingBlockedReason(
+                    JmhzSubmissionBridgeService::AGENDA_CODE,
+                    'submitted',
+                    $status,
+                    null,
+                ),
+                'Stav „' . $status . '" musí jít uzavřít jako podaný jinudy.',
+            );
+        }
+    }
+
+    /** O čem už úřad rozhodl, není co potvrzovat. */
+    public function testDecidedSubmissionCannotBeClosedAsFiledExternally(): void
+    {
+        foreach (['accepted', 'rejected', 'cancelled_in_time', 'superseded'] as $status) {
+            self::assertNotNull($this->policy->externalFilingBlockedReason(
+                JmhzSubmissionBridgeService::AGENDA_CODE,
+                'submitted',
+                $status,
+                null,
+            ));
+        }
+    }
+
+    /** Uzavřená povinnost se znovu neuzavírá ani touhle cestou. */
+    public function testClosedObligationCannotBeClosedAgainAsFiledExternally(): void
+    {
+        self::assertNotNull($this->policy->externalFilingBlockedReason(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+            'fulfilled',
+            'submitted',
+            null,
+        ));
+    }
+
+    /**
+     * Zpráva čekající ve frontě je tu stopka: účetní podala na portálu, a kdyby
+     * totéž odešlo ještě datovkou, vznikla by u úřadu duplicita.
+     */
+    public function testQueuedUndeliveredMessageBlocksExternalFiling(): void
+    {
+        $reason = $this->policy->externalFilingBlockedReason(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+            'submitted',
+            'submitted',
+            ['dispatch_state' => 'queued', 'acceptance_state' => 'unknown'],
+        );
+
+        self::assertNotNull($reason);
+        self::assertStringContainsString('podruhé', $reason);
+    }
+
     public function testHealthOverviewSentByDataBoxCanBeSettled(): void
     {
         self::assertNull($this->policy->blockedReason(

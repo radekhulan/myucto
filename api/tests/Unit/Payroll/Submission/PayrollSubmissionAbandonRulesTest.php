@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAbandonService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
 use PHPUnit\Framework\TestCase;
 
@@ -124,6 +125,37 @@ final class PayrollSubmissionAbandonRulesTest extends TestCase
             'status' => 'failed',
             'sent_at' => '2026-09-04 08:30:00',
         ]));
+    }
+
+    /**
+     * Pokus čekající na protokol MUSÍ jít zahodit.
+     *
+     * Přesně tenhle stav služba řeší: ČSSZ zprávu převezme a odmítne ji až
+     * protokolem, takže pokus skončí v `awaiting_protocol`. Ve výčtu
+     * zahoditelných stavů ale chyběl, takže ho zahození minulo — pokus se dál
+     * doptával na výsledek a povinnost zůstala nepodatelná. Test čte přímo
+     * konstantu služby, aby ho nešlo obejít úpravou textu komentáře.
+     */
+    public function testAwaitingProtocolAttemptIsAbandonable(): void
+    {
+        $statuses = (new \ReflectionClassConstant(
+            PayrollSubmissionAbandonService::class,
+            'OPEN_ATTEMPT_STATUSES',
+        ))->getValue();
+
+        self::assertContains(
+            'awaiting_protocol',
+            $statuses,
+            'Pokus čekající na protokol je právě ten, kvůli kterému zahození vzniklo.',
+        );
+        // Ostatní otevřené stavy tím nesmí vypadnout.
+        foreach (['prepared', 'sent', 'completed'] as $open) {
+            self::assertContains($open, $statuses);
+        }
+        // Terminální stavy se zahazovat nemají — nic už nedrží otevřené.
+        foreach (['failed', 'expired'] as $terminal) {
+            self::assertNotContains($terminal, $statuses);
+        }
     }
 
     /**

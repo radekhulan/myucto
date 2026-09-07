@@ -87,13 +87,110 @@ final readonly class PayrollSubmissionSettlementService
             );
         }
 
+        return $this->close(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $expectedObligationVersion,
+            fn (array $obligation, string $submissionStatus, ?array $outbox): ?string
+                => $this->policy->blockedReason(
+                    $obligation['agenda_code'],
+                    $obligation['status'],
+                    $submissionStatus,
+                    $outbox,
+                ),
+            self::acceptanceNote($note, $userId),
+        );
+    }
+
+    /**
+     * Účetní podala hlášení MIMO aplikaci — na portálu úřadu — a tímhle to
+     * dává vědět.
+     *
+     * Od {@see settle()} se liší jen bránou a tím, co zůstane v historii:
+     * uzavírá se opět POVINNOST, stav podání se nemění. Zápis do fronty
+     * výslovně říká, že podal člověk jinudy, aby z přehledu nešlo usoudit,
+     * že hlášení odeslala aplikace.
+     *
+     * @param  string $filedOn den podání na portálu ve tvaru `Y-m-d`
+     * @param  string $note čím je podání doložené (č. protokolu, kde bylo podáno…)
+     * @return array{
+     *   obligation:array{id:int,status:string,row_version:int},
+     *   submission:array{id:int,status:string},
+     *   outbox_id:?int,delivery_proof:?string
+     * }
+     */
+    public function settleAsFiledExternally(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $expectedObligationVersion,
+        string $filedOn,
+        string $note,
+        ?int $userId,
+    ): array {
+        $filedOn = trim($filedOn);
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $filedOn);
+        if ($date === false || $date->format('Y-m-d') !== $filedOn) {
+            throw new \InvalidArgumentException(
+                'Uveďte den podání ve tvaru RRRR-MM-DD.',
+            );
+        }
+        if ($date > new \DateTimeImmutable('today')) {
+            throw new \InvalidArgumentException(
+                'Den podání nemůže být v budoucnu — potvrzuje se něco, co už se stalo.',
+            );
+        }
+        $note = trim($note);
+        if ($note === '') {
+            throw new \InvalidArgumentException(
+                'Uveďte, čím je podání doložené — bez poznámky by v historii'
+                    . ' zůstalo tvrzení, které nejde ověřit.',
+            );
+        }
+
+        return $this->close(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $expectedObligationVersion,
+            fn (array $obligation, string $submissionStatus, ?array $outbox): ?string
+                => $this->policy->externalFilingBlockedReason(
+                    $obligation['agenda_code'],
+                    $obligation['status'],
+                    $submissionStatus,
+                    $outbox,
+                ),
+            self::externalFilingNote($filedOn, $note, $userId),
+        );
+    }
+
+    /**
+     * Společné jádro obou cest: ověř bránu, zamkni povinnost, uzavři ji
+     * a zapiš do fronty, KDO a o co se opřel.
+     *
+     * @param callable(array<string,mixed>,string,?array<string,mixed>):?string $blockedReason
+     * @return array{
+     *   obligation:array{id:int,status:string,row_version:int},
+     *   submission:array{id:int,status:string},
+     *   outbox_id:?int,delivery_proof:?string
+     * }
+     */
+    private function close(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $expectedObligationVersion,
+        callable $blockedReason,
+        string $acceptanceNote,
+    ): array {
         return $this->repository->transaction(function () use (
             $supplierId,
             $environment,
             $submissionId,
             $expectedObligationVersion,
-            $note,
-            $userId,
+            $blockedReason,
+            $acceptanceNote,
         ): array {
             $submission = $this->repository->findSubmission($supplierId, $submissionId);
             if ($submission === null
@@ -116,9 +213,8 @@ final readonly class PayrollSubmissionSettlementService
                 $environment,
                 $submissionId,
             );
-            $blocked = $this->policy->blockedReason(
-                $obligation['agenda_code'],
-                $obligation['status'],
+            $blocked = $blockedReason(
+                $obligation,
                 (string) $submission['status'],
                 $outboxRow,
             );
@@ -153,7 +249,7 @@ final readonly class PayrollSubmissionSettlementService
                     $outboxRow['id'],
                     'accepted',
                     'manual_confirmation',
-                    self::acceptanceNote($note, $userId),
+                    $acceptanceNote,
                     $outboxRow['row_version'],
                 );
             }
@@ -174,6 +270,18 @@ final readonly class PayrollSubmissionSettlementService
                 'delivery_proof' => PayrollSubmissionDeliveryProof::reason($outboxRow),
             ];
         });
+    }
+
+    /** Historie musí říct, že hlášení podal ČLOVĚK JINUDY, ne že dorazil protokol. */
+    private static function externalFilingNote(string $filedOn, string $note, ?int $userId): string
+    {
+        $who = $userId === null ? '' : sprintf(' (uživatel #%d)', $userId);
+
+        return mb_substr(
+            sprintf('Podáno mimo aplikaci %s%s: %s', $filedOn, $who, $note),
+            0,
+            500,
+        );
     }
 
     private static function acceptanceNote(string $note, ?int $userId): string

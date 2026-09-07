@@ -48,8 +48,17 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
  */
 final readonly class PayrollSubmissionAbandonService
 {
-    /** Stavy pokusu, které JEŠTĚ drží odeslání otevřené a jde je zahodit. */
-    private const OPEN_ATTEMPT_STATUSES = ['prepared', 'sent', 'completed'];
+    /**
+     * Stavy pokusu, které JEŠTĚ drží odeslání otevřené a jde je zahodit.
+     *
+     * `awaiting_protocol` tu chybělo, přestože je to PŘESNĚ ten stav, kvůli
+     * kterému služba vznikla: ČSSZ zprávu převezme (HTTP 200, CorrelationID)
+     * a odmítne ji až protokolem. Pokus, který na protokol čeká, tak zahození
+     * tiše minulo — dál se na výsledek doptával, dál blokoval odeslání a
+     * povinnost zůstala z aplikace nepodatelná. Viz
+     * {@see \MyInvoice\Tests\Unit\Payroll\Submission\PayrollSubmissionAbandonRulesTest}.
+     */
+    private const OPEN_ATTEMPT_STATUSES = ['prepared', 'sent', 'awaiting_protocol', 'completed'];
 
     public function __construct(
         private PayrollSubmissionService $submissions,

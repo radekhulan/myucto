@@ -21,6 +21,7 @@ import {
   type PayrollSubmissionDetail,
   type PayrollSubmissionOverviewItem,
 } from '@/api/payroll'
+import DateInput from '@/components/ui/DateInput.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
@@ -243,6 +244,60 @@ async function settle(item: PayrollSubmissionOverviewItem) {
     )
   } finally {
     settlingId.value = null
+  }
+}
+
+/**
+ * Účetní podala hlášení na portálu úřadu (typicky ČSSZ) a dává to vědět.
+ *
+ * Odlišené od „uzavřít povinnost" schválně: běžné uzavření je pro agendy, kde
+ * úřad výsledek NEPOSÍLÁ. Tady ho posílá, jenom na podání, které aplikace nikdy
+ * neodeslala, nemá kam. V historii proto zůstane výslovně „podáno mimo
+ * aplikaci" i s dnem podání, ať z přehledu nejde usoudit, že odeslala aplikace.
+ */
+const externalFilingItem = ref<PayrollSubmissionOverviewItem | null>(null)
+const externalFiledOn = ref('')
+const externalNote = ref('')
+const externalSaving = ref(false)
+const externalError = ref('')
+
+function openExternalFiling(item: PayrollSubmissionOverviewItem) {
+  externalFilingItem.value = item
+  externalFiledOn.value = new Date().toISOString().slice(0, 10)
+  externalNote.value = ''
+  externalError.value = ''
+}
+
+function closeExternalFiling() {
+  externalFilingItem.value = null
+  externalError.value = ''
+}
+
+async function confirmExternalFiling() {
+  const item = externalFilingItem.value
+  const latest = item?.latest_submission
+  if (!item || !latest || externalSaving.value) return
+  if (externalNote.value.trim() === '' || externalFiledOn.value === '') return
+
+  externalSaving.value = true
+  externalError.value = ''
+  try {
+    await payrollApi.markSubmissionFiledExternally(
+      environment.value,
+      latest.id,
+      item.row_version,
+      externalFiledOn.value,
+      externalNote.value.trim(),
+    )
+    closeExternalFiling()
+    await load()
+  } catch (e) {
+    externalError.value = apiErrorMessage(
+      e,
+      t('payroll.submissions.overview.external_failed'),
+    )
+  } finally {
+    externalSaving.value = false
   }
 }
 
@@ -765,6 +820,15 @@ onMounted(load)
                   <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">
                     <div class="flex flex-wrap items-center justify-end gap-2">
                       <button
+                        v-if="item.settlement?.can_file_externally && !item.settlement?.can_settle"
+                        type="button"
+                        :class="btnOutlineSm('neutral')"
+                        data-test="submission-filed-externally-row"
+                        @click="openExternalFiling(item)"
+                      >
+                        {{ t('payroll.submissions.overview.external_action') }}
+                      </button>
+                      <button
                         v-if="item.settlement?.can_settle"
                         type="button"
                         :class="btnFilledSm('success')"
@@ -869,6 +933,19 @@ onMounted(load)
               {{ settlingId === item.id
                 ? t('payroll.submissions.overview.settling')
                 : t('payroll.submissions.overview.settle_action') }}
+            </button>
+            <button
+              v-if="item.settlement?.can_file_externally && !item.settlement?.can_settle"
+              type="button"
+              class="cursor-pointer mt-4"
+              :class="btnOutline('neutral')"
+              data-test="submission-filed-externally"
+              @click="openExternalFiling(item)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.check" />
+              </svg>
+              {{ t('payroll.submissions.overview.external_action') }}
             </button>
             <button
               v-if="item.latest_submission"
@@ -1433,4 +1510,61 @@ onMounted(load)
       </section>
     </template>
   </section>
+
+    <!--
+      Podání mimo aplikaci. Den i poznámka jsou povinné: bez nich by v historii
+      zůstalo tvrzení, které nejde ověřit — a právě to je jediný rozdíl proti
+      tomu, kdyby aplikace prostě prohlásila povinnost za splněnou.
+    -->
+    <div
+      v-if="externalFilingItem"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      data-test="external-filing-dialog"
+    >
+      <div class="w-full max-w-md rounded-xl bg-surface p-5 shadow-lg">
+        <h3 class="text-lg font-semibold text-neutral-900">
+          {{ t('payroll.submissions.overview.external_title') }}
+        </h3>
+        <p class="mt-1 text-sm text-neutral-500">
+          {{ t('payroll.submissions.overview.external_hint') }}
+        </p>
+        <div class="mt-4 space-y-3">
+          <div>
+            <label class="mb-1 block text-sm font-medium text-neutral-700">
+              {{ t('payroll.submissions.overview.external_filed_on') }}
+            </label>
+            <DateInput v-model="externalFiledOn" required class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-neutral-700">
+              {{ t('payroll.submissions.overview.external_note') }}
+            </label>
+            <textarea
+              v-model="externalNote"
+              rows="3"
+              :placeholder="t('payroll.submissions.overview.external_note_ph')"
+              class="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+              data-test="external-filing-note"
+            ></textarea>
+          </div>
+          <p v-if="externalError" class="text-sm text-danger-600">{{ externalError }}</p>
+        </div>
+        <div class="mt-4 flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" @click="closeExternalFiling()">
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="button"
+            :class="btnFilledSm('success')"
+            :disabled="externalSaving || externalNote.trim() === '' || externalFiledOn === ''"
+            data-test="external-filing-confirm"
+            @click="confirmExternalFiling()"
+          >
+            {{ externalSaving
+              ? t('payroll.submissions.overview.settling')
+              : t('payroll.submissions.overview.external_confirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
 </template>

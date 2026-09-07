@@ -42,6 +42,30 @@ final class PayrollSubmissionSettlementAction
     /** @param array{submissionId?:string} $args */
     public function __invoke(Request $request, Response $response, array $args): Response
     {
+        return $this->handle($request, $response, $args, false);
+    }
+
+    /**
+     * POST /submissions/{submissionId}/filed-externally — účetní podala hlášení
+     * na portálu úřadu a dává to vědět.
+     *
+     * Tělo navíc nese `filed_on` (den podání). Uzavírá se POVINNOST, stav podání
+     * zůstává — aplikace ho neodeslala a předstírat opak by bylo lhaní o původu.
+     *
+     * @param array{submissionId?:string} $args
+     */
+    public function fileExternally(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, $args, true);
+    }
+
+    /** @param array{submissionId?:string} $args */
+    private function handle(
+        Request $request,
+        Response $response,
+        array $args,
+        bool $externalFiling,
+    ): Response {
         // Uzavření úřední povinnosti jménem firmy se nespouští přes token:
         // token se dá odcizit a na rozdíl od relace u něj není druhý faktor.
         if (!RequestAuthorization::isSessionAuth($request)) {
@@ -102,14 +126,24 @@ final class PayrollSubmissionSettlementAction
         $note = is_string($note) ? $note : '';
 
         try {
-            $result = $this->settlements->settle(
-                $this->currentSupplierId($request),
-                $environment,
-                (int) $submissionId,
-                (int) $rowVersion,
-                $note,
-                $this->userId($request),
-            );
+            $result = $externalFiling
+                ? $this->settlements->settleAsFiledExternally(
+                    $this->currentSupplierId($request),
+                    $environment,
+                    (int) $submissionId,
+                    (int) $rowVersion,
+                    is_string($body['filed_on'] ?? null) ? $body['filed_on'] : '',
+                    $note,
+                    $this->userId($request),
+                )
+                : $this->settlements->settle(
+                    $this->currentSupplierId($request),
+                    $environment,
+                    (int) $submissionId,
+                    (int) $rowVersion,
+                    $note,
+                    $this->userId($request),
+                );
         } catch (PayrollSubmissionConflictException $exception) {
             return $this->noStore(Json::error(
                 $response,

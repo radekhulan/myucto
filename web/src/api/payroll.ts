@@ -2531,6 +2531,8 @@ export interface PayrollSubmissionOverviewItem {
   settlement?: {
     authority_reports_result: boolean
     can_settle: boolean
+    /** Lze prohlásit za podané mimo aplikaci (na portálu úřadu)? */
+    can_file_externally?: boolean
     /** Čím je doručení doložené: `delivered` | `receipt` | `accepted`. */
     delivery_proof: string | null
   }
@@ -6500,6 +6502,25 @@ export const payrollApi = {
       { environment, row_version: rowVersion, note },
     ).then(response => response.data),
   /**
+   * Účetní podala hlášení MIMO aplikaci — na portálu úřadu — a dává to vědět.
+   *
+   * Od `settleSubmission` se liší tím, že projde i tam, kde úřad výsledek
+   * normálně posílá sám (JMHZ): na podání, které aplikace neodeslala, žádný
+   * protokol nedorazí. Uzavírá se POVINNOST, stav podání zůstává — aplikace
+   * ho neodeslala a předstírat opak by bylo lhaní o původu.
+   */
+  markSubmissionFiledExternally: (
+    environment: PayrollRegzelEnvironment,
+    submissionId: number,
+    rowVersion: number,
+    filedOn: string,
+    note: string,
+  ) =>
+    api.post<PayrollSubmissionSettlementResult>(
+      `/payroll/submissions/${submissionId}/filed-externally`,
+      { environment, row_version: rowVersion, filed_on: filedOn, note },
+    ).then(response => response.data),
+  /**
    * Jeden měsíční přehled: co se za zvolené období generuje/odesílá, kam,
    * jakou cestou, do kdy a co s tím — přes VŠECHNY agendy i to, co appka
    * jen počítá nebo drží jako úkol bez podání (viz {@see PayrollMonthlyChecklistItem}).
@@ -7863,6 +7884,30 @@ export const payrollApi = {
     `/payroll/submissions/jmhz-transport/${attemptId}/close`,
     { environment },
     { params: { variable_symbol: variableSymbol, environment } },
+  ).then(response => response.data),
+  /**
+   * Trvale smaže pokus o odeslání z historie.
+   *
+   * Běžná cesta ven je ZAHOZENÍ pokusu (`abandonSubmissionInQueue`) — řádek
+   * zůstane i s odpovědí úřadu. Tohle je pro záznam, který nic nedokládá:
+   * server pustí jen pokus bez dodejky a bez protokolu. `rowVersion` je
+   * povinná, aby nešlo smazat pokus, do kterého mezitím dorazil protokol.
+   */
+  deleteJmhzTransportAttempt: (
+    attemptId: number,
+    rowVersion: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.delete<{
+    deleted: true
+    attempt_id: number
+    submission_id: number
+    attempt_no: number
+    channel: string
+    status: string
+    correlation_reference: string | null
+  }>(
+    `/payroll/submissions/jmhz-transport/${attemptId}`,
+    { data: { environment, row_version: rowVersion }, params: { environment } },
   ).then(response => response.data),
   /**
    * Storno celého podání za období. Jen ho ZMRAZÍ — odesílá se pak stejnou

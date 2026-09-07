@@ -737,6 +737,43 @@ async function poll(attempt: PayrollJmhzTransportAttempt) {
   }
 }
 
+/**
+ * Trvale smaže pokus z historie.
+ *
+ * Ledger pokusů je jinak append-only a běžná cesta ven je zahození, po kterém
+ * řádek zůstane i s odpovědí úřadu. Tohle je pro pokus, který NIC nedokládá —
+ * server pustí jen ten bez dodejky a bez protokolu; jinak odpoví 409. Ptáme se
+ * proto jednou navíc: po smazání po řádku nezůstane nic než auditní zápis.
+ */
+const deletingId = ref<number | null>(null)
+
+async function deleteAttempt(attempt: PayrollJmhzTransportAttempt) {
+  if (!canWrite.value || busy.value) return
+  if (!window.confirm(t('payroll.submissions.transport.delete_confirm', {
+    no: attempt.attempt_no,
+  }))) return
+
+  deletingId.value = attempt.id
+  actionError.value = ''
+  success.value = ''
+  try {
+    await payrollApi.deleteJmhzTransportAttempt(
+      attempt.id,
+      attempt.row_version,
+      environment.value,
+    )
+    success.value = t('payroll.submissions.transport.delete_done', { no: attempt.attempt_no })
+    await load()
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.delete_failed'),
+    )
+  } finally {
+    deletingId.value = null
+  }
+}
+
 function askToCancel(submissionId: number) {
   if (busy.value) return
   closeCorrection()
@@ -1729,6 +1766,22 @@ onMounted(loadVariableSymbols)
                     {{ pollingId === attempt.id
                       ? t('payroll.submissions.transport.polling')
                       : t('payroll.submissions.transport.poll') }}
+                  </button>
+                  <button
+                    v-if="canWrite"
+                    type="button"
+                    :data-test="`transport-delete-${attempt.id}`"
+                    :class="btnOutlineSm('danger')"
+                    :disabled="busy"
+                    :title="t('payroll.submissions.transport.delete_hint')"
+                    @click="deleteAttempt(attempt)"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.trash" />
+                    </svg>
+                    {{ deletingId === attempt.id
+                      ? t('payroll.submissions.transport.deleting')
+                      : t('payroll.submissions.transport.delete') }}
                   </button>
                   <button
                     v-if="canWrite && canClose(attempt)"

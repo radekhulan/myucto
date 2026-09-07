@@ -17,6 +17,10 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolExplainer;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAttemptDeletionService;
 
 final class PayrollJmhzTransportQualificationGateTest extends TestCase
 {
@@ -52,6 +56,15 @@ final class PayrollJmhzTransportQualificationGateTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $access,
             $gate,
+            // Mazání pokusu i audit test nezajímají — brána kvalifikace se ptá
+            // dřív, než se na ně vůbec dojde. Skutečná instance nad atrapami,
+            // aby kvůli testu nemusela služba do seznamu bypass-finals.
+            new PayrollSubmissionAttemptDeletionService(
+                $this->createStub(Connection::class),
+                $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+            ),
+            $this->createStub(ActivityLogger::class),
+            $this->createStub(IpMatcher::class),
         );
 
         $response = $action->send(

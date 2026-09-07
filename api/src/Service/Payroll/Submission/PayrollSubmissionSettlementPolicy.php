@@ -22,6 +22,21 @@ final readonly class PayrollSubmissionSettlementPolicy
     /** Stavy podání, které smí uzavřít ruční potvrzení. */
     public const SETTLEABLE_SUBMISSION_STATUSES = ['submitted', 'processing'];
 
+    /**
+     * Stavy podání, u kterých má smysl prohlásit „podal jsem to mimo aplikaci".
+     *
+     * Širší než u běžného uzavření schválně: účetní může hlášení vyplnit
+     * a odeslat rovnou na portálu úřadu, aniž by ho aplikace kdy poslala —
+     * podání pak zůstane `ready` nebo `prepared`. Chybí tu naopak všechny stavy,
+     * o kterých už úřad rozhodl; tam není co potvrzovat.
+     */
+    public const EXTERNALLY_FILEABLE_SUBMISSION_STATUSES = [
+        'prepared',
+        'ready',
+        'submitted',
+        'processing',
+    ];
+
     public function __construct(
         private PayrollDispatchCapabilityCatalog $capabilities,
     ) {}
@@ -78,6 +93,56 @@ final readonly class PayrollSubmissionSettlementPolicy
             return 'Zpráva zatím leží v odchozí frontě datové schránky'
                 . ' neodeslaná. Nejdřív ji odešlete, teprve pak jde podání'
                 . ' uzavřít.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Smí účetní prohlásit, že podání odeslala MIMO aplikaci (na portálu úřadu)?
+     *
+     * Proč je to druhá brána, a ne uvolnění té první: běžné ruční uzavření se
+     * vědomě zavírá tam, kde úřad výsledek posílá sám, protože jinak by se za
+     * hotové odklikl měsíc, o kterém úřad teprve rozhoduje. Tenhle předpoklad
+     * ale u podání odeslaného jinudy NEPLATÍ — na hlášení, které aplikace nikdy
+     * neodeslala, žádný protokol nedorazí a povinnost by visela navždy. Proto
+     * `authorityReportsResult` tady záměrně nic neblokuje; laťkou je místo toho
+     * výslovné prohlášení účetní, kdy a kde podala (vyžaduje ho služba).
+     *
+     * @param array<string,mixed>|null $outbox
+     */
+    public function externalFilingBlockedReason(
+        string $agendaCode,
+        string $obligationStatus,
+        string $submissionStatus,
+        ?array $outbox,
+    ): ?string {
+        if (in_array($obligationStatus, ['fulfilled', 'cancelled'], true)) {
+            return 'Povinnost už je uzavřená.';
+        }
+        if (!$this->capabilities->forAgenda($agendaCode)->isDispatchable()) {
+            return 'Tuhle agendu aplikace neodesílá, takže tady není co'
+                . ' uzavírat. Výsledek se dokládá na záložce příslušné agendy.';
+        }
+        if (!in_array(
+            $submissionStatus,
+            self::EXTERNALLY_FILEABLE_SUBMISSION_STATUSES,
+            true,
+        )) {
+            return sprintf(
+                'O tomhle podání už úřad rozhodl (stav „%s"), takže není co'
+                    . ' potvrzovat.',
+                $submissionStatus,
+            );
+        }
+        // Zpráva čekající ve frontě je tu STOPKA s opačnou radou než u běžného
+        // uzavření: když účetní podala na portálu, nesmí ta samá zpráva odejít
+        // ještě jednou datovkou — u úřadu by vznikla duplicita.
+        if ($outbox !== null
+            && !PayrollSubmissionDeliveryProof::hasLeftApplication($outbox)
+        ) {
+            return 'Zpráva ještě leží v odchozí frontě datové schránky. Nejdřív'
+                . ' ji ve frontě zrušte, jinak by totéž hlášení odešlo podruhé.';
         }
 
         return null;

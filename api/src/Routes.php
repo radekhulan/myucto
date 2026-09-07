@@ -1371,6 +1371,14 @@ final class Routes
                 '/submissions/{submissionId:[0-9]+}/settle',
                 PayrollSubmissionSettlementAction::class,
             );
+            // Hlášení podané na portálu úřadu. Vlastní adresa i vlastní brána:
+            // aplikace ho nikdy neodeslala, takže na něj protokol nedorazí
+            // a povinnost by jinak visela navždy. Zápis v historii výslovně
+            // říká, že podal člověk jinudy.
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/filed-externally',
+                [PayrollSubmissionSettlementAction::class, 'fileExternally'],
+            );
             // Fronta odchozích podání: jedno místo pro všechno připravené
             // a neodeslané napříč agendami. Odesílá přes TYTÉŽ služby jako
             // původní tlačítka u jednotlivých agend — je to druhá cesta
@@ -1668,6 +1676,13 @@ final class Routes
             $g->post(
                 '/submissions/jmhz-transport/{attemptId:[0-9]+}/close',
                 [PayrollJmhzTransportAction::class, 'close'],
+            );
+            // Trvalé smazání pokusu z historie. Běžná cesta ven je zahození
+            // (`/submissions/queue/{id}/abandon`), kde pokus zůstane i s odpovědí
+            // úřadu; tohle je pro záznam, který nic nedokládá a jen mate.
+            $g->delete(
+                '/submissions/jmhz-transport/{attemptId:[0-9]+}',
+                [PayrollJmhzTransportAction::class, 'delete'],
             );
             // Datová schránka je druhý rovnocenný kanál JMHZ vedle VREP, ne
             // náhradní cesta — ČSSZ pro JMHZ zřídila vlastní schránku iie254d.

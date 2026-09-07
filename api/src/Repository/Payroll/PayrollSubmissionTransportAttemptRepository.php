@@ -1051,6 +1051,40 @@ final class PayrollSubmissionTransportAttemptRepository
     }
 
     /**
+     * Fyzicky smaže řádek pokusu.
+     *
+     * ⚠️ VÝJIMKA z append-only ledgeru. Zahození pokusu ({@see markExpired})
+     * je ta běžná cesta — řádek zůstane i s tím, co úřad odpověděl. Tohle je
+     * pro případ, kdy má v přehledu zmizet úplně: pokus, který úřad nikdy
+     * nepřijal a nemá k sobě dodejku, je jen šum po nepovedeném odeslání.
+     *
+     * Co se smí a co ne, rozhoduje
+     * {@see \MyInvoice\Service\Payroll\Submission\PayrollSubmissionAttemptDeletionService};
+     * tady je jen zápis, který si hlídá verzi řádku, aby nesmazal pokus, který
+     * se mezitím pohnul (třeba právě dorazivším protokolem).
+     */
+    public function delete(int $attemptId, int $expectedVersion): void
+    {
+        $statement = $this->db->pdo()->prepare(
+            'DELETE FROM ' . self::TABLE . ' WHERE id = ? AND row_version = ?',
+        );
+        $statement->execute([$attemptId, $expectedVersion]);
+        if ($statement->rowCount() === 1) {
+            return;
+        }
+
+        $current = $this->findOne('WHERE id = ?', [$attemptId]);
+        if ($current === null) {
+            throw new \DomainException('Pokus o odeslání #' . $attemptId . ' neexistuje.');
+        }
+        throw new \DomainException(
+            'Pokus o odeslání #' . $attemptId
+            . ' se mezitím změnil (očekávána verze ' . $expectedVersion
+            . ', aktuální ' . (int) $current['row_version'] . '). Načtěte stav znovu.',
+        );
+    }
+
+    /**
      * Jediná zapisovací cesta: každý UPDATE posouvá `row_version` právě o jedna
      * a zároveň si ho hlídá v podmínce. Když neprojde ani jeden řádek, není to
      * „nic se nezměnilo", ale prohraný souboj o zámek nebo neexistující pokus —
