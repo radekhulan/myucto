@@ -61,7 +61,10 @@ final class NamedLockName
     private static function database(Connection $db): string
     {
         $statement = $db->pdo()->query('SELECT DATABASE()');
-        if ($statement === false) {
+        // `false` vrací PDO při chybě; `null` jen atrapa v testu, která `query()`
+        // nemá nastavené. Obojí je lepší ohlásit než spadnout na volání metody
+        // nad ničím — z fatální chyby uvnitř zamykání se špatně hledá příčina.
+        if ($statement === false || $statement === null) {
             throw new \RuntimeException('Aktuální databázi pro named lock nelze načíst.');
         }
 

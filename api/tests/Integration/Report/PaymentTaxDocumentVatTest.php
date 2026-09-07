@@ -8,6 +8,7 @@ use MyInvoice\Action\Invoice\CancelInvoiceAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
@@ -440,7 +441,9 @@ final class PaymentTaxDocumentVatTest extends TestCase
         // recyklovaném testovacím spojení by druhé „spojení" zámek dostalo vždy
         // a test by neměřil nic.
         $second = Connection::withoutSharedTestConnection(fn (): Connection => new Connection($this->config));
-        $name = 'myinvoice:advance-cycle:' . $proformaId;
+        // Jméno skládá NamedLockName (scoping podle databáze) — test si ho nesmí
+        // dopočítávat vlastním vzorcem, jinak by přestal měřit týž zámek.
+        $name = NamedLockName::for($this->db, 'myinvoice:advance-cycle', $proformaId);
 
         $this->cycleLock->synchronized($proformaId, function () use ($second, $name): void {
             $stmt = $second->pdo()->prepare('SELECT GET_LOCK(?, 0)');
@@ -480,7 +483,9 @@ final class PaymentTaxDocumentVatTest extends TestCase
     public function testAdvanceCycleLockSurvivesOuterTransactionCallback(): void
     {
         $proformaId = $this->seedProforma('2099090991', '2099-09-10', [[1000.00, 210.00, 21.0]]);
-        $name = 'myinvoice:advance-cycle:' . $proformaId;
+        // Jméno skládá NamedLockName (scoping podle databáze) — test si ho nesmí
+        // dopočítávat vlastním vzorcem, jinak by přestal měřit týž zámek.
+        $name = NamedLockName::for($this->db, 'myinvoice:advance-cycle', $proformaId);
         // Nesdílená zóna — viz testAdvanceCycleLockSerializesSecondConnection().
         $second = Connection::withoutSharedTestConnection(fn (): Connection => new Connection($this->config));
         $pdo = $this->db->pdo();

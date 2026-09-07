@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Document;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateDocumentData;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificatePdfRenderer;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateService;
@@ -28,13 +29,18 @@ final class AnnualTaxCertificateServiceTest extends TestCase
         $pdo->expects(self::once())->method('beginTransaction');
         $pdo->expects(self::never())->method('commit');
         $pdo->expects(self::once())->method('rollBack');
+        // Jméno zámku nese otisk databáze (NamedLockName), takže atrapa musí
+        // odpovědět i na `SELECT DATABASE()` a očekávané jméno se skládá touž cestou.
+        $database = 'myucto_unit_test';
+        $expectedLock = NamedLockName::compose('payroll-annual-document', $database, '11:21:2026');
+        $databaseQuery = $this->createStub(\PDOStatement::class);
+        $databaseQuery->method('fetchColumn')->willReturn($database);
+        $pdo->method('query')->willReturn($databaseQuery);
         $lock = $this->createMock(\PDOStatement::class);
-        $lock->expects(self::once())->method('execute')
-            ->with(['payroll-annual-document:11:21:2026']);
+        $lock->expects(self::once())->method('execute')->with([$expectedLock]);
         $lock->expects(self::once())->method('fetchColumn')->willReturn(1);
         $release = $this->createMock(\PDOStatement::class);
-        $release->expects(self::once())->method('execute')
-            ->with(['payroll-annual-document:11:21:2026']);
+        $release->expects(self::once())->method('execute')->with([$expectedLock]);
         $release->expects(self::once())->method('fetchColumn')->willReturn(1);
         $pdo->expects(self::exactly(2))->method('prepare')
             ->willReturnOnConsecutiveCalls($lock, $release);
@@ -159,6 +165,10 @@ final class AnnualTaxCertificateServiceTest extends TestCase
         );
         $statement->method('fetchColumn')->willReturn(1);
         $pdo->method('prepare')->willReturn($statement);
+        // Jméno zámku nese otisk databáze (NamedLockName), takže atrapa musí umět
+        // odpovědět i na `SELECT DATABASE()`. Na čem konkrétně test běží, je jedno —
+        // jde o tvar jména, ne o obsah otisku.
+        $pdo->method('query')->willReturn($statement);
 
         $connection = (new \ReflectionClass(Connection::class))
             ->newInstanceWithoutConstructor();

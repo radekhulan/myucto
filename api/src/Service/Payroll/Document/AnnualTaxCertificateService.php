@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Document;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use PDO;
 
 final class AnnualTaxCertificateService
@@ -38,7 +39,7 @@ final class AnnualTaxCertificateService
                 . 'databázovou transakci.',
             );
         }
-        $storageLock = self::storageLockName($supplierId, $employeeId, $taxYear);
+        $storageLock = $this->storageLockName($supplierId, $employeeId, $taxYear);
         $this->acquireStorageLock($pdo, $storageLock);
         try {
             $scope = $this->documents->beginStorageScope();
@@ -137,12 +138,17 @@ final class AnnualTaxCertificateService
      * navzájem nahrazují, takže je bezpečnější je serializovat spolu — a název
      * zámku se tím vejde do 64 znaků, což je limit MySQL.
      */
-    private static function storageLockName(
+    private function storageLockName(
         int $supplierId,
         int $employeeId,
         int $taxYear,
     ): string {
-        return "payroll-annual-document:{$supplierId}:{$employeeId}:{$taxYear}";
+        // Serverový named lock — scoping podle databáze, viz NamedLockName.
+        return NamedLockName::for(
+            $this->db,
+            'payroll-annual-document',
+            "{$supplierId}:{$employeeId}:{$taxYear}",
+        );
     }
 
     private function rollbackIfOpen(PDO $pdo): void

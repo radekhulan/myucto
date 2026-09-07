@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\License;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 
 /**
  * Jediná atomická brána pro mutace, které mohou změnit licenční kapacitu.
@@ -14,7 +15,7 @@ use MyInvoice\Infrastructure\Database\Connection;
  */
 final class LicenseCapacityGate
 {
-    private const LOCK_PREFIX = 'myucto_license_capacity_';
+    private const LOCK_SCOPE = 'myucto_license_capacity';
     private const LOCK_TIMEOUT_SECONDS = 10;
     private const SAVEPOINT = 'license_capacity_gate';
 
@@ -132,16 +133,9 @@ final class LicenseCapacityGate
 
     private function lockName(): string
     {
-        $statement = $this->db->pdo()->query('SELECT DATABASE()');
-        if ($statement === false) {
-            throw new \RuntimeException('Aktuální databázi pro licenční zámek nelze načíst.');
-        }
-        $database = (string) $statement->fetchColumn();
-        if ($database === '') {
-            throw new \RuntimeException('Aktuální databázi pro licenční zámek nelze určit.');
-        }
-
-        return self::LOCK_PREFIX . substr(hash('sha256', $database), 0, 32);
+        // Scoping podle databáze vznikl původně tady; dnes ho drží
+        // {@see NamedLockName} pro všechny named locky v aplikaci.
+        return NamedLockName::for($this->db, self::LOCK_SCOPE);
     }
 
     /**

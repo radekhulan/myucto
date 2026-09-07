@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use MyInvoice\Service\System\InstanceEntitlement;
 use MyInvoice\Service\System\TelemetryPayloadBuilder;
 use Psr\Log\LoggerInterface;
@@ -32,7 +33,7 @@ final class LicenseService
     public const DEFAULT_PUBLIC_KEY = 'lDwgisBH87eegfc95Z3dvc9FhMpZz/sQtat8JMd+KdE=';
 
     private const TRIAL_DAYS = 60;
-    private const PURCHASE_LOCK_PREFIX = 'myucto_license_purchase_';
+    private const PURCHASE_LOCK_SCOPE = 'myucto_license_purchase';
     private const PURCHASE_LOCK_TIMEOUT = 10;
     private const PURCHASE_PERSIST_SAVEPOINT = 'license_purchase_persist';
     private const BILLING_WATCH_BEFORE_SECONDS = 2 * 3600;
@@ -1272,11 +1273,8 @@ final class LicenseService
     private function withPurchaseLock(callable $callback): mixed
     {
         $pdo = $this->db->pdo();
-        $database = (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
-        if ($database === '') {
-            throw new \RuntimeException('Aktuální databázi pro purchase lock nelze určit.');
-        }
-        $lockName = self::PURCHASE_LOCK_PREFIX . substr(hash('sha256', $database), 0, 32);
+        // Scoping podle databáze — viz NamedLockName (serverový named lock).
+        $lockName = NamedLockName::for($this->db, self::PURCHASE_LOCK_SCOPE);
         $statement = $pdo->prepare('SELECT GET_LOCK(?, ?)');
         $statement->execute([$lockName, self::PURCHASE_LOCK_TIMEOUT]);
         if ((int) $statement->fetchColumn() !== 1) {

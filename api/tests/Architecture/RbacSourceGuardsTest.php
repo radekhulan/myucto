@@ -121,17 +121,24 @@ final class RbacSourceGuardsTest extends TestCase
     {
         $source = file_get_contents(dirname(__DIR__, 2) . '/src/Action/Admin/UserAdminAction.php');
         $capacityGate = file_get_contents(dirname(__DIR__, 2) . '/src/Service/License/LicenseCapacityGate.php');
+        $lockName = file_get_contents(dirname(__DIR__, 2) . '/src/Infrastructure/Database/NamedLockName.php');
         self::assertNotFalse($source);
         self::assertNotFalse($capacityGate);
+        self::assertNotFalse($lockName);
         self::assertStringContainsString('capacity->mutateSeats(', $source);
         self::assertStringContainsString('ORDER BY u.id FOR UPDATE', $source);
         self::assertStringContainsString('guardedUserUpdate(', $source);
         self::assertStringContainsString('GET_LOCK(', $capacityGate);
-        self::assertStringContainsString('SELECT DATABASE()', $capacityGate);
-        self::assertStringContainsString("hash('sha256', \$database)", $capacityGate);
         self::assertStringContainsString('beginTransaction()', $capacityGate);
         self::assertStringContainsString('rollBack()', $capacityGate);
         self::assertStringContainsString('commit()', $capacityGate);
+        // Zámek MUSÍ být scopovaný podle databáze — named lock je v MariaDB
+        // serverový, takže bez toho by si dvě instalace na sdíleném serveru
+        // (SaaS hosting) blokovaly kapacitní bránu navzájem. Scoping se skládá
+        // v NamedLockName, ne tady; brána proto hlídá obě půlky té vazby.
+        self::assertStringContainsString('NamedLockName::for(', $capacityGate);
+        self::assertStringContainsString('SELECT DATABASE()', $lockName);
+        self::assertStringContainsString("hash('sha256', \$database)", $lockName);
     }
 
     public function testLicenseCapacityMutationsUseSingleDatabaseGate(): void

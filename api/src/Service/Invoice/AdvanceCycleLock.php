@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 
 final class AdvanceCycleLock
 {
@@ -16,7 +17,8 @@ final class AdvanceCycleLock
             return $callback();
         }
 
-        $name = 'myinvoice:advance-cycle:' . $proformaId;
+        // Serverový named lock — scoping podle databáze, viz NamedLockName.
+        $name = NamedLockName::for($this->db, 'myinvoice:advance-cycle', $proformaId);
         $lock = $this->db->pdo()->prepare('SELECT GET_LOCK(?, 10)');
         $lock->execute([$name]);
         if ((int) $lock->fetchColumn() !== 1) {

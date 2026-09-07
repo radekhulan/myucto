@@ -9,6 +9,7 @@ use MyInvoice\Action\License\DeactivateLicenseAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Service\License\LicenseClient;
 use MyInvoice\Service\License\LicenseNetworkException;
@@ -410,9 +411,9 @@ final class LicenseActivationActionTest extends TestCase
 
     private function purchaseLockName(): string
     {
-        $database = (string) $this->db->pdo()->query('SELECT DATABASE()')->fetchColumn();
-
-        return 'myucto_license_purchase_' . substr(hash('sha256', $database), 0, 32);
+        // Jméno skládá NamedLockName (scoping podle databáze) — test si ho nesmí
+        // dopočítávat vlastním vzorcem, jinak by přestal měřit týž zámek.
+        return NamedLockName::for($this->db, 'myucto_license_purchase');
     }
 
     private function assertLockUnavailable(Connection $connection, string $lockName): void

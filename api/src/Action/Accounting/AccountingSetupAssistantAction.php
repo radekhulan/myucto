@@ -9,6 +9,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Repository\AccountingModeRepository;
@@ -321,7 +322,7 @@ final class AccountingSetupAssistantAction
             || !empty(($applied['params'] ?? [])['rollback_of_job_id'])) {
             return Json::error($response, 'not_found', 'Přeúčtování nenalezeno.', 404);
         }
-        $lockName = self::lifecycleLockName($supplierId, $appliedJobId);
+        $lockName = $this->lifecycleLockName($supplierId, $appliedJobId);
         if (!$this->acquireLifecycleLock($lockName)) {
             return Json::error($response, 'operation_busy', 'S touto zálohou právě pracuje jiná operace.', 409);
         }
@@ -366,7 +367,7 @@ final class AccountingSetupAssistantAction
             || !empty(($job['params'] ?? [])['rollback_of_job_id'])) {
             return Json::error($response, 'not_found', 'Přeúčtování nenalezeno.', 404);
         }
-        $lockName = self::lifecycleLockName($supplierId, $jobId);
+        $lockName = $this->lifecycleLockName($supplierId, $jobId);
         if (!$this->acquireLifecycleLock($lockName)) {
             return Json::error($response, 'operation_busy', 'S touto zálohou právě pracuje jiná operace.', 409);
         }
@@ -453,9 +454,10 @@ final class AccountingSetupAssistantAction
         $stmt->execute([$name]);
     }
 
-    private static function lifecycleLockName(int $supplierId, int $jobId): string
+    private function lifecycleLockName(int $supplierId, int $jobId): string
     {
-        return "accounting_setup_snapshot:{$supplierId}:{$jobId}";
+        // Serverový named lock — scoping podle databáze, viz NamedLockName.
+        return NamedLockName::for($this->db, 'accounting_setup_snapshot', "{$supplierId}:{$jobId}");
     }
 
     private function spawn(int $jobId): bool
