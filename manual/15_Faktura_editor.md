@@ -44,6 +44,12 @@ Editor je rozdělený na tři bloky:
 | Číslo objednávky dodavatele | Volitelná obchodní reference, například `MYU000023`. Je uložená přímo na faktuře i bez zakázky a lze podle ní párovat platby. |
 | Datum úhrady | Vyplní se automaticky při zaplacení (přes banku nebo manuálně) |
 
+Datumová pole se zadávají ve formátu jazyka aplikace — v češtině `d. m. rrrr`
+(např. `1. 9. 2026` nebo zkráceně `1.9.26`), v angličtině `mm/dd/yyyy`. Formát
+se neřídí jazykem prohlížeče ani systému. Ikona vpravo v poli otevře kalendář;
+neplatné datum (např. `31. 2.`) pole označí a faktura se neuloží, dokud ho
+neopravíte. Platí to stejně ve všech agendách, viz [§ 1.1](01_Uvod.md).
+
 ### 15.2.4 Měna a DPH
 
 - **Měna** — předvyplní se z klienta (nebo zakázky), lze přepsat.

@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import type { ChartAccount } from '@/api/accounting'
 import ChartAccountSelect from '../ChartAccountSelect.vue'
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 
 const accounts = [
   { id: 1, account_code: '518', name: 'Services', is_active: true, parent_id: null },

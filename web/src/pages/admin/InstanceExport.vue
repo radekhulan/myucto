@@ -12,6 +12,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 /**
  * Balíček firmy složený z obnovitelného archivu a volitelných účetních podkladů.
@@ -245,12 +246,12 @@ function statusClass(status: string): string {
       <div class="flex flex-wrap items-end gap-3">
         <label class="text-sm">
           <span class="block text-xs text-neutral-500 mb-1">{{ t('instance_export.date_from') }}</span>
-          <input v-model="dateFrom" type="date" :disabled="isBusy"
+          <DateInput v-model="dateFrom" :disabled="isBusy"
             class="border border-neutral-300 rounded px-2 py-1.5 text-sm" />
         </label>
         <label class="text-sm">
           <span class="block text-xs text-neutral-500 mb-1">{{ t('instance_export.date_to') }}</span>
-          <input v-model="dateTo" type="date" :disabled="isBusy"
+          <DateInput v-model="dateTo" :disabled="isBusy"
             class="border border-neutral-300 rounded px-2 py-1.5 text-sm" />
         </label>
         <span class="text-xs text-neutral-500 pb-2 max-w-sm">{{ t('instance_export.range_hint') }}</span>

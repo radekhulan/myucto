@@ -54,7 +54,54 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             authResults: $this->authenticationResults($message),
             allowForwarded: (bool) ($settings['allow_forwarded'] ?? false),
             forwardedFrom: trim((string) ($settings['forwarded_from'] ?? '')),
+            attachments: empty($settings['ingest_pdf_invoices']) ? [] : $this->attachments($message),
         );
+    }
+
+    /**
+     * PDF přílohy zprávy. Volá se jen u účtů se zapnutým načítáním PDF faktur.
+     *
+     * Drží se ZÁMĚRNĚ jen PDF: skener načítá až 500 zpráv naráz a všechny drží
+     * v poli, takže ponechat si obrázky z patiček by cronu utrhlo paměť.
+     * Rozhoduje magic `%PDF`, ne přípona ani MIME typ — obojí si určuje odesílatel.
+     *
+     * Velikostní pravidlo (20 MiB) se tu ZÁMĚRNĚ neuplatňuje — příliš velkou
+     * přílohu má zamítnout a ZALOGOVAT {@see EmailPdfInvoiceIngestor}, aby po ní
+     * zůstala stopa. Zdejší strop je jen pojistka proti patologické zprávě.
+     *
+     * @return list<EmailAttachment>
+     */
+    private function attachments(object $message): array
+    {
+        try {
+            if (!method_exists($message, 'getAttachments')) {
+                return [];
+            }
+            $out = [];
+            foreach ($message->getAttachments() as $attachment) {
+                $content = (string) $attachment->getContent();
+                if ($content === '' || !str_starts_with($content, '%PDF')) {
+                    continue;
+                }
+                if (strlen($content) > 64 * 1024 * 1024) {
+                    continue;
+                }
+                $name = trim(MimeHeaderDecoder::decode((string) $attachment->getName()));
+                if ($name === '') {
+                    $ext = trim((string) $attachment->getExtension());
+                    $name = 'priloha' . ($ext !== '' ? '.' . $ext : '');
+                }
+                $out[] = new EmailAttachment(
+                    filename: $name,
+                    mimeType: strtolower(trim((string) $attachment->getMimeType())),
+                    content: $content,
+                );
+            }
+            return $out;
+        } catch (\Throwable) {
+            // Nečitelná příloha nesmí shodit zpracování samotného avíza.
+            return [];
+        }
     }
 
     public function test(array $settings): array

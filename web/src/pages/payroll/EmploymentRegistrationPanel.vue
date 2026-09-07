@@ -32,6 +32,7 @@ import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { loadPayrollJmhzOptions } from '@/composables/usePayrollJmhzOptions'
 import { healthInsurerOptions, isHealthInsurerCode } from '@/utils/healthInsurers'
 import { fieldSelector, revealField } from '@/utils/revealField'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   employmentId: number
@@ -2263,13 +2264,11 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.actual_start_on') }}
               </span>
-              <input
+              <DateInput
                 v-model="a1Form.employment.actual_start_on"
-                type="date"
                 v-bind="a1FieldAttrs('employment.actual_start_on')"
                 disabled
-                data-test="a1-employment-actual-start-on"
-              >
+                data-test="a1-employment-actual-start-on" />
               <span
                 v-if="a1NoteText('employment.actual_start_on')"
                 :class="a1NoteClass('employment.actual_start_on')"
@@ -2281,13 +2280,11 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.employment.contract_start_on') }}
               </span>
-              <input
+              <DateInput
                 v-model="a1Form.employment.contract_start_on"
-                type="date"
                 v-bind="a1FieldAttrs('employment.contract_start_on')"
                 :disabled="a1Busy"
-                data-test="a1-employment-contract-start-on"
-              >
+                data-test="a1-employment-contract-start-on" />
               <span
                 v-if="a1NoteText('employment.contract_start_on')"
                 :class="a1NoteClass('employment.contract_start_on')"
@@ -2663,20 +2660,16 @@ async function copyXml(): Promise<void> {
                   :value="option.code"
                 >{{ option.code }} · {{ option.label }}</option>
               </select>
-              <input
+              <DateInput
                 v-model="restriction.from"
-                type="date"
                 :class="a1InputClass"
                 :disabled="a1Busy"
-                :data-test="`a1-restriction-from-${index}`"
-              >
-              <input
+                :data-test="`a1-restriction-from-${index}`" />
+              <DateInput
                 v-model="restriction.to"
-                type="date"
                 :class="a1InputClass"
                 :disabled="a1Busy"
-                :data-test="`a1-restriction-to-${index}`"
-              >
+                :data-test="`a1-restriction-to-${index}`" />
               <button
                 type="button"
                 :class="btnOutline('danger')"
@@ -2730,13 +2723,11 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.pension.received_from') }}
               </span>
-              <input
+              <DateInput
                 v-model="a1Form.pension.received_from"
-                type="date"
                 v-bind="a1FieldAttrs('pension.received_from')"
                 :disabled="a1Busy"
-                data-test="a1-pension-received-from"
-              >
+                data-test="a1-pension-received-from" />
             </label>
             <label class="block">
               <span :class="a1LabelClass">
@@ -3012,13 +3003,11 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.foreign_worker.permit_from') }}
               </span>
-              <input
+              <DateInput
                 v-model="a1Form.foreign_worker.permit_from"
-                type="date"
                 v-bind="a1FieldAttrs('foreign_worker.permit_from')"
                 :disabled="a1Busy"
-                data-test="a1-foreign-worker-permit-from"
-              >
+                data-test="a1-foreign-worker-permit-from" />
               <span
                 v-if="a1NoteText('foreign_worker.permit_from')"
                 :class="a1NoteClass('foreign_worker.permit_from')"
@@ -3030,13 +3019,11 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.foreign_worker.permit_to') }}
               </span>
-              <input
+              <DateInput
                 v-model="a1Form.foreign_worker.permit_to"
-                type="date"
                 v-bind="a1FieldAttrs('foreign_worker.permit_to')"
                 :disabled="a1Busy"
-                data-test="a1-foreign-worker-permit-to"
-              >
+                data-test="a1-foreign-worker-permit-to" />
             </label>
           </div>
         </div>
@@ -3336,13 +3323,11 @@ async function copyXml(): Promise<void> {
           </label>
           <label class="text-xs font-medium text-neutral-700">
             {{ t(`payroll.people.registration.event.effective_on.${eventInteraction}`) }}
-            <input
+            <DateInput
               v-model="effectiveOn"
-              type="date"
               required
               class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900"
-              data-test="registration-event-effective-on"
-            />
+              data-test="registration-event-effective-on" />
           </label>
           <label v-if="sourceReferenceRequired" class="text-xs font-medium text-neutral-700 sm:col-span-2">
             {{ t('payroll.people.registration.event.source_reference') }}
@@ -3398,11 +3383,11 @@ async function copyXml(): Promise<void> {
               <div v-for="(period, index) in pensionPeriods" :key="index" class="mt-2 flex flex-wrap items-end gap-2">
                 <label class="min-w-36 flex-1 text-xs text-neutral-600">
                   {{ t('common.from') }}
-                  <input v-model="period.from" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
+                  <DateInput v-model="period.from" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
                 </label>
                 <label class="min-w-36 flex-1 text-xs text-neutral-600">
                   {{ t('common.to') }}
-                  <input v-model="period.to" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
+                  <DateInput v-model="period.to" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
                 </label>
                 <button type="button" :class="btnOutline('danger')" :disabled="pensionPeriods.length === 1" @click="removePensionPeriod(index)">
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
@@ -3471,7 +3456,7 @@ async function copyXml(): Promise<void> {
             </label>
             <label class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.discovered_on') }}
-              <input v-model="discoveredOn" type="date" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
+              <DateInput v-model="discoveredOn" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
             </label>
           </div>
           <label class="block text-xs font-medium text-neutral-700">
@@ -3494,7 +3479,7 @@ async function copyXml(): Promise<void> {
           <div v-else-if="deltaField === 'tax_residency'">
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.address.country_code') }}<input v-model="residencyCountryCode" maxlength="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm uppercase text-neutral-900" /></label>
-              <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.residency_changed_on') }}<input v-model="residencyChangedOn" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
+              <label class="text-xs font-medium text-neutral-700">{{ t('payroll.people.registration.event.residency_changed_on') }}<DateInput v-model="residencyChangedOn" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" /></label>
             </div>
             <p class="mt-2 text-xs text-neutral-500" data-test="registration-event-tax-residency-two-step-hint">
               {{ t('payroll.people.registration.event.tax_residency_two_step_hint') }}

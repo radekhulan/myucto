@@ -20,6 +20,7 @@ import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue
 import Modal from '@/components/ui/Modal.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { dependentProposalIds, requiredChartProposalIds } from '@/utils/accountingSetupDependencies'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -584,8 +585,8 @@ onBeforeUnmount(stopPolling)
         @cancel="cancel"
       />
       <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label class="text-sm">{{ t('accounting.setup_assistant.date_from') }}<input v-model="dateFrom" type="date" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" /></label>
-        <label class="text-sm">{{ t('accounting.setup_assistant.date_to') }}<input v-model="dateTo" type="date" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" /></label>
+        <label class="text-sm">{{ t('accounting.setup_assistant.date_from') }}<DateInput v-model="dateFrom" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" /></label>
+        <label class="text-sm">{{ t('accounting.setup_assistant.date_to') }}<DateInput v-model="dateTo" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" /></label>
       </div>
       <label v-if="aiAvailable" class="mt-4 flex cursor-pointer items-start gap-3 rounded-md border border-primary-200 bg-primary-50 p-3 text-sm">
         <input v-model="useAi" type="checkbox" class="mt-1" />
@@ -703,8 +704,8 @@ onBeforeUnmount(stopPolling)
       <h2 class="text-lg font-semibold">3. {{ t('accounting.setup_assistant.history_title') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('accounting.setup_assistant.history_help') }}</p>
       <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label class="text-sm">{{ t('accounting.setup_assistant.history_date_from') }}<input v-model="historyDateFrom" type="date" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" /></label>
-        <label class="text-sm">{{ t('accounting.setup_assistant.history_date_to') }}<input v-model="historyDateTo" type="date" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" /></label>
+        <label class="text-sm">{{ t('accounting.setup_assistant.history_date_from') }}<DateInput v-model="historyDateFrom" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" /></label>
+        <label class="text-sm">{{ t('accounting.setup_assistant.history_date_to') }}<DateInput v-model="historyDateTo" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" /></label>
       </div>
       <p class="mt-2 text-xs text-neutral-500">{{ t('accounting.setup_assistant.history_range_hint') }}</p>
       <fieldset class="mt-4">

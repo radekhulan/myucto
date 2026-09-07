@@ -14,7 +14,7 @@ vi.mock('@/api/payroll', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
 import RegzelProfileSettings from '@/pages/payroll/RegzelProfileSettings.vue'

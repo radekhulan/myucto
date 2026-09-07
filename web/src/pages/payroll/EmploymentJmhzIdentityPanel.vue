@@ -10,6 +10,7 @@ import { apiErrorMessage } from '@/api/errors'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { btnFilled, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { todayIso } from './employmentLifecycleUi'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   employmentId: number
@@ -269,14 +270,12 @@ watch(() => [props.startDate, props.endDate], () => {
         </div>
         <label class="text-xs text-neutral-600">
           {{ t('payroll.people.jmhz_identity.on_date') }}
-          <input
+          <DateInput
             v-model="onDate"
-            type="date"
             :min="startDate ?? undefined"
             :max="endDate ?? undefined"
             class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900"
-            data-test="jmhz-identity-on-date"
-          >
+            data-test="jmhz-identity-on-date" />
         </label>
       </div>
 
@@ -407,14 +406,12 @@ watch(() => [props.startDate, props.endDate], () => {
             </label>
             <label class="text-xs text-neutral-600">
               {{ t('payroll.people.jmhz_identity.valid_from') }}
-              <input
+              <DateInput
                 v-model="validFrom"
-                type="date"
                 :min="startDate ?? undefined"
                 :max="endDate ?? undefined"
                 class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900"
-                data-test="jmhz-identity-valid-from"
-              >
+                data-test="jmhz-identity-valid-from" />
             </label>
             <label class="text-xs text-neutral-600">
               {{ t('payroll.people.jmhz_identity.source_reference') }}

@@ -25,6 +25,7 @@ import {
 import { formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   employment: PayrollEmployment
@@ -582,8 +583,8 @@ onMounted(() => void load())
                   :aria-label="t('payroll.people.exit_documents.category')"
                 />
               </div>
-              <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.from') }}<input v-model="row.from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-              <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.to') }}<input v-model="row.to" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+              <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.from') }}<DateInput v-model="row.from" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label>
+              <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.to') }}<DateInput v-model="row.to" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label>
               <button type="button" :class="btnOutlineSm('danger')" class="self-end" @click="removePensionPeriod(index)">
                 <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
                 {{ t('common.remove') }}
@@ -724,8 +725,8 @@ onMounted(() => void load())
               </button>
             </div>
             <div v-for="(row, index) in pensionInsurancePeriods" :key="index" class="mt-3 grid grid-cols-1 gap-3 rounded-lg border border-neutral-200 p-3 sm:grid-cols-[1fr_1fr_auto]">
-              <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.from') }}<input v-model="row.from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-              <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.to') }}<input v-model="row.to" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+              <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.from') }}<DateInput v-model="row.from" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label>
+              <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.to') }}<DateInput v-model="row.to" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label>
               <button type="button" :class="btnOutlineSm('danger')" class="self-end" @click="removePensionInsurancePeriod(index)">
                 <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
                 {{ t('common.remove') }}

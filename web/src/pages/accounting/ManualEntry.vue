@@ -16,6 +16,7 @@ import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/butt
 import DocumentLinkPicker from '@/components/accounting/DocumentLinkPicker.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -450,7 +451,7 @@ async function submitTransfer(force = false) {
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.manual.entry_date') }}</label>
-          <input v-model="form.entry_date" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="form.entry_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.manual.document_no') }}</label>
@@ -598,11 +599,11 @@ async function submitTransfer(force = false) {
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.closing.transfer.date_out') }}</label>
-              <input v-model="transfer.date_out" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <DateInput v-model="transfer.date_out" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.closing.transfer.date_in') }}</label>
-              <input v-model="transfer.date_in" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <DateInput v-model="transfer.date_in" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
           </div>
           <div>

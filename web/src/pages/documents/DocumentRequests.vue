@@ -7,6 +7,7 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -138,11 +139,11 @@ function isOverdue(item: DocumentRequest): boolean {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('document_requests.context_date') }}</label>
-          <input v-model="form.context_date" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="form.context_date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('document_requests.deadline') }}</label>
-          <input v-model="form.deadline" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="form.deadline" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
       </div>
       <div class="flex justify-end">

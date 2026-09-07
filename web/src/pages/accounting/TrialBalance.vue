@@ -18,6 +18,7 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -166,12 +167,12 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.trial_balance.filter_from') }}</label>
-          <input v-model="filters.from" type="date" @change="load"
+          <DateInput v-model="filters.from" @change="load"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.trial_balance.filter_to') }}</label>
-          <input v-model="filters.to" type="date" @change="load"
+          <DateInput v-model="filters.to" @change="load"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div class="flex items-end pb-2">

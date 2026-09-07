@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Automation;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use MyInvoice\Repository\ImportJobRepository;
 use RuntimeException;
 use Throwable;
@@ -35,7 +36,8 @@ final class AutomationRecommendationJobService
     public function start(int $supplierId, int $userId): array
     {
         $pdo = $this->db->pdo();
-        $name = 'automation_recommendation_job:' . $supplierId;
+        // Scoping podle databáze — viz NamedLockName (serverový named lock).
+        $name = NamedLockName::for($this->db, 'automation_recommendation_job', $supplierId);
         $lock = $pdo->prepare('SELECT GET_LOCK(?, 2)');
         $lock->execute([$name]);
         if ((int) $lock->fetchColumn() !== 1) throw new RuntimeException('job_start_busy');

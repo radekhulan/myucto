@@ -19,6 +19,7 @@ import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import PurchaseOrderReceiptModal from '@/components/stock/PurchaseOrderReceiptModal.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -456,11 +457,11 @@ onMounted(async () => {
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.orders.field_order_date') }}</label>
-            <input v-model="form.order_date" type="date" :disabled="readOnly" class="w-full h-10 px-3 border border-neutral-300 rounded-md disabled:bg-neutral-50 text-sm" />
+            <DateInput v-model="form.order_date" :disabled="readOnly" class="w-full h-10 px-3 border border-neutral-300 rounded-md disabled:bg-neutral-50 text-sm" />
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.orders.field_expected_date') }}</label>
-            <input v-model="form.expected_date" type="date" :disabled="readOnly" class="w-full h-10 px-3 border border-neutral-300 rounded-md disabled:bg-neutral-50 text-sm" />
+            <DateInput v-model="form.expected_date" :disabled="readOnly" class="w-full h-10 px-3 border border-neutral-300 rounded-md disabled:bg-neutral-50 text-sm" />
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.orders.field_currency') }}</label>
@@ -544,7 +545,7 @@ onMounted(async () => {
               <label class="block text-xs font-medium text-neutral-500 mb-1 sm:hidden">{{ t('stock.orders.col_vendor_sku') }}</label>
               <input v-model="row.vendor_sku" type="text" :placeholder="t('stock.orders.col_vendor_sku')"
                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-              <input v-model="row.expected_date" type="date" :title="t('stock.orders.col_line_expected')"
+              <DateInput v-model="row.expected_date" :title="t('stock.orders.col_line_expected')"
                 class="mt-1 w-full h-8 px-2 border border-neutral-300 rounded-md text-xs" />
             </div>
             <div class="sm:col-span-1 flex sm:justify-end">
@@ -626,7 +627,7 @@ onMounted(async () => {
           <h3 class="text-lg font-semibold mb-1">{{ t('stock.orders.confirm_modal_title') }}</h3>
           <p class="text-sm text-neutral-500 mb-3">{{ t('stock.orders.confirm_modal_hint') }}</p>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.orders.confirm_expected_date') }}</label>
-          <input v-model="confirmExpectedDate" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-3" />
+          <DateInput v-model="confirmExpectedDate" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-3" />
           <div class="border border-neutral-200 rounded-lg overflow-hidden mb-3">
             <div v-for="l in confirmLines" :key="l.id" class="p-2.5 border-b border-neutral-100 last:border-b-0 flex items-center gap-2">
               <span class="flex-1 text-sm truncate">{{ l.description }}</span>

@@ -35,6 +35,7 @@ import {
   type StatutoryIssue,
   type StatutorySectionSpec,
 } from './statutoryEvidenceForm'
+import DateInput from '@/components/ui/DateInput.vue'
 
 /**
  * Zákonná evidence osoby.
@@ -396,6 +397,21 @@ function onInput(
   setField(section, row, key, (event.target as HTMLInputElement).value)
 }
 
+/**
+ * Datumové pole nemá `v-model` (hodnota se čte přes fieldValue), takže si sahá
+ * pro potvrzenou hodnotu do `change`. DateInput ji na rozdíl od nativního pole
+ * posílá rovnou jako ISO řetězec, ne v události — rozepsaný nesmysl se tím
+ * do řádku vůbec nedostane.
+ */
+function onDateChange(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+  key: string,
+  value: string,
+) {
+  setField(section, row, key, value)
+}
+
 const customReferenceEditors = reactive(
   new WeakMap<PayrollStatutoryEvidenceRow, Set<string>>(),
 )
@@ -655,12 +671,10 @@ onMounted(() => {
       <template v-else>
         <label class="mb-3 block text-xs text-neutral-600">
           {{ t('payroll.people.statutory_evidence.effective_on') }}
-          <input
+          <DateInput
             v-model="effectiveOn"
-            type="date"
             class="mt-1 block rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm"
-            data-test="statutory-evidence-effective-on"
-          >
+            data-test="statutory-evidence-effective-on" />
           <span class="mt-1 block text-neutral-500">
             {{ t('payroll.people.statutory_evidence.effective_on_hint') }}
           </span>
@@ -779,34 +793,28 @@ onMounted(() => {
                   <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     <label v-if="section.kind === 'month'" class="block text-xs text-neutral-600">
                       {{ t('payroll.people.statutory_evidence.period_start') }}
-                      <input
+                      <DateInput
                         v-model="row.period_start"
-                        type="date"
                         :disabled="!editing || saving || isFrozen(section, row)"
                         :data-test="`${section.key}-${index}-period_start`"
-                        class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                      >
+                        class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100" />
                     </label>
                     <template v-else>
                       <label class="block text-xs text-neutral-600">
                         {{ t('payroll.people.statutory_evidence.effective_from') }}
-                        <input
+                        <DateInput
                           v-model="row.effective_from"
-                          type="date"
                           :disabled="!editing || saving || isFrozen(section, row)"
                           :data-test="`${section.key}-${index}-effective_from`"
-                          class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                        >
+                          class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100" />
                       </label>
                       <label class="block text-xs text-neutral-600">
                         {{ t('payroll.people.statutory_evidence.effective_to') }}
-                        <input
+                        <DateInput
                           v-model="row.effective_to"
-                          type="date"
                           :disabled="!editing || saving"
                           :data-test="`${section.key}-${index}-effective_to`"
-                          class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                        >
+                          class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100" />
                       </label>
                     </template>
 
@@ -872,15 +880,14 @@ onMounted(() => {
                         >{{ reference }}</option>
                       </select>
 
-                      <input
+                      <DateInput
                         v-else-if="field.kind === 'date'"
-                        :value="fieldValue(row, field.key)"
-                        type="date"
+                        :model-value="fieldValue(row, field.key)"
                         :disabled="!editing || saving"
                         :data-test="`${section.key}-${index}-${field.key}`"
                         class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                        @change="onInput(section, row, field.key, $event)"
-                      >
+                        @change="onDateChange(section, row, field.key, $event)"
+                      />
                     </label>
                   </div>
 

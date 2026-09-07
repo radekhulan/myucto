@@ -19,6 +19,7 @@ import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -196,7 +197,7 @@ onMounted(() => { loadCandidates(); loadRestorations() })
         </label>
         <label class="flex items-center gap-2 text-sm text-neutral-600">
           {{ t('reports.s46.as_of') }}
-          <input v-model="asOf" type="date" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
+          <DateInput v-model="asOf" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm" />
         </label>
       </div>
     </div>
@@ -360,7 +361,7 @@ onMounted(() => { loadCandidates(); loadRestorations() })
         </div>
         <div>
           <label class="block text-sm mb-1">{{ t('reports.s46.delivered_on') }}</label>
-          <input v-model="form.delivered_on" type="date"
+          <DateInput v-model="form.delivered_on"
                  class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           <p class="text-[11px] text-neutral-400 mt-1">{{ t('reports.s46.delivered_on_hint') }}</p>
         </div>

@@ -31,7 +31,7 @@ vi.mock('@/api/accounting', () => ({
 
 // i18n stub — `t` vrací klíč (na překlady se v testu nespoléháme).
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
 // vue-router — useRoute pro periodId, RouterLink jako jednoduchý stub.

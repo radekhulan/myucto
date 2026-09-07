@@ -28,7 +28,7 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: () => true }),
 }))
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) =>
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key }),
 }))
 vi.mock('@/api/errors', () => ({

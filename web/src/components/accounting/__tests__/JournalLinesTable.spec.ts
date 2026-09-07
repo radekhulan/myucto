@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import JournalLinesTable from '@/components/accounting/JournalLinesTable.vue'
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
 vi.mock('@/composables/useFormat', () => ({

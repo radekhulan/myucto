@@ -42,6 +42,7 @@ import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { apiErrorMessage } from '@/api/errors'
 import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
+import { rowKey } from '@/utils/rowKey'
 import ExpenseKindSuggestionHint from '@/components/purchase/ExpenseKindSuggestionHint.vue'
 import VendorPicker from '@/components/purchase/VendorPicker.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
@@ -56,6 +57,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { appIsoDate } from '@/utils/date'
 import { useSidePreviewWide } from '@/composables/useSidePreviewWide'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -1739,19 +1741,19 @@ function fieldErr(key: string): string | null {
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
             <label class="block text-sm text-neutral-700 mb-1">{{ t('purchase_invoice.fields.issue_date') }} <span class="text-danger-500">*</span></label>
-            <input v-model="form.issue_date" type="date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="form.issue_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
             <label class="block text-sm text-neutral-700 mb-1">{{ t('purchase_invoice.fields.tax_date') }}</label>
-            <input v-model="form.tax_date" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="form.tax_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
             <label class="block text-sm text-neutral-700 mb-1">{{ t('purchase_invoice.fields.due_date') }} <span class="text-danger-500">*</span></label>
-            <input v-model="form.due_date" type="date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="form.due_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
             <label class="block text-sm text-neutral-700 mb-1">{{ t('purchase_invoice.fields.received_at') }}</label>
-            <input v-model="form.received_at" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="form.received_at" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
         </div>
         <!-- RC: DPH období se řídí DUZP (§ 25 / § 24), ne datem vystavení — issue #117 -->
@@ -1867,7 +1869,7 @@ function fieldErr(key: string): string | null {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(it, i) in form.items" :key="i" class="border-t border-neutral-200">
+            <tr v-for="(it, i) in form.items" :key="rowKey(it)" class="border-t border-neutral-200">
               <td class="py-2 pl-5 pr-2">
                 <StockDescriptionField
                   v-model:description="it.description"
@@ -1928,9 +1930,9 @@ function fieldErr(key: string): string | null {
                     {{ accrualVisible(it, i) ? t('purchase_invoice.items.accrual_remove') : t('purchase_invoice.items.accrual_add') }}
                   </button>
                   <div v-if="accrualVisible(it, i)" class="mt-1 space-y-1">
-                    <input v-model="it.accrual_from" type="date" :title="t('purchase_invoice.items.accrual_from')"
+                    <DateInput v-model="it.accrual_from" :title="t('purchase_invoice.items.accrual_from')"
                       class="w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-xs" />
-                    <input v-model="it.accrual_to" type="date" :title="t('purchase_invoice.items.accrual_to')"
+                    <DateInput v-model="it.accrual_to" :title="t('purchase_invoice.items.accrual_to')"
                       class="w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-xs" />
                   </div>
                 </template>
@@ -1950,7 +1952,7 @@ function fieldErr(key: string): string | null {
 
         <!-- Mobile: stack karet (každé pole na vlastním řádku, čitelné inputy) -->
         <div v-if="form.items.length > 0" class="md:hidden divide-y divide-neutral-200 border-t border-neutral-200">
-          <div v-for="(it, i) in form.items" :key="`m-${i}`" class="p-3 space-y-2">
+          <div v-for="(it, i) in form.items" :key="`m-${rowKey(it)}`" class="p-3 space-y-2">
             <div class="flex items-center justify-between text-xs text-neutral-500">
               <span class="font-mono">#{{ i + 1 }}</span>
               <button type="button" @click="removeItem(i)" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-danger-500/40 text-danger-500 hover:bg-danger-50 rounded text-lg leading-none" :title="t('purchase_invoice.items.remove')">✕</button>
@@ -2026,11 +2028,11 @@ function fieldErr(key: string): string | null {
                 <div v-if="accrualVisible(it, i)" class="mt-1 grid grid-cols-2 gap-2">
                   <div>
                     <label class="block text-xs text-neutral-600 mb-1">{{ t('purchase_invoice.items.accrual_from') }}</label>
-                    <input v-model="it.accrual_from" type="date" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm" />
+                    <DateInput v-model="it.accrual_from" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm" />
                   </div>
                   <div>
                     <label class="block text-xs text-neutral-600 mb-1">{{ t('purchase_invoice.items.accrual_to') }}</label>
-                    <input v-model="it.accrual_to" type="date" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm" />
+                    <DateInput v-model="it.accrual_to" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm" />
                   </div>
                 </div>
               </template>

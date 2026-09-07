@@ -98,6 +98,11 @@ final class BankEmailNoticeRepository
                 ? (int) (bool) $body['require_email_auth']
                 : (int) (bool) ($current['require_email_auth'] ?? 1),
             'allow_forwarded' => !empty($body['allow_forwarded']) ? 1 : 0,
+            // Načítání PDF faktur z příloh — opt-in, mimo jiné proto, že jako jediné
+            // nastavení účtu si z IMAPu tahá obsah příloh (paměť + čas skenu).
+            'ingest_pdf_invoices' => array_key_exists('ingest_pdf_invoices', $body)
+                ? (int) (bool) $body['ingest_pdf_invoices']
+                : (int) (bool) ($current['ingest_pdf_invoices'] ?? 0),
             'forwarded_from' => $this->nullable($body['forwarded_from'] ?? null),
             'email_auth_serv_id' => $this->nullable($body['email_auth_serv_id'] ?? null),
             'username' => trim((string) ($body['username'] ?? '')),
@@ -120,7 +125,8 @@ final class BankEmailNoticeRepository
             $sql = 'UPDATE bank_email_imap_settings
                        SET name = :name, enabled = :enabled, host = :host, port = :port, encryption = :encryption,
                            validate_cert = :validate_cert, require_email_auth = :require_email_auth,
-                           allow_forwarded = :allow_forwarded, forwarded_from = :forwarded_from,
+                           allow_forwarded = :allow_forwarded, ingest_pdf_invoices = :ingest_pdf_invoices,
+                           forwarded_from = :forwarded_from,
                            email_auth_serv_id = :email_auth_serv_id, username = :username, password_enc = :password_enc,
                            folder = :folder, max_messages_per_run = :max_messages_per_run,
                            process_from_date = :process_from_date, success_action = :success_action,
@@ -134,12 +140,12 @@ final class BankEmailNoticeRepository
         }
 
         $sql = 'INSERT INTO bank_email_imap_settings
-                  (supplier_id, name, enabled, host, port, encryption, validate_cert, require_email_auth, allow_forwarded, forwarded_from, email_auth_serv_id,
+                  (supplier_id, name, enabled, host, port, encryption, validate_cert, require_email_auth, allow_forwarded, ingest_pdf_invoices, forwarded_from, email_auth_serv_id,
                    username, password_enc, folder,
                    max_messages_per_run, process_from_date, success_action, success_flag, success_move_folder,
                    failure_action, failure_flag, failure_move_folder, retry_failed, max_attempts)
                 VALUES
-                  (:supplier_id, :name, :enabled, :host, :port, :encryption, :validate_cert, :require_email_auth, :allow_forwarded, :forwarded_from, :email_auth_serv_id,
+                  (:supplier_id, :name, :enabled, :host, :port, :encryption, :validate_cert, :require_email_auth, :allow_forwarded, :ingest_pdf_invoices, :forwarded_from, :email_auth_serv_id,
                    :username, :password_enc, :folder,
                    :max_messages_per_run, :process_from_date, :success_action, :success_flag, :success_move_folder,
                    :failure_action, :failure_flag, :failure_move_folder, :retry_failed, :max_attempts)';
@@ -690,6 +696,7 @@ final class BankEmailNoticeRepository
             // Fail-closed default nového (dosud neuloženého) účtu — viz saveImapAccount.
             'require_email_auth' => true,
             'allow_forwarded' => false,
+            'ingest_pdf_invoices' => false,
             'forwarded_from' => null,
             'email_auth_serv_id' => null,
             'username' => '',
@@ -806,6 +813,7 @@ final class BankEmailNoticeRepository
         $row['validate_cert'] = (bool) $row['validate_cert'];
         $row['require_email_auth'] = (bool) ($row['require_email_auth'] ?? false);
         $row['allow_forwarded'] = (bool) ($row['allow_forwarded'] ?? false);
+        $row['ingest_pdf_invoices'] = (bool) ($row['ingest_pdf_invoices'] ?? false);
         $row['max_messages_per_run'] = (int) $row['max_messages_per_run'];
         $row['retry_failed'] = (bool) $row['retry_failed'];
         $row['max_attempts'] = (int) $row['max_attempts'];

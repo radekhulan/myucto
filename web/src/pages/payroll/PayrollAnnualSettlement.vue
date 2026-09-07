@@ -40,6 +40,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import { useSavedFilters } from '@/composables/useSavedFilters'
 import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -799,13 +800,11 @@ onMounted(async () => {
                 <span class="mb-1 block text-xs font-medium text-neutral-600">
                   {{ t('payroll.annual_settlement.requested_on') }}
                 </span>
-                <input
+                <DateInput
                   ref="requestedOnField"
                   v-model="form.requested_on"
                   data-test="annual-settlement-requested-on"
-                  type="date"
-                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
-                >
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900" />
               </label>
 
               <label v-if="form.request_status === 'requested'" class="block sm:col-span-2">
@@ -843,13 +842,11 @@ onMounted(async () => {
                 <span class="mb-1 block text-xs font-medium text-neutral-600">
                   {{ t('payroll.annual_settlement.prior_documents_received_on') }}
                 </span>
-                <input
+                <DateInput
                   ref="priorDocumentsField"
                   v-model="form.prior_documents_received_on"
                   data-test="annual-settlement-prior-documents-on"
-                  type="date"
-                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
-                >
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900" />
               </label>
 
               <label class="block">
@@ -983,11 +980,9 @@ onMounted(async () => {
                         <span class="mb-1 block text-xs font-medium text-neutral-600">
                           {{ t('payroll.annual_settlement.caregiver_birth_date') }}
                         </span>
-                        <input
+                        <DateInput
                           v-model="caregiver.birth_date"
-                          type="date"
-                          class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
-                        >
+                          class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900" />
                       </label>
                     </div>
                     <fieldset class="mt-3">
@@ -1149,12 +1144,10 @@ onMounted(async () => {
                   <span class="mb-1 block text-xs font-medium text-neutral-600">
                     {{ t('payroll.annual_settlement.certificate_received_on') }}
                   </span>
-                  <input
+                  <DateInput
                     v-model="certificate.received_on"
-                    type="date"
                     :disabled="!canEditCertificates"
-                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
-                  >
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900" />
                 </label>
                 <!--
                   Tiskopisové „za období od–do". Rozhoduje o tom, jestli poplatník
@@ -1167,25 +1160,21 @@ onMounted(async () => {
                   <span class="mb-1 block text-xs font-medium text-neutral-600">
                     {{ t('payroll.annual_settlement.certificate_employment_from') }}
                   </span>
-                  <input
+                  <DateInput
                     v-model="certificate.employment_from"
                     data-test="certificate-employment-from"
-                    type="date"
                     :disabled="!canEditCertificates"
-                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
-                  >
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900" />
                 </label>
                 <label class="block">
                   <span class="mb-1 block text-xs font-medium text-neutral-600">
                     {{ t('payroll.annual_settlement.certificate_employment_to') }}
                   </span>
-                  <input
+                  <DateInput
                     v-model="certificate.employment_to"
                     data-test="certificate-employment-to"
-                    type="date"
                     :disabled="!canEditCertificates"
-                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
-                  >
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900" />
                 </label>
                 <p class="text-xs text-neutral-500 sm:col-span-2">
                   {{ t('payroll.annual_settlement.certificate_employment_period_hint') }}

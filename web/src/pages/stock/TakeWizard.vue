@@ -9,6 +9,7 @@ import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -239,7 +240,7 @@ const STATUS_BADGE: Record<string, string> = {
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.takes.field_date') }}</label>
-              <input v-model="createForm.take_date" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <DateInput v-model="createForm.take_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.takes.field_note') }}</label>

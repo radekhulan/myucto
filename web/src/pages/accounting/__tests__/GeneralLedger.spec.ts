@@ -32,7 +32,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))

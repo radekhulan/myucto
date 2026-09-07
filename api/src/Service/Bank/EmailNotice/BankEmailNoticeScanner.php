@@ -23,6 +23,12 @@ final class BankEmailNoticeScanner
          * i na instalaci bez mzdového modulu a v jednotkových testech parserů.
          */
         private readonly ?PayrollPaymentSettlementRecognizer $payrollSettlements = null,
+        /**
+         * Načítání PDF faktur z příloh (opt-in `ingest_pdf_invoices` per IMAP účet).
+         * Nepovinné ze stejného důvodu jako mzdy: parserové jednotkové testy skener
+         * sestavují bez celé importní vrstvy.
+         */
+        private readonly ?EmailPdfInvoiceIngestor $pdfInvoices = null,
     ) {}
 
     /**
@@ -48,13 +54,20 @@ final class BankEmailNoticeScanner
             'security_rejected' => 0,
             'errors' => 0,
             'postprocess_errors' => 0,
+            'attachments_considered' => 0,
+            'attachments_imported' => 0,
+            'attachments_skipped' => 0,
             'accounts' => [],
         ];
 
         foreach ($accounts as $settings) {
             $accountSummary = $this->scanAccount($supplierId, $settings, $limitOverride);
             $summary['accounts'][] = $accountSummary;
-            foreach (['fetched', 'processed', 'matched', 'known_skipped', 'old_skipped', 'security_rejected', 'errors', 'postprocess_errors'] as $key) {
+            foreach ([
+                'fetched', 'processed', 'matched', 'known_skipped', 'old_skipped', 'security_rejected',
+                'errors', 'postprocess_errors',
+                'attachments_considered', 'attachments_imported', 'attachments_skipped',
+            ] as $key) {
                 $summary[$key] += (int) ($accountSummary[$key] ?? 0);
             }
         }
@@ -101,6 +114,9 @@ final class BankEmailNoticeScanner
                     'security_rejected' => 0,
                     'errors' => 1,
                     'postprocess_errors' => 0,
+                    'attachments_considered' => 0,
+                    'attachments_imported' => 0,
+                    'attachments_skipped' => 0,
                     'details' => [],
                 ];
             }
@@ -122,6 +138,9 @@ final class BankEmailNoticeScanner
             'security_rejected' => 0,
             'errors' => 0,
             'postprocess_errors' => 0,
+            'attachments_considered' => 0,
+            'attachments_imported' => 0,
+            'attachments_skipped' => 0,
             'details' => [],
         ];
 
@@ -131,12 +150,22 @@ final class BankEmailNoticeScanner
             foreach ($messages as $message) {
                 $result = $this->processMessage($supplierId, $settings, $message);
                 $summary['details'][] = $result;
+                $attachments = (array) ($result['attachments'] ?? []);
+                $summary['attachments_considered'] += (int) ($attachments['considered'] ?? 0);
+                $summary['attachments_imported'] += (int) ($attachments['imported'] ?? 0);
+                $summary['attachments_skipped'] += (int) ($attachments['skipped'] ?? 0)
+                    + (int) ($attachments['rejected'] ?? 0)
+                    + (int) ($attachments['failed'] ?? 0);
+
                 $status = (string) ($result['status'] ?? '');
                 if ($status === 'processed_success') {
                     $summary['processed']++;
                     if (!empty($result['matched'])) {
                         $summary['matched']++;
                     }
+                } elseif ($status === 'attachment_imported') {
+                    // Zpráva nebyla avízo, ale nesla fakturu. Není to chyba skenu —
+                    // počítá se jen do příloh, ne do zpracovaných avíz.
                 } elseif ($status === 'skipped_known') {
                     $summary['known_skipped']++;
                 } elseif ($status === 'skipped_old') {
@@ -225,6 +254,13 @@ final class BankEmailNoticeScanner
             }
         }
 
+        // PDF přílohy se posuzují NEZÁVISLE na tom, jestli je zpráva čitelné avízo:
+        // faktura od dodavatele avízo není a parser ji odmítne. Běží ale až ZA
+        // ověřením autenticity — zamítnutá zpráva nesmí do fronty dokladů dostat nic.
+        $attachments = $this->pdfInvoices?->ingestFromMessage($supplierId, $settings, $message)
+            ?? ['enabled' => false, 'considered' => 0, 'imported' => 0, 'skipped' => 0, 'rejected' => 0, 'failed' => 0, 'details' => []];
+        $attachmentSummary = ['attachments' => $attachments];
+
         try {
             $resolved = $this->parseAndResolveMapping($supplierId, $imapAccountId, $message);
             $provider = $resolved['provider'];
@@ -240,7 +276,7 @@ final class BankEmailNoticeScanner
                         . ') není namapovaný na žádný bankovní účet dodavatele.',
                 ]);
                 $this->safePostProcess($settings, $message, 'failure');
-                return ['status' => 'match_failed', 'message_id' => $messageId, 'reason' => 'account_mapping_missing'];
+                return $attachmentSummary + ['status' => 'match_failed', 'message_id' => $messageId, 'reason' => 'account_mapping_missing'];
             }
 
             $tx = $this->repo->createTransactionFromNotice(
@@ -282,7 +318,7 @@ final class BankEmailNoticeScanner
                 'error_message' => $postError,
             ]);
 
-            return [
+            return $attachmentSummary + [
                 'status' => $status,
                 'id' => $recordId,
                 'message_id' => $messageId,
@@ -293,16 +329,23 @@ final class BankEmailNoticeScanner
                 'postprocess_error' => $postError,
             ];
         } catch (\Throwable $e) {
+            // E-mail s fakturou v příloze NENÍ avízo — parser na něm selže vždy.
+            // Když z něj ale vznikl doklad ve frontě, je to úspěch, ne chyba:
+            // jinak by IMAP post-process poslal fakturu do složky chyb.
+            $imported = (int) ($attachments['imported'] ?? 0) > 0;
+            $status = $imported ? 'attachment_imported' : 'parse_failed';
             $this->repo->recordMessage($base + [
-                'status' => 'parse_failed',
-                'error_message' => $e->getMessage(),
+                'status' => $status,
+                'error_message' => $imported
+                    ? 'Zpráva není bankovní avízo (' . $e->getMessage() . '), ale nesla PDF doklad — založeno podání v Příchozích dokladech.'
+                    : $e->getMessage(),
             ]);
-            $postError = $this->safePostProcess($settings, $message, 'failure');
-            return [
-                'status' => 'parse_failed',
+            $postError = $this->safePostProcess($settings, $message, $imported ? 'success' : 'failure');
+            return $attachmentSummary + [
+                'status' => $status,
                 'message_id' => $messageId,
                 'imap_account_id' => $imapAccountId,
-                'error' => $e->getMessage(),
+                'error' => $imported ? null : $e->getMessage(),
                 'postprocess_error' => $postError,
             ];
         }

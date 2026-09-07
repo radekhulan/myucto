@@ -10,6 +10,7 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -303,11 +304,11 @@ async function saveLock() {
         <template v-else>
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.monthly_check.filter_from') }}</label>
-            <input v-model="filters.from" type="date" @change="run" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+            <DateInput v-model="filters.from" @change="run" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.monthly_check.filter_to') }}</label>
-            <input v-model="filters.to" type="date" @change="run" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+            <DateInput v-model="filters.to" @change="run" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
         </template>
         <div>
@@ -396,7 +397,7 @@ async function saveLock() {
       <div class="bg-surface rounded-lg shadow-lg p-4 w-full max-w-sm">
         <h2 class="text-base font-semibold mb-3">{{ t('accounting.monthly_check.lock_dialog_title') }}</h2>
         <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.monthly_check.lock_date_label') }}</label>
-        <input v-model="lockDialog.date" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-3" />
+        <DateInput v-model="lockDialog.date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-3" />
         <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.monthly_check.lock_reason_label') }}</label>
         <input v-model="lockDialog.reason" type="text" :placeholder="t('accounting.monthly_check.lock_reason_placeholder')"
           class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-4" />

@@ -53,7 +53,7 @@ vi.mock('@/components/ui/buttonStyles', () => ({
   btnOutline: () => 'btn-outline',
   btnFilled: () => 'btn-filled',
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: { tab: 'email' } }),
   useRouter: () => ({ replace: vi.fn() }),

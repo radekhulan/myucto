@@ -14,6 +14,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -490,7 +491,7 @@ const recurringActions = computed<ActionItem[]>(() => {
 
         <label v-if="!isPeriodDraft" class="block text-sm">
           <span class="text-neutral-700 font-medium">{{ t('recurring.run_now_issue_date_label') }}</span>
-          <input v-model="runNowDate" type="date"
+          <DateInput v-model="runNowDate"
             class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md" />
         </label>
 

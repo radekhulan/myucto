@@ -13,6 +13,9 @@ final class BankEmailNoticeMessage
      *                             detekci banky z těla, když `From` nesedí (opt-in per účet).
      * @param string $forwardedFrom Volitelný whitelist přeposílatele (adresa nebo doména);
      *                              prázdný = libovolný. Uplatní se jen v přeposlané větvi.
+     * @param list<EmailAttachment> $attachments Přílohy zprávy. Plní se JEN u účtů se
+     *                              zapnutým `ingest_pdf_invoices` — jinak zůstává prázdné
+     *                              pole a obsah příloh se z IMAPu vůbec netahá.
      */
     public function __construct(
         public readonly ?int $uid,
@@ -25,6 +28,7 @@ final class BankEmailNoticeMessage
         public readonly array $authResults = [],
         public readonly bool $allowForwarded = false,
         public readonly string $forwardedFrom = '',
+        public readonly array $attachments = [],
     ) {}
 
     /**

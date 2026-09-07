@@ -7,6 +7,7 @@ import { formatMoney } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{ purchaseInvoiceId: number }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'created'): void }>()
@@ -205,7 +206,7 @@ async function submit() {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.receipt.field_date') }}</label>
-              <input v-model="docDate" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+              <DateInput v-model="docDate" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
             </div>
           </div>
 

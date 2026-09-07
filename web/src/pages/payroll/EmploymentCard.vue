@@ -40,6 +40,7 @@ import {
   todayIso,
   transitionPresentation,
 } from './employmentLifecycleUi'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   employment: PayrollEmployment
@@ -931,7 +932,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         -->
         <label v-if="canWrite && employment.allowed_transitions.length && expanded" class="flex items-center gap-1.5 text-xs text-neutral-500">
           {{ t('payroll.people.transition_date') }}
-          <input v-model="transitionDate" type="date" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm text-neutral-800">
+          <DateInput v-model="transitionDate" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm text-neutral-800" />
         </label>
         <button
           v-if="isClosed"
@@ -1252,22 +1253,20 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         <div :class="GRID">
           <label :class="FIELD">
             {{ t('payroll.people.planned_start') }} <RequiredMark />
-            <input
+            <DateInput
               v-model="termsForm.planned_start_on"
               required
-              type="date"
               :disabled="!canEditTerms || busy"
               :class="INPUT"
-              data-test="terms-planned-start"
-            >
+              data-test="terms-planned-start" />
           </label>
           <label :class="FIELD">
             {{ t('payroll.people.contract_signed') }}
-            <input v-model="termsForm.contract_signed_on" type="date" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-contract-signed">
+            <DateInput v-model="termsForm.contract_signed_on" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-contract-signed" />
           </label>
           <label :class="FIELD">
             {{ t('payroll.people.fixed_end') }}
-            <input v-model="termsForm.fixed_term_end_on" type="date" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-fixed-end">
+            <DateInput v-model="termsForm.fixed_term_end_on" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-fixed-end" />
           </label>
           <div>
             <dt :class="READ_LABEL">{{ t('payroll.people.actual_start') }}</dt>
@@ -1414,7 +1413,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.a1_certificate_until') }}
-                <input v-model="termsForm.a1_certificate_until" type="date" :disabled="!canEditTerms || busy" :class="INPUT">
+                <DateInput v-model="termsForm.a1_certificate_until" :disabled="!canEditTerms || busy" :class="INPUT" />
               </label>
             </div>
           </section>
@@ -1452,7 +1451,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               </label>
               <label v-if="termsForm.social_part_time_discount_reason !== 'none'" :class="FIELD">
                 {{ t('payroll.people.social_part_time_discount_notified_on') }}
-                <input v-model="termsForm.social_part_time_discount_notified_on" type="date" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-part-time-discount-notified-on">
+                <DateInput v-model="termsForm.social_part_time_discount_notified_on" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-part-time-discount-notified-on" />
                 <span :class="HINT">{{ t('payroll.people.social_part_time_discount_notified_on_hint') }}</span>
               </label>
               <label v-if="termsForm.social_part_time_discount_reason !== 'none'" :class="[FIELD, 'sm:col-span-2']">
@@ -1524,14 +1523,12 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <!-- Datum účinnosti se ptá jen ta cesta, které na něm záleží. -->
             <label v-if="saveMode === 'version'" :class="FIELD" data-test="terms-effective-from-field">
               {{ t('payroll.people.effective_from') }} <RequiredMark />
-              <input
+              <DateInput
                 v-model="versionEffectiveFrom"
                 required
-                type="date"
                 :min="minimumNewTermsDate"
                 :class="[INPUT, 'w-44']"
-                data-test="terms-effective-from"
-              >
+                data-test="terms-effective-from" />
             </label>
             <button type="button" :class="btnOutlineSm('neutral')" :disabled="busy" data-test="terms-discard" @click="discardChanges">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>

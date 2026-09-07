@@ -36,7 +36,7 @@ vi.mock('@/composables/useToast', () => ({
 // proto musí původní modul rozprostřít, ne nahradit.
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({
+  useI18n: () => ({ locale: { value: 'cs' },
     // Parametry se do textu propisují: hláška validace jmenuje vadná POLE,
     // takže bez nich by test neuhlídal to podstatné.
     t: (key: string, params?: Record<string, unknown>) =>

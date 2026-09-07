@@ -21,6 +21,7 @@ import RequiredMark from '@/components/ui/RequiredMark.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { usePaneDom } from '@/composables/usePaneDom'
+import DateInput from '@/components/ui/DateInput.vue'
 
 defineProps<{ canWrite: boolean }>()
 
@@ -895,11 +896,11 @@ onMounted(async () => {
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.valid_from') }}<RequiredMark /></span>
-            <input v-model="createForm.valid_from" type="date" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            <DateInput v-model="createForm.valid_from" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" />
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.valid_to') }}</span>
-            <input v-model="createForm.valid_to" type="date" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            <DateInput v-model="createForm.valid_to" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" />
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source') }}<RequiredMark /></span>
@@ -919,7 +920,7 @@ onMounted(async () => {
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.verified_on') }}<RequiredMark /></span>
-            <input v-model="createForm.verified_on" type="date" :max="localToday()" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            <DateInput v-model="createForm.verified_on" :max="localToday()" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" />
           </label>
         </div>
         <p v-if="showValidation && !createValid" class="mt-3 text-sm text-danger-600" role="alert" data-testid="health-create-validation">
@@ -1010,7 +1011,7 @@ onMounted(async () => {
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.valid_to') }}</span>
-            <input v-model="editForm.valid_to" type="date" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            <DateInput v-model="editForm.valid_to" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" />
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source') }}<RequiredMark /></span>
@@ -1030,7 +1031,7 @@ onMounted(async () => {
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.verified_on') }}<RequiredMark /></span>
-            <input v-model="editForm.verified_on" type="date" :max="localToday()" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            <DateInput v-model="editForm.verified_on" :max="localToday()" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" />
           </label>
         </div>
         <p v-if="showValidation && !editValid" class="mt-3 text-sm text-danger-600" role="alert" data-testid="health-edit-validation">

@@ -39,6 +39,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -570,7 +571,9 @@ const actions = computed<ActionItem[]>(() => [
                       <option v-for="c in currencyOptions(draft.currency_code)" :key="c" :value="c">{{ c }}</option>
                     </select>
                   </div>
-                  <input v-model="draft.price_valid_to" type="date" class="mt-1 w-full rounded-md border border-neutral-300 h-8 px-2 text-xs" :title="t('stock.vendor_offers.field_valid_to')" />
+                  <!-- `draft` je Record<string, string | boolean>, takže v-model neprojde typem; hodnota je ale vždy řetězec (viz text()). -->
+                  <DateInput :model-value="String(draft.price_valid_to ?? '')" @update:model-value="draft.price_valid_to = $event"
+                    class="mt-1 w-full rounded-md border border-neutral-300 h-8 px-2 text-xs" :title="t('stock.vendor_offers.field_valid_to')" />
                 </td>
                 <td class="px-3 py-2 align-top">
                   <input v-model="draft.stock_qty" type="text" inputmode="decimal" class="w-24 text-right rounded-md border border-neutral-300 h-8 px-2 text-sm" />
@@ -678,7 +681,7 @@ const actions = computed<ActionItem[]>(() => [
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('stock.vendor_offers.field_valid_to') }}</label>
-            <input v-model="form.price_valid_to" type="date" class="w-full rounded-md border border-neutral-300 h-9 px-3 text-sm" />
+            <DateInput v-model="form.price_valid_to" class="w-full rounded-md border border-neutral-300 h-9 px-3 text-sm" />
           </div>
           <div class="md:col-span-2">
             <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('stock.vendor_offers.field_note') }}</label>

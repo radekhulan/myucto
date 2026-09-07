@@ -13,6 +13,7 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -187,7 +188,7 @@ onMounted(loadList)
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.offsets.date') }}</label>
-          <input v-model="form.agreement_date" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="form.agreement_date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.offsets.note') }}</label>

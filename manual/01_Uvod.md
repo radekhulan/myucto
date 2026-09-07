@@ -69,6 +69,13 @@ samostatná rozhraní:
 - **Zaúčtované doklady klient nerozbije** — co už prošlo do deníku, má v portálu
   uzamčené a edituje se u zdroje.
 
+**Datumová pole v celé aplikaci** se zadávají ve formátu jazyka aplikace — česky
+`d. m. rrrr` (`1. 9. 2026`, zkráceně i `1.9.26` nebo `01092026`), anglicky
+`mm/dd/yyyy`. Neřídí se jazykem prohlížeče ani systému, takže se zadání nikdy
+nerozejde s tím, co je vypsané v přehledech. Ikona vpravo v poli otevře kalendář,
+neexistující datum (`31. 2.`) pole označí a formulář se neuloží, dokud ho
+neopravíte.
+
 ## 1.2 Vystavování dokladů
 
 Aplikace pokrývá celý český cyklus daňových dokladů — od proforma faktury, přes

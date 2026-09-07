@@ -38,6 +38,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, te, locale } = useI18n()
 const auth = useAuthStore()
@@ -321,12 +322,10 @@ onMounted(load)
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
       <label class="flex items-center gap-2 text-xs text-neutral-500 flex-wrap">
         {{ t('payroll.erasure.as_of') }}
-        <input
+        <DateInput
           v-model="asOf"
-          type="date"
           data-test="erasure-as-of"
-          class="h-8 px-2 border border-neutral-300 rounded-md text-xs bg-surface"
-        />
+          class="h-8 px-2 border border-neutral-300 rounded-md text-xs bg-surface" />
         <span class="text-neutral-400">{{ t('payroll.erasure.as_of_hint') }}</span>
       </label>
     </div>

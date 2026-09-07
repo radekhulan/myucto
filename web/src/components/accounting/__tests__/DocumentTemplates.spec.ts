@@ -11,7 +11,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true })
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: () => {} }))
 vi.mock('@/api/settings', () => ({ settingsApi: { listCurrencies: async () => [{ code: 'EUR', is_active: true }] } }))
 vi.mock('@/api/bankPosting', () => ({ bankPostingApi: { createRule: m.createBankRule }, bankPostingErrorMessage: () => 'error' }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 import ExpenseRuleTemplateModal from '../ExpenseRuleTemplateModal.vue'
 import ExpenseRules from '@/pages/accounting/ExpenseRules.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'

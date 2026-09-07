@@ -32,6 +32,7 @@ import { useToast } from '@/composables/useToast'
 import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollMonthlyChecklistPanel from '@/pages/payroll/PayrollMonthlyChecklistPanel.vue'
 import type { PayrollRegzelEnvironment } from '@/api/payroll'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -1028,12 +1029,10 @@ onMounted(load)
         </label>
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.runs.payment_date') }}</span>
-          <input
+          <DateInput
             v-model="paymentDate"
-            type="date"
             class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
-            @input="paymentDateTouched = true"
-          >
+            @input="paymentDateTouched = true" />
         </label>
         <RouterLink
           :to="{ name: 'payroll-quick-inputs', query: { period } }"

@@ -15,6 +15,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -211,12 +212,12 @@ onMounted(load)
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('tax_evidence.cash_journal.filter_from') }}</label>
-          <input v-model="filters.from" type="date" @change="load"
+          <DateInput v-model="filters.from" @change="load"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('tax_evidence.cash_journal.filter_to') }}</label>
-          <input v-model="filters.to" type="date" @change="load"
+          <DateInput v-model="filters.to" @change="load"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
       </div>

@@ -15,6 +15,7 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { formatMoneyMinor } from '@/composables/useFormat'
 import { btnFilled, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import DateInput from '@/components/ui/DateInput.vue'
 
 interface EmploymentOption {
   employment_id: number
@@ -324,11 +325,11 @@ onMounted(load)
       </label>
       <label class="block">
         <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.risky_savings.claimed_on') }}</span>
-        <input v-model="rightClaimedOn" data-testid="risky-claimed-on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+        <DateInput v-model="rightClaimedOn" data-testid="risky-claimed-on" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
       </label>
       <label class="block">
         <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.risky_savings.informed_on') }}</span>
-        <input v-model="employeeInformedOn" data-testid="risky-informed-on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+        <DateInput v-model="employeeInformedOn" data-testid="risky-informed-on" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
         <span v-if="employeeInformedOn === ''" class="mt-1 block text-xs text-warning-700">{{ t('payroll.risky_savings.informed_warning') }}</span>
       </label>
       <label class="block">

@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import type { BankTransactionActions } from '@/composables/useBankTransactionActions'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{ actions: BankTransactionActions }>()
 const { t } = useI18n()
@@ -20,7 +21,7 @@ const { requestDocTx, requestDocDeadline, requestingDoc, submitRequestDoc, close
       </p>
       <p class="text-sm text-neutral-600 mb-3">{{ t('bank.document_request.hint') }}</p>
       <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('document_requests.deadline') }}</label>
-      <input v-model="requestDocDeadline" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm mb-4" />
+      <DateInput v-model="requestDocDeadline" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm mb-4" />
       <div class="flex justify-end gap-2">
         <button @click="closeRequestDoc" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
         <button @click="submitRequestDoc" :disabled="requestingDoc"

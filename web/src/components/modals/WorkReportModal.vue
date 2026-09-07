@@ -30,6 +30,7 @@ import { focusLastRow } from '@/composables/useRowFocus'
 import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
 import Modal from '@/components/ui/Modal.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -425,7 +426,7 @@ onMounted(() => {
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm" />
                   </td>
                   <td class="px-3 py-1.5">
-                    <input v-model="it.work_date" type="date"
+                    <DateInput v-model="it.work_date"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm" />
                   </td>
                   <td class="px-3 py-1.5">
@@ -488,7 +489,7 @@ onMounted(() => {
                 <div class="grid grid-cols-3 gap-2">
                   <div>
                     <label class="block text-[11px] text-neutral-500 mb-0.5">{{ t('invoice.wr_date') }}</label>
-                    <input v-model="it.work_date" type="date"
+                    <DateInput v-model="it.work_date"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm" />
                   </div>
                   <div>

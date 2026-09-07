@@ -25,6 +25,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -641,20 +642,20 @@ onMounted(load)
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label class="text-xs font-medium text-neutral-600">
               {{ t('payroll.deductions.valid_from') }}
-              <input v-model="form.valid_from" type="date" required :disabled="!!detail && detail.withheld_total_minor > 0" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100">
+              <DateInput v-model="form.valid_from" required :disabled="!!detail && detail.withheld_total_minor > 0" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100" />
             </label>
             <label class="text-xs font-medium text-neutral-600">
               {{ t('payroll.deductions.valid_to') }}
-              <input v-model="form.valid_to" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+              <DateInput v-model="form.valid_to" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
             </label>
             <label class="text-xs font-medium text-neutral-600">
               {{ t('payroll.deductions.delivered_on') }}
-              <input v-model="form.delivered_on" type="date" :disabled="!!detail && detail.withheld_total_minor > 0" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100">
+              <DateInput v-model="form.delivered_on" :disabled="!!detail && detail.withheld_total_minor > 0" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100" />
               <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('payroll.deductions.delivered_on_hint') }}</span>
             </label>
             <label class="text-xs font-medium text-neutral-600">
               {{ t('payroll.deductions.effective_from') }}
-              <input v-model="form.effective_from" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+              <DateInput v-model="form.effective_from" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
               <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('payroll.deductions.effective_hint') }}</span>
             </label>
             <label v-if="creating" class="flex items-center gap-2 pt-5 text-sm text-neutral-700">

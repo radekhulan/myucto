@@ -5,7 +5,7 @@ const m = vi.hoisted(() => ({ postingRuleChartAlignment: vi.fn(), applyPostingRu
 vi.mock('@/api/accounting', () => ({ accountingApi: m }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: () => 'error' }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn() }) }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 import PostingRuleChartAlignmentDialog from '../PostingRuleChartAlignmentDialog.vue'
 
 function side(over: Record<string, unknown> = {}) {

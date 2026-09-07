@@ -27,6 +27,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -354,7 +355,7 @@ onMounted(() => {
           </div>
           <div>
             <label class="block text-sm mb-1">{{ t('reports.vatCorrections.col.delivered_on') }}</label>
-            <input v-model="f43.delivered_on" type="date"
+            <DateInput v-model="f43.delivered_on"
                    class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
           <div>
@@ -414,12 +415,12 @@ onMounted(() => {
           </div>
           <div>
             <label class="block text-sm mb-1">{{ t('reports.vatCorrections.col.acquired_on') }}</label>
-            <input v-model="f79.acquired_on" type="date"
+            <DateInput v-model="f79.acquired_on"
                    class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
           <div>
             <label class="block text-sm mb-1">{{ t('reports.vatCorrections.col.effective_on') }}</label>
-            <input v-model="f79.effective_on" type="date"
+            <DateInput v-model="f79.effective_on"
                    class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           </div>
           <div>

@@ -147,6 +147,11 @@ Limity:
 | **Kurz k DUZP** | Pokud je měna ≠ CZK, **musíš zafixovat kurz**. Tlačítko „Načíst z ČNB" stáhne denní kurz k rozhodnému dni dokladu. Korunový doklad kurz nemá — když měnu přepneš na CZK, kurz i jeho datum se vyprázdní. Viz [§ 23.2.9](#2329-kurz-cizi-meny-a-jeho-prenacitani). |
 | **Reverse charge** | Zaškrtni, pokud je doklad B2B s přenesenou daňovou povinností (pořízení zboží z EU, služby z EU/3. země, tuzemský §92a). Položkám nastav **tuzemskou sazbu** (typicky 21 %) a odpovídající klasifikační kód — daň na dokladu zůstane 0 (dodavatel ji neúčtuje), samovyměření i zrcadlový odpočet dopočítají výkazy DPH. Viz [§ 23.2.7](#2327-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba). |
 
+Datumová pole (vystaveno, DUZP, splatnost, datum přijetí i časové rozlišení
+u položek) se zadávají ve formátu jazyka aplikace — česky `d. m. rrrr`, anglicky
+`mm/dd/yyyy`, stejně jako všude jinde v aplikaci (viz [§ 1.1](01_Uvod.md)).
+Ikona v poli otevře kalendář.
+
 > [!NOTE]
 > **Datum přijetí a období odpočtu DPH.** U ručně založené (tzn. **ne** importované)
 > tuzemské přijaté faktury se datum přijetí počítá i do určení **období, ve kterém

@@ -12,6 +12,7 @@ import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import PostingPreviewModal from '@/components/accounting/PostingPreviewModal.vue'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import type { AutomationRecommendationsJob } from '@/api/automationRecommendations'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{ suppliers: number[] }>()
 const { t, locale } = useI18n()
@@ -236,8 +237,8 @@ watch(page, () => { void load() })
           <option v-for="kind in ['post_invoice', 'post_purchase', 'classify_purchase', 'bank_rule']" :key="kind" :value="kind">{{ t(`automation.recommendations.${kind}`) }}</option>
         </select>
       </label>
-      <label class="text-xs text-neutral-500">{{ t('common.from') }}<input v-model="from" type="date" class="mt-1 block rounded border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-      <label class="text-xs text-neutral-500">{{ t('common.to') }}<input v-model="to" type="date" class="mt-1 block rounded border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+      <label class="text-xs text-neutral-500">{{ t('common.from') }}<DateInput v-model="from" class="mt-1 block rounded border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label>
+      <label class="text-xs text-neutral-500">{{ t('common.to') }}<DateInput v-model="to" class="mt-1 block rounded border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label>
       <button type="button" :class="btnOutline('neutral')" :disabled="loading || refreshing || jobRunning || !suppliers.length" @click="requestRefresh()"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>{{ t('automation.recommendations.refresh') }}</button>
     </div>
     <p class="text-xs text-neutral-500">{{ t('automation.recommendations.date_filter_hint') }}</p>

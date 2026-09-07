@@ -31,6 +31,7 @@ import {
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import DateInput from '@/components/ui/DateInput.vue'
 
 interface ItemForm {
   item_kind: TravelItemKind
@@ -880,7 +881,7 @@ onMounted(load)
             </div>
             <label>
               <span :class="labelClass">{{ t('payroll_travel.items.spent_on') }}</span>
-              <input v-model="item.spent_on" type="date" :class="fieldClass">
+              <DateInput v-model="item.spent_on" :class="fieldClass" />
             </label>
             <label class="sm:col-span-2">
               <span :class="labelClass">{{ t('payroll_travel.items.description') }}</span>
@@ -961,7 +962,7 @@ onMounted(load)
         >
           <label>
             <span :class="labelClass">{{ t('payroll_travel.meals.date') }}</span>
-            <input v-model="meal.meal_date" type="date" :class="fieldClass">
+            <DateInput v-model="meal.meal_date" :class="fieldClass" />
           </label>
           <label>
             <span :class="labelClass">{{ t('payroll_travel.meals.count') }}</span>

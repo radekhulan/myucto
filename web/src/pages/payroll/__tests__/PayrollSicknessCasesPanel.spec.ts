@@ -259,10 +259,12 @@ describe('PayrollSicknessCasesPanel', () => {
     await wrapper.find('[data-test="sickness-case-incapacity-to"]')
       .setValue('2026-08-22')
     await wrapper.find('[data-test="sickness-case-work-day-add"]').trigger('click')
-    await wrapper.find('[data-test="sickness-case-work-day-0"] input')
-      .setValue('2026-08-10')
-    await wrapper.findAll('[data-test="sickness-case-work-day-0"] input')[1]
-      .setValue('2026-08-11')
+    // Každé datumové pole je dnes DateInput: viditelný text + skryté date pole
+    // pro kalendář. Bez omezení na `type="text"` by druhý index trefil skryté
+    // pole prvního data místo druhého data.
+    const workDayFields = wrapper.findAll('[data-test="sickness-case-work-day-0"] input[type="text"]')
+    await workDayFields[0].setValue('2026-08-10')
+    await workDayFields[1].setValue('2026-08-11')
     await wrapper.findAll('button')
       .find(button => button.text().includes('actions.save'))!
       .trigger('click')

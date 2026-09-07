@@ -13,6 +13,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -434,7 +435,7 @@ onMounted(async () => {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.documents.field_date') }}</label>
-            <input v-model="form.doc_date" type="date" :disabled="readOnly" class="w-full h-10 px-3 border border-neutral-300 rounded-md disabled:bg-neutral-50 text-sm" />
+            <DateInput v-model="form.doc_date" :disabled="readOnly" class="w-full h-10 px-3 border border-neutral-300 rounded-md disabled:bg-neutral-50 text-sm" />
           </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">

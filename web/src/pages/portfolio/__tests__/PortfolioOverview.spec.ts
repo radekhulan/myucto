@@ -19,7 +19,7 @@ vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }) }))
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({

@@ -26,6 +26,7 @@ import {
   type PayrollAbsence,
   type PayrollAbsenceEmployment,
 } from '@/api/payrollAbsences'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -1032,11 +1033,11 @@ onMounted(async () => {
         </div>
         <label>
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.from') }}</span>
-          <input v-model="filterFrom" type="date" :class="fieldClass">
+          <DateInput v-model="filterFrom" :class="fieldClass" />
         </label>
         <label>
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.to') }}</span>
-          <input v-model="filterTo" type="date" :class="fieldClass">
+          <DateInput v-model="filterTo" :class="fieldClass" />
         </label>
       </div>
       <div class="mt-3 flex flex-wrap items-center justify-end gap-2">
@@ -1114,11 +1115,11 @@ onMounted(async () => {
           </div>
           <label>
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.from') }}</span>
-            <input v-model="absenceForm.date_from" required type="date" :class="fieldClass">
+            <DateInput v-model="absenceForm.date_from" required :class="fieldClass" />
           </label>
           <label>
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.to') }}</span>
-            <input v-model="absenceForm.date_to" required type="date" :class="fieldClass">
+            <DateInput v-model="absenceForm.date_to" required :class="fieldClass" />
           </label>
           <div v-if="needsAverage">
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.average') }}</span>
@@ -1450,8 +1451,8 @@ onMounted(async () => {
         <form data-test="average-form" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createAverage">
           <label><span class="form-label">{{ t('payroll_absence.averages.year') }}</span><input v-model.number="averageForm.applicable_year" data-test="average-year" :min="minimumFormYear" :max="maximumFormYear" type="number" :class="fieldClass"></label>
           <label><span class="form-label">{{ t('payroll_absence.averages.quarter') }}</span><input v-model.number="averageForm.applicable_quarter" min="1" max="4" type="number" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.decisive_from') }}</span><input v-model="averageForm.decisive_from" type="date" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.decisive_to') }}</span><input v-model="averageForm.decisive_to" type="date" :class="fieldClass"></label>
+          <label><span class="form-label">{{ t('payroll_absence.averages.decisive_from') }}</span><DateInput v-model="averageForm.decisive_from" :class="fieldClass" /></label>
+          <label><span class="form-label">{{ t('payroll_absence.averages.decisive_to') }}</span><DateInput v-model="averageForm.decisive_to" :class="fieldClass" /></label>
           <label>
             <span class="form-label">{{ t('payroll_absence.averages.gross_minor') }}</span>
             <input v-model.number="averageForm.gross_earnings_czk" data-test="average-gross-czk" min="0" step="0.01" type="number" :class="fieldClass">
@@ -1573,7 +1574,7 @@ onMounted(async () => {
           <h2 class="font-semibold text-neutral-900">{{ t('payroll_absence.leave.manual_entry') }}</h2>
           <form data-test="leave-entry-form" class="mt-4 grid gap-3 sm:grid-cols-2" @submit.prevent="createEntry">
             <div><span class="form-label">{{ t('payroll_absence.leave.entry_type') }}</span><SearchableSelect v-model="entryForm.entry_type" :options="leaveEntryTypeOptions" :clearable="false" accent="payroll" :aria-label="t('payroll_absence.leave.entry_type')" /></div>
-            <label><span class="form-label">{{ t('payroll_absence.leave.effective_date') }}</span><input v-model="entryForm.effective_date" type="date" :class="fieldClass"></label>
+            <label><span class="form-label">{{ t('payroll_absence.leave.effective_date') }}</span><DateInput v-model="entryForm.effective_date" :class="fieldClass" /></label>
             <label><span class="form-label">{{ t('payroll_absence.leave.minutes_delta') }}</span><input v-model.number="entryForm.hours_delta" data-test="leave-entry-hours" step="0.25" type="number" :class="fieldClass"></label>
             <label><span class="form-label">{{ t('payroll_absence.leave.reason') }}</span><input v-model="entryForm.reason" data-test="leave-entry-reason" required maxlength="1000" :class="fieldClass"></label>
             <div class="flex flex-wrap justify-end sm:col-span-2"><button :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll_absence.leave.add') }}</button></div>

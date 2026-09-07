@@ -502,7 +502,8 @@ describe('EnforcementCases', () => {
     await input.setValue('2026-05-20')
     expect(input.attributes('readonly')).toBeUndefined()
     await input.setValue('2026-05-21')
-    expect((input.element as HTMLInputElement).value).toBe('2026-05-21')
+    // Pole přijme i ISO ze schránky, ale zobrazuje datum v jazyce aplikace.
+    expect((input.element as HTMLInputElement).value).toBe('21. 05. 2026')
     wrapper.unmount()
   })
 

@@ -20,6 +20,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   canWrite: boolean
@@ -441,11 +442,9 @@ onMounted(async () => {
             <span class="mb-1 block text-xs font-medium text-neutral-600">
               {{ t('payroll.employer.policies.effective_on') }}
             </span>
-            <input
+            <DateInput
               v-model="effectiveOn"
-              type="date"
-              class="h-10 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
-            >
+              class="h-10 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" />
           </label>
           <button type="button" :class="btnOutline('neutral')" :disabled="loading" @click="reloadSetup">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -711,13 +710,13 @@ onMounted(async () => {
           <span class="mb-1 block text-sm font-medium text-neutral-700">
             {{ t('payroll.employer.policies.valid_from') }}
           </span>
-          <input v-model="form.valid_from" type="date" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+          <DateInput v-model="form.valid_from" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" />
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">
             {{ t('payroll.employer.policies.valid_to') }}
           </span>
-          <input v-model="form.valid_to" type="date" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+          <DateInput v-model="form.valid_to" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" />
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">
@@ -842,13 +841,11 @@ onMounted(async () => {
           <span class="mb-1 block text-sm font-medium text-neutral-700">
             {{ t('payroll.employer.policies.delivery_verified_on') }}
           </span>
-          <input
+          <DateInput
             v-model="form.delivery_verified_on"
-            type="date"
             data-test="policy-delivery-verified-on"
             :disabled="!canWrite || form.delivery_channel === 'disabled'"
-            class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50"
-          >
+            class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50" />
           <span
             v-if="deliveryUnverified"
             class="mt-1 block text-xs text-warning-700"

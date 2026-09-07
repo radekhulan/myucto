@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Repository\BankEmailAttachmentIngestRepository;
 use MyInvoice\Repository\BankEmailNoticeRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeMessage;
@@ -24,6 +25,7 @@ final class BankEmailNoticeAction
 {
     public function __construct(
         private readonly BankEmailNoticeRepository $repo,
+        private readonly BankEmailAttachmentIngestRepository $attachments,
         private readonly BankEmailNoticeParserRepository $parsers,
         private readonly BankEmailNoticeScanner $scanner,
         private readonly ImapMailboxClientInterface $imap,
@@ -46,6 +48,7 @@ final class BankEmailNoticeAction
                 'mappings' => $this->repo->accountMappings($sid),
                 'messages' => $this->repo->processedMessages($sid, 50, 0),
                 'messages_total' => $this->repo->countProcessedMessages($sid),
+                'attachments' => $this->attachments->recent($sid, 50),
             ]);
         } catch (\PDOException $e) {
             if (str_starts_with((string) $e->getCode(), '42S02')) {

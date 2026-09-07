@@ -53,6 +53,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { appIsoDate } from '@/utils/date'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
 const pageId = useId()
@@ -813,12 +814,10 @@ onMounted(reloadAll)
         <h2 class="text-sm font-semibold">{{ t('payroll.retention.erasure_title') }}</h2>
         <label class="flex items-center gap-1.5 text-xs text-neutral-500">
           {{ t('payroll.retention.as_of') }}
-          <input
+          <DateInput
             v-model="asOf"
-            type="date"
             class="h-8 px-2 border border-neutral-300 rounded-md text-xs bg-surface"
-            @change="loadAssessment"
-          />
+            @change="loadAssessment" />
         </label>
       </div>
 
@@ -1133,12 +1132,10 @@ onMounted(reloadAll)
           <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-hold-placed`">
             {{ t('payroll.retention.col.placed_on') }}
           </label>
-          <input
+          <DateInput
             :id="`${pageId}-hold-placed`"
             v-model="holdForm.placedOn"
-            type="date"
-            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
-          />
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
         </div>
 
         <div class="flex justify-end gap-2 pt-2 flex-wrap">

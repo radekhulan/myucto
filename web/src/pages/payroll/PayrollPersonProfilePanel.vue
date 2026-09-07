@@ -33,6 +33,7 @@ import { fieldSelector, revealField } from '@/utils/revealField'
 import { accountPickerOptions } from '@/utils/chartAccountOptions'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { todayIso } from './employmentLifecycleUi'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   personId: number
@@ -1236,8 +1237,8 @@ onMounted(load)
                 <label :class="labelClass">{{ t('payroll.people.profile.first_name') }} <RequiredMark /><input v-model="row.first_name" required autocomplete="given-name" :disabled="!canWrite" :class="inputClass"></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.last_name') }} <RequiredMark /><input v-model="row.last_name" required autocomplete="family-name" :disabled="!canWrite" :class="inputClass" :data-a1-field="index === 0 ? 'identity.last_name' : undefined"></label>
                 <label :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.full_name') }} <RequiredMark /><input v-model="row.full_name" required autocomplete="name" :disabled="!canWrite" :class="inputClass"></label>
-                <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><input v-model="row.effective_from" required type="date" :disabled="!canWrite" :class="inputClass"></label>
-                <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<input v-model="row.effective_to" type="date" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><DateInput v-model="row.effective_from" required :disabled="!canWrite" :class="inputClass" /></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<DateInput v-model="row.effective_to" :disabled="!canWrite" :class="inputClass" /></label>
                 <div v-if="row.birth_surname_masked" class="lg:col-span-2">
                   <span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span>
                   <p class="mt-1 font-mono text-sm text-neutral-800">{{ row.birth_surname_masked }}</p>
@@ -1274,7 +1275,7 @@ onMounted(load)
                   </label>
                   <label :class="labelClass">
                     {{ t('payroll.people.profile.birth_date') }}
-                    <input v-model="row.birth_date" type="date" :max="todayIso()" :disabled="!canWrite" :class="inputClass" data-test="identity-birth-date" :data-a1-field="index === 0 ? 'identity.birth_date' : undefined">
+                    <DateInput v-model="row.birth_date" :max="todayIso()" :disabled="!canWrite" :class="inputClass" data-test="identity-birth-date" :data-a1-field="index === 0 ? 'identity.birth_date' : undefined" />
                   </label>
                   <label :class="labelClass">
                     {{ t('payroll.people.profile.sex_label') }}
@@ -1339,8 +1340,8 @@ onMounted(load)
             <article v-for="(row, index) in form.addresses" :key="row.id ?? `new-address-${index}`" :class="cardClass">
               <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                 <label :class="labelClass">{{ t('payroll.people.profile.address_type_label') }}<SearchableSelect v-model="row.address_type" class="mt-1" :options="addressTypeOptions" :clearable="false" :disabled="!canWrite" accent="payroll" /></label>
-                <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><input v-model="row.effective_from" required type="date" :disabled="!canWrite" :class="inputClass"></label>
-                <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<input v-model="row.effective_to" type="date" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><DateInput v-model="row.effective_from" required :disabled="!canWrite" :class="inputClass" /></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<DateInput v-model="row.effective_to" :disabled="!canWrite" :class="inputClass" /></label>
                 <div v-if="row.address_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-1 text-sm text-neutral-800">{{ row.address_masked }}</p></div>
                 <template v-if="canWrite">
                   <label :class="labelClass">{{ t('payroll.people.profile.street') }} <RequiredMark v-if="!row.id" /><input v-model="row.street_line" :required="!row.id" autocomplete="off" :class="inputClass"></label>
@@ -1413,7 +1414,7 @@ onMounted(load)
             {{ t('payroll.people.profile.cash_allocation') }}
             <span class="mt-1 block font-normal text-neutral-500">{{ t('payroll.people.profile.cash_allocation_settlement') }}</span>
           </p>
-          <label :class="labelClass">{{ t('payroll.people.profile.payout_effective_on') }} <RequiredMark /><input v-model="form.payout_effective_on" required type="date" :disabled="!canWrite" :class="inputClass"></label>
+          <label :class="labelClass">{{ t('payroll.people.profile.payout_effective_on') }} <RequiredMark /><DateInput v-model="form.payout_effective_on" required :disabled="!canWrite" :class="inputClass" /></label>
         </section>
 
         <section v-if="isPartnerSettlement" class="rounded-lg border border-payroll-200 bg-payroll-50/40 p-3 sm:p-4">
@@ -1444,8 +1445,8 @@ onMounted(load)
               <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                 <label :class="labelClass">{{ t('payroll.people.profile.account_label') }} <RequiredMark /><input v-model="row.label" required :disabled="!canWrite" :class="inputClass"></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.account_allocation') }} <RequiredMark /><input v-model.number="row.allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass"></label>
-                <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><input v-model="row.effective_from" required type="date" :disabled="!canWrite" :class="inputClass"></label>
-                <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<input v-model="row.effective_to" type="date" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><DateInput v-model="row.effective_from" required :disabled="!canWrite" :class="inputClass" /></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<DateInput v-model="row.effective_to" :disabled="!canWrite" :class="inputClass" /></label>
                 <div v-if="row.bank_account_masked"><span class="text-xs text-neutral-500">{{ t('payroll.people.profile.current_masked') }}</span><p class="mt-2 font-mono text-sm text-neutral-800">{{ row.bank_account_masked }}</p></div>
                 <label v-if="canWrite" :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.new_bank_account') }} <RequiredMark v-if="!row.id" /><input v-model="row.bank_account" :required="!row.id" autocomplete="off" :class="inputClass" :placeholder="row.id ? t('payroll.people.profile.keep_masked') : t('payroll.people.profile.bank_account_placeholder')" data-test="bank-account-plaintext" :data-a1-field="index === 0 ? 'payout.bank_account' : undefined"></label>
                 <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_active" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.active') }}</label>
@@ -1466,7 +1467,7 @@ onMounted(load)
                 </div>
                 <div v-if="canWrite && row.is_active && verificationForms[row.id]" class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,12rem)_auto] md:items-end">
                   <label :class="labelClass">{{ t('payroll.people.profile.verification_source_label') }}<SearchableSelect v-model="verificationForms[row.id].verification_source" class="mt-1" :options="verificationSourceOptions" :clearable="false" accent="payroll" /></label>
-                  <label :class="labelClass">{{ t('payroll.people.profile.verified_on') }} <RequiredMark /><input v-model="verificationForms[row.id].verified_on" required type="date" :class="inputClass"></label>
+                  <label :class="labelClass">{{ t('payroll.people.profile.verified_on') }} <RequiredMark /><DateInput v-model="verificationForms[row.id].verified_on" required :class="inputClass" /></label>
                   <button type="button" :class="btnOutline('success')" :disabled="verifyingAccountId !== null || accountHasUnsavedChanges(row)" data-test="verify-account" @click="verifyAccount(row)">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
                     {{ t('payroll.people.profile.verify_account') }}

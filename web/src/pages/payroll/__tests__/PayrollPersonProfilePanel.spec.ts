@@ -322,8 +322,9 @@ describe('PayrollPersonProfilePanel', () => {
     const wrapper = await mountedPanel()
 
     expect(wrapper.find('[data-test="registration-identity-details"]').exists()).toBe(true)
+    // DateInput zobrazuje datum v jazyce aplikace; ISO se ověřuje na payloadu níže.
     expect(wrapper.get<HTMLInputElement>('[data-test="identity-birth-date"]').element.value)
-      .toBe('1990-02-03')
+      .toBe('03. 02. 1990')
     expect(wrapper.find('[data-test="identity-birth-country"] input').exists()).toBe(true)
     expect(wrapper.find('[data-test="identity-citizenship-country"] input').exists()).toBe(true)
 

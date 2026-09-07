@@ -43,7 +43,69 @@ final class PurchaseInvoiceSubmissionUploadService
         if ($file->getError() !== UPLOAD_ERR_OK) {
             throw new PurchaseInvoiceSubmissionException('upload_failed', 'Nahrání souboru selhalo.', 400);
         }
-        $originalName = basename(str_replace('\\', '/', trim((string) $file->getClientFilename())));
+        return $this->ingest(
+            basename(str_replace('\\', '/', trim((string) $file->getClientFilename()))),
+            $supplierId,
+            $userId,
+            $via,
+            $note,
+            $kindHint,
+            $bankTransactionId,
+            $supersedesSubmissionId,
+            static function (string $tmp) use ($file): void {
+                $file->moveTo($tmp);
+            },
+        );
+    }
+
+    /**
+     * Podání z bajtů, které už držíme v paměti (příloha e-mailu). Prochází TOUTÉŽ
+     * cestou jako upload z prohlížeče — stejná validace přípony i magic bajtů,
+     * stejný dedup, stejný zápis do DMS.
+     *
+     * @return array{submission:array<string,mixed>,duplicate:bool}
+     */
+    public function submitBytes(
+        string $bytes,
+        string $originalName,
+        int $supplierId,
+        ?int $userId,
+        string $via,
+        ?string $note = null,
+        ?string $kindHint = null,
+    ): array {
+        return $this->ingest(
+            basename(str_replace('\\', '/', trim($originalName))),
+            $supplierId,
+            $userId,
+            $via,
+            $note,
+            $kindHint,
+            null,
+            null,
+            static function (string $tmp) use ($bytes): void {
+                if (@file_put_contents($tmp, $bytes) === false) {
+                    throw new \RuntimeException('Obsah přílohy se nepodařilo zapsat do dočasného souboru.');
+                }
+            },
+        );
+    }
+
+    /**
+     * @param callable(string):void $writer Uloží originální bajty na předanou dočasnou cestu.
+     * @return array{submission:array<string,mixed>,duplicate:bool}
+     */
+    private function ingest(
+        string $originalName,
+        int $supplierId,
+        ?int $userId,
+        string $via,
+        ?string $note,
+        ?string $kindHint,
+        ?int $bankTransactionId,
+        ?int $supersedesSubmissionId,
+        callable $writer,
+    ): array {
         if ($originalName === '') {
             throw new PurchaseInvoiceSubmissionException('no_filename', 'Soubor nemá platný název.', 400);
         }
@@ -55,7 +117,7 @@ final class PurchaseInvoiceSubmissionUploadService
                 415,
             );
         }
-        if (!in_array($via, ['portal', 'document_request', 'staff'], true)) {
+        if (!in_array($via, ['portal', 'document_request', 'staff', 'email'], true)) {
             throw new \InvalidArgumentException('Neplatný zdroj podání.');
         }
         $kindHint = $kindHint !== null && in_array($kindHint, self::KIND_HINTS, true) ? $kindHint : null;
@@ -102,7 +164,7 @@ final class PurchaseInvoiceSubmissionUploadService
             throw new PurchaseInvoiceSubmissionException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }
         try {
-            $file->moveTo($tmp);
+            $writer($tmp);
         } catch (\Throwable) {
             @unlink($tmp);
             throw new PurchaseInvoiceSubmissionException('move_failed', 'Soubor se nepodařilo převzít.', 500);

@@ -31,6 +31,7 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -1606,7 +1607,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.closing.profit_distribution.decision_date') }}</label>
-              <input v-model="pdDecisionDate" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <DateInput v-model="pdDecisionDate" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.closing.profit_distribution.withholding_rate') }}</label>

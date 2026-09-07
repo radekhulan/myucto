@@ -30,7 +30,7 @@ vi.mock('@/api/dataBox', () => ({
     purgeInboxLocalContent: m.purgeInboxLocalContent,
   },
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 vi.mock('@/composables/useFormat', () => ({ formatUtcDateTime: (value: string) => value }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (error: unknown) => String(error) }))
 vi.mock('@/composables/useToast', () => ({

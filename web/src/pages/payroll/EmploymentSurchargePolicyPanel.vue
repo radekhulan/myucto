@@ -62,6 +62,7 @@ import {
   disabledTitle,
   ICONS,
 } from '@/components/ui/buttonStyles'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   employmentId: number
@@ -563,13 +564,11 @@ onMounted(load)
       <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label class="text-xs text-neutral-600">
           {{ t('payroll.people.surcharge_policy.valid_from') }}
-          <input
+          <DateInput
             v-model="form.valid_from"
             data-test="surcharge-policy-valid-from"
-            type="date"
             :disabled="!canWrite || editingId !== null"
-            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100"
-          >
+            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100" />
           <span v-if="editingId !== null" class="mt-1 block text-neutral-500">
             {{ t('payroll.people.surcharge_policy.valid_from_locked') }}
           </span>
@@ -580,14 +579,12 @@ onMounted(load)
         -->
         <label v-if="editingId !== null" class="text-xs text-neutral-600">
           {{ t('payroll.people.surcharge_policy.valid_to') }}
-          <input
+          <DateInput
             v-model="form.valid_to"
             data-test="surcharge-policy-valid-to"
-            type="date"
             :min="form.valid_from"
             :disabled="!canWrite"
-            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
-          >
+            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
           <span class="mt-1 block text-neutral-500">{{ t('payroll.people.surcharge_policy.valid_to_hint') }}</span>
         </label>
         <label class="text-xs text-neutral-600">

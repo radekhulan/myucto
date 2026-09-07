@@ -8,6 +8,7 @@ import { useToast } from '@/composables/useToast'
 import { authApi } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -538,7 +539,7 @@ onMounted(load)
 
           <label class="block text-sm">
             <span class="text-neutral-700 font-medium">{{ t('api_tokens.col_expires') }} <span class="text-neutral-400">{{ t('common.optional') }}</span></span>
-            <input v-model="form.expires_at" type="date" :disabled="form.never_expires"
+            <DateInput v-model="form.expires_at" :disabled="form.never_expires"
               class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md disabled:bg-neutral-100" />
             <p class="text-xs text-neutral-500 mt-1">{{ t('api_tokens.expires_hint') }}</p>
           </label>

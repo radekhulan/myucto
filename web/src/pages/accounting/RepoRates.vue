@@ -6,6 +6,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 // embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
 defineProps<{ embedded?: boolean }>()
@@ -84,7 +85,7 @@ onMounted(load)
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end mb-4">
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.repo_rates.valid_from') }}</label>
-            <input v-model="form.valid_from" type="date"
+            <DateInput v-model="form.valid_from"
               class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
