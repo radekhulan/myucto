@@ -31,7 +31,7 @@ import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import { accountingApi } from '@/api/accounting'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { useSidePreview } from '@/composables/useSidePreview'
-import { appIsoDate } from '@/utils/date'
+import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, te, locale } = useI18n()
@@ -1230,19 +1230,12 @@ const canSendReminder = computed(() => {
   if (!['issued', 'sent', 'reminded'].includes(invoice.value.status)) return false
   if ((invoice.value.payment_method ?? 'bank_transfer') !== 'bank_transfer') return false
   if (Number(invoice.value.amount_to_pay ?? 0) <= 0) return false
-  const due = new Date(invoice.value.due_date)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return due < today
+  return overdueDays(invoice.value.due_date) > 0
 })
 
 const daysOverdue = computed(() => {
   if (!invoice.value) return 0
-  const due = new Date(invoice.value.due_date)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  due.setHours(0, 0, 0, 0)
-  return Math.max(0, Math.floor((today.getTime() - due.getTime()) / 86_400_000))
+  return overdueDays(invoice.value.due_date)
 })
 
 // #86 — příjemci upomínky z resolveru (kontakty s účelem `reminders`, fallback documents/main).

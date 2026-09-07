@@ -427,6 +427,11 @@ return [
     'qr' => [
         'czk_constant_symbol' => '0308',             // KS pro CZK platby (0308 = běžný platební styk)
     ],
+    'invoices' => [
+        // true = v seznamech a souhrnech zahrnout mezi doklady po splatnosti i dnešní.
+        // Odeslání upomínky zůstává možné až po dni splatnosti.
+        'overdue_includes_today' => false,
+    ],
     'pagination' => [
         // Velikost stránky pro tlačítko "Další" v UI seznamech.
         // Min/max hranice (5 / 200) se enforcují v API; mimo rozsah API hodnotu clampuje.

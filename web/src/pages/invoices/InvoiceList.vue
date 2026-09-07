@@ -33,7 +33,7 @@ import PostingBadge from '@/components/ui/PostingBadge.vue'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import { ACCOUNTING_PERIOD_MISSING_CODES, accountingPeriodRoute } from '@/api/errors'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
-import { appIsoDate } from '@/utils/date'
+import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, tm, rt } = useI18n()
@@ -608,8 +608,6 @@ const markPayableSelected = computed(() => {
 // po splatnosti a placené bankovním převodem (kartové/hotovostní úhrady se neupomínají).
 const reminderSelected = computed(() => {
   const ids = new Set(selectedIds.value)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
   return groups.value
     .flatMap(g => g.invoices)
     .filter(inv => {
@@ -618,8 +616,7 @@ const reminderSelected = computed(() => {
       if (!['issued', 'sent', 'reminded'].includes(inv.status)) return false
       if (!hasPositiveAmountToPay(inv)) return false
       if ((inv.payment_method ?? 'bank_transfer') !== 'bank_transfer') return false
-      const due = new Date(inv.due_date)
-      return due < today
+      return overdueDays(inv.due_date) > 0
     })
 })
 

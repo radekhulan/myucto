@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Accounting\Activation\PendingBackfillCounter;
+use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Support\Sql\CzkAmountExpr;
 use MyInvoice\Support\Sql\PayablePredicate;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -36,6 +37,7 @@ final class SummaryAction
         private readonly \MyInvoice\Repository\TaxConstantsRepository $taxConstants,
         private readonly \MyInvoice\Service\TaxEvidence\CashJournalService $cashJournal,
         private readonly PendingBackfillCounter $pendingBackfill,
+        private readonly OverduePolicy $overduePolicy,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -386,6 +388,7 @@ final class SummaryAction
 
     private function kpi(\PDO $pdo, int $year, int $prevYear, int $sid, bool $isVatPayer): array
     {
+        $overdueOperator = $this->overduePolicy->comparisonOperator();
         $rev = $this->revenueCol($isVatPayer);
         // Tentýž obrat ještě jednou, přepočtený na CZK — z něj se sečte `total_czk` (viz níže).
         // Jde o DALŠÍ SLOUPCE téhož dotazu, ne druhý průchod tabulkou.
@@ -492,7 +495,7 @@ final class SummaryAction
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
-                AND i.status IN ('issued','sent','reminded') AND i.due_date <= CURDATE()
+                AND i.status IN ('issued','sent','reminded') AND i.due_date {$overdueOperator} CURDATE()
                 AND " . $this->receivableDocTypeSql() . "
                 AND " . $this->outstandingReceivableSql() . "
               GROUP BY cur.code"
@@ -692,6 +695,7 @@ final class SummaryAction
 
     private function overdue(\PDO $pdo, int $sid): array
     {
+        $overdueOperator = $this->overduePolicy->comparisonOperator();
         $sql = "SELECT i.id, i.varsymbol, i.invoice_type, i.client_id, cur.code AS currency,
                        i.issue_date, i.due_date, (i.amount_to_pay - i.paid_total) AS amount_to_pay, i.status,
                        c.company_name AS client_company_name,
@@ -701,7 +705,7 @@ final class SummaryAction
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
                    AND i.status IN ('issued','sent','reminded')
-                   AND i.due_date <= CURDATE()
+                   AND i.due_date {$overdueOperator} CURDATE()
                    AND " . $this->receivableDocTypeSql() . "
                    AND " . $this->outstandingReceivableSql() . "
                  ORDER BY i.due_date ASC

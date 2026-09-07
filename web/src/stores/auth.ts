@@ -4,6 +4,7 @@ import { authApi, type User, type SetupStatus, type SessionState, type DomainCon
 import type { LicenseSummary } from '@/api/license'
 import { setCsrfToken, setDomainSupplierLock } from '@/api/client'
 import { broadcastSessionEvent } from '@/security/sessionChannel'
+import { setOverdueIncludesToday } from '@/utils/invoiceOverdue'
 import { useSupplierStore } from './supplier'
 import { accessLevelValue, type AccessLevel, type PermissionKey, type PermissionValue } from '@/security/permissions'
 
@@ -78,6 +79,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function fetchSetupStatus() {
     setupStatus.value = await authApi.setupStatus()
+    setOverdueIncludesToday(setupStatus.value.overdue_includes_today === true)
     // Na úplně čerstvé instalaci ještě nemusí existovat tabulka domén a setup
     // záměr schválně povoluje přístup i z LAN hostname odlišného od app.url.
     // Tenant kontext proto načítáme až po dokončení prvotního setupu.

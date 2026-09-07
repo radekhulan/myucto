@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { addDaysIso, addMonthsIso, appIsoDate, appYear } from '../date'
+import { addDaysIso, addMonthsIso, appIsoDate, appYear, overdueDays } from '../date'
+
+describe('overdueDays', () => {
+  it.each([
+    ['2026-09-07', '2026-09-07T21:59:59Z', 0],
+    ['2026-09-07', '2026-09-07T22:00:00Z', 1],
+    ['2026-03-29', '2026-03-29T22:00:00Z', 1],
+    ['2026-10-25', '2026-10-25T23:00:00Z', 1],
+    ['2026-12-31', '2026-12-31T23:00:00Z', 1],
+    ['2028-02-28', '2028-03-01T12:00:00Z', 2],
+    ['2026-09-08', '2026-09-07T12:00:00Z', 0],
+    ['', '2026-09-07T12:00:00Z', 0],
+  ])('splatnost %s v okamžiku %s znamená %i dní', (due, now, expected) => {
+    expect(overdueDays(due, new Date(now))).toBe(expected)
+  })
+})
 
 describe('appIsoDate', () => {
   it('vrací kalendářní datum v účetní zóně, ne v UTC', () => {

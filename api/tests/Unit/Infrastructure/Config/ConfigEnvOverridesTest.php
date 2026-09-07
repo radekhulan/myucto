@@ -105,6 +105,16 @@ PHP);
         self::assertSame(3306, $cfg->get('db.port'));
     }
 
+    public function testOverdueBoundaryDefaultsToTomorrowAndSupportsBooleanEnv(): void
+    {
+        $this->unsetEnv('MYINVOICE_OVERDUE_INCLUDES_TODAY');
+        self::assertFalse(Config::load($this->tmpDir)->get('invoices.overdue_includes_today'));
+        $this->setEnv('MYINVOICE_OVERDUE_INCLUDES_TODAY', 'true');
+        self::assertTrue(Config::load($this->tmpDir)->get('invoices.overdue_includes_today'));
+        $this->setEnv('MYINVOICE_OVERDUE_INCLUDES_TODAY', 'false');
+        self::assertFalse(Config::load($this->tmpDir)->get('invoices.overdue_includes_today'));
+    }
+
     public function testEpoTestDefaultsOffAndCanBeEnabledByEnvironment(): void
     {
         $cfg = Config::load($this->tmpDir);

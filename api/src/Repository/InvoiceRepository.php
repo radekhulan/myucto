@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Invoice\CzkRecap;
+use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
@@ -23,6 +24,7 @@ final class InvoiceRepository
     public function __construct(
         private readonly Connection $db,
         private readonly TaxConstantsRepository $taxConstants,
+        private readonly OverduePolicy $overduePolicy,
     ) {}
 
     /**
@@ -816,7 +818,8 @@ final class InvoiceRepository
             $where[] = "(i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)";
         }
         if (!empty($filters['overdue'])) {
-            $where[] = "i.status IN ('issued','sent','reminded') AND i.due_date <= CURDATE()";
+            $operator = $this->overduePolicy->comparisonOperator();
+            $where[] = "i.status IN ('issued','sent','reminded') AND i.due_date {$operator} CURDATE()";
             // Stejná pohledávková sémantika jako unpaid (vč. nespárovaných proforem).
             $where[] = "(i.invoice_type != 'proforma'"
                 . " OR NOT EXISTS (SELECT 1 FROM invoices ch"
