@@ -64,6 +64,7 @@
     "lock",
     "logbook",
     "manualQueue",
+    "markdown_editor",
     "mcp_server_page",
     "mfa_setup",
     "monthly_report",
@@ -143,6 +144,7 @@
       "lock",
       "logbook",
       "manualQueue",
+      "markdown_editor",
       "mcp_server_page",
       "mfa_setup",
       "monthly_report",
@@ -552,6 +554,7 @@
     ],
     "stock-item-new": [
       "eshop",
+      "markdown_editor",
       "stock"
     ],
     "stock-item-detail": [
@@ -560,6 +563,7 @@
     ],
     "stock-item-edit": [
       "eshop",
+      "markdown_editor",
       "stock"
     ],
     "stock-documents": [

@@ -34,6 +34,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import MarkdownEditor from '@/components/ui/MarkdownEditor.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -240,7 +241,7 @@ async function recomputePrices() {
   recomputing.value = true
   try {
     // Nejprve ulož aktuální nastavení řádků, ať přepočet vychází z editovaných hodnot.
-    await eshopApi.updatePrices(itemId.value, prices.value.map(pricePayloadFrom))
+    await eshopApi.updatePrices(itemId.value, meaningfulPriceRows().map(pricePayloadFrom))
     const rows = await eshopApi.recomputePrices(itemId.value)
     prices.value = rows.map(priceRowFrom)
     toast.success(t('common.saved'))
@@ -250,6 +251,25 @@ async function recomputePrices() {
     recomputing.value = false
   }
 }
+/**
+ * Řádky, které se opravdu ukládají. Předvyplněný řádek (jediná měna / jediný
+ * jazyk) je jen UI zkratka — dokud do něj uživatel nic nenapsal, nemá vznikat
+ * v datech. Platí i pro řádek, který uživatel přidal ručně a nechal prázdný.
+ */
+function meaningfulPriceRows(): PriceRow[] {
+  return prices.value.filter(r =>
+    r.id !== null
+    || r.is_manual_override
+    || String(r.markup_pct ?? '').trim() !== ''
+    || String(r.fixed_price ?? '').trim() !== '')
+}
+
+function meaningfulI18nRows(): ProductI18nRow[] {
+  return i18nRows.value.filter(r =>
+    [r.name, r.short_desc, r.description, r.seo_title, r.seo_description, r.seo_slug]
+      .some(v => String(v ?? '').trim() !== ''))
+}
+
 function pricePayloadFrom(r: PriceRow) {
   return {
     currency_code: r.currency_code.trim().toUpperCase(),
@@ -537,10 +557,32 @@ async function loadProduct(id: number) {
   vendors.value = vn.map(vendorRowFrom)
 }
 
+/**
+ * S jediným jazykem (resp. měnou) v číselníku není co vybírat — přesto musel
+ * uživatel řádek nejdřív ručně přidat, než mohl napsat popis nebo cenu.
+ * Prázdný řádek proto předvyplníme; jde jen o UI zkratku, do dat se nedostane,
+ * dokud v něm něco nevyplní (viz buildProductPayload / buildPricePayloads).
+ *
+ * Jen při načtení, ne watcherem: řádek smazaný uživatelem se nesmí sám vrátit.
+ */
+function prefillSingleOptions() {
+  const active = locales.value.filter(l => !l.archived)
+  if (active.length === 1 && i18nRows.value.length === 0) {
+    i18nRows.value.push({
+      locale: active[0].code, name: null, short_desc: null, description: null,
+      seo_title: null, seo_description: null, seo_slug: null,
+    })
+  }
+  if (currencies.value.length === 1 && prices.value.length === 0) {
+    addPriceRow()
+  }
+}
+
 onMounted(async () => {
   try {
     await loadCodebooks()
     if (isEdit.value && itemId.value) await loadProduct(itemId.value)
+    prefillSingleOptions()
   } catch (e: any) {
     error.value = mapError(e)
   }
@@ -575,7 +617,7 @@ function buildProductPayload(): ProductUpdatePayload {
     is_stocked: eshop.value.is_stocked,
     weight_g: numOrNull(eshop.value.weight_g),
     pricing_base: eshop.value.pricing_base,
-    i18n: i18nRows.value,
+    i18n: meaningfulI18nRows(),
     categories: selectedCategoryIds.value.map((id, idx) => ({
       category_id: id,
       is_primary: id === primaryCategoryId.value,
@@ -613,7 +655,7 @@ async function submit() {
     if (isEdit.value && itemId.value) {
       await stockApi.updateItem(itemId.value, form.value)
       await eshopApi.updateProduct(itemId.value, buildProductPayload())
-      await eshopApi.updatePrices(itemId.value, prices.value.map(pricePayloadFrom))
+      await eshopApi.updatePrices(itemId.value, meaningfulPriceRows().map(pricePayloadFrom))
       await eshopApi.updatePromoPrices(itemId.value, promos.value.map(promoPayloadFrom))
       await eshopApi.updateVendors(itemId.value, vendors.value.map(vendorPayloadFrom))
       toast.success(t('common.saved'))
@@ -893,7 +935,7 @@ function onImgError(e: Event) {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.languages.field_description') }}</label>
-              <textarea v-model="row.description" rows="3" class="w-full px-2 py-1.5 border border-neutral-300 rounded-md text-sm"></textarea>
+              <MarkdownEditor v-model="row.description" :rows="6" />
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -1077,74 +1119,73 @@ function onImgError(e: Event) {
             <EmptyState v-if="promos.length === 0" dense accent="neutral" icon="tag"
               :title="t('eshop.promo.empty')" :message="t('eshop.promo.empty_hint')" />
 
-            <div v-else class="overflow-x-auto scrollbar-slim">
-              <table class="w-full text-sm border-collapse">
-                <thead>
-                  <tr class="text-left text-xs text-neutral-500 border-b border-neutral-200">
-                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_label') }}</th>
-                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_currency') }}</th>
-                    <th class="py-2 pr-3 font-medium text-right">{{ t('eshop.promo.col_price') }}</th>
-                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_from') }}</th>
-                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_to') }}</th>
-                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_qty_mode') }}</th>
-                    <th class="py-2 pr-3 font-medium text-right">{{ t('eshop.promo.col_remaining') }}</th>
-                    <th class="py-2 pr-3 font-medium text-center">{{ t('eshop.promo.col_active') }}</th>
-                    <th class="py-2 pr-3 font-medium">{{ t('eshop.promo.col_state') }}</th>
-                    <th class="py-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(p, idx) in promos" :key="p.id ?? `new-promo-${idx}`" class="border-b border-neutral-100 align-top">
-                    <td class="py-2 pr-3">
-                      <input v-model="p.label" type="text" maxlength="60" :placeholder="t('eshop.promo.label_ph')"
-                        class="w-40 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-                    </td>
-                    <td class="py-2 pr-3">
-                      <select v-model="p.currency_code" required
-                        class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono bg-surface">
-                        <option value="">{{ t('eshop.prices.select_currency') }}</option>
-                        <option v-for="c in currencyOptions(p.currency_code)" :key="c.code" :value="c.code">{{ c.code }}{{ c.known ? '' : ' ⚠' }}</option>
-                      </select>
-                    </td>
-                    <td class="py-2 pr-3">
-                      <input v-model="p.promo_price" type="text" inputmode="decimal" :placeholder="t('eshop.prices.fixed_ph')"
-                        class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
-                    </td>
-                    <td class="py-2 pr-3">
-                      <DateInput v-model="p.valid_from"
-                        class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-                    </td>
-                    <td class="py-2 pr-3">
-                      <DateInput v-model="p.valid_to"
-                        class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-                    </td>
-                    <td class="py-2 pr-3">
+            <!--
+              Karty místo tabulky: deset sloupců se do šířky obsahu nevešlo a
+              řádek se posouval vodorovným scrollbarem, takže „Platí do" i stav
+              akce byly mimo obraz. Stejný vzor jako jazykové mutace výše.
+            -->
+            <div v-else class="space-y-3">
+              <div v-for="(p, idx) in promos" :key="p.id ?? `new-promo-${idx}`"
+                class="border border-neutral-200 rounded-md p-4 space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <span v-if="p.state" class="inline-block px-2 py-0.5 rounded-full border text-xs whitespace-nowrap"
+                      :class="promoStateClass(p.state)">{{ t('eshop.promo.state_' + p.state) }}</span>
+                    <span v-else class="text-xs text-neutral-400">{{ t('eshop.promo.state_unsaved') }}</span>
+                    <label class="flex items-center gap-1.5 text-xs text-neutral-600">
+                      <input v-model="p.is_active" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+                      {{ t('eshop.promo.col_active') }}
+                    </label>
+                  </div>
+                  <button type="button" @click="removePromoRow(idx)" :title="t('common.delete')" class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1">
+                    <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                  </button>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div class="sm:col-span-2 lg:col-span-1">
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.promo.col_label') }}</label>
+                    <input v-model="p.label" type="text" maxlength="60" :placeholder="t('eshop.promo.label_ph')"
+                      class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.promo.col_currency') }}</label>
+                    <select v-model="p.currency_code" required
+                      class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono bg-surface">
+                      <option value="">{{ t('eshop.prices.select_currency') }}</option>
+                      <option v-for="c in currencyOptions(p.currency_code)" :key="c.code" :value="c.code">{{ c.code }}{{ c.known ? '' : ' ⚠' }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.promo.col_price') }}</label>
+                    <input v-model="p.promo_price" type="text" inputmode="decimal" :placeholder="t('eshop.prices.fixed_ph')"
+                      class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.promo.col_from') }}</label>
+                    <DateInput v-model="p.valid_from" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.promo.col_to') }}</label>
+                    <DateInput v-model="p.valid_to" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.promo.col_qty_mode') }}</label>
+                    <div class="flex flex-wrap items-center gap-2">
                       <select v-model="p.qty_mode" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
                         <option v-for="m in QTY_MODES" :key="m" :value="m">{{ t('eshop.promo.qty_mode_' + m) }}</option>
                       </select>
                       <input v-if="p.qty_mode === 'limited'" v-model="p.qty_limit" type="number" step="1" min="1"
                         :placeholder="t('eshop.promo.qty_limit_ph')"
-                        class="mt-1 w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right block" />
-                    </td>
-                    <td class="py-2 pr-3 text-right font-mono text-neutral-700 whitespace-nowrap">
-                      {{ p.qty_mode === 'unlimited' ? '∞' : (p.qty_remaining ?? '—') }}
-                    </td>
-                    <td class="py-2 pr-3 text-center">
-                      <input v-model="p.is_active" type="checkbox" class="rounded border-neutral-300 text-primary-600 mt-2" />
-                    </td>
-                    <td class="py-2 pr-3">
-                      <span v-if="p.state" class="inline-block px-2 py-0.5 rounded-full border text-xs whitespace-nowrap"
-                        :class="promoStateClass(p.state)">{{ t('eshop.promo.state_' + p.state) }}</span>
-                      <span v-else class="text-xs text-neutral-400">{{ t('eshop.promo.state_unsaved') }}</span>
-                    </td>
-                    <td class="py-2 text-right">
-                      <button type="button" @click="removePromoRow(idx)" :title="t('common.delete')" class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1">
-                        <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                        class="w-24 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
+                      <span class="text-xs text-neutral-500 whitespace-nowrap">
+                        {{ t('eshop.promo.col_remaining') }}:
+                        <span class="font-mono text-neutral-700">{{ p.qty_mode === 'unlimited' ? '∞' : (p.qty_remaining ?? '—') }}</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
             <p class="text-xs text-neutral-500">{{ t('eshop.promo.hint') }}</p>
           </div>

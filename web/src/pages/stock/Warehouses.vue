@@ -167,13 +167,15 @@ async function remove(w: Warehouse) {
 
     <Modal v-if="modalOpen" :title="editing ? t('stock.warehouses.edit') : t('stock.warehouses.new')" widthClass="max-w-md" @close="modalOpen = false">
       <div class="space-y-3">
-        <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.warehouses.field_code') }}</label>
-          <input v-model="form.code" type="text" maxlength="20" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
-        </div>
+        <!-- Název je to, co uživatel opravdu vymýšlí; kód je zkratka odvozená z něj,
+             proto stojí až za ním (stejné pořadí jako v ostatních číselnících). -->
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.warehouses.field_name') }}</label>
           <input v-model="form.name" type="text" maxlength="100" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.warehouses.field_code') }}</label>
+          <input v-model="form.code" type="text" maxlength="20" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.warehouses.field_note') }}</label>

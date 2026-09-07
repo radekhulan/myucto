@@ -8312,7 +8312,7 @@
       "new": "New order",
       "new_title": "New order",
       "draft_number": "Draft",
-      "back_to_list": "Back to list",
+      "back_to_list": "← Back to list",
       "empty_title": "No purchase orders yet",
       "empty_hint": "A purchase order keeps track of expected goods before the vendor's invoice even arrives.",
       "replenishment_cta": "Restock",
@@ -8467,7 +8467,7 @@
       "deactivate_confirm": "Deactivate stock item \"{name}\"?"
     },
     "item_detail": {
-      "back_to_list": "Back to list",
+      "back_to_list": "← Back to list",
       "tab_movements": "Movements",
       "new_issue": "New goods issue with this item",
       "edit": "Edit",
@@ -8849,9 +8849,9 @@
       "eshop_hint": "E-shop sections (languages, categories, parameters, attachments) become available after saving the card."
     },
     "languages": {
-      "add_locale": "Add language",
-      "remove_locale": "Remove language",
-      "empty": "No language variant yet. Add a language above.",
+      "add_locale": "Add description",
+      "remove_locale": "Remove description",
+      "empty": "No description yet. Add one with the button above.",
       "field_name": "Name",
       "field_short_desc": "Short description",
       "field_description": "Description",
@@ -13276,6 +13276,30 @@
       "out_of_range_min": "The date must not be before {min}.",
       "out_of_range_max": "The date must not be after {max}."
     }
+  },
+  "markdown_editor": {
+    "bold": "Bold",
+    "italic": "Italic",
+    "heading": "Heading",
+    "paragraph": "Paragraph",
+    "table": "Table",
+    "table_col": "Column",
+    "bullet": "Bullet",
+    "numbered": "Numbered list",
+    "quote": "Quote",
+    "strike": "Strikethrough",
+    "code": "Code",
+    "sample_strike": "strikethrough",
+    "sample_code": "code",
+    "link": "Link",
+    "preview": "Preview",
+    "edit": "Edit",
+    "preview_empty": "Nothing to show yet.",
+    "hint": "Markdown supported",
+    "sample_bold": "bold text",
+    "sample_italic": "italic",
+    "sample_link": "link",
+    "sample_line": "text"
   },
   "codebookTransfer": {
     "export": "Export XLSX",

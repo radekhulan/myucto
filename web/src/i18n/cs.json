@@ -8312,7 +8312,7 @@
       "new": "Nová objednávka",
       "new_title": "Nová objednávka",
       "draft_number": "Koncept",
-      "back_to_list": "Zpět na seznam",
+      "back_to_list": "← Zpět na seznam",
       "empty_title": "Zatím žádné objednávky",
       "empty_hint": "Objednávkou u dodavatele si podržíte přehled o očekávaném zboží ještě předtím, než dorazí faktura.",
       "replenishment_cta": "Doplnění zásob",
@@ -8467,7 +8467,7 @@
       "deactivate_confirm": "Opravdu deaktivovat skladovou kartu „{name}\"?"
     },
     "item_detail": {
-      "back_to_list": "Zpět na seznam",
+      "back_to_list": "← Zpět na seznam",
       "tab_movements": "Pohyby",
       "new_issue": "Nová výdejka s touto položkou",
       "edit": "Upravit",
@@ -8849,9 +8849,9 @@
       "eshop_hint": "E-shopové sekce (jazyky, kategorie, parametry, přílohy) jsou dostupné po uložení karty."
     },
     "languages": {
-      "add_locale": "Přidat jazyk",
-      "remove_locale": "Odebrat jazyk",
-      "empty": "Zatím žádná jazyková mutace. Přidejte jazyk výše.",
+      "add_locale": "Přidat popis",
+      "remove_locale": "Odebrat popis",
+      "empty": "Zatím žádný popis. Přidejte ho tlačítkem výše.",
       "field_name": "Název",
       "field_short_desc": "Krátký popis",
       "field_description": "Popis",
@@ -13276,6 +13276,30 @@
       "out_of_range_min": "Datum nesmí být před {min}.",
       "out_of_range_max": "Datum nesmí být po {max}."
     }
+  },
+  "markdown_editor": {
+    "bold": "Tučně",
+    "italic": "Kurzíva",
+    "heading": "Nadpis",
+    "paragraph": "Odstavec",
+    "table": "Tabulka",
+    "table_col": "Sloupec",
+    "bullet": "Odrážka",
+    "numbered": "Číslovaný seznam",
+    "quote": "Citace",
+    "strike": "Přeškrtnuté",
+    "code": "Kód",
+    "sample_strike": "přeškrtnuté",
+    "sample_code": "kód",
+    "link": "Odkaz",
+    "preview": "Náhled",
+    "edit": "Upravit",
+    "preview_empty": "Zatím nic k zobrazení.",
+    "hint": "Umí Markdown",
+    "sample_bold": "tučný text",
+    "sample_italic": "kurzíva",
+    "sample_link": "odkaz",
+    "sample_line": "text"
   },
   "codebookTransfer": {
     "export": "Export XLSX",
