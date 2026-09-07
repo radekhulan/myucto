@@ -648,6 +648,9 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Bank\EmailNotice\ImapMailboxClientInterface::class),
                 $c->get(\MyInvoice\Service\Bank\StatementMatcher::class),
                 payrollSettlements: $c->get(\MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer::class),
+                // Totéž pro ?EmailPdfInvoiceIngestor — bez bindu by se PDF faktury
+                // z příloh nikdy nenačetly, i kdyby to účet měl zapnuté.
+                pdfInvoices: $c->get(\MyInvoice\Service\Bank\EmailNotice\EmailPdfInvoiceIngestor::class),
             ),
             \MyInvoice\Service\Bank\StatementImporter::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\StatementImporter(
                 $c->get(Connection::class),

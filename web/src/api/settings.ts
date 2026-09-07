@@ -389,6 +389,7 @@ export interface BankEmailImapSettings {
   validate_cert: boolean
   require_email_auth: boolean
   allow_forwarded: boolean
+  ingest_pdf_invoices: boolean
   forwarded_from: string | null
   email_auth_serv_id: string | null
   username: string
@@ -470,6 +471,27 @@ export interface BankEmailProcessedMessage {
   processed_at: string
 }
 
+/** Posouzená PDF příloha z e-mailu (i zamítnutá — drží se kvůli dohledatelnosti). */
+export interface BankEmailAttachmentIngest {
+  id: number
+  imap_account_id: number | null
+  imap_account_name?: string | null
+  message_id: string | null
+  sender: string | null
+  subject: string | null
+  filename: string
+  sha256: string
+  size_bytes: number
+  status: 'imported' | 'skipped_duplicate' | 'skipped_not_invoice' | 'rejected' | 'failed'
+  reason: string | null
+  submission_id: number | null
+  submission_status?: string | null
+  purchase_invoice_id: number | null
+  matched_by: string | null
+  match_score: number | null
+  created_at: string
+}
+
 export interface BankEmailOverview {
   imap: BankEmailImapSettings
   imap_accounts: BankEmailImapSettings[]
@@ -477,6 +499,7 @@ export interface BankEmailOverview {
   mappings: BankEmailAccountMapping[]
   messages: BankEmailProcessedMessage[]
   messages_total: number
+  attachments?: BankEmailAttachmentIngest[]
 }
 
 export interface BankEmailMessagePage {

@@ -231,9 +231,11 @@ final class PurchaseInvoiceSubmissionAction
         $body = (array) ($request->getParsedBody() ?? []);
         $reason = trim((string) ($body['reason'] ?? ''));
         // Zprávu vyžadujeme jen tam, kde ji má kdo číst. U dokladu, který si účetní
-        // nahrála sama, není komu psát „co doplnit" — odmítnutí je tam jen úklid fronty.
+        // nahrála sama, ani u přílohy vytažené z e-mailu není komu psát „co doplnit" —
+        // odmítnutí je tam jen úklid fronty.
         $existing = $this->submissions->find($id, $supplierId);
-        $hasClientToInform = $existing !== null && (string) $existing['submitted_via'] !== 'staff';
+        $hasClientToInform = $existing !== null
+            && !in_array((string) $existing['submitted_via'], ['staff', 'email'], true);
         if ($reason === '' && ($hasClientToInform || $status === 'needs_information')) {
             return Json::error($response, 'reason_required', 'Doplňte důvod pro klienta.', 400);
         }

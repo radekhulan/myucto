@@ -8,6 +8,7 @@ import {
   type BankEmailAccountMapping,
   type BankEmailImapSettings,
   type BankEmailProcessedMessage,
+  type BankEmailAttachmentIngest,
   type BankEmailProvider,
   type CurrencyAccount,
   type Supplier,
@@ -116,6 +117,14 @@ const mappings = ref<BankEmailAccountMapping[]>([])
 const providers = ref<BankEmailProvider[]>([])
 const imapAccounts = ref<BankEmailImapSettings[]>([])
 const messages = ref<BankEmailProcessedMessage[]>([])
+const attachmentIngests = ref<BankEmailAttachmentIngest[]>([])
+/** Sekci s přílohami ukazujeme, jen když ji aspoň jeden účet má zapnutou. */
+const pdfIngestEnabled = computed(() => imapAccounts.value.some(a => a.ingest_pdf_invoices))
+function attachmentStatusClass(status: BankEmailAttachmentIngest['status']): string {
+  if (status === 'imported') return 'text-success-600'
+  if (status === 'failed' || status === 'rejected') return 'text-danger-500'
+  return 'text-neutral-500'
+}
 const messagesTotal = ref(0)
 const messagesPage = ref(1)
 const messagesPerPage = ref(50)
@@ -197,6 +206,7 @@ function defaultImapDraft(): Partial<BankEmailImapSettings> & { password?: strin
     validate_cert: true,
     require_email_auth: true,
     allow_forwarded: false,
+    ingest_pdf_invoices: false,
     forwarded_from: '',
     email_auth_serv_id: '',
     username: '',
@@ -265,6 +275,7 @@ async function load() {
       messages.value = overview.messages
       messagesTotal.value = overview.messages_total ?? overview.messages.length
       messagesPage.value = 1
+      attachmentIngests.value = overview.attachments ?? []
     } else {
       bankEmailLoadError.value = apiErrorMessage(overviewResult.reason, t('bank_accounts.load_config_failed'))
       mappings.value = []
@@ -272,6 +283,7 @@ async function load() {
       imapAccounts.value = []
       messages.value = []
       messagesTotal.value = 0
+      attachmentIngests.value = []
     }
   } finally {
     loading.value = false
@@ -1247,6 +1259,13 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                 <p class="text-xs text-neutral-500 mt-1">{{ t('bank_accounts.forwarded_from_hint') }}</p>
               </div>
             </div>
+            <label class="flex items-start gap-2 text-sm md:col-span-3">
+              <input v-model="imapDraft.ingest_pdf_invoices" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+              <span>
+                {{ t('bank_accounts.ingest_pdf_invoices') }}
+                <span class="block text-xs text-neutral-500">{{ t('bank_accounts.ingest_pdf_invoices_hint') }}</span>
+              </span>
+            </label>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.on_success') }}</label>
               <select v-model="imapDraft.success_action" class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm">
@@ -1400,6 +1419,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             rejected: scanSummary.security_rejected ?? 0,
             errors: scanSummary.errors ?? 0,
           }) }}
+          <span v-if="(scanSummary.attachments_considered ?? 0) > 0" class="ml-2">
+            · {{ t('bank_accounts.attachments_title') }}: {{ scanSummary.attachments_imported ?? 0 }} / {{ scanSummary.attachments_considered }}
+          </span>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm table-sticky-first">
@@ -1460,6 +1482,51 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <button type="button" :disabled="messagesPage >= messagesTotalPages" @click="loadMessagesPage(messagesPage + 1)"
               class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
           </div>
+        </div>
+      </section>
+
+      <section v-if="pdfIngestEnabled || attachmentIngests.length > 0" class="bg-surface rounded-xl border border-neutral-200 overflow-hidden">
+        <header class="px-5 py-4 border-b border-neutral-200 flex items-center justify-between gap-3 flex-wrap">
+          <h2 class="font-semibold">{{ t('bank_accounts.attachments_title') }}</h2>
+          <RouterLink to="/purchase-invoices/incoming" :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.inbox" /></svg>
+            <span class="whitespace-nowrap">{{ t('bank_accounts.attachments_open') }}</span>
+          </RouterLink>
+        </header>
+        <p v-if="attachmentIngests.length === 0" class="px-5 py-4 text-sm text-neutral-500">
+          {{ t('bank_accounts.attachments_empty') }}
+        </p>
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-sm table-sticky-first">
+            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-3 py-2 text-left font-medium">{{ t('bank_accounts.attachments_file') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('bank_accounts.th_processed_at') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('bank_accounts.attachments_status') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('bank_accounts.attachments_match') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('bank_accounts.attachments_reason') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="a in attachmentIngests" :key="a.id">
+                <td class="px-3 py-2 max-w-sm">
+                  <div class="truncate">{{ a.filename }}</div>
+                  <div class="text-xs text-neutral-500 truncate">{{ a.sender }}<template v-if="a.subject"> · {{ a.subject }}</template></div>
+                </td>
+                <td class="px-3 py-2 text-xs whitespace-nowrap">
+                  <time :datetime="a.created_at">{{ formatDateTime(a.created_at) }}</time>
+                </td>
+                <td class="px-3 py-2 whitespace-nowrap">
+                  <span :class="attachmentStatusClass(a.status)">{{ t(`bank_accounts.attachments_status_${a.status}`) }}</span>
+                </td>
+                <td class="px-3 py-2 text-xs whitespace-nowrap">
+                  <template v-if="a.matched_by">{{ a.matched_by }}<template v-if="a.match_score !== null"> · {{ a.match_score }} %</template></template>
+                  <template v-else>—</template>
+                </td>
+                <td class="px-3 py-2 text-xs text-neutral-600">{{ a.reason }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
       </div>

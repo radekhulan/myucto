@@ -107,7 +107,7 @@ Nové nebo nenastavené mapování začíná volbou **Žádný IMAP účet**. Ta
 se při scanování nepoužije, dokud nezvolíš konkrétní IMAP účet nebo vědomě
 nepovolíš variantu **Všechny IMAP účty**.
 
-## 29.3 IMAP účty pro bankovní avíza
+## 29.3 Vaše nastavení pro načítání bankovních avíz a PDF z e-mailů
 
 Každý dodavatel může mít více IMAP účtů, typicky jeden pro každou banku.
 
@@ -124,6 +124,7 @@ Každý dodavatel může mít více IMAP účtů, typicky jeden pro každou bank
 | Důvěryhodné authserv-id | Volitelné připnutí serveru, jehož verdiktu se věří (např. `mx.mojedomena.cz`) |
 | Přijímat přeposlaná (FW) avíza | Rozpozná banku i z těla e-mailu, když avíza chodí do schránky přeposlaná (odesílatel je tvoje adresa, ne banka) |
 | E-mail přeposílatele | Volitelné omezení, od koho smí přeposlaná avíza chodit — adresa (`jan@firma.cz`) nebo doména (`firma.cz`); prázdné = libovolný |
+| Načítat PDF faktury z příloh | Vedle avíz se z každé zprávy posoudí i PDF přílohy a doklady adresované tvé firmě se založí do Nákup → Příchozí doklady; **vypnuto** |
 | Po úspěchu | Co udělat se zpracovanou zprávou |
 
 ### 29.3.1 Ověření autenticity e-mailu (DKIM/DMARC)
@@ -159,6 +160,55 @@ hashe, takže funguje i s účtem, kde aplikace nemůže zprávy přesouvat nebo
 označovat. Pokud má účet zápis povolený, můžeš zvolit doplňkovou akci po
 úspěchu: neměnit zprávu, přidat flag, přesunout do jiné složky nebo označit
 jako přečtené.
+
+### 29.3.2 Načítání PDF faktur z příloh
+
+Do schránky, kam chodí bankovní avíza, obvykle posílají faktury i dodavatelé.
+Přepínač **Načítat PDF faktury z příloh** proto u daného IMAP účtu zapne druhou,
+nezávislou větev zpracování: u každé nové zprávy se projdou PDF přílohy a ty,
+které projdou rozpoznáním, se založí jako podání ve frontě
+[Nákup → Příchozí doklady](23_Prijate_faktury.md).
+
+Příloha projde, jen když splní **obě** podmínky:
+
+1. **Je to doklad** — v textu PDF je označení dokladu: faktura, daňový doklad,
+   zálohová faktura, dobropis, účtenka, vyúčtování, splátkový kalendář, invoice.
+2. **Je adresovaný tobě** — v textu je tvoje **IČO** (shoda na všechny číslice;
+   mezery uvnitř čísla nevadí), tvoje **DIČ**, nebo **název tvé firmy** shodný
+   nejméně na 70 % (bez ohledu na diakritiku a právní formu).
+
+Výjimka: PDF se strojově čitelným ISDOC uvnitř (PDF/A-3) se bere jako doklad bez
+dalšího zkoumání — data v něm jsou průkazná sama o sobě.
+
+Co se z přílohy **nestane**: nic se neúčtuje ani nezakládá jako přijatá faktura.
+Vznikne jen podání ve frontě příchozích dokladů, které účetní zpracuje stejně jako
+doklad z klientského portálu. Rozpoznání dat z dokladu (ISDOC nebo AI) se spouští
+až tam, takže se za nepřečtenou přílohu neplatí žádné AI volání.
+
+Výsledek posouzení každé přílohy — včetně zamítnuté — najdeš v tabulce
+**PDF faktury z příloh** pod přehledem zpracovaných zpráv:
+
+| Výsledek | Význam |
+|---|---|
+| Přidáno do příchozích dokladů | Vzniklo podání ve frontě |
+| Duplicita | Stejný soubor už systém zná (podle otisku obsahu) |
+| Není doklad pro nás | Chybí označení dokladu, nebo identita tvé firmy |
+| Odmítnuto | Příloha není PDF, nebo je větší než 20 MiB |
+| Chyba | Založení podání selhalo — důvod je ve sloupci Důvod |
+
+Skenované PDF bez textové vrstvy rozpoznat nejde (aplikace nemá OCR) a skončí
+jako *Není doklad pro nás* s vysvětlením. Takový doklad nahraj do fronty ručně.
+
+Jednou posouzená příloha se už znovu neposuzuje, takže změna nastavení zpětně
+nepřehodnotí staré zprávy — projeví se až na nově načtených e-mailech.
+
+E-mail s fakturou samozřejmě není bankovní avízo, takže ho parser avíz odmítne.
+Pokud z něj vzniklo podání, zpráva skončí ve stavu `attachment_imported` a
+post-processing (přesun, příznak) s ní zachází jako s úspěšně zpracovanou — do
+složky chyb se nepřesune.
+
+Přílohy se posuzují **až po** ověření autenticity e-mailu (kapitola 29.3.1). Zpráva
+zamítnutá jako `security_rejected` do fronty dokladů nedostane nic.
 
 ## 29.4 Parser provideri
 
