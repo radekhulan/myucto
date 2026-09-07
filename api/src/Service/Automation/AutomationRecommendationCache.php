@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Automation;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use PDO;
 use Throwable;
 
@@ -117,7 +118,11 @@ final class AutomationRecommendationCache
     public function rebuildSupplier(int $supplierId, ?callable $progress = null, int $lockWaitSeconds = 0, bool $force = false): bool
     {
         $pdo = $this->db->pdo();
-        $lockName = 'automation_recommendations:' . $supplierId;
+        // Named lock je v MariaDB serverový, ne per-databázový — bez scopingu
+        // by si dvě instalace na sdíleném serveru (SaaS hosting, paralelní testy)
+        // blokovaly přepočet přes shodné `supplier_id`. A protože se tu zámek bere
+        // bez čekání, nebyla by to chyba, ale tiché přeskočení.
+        $lockName = NamedLockName::for($this->db, 'automation_recommendations', $supplierId);
         $lock = $pdo->prepare('SELECT GET_LOCK(?, ?)');
         $lock->execute([$lockName, $lockWaitSeconds]);
         if ((int) $lock->fetchColumn() !== 1) return false;
