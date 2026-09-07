@@ -150,7 +150,7 @@ async function mountWith(
 ) {
   m.credentials.mockResolvedValue([credential])
   m.recipients.mockResolvedValue([])
-  m.outbox.mockResolvedValue(rows)
+  m.outbox.mockResolvedValue({ items: rows, total: rows.length })
   m.inbox.mockResolvedValue({ items: [], state: null })
   m.unmatchedReceipts.mockResolvedValue(unmatched)
   m.mobileKeyProfile.mockResolvedValue(mobileProfile)

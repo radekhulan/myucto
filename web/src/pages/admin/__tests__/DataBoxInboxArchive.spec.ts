@@ -42,7 +42,7 @@ describe('DataBox — archiv příchozích zpráv', () => {
   it('zobrazuje celou cestu složky a uloží ji pro aktuální prostředí', async () => {
     m.credentials.mockResolvedValue([])
     m.recipients.mockResolvedValue([])
-    m.outbox.mockResolvedValue([])
+    m.outbox.mockResolvedValue({ items: [], total: [].length })
     m.inbox.mockResolvedValue({ items: [], state: null })
     m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })
     m.unmatchedReceipts.mockResolvedValue([])

@@ -119,7 +119,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   m.credentials.mockResolvedValue([credential])
   m.recipients.mockResolvedValue([])
-  m.outbox.mockResolvedValue([submission()])
+  m.outbox.mockResolvedValue({ items: [submission()], total: [submission()].length })
   m.inbox.mockResolvedValue({ items: [], state: null })
   m.unmatchedReceipts.mockResolvedValue([])
   m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })

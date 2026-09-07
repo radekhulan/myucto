@@ -20,6 +20,7 @@ use MyInvoice\Service\Submission\SubmissionCredentialService;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 
 /**
  * Fronta odchozích podání.
@@ -45,14 +46,31 @@ final class SubmissionOutboxAction
         }
         $params = $request->getQueryParams();
         $environment = (string) ($params['environment'] ?? 'production');
+        // Bez stránkování vracel seznam prvních 100 řádků a mlčel o zbytku —
+        // po pár měsících provozu tak starší podání z přehledu tiše zmizela.
+        $limit = max(1, min(
+            SubmissionOutboxRepository::LIST_MAX_LIMIT,
+            (int) ($params['limit'] ?? SubmissionOutboxRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($params['offset'] ?? 0));
 
         try {
-            $items = $this->outbox->listForSupplier(SupplierGuard::currentId($request), $environment);
+            $page = $this->outbox->listPageForSupplier(
+                SupplierGuard::currentId($request),
+                $environment,
+                $limit,
+                $offset,
+            );
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
 
-        return Json::ok($response, ['items' => $items]);
+        return Json::ok($response, [
+            'items' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
+        ]);
     }
 
     /** @param array<string,string> $args */

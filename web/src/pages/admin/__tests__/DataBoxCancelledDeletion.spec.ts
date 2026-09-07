@@ -126,7 +126,7 @@ function submission(overrides: Partial<OutboxSubmission> = {}): OutboxSubmission
 async function mountWith(rows: OutboxSubmission[]) {
   m.credentials.mockResolvedValue([credential])
   m.recipients.mockResolvedValue([])
-  m.outbox.mockResolvedValue(rows)
+  m.outbox.mockResolvedValue({ items: rows, total: rows.length })
   m.inbox.mockResolvedValue({ items: [], state: null })
   m.unmatchedReceipts.mockResolvedValue([])
   m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })

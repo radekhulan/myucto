@@ -157,7 +157,7 @@ async function mountWith(options: {
 } = {}) {
   m.credentials.mockResolvedValue([credential])
   m.recipients.mockResolvedValue([])
-  m.outbox.mockResolvedValue([])
+  m.outbox.mockResolvedValue({ items: [], total: [].length })
   m.inbox.mockResolvedValue({ items: options.messages ?? [], state: null })
   m.unmatchedReceipts.mockResolvedValue([])
   m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })
@@ -259,7 +259,7 @@ describe('DataBox — výzvy k odstranění vad', () => {
   it('selhání načtení výzev se netváří jako prázdný seznam', async () => {
     m.credentials.mockResolvedValue([credential])
     m.recipients.mockResolvedValue([])
-    m.outbox.mockResolvedValue([])
+    m.outbox.mockResolvedValue({ items: [], total: [].length })
     m.inbox.mockResolvedValue({ items: [], state: null })
     m.unmatchedReceipts.mockResolvedValue([])
     m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })

@@ -670,10 +670,14 @@ export const dataBoxApi = {
   deleteRecipient: (id: number) =>
     api.delete(`/submissions/recipients/${id}`).then(r => r.data),
 
-  outbox: (environment: string) =>
-    api.get<{ items: OutboxSubmission[] }>('/submissions/outbox', {
-      params: { environment },
-    }).then(r => r.data.items),
+  /**
+   * Stránka odchozí fronty. Dřív se vracelo prvních 100 řádků bez celkového
+   * počtu, takže po pár měsících provozu starší podání z přehledu tiše zmizela.
+   */
+  outbox: (environment: string, limit?: number, offset?: number) =>
+    api.get<{ items: OutboxSubmission[]; total?: number }>('/submissions/outbox', {
+      params: { environment, limit, offset },
+    }).then(r => ({ items: r.data.items, total: r.data.total ?? r.data.items.length })),
 
   attempts: (id: number) =>
     api.get<{ items: OutboxAttempt[] }>(`/submissions/outbox/${id}/attempts`).then(r => r.data.items),

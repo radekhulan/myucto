@@ -98,6 +98,12 @@ const reprocessBusyId = ref<number | null>(null)
 const credentials = ref<DataBoxCredential[]>([])
 const recipients = ref<SubmissionRecipient[]>([])
 const outbox = ref<OutboxSubmission[]>([])
+// Fronta roste každý měsíc a podání se z ní nemažou, takže se listuje —
+// dřív se vracelo prvních 100 řádků a o zbytku obrazovka mlčela.
+const outboxPageSize = 25
+const outboxTotal = ref(0)
+const outboxOffset = ref(0)
+const outboxPage = computed(() => Math.floor(outboxOffset.value / outboxPageSize) + 1)
 const inbox = ref<InboxMessage[]>([])
 const inboxVisibility = ref<'active' | 'hidden'>('active')
 // Schránka roste každý měsíc a mazat se z ní nesmí, takže se listuje.
@@ -341,7 +347,7 @@ async function loadAll() {
     const [creds, recips, out, inb, unmatched, mobileProfile, storage, shared] = await Promise.all([
       dataBoxApi.credentials(),
       dataBoxApi.recipients(),
-      dataBoxApi.outbox(environment.value),
+      dataBoxApi.outbox(environment.value, outboxPageSize, outboxOffset.value),
       dataBoxApi.inbox(
         environment.value,
         undefined,
@@ -370,7 +376,8 @@ async function loadAll() {
       certSource.value = 'vault'
     }
     recipients.value = recips
-    outbox.value = out
+    outbox.value = out.items
+    outboxTotal.value = out.total
     inbox.value = inb.items
     inboxTotal.value = inb.total ?? inb.items.length
     pollState.value = inb.state
@@ -461,6 +468,13 @@ async function setInboxVisibility(visibility: 'active' | 'hidden') {
   inboxVisibility.value = visibility
   // Jiný pohled má vlastní počet zpráv; zůstat na páté stránce by ukázalo prázdno.
   inboxOffset.value = 0
+  await loadAll()
+}
+
+async function goToOutboxPage(nextPage: number) {
+  const offset = Math.max(0, (nextPage - 1) * outboxPageSize)
+  if (offset === outboxOffset.value) return
+  outboxOffset.value = offset
   await loadAll()
 }
 
@@ -2636,6 +2650,15 @@ onUnmounted(clearReceiptsTimer)
           </li>
         </ul>
       </div>
+
+      <PaginationBar
+        v-if="outboxTotal > outboxPageSize"
+        data-test="outbox-pagination"
+        :page="outboxPage"
+        :per-page="outboxPageSize"
+        :total="outboxTotal"
+        @update:page="goToOutboxPage"
+      />
     </section>
 
     <!-- ─────────────── Příchozí ─────────────── -->

@@ -72,7 +72,7 @@ describe('DataBox — soukromí příchozích zpráv', () => {
     vi.clearAllMocks()
     m.credentials.mockResolvedValue([])
     m.recipients.mockResolvedValue([])
-    m.outbox.mockResolvedValue([])
+    m.outbox.mockResolvedValue({ items: [], total: [].length })
     m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })
     m.unmatchedReceipts.mockResolvedValue([])
     m.inboxStorage.mockResolvedValue({ items: [], folders: [] })

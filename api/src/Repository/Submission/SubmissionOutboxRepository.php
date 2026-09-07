@@ -22,6 +22,10 @@ final class SubmissionOutboxRepository
 {
     private const TABLE = 'submission_outbox';
 
+    /** Stránka odchozí fronty — stejná velikost jako u příchozích zpráv. */
+    public const LIST_DEFAULT_LIMIT = 25;
+    public const LIST_MAX_LIMIT = 200;
+
     private const COLUMNS = 'id, supplier_id, environment, channel, dispatch_mode, agenda_code, recipient_id,
         recipient_box_id, subject, artifact_kind, artifact_id, artifact_filename, artifact_sha256,
         dispatch_state, acceptance_state, acceptance_evidence_kind, acceptance_note,
@@ -168,6 +172,49 @@ final class SubmissionOutboxRepository
         );
         $stmt->execute([$supplierId, $environment]);
         return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Stránka odchozí fronty i s celkovým počtem.
+     *
+     * Proč vedle {@see listForSupplier()}: ta vrací jen prvních 100 řádků
+     * a nic o tom neřekne. Po pár měsících provozu tak starší podání z přehledu
+     * TICHE zmizela — obrazovka vypadala kompletně, jen v ní chyběl konec. Ten
+     * strop dává smysl leda tam, kde se seznam rovnou zpracovává, ne kde ho
+     * čte člověk.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
+     */
+    public function listPageForSupplier(
+        int $supplierId,
+        string $environment,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        $this->assertAvailable();
+        // Limit i offset se vkládají do SQL jako celá čísla — MariaDB v LIMIT
+        // vázané parametry nepřijímá — takže se rozsah omezuje právě tady.
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $countStatement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?'
+        );
+        $countStatement->execute([$supplierId, $environment]);
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?
+              ORDER BY id DESC
+              LIMIT ' . $limit . ' OFFSET ' . $offset
+        );
+        $stmt->execute([$supplierId, $environment]);
+
+        return [
+            'items' => array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []),
+            'total' => (int) $countStatement->fetchColumn(),
+        ];
     }
 
     /**

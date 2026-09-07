@@ -133,7 +133,7 @@ async function mountWith(
 ) {
   m.credentials.mockResolvedValue(credentials)
   m.recipients.mockResolvedValue([])
-  m.outbox.mockResolvedValue(rows)
+  m.outbox.mockResolvedValue({ items: rows, total: rows.length })
   m.inbox.mockResolvedValue({ items: [], state: null })
   m.pollInbox.mockResolvedValue({ fetched: 0, stored: 0, skipped: 0, failed: 0, unclassified: 0 })
   m.pollInboxWithPassword.mockResolvedValue({ fetched: 0, stored: 0, skipped: 0, failed: 0, unclassified: 0 })
