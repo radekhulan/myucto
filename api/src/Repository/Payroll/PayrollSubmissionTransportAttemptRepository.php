@@ -1065,10 +1065,31 @@ final class PayrollSubmissionTransportAttemptRepository
      */
     public function delete(int $attemptId, int $expectedVersion): void
     {
-        $statement = $this->db->pdo()->prepare(
-            'DELETE FROM ' . self::TABLE . ' WHERE id = ? AND row_version = ?',
-        );
-        $statement->execute([$attemptId, $expectedVersion]);
+        $pdo = $this->db->pdo();
+        // Append-only hlídá TRIGGER, ne jen konvence (migrace 1372). Skulina je
+        // adresná: session proměnná povolí smazání jednoho konkrétního řádku
+        // a hned se uklidí, takže každý jiný DELETE narazí dál. Bez ní by tenhle
+        // dotaz spadl na SQLSTATE 45000 — viz migrace 1758.
+        $allow = $pdo->prepare('SET @payroll_transport_attempt_delete_allowed = ?');
+        $allow->execute([$attemptId]);
+        try {
+            $statement = $pdo->prepare(
+                'DELETE FROM ' . self::TABLE . ' WHERE id = ? AND row_version = ?',
+            );
+            $statement->execute([$attemptId, $expectedVersion]);
+        } catch (\PDOException $exception) {
+            if (str_contains($exception->getMessage(), 'are append-only')) {
+                throw new \DomainException(
+                    'Databáze smazání pokusu odmítla — chybí migrace 1758,'
+                    . ' která k tomu ledgeru otevírá adresnou výjimku.',
+                    0,
+                    $exception,
+                );
+            }
+            throw $exception;
+        } finally {
+            $pdo->exec('SET @payroll_transport_attempt_delete_allowed = NULL');
+        }
         if ($statement->rowCount() === 1) {
             return;
         }
