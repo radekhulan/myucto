@@ -75,11 +75,21 @@ function declined(payUrl: string | null): unknown {
   }
 }
 
+/**
+ * Náhled stavů je od 6.6.0 dostupný jen na serveru v development režimu
+ * (commit b51fd5d88 — na produkční instalaci nemá superadmin co předstírat).
+ * Testy náhledu proto musí dodat `development: true`, jinak by měřily jen to,
+ * že se náhled správně nezapnul.
+ */
+function previewStatus(scenario: Parameters<typeof buildPreviewStatus>[0], now = 1_800_000_000) {
+  return { ...buildPreviewStatus(scenario, now), development: true }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   stopPreview()
   vi.stubGlobal('confirm', () => true)
-  mocks.status.mockResolvedValue(buildPreviewStatus('manual_key', 1_800_000_000))
+  mocks.status.mockResolvedValue(previewStatus('manual_key'))
   mocks.resumePendingChanges.mockResolvedValue([])
   mocks.refresh.mockResolvedValue({ refreshed: true })
   mocks.storageQuote.mockResolvedValue({
@@ -184,7 +194,7 @@ describe('Hosting — neúspěšná kontrola licence', () => {
   // `billing` chodí uvnitř bloku `instance`, ne vedle něj — obrazovka ho čte
   // přes instanceStatus, ne ze stavu licence.
   function withBilling(lastCheckOk: boolean) {
-    const base = buildPreviewStatus('manual_key', 1_800_000_000) as unknown as Record<string, unknown>
+    const base = previewStatus('manual_key') as unknown as Record<string, unknown>
     const instance = { ...(base.instance as Record<string, unknown>) }
     const billing = { ...(instance.billing as Record<string, unknown> ?? {}) }
 

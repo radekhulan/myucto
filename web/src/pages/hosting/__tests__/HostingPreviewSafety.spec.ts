@@ -58,10 +58,20 @@ async function mountHosting(path = '/hosting') {
   return { wrapper, router }
 }
 
+/**
+ * Náhled stavů je od 6.6.0 dostupný jen na serveru v development režimu
+ * (commit b51fd5d88 — na produkční instalaci nemá superadmin co předstírat).
+ * Testy náhledu proto musí dodat `development: true`, jinak by měřily jen to,
+ * že se náhled správně nezapnul.
+ */
+function previewStatus(scenario: Parameters<typeof buildPreviewStatus>[0], now = 1_800_000_000) {
+  return { ...buildPreviewStatus(scenario, now), development: true }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   stopPreview()
-  mocks.status.mockResolvedValue(buildPreviewStatus('manual_key', 1_800_000_000))
+  mocks.status.mockResolvedValue(previewStatus('manual_key'))
   mocks.resumePendingChanges.mockResolvedValue([])
   mocks.refresh.mockResolvedValue({ refreshed: true })
   mocks.tierQuote.mockResolvedValue({
@@ -112,7 +122,7 @@ describe('Hosting — bezpečnost náhledu', () => {
     // Dokud rovnost se stropem padala do souhrnu, uvítala čerstvě zřízená
     // instalace zákazníka při prvním přihlášení výstrahou.
     mocks.status.mockResolvedValue({
-      ...buildPreviewStatus('manual_key', 1_800_000_000),
+      ...previewStatus('manual_key'),
       users_licensed: 1,
       users_active: 1,
       max_companies: 1,
@@ -126,7 +136,7 @@ describe('Hosting — bezpečnost náhledu', () => {
 
   it('překročený strop uživatelů do souhrnu pozornosti patří', async () => {
     mocks.status.mockResolvedValue({
-      ...buildPreviewStatus('manual_key', 1_800_000_000),
+      ...previewStatus('manual_key'),
       users_licensed: 1,
       users_active: 2,
     })

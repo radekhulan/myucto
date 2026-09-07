@@ -210,6 +210,13 @@ jobs:
         working-directory: web
         run: pnpm test:pwa
 
+      # Doteď CI pouštělo jen `test:pwa`, takže 2 000+ komponentových testů
+      # nikdo v pipeline nespustil — tři rozbité testy hostingu tak na masteru
+      # ležely nepovšimnuté od 6.6.0. Sada běží ~3 minuty, což za to stojí.
+      - name: Unit and component tests
+        working-directory: web
+        run: pnpm test
+
       - name: Production build
         working-directory: web
         run: pnpm build
