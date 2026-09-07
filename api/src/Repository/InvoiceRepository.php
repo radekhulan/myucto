@@ -816,7 +816,7 @@ final class InvoiceRepository
             $where[] = "(i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)";
         }
         if (!empty($filters['overdue'])) {
-            $where[] = "i.status IN ('issued','sent','reminded') AND i.due_date <= CURDATE()";
+            $where[] = "i.status IN ('issued','sent','reminded') AND i.due_date < CURDATE()";
             // Stejná pohledávková sémantika jako unpaid (vč. nespárovaných proforem).
             $where[] = "(i.invoice_type != 'proforma'"
                 . " OR NOT EXISTS (SELECT 1 FROM invoices ch"

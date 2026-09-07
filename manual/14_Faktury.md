@@ -103,6 +103,12 @@ neschová.
 
 ## 14.2 Stavy faktur
 
+Faktura je ve splatnosti po celý den uvedený jako datum splatnosti. Mezi doklady
+**po splatnosti** patří až následující kalendářní den, pokud zůstává neuhrazená;
+teprve tehdy se také nabízí běžná upomínka. Rozhoduje datum v časové zóně aplikace
+(Europe/Prague), nikoli časové pásmo prohlížeče. Stejná hranice platí pro filtr
+přijatých faktur, dashboard a souhrny klientů a zakázek.
+
 | Stav | Význam | Co lze udělat |
 |---|---|---|
 | 📝 **Koncept** (`draft`) | Rozpracovaná, neviditelná pro klienta | Editovat, smazat, vystavit |

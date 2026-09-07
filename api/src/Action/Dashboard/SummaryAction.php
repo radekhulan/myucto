@@ -492,7 +492,7 @@ final class SummaryAction
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
-                AND i.status IN ('issued','sent','reminded') AND i.due_date <= CURDATE()
+                AND i.status IN ('issued','sent','reminded') AND i.due_date < CURDATE()
                 AND " . $this->receivableDocTypeSql() . "
                 AND " . $this->outstandingReceivableSql() . "
               GROUP BY cur.code"
@@ -701,7 +701,7 @@ final class SummaryAction
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
                    AND i.status IN ('issued','sent','reminded')
-                   AND i.due_date <= CURDATE()
+                   AND i.due_date < CURDATE()
                    AND " . $this->receivableDocTypeSql() . "
                    AND " . $this->outstandingReceivableSql() . "
                  ORDER BY i.due_date ASC

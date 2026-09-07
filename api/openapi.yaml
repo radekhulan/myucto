@@ -822,7 +822,7 @@ paths:
           schema: { type: boolean }
         - in: query
           name: filter[overdue]
-          description: Pouze po splatnosti
+          description: Pouze po splatnosti (datum splatnosti je před dnešním dnem v časové zóně aplikace; dnešní splatnost se nezahrnuje).
           schema: { type: boolean }
         - in: query
           name: filter[unpaid_as_of]
@@ -5596,6 +5596,7 @@ paths:
           schema: { type: boolean }
         - in: query
           name: filter[overdue]
+          description: Pouze po splatnosti (datum splatnosti je před dnešním dnem v časové zóně aplikace; dnešní splatnost se nezahrnuje).
           schema: { type: boolean }
         - in: query
           name: filter[unpaid_as_of]
@@ -20567,8 +20568,8 @@ components:
                   currency: { type: string }
                   unpaid_total:  { type: number, format: float }
                   unpaid_count:  { type: integer }
-                  overdue_total: { type: number, format: float }
-                  overdue_count: { type: integer }
+                  overdue_total: { type: number, format: float, description: "Dluh se splatností před dnešním dnem v časové zóně aplikace." }
+                  overdue_count: { type: integer, description: "Počet dokladů se splatností před dnešním dnem; dnešní splatnost se nezahrnuje." }
 
     ClientInput:
       type: object
@@ -21016,8 +21017,8 @@ components:
                   currency: { type: string, example: CZK }
                   unpaid_total:  { type: number, format: float }
                   unpaid_count:  { type: integer }
-                  overdue_total: { type: number, format: float }
-                  overdue_count: { type: integer }
+                  overdue_total: { type: number, format: float, description: "Dluh se splatností před dnešním dnem v časové zóně aplikace." }
+                  overdue_count: { type: integer, description: "Počet dokladů se splatností před dnešním dnem; dnešní splatnost se nezahrnuje." }
 
     ProjectInput:
       type: object
@@ -21290,7 +21291,7 @@ components:
                   this_year_project_count: { type: integer, description: "DISTINCT zakázky v této měně (letos)" }
                   prev_year_project_count: { type: integer }
             issued_count_ytd: { type: integer }
-            overdue_count: { type: integer }
+            overdue_count: { type: integer, description: "Počet dokladů se splatností před dnešním dnem v časové zóně aplikace." }
             overdue_per_currency:
               type: array
               items:
@@ -21305,6 +21306,7 @@ components:
               additionalProperties: { type: integer }
         overdue:
           type: array
+          description: Neuhrazené doklady se splatností před dnešním dnem v časové zóně aplikace; dnešní splatnost se nezahrnuje.
           items: { $ref: '#/components/schemas/Invoice' }
         unpaid_upcoming:
           type: array

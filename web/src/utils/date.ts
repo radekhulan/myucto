@@ -39,6 +39,13 @@ export function appYear(date: Date = new Date()): string {
   return appIsoDate(date).slice(0, 4)
 }
 
+/** Celé kalendářní dny po splatnosti v účetní zóně, nezávisle na změnách letního času. */
+export function overdueDays(dueDate: string, now: Date = new Date()): number {
+  if (!parseIsoDate(dueDate)) return 0
+  const days = (Date.parse(appIsoDate(now)) - Date.parse(dueDate)) / 86_400_000
+  return Number.isFinite(days) ? Math.max(0, days) : 0
+}
+
 /**
  * `YYYY-MM-DD` složené z LOKÁLNÍCH složek `Date`.
  *

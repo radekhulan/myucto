@@ -844,7 +844,7 @@ final class PurchaseInvoiceRepository
             $where[] = PayablePredicate::outstandingBalanceCondition('pi');
         }
         if (!empty($filters['overdue'])) {
-            $where[] = "pi.status IN ('received','booked') AND pi.due_date <= CURDATE()";
+            $where[] = "pi.status IN ('received','booked') AND pi.due_date < CURDATE()";
             $where[] = PayablePredicate::outstandingBalanceCondition('pi');
         }
         // Neuhrazené K DATU X (task #4) — historický protějšek `unpaid_only`/`overdue`
