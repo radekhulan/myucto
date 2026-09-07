@@ -469,6 +469,44 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
         self::assertArrayNotHasKey('zakladZamestnavateleB', $preview->pvpoj['pojistne']);
     }
 
+    /**
+     * Pojistná část a formulář zaměstnance musí číst slevu zaměstnavatele
+     * TÝMŽ pravidlem.
+     *
+     * {@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentResolver::partTimeDiscount()}
+     * vykáže příznak 10372 jen u vztahu s výsledkem `applied`. Kdyby pojistná
+     * část počítala i doložený nárok BEZ výsledku, vznikl by přehled tvrdící
+     * slevu, kterou žádný formulář nevykazuje — přesně rozpor, který hlídá
+     * kontrola 1 ČSSZ.
+     *
+     * Doložený nárok bez výsledku navíc nedokáže vyrobit ani sám výpočet
+     * ({@see \MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthCalculator}
+     * sčítá základ slevy jen u `applied`), takže je to rozporný vstup a smí
+     * skončit jedině odmítnutím.
+     */
+    public function testEmployerDiscountWithoutOutcomeIsNotCountedIntoPvpoj(): void
+    {
+        $source = $this->source();
+        $relationship = &$source['statutory_result']['people'][1][
+            'relationships'
+        ][1];
+        self::assertSame(
+            'verified',
+            $relationship['result_snapshot']['part_time_employer_discount'],
+        );
+        $relationship['result_snapshot']['part_time_employer_discount_outcome']
+            = null;
+        $relationship['result_snapshot_hash'] = $this->hash(
+            $relationship['result_snapshot'],
+        );
+        unset($relationship);
+
+        $this->expectCode(
+            'jmhz_social_totals_mismatch',
+            fn () => $this->builder->build(41, $source),
+        );
+    }
+
     public function testRejectsUnsupportedEmployerRateCategory(): void
     {
         $source = $this->source();
@@ -807,6 +845,13 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
             'capped_assessment_base_minor_units' => $base,
             'part_time_employer_discount' =>
                 $partTimeDiscount ? 'verified' : 'not_claimed',
+            // „Nárok doložen" a „sleva náleží" jsou dvě různé věci. Do základu
+            // slevy počítá SocialInsuranceMonthCalculator jen vztah s výsledkem
+            // `applied`, takže doložený nárok BEZ výsledku je stav, který běh
+            // vyrobit nedokáže — a fixtura ho vyrábět nesmí, jinak by testovala
+            // tvar, který v podání nikdy nenastane.
+            'part_time_employer_discount_outcome' =>
+                $partTimeDiscount ? 'applied' : null,
             'part_time_employer_discount_evidence_reference' =>
                 $partTimeDiscount ? "evidence:part-time:{$employmentId}" : null,
             'employer_rate_category' => 'ordinary',

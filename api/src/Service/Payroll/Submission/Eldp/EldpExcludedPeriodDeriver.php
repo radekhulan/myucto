@@ -176,6 +176,57 @@ final class EldpExcludedPeriodDeriver
     ];
 
     /**
+     * Složky vyloučených dnů podle § 18 odst. 7 zákona č. 187/2006 Sb.
+     *
+     * Jiná veličina než {@see COMPONENTS}: ty jsou vyloučenými DOBAMI pro
+     * důchodové pojištění (§ 16 odst. 4 zákona č. 155/1995 Sb.), tyhle jsou
+     * vyloučenými DNY pro denní vyměřovací základ nemocenských dávek. Do
+     * hlášení jdou vedle sebe a mohou se v týchž dnech překrývat — nemoc je
+     * v obou.
+     *
+     * Datový slovník JMHZ 1.4.1.6 u atributu 10366 předepisuje součet
+     * `10366 = 10473 + 10474 + 10475`, takže rozpad je úplný, nebo se nesmí
+     * vykázat vůbec.
+     *
+     * @var list<string>
+     */
+    public const SECTION18_COMPONENTS = [
+        'omluvenaNepritomnost',
+        'pracovniNeschopnost',
+        'vyplaceniDavek',
+    ];
+
+    /**
+     * Druh nepřítomnosti → složka § 18 odst. 7, do které se jeho dny počítají.
+     *
+     * Jediný jednoznačný případ, který zmrazený snapshot unese: neplacené
+     * volno je omluvená nepřítomnost, za kterou nenáleží náhrada příjmu
+     * (10473, „neplacené volno, stávka" v datovém slovníku). Stávku aplikace
+     * jako druh nepřítomnosti nezná.
+     */
+    private const SECTION18_ATTRIBUTES = [
+        'unpaid_leave' => 'omluvenaNepritomnost',
+    ];
+
+    /**
+     * Druhy nepřítomnosti, které vyloučený den podle § 18 odst. 7 netvoří.
+     *
+     * - `vacation`, `employer_obstacle`, `employee_obstacle`,
+     *   `compensatory_time_off` — náhrada příjmu (nebo nekrácená mzda) náleží,
+     *   takže o vyloučený den nejde už z návětí § 18 odst. 7.
+     * - `unexcused` — neomluvená absence není OMLUVENÁ nepřítomnost.
+     *
+     * @var list<string>
+     */
+    private const SECTION18_NEUTRAL_TYPES = [
+        'vacation',
+        'employer_obstacle',
+        'employee_obstacle',
+        'compensatory_time_off',
+        'unexcused',
+    ];
+
+    /**
      * @param list<array<string,mixed>> $absences absence ze zmrazeného snapshotu
      * @return array{
      *   components:array<string,int>,
@@ -295,6 +346,131 @@ final class EldpExcludedPeriodDeriver
             'total' => array_sum($components),
             'provenance' => $provenance,
             'blockers' => $blockers,
+        ];
+    }
+
+    /**
+     * Vyloučené dny podle § 18 odst. 7 zákona č. 187/2006 Sb. (10366 a rozpad
+     * 10473–10475).
+     *
+     * Jde o dny, které se vyřazují z rozhodného období pro denní vyměřovací
+     * základ nemocenských dávek. Bez nich ČSSZ počítá dávku z měsíce, ve
+     * kterém zaměstnanec kvůli neplacenému volnu nebo nemoci nevydělával, a
+     * dávka vyjde nižší, než na jakou má nárok.
+     *
+     * ## Proč se rozpad buď vykáže celý, nebo vůbec
+     *
+     * Datový slovník předepisuje `10366 = 10473 + 10474 + 10475`. Vykázat jen
+     * část by bylo tvrzení, že zbytek je nula — a to by dávku podhodnotilo
+     * úplně stejně jako mlčení, jenom by se to nedalo poznat. Proto se
+     * `derivable` obrací na `false`, jakmile je v intervalu nepřítomnost,
+     * jejíž zacházení v § 18 odst. 7 ze zmrazeného snapshotu neplyne:
+     *
+     * - `dpn`, `quarantine` — rozpad na dny s náhradou příjmu (10474, prvních
+     *   čtrnáct kalendářních dnů podle § 192 zákoníku práce) a na dny
+     *   s vyplacenou dávkou (10475) závisí na skutečném začátku dočasné
+     *   pracovní neschopnosti. `payroll_absences` drží interval nepřítomnosti,
+     *   ne běh podpůrčí doby, takže navazující neschopnost nebo neschopnost
+     *   zapsanou po měsících by čtrnáctidenní okno posunulo.
+     * - `ocr`, `long_term_care`, `paternity`, `ppm` — dny s vyplacenou dávkou
+     *   (10475) tvrdí, že dávku ČSSZ opravdu vyplatila. Zaměstnavatel to neví;
+     *   ví jen, že o ni bylo požádáno.
+     * - `parental` — rodičovská je omluvená nepřítomnost bez náhrady příjmu,
+     *   ale současně náhradní doba pojištění hodnocená mimo hlášení; doložený
+     *   způsob zápisu do 10473 repozitář nemá.
+     * - neznámý druh — fail-closed stejně jako u vyloučených dob.
+     *
+     * Vynechání je legální: matice povinností JMHZ 1.4.0.2 vede 10366 jako
+     * podmíněně nepovinný („nepovinné, pokud je vyplněn 10357 > 0"), a každý
+     * z nederivovatelných druhů kromě `parental` vyloučenou dobu podle
+     * § 16 odst. 4 tvoří, takže 10357 > 0 nastane s ním.
+     *
+     * @param list<array<string,mixed>> $absences absence ze zmrazeného snapshotu
+     * @return array{
+     *   components:array<string,int>,
+     *   total:int,
+     *   derivable:bool,
+     *   undecidable_types:list<string>,
+     *   provenance:list<array{
+     *     absence_id:int,absence_type:string,attribute:string,
+     *     absence_from:string,absence_to:string,
+     *     counted_from:string,counted_to:string,days:int
+     *   }>
+     * }
+     */
+    public function deriveSection18(
+        array $absences,
+        string $intervalFrom,
+        string $intervalTo,
+    ): array {
+        $components = array_fill_keys(self::SECTION18_COMPONENTS, 0);
+        $provenance = [];
+        $undecidable = [];
+        $claimedDays = [];
+
+        foreach ($absences as $absence) {
+            $absenceId = $absence['id'] ?? null;
+            $type = $absence['absence_type'] ?? null;
+            if (!is_int($absenceId) || $absenceId <= 0 || !is_string($type)) {
+                // Vadný řádek nahlásí už derive(); tady stačí, že se o něm
+                // nedá rozhodnout.
+                $undecidable[] = 'unknown';
+                continue;
+            }
+            $from = self::date($absence['date_from'] ?? null);
+            $to = self::date($absence['date_to'] ?? null);
+            if ($from === null || $to === null || $from > $to) {
+                $undecidable[] = $type;
+                continue;
+            }
+            $countedFrom = max($from, $intervalFrom);
+            $countedTo = min($to, $intervalTo);
+            if ($countedFrom > $countedTo) {
+                continue;
+            }
+            if (in_array($type, self::SECTION18_NEUTRAL_TYPES, true)) {
+                continue;
+            }
+            $attribute = self::SECTION18_ATTRIBUTES[$type] ?? null;
+            if ($attribute === null) {
+                $undecidable[] = $type;
+                continue;
+            }
+            $days = self::inclusiveDays($countedFrom, $countedTo);
+            if (self::claim($claimedDays, $countedFrom, $days) !== null) {
+                // Souběh by tentýž den započítal dvakrát. Souběh hlásí
+                // blokátorem derive(); tady se jen přestane tvrdit součet.
+                $undecidable[] = $type;
+                continue;
+            }
+            $components[$attribute] += $days;
+            $provenance[] = [
+                'absence_id' => $absenceId,
+                'absence_type' => $type,
+                'attribute' => $attribute,
+                'absence_from' => $from,
+                'absence_to' => $to,
+                'counted_from' => $countedFrom,
+                'counted_to' => $countedTo,
+                'days' => $days,
+            ];
+        }
+
+        usort(
+            $provenance,
+            static fn (array $left, array $right): int =>
+                [$left['counted_from'], $left['absence_id']]
+                <=> [$right['counted_from'], $right['absence_id']],
+        );
+        $undecidable = array_values(array_unique($undecidable));
+        sort($undecidable);
+
+        return [
+            'components' => $components,
+            'total' => array_sum($components),
+            'derivable' => $undecidable === [],
+            'undecidable_types' => $undecidable,
+            'provenance' => $provenance,
         ];
     }
 

@@ -27,7 +27,21 @@ final class PayrollComponentJmhzTargetCatalog
         ['attribute_id' => '10339', 'parent' => '10337', 'role' => 'detail'],
         ['attribute_id' => '10340', 'parent' => '10337', 'role' => 'detail'],
         ['attribute_id' => '10341', 'parent' => '10337', 'role' => 'detail'],
-        ['attribute_id' => '10342', 'parent' => '10337', 'role' => 'detail'],
+        /*
+         * Náhrada při dočasné pracovní neschopnosti stojí VEDLE úhrnu
+         * zúčtovaných náhrad (10337), ne pod ním.
+         *
+         * Datový slovník u 10337 žádný součtový vzorec nemá, takže rozhoduje
+         * doložené chování: v přijatých hlášeních jiných mzdových systémů je
+         * `nahrady.mzdyZuctovane` = 10338 + 10339 + 10340 + 10341 a
+         * `nahrady.docasnaNeschopnost` k němu nepřičtená (měsíc s náhradou za
+         * nemoc a bez ostatních náhrad má mzdyZuctovane = 0). Odpovídá to
+         * i ISPV, kde ukazatel NAHRADY náhradu za nemoc nezahrnuje.
+         *
+         * Kdyby se 10342 rolovalo do 10337, měsíc s nemocí by úhrn náhrad
+         * nadhodnotil o náhradu, kterou hlášení vykazuje samostatně.
+         */
+        ['attribute_id' => '10342', 'parent' => null, 'role' => 'detail'],
         ['attribute_id' => '10343', 'parent' => null, 'role' => 'detail'],
         ['attribute_id' => '10417', 'parent' => null, 'role' => 'detail'],
     ];

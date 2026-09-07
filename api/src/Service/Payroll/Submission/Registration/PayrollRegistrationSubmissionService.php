@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use Psr\Clock\ClockInterface;
@@ -80,6 +81,7 @@ final readonly class PayrollRegistrationSubmissionService
         private PayrollSubmissionService $submissions,
         private PayrollSubmissionRepository $submissionRepository,
         private JmhzSubmissionGuidFactory $guids,
+        private JmhzSoftwareIdentification $software,
         private ClockInterface $clock,
     ) {}
 
@@ -697,6 +699,8 @@ final readonly class PayrollRegistrationSubmissionService
                 ? (string) ($eventEmployer['name']
                     ?? $context['employer_name'])
                 : null,
+            productName: $this->software->productName,
+            productVersion: $this->software->productVersion,
             csszWorkplaceCode: $regzec
                 ? (string) ($eventEmployer['workplace_code']
                     ?? $context['cssz_workplace_code'])

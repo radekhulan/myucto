@@ -96,6 +96,7 @@ final class PayrollRegistrationXmlSerializer
         $document = $this->document();
         $root = $document->createElementNS($namespace, 'PREZEC');
         $document->appendChild($root);
+        $this->appendVendor($document, $namespace, $root, $payload);
         $employees = $this->element($document, $namespace, 'employees');
         $employee = $this->element($document, $namespace, 'employee');
         $this->employeeAttributes($employee, $payload, true);
@@ -133,6 +134,7 @@ final class PayrollRegistrationXmlSerializer
         $document = $this->document();
         $root = $document->createElementNS($namespace, 'REGZEC');
         $document->appendChild($root);
+        $this->appendVendor($document, $namespace, $root, $payload);
         $employees = $this->element($document, $namespace, 'employees');
         $employee = $this->element($document, $namespace, 'employee');
         $this->employeeAttributes($employee, $payload, false);
@@ -393,6 +395,7 @@ final class PayrollRegistrationXmlSerializer
         $document = $this->document();
         $root = $document->createElementNS($namespace, 'REGZEC');
         $document->appendChild($root);
+        $this->appendVendor($document, $namespace, $root, $payload);
         $employees = $this->element($document, $namespace, 'employees');
         $employee = $this->element($document, $namespace, 'employee');
         $this->employeeAttributes($employee, $payload, false);
@@ -578,6 +581,30 @@ final class PayrollRegistrationXmlSerializer
             $node->appendChild($child);
         }
         $employee->appendChild($node);
+    }
+
+    /**
+     * `VENDOR` — identifikace odesílajícího programu.
+     *
+     * PREZEC26 i REGZEC25 ji mají hned prvním prvkem kořene, stejně jako
+     * měsíční hlášení, příloha k žádosti o dávku i hlášení zaměstnavatele
+     * o ukončení pojištění. Registrace byly jediné podání, kde se
+     * nevyplňovala. Prvek je nepovinný, takže chybějící identifikace podání
+     * neblokuje — jen se nezapíše.
+     */
+    private function appendVendor(
+        DOMDocument $document,
+        string $namespace,
+        DOMElement $root,
+        PayrollRegistrationXmlPayload $payload,
+    ): void {
+        if ($payload->productName === null || $payload->productVersion === null) {
+            return;
+        }
+        $vendor = $this->element($document, $namespace, 'VENDOR');
+        $vendor->setAttribute('productName', $payload->productName);
+        $vendor->setAttribute('productVersion', $payload->productVersion);
+        $root->appendChild($vendor);
     }
 
     private function employeeAttributes(

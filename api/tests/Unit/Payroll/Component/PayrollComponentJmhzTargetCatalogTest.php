@@ -31,7 +31,7 @@ final class PayrollComponentJmhzTargetCatalogTest extends TestCase
             ['10339', '10337'],
             ['10340', '10337'],
             ['10341', '10337'],
-            ['10342', '10337'],
+            ['10342', null],
             ['10343', null],
             ['10417', null],
         ];
@@ -45,7 +45,10 @@ final class PayrollComponentJmhzTargetCatalogTest extends TestCase
         self::assertSame('catch_all_total', $catalog->requireTarget('10332')['aggregation_role']);
         self::assertSame('10332', $catalog->requireTarget('10336')['parent_attribute_id']);
         self::assertSame('catch_all_total', $catalog->requireTarget('10337')['aggregation_role']);
-        self::assertSame('10337', $catalog->requireTarget('10342')['parent_attribute_id']);
+        // 10342 stojí VEDLE úhrnu 10337, ne pod ním: v přijatých hlášeních má
+        // měsíc s náhradou jen za nemoc mzdyZuctovane = 0.
+        self::assertNull($catalog->requireTarget('10342')['parent_attribute_id']);
+        self::assertSame([], $catalog->rollupAttributeIds('10342'));
         self::assertNull($catalog->requireTarget('10343')['parent_attribute_id']);
         self::assertNull($catalog->requireTarget('10417')['parent_attribute_id']);
         self::assertSame('employment', $catalog->requireTarget('10328')['aggregation_scope']);

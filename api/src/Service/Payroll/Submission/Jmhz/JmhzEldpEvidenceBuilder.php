@@ -360,6 +360,7 @@ final class JmhzEldpEvidenceBuilder
             $this->invalid('jmhz_eldp_days_mismatch', 'Počet dnů ELDP neodpovídá inkluzivnímu intervalu.');
         }
         $excluded = $this->excludedPeriods($absences, $insuranceFrom, $insuranceTo, $days);
+        $section18 = $this->section18Periods($absences, $insuranceFrom, $insuranceTo, $days);
         $this->assertWorkSummaryConsistency(
             $workSummary,
             $days,
@@ -450,6 +451,17 @@ final class JmhzEldpEvidenceBuilder
                 'excluded_days' => $excluded['components'],
                 'excluded_days_total' => $excluded['total'],
                 'excluded_days_provenance' => $excluded['provenance'],
+                /*
+                 * Vyloučené dny podle § 18 odst. 7 zákona č. 187/2006 Sb.
+                 * (10366 a rozpad 10473–10475). Jiná veličina než vyloučené
+                 * DOBY výš: ty krátí osobní vyměřovací základ důchodu, tyhle
+                 * rozhodné období denního vyměřovacího základu nemocenských
+                 * dávek. `null` znamená NEUVEDENO — viz
+                 * {@see section18Periods()}.
+                 */
+                'section18_days' => $section18['components'] ?? null,
+                'section18_days_total' => $section18['total'] ?? null,
+                'section18_days_provenance' => $section18['provenance'] ?? [],
                 /*
                  * Odečítané doby (10375, 10462–10469) se týkají VÝHRADNĚ dob
                  * po dosažení důchodového věku. Aplikace důchodový věk nezná —
@@ -878,6 +890,61 @@ final class JmhzEldpEvidenceBuilder
         }
 
         return $derived;
+    }
+
+    /**
+     * Vyloučené dny podle § 18 odst. 7 zákona č. 187/2006 Sb. (10366 a rozpad
+     * 10473–10475) pro jeden ELDP řez.
+     *
+     * Vrací `null`, když se rozpad ze zmrazeného snapshotu odvodit nedá —
+     * důvody a doklad, proč je vynechání legální, drží
+     * {@see EldpExcludedPeriodDeriver::deriveSection18()}. `null` znamená
+     * NEUVEDENO, ne nulu; serializér pak celý blok vynechá.
+     *
+     * @param list<array<string,mixed>> $absences
+     * @return array{components:array<string,int>,total:int,provenance:list<array<string,mixed>>}|null
+     */
+    private function section18Periods(
+        array $absences,
+        string $insuranceFrom,
+        string $insuranceTo,
+        int $insuranceDays,
+    ): ?array {
+        if ($insuranceDays === 0) {
+            // Neúčastný vztah (dohoda pod hranicí, měsíc bez započitatelného
+            // příjmu) nemá dobu pojištění, ze které by šlo den vyloučit.
+            return null;
+        }
+        $derived = (new EldpExcludedPeriodDeriver())->deriveSection18(
+            $absences,
+            $insuranceFrom,
+            $insuranceTo,
+        );
+        if ($derived['derivable'] !== true) {
+            return null;
+        }
+        if (array_sum($derived['components']) !== $derived['total']) {
+            $this->invalid(
+                'jmhz_eldp_section18_days_sum_mismatch',
+                'Úhrn vyloučených dnů neodpovídá rozpadu podle § 18 odst. 7 zákona č. 187/2006 Sb.',
+            );
+        }
+        // Kontrola 98 ČSSZ poměřuje 10366 i jeho složky s počtem kalendářních
+        // dnů měsíce. Interval řezu je stejný nebo kratší, takže je přísnější;
+        // u neúčastného vztahu je `insuranceDays` nula, a pak nesmí být
+        // vyloučený den žádný — bez doby pojištění není co vylučovat.
+        if ($derived['total'] > $insuranceDays) {
+            $this->invalid(
+                'jmhz_eldp_section18_days_exceed_period',
+                'Vyloučené dny podle § 18 odst. 7 přesahují dobu pojištění vykázanou v ELDP řezu.',
+            );
+        }
+
+        return [
+            'components' => $derived['components'],
+            'total' => $derived['total'],
+            'provenance' => $derived['provenance'],
+        ];
     }
 
     /**

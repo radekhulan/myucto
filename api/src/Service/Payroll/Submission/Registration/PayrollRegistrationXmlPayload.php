@@ -19,5 +19,13 @@ final readonly class PayrollRegistrationXmlPayload
         public ?string $csszWorkplaceCode = null,
         /** @var array<string,mixed>|null */
         public ?array $eventSnapshot = null,
+        /*
+         * Identifikace odesílajícího software (`VENDOR`). PREZEC26 i REGZEC25
+         * ji mají stejně jako hlášení a příloha k žádosti o dávku; je to
+         * jediné místo, kde ČSSZ pozná, ze kterého programu podání vzniklo.
+         * Zůstává nepovinná, aby starší volání serializéru dál procházela.
+         */
+        public ?string $productName = null,
+        public ?string $productVersion = null,
     ) {}
 }

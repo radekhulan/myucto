@@ -438,6 +438,13 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
             $validator->validate($payload, $xml);
             self::assertStringContainsString('act="' . $actionCode . '"', $xml);
             self::assertStringContainsString('oid="200000000000000000002"', $xml);
+            // `VENDOR` stojí první ve `regzecType`; ČSSZ podle něj pozná, ze
+            // kterého programu podání vzniklo. Registrace byly jediná agenda,
+            // kde se identifikace nevyplňovala.
+            self::assertStringContainsString(
+                '<VENDOR productName="MyÚčto.cz" productVersion="5.6.0"/>',
+                $xml,
+            );
             if (in_array($actionCode, [2, 8], true)) {
                 self::assertStringNotContainsString(' fro=', $xml);
             }
@@ -557,6 +564,8 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
             employerName: 'Syntetický zaměstnavatel s.r.o.',
             csszWorkplaceCode: '110',
             eventSnapshot: $eventSnapshot,
+            productName: 'MyÚčto.cz',
+            productVersion: '5.6.0',
         );
     }
 
@@ -847,6 +856,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
         return <<<'XML'
 <?xml version="1.0" encoding="UTF-8"?>
 <PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026">
+  <VENDOR productName="MyÚčto.cz" productVersion="5.6.0"/>
   <employees>
     <employee sqnr="1" act="9" idform="12345678-1234-1234-1234-123456789ABC" dat="2026-08-04" predat="2026-08-05">
       <client bno="9152031234">
@@ -866,6 +876,7 @@ XML;
         return <<<'XML'
 <?xml version="1.0" encoding="UTF-8"?>
 <PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026">
+  <VENDOR productName="MyÚčto.cz" productVersion="5.6.0"/>
   <employees>
     <employee sqnr="1" act="10" idform="12345678-1234-1234-1234-123456789ABC" dat="2026-08-04">
       <client bno="9152031234"/>

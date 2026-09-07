@@ -15,7 +15,17 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  */
 final class EldpXmlSerializer
 {
-    /** Pořadí podle sekvence `vylouceneDnyType`. */
+    /**
+     * Pořadí podle sekvence `vylouceneDnyType`.
+     *
+     * Jen složky § 16 odst. 4 zákona č. 155/1995 Sb. Typ `vylouceneDnyType`
+     * nese i vyloučené DNY podle § 18 odst. 7 zákona č. 187/2006 Sb.
+     * (10366 a rozpad 10473–10475), ale ty sem NEPATŘÍ a doplnit je není
+     * sjednocení, nýbrž chyba: evidenční list je doklad DŮCHODOVÉHO
+     * pojištění, kdežto § 18 odst. 7 krátí rozhodné období denního
+     * vyměřovacího základu NEMOCENSKÝCH dávek a vykazuje se měsíčně
+     * v hlášení ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlSerializer}).
+     */
     private const EXCLUDED_ORDER = [
         'docasNeschopnost',
         'penezitaPomocMaterstvi',

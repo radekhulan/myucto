@@ -54,6 +54,22 @@ final class JmhzScenario1XmlSerializer
         'vyloucenePar16' => '10536',
     ];
 
+    /**
+     * Rozpad vyloučených dnů podle § 18 odst. 7 zákona č. 187/2006 Sb.
+     * v pořadí sekvence `vylouceneDnyType`, za složkami § 16 odst. 4.
+     *
+     * Úhrn 10366 datový slovník definuje jako součet těchhle tří, takže se
+     * blok vykazuje celý, nebo vůbec — odvození drží
+     * {@see \MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver::deriveSection18()}.
+     *
+     * @var array<string, string>
+     */
+    private const ELDP_SECTION18_DAYS = [
+        'omluvenaNepritomnost' => '10473',
+        'pracovniNeschopnost' => '10474',
+        'vyplaceniDavek' => '10475',
+    ];
+
     public function serialize(
         JmhzScenario1NormalizedDocument $document,
         JmhzSubmissionEnvelope $envelope,
@@ -1551,6 +1567,49 @@ final class JmhzScenario1XmlSerializer
             $node->appendChild($wrapper);
         }
 
+        /*
+         * Sleva na pojistném ZAMĚSTNANCE — 10490 (pracující důchodci, § 7d
+         * ZPSZ) a 10546 (ovocnářství a pěstování zeleniny). Matice povinností
+         * 1.4.0.2 vede oba příznaky jako povinné jádro scénáře, ne jako údaj
+         * podmíněný interakcí, a `slevaZamestnanceType` je má oba v jednom
+         * bloku před slevou zaměstnavatele.
+         *
+         * „Ne" tady není dopočtená nula. Příprava se zastaví hned, jakmile je
+         * sleva zaměstnance nenulová
+         * ({@see JmhzPreparationSnapshotBuilder::inspectDiscounts()},
+         * `jmhz_employee_social_discount_unsupported`), takže do serializace se
+         * dostane jen měsíc, ve kterém se ani jedna sleva neuplatňuje.
+         *
+         * Vykázat to je nutné, ne kosmetické: kontrola 297 poměřuje počet
+         * zaměstnanců v `pvpoj:slevyZamestnancu` s počtem vztahů, u nichž je
+         * 10490 = ANO, a kontrola 213 stejně tak úhrn vyměřovacích základů.
+         * Mlčení na formulářích při vyplněné pojistné části je proto rozpor
+         * uvnitř jednoho podání.
+         *
+         * AŽ blokace padne, musí se sem číst skutečný stav vztahu — hodnota
+         * `true` se nikdy nesmí objevit u obou zároveň (kontrola 275).
+         */
+        $employeeDiscounts = $this->node(
+            $dom,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:slevaZamestnance',
+        );
+        $this->text(
+            $dom,
+            $employeeDiscounts,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:slevaZamestnanceEvidovana',
+            'false',
+        );
+        $this->text(
+            $dom,
+            $employeeDiscounts,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:slevaZamestnanceOvoZelEvidovana',
+            'false',
+        );
+        $node->appendChild($employeeDiscounts);
+
         // Sleva zaměstnavatele podle § 7a stojí v sekvenci
         // `pojisteniBezPriznakuType` až za pojistným, a to jen tehdy, když se
         // uplatňuje: prázdný blok by kontrole 1 ČSSZ přidal zaměstnance, který
@@ -1840,9 +1899,10 @@ final class JmhzScenario1XmlSerializer
          * a jeho tři složky jsou uvnitř povinné, takže je to celý blok, nebo nic.
          * Nenulová složka při nulovém úhrnu je rozpor ve zdrojových datech.
          */
+        $surcharges = $this->wageSurcharges($earnings);
         if ($wageTotal === 0) {
-            foreach ($components as $attributeId) {
-                if ($attributeId !== 0) {
+            foreach ([...array_values($components), ...array_values($surcharges)] as $amount) {
+                if ($amount !== 0) {
                     $this->invalid(
                         'jmhz_xml_wage_breakdown_without_wage',
                         'Rozpad mzdy nelze vykázat při nulové zúčtované mzdě.',
@@ -1860,8 +1920,11 @@ final class JmhzScenario1XmlSerializer
                     (string) $value,
                 );
             }
+            $this->appendSurcharges($dom, $breakdown, $surcharges);
             $node->appendChild($breakdown);
         }
+        $this->appendCompensations($dom, $node, $earnings);
+        $this->appendStandbyPay($dom, $node, $earnings);
 
         $average = $this->object($employment['average_hourly'] ?? null);
         $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vydelek');
@@ -1885,6 +1948,155 @@ final class JmhzScenario1XmlSerializer
         $node->appendChild($wrapper);
 
         return $node;
+    }
+
+    /**
+     * Příplatky (10332–10336) z vektoru výdělků.
+     *
+     * Prázdné pole znamená, že v měsíci žádný příplatek evidovaný není —
+     * interakce IN10 („V měsíci jsou evidovány příplatky") se neuplatní a
+     * `priplatky` se nevykazuje. Vektor totiž nese jen atributy, do kterých
+     * má zaměstnavatel namapovanou mzdovou složku, takže PŘÍTOMNOST atributu
+     * je tvrzení, ne implicitní nula.
+     *
+     * Úhrn 10332 je v matici povinností pro IN10 povinný, detaily 10333–10336
+     * nepovinné, takže se každý zapíše jen tehdy, když ho vektor nese. Součet
+     * detailů se s úhrnem NEporovnává: datový slovník mezi nimi žádný vzorec
+     * nemá a v přijatých hlášeních se rozchází.
+     *
+     * @param array<array-key,mixed> $earnings
+     * @return array<string,int>
+     */
+    private function wageSurcharges(array $earnings): array
+    {
+        $surcharges = [];
+        foreach ([
+            'form:celkem' => '10332',
+            'form:prescas' => '10333',
+            'form:nocni' => '10334',
+            'form:sobotaNedele' => '10335',
+            'form:svatek' => '10336',
+        ] as $element => $attributeId) {
+            $value = $this->earning($earnings, $attributeId);
+            if ($value === null) {
+                continue;
+            }
+            $surcharges[$element] = $this->int($value, $attributeId);
+        }
+        if ($surcharges === []) {
+            return [];
+        }
+        if (!array_key_exists('form:celkem', $surcharges)) {
+            // `celkem` je uvnitř `priplatkyType` povinný bez `minOccurs`, takže
+            // detail bez úhrnu je nezapsatelný. Nedopočítáváme ho ze složek:
+            // úhrn je vlastní atribut hlášení, ne jejich součet.
+            $this->invalid(
+                'jmhz_xml_surcharge_total_missing',
+                'Rozpad příplatků nelze vykázat bez úhrnu příplatků (10332).',
+            );
+        }
+
+        return $surcharges;
+    }
+
+    /**
+     * @param array<string,int> $surcharges
+     */
+    private function appendSurcharges(
+        DOMDocument $dom,
+        DOMElement $breakdown,
+        array $surcharges,
+    ): void {
+        if ($surcharges === []) {
+            return;
+        }
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:priplatky');
+        foreach ($surcharges as $element => $value) {
+            $this->text($dom, $node, JmhzSchemaCatalog::NS_FORM, $element, (string) $value);
+        }
+        $breakdown->appendChild($node);
+    }
+
+    /**
+     * Náhrady mzdy (10337–10342).
+     *
+     * Stojí v `mzdaBezPriznakuType` za rozpadem mzdy a mimo ni: náhrada není
+     * mzda za práci, takže se do 10328 nepočítá a měsíc, ve kterém zaměstnanec
+     * jen čerpal dovolenou, má `mzdaZuctovana` = 0 a náhrady tady.
+     *
+     * Úhrn 10337 je pro interakci IN11 povinný. Náhrada při dočasné pracovní
+     * neschopnosti (10342) do něj nepatří — stojí vedle, viz
+     * {@see \MyInvoice\Service\Payroll\Component\PayrollComponentJmhzTargetCatalog}
+     * — takže měsíc, ve kterém byla zúčtovaná jen ona, vykáže povinný úhrn
+     * jako nulu. Není to dopočtená nula: vektor v takovém měsíci žádnou
+     * složku do 10337 nemapuje, a XSD úhrn vyžaduje.
+     *
+     * @param array<array-key,mixed> $earnings
+     */
+    private function appendCompensations(
+        DOMDocument $dom,
+        DOMElement $wage,
+        array $earnings,
+    ): void {
+        $values = [];
+        foreach ([
+            'form:mzdyZuctovane' => '10337',
+            'form:dovolena' => '10338',
+            'form:svatky' => '10339',
+            'form:prekazkyZamestnavatel' => '10340',
+            'form:prekazkyZamestnanec' => '10341',
+            'form:docasnaNeschopnost' => '10342',
+        ] as $element => $attributeId) {
+            $value = $this->earning($earnings, $attributeId);
+            if ($value === null) {
+                continue;
+            }
+            $values[$element] = $this->int($value, $attributeId);
+        }
+        if ($values === []) {
+            return;
+        }
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:nahrady');
+        $this->text(
+            $dom,
+            $node,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:mzdyZuctovane',
+            (string) ($values['form:mzdyZuctovane'] ?? 0),
+        );
+        unset($values['form:mzdyZuctovane']);
+        foreach ($values as $element => $value) {
+            $this->text($dom, $node, JmhzSchemaCatalog::NS_FORM, $element, (string) $value);
+        }
+        $wage->appendChild($node);
+    }
+
+    /**
+     * Odměny za pracovní pohotovost (10343, interakce IN12).
+     *
+     * `odmenyType` má `pohotovost` jako jediný a povinný prvek, takže blok
+     * vzniká právě tehdy, když vektor atribut nese.
+     *
+     * @param array<array-key,mixed> $earnings
+     */
+    private function appendStandbyPay(
+        DOMDocument $dom,
+        DOMElement $wage,
+        array $earnings,
+    ): void {
+        $value = $this->earning($earnings, '10343');
+        if ($value === null) {
+            return;
+        }
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:odmeny');
+        $this->text(
+            $dom,
+            $node,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:pohotovost',
+            (string) $this->int($value, '10343'),
+        );
+        $wage->appendChild($node);
     }
 
     /**
@@ -1953,7 +2165,22 @@ final class JmhzScenario1XmlSerializer
     ): void {
         $total = $section['excluded_days_total'] ?? null;
         $components = $section['excluded_days'] ?? null;
+        // Vyloučené DNY podle § 18 odst. 7 jsou samostatná veličina, ne rozpad
+        // vyloučených DOB — sdílejí jen element `vylouceneDny`. Řez, který má
+        // jen je (měsíc s neplaceným volnem a bez omluvného důvodu podle
+        // § 16 odst. 4), je proto pořád řez, který má co vykázat.
+        $hasSection18 = ($section['section18_days_total'] ?? null) !== null;
         if ($total === null && ($components === null || $components === [])) {
+            if (!$hasSection18) {
+                return;
+            }
+            if (!is_string($code) || $code === '') {
+                return;
+            }
+            $block = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vylouceneDny');
+            $this->appendEldpSection18Days($dom, $block, $section);
+            $entry->appendChild($block);
+
             return;
         }
         /*
@@ -1970,6 +2197,7 @@ final class JmhzScenario1XmlSerializer
          */
         if ($total === 0
             && !$this->hasNonZeroExcludedDays($components)
+            && !$hasSection18
             && !(is_string($code) && $code !== '')
         ) {
             return;
@@ -2016,7 +2244,68 @@ final class JmhzScenario1XmlSerializer
                 );
             }
         }
+        $this->appendEldpSection18Days($dom, $block, $section);
         $entry->appendChild($block);
+    }
+
+    /**
+     * Vyloučené dny podle § 18 odst. 7 zákona č. 187/2006 Sb. (10366 a rozpad
+     * 10473–10475).
+     *
+     * Jsou to dny vyřazené z rozhodného období pro denní vyměřovací základ
+     * nemocenských dávek, ne vyloučené DOBY důchodového pojištění — proto
+     * stojí ve `vylouceneDnyType` vedle sebe a smějí se v týchž dnech
+     * překrývat (nemoc je v obou).
+     *
+     * `null` v řezu znamená NEUVEDENO: buď jde o řez zmrazený dřív, než se
+     * § 18 odvozoval, nebo v měsíci byla nepřítomnost, jejíž rozpad na
+     * 10473/10474/10475 ze zmrazeného snapshotu neplyne. Datový slovník
+     * předepisuje `10366 = 10473 + 10474 + 10475`, takže se v obou případech
+     * mlčí — vykázat část by tvrdilo, že zbytek je nula. Matice povinností
+     * 1.4.0.2 to dovoluje: 10366 je „nepovinné, pokud je vyplněn 10357 > 0".
+     *
+     * @param array<string,mixed> $section
+     */
+    private function appendEldpSection18Days(
+        DOMDocument $dom,
+        DOMElement $block,
+        array $section,
+    ): void {
+        $total = $section['section18_days_total'] ?? null;
+        $components = $section['section18_days'] ?? null;
+        if ($total === null || !is_array($components) || array_is_list($components)) {
+            return;
+        }
+        $total = $this->int($total, '10366');
+        $sum = 0;
+        $values = [];
+        foreach (self::ELDP_SECTION18_DAYS as $key => $attributeId) {
+            $values[$key] = $this->int($components[$key] ?? null, $attributeId);
+            $sum += $values[$key];
+        }
+        if ($sum !== $total || count($components) !== count($values)) {
+            $this->invalid(
+                'jmhz_xml_eldp_section18_days_sum_mismatch',
+                'Úhrn vyloučených dnů neodpovídá rozpadu podle § 18 odst. 7'
+                    . ' zákona č. 187/2006 Sb.',
+            );
+        }
+        $this->text(
+            $dom,
+            $block,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:vyloucenePar18',
+            (string) $total,
+        );
+        foreach ($values as $key => $value) {
+            $this->text(
+                $dom,
+                $block,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:' . $key,
+                (string) $value,
+            );
+        }
     }
 
     private function node(

@@ -24,6 +24,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -2664,6 +2665,7 @@ final class PayrollRegistrationActionTest extends TestCase
             $submissions,
             $submissionRepository,
             new JmhzSubmissionGuidFactory(),
+            new JmhzSoftwareIdentification('MyÚčto.cz', '5.6.0'),
             $clock,
         );
 

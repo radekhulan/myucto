@@ -185,6 +185,184 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         }
     }
 
+    /**
+     * Vyloučené dny podle § 18 odst. 7 zákona č. 187/2006 Sb. krátí rozhodné
+     * období denního vyměřovacího základu nemocenských dávek. Bez nich počítá
+     * ČSSZ dávku i z měsíce, ve kterém zaměstnanec kvůli neplacenému volnu
+     * nevydělával, a vyplatí méně, než na kolik má zaměstnanec nárok.
+     */
+    public function testUnpaidLeaveIsReportedAsSection18ExcludedDays(): void
+    {
+        $payload = $this->payload();
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        // Neplacené volno není omluvným důvodem podle § 16 odst. 4 zákona
+        // č. 155/1995 Sb., takže vyloučené DOBY zůstávají nulové a celý údaj
+        // nese až § 18 odst. 7.
+        $section['excluded_days'] = [
+            'docasNeschopnost' => 0,
+            'penezitaPomocMaterstvi' => 0,
+            'osetrovaniClenaRodiny' => 0,
+            'otcovska' => 0,
+            'vyloucenePar16' => 0,
+        ];
+        $section['excluded_days_total'] = 0;
+        $section['section18_days'] = [
+            'omluvenaNepritomnost' => 3,
+            'pracovniNeschopnost' => 0,
+            'vyplaceniDavek' => 0,
+        ];
+        $section['section18_days_total'] = 3;
+        unset($section);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:vylouceneDobyCelkem>0</form:vylouceneDobyCelkem>'
+                . '<form:vyloucenePar18>3</form:vyloucenePar18>'
+                . '<form:omluvenaNepritomnost>3</form:omluvenaNepritomnost>'
+                . '<form:pracovniNeschopnost>0</form:pracovniNeschopnost>'
+                . '<form:vyplaceniDavek>0</form:vyplaceniDavek>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+    }
+
+    /**
+     * `null` v řezu znamená NEUVEDENO. Datový slovník předepisuje
+     * 10366 = 10473 + 10474 + 10475, takže vykázat část rozpadu by tvrdilo,
+     * že zbytek je nula — a to je stejná chyba jako mlčení, jen hůř
+     * rozpoznatelná.
+     */
+    public function testSection18DaysAreOmittedWhenTheBreakdownIsNotDerivable(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolution(),
+            $this->envelope(),
+        );
+
+        self::assertStringNotContainsString('<form:vyloucenePar18>', $result['xml']);
+        self::assertStringNotContainsString('<form:omluvenaNepritomnost>', $result['xml']);
+    }
+
+    public function testSection18DaysSumMismatchBlocksSubmission(): void
+    {
+        $payload = $this->payload();
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        $section['section18_days'] = [
+            'omluvenaNepritomnost' => 3,
+            'pracovniNeschopnost' => 0,
+            'vyplaceniDavek' => 0,
+        ];
+        $section['section18_days_total'] = 4;
+        unset($section);
+
+        try {
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            );
+            self::fail('Rozporný úhrn vyloučených dnů musel podání zablokovat.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame(
+                'jmhz_xml_eldp_section18_days_sum_mismatch',
+                $exception->validationCode,
+            );
+        }
+    }
+
+    /**
+     * Příplatky, náhrady a odměna za pohotovost mají v hlášení vlastní bloky.
+     * Bez nich se měsíc s dovolenou vykáže jako měsíc s nulovou mzdou a beze
+     * stopy po tom, co zaměstnanec dostal — MPSV ani ČSSZ nedostanou nic, co
+     * by odpovídalo výplatní pásce.
+     */
+    public function testSurchargesCompensationsAndStandbyPayAreReported(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($this->payloadWithWageBreakdown()),
+            $this->envelope(),
+        );
+        $xml = preg_replace('/>\s+</', '><', $result['xml']) ?? '';
+
+        self::assertStringContainsString(
+            '<form:mzdaRozpad><form:tarif>800</form:tarif>'
+                . '<form:odmenyPravidelne>0</form:odmenyPravidelne>'
+                . '<form:odmenyNepravidelne>0</form:odmenyNepravidelne>'
+                . '<form:priplatky><form:celkem>200</form:celkem>'
+                . '<form:prescas>120</form:prescas>'
+                . '<form:nocni>80</form:nocni>'
+                . '<form:sobotaNedele>0</form:sobotaNedele>'
+                . '<form:svatek>0</form:svatek></form:priplatky></form:mzdaRozpad>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<form:nahrady><form:mzdyZuctovane>500</form:mzdyZuctovane>'
+                . '<form:dovolena>500</form:dovolena>'
+                . '<form:svatky>0</form:svatky>'
+                . '<form:prekazkyZamestnavatel>0</form:prekazkyZamestnavatel>'
+                . '<form:prekazkyZamestnanec>0</form:prekazkyZamestnanec>'
+                . '<form:docasnaNeschopnost>0</form:docasnaNeschopnost></form:nahrady>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<form:odmeny><form:pohotovost>150</form:pohotovost></form:odmeny>',
+            $xml,
+        );
+    }
+
+    /**
+     * Náhrada při dočasné pracovní neschopnosti stojí VEDLE úhrnu zúčtovaných
+     * náhrad, ne pod ním: měsíc, ve kterém byla zúčtovaná jen ona, má
+     * `mzdyZuctovane` nula.
+     */
+    public function testSicknessCompensationStaysOutsideTheCompensationTotal(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['earnings_by_attribute_minor']['10342']
+            = 120_000;
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:nahrady><form:mzdyZuctovane>0</form:mzdyZuctovane>'
+                . '<form:docasnaNeschopnost>1200</form:docasnaNeschopnost></form:nahrady>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+    }
+
+    /**
+     * Kontrola 267 zakazuje vyplněný rozpad při nulové zúčtované mzdě, a
+     * „vyplněný" je pro ČSSZ už samotná přítomnost elementu. Příplatky jsou
+     * v jejím výčtu (10332–10336) stejně jako tarif.
+     */
+    public function testSurchargeWithoutWageIsRefused(): void
+    {
+        $payload = $this->payload();
+        $earnings = &$payload['people'][0]['employments'][0]['earnings_by_attribute_minor'];
+        $earnings['10328'] = 0;
+        $earnings['10329'] = 0;
+        $earnings['10332'] = 20_000;
+        unset($earnings);
+
+        try {
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            );
+            self::fail('Příplatek při nulové zúčtované mzdě musel podání zablokovat.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame(
+                'jmhz_xml_wage_breakdown_without_wage',
+                $exception->validationCode,
+            );
+        }
+    }
+
     public function testContentCorrectionHasNoLocalBlockingControlCoverageGap(): void
     {
         $result = (new JmhzScenario1XmlValidator())->dryRunCorrection(
@@ -1228,6 +1406,38 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         return $payload;
     }
 
+    /**
+     * Vektor výdělků s příplatky (10332–10336), náhradami (10337–10342)
+     * a odměnou za pohotovost (10343). Tarif 800 Kč a příplatky 200 Kč dávají
+     * dohromady zúčtovanou mzdu 1 000 Kč; náhrada za dovolenou stojí mimo ni.
+     *
+     * @return array<string,mixed>
+     */
+    private function payloadWithWageBreakdown(): array
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['earnings_by_attribute_minor'] = [
+            '10328' => 100_000,
+            '10329' => 80_000,
+            '10330' => 0,
+            '10331' => 0,
+            '10332' => 20_000,
+            '10333' => 12_000,
+            '10334' => 8_000,
+            '10335' => 0,
+            '10336' => 0,
+            '10337' => 50_000,
+            '10338' => 50_000,
+            '10339' => 0,
+            '10340' => 0,
+            '10341' => 0,
+            '10342' => 0,
+            '10343' => 15_000,
+        ];
+
+        return $payload;
+    }
+
     private function envelope(): JmhzSubmissionEnvelope
     {
         return JmhzSubmissionEnvelope::create(
@@ -1675,6 +1885,10 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                       <form:pojisteniZamestnavatel>
                         <form:socialniPojisteni>248</form:socialniPojisteni>
                       </form:pojisteniZamestnavatel>
+                      <form:slevaZamestnance>
+                        <form:slevaZamestnanceEvidovana>false</form:slevaZamestnanceEvidovana>
+                        <form:slevaZamestnanceOvoZelEvidovana>false</form:slevaZamestnanceOvoZelEvidovana>
+                      </form:slevaZamestnance>
                     </form:pojisteni>
                     <form:vykonavanaPozice>
                       <form:mistoVykonuPrace>

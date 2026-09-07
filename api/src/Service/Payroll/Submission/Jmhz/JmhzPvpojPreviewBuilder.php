@@ -939,8 +939,22 @@ final class JmhzPvpojPreviewBuilder
                         "Sleva employment:{$employmentId} není ověřená.",
                     );
                 }
+                /*
+                 * „Nárok doložen" (10372) a „sleva náleží" jsou dvě různé věci;
+                 * do počtu zaměstnanců se slevou patří jen výsledek `applied`.
+                 *
+                 * Podmínka musí být PŘESNĚ tatáž jako v
+                 * {@see JmhzScenario1DocumentResolver::partTimeDiscount()},
+                 * které rozhoduje o příznaku 10372 na formuláři zaměstnance.
+                 * Kontrola 1 ČSSZ poměřuje počet zaměstnanců v pojistné části
+                 * s počtem vztahů, které slevu na formuláři vykazují — jakmile
+                 * se obě strany rozejdou, je podání rozporné samo se sebou.
+                 * Dřív se tady chybějící výsledek toleroval a v resolveru ne;
+                 * neprojevilo se to jen proto, že přípravu zastaví dřív
+                 * `jmhz_employer_part_time_discount_outcome_missing`.
+                 */
                 $discountOutcome = $result['part_time_employer_discount_outcome'] ?? null;
-                if ($discountOutcome !== null && $discountOutcome !== 'applied') {
+                if ($discountOutcome !== 'applied') {
                     $discount = 'not_claimed';
                 }
                 if ($discount === 'verified') {
