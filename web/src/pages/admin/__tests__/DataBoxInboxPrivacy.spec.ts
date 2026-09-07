@@ -140,7 +140,7 @@ describe('DataBox — soukromí příchozích zpráv', () => {
 
     // Přepnutí pohledu vrací listování na první stránku: skrytých zpráv je
     // jiný počet a zůstat na páté stránce by ukázalo prázdno.
-    expect(m.inbox).toHaveBeenCalledWith('production', undefined, 'hidden', 25, 0)
+    expect(m.inbox).toHaveBeenCalledWith('production', undefined, 'hidden', 25, 0, null, null)
     expect(m.purgeInboxLocalContent).toHaveBeenCalledWith(51, 4)
     expect(m.toastSuccess).toHaveBeenCalledWith('databox.inbox.privacy.purged')
   })

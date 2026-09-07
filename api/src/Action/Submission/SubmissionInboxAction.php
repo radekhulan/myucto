@@ -25,6 +25,7 @@ use MyInvoice\Service\Submission\SubmissionInboxPrivacyService;
 use MyInvoice\Service\Submission\IsdsMobileCredentialService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Support\PeriodFilter;
 
 /**
  * Příchozí zprávy z datové schránky.
@@ -65,6 +66,13 @@ final class SubmissionInboxAction
             (int) ($params['limit'] ?? SubmissionInboxRepository::LIST_DEFAULT_LIMIT),
         ));
         $offset = max(0, (int) ($params['offset'] ?? 0));
+        // Filtr se čte MIMO try níž: ten hlásí chybný pohled a špatný rok by
+        // se pod jeho kódem tvářil jako neznámá záložka.
+        try {
+            $period = PeriodFilter::fromQuery($params);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
 
         try {
             $page = $this->inbox->listRecentPage(
@@ -74,11 +82,13 @@ final class SubmissionInboxAction
                 $limit,
                 $offset,
                 $visibility,
+                $period,
             );
 
             return Json::ok($response, [
                 'items' => $page['items'],
                 'total' => $page['total'],
+                'years' => $page['years'],
                 'limit' => $limit,
                 'offset' => $offset,
                 'state' => $this->inbox->pollState($supplierId, 'isds', $environment),

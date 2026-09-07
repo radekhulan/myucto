@@ -50,6 +50,8 @@ import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/butt
 import EmptyState from '@/components/ui/EmptyState.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import PeriodFilterBar from '@/components/ui/PeriodFilterBar.vue'
+import { pickDefaultYear } from '@/utils/periodDefaultYear'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
@@ -104,6 +106,56 @@ const outboxPageSize = 25
 const outboxTotal = ref(0)
 const outboxOffset = ref(0)
 const outboxPage = computed(() => Math.floor(outboxOffset.value / outboxPageSize) + 1)
+// Rychlý filtr podle DATA ZPRÁVY — podle toho, co je ve výpisu vidět.
+// Každá záložka má vlastní: jsou to dva nezávislé seznamy s jinými daty.
+const outboxYear = ref<number | null>(null)
+const outboxMonth = ref<number | null>(null)
+const outboxYears = ref<number[]>([])
+const inboxYear = ref<number | null>(null)
+const inboxMonth = ref<number | null>(null)
+const inboxYears = ref<number[]>([])
+
+/**
+ * Předvolba roku, aby „leden" znamenal konkrétní leden.
+ *
+ * Roky zná až odpověď serveru, takže se předvolba dá nastavit teprve po prvním
+ * načtení a seznam se pro ni musí načíst znovu. Vlajka hlídá, že se to stane
+ * právě jednou — jinak by šlo o nekonečné kolo — a zároveň že uživatelovo
+ * pozdější „Vše" nikdo nepřepíše zpátky.
+ */
+const defaultYearsApplied = ref(false)
+
+function ensureDefaultYears(): boolean {
+  if (defaultYearsApplied.value) return false
+  defaultYearsApplied.value = true
+  let changed = false
+  const outboxDefault = pickDefaultYear(outboxYears.value)
+  if (outboxYear.value === null && outboxDefault !== null) {
+    outboxYear.value = outboxDefault
+    changed = true
+  }
+  const inboxDefault = pickDefaultYear(inboxYears.value)
+  if (inboxYear.value === null && inboxDefault !== null) {
+    inboxYear.value = inboxDefault
+    changed = true
+  }
+  return changed
+}
+
+async function applyOutboxPeriod(next: { year?: number | null; month?: number | null }) {
+  if (next.year !== undefined) outboxYear.value = next.year
+  if (next.month !== undefined) outboxMonth.value = next.month
+  // Jiný filtr má vlastní počet řádků; zůstat na páté stránce by ukázalo prázdno.
+  outboxOffset.value = 0
+  await loadAll()
+}
+
+async function applyInboxPeriod(next: { year?: number | null; month?: number | null }) {
+  if (next.year !== undefined) inboxYear.value = next.year
+  if (next.month !== undefined) inboxMonth.value = next.month
+  inboxOffset.value = 0
+  await loadAll()
+}
 const inbox = ref<InboxMessage[]>([])
 const inboxVisibility = ref<'active' | 'hidden'>('active')
 // Schránka roste každý měsíc a mazat se z ní nesmí, takže se listuje.
@@ -347,13 +399,21 @@ async function loadAll() {
     const [creds, recips, out, inb, unmatched, mobileProfile, storage, shared] = await Promise.all([
       dataBoxApi.credentials(),
       dataBoxApi.recipients(),
-      dataBoxApi.outbox(environment.value, outboxPageSize, outboxOffset.value),
+      dataBoxApi.outbox(
+        environment.value,
+        outboxPageSize,
+        outboxOffset.value,
+        outboxYear.value,
+        outboxMonth.value,
+      ),
       dataBoxApi.inbox(
         environment.value,
         undefined,
         inboxVisibility.value,
         inboxPageSize,
         inboxOffset.value,
+        inboxYear.value,
+        inboxMonth.value,
       ),
       // Nespárovaná doručenka nesmí zmizet z očí — načítá se vždycky, ne až
       // na vyžádání.
@@ -378,8 +438,10 @@ async function loadAll() {
     recipients.value = recips
     outbox.value = out.items
     outboxTotal.value = out.total
+    outboxYears.value = out.years ?? []
     inbox.value = inb.items
     inboxTotal.value = inb.total ?? inb.items.length
+    inboxYears.value = inb.years ?? []
     pollState.value = inb.state
     unmatchedReceipts.value = unmatched
     savedMobileCredential.value = mobileProfile
@@ -402,6 +464,9 @@ async function loadAll() {
     toast.error(apiErrorMessage(e))
   } finally {
     loading.value = false
+  }
+  if (ensureDefaultYears()) {
+    await loadAll()
   }
 }
 
@@ -1841,6 +1906,15 @@ onUnmounted(clearReceiptsTimer)
 
     <!-- ─────────────── Odchozí ─────────────── -->
     <section v-else-if="tab === 'outbox'" class="space-y-3">
+      <!-- Filtruje se podle DATA ZPRÁVY, tedy podle toho, co je ve výpisu vidět. -->
+      <PeriodFilterBar
+        :year="outboxYear"
+        :month="outboxMonth"
+        :years="outboxYears"
+        :total="outboxTotal"
+        @update:year="applyOutboxPeriod({ year: $event })"
+        @update:month="applyOutboxPeriod({ month: $event })"
+      />
       <!-- Jediný skrytý file input pro celou sekci; cíl určuje uploadTargetId. -->
       <input ref="receiptInput" type="file" accept=".zfo" class="hidden" @change="onReceiptChosen" />
 
@@ -2663,6 +2737,14 @@ onUnmounted(clearReceiptsTimer)
 
     <!-- ─────────────── Příchozí ─────────────── -->
     <section v-else-if="tab === 'inbox'" class="space-y-4">
+      <PeriodFilterBar
+        :year="inboxYear"
+        :month="inboxMonth"
+        :years="inboxYears"
+        :total="inboxTotal"
+        @update:year="applyInboxPeriod({ year: $event })"
+        @update:month="applyInboxPeriod({ month: $event })"
+      />
       <div class="min-w-0 rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
         <h2 class="font-medium text-neutral-900">{{ t('databox.inbox.archive.title') }}</h2>
         <p class="mt-1 text-sm text-neutral-500">{{ t('databox.inbox.archive.description') }}</p>

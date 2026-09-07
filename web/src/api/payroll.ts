@@ -5765,6 +5765,8 @@ export interface PayrollJmhzTransportHistory {
   ready_submissions: PayrollJmhzReadySubmission[]
   dispatched_submissions: PayrollJmhzDispatchedSubmission[]
   total: number
+  /** Roky, za které firma nějaké hlášení odesílala — nabídka rychlého filtru. */
+  years?: number[]
   limit: number
   offset: number
 }
@@ -7835,9 +7837,16 @@ export const payrollApi = {
   jmhzTransportHistory: (
     environment: PayrollJmhzTransportEnvironment,
     page?: PayrollPageParams,
+    /** Rychlý filtr podle OBDOBÍ hlášení, ne podle dne odeslání. */
+    period?: { year: number | null; month: number | null },
   ) =>
     api.get<PayrollJmhzTransportHistory>('/payroll/submissions/jmhz-transport', {
-      params: { environment, ...pageParams(page) },
+      params: {
+        environment,
+        ...pageParams(page),
+        year: period?.year ?? undefined,
+        month: period?.month ?? undefined,
+      },
     }).then(response => response.data),
   sendJmhzTransport: (
     submissionId: number,
@@ -7973,10 +7982,19 @@ export const payrollApi = {
   jmhzImportedProtocols: (
     environment: PayrollJmhzTransportEnvironment,
     page?: PayrollPageParams,
+    /** Rychlý filtr podle období hlášení — protokol ho nese ve vlastních sloupcích. */
+    period?: { year: number | null; month: number | null },
   ) =>
     api.get<PayrollJmhzImportedProtocolHistory>(
       '/payroll/submissions/jmhz-protocol-import',
-      { params: { environment, ...pageParams(page) } },
+      {
+        params: {
+          environment,
+          ...pageParams(page),
+          year: period?.year ?? undefined,
+          month: period?.month ?? undefined,
+        },
+      },
     ).then(response => response.data),
   /**
    * Vysvětlené chyby jednoho protokolu. Seznam je nenese — počítají se z

@@ -228,7 +228,12 @@ describe('PayrollTransportHistoryPanel', () => {
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
 
-    expect(m.jmhzTransportHistory).toHaveBeenCalledWith('production', { limit: 25, offset: 0 })
+    expect(m.jmhzTransportHistory).toHaveBeenCalledWith(
+      'production',
+      { limit: 25, offset: 0 },
+      // Rychlý filtr období; nevyplněný znamená „bez omezení".
+      { year: null, month: null },
+    )
     const group = wrapper.get('[data-test="transport-group-70"]')
     expect(group.text()).toContain('payroll.submissions.transport.group.attempts 2')
     // Období se ukazuje v lidském tvaru, ne v ISO — hledá se proto „01. 07. 2026".
@@ -591,7 +596,11 @@ describe('PayrollTransportHistoryPanel', () => {
     await wrapper.get('[data-test="transport-environment-test"]').trigger('click')
     await flushPromises()
 
-    expect(m.jmhzTransportHistory).toHaveBeenLastCalledWith('test', { limit: 25, offset: 0 })
+    expect(m.jmhzTransportHistory).toHaveBeenLastCalledWith(
+      'test',
+      { limit: 25, offset: 0 },
+      { year: null, month: null },
+    )
     expect(wrapper.get('[data-test="transport-environment-note"]').text())
       .toContain('payroll.submissions.transport.environment.test_note')
   })

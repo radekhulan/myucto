@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollImportedJmhzProtocolRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
@@ -22,6 +23,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolExplainer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Support\PeriodFilter;
 
 /**
  * Odeslání měsíčního hlášení na ČSSZ a dotažení výsledku.
@@ -55,6 +57,10 @@ final class PayrollJmhzTransportAction
         private readonly PayrollSubmissionAttemptDeletionService $deletion,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        // Kvůli nabídce roků ve filtru: načtený protokol může být jediná stopa
+        // po hlášení podaném přímo na portálu ČSSZ, takže bez něj by rok
+        // v nabídce chyběl a protokol by se nedal najít.
+        private readonly PayrollImportedJmhzProtocolRepository $protocols,
     ) {}
 
     /** @param array{submissionId:string} $args */
@@ -133,12 +139,18 @@ final class PayrollJmhzTransportAction
                 ?? PayrollSubmissionTransportAttemptRepository::LIST_DEFAULT_LIMIT),
         ));
         $offset = max(0, (int) ($query['offset'] ?? 0));
+        try {
+            $period = PeriodFilter::fromQuery($query);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        }
         $supplierId = $this->currentSupplierId($request);
         $page = $this->attempts->listRecentPage(
             $supplierId,
             $environment,
             $limit,
             $offset,
+            $period,
         );
         // Rozsah obrazovky „Stav odeslání" je právě JMHZ. Je to obrazovka
         // kanálu VREP/APEP (variabilní symbol, doptání na protokol, uzavření
@@ -151,6 +163,8 @@ final class PayrollJmhzTransportAction
             $supplierId,
             $environment,
             [JmhzSubmissionBridgeService::AGENDA_CODE],
+            50,
+            $period,
         );
         // Hlášení odeslané datovou schránkou nezakládá pokus a ze stavu
         // `ready` odejde hned při zařazení do fronty. Bez tohohle seznamu
@@ -159,6 +173,8 @@ final class PayrollJmhzTransportAction
             $supplierId,
             $environment,
             [JmhzSubmissionBridgeService::AGENDA_CODE],
+            50,
+            $period,
         );
 
         return $this->noStore(Json::ok($response, [
@@ -167,9 +183,36 @@ final class PayrollJmhzTransportAction
             'ready_submissions' => $readySubmissions,
             'dispatched_submissions' => $dispatchedSubmissions,
             'total' => $page['total'],
+            'years' => $this->availableYears($supplierId, $environment),
             'limit' => $limit,
             'offset' => $offset,
         ]));
+    }
+
+    /**
+     * Roky do nabídky filtru za CELOU obrazovku.
+     *
+     * Obrazovka slévá pokusy, zmrazená podání, podání odeslaná datovkou
+     * a načtené protokoly. Kdyby se nabídka brala jen z ledgeru pokusů (jak ji
+     * vrací stránkovaný seznam), chyběl by v ní rok, ve kterém firma odeslala
+     * datovkou nebo podala rovnou na portálu ČSSZ — a k těm datům by se přes
+     * filtr nešlo dostat.
+     *
+     * @return list<int>
+     */
+    private function availableYears(int $supplierId, string $environment): array
+    {
+        $years = array_unique(array_merge(
+            $this->attempts->availableYears(
+                $supplierId,
+                $environment,
+                [JmhzSubmissionBridgeService::AGENDA_CODE],
+            ),
+            $this->protocols->availableYears($supplierId, $environment),
+        ));
+        rsort($years);
+
+        return array_values($years);
     }
 
     /** @param array{attemptId:string} $args */

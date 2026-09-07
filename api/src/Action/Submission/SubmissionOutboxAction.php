@@ -21,6 +21,7 @@ use MyInvoice\Service\Submission\SubmissionOutboxService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
+use MyInvoice\Support\PeriodFilter;
 
 /**
  * Fronta odchozích podání.
@@ -60,7 +61,10 @@ final class SubmissionOutboxAction
                 $environment,
                 $limit,
                 $offset,
+                PeriodFilter::fromQuery($params),
             );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -68,6 +72,7 @@ final class SubmissionOutboxAction
         return Json::ok($response, [
             'items' => $page['items'],
             'total' => $page['total'],
+            'years' => $page['years'],
             'limit' => $limit,
             'offset' => $offset,
         ]);

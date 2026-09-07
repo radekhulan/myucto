@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
+use MyInvoice\Support\PeriodFilter;
 
 /**
  * Načtení protokolu ČSSZ ze souboru (datová schránka).
@@ -104,11 +105,17 @@ final class PayrollJmhzProtocolImportAction
             (int) ($query['limit'] ?? PayrollImportedJmhzProtocolRepository::LIST_DEFAULT_LIMIT),
         ));
         $offset = max(0, (int) ($query['offset'] ?? 0));
+        try {
+            $period = PeriodFilter::fromQuery($query);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        }
         $page = $this->protocols->history(
             $this->currentSupplierId($request),
             $environment,
             $limit,
             $offset,
+            $period,
         );
 
         // Klíč `protocols` zůstává kvůli stávajícím volajícím.

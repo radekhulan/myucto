@@ -674,10 +674,20 @@ export const dataBoxApi = {
    * Stránka odchozí fronty. Dřív se vracelo prvních 100 řádků bez celkového
    * počtu, takže po pár měsících provozu starší podání z přehledu tiše zmizela.
    */
-  outbox: (environment: string, limit?: number, offset?: number) =>
-    api.get<{ items: OutboxSubmission[]; total?: number }>('/submissions/outbox', {
-      params: { environment, limit, offset },
-    }).then(r => ({ items: r.data.items, total: r.data.total ?? r.data.items.length })),
+  outbox: (
+    environment: string,
+    limit?: number,
+    offset?: number,
+    year?: number | null,
+    month?: number | null,
+  ) =>
+    api.get<{ items: OutboxSubmission[]; total?: number; years?: number[] }>('/submissions/outbox', {
+      params: { environment, limit, offset, year: year ?? undefined, month: month ?? undefined },
+    }).then(r => ({
+      items: r.data.items,
+      total: r.data.total ?? r.data.items.length,
+      years: r.data.years ?? [],
+    })),
 
   attempts: (id: number) =>
     api.get<{ items: OutboxAttempt[] }>(`/submissions/outbox/${id}/attempts`).then(r => r.data.items),
@@ -803,15 +813,26 @@ export const dataBoxApi = {
     visibility: 'active' | 'hidden' | 'all' = 'active',
     limit?: number,
     offset?: number,
+    year?: number | null,
+    month?: number | null,
   ) =>
     api.get<{
       items: InboxMessage[]
       total: number
+      years?: number[]
       limit: number
       offset: number
       state: InboxPollState | null
     }>('/submissions/inbox', {
-      params: { environment, classification, visibility, limit, offset },
+      params: {
+        environment,
+        classification,
+        visibility,
+        limit,
+        offset,
+        year: year ?? undefined,
+        month: month ?? undefined,
+      },
     }).then(r => r.data),
 
   /**

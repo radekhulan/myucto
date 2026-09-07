@@ -13315,6 +13315,14 @@
     "sample_link": "link",
     "sample_line": "text"
   },
+  "period_filter": {
+    "month": "Month",
+    "year": "Year",
+    "all_months": "All months",
+    "all_years": "All years",
+    "clear": "Clear filter",
+    "count": "{count} records"
+  },
   "codebookTransfer": {
     "export": "Export XLSX",
     "import": "Import",

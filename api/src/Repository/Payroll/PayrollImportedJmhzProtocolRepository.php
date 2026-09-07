@@ -6,6 +6,7 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
+use MyInvoice\Support\PeriodFilter;
 
 /**
  * Protokoly ČSSZ načtené ze souboru (migrace 1375).
@@ -105,6 +106,7 @@ final class PayrollImportedJmhzProtocolRepository
         string $environment,
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?PeriodFilter $period = null,
     ): array {
         if (!$this->isAvailable()) {
             return ['items' => [], 'total' => 0];
@@ -115,23 +117,28 @@ final class PayrollImportedJmhzProtocolRepository
         $limit = max(1, min($limit, self::LIST_MAX_LIMIT));
         $offset = max(0, $offset);
 
+        // Rok a měsíc má tahle tabulka ve vlastních sloupcích, takže se
+        // filtruje přímo na nich — skládat z nich datum jen kvůli filtru by
+        // znamenalo řešit, že každý z nich může být NULL zvlášť.
+        $filter = ($period ?? PeriodFilter::none())->sqlForColumns('period_year', 'period_month');
+        $where = ' WHERE supplier_id = ? AND environment = ?' . $filter['sql'];
+        $params = [$supplierId, $environment, ...$filter['params']];
+
         $countStatement = $this->db->pdo()->prepare(
-            'SELECT COUNT(*) FROM ' . self::TABLE . '
-              WHERE supplier_id = ? AND environment = ?',
+            'SELECT COUNT(*) FROM ' . self::TABLE . $where,
         );
-        $countStatement->execute([$supplierId, $environment]);
+        $countStatement->execute($params);
         $total = (int) $countStatement->fetchColumn();
 
         $statement = $this->db->pdo()->prepare(
             'SELECT ' . self::LIST_COLUMNS . ',
                     (payload_xml IS NOT NULL AND payload_xml <> "")
                         AS has_payload
-               FROM ' . self::TABLE . '
-              WHERE supplier_id = ? AND environment = ?
+               FROM ' . self::TABLE . $where . '
               ORDER BY period_year DESC, period_month DESC, id DESC
               LIMIT ' . $limit . ' OFFSET ' . $offset,
         );
-        $statement->execute([$supplierId, $environment]);
+        $statement->execute($params);
         $rows = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if (is_array($row)) {
@@ -144,6 +151,35 @@ final class PayrollImportedJmhzProtocolRepository
         }
 
         return ['items' => $rows, 'total' => $total];
+    }
+
+    /**
+     * Roky, za které firma nějaký protokol načetla.
+     *
+     * Protokol může existovat i bez podání v aplikaci — přesně to je případ
+     * hlášení podaného přímo na portálu ČSSZ. Bez těchhle roků by nabídka
+     * filtru takový rok neznala a načtený protokol by se nedal najít.
+     *
+     * @return list<int>
+     */
+    public function availableYears(int $supplierId, string $environment): array
+    {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        self::assertEnvironment($environment);
+        $statement = $this->db->pdo()->prepare(
+            'SELECT DISTINCT period_year AS y
+               FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ? AND period_year IS NOT NULL
+              ORDER BY y DESC',
+        );
+        $statement->execute([$supplierId, $environment]);
+
+        return array_values(array_filter(array_map(
+            static fn ($row): int => (int) $row,
+            $statement->fetchAll(PDO::FETCH_COLUMN) ?: [],
+        )));
     }
 
     /**

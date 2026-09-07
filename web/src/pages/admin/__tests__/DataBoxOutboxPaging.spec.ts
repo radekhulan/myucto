@@ -72,6 +72,7 @@ async function mountOutbox(total: number, pageSize = 25) {
   m.outbox.mockResolvedValue({
     items: Array.from({ length: Math.min(total, pageSize) }, (_v, i) => submission(i + 1)),
     total,
+    years: [2026, 2025],
   })
 
   const wrapper = mount(DataBox, {
@@ -98,7 +99,34 @@ describe('DataBox — stránkování odchozích podání', () => {
   it('si řekne o stránku, ne o celou frontu', async () => {
     await mountOutbox(60)
 
-    expect(m.outbox).toHaveBeenCalledWith('production', 25, 0)
+    expect(m.outbox).toHaveBeenCalledWith('production', 25, 0, null, null)
+  })
+
+  /**
+   * Filtr musí dojet na SERVER, ne jen proškrtat načtenou stránku — jinak by
+   * ukazoval jen to, co se náhodou vešlo do prvních 25 řádků.
+   */
+  it('vybraný měsíc a rok pošle na server a vrátí se na první stránku', async () => {
+    const wrapper = await mountOutbox(60)
+
+    await wrapper.get('[data-test="period-filter-year"]').setValue('2026')
+    await flushPromises()
+    expect(m.outbox).toHaveBeenLastCalledWith('production', 25, 0, 2026, null)
+
+    await wrapper.get('[data-test="period-filter-month"]').setValue('8')
+    await flushPromises()
+    expect(m.outbox).toHaveBeenLastCalledWith('production', 25, 0, 2026, 8)
+  })
+
+  it('zrušení filtru se vrátí k celému seznamu', async () => {
+    const wrapper = await mountOutbox(60)
+
+    await wrapper.get('[data-test="period-filter-year"]').setValue('2026')
+    await flushPromises()
+    await wrapper.get('[data-test="period-filter-clear"]').trigger('click')
+    await flushPromises()
+
+    expect(m.outbox).toHaveBeenLastCalledWith('production', 25, 0, null, null)
   })
 
   it('nad jednu stránku nabídne listování', async () => {

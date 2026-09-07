@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Submission;
 
 use MyInvoice\Repository\Submission\SubmissionOutboxAttemptRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
+use MyInvoice\Support\PeriodFilter;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
 use MyInvoice\Service\Submission\Channel\AcceptanceState;
@@ -798,8 +799,52 @@ final readonly class SubmissionOutboxService
     public function listForSupplier(int $supplierId, string $environment, int $limit = 100): array
     {
         $this->assertEnvironment($environment);
-        $rows = $this->outbox->listForSupplier($supplierId, $environment, $limit);
 
+        return $this->annotate(
+            $supplierId,
+            $this->outbox->listForSupplier($supplierId, $environment, $limit),
+        );
+    }
+
+    /**
+     * Totéž stránkovaně a s filtrem období — fronta roste každý měsíc a nic se
+     * z ní nemaže, takže bez stránkování starší zprávy z přehledu tiše mizely.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int,years:list<int>}
+     */
+    public function listPageForSupplier(
+        int $supplierId,
+        string $environment,
+        int $limit = SubmissionOutboxRepository::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+        ?PeriodFilter $period = null,
+    ): array {
+        $this->assertEnvironment($environment);
+        $page = $this->outbox->listPageForSupplier(
+            $supplierId,
+            $environment,
+            $limit,
+            $offset,
+            $period,
+        );
+        $page['items'] = $this->annotate($supplierId, $page['items']);
+
+        return $page;
+    }
+
+    /**
+     * Doplní řádkům to, co se nedá spočítat v SQL: jestli jde zprávu smazat,
+     * proč ne a jak na tom je podklad, ze kterého vznikla.
+     *
+     * Je to jedno místo pro obě cesty do seznamu ZÁMĚRNĚ. Když si stránkovaná
+     * varianta obohacení okopírovala, znamenalo by to, že „Smazat" nabízí na
+     * jedné obrazovce jinak než na druhé.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function annotate(int $supplierId, array $rows): array
+    {
         foreach ($rows as $index => $row) {
             if ((string) $row['dispatch_state'] !== SubmissionOutboxDeletionPolicy::DELETABLE_STATE->value) {
                 continue;

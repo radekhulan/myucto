@@ -47,6 +47,8 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import PeriodFilterBar from '@/components/ui/PeriodFilterBar.vue'
+import { pickDefaultYear } from '@/utils/periodDefaultYear'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 // Ledger vrací syrové ISO tvary („2026-07-31", „2026-07-31 09:12:04"). Účetní
@@ -116,6 +118,41 @@ const protocolErrorsLoading = ref<Record<number, boolean>>({})
 const protocolErrorsFailed = ref<Record<number, boolean>>({})
 /** `false` = uložený originál se nepodařilo znovu přečíst, detail neexistuje. */
 const protocolDetailAvailable = ref<Record<number, boolean>>({})
+
+// Rychlý filtr podle OBDOBÍ hlášení — podle toho, čím je karta nadepsaná.
+const filterYear = ref<number | null>(null)
+const filterMonth = ref<number | null>(null)
+const filterYears = ref<number[]>([])
+
+/** Aby se předvolení roku stalo právě jednou, ne po každém načtení. */
+const defaultYearApplied = ref(false)
+
+/**
+ * Předvolí rok, jakmile je z čeho vybírat, a vrátí, jestli se něco změnilo.
+ *
+ * Samotný měsíc je matoucí — „leden" neřekne který. Bere se dnešní rok; když
+ * v datech není (firma letos ještě nepodávala), tak nejnovější, který v nich
+ * je, ať filtr nezačne prázdnou obrazovkou. Roky zná až odpověď serveru, takže
+ * se předvolba dá udělat nejdřív po prvním načtení — a to se pak musí načíst
+ * znovu, jinak by rok svítil ve výběru, ale na seznam by neplatil.
+ */
+function ensureDefaultYear(): boolean {
+  if (defaultYearApplied.value) return false
+  defaultYearApplied.value = true
+  if (filterYear.value !== null) return false
+  const preset = pickDefaultYear(filterYears.value)
+  if (preset === null) return false
+  filterYear.value = preset
+  return true
+}
+
+async function applyPeriodFilter(next: { year?: number | null; month?: number | null }) {
+  if (next.year !== undefined) filterYear.value = next.year
+  if (next.month !== undefined) filterMonth.value = next.month
+  // Jiný filtr má vlastní počet řádků; zůstat na páté stránce by ukázalo prázdno.
+  attemptsOffset.value = 0
+  await load()
+}
 
 const attemptsPageSize = 25
 const attemptsTotal = ref(0)
@@ -609,19 +646,22 @@ async function load() {
     // znamenalo přehled, který zamlčuje podání — a přesně kvůli tomu se sem
     // uživatel dívá.
     const [history, protocols] = await Promise.all([
-      payrollApi.jmhzTransportHistory(environment.value, {
-        limit: attemptsPageSize,
-        offset: attemptsOffset.value,
-      }),
-      payrollApi.jmhzImportedProtocols(environment.value, {
-        limit: importedPageSize,
-        offset: importedOffset.value,
-      }),
+      payrollApi.jmhzTransportHistory(
+        environment.value,
+        { limit: attemptsPageSize, offset: attemptsOffset.value },
+        { year: filterYear.value, month: filterMonth.value },
+      ),
+      payrollApi.jmhzImportedProtocols(
+        environment.value,
+        { limit: importedPageSize, offset: importedOffset.value },
+        { year: filterYear.value, month: filterMonth.value },
+      ),
     ])
     attempts.value = history.attempts ?? []
     readySubmissions.value = history.ready_submissions ?? []
     dispatchedSubmissions.value = history.dispatched_submissions ?? []
     attemptsTotal.value = history.total ?? 0
+    filterYears.value = history.years ?? []
     imported.value = protocols.protocols ?? []
     importedTotal.value = protocols.total ?? 0
   } catch (exception: unknown) {
@@ -639,6 +679,12 @@ async function load() {
     )
   } finally {
     loading.value = false
+  }
+  // Roky zná až odpověď serveru, takže předvolba přijde po prvním načtení
+  // a seznam se pro ni musí načíst znovu. Vlajka uvnitř hlídá, že se to
+  // stane právě jednou — jinak by to bylo nekonečné kolo.
+  if (ensureDefaultYear()) {
+    await load()
   }
 }
 
@@ -1215,6 +1261,22 @@ onMounted(loadVariableSymbols)
     />
 
     <template v-else>
+      <!--
+        Filtr míří na OBDOBÍ hlášení, ne na den odeslání: karta je nadepsaná
+        obdobím a uživatel hledá „co jsem poslal za červenec".
+      -->
+      <!--
+        Bez počtu záměrně: přehled slévá tři nezávislé zdroje (pokusy, podání
+        odeslaná datovkou a načtené protokoly) a `attemptsTotal` je jen první
+        z nich. Číslo u filtru by tedy tvrdilo něco jiného, než je na obrazovce.
+      -->
+      <PeriodFilterBar
+        :year="filterYear"
+        :month="filterMonth"
+        :years="filterYears"
+        @update:year="applyPeriodFilter({ year: $event })"
+        @update:month="applyPeriodFilter({ month: $event })"
+      />
       <p
         v-if="actionError"
         data-test="transport-error"

@@ -13315,6 +13315,14 @@
     "sample_link": "odkaz",
     "sample_line": "text"
   },
+  "period_filter": {
+    "month": "Měsíc",
+    "year": "Rok",
+    "all_months": "Všechny měsíce",
+    "all_years": "Všechny roky",
+    "clear": "Zrušit filtr",
+    "count": "{count} záznamů"
+  },
   "codebookTransfer": {
     "export": "Export XLSX",
     "import": "Import",

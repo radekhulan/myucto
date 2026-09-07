@@ -75,6 +75,7 @@
     "payrollDocumentAccess",
     "payroll_absence",
     "payroll_travel",
+    "period_filter",
     "permissions",
     "portal",
     "portfolio",
@@ -155,6 +156,7 @@
       "payrollDocumentAccess",
       "payroll_absence",
       "payroll_travel",
+      "period_filter",
       "permissions",
       "portal",
       "portfolio",
@@ -457,11 +459,13 @@
     ],
     "payroll-submissions": [
       "databox",
-      "payroll"
+      "payroll",
+      "period_filter"
     ],
     "payroll-submissions-tab": [
       "databox",
-      "payroll"
+      "payroll",
+      "period_filter"
     ],
     "payroll-settings": [
       "payroll"
@@ -703,7 +707,8 @@
       "settings"
     ],
     "admin-databox": [
-      "databox"
+      "databox",
+      "period_filter"
     ],
     "admin-isds-gateway": [
       "databox"

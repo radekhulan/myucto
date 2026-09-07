@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 
 use MyInvoice\Repository\Payroll\PayrollImportedJmhzProtocolRepository;
+use MyInvoice\Support\PeriodFilter;
 
 /**
  * Načtení protokolu ČSSZ, který přišel do datové schránky.
@@ -133,12 +134,14 @@ final readonly class JmhzProtocolImportService
         string $environment,
         int $limit = PayrollImportedJmhzProtocolRepository::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?PeriodFilter $period = null,
     ): array {
         return $this->protocols->listRecentPage(
             $supplierId,
             $environment,
             $limit,
             $offset,
+            $period,
         );
     }
 

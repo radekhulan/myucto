@@ -7,6 +7,7 @@ namespace MyInvoice\Repository\Submission;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 use PDOException;
+use MyInvoice\Support\PeriodFilter;
 
 /**
  * Odchozí fronta podání (migrace 1381).
@@ -21,6 +22,9 @@ use PDOException;
 final class SubmissionOutboxRepository
 {
     private const TABLE = 'submission_outbox';
+
+    /** Podle čeho se řadí i filtruje: den odeslání, u nedoslané zprávy založení. */
+    private const DATE_EXPRESSION = 'COALESCE(sent_at, created_at)';
 
     /** Stránka odchozí fronty — stejná velikost jako u příchozích zpráv. */
     public const LIST_DEFAULT_LIMIT = 25;
@@ -190,6 +194,7 @@ final class SubmissionOutboxRepository
         string $environment,
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?PeriodFilter $period = null,
     ): array {
         $this->assertAvailable();
         // Limit i offset se vkládají do SQL jako celá čísla — MariaDB v LIMIT
@@ -197,24 +202,50 @@ final class SubmissionOutboxRepository
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
 
+        // Filtruje se podle DATA ZPRÁVY, tedy podle toho, co je ve výpisu vidět.
+        // Nedoslaná zpráva ještě datum odeslání nemá, proto fallback na založení.
+        $filter = ($period ?? PeriodFilter::none())->sqlFor(self::DATE_EXPRESSION);
+        $where = ' WHERE supplier_id = ? AND environment = ?' . $filter['sql'];
+        $params = [$supplierId, $environment, ...$filter['params']];
+
         $countStatement = $this->db->pdo()->prepare(
-            'SELECT COUNT(*) FROM ' . self::TABLE . '
-              WHERE supplier_id = ? AND environment = ?'
+            'SELECT COUNT(*) FROM ' . self::TABLE . $where
         );
-        $countStatement->execute([$supplierId, $environment]);
+        $countStatement->execute($params);
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
-              WHERE supplier_id = ? AND environment = ?
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . $where . '
               ORDER BY id DESC
               LIMIT ' . $limit . ' OFFSET ' . $offset
         );
-        $stmt->execute([$supplierId, $environment]);
+        $stmt->execute($params);
 
         return [
             'items' => array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []),
             'total' => (int) $countStatement->fetchColumn(),
+            'years' => $this->availableYears($supplierId, $environment),
         ];
+    }
+
+    /**
+     * Roky, ve kterých firma nějakou zprávu má — nabídka filtru se staví z dat,
+     * ne z pevného rozsahu. Prázdný rok v nabídce vede jen k prázdnému seznamu.
+     *
+     * @return list<int>
+     */
+    private function availableYears(int $supplierId, string $environment): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT YEAR(' . self::DATE_EXPRESSION . ') AS y FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?
+              ORDER BY y DESC'
+        );
+        $stmt->execute([$supplierId, $environment]);
+
+        return array_values(array_filter(array_map(
+            static fn ($row): int => (int) $row,
+            $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [],
+        )));
     }
 
     /**

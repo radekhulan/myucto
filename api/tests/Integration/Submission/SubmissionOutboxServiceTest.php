@@ -112,6 +112,41 @@ final class SubmissionOutboxServiceTest extends TestCase
         self::assertSame($first['row']['id'], $second['row']['id']);
     }
 
+    /**
+     * Stránkovaný seznam musí být na SLUŽBĚ, ne jen na repozitáři.
+     *
+     * Obrazovka datové schránky volá službu; když stránkování přibylo jen
+     * v repozitáři, spadl přehled na „Call to undefined method" a uživatel
+     * viděl prázdnou stránku s chybou 500. Test to hlídá i s tím, že řádky
+     * projdou stejným obohacením jako nestránkovaný seznam — jinak by se
+     * nabídka „Smazat" na jedné obrazovce lišila od druhé.
+     */
+    public function testPagedListGoesThroughTheServiceAndKeepsRowAnnotations(): void
+    {
+        $row = $this->enqueue()['row'];
+
+        $page = $this->service->listPageForSupplier($this->supplierId, 'test', 25, 0);
+
+        self::assertGreaterThanOrEqual(1, $page['total']);
+        self::assertContains($row['id'], array_column($page['items'], 'id'));
+        self::assertContains((int) date('Y'), $page['years']);
+
+        $plain = $this->service->listForSupplier($this->supplierId, 'test');
+        $find = static fn (array $rows): array => array_values(array_filter(
+            $rows,
+            static fn (array $candidate): bool => (int) $candidate['id'] === (int) $row['id'],
+        ))[0];
+        $fromPage = $find($page['items']);
+        $fromPlain = $find($plain);
+        foreach (['deletable', 'delete_blocked_reason', 'source_obligation'] as $key) {
+            self::assertSame(
+                $fromPlain[$key] ?? null,
+                $fromPage[$key] ?? null,
+                'Stránkovaný seznam musí řádek obohatit stejně jako nestránkovaný.',
+            );
+        }
+    }
+
     public function testAutomationCanOnlyPrepareNeverSend(): void
     {
         $row = $this->enqueue()['row'];

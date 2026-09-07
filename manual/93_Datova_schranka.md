@@ -157,6 +157,20 @@ a spisové značky, aby bylo zpětně poznat, co zmizelo a kdo to smazal.
 Smazáním se povinnost nesplní. Podání se vrátí mezi nesplněné přesně tak jako
 po zrušení a fronta mzdových podání ho zase nabídne k zařazení.
 
+### 93.4.5 Listování a filtr podle měsíce
+
+Odchozí podání ani příchozí zprávy se nemažou, takže obojí seznam roste každý
+měsíc. Zobrazuje se proto po stránkách a nad každým seznamem je rychlý filtr
+**měsíc a rok**.
+
+Rok je předvolený na aktuální, aby bylo poznat, o který měsíc jde. Vybraný
+samotný rok zobrazí celý rok, samotný měsíc týž měsíc napříč roky. Volbou
+**Zrušit filtr** se vrátíte na celou historii. V nabídce roků jsou jen roky, ve
+kterých firma opravdu něco má.
+
+Stejný filtr je i v přehledu mzdových podání (Mzdy → Podání → **Stav
+odeslání**), takže se hledá všude stejně.
+
 ## 93.5 Příjemci a výzvy
 
 V záložce **Příjemci** zkontrolujte ID datové schránky cílové instituce. Výchozí adresář zdravotních pojišťoven lze přepsat pro konkrétní firmu; jiné instituce doplňte podle jejich aktuálních údajů. Před každým odesláním příjemce ověřte.

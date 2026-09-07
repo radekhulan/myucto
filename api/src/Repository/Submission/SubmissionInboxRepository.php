@@ -7,6 +7,7 @@ namespace MyInvoice\Repository\Submission;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 use PDOException;
+use MyInvoice\Support\PeriodFilter;
 
 /**
  * Příchozí zprávy z datové schránky + stav dotazování (migrace 1381).
@@ -143,6 +144,9 @@ final class SubmissionInboxRepository
         return $row !== false ? self::normalize($row) : null;
     }
 
+    /** Podle čeho se řadí i filtruje: den doručení, u nestažené zprávy stažení. */
+    private const DATE_EXPRESSION = 'COALESCE(delivered_at, fetched_at)';
+
     public const LIST_DEFAULT_LIMIT = 25;
     public const LIST_MAX_LIMIT = 200;
 
@@ -185,6 +189,7 @@ final class SubmissionInboxRepository
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
         string $visibility = 'active',
+        ?PeriodFilter $period = null,
     ): array {
         $this->assertAvailable();
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
@@ -203,6 +208,11 @@ final class SubmissionInboxRepository
             $where .= ' AND classification = ?';
             $params[] = $classification;
         }
+        // Filtruje se podle DATA ZPRÁVY, tedy podle toho, co je ve výpisu vidět
+        // a podle čeho se i řadí — nestažená zpráva datum doručení ještě nemá.
+        $filter = ($period ?? PeriodFilter::none())->sqlFor(self::DATE_EXPRESSION);
+        $where .= $filter['sql'];
+        $params = [...$params, ...$filter['params']];
 
         $countStmt = $this->db->pdo()->prepare(
             'SELECT COUNT(*) FROM ' . self::TABLE . $where,
@@ -212,7 +222,7 @@ final class SubmissionInboxRepository
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . $this->columns() . ' FROM ' . self::TABLE . $where
-            . ' ORDER BY COALESCE(delivered_at, fetched_at) DESC, id DESC'
+            . ' ORDER BY ' . self::DATE_EXPRESSION . ' DESC, id DESC'
             . ' LIMIT ' . $limit . ' OFFSET ' . $offset,
         );
         $stmt->execute($params);
@@ -223,7 +233,29 @@ final class SubmissionInboxRepository
                 $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
             )),
             'total' => $total,
+            'years' => $this->availableYears($supplierId, $environment),
         ];
+    }
+
+    /**
+     * Roky, ve kterých firma nějakou zprávu má — nabídka filtru se staví z dat,
+     * ne z pevného rozsahu. Prázdný rok v nabídce vede jen k prázdnému seznamu.
+     *
+     * @return list<int>
+     */
+    private function availableYears(int $supplierId, string $environment): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT YEAR(' . self::DATE_EXPRESSION . ') AS y FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?
+              ORDER BY y DESC',
+        );
+        $stmt->execute([$supplierId, $environment]);
+
+        return array_values(array_filter(array_map(
+            static fn ($row): int => (int) $row,
+            $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [],
+        )));
     }
 
     /** @return array<string,mixed>|null */

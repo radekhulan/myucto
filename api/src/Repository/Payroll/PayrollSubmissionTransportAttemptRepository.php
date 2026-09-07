@@ -7,6 +7,7 @@ namespace MyInvoice\Repository\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 use PDOException;
+use MyInvoice\Support\PeriodFilter;
 
 /**
  * Append-only ledger pokusů o odeslání mzdového podání (migrace 1372).
@@ -204,9 +205,10 @@ final class PayrollSubmissionTransportAttemptRepository
         string $environment,
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?PeriodFilter $period = null,
     ): array {
         if (!$this->isAvailable()) {
-            return ['items' => [], 'total' => 0];
+            return ['items' => [], 'total' => 0, 'years' => []];
         }
         self::assertEnvironment($environment);
         // Strop se klampuje i tady, ne jen na HTTP hranici. Limit i offset se
@@ -215,11 +217,25 @@ final class PayrollSubmissionTransportAttemptRepository
         $limit = max(1, min($limit, self::LIST_MAX_LIMIT));
         $offset = max(0, $offset);
 
+        // Filtruje se podle OBDOBÍ HLÁŠENÍ, tedy podle toho, čím je karta
+        // v přehledu nadepsaná („Období 01. 08. – 31. 08."), ne podle dne
+        // odeslání. Pokus bez podání (osiřelý ledger) období nemá a filtrem
+        // proto propadne — to je správně, filtruje se na měsíc hlášení.
+        $filter = ($period ?? PeriodFilter::none())->sqlFor('obligation.period_start');
+        $join = ' LEFT JOIN payroll_submissions submission
+                      ON submission.supplier_id = attempt.supplier_id
+                     AND submission.id = attempt.submission_id
+               LEFT JOIN payroll_obligations obligation
+                      ON obligation.supplier_id = submission.supplier_id
+                     AND obligation.environment = submission.environment
+                     AND obligation.id = submission.obligation_id';
+        $where = ' WHERE attempt.supplier_id = ? AND attempt.environment = ?' . $filter['sql'];
+        $params = [$supplierId, $environment, ...$filter['params']];
+
         $countStatement = $this->db->pdo()->prepare(
-            'SELECT COUNT(*) FROM ' . self::TABLE . ' attempt
-              WHERE attempt.supplier_id = ? AND attempt.environment = ?',
+            'SELECT COUNT(*) FROM ' . self::TABLE . ' attempt' . $join . $where,
         );
-        $countStatement->execute([$supplierId, $environment]);
+        $countStatement->execute($params);
         $total = (int) $countStatement->fetchColumn();
 
         $statement = $this->db->pdo()->prepare(
@@ -228,19 +244,11 @@ final class PayrollSubmissionTransportAttemptRepository
                     submission.submission_kind,
                     submission.status AS submission_status,
                     submission.corrects_submission_id
-               FROM ' . self::TABLE . ' attempt
-               LEFT JOIN payroll_submissions submission
-                      ON submission.supplier_id = attempt.supplier_id
-                     AND submission.id = attempt.submission_id
-               LEFT JOIN payroll_obligations obligation
-                      ON obligation.supplier_id = submission.supplier_id
-                     AND obligation.environment = submission.environment
-                     AND obligation.id = submission.obligation_id
-              WHERE attempt.supplier_id = ? AND attempt.environment = ?
+               FROM ' . self::TABLE . ' attempt' . $join . $where . '
               ORDER BY attempt.id DESC
               LIMIT ' . $limit . ' OFFSET ' . $offset,
         );
-        $statement->execute([$supplierId, $environment]);
+        $statement->execute($params);
         $rows = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if (is_array($row)) {
@@ -248,7 +256,67 @@ final class PayrollSubmissionTransportAttemptRepository
             }
         }
 
-        return ['items' => $rows, 'total' => $total];
+        return [
+            'items' => $rows,
+            'total' => $total,
+            // Nabídka roků se schválně NEomezuje na ledger pokusů: obrazovka
+            // slévá tři zdroje a rok, ve kterém firma jen odeslala datovkou,
+            // by se v nabídce vůbec neobjevil — a ta data by nešlo najít.
+            'years' => $this->availableYears($supplierId, $environment),
+        ];
+    }
+
+    /**
+     * Roky, které smí nabídnout filtr — staví se z DAT, ne z pevného rozsahu.
+     *
+     * Bere se ROK OBDOBÍ, protože podle něj se i filtruje. Zdrojem jsou VŠECHNA
+     * podání firmy, ne jen ta s pokusem: obrazovka slévá tři seznamy (ledger
+     * pokusů, zmrazená podání bez pokusu, podání odeslaná datovou schránkou)
+     * a hlášení odeslané datovkou žádný pokus nezakládá. Kdyby se nabídka
+     * počítala z ledgeru, takový rok by v ní chyběl a jeho data by nešlo najít.
+     *
+     * Raději tedy o rok víc než o rok míň: prázdný rok v nabídce znamená
+     * prázdný seznam, kdežto chybějící rok znamená data, ke kterým se uživatel
+     * nedostane.
+     *
+     * @param list<string> $agendaCodes
+     * @return list<int>
+     */
+    public function availableYears(int $supplierId, string $environment, array $agendaCodes = []): array
+    {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        self::assertEnvironment($environment);
+        $agendaCodes = array_values(array_unique(array_filter(
+            array_map(
+                static fn (string $code): string => strtoupper(trim($code)),
+                $agendaCodes,
+            ),
+            static fn (string $code): bool => $code !== '',
+        )));
+        $agendaFilter = '';
+        if ($agendaCodes !== []) {
+            $agendaFilter = ' AND obligation.agenda_code IN ('
+                . implode(', ', array_fill(0, count($agendaCodes), '?')) . ')';
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT DISTINCT YEAR(obligation.period_start) AS y
+               FROM payroll_submissions submission
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+              WHERE submission.supplier_id = ? AND submission.environment = ?'
+                . $agendaFilter . '
+              ORDER BY y DESC',
+        );
+        $statement->execute([$supplierId, $environment, ...$agendaCodes]);
+
+        return array_values(array_filter(array_map(
+            static fn ($row): int => (int) $row,
+            $statement->fetchAll(PDO::FETCH_COLUMN) ?: [],
+        )));
     }
 
     /**
@@ -295,6 +363,7 @@ final class PayrollSubmissionTransportAttemptRepository
         string $environment,
         array $agendaCodes,
         int $limit = 50,
+        ?PeriodFilter $period = null,
     ): array {
         if (!$this->isAvailable()) {
             return [];
@@ -316,6 +385,8 @@ final class PayrollSubmissionTransportAttemptRepository
         }
         $limit = max(1, min($limit, 100));
         $placeholders = implode(', ', array_fill(0, count($agendaCodes), '?'));
+        // Filtr období platí i tady — viz listReadySubmissions().
+        $filter = ($period ?? PeriodFilter::none())->sqlFor('obligation.period_start');
         $statement = $this->db->pdo()->prepare(
             'SELECT submission.id AS submission_id,
                     obligation.agenda_code,
@@ -376,11 +447,11 @@ final class PayrollSubmissionTransportAttemptRepository
                 AND submission.environment = ?
                 AND submission.status = "ready"
                 AND obligation.agenda_code IN (' . $placeholders . ')
-                AND attempt.id IS NULL
+                AND attempt.id IS NULL' . $filter['sql'] . '
               ORDER BY submission.created_at DESC, submission.id DESC
               LIMIT ' . $limit,
         );
-        $statement->execute([$supplierId, $environment, ...$agendaCodes]);
+        $statement->execute([$supplierId, $environment, ...$agendaCodes, ...$filter['params']]);
         $rows = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if (!is_array($row)) {
@@ -447,6 +518,7 @@ final class PayrollSubmissionTransportAttemptRepository
         string $environment,
         array $agendaCodes,
         int $limit = 50,
+        ?PeriodFilter $period = null,
     ): array {
         if (!$this->isAvailable()) {
             return [];
@@ -466,6 +538,7 @@ final class PayrollSubmissionTransportAttemptRepository
         }
         $limit = max(1, min($limit, 100));
         $placeholders = implode(', ', array_fill(0, count($agendaCodes), '?'));
+        $filter = ($period ?? PeriodFilter::none())->sqlFor('obligation.period_start');
         $statement = $this->db->pdo()->prepare(
             'SELECT submission.id AS submission_id,
                     obligation.agenda_code,
@@ -517,10 +590,11 @@ final class PayrollSubmissionTransportAttemptRepository
                        AND attempt.environment = submission.environment
                        AND attempt.submission_id = submission.id
                 )
+                ' . $filter['sql'] . '
               ORDER BY outbox.sent_at DESC, submission.id DESC
               LIMIT ' . $limit,
         );
-        $statement->execute([$supplierId, $environment, ...$agendaCodes]);
+        $statement->execute([$supplierId, $environment, ...$agendaCodes, ...$filter['params']]);
         $rows = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if (!is_array($row)) {
