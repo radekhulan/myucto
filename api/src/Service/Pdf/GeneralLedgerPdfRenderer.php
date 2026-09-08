@@ -19,6 +19,7 @@ final class GeneralLedgerPdfRenderer extends ReportPdfRendererBase
         $mpdf = $this->mpdf();
         $label = !empty($data['all_periods']) ? 'všechna období' : (string) ($data['period']['fiscal_year'] ?? '');
         $mpdf->SetTitle('Hlavní kniha ' . $label);
+        $this->withPageNumbers($mpdf, 'Hlavní kniha');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

@@ -16,6 +16,7 @@ final class StockItemMovementsPdfRenderer extends ReportPdfRendererBase
         $mpdf = $this->mpdf();
         $item = $data['item'] ?? [];
         $mpdf->SetTitle('Skladová karta ' . (string) ($item['sku'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Skladová karta');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

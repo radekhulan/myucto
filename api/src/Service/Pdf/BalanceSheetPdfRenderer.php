@@ -23,6 +23,7 @@ final class BalanceSheetPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('balance_sheet.twig', $this->toThousands($data));
         $mpdf = $this->mpdf(['format' => 'A4', 'orientation' => 'P']);
         $mpdf->SetTitle('Rozvaha k ' . (string) ($data['as_of'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Rozvaha');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

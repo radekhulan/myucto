@@ -19,6 +19,7 @@ final class SaldoPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('saldo.twig', $data);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle($title . ' k ' . (string) ($data['as_of'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Saldokonto');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

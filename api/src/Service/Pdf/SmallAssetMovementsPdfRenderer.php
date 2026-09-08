@@ -15,6 +15,7 @@ final class SmallAssetMovementsPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('small_asset_movements.twig', $data);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Přírůstky a úbytky drobného majetku');
+        $this->withPageNumbers($mpdf, 'Přírůstky a úbytky drobného majetku');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

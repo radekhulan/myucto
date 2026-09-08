@@ -15,6 +15,7 @@ final class StockStatusPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('stock_status.twig', $data);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Stav zásob');
+        $this->withPageNumbers($mpdf, 'Stav zásob');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

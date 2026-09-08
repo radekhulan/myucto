@@ -16,6 +16,7 @@ final class SmallAssetExpenseBreakdownPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('small_asset_expense_breakdown.twig', $data);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Rozpis 501 dle druhu výdaje');
+        $this->withPageNumbers($mpdf, 'Rozpis 501 dle druhu výdaje');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

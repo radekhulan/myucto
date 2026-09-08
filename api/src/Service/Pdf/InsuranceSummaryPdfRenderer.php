@@ -25,6 +25,7 @@ final class InsuranceSummaryPdfRenderer extends ReportPdfRendererBase
             'margin_bottom' => 14,
         ]);
         $mpdf->SetTitle('Přehledy pojistného OSVČ ' . (string) ($data['summary']['year'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Přehledy pojistného OSVČ');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

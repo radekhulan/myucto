@@ -15,6 +15,7 @@ final class StockValuationPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('stock_valuation.twig', $data);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Ocenění zásob k ' . (string) ($data['date'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Ocenění zásob');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

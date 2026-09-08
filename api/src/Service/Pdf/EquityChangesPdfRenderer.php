@@ -16,6 +16,7 @@ final class EquityChangesPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('equity_changes.twig', $data);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Přehled o změnách vlastního kapitálu ' . (string) ($data['period']['starts_on'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Přehled o změnách vlastního kapitálu');
         $mpdf->WriteHTML($body);
 
         return $mpdf->Output('', 'S');

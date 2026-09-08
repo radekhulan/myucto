@@ -22,6 +22,7 @@ final class IncomeStatementPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('income_statement.twig', $this->toThousands($data));
         $mpdf = $this->mpdf(['format' => 'A4', 'orientation' => 'P']);
         $mpdf->SetTitle('Výkaz zisku a ztráty k ' . (string) ($data['as_of'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Výkaz zisku a ztráty');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

@@ -20,6 +20,7 @@ final class CashFlowPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('cash_flow.twig', $data);
         $mpdf = $this->mpdf(['format' => 'A4', 'orientation' => 'P']);
         $mpdf->SetTitle('Přehled o peněžních tocích ' . (string) ($data['period']['starts_on'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Přehled o peněžních tocích');
         $mpdf->WriteHTML($body);
 
         return $mpdf->Output('', 'S');

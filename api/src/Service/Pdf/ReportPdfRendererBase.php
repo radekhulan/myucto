@@ -63,12 +63,27 @@ abstract class ReportPdfRendererBase
     }
 
     /**
-     * Číslování stran (audit 2026-07, nález „Export a tisk účetního deníku" — §13 ZoÚ,
-     * kniha musí mít číslované strany). `{PAGENO}`/`{nbpg}` jsou mPDF vestavěné tokeny.
+     * Patička tiskové sestavy: název sestavy, číslo strany, původce a okamžik tisku.
+     *
+     * Číslování stran vychází z §13 ZoÚ (účetní deník i hlavní kniha jsou zákonné
+     * knihy a musí mít číslované strany). Původce a datum tisku patří na archivovaný
+     * výtisk ze stejného důvodu, z jakého je tam má každý konkurenční systém: bez
+     * nich se u papíru v šanonu nedá zjistit, odkud a kdy pochází.
+     *
+     * `{PAGENO}`/`{nbpg}` jsou mPDF vestavěné tokeny, `|` odděluje levou, střední
+     * a pravou část patičky.
+     *
+     * NEPOUŽÍVAT na úředních tiskopisech a na dokladech, které jsou samy o sobě
+     * právním jednáním (přehledy pro pojišťovny a ČSSZ, dohoda o zápočtu,
+     * pokladní a skladové doklady, objednávky) — tam patička nepatří.
      */
     protected function withPageNumbers(Mpdf $mpdf, string $left = ''): void
     {
-        $mpdf->SetFooter($left . '|Strana {PAGENO} / {nbpg}|' . (new \DateTimeImmutable())->format('d.m.Y H:i'));
+        $mpdf->SetFooter(
+            $left
+            . '|Strana {PAGENO} / {nbpg}|'
+            . 'Zpracováno v MyÚčto.cz · ' . (new \DateTimeImmutable())->format('d.m.Y H:i')
+        );
     }
 
     private function twig(): Environment

@@ -25,6 +25,7 @@ final class TaxEvidenceAgingPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('receivables_payables.twig', $view);
         $mpdf = $this->mpdf(['format' => 'A4', 'orientation' => 'P']);
         $mpdf->SetTitle('Pohledávky a závazky');
+        $this->withPageNumbers($mpdf, 'Pohledávky a závazky');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

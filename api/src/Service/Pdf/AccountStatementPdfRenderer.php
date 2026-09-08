@@ -17,6 +17,7 @@ final class AccountStatementPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('account_statement.twig', $data);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Opis účtu ' . (string) ($data['account']['code'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Opis účtu');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

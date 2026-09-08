@@ -17,6 +17,7 @@ final class TrialBalancePdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('trial_balance.twig', $data);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Obratová předvaha ' . (string) ($data['period']['fiscal_year'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Obratová předvaha');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }

@@ -18,6 +18,7 @@ final class TaxEvidenceCashJournalPdfRenderer extends ReportPdfRendererBase
         $body = $this->renderTemplate('cash_journal.twig', $data);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Peněžní deník ' . (string) ($data['year'] ?? ''));
+        $this->withPageNumbers($mpdf, 'Peněžní deník');
         $mpdf->WriteHTML($body);
         return $mpdf->Output('', 'S');
     }
