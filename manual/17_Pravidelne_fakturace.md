@@ -291,6 +291,37 @@ užitečné pro testování i pro ruční vytvoření dokladu mimo rozvrh).
   datum se proto nevybírá a varování o budoucím datu se nezobrazuje (budoucí
   DUZP je tu záměr, koncept se edituje celý měsíc).
 
+### Ruční generování a plán
+
+U režimu *Až při vystavení* dialog nabízí volbu **Nahradit plánovaný termín
+a posunout plán o jeden interval** (výchozí zapnuto). Další termín se počítá
+z plánovaného data, nikoli z data ručně vytvořené faktury. Například roční
+šablona s termínem 1. 2. 2027 přejde na 1. 2. 2028 i při ručním vystavení
+v září 2026. Vypnutím volby vytvoříš **mimořádnou fakturu** a plán zůstane
+na 1. 2. 2027. Dialog před potvrzením ukazuje výsledný příští termín.
+
+Režim *Na začátku období* dál pracuje s plánovaným konceptem; mimořádné
+generování bez posunu plánu v něm není dostupné.
+
+### Oprava příštího termínu
+
+Na detailu šablony otevři **… → Změnit příští vygenerování…**. Dialog ukáže
+aktuální datum, nové datum a upozornění na přeskočení nebo opakované
+vyfakturování. Pole nového data je předvyplněné aktuálním příštím termínem:
+nejprve ho změň a potom potvrď kontrolu existujících faktur zaškrtnutím.
+Samotné zaškrtnutí datum neobnovuje. Při stejném nebo neplatném datu
+dialog zobrazí důvod, proč změnu nelze uložit.
+Původní faktury, datum prvního vystavení a historie zůstanou zachované.
+Další cykly se odvozují od nového termínu podle intervalu a pravidla dne
+v šabloně.
+
+Datum musí být nejdříve dnešní a v rozsahu platnosti šablony. Pro cílové
+datum nesmí existovat faktura této šablony. U režimu *Na začátku období*
+nejprve vyřeš otevřený koncept aktuálního období. Aktivní šablona zůstane
+aktivní, pozastavená pozastavená; ukončená se přepne na pozastavenou a její
+generování je třeba samostatně obnovit. Dnešní termín aktivní šablony může
+zpracovat nejbližší běh automatiky.
+
 > ⚠️ **Banner „Generování selhalo"** — když poslední automatické (cronové)
 > generování selže (typicky kvůli vypršelé sazbě DPH nebo nekladné částce),
 > uloží se poslední chyba a zobrazí se jako červený banner na detailu šablony

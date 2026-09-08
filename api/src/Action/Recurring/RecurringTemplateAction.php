@@ -35,7 +35,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   DELETE /api/recurring/{id}            → delete
  *   POST   /api/recurring/{id}/pause      → pause
  *   POST   /api/recurring/{id}/resume     → resume + přepočet next_run
- *   POST   /api/recurring/{id}/run-now    → manuální spuštění (testování)
+ *   POST   /api/recurring/{id}/reschedule → oprava příštího termínu
+ *   POST   /api/recurring/{id}/run-now    → manuální spuštění
  */
 final class RecurringTemplateAction
 {
@@ -394,6 +395,49 @@ final class RecurringTemplateAction
         return $this->setStatus($request, $response, $args, 'active', 'recurring.resumed');
     }
 
+    public function reschedule(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) ($args['id'] ?? 0);
+        $tpl = $this->repo->find($id);
+        if (!SupplierGuard::owns($request, $tpl)) {
+            return Json::error($response, 'not_found', 'Šablona nenalezena.', 404);
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $date = $body['next_run_date'] ?? null;
+        if (!is_string($date) || !self::isValidDate($date)
+            || $date < (new \DateTimeImmutable('today'))->format('Y-m-d')
+            || $date < $tpl['anchor_date']
+            || (!empty($tpl['end_date']) && $date > $tpl['end_date'])) {
+            return Json::error($response, 'invalid_date', 'Zvolte platné datum od dneška v rozsahu platnosti šablony.', 400);
+        }
+        if (($body['expected_next_run_date'] ?? null) !== $tpl['next_run_date']) {
+            return Json::error($response, 'schedule_changed', 'Plán se mezitím změnil. Obnovte detail a zkuste to znovu.', 409);
+        }
+        if ($date === $tpl['next_run_date']) {
+            return Json::ok($response, $tpl);
+        }
+        // Otevřený koncept patří k původnímu období; přesunutím by ho cron opustil.
+        if (($tpl['draft_open_mode'] ?? 'at_issue') === 'period_start') {
+            $current = $this->repo->findPeriodInvoice($id, $tpl['next_run_date']);
+            if ($current !== null && $current['status'] === 'draft') {
+                return Json::error($response, 'period_draft_exists', 'Nejprve vyřešte otevřený koncept aktuálního období.', 409);
+            }
+        }
+        if ($this->repo->findPeriodInvoice($id, $date) !== null) {
+            return Json::error($response, 'period_invoice_exists', 'Pro zvolené datum již existuje faktura této šablony.', 409);
+        }
+        if (!$this->repo->reschedule($tpl, $date)) {
+            return Json::error($response, 'schedule_changed', 'Plán se mezitím změnil. Obnovte detail a zkuste to znovu.', 409);
+        }
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $this->logger->log('recurring.rescheduled', $user['id'] ?? null, 'recurring_template', $id, [
+            'old_next_run_date' => $tpl['next_run_date'],
+            'new_next_run_date' => $date,
+        ], $ip, $request->getHeaderLine('User-Agent'));
+        return Json::ok($response, $this->repo->find($id));
+    }
+
     public function runNow(Request $request, Response $response, array $args): Response
     {
         $id = (int) ($args['id'] ?? 0);
@@ -409,6 +453,13 @@ final class RecurringTemplateAction
         $forcedIssueDate = !empty($body['issue_date']) ? (string) $body['issue_date'] : null;
         // draft=true → „Vygenerovat koncept": vytvoří draft i u šablony s auto_issue=true.
         $forceDraft = !empty($body['draft']);
+        $advanceSchedule = $body['advance_schedule'] ?? true;
+        if (!is_bool($advanceSchedule)) {
+            return Json::error($response, 'invalid_schedule', 'Neplatná volba posunu plánu.', 400);
+        }
+        if (!$advanceSchedule && ($tpl['draft_open_mode'] ?? 'at_issue') === 'period_start') {
+            return Json::error($response, 'invalid_schedule', 'Režim Na začátku období používá plánovaný koncept.', 400);
+        }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
@@ -431,7 +482,7 @@ final class RecurringTemplateAction
                     'template_status'   => $tpl['status'] ?? 'active',
                 ];
             } else {
-                $result = $this->generator->generate($id, $forcedIssueDate, $userId, $ip, $ua, $forceDraft);
+                $result = $this->generator->generate($id, $forcedIssueDate, $userId, $ip, $ua, $forceDraft, $advanceSchedule);
             }
             // Úspěšné ruční vygenerování smaže případný banner z dřívějšího selhání cronu.
             $this->repo->clearLastError($id);

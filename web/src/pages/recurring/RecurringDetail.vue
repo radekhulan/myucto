@@ -9,12 +9,14 @@ import {
   type RecurringStatus,
 } from '@/api/recurring'
 import { useToast } from '@/composables/useToast'
+import { validateRescheduleDate } from '@/utils/recurringSchedule'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import { FILLED, OUTLINE, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -161,6 +163,55 @@ async function resumeAction() {
   } finally { busy.value = false }
 }
 
+const rescheduleModal = ref(false)
+const rescheduleDate = ref('')
+const rescheduleConfirmed = ref(false)
+const rescheduleError = ref('')
+const rescheduleMin = computed(() => [todayIso(), tpl.value?.anchor_date || ''].sort().at(-1))
+
+function openReschedule() {
+  if (!tpl.value) return
+  rescheduleError.value = ''
+  rescheduleDate.value = tpl.value.next_run_date
+  rescheduleConfirmed.value = false
+  rescheduleModal.value = true
+}
+
+async function submitReschedule() {
+  if (!tpl.value || busy.value) return
+  rescheduleError.value = ''
+  const error = validateRescheduleDate(rescheduleDate.value, tpl.value.next_run_date, rescheduleMin.value!, tpl.value.end_date)
+  if (error) {
+    rescheduleError.value = t(error, { min: formatDate(rescheduleMin.value!), max: formatDate(tpl.value.end_date) })
+    return
+  }
+  if (!rescheduleConfirmed.value) {
+    rescheduleError.value = t('recurring.reschedule_confirmation_required')
+    return
+  }
+  busy.value = true
+  try {
+    tpl.value = await recurringApi.reschedule(id.value, rescheduleDate.value, tpl.value.next_run_date)
+    rescheduleModal.value = false
+    toast.success(t('recurring.reschedule_saved'))
+  } catch (e: any) {
+    rescheduleError.value = e?.response?.data?.error?.message || t('common.save_failed')
+  } finally { busy.value = false }
+}
+
+const advanceSchedule = ref(true)
+const runNowNextDate = computed(() => {
+  const r = tpl.value
+  if (!r) return null
+  if (!advanceSchedule.value || isPeriodDraft.value) return r.next_run_date
+  const [year, month, day] = r.next_run_date.split('-').map(Number)
+  const months = { monthly: 1, quarterly: 3, semi_annually: 6, annually: 12 }[r.frequency]
+  const next = new Date(Date.UTC(year!, month! - 1 + months, 1))
+  if (r.end_of_month) next.setUTCMonth(next.getUTCMonth() + 1, 0)
+  else next.setUTCDate(Math.max(1, Math.min(28, r.day_of_month ?? day!)))
+  return next.toISOString().slice(0, 10)
+})
+
 const runNowModal = ref(false)
 const runNowDate = ref('')
 const runNowMode = ref<'issue' | 'draft'>('issue')
@@ -174,6 +225,7 @@ function todayIso(): string {
 
 function openRunNow(mode: 'issue' | 'draft' = 'issue') {
   if (!tpl.value) return
+  advanceSchedule.value = true
   runNowMode.value = mode
   runNowDate.value = todayIso()
   runNowModal.value = true
@@ -190,7 +242,7 @@ async function submitRunNow() {
   runNowModal.value = false
   busy.value = true
   try {
-    const r = await recurringApi.runNow(id.value, runNowDate.value, draft)
+    const r = await recurringApi.runNow(id.value, runNowDate.value, draft, advanceSchedule.value)
     if (draft) {
       toast.success(t('recurring.run_now_draft_done', { id: r.invoice_id }))
     } else if (r.sent_to.length > 0) {
@@ -238,6 +290,8 @@ const recurringActions = computed<ActionItem[]>(() => {
       show: active && canRun, disabled: busy.value, run: () => openRunNow('draft') },
     { key: 'pause', label: t('recurring.actions.pause'), icon: 'pause', tier: 'overflow', variant: 'warning',
       show: active && canPause, disabled: busy.value, run: pauseAction },
+    { key: 'reschedule', label: t('recurring.reschedule_title'), icon: 'cycle', tier: 'overflow', variant: 'warning',
+      show: w, disabled: busy.value, run: openReschedule },
     { key: 'delete', label: t('recurring.actions.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
       show: auth.canWrite('recurring.delete'), disabled: busy.value, run: removeAction },
   ]
@@ -481,6 +535,43 @@ const recurringActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
+    <div v-if="rescheduleModal && tpl" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+      role="dialog" aria-modal="true" aria-labelledby="reschedule-title" @keydown.esc="!busy && (rescheduleModal = false)">
+      <form novalidate @submit.prevent="submitReschedule" class="bg-surface rounded-lg shadow-xl max-w-md w-full p-6">
+        <h2 id="reschedule-title" class="text-lg font-semibold mb-2">{{ t('recurring.reschedule_title') }}</h2>
+        <p class="text-sm text-neutral-600 mb-3">{{ tpl.name }}</p>
+        <p class="text-sm mb-3">{{ t('recurring.reschedule_current', { date: formatDate(tpl.next_run_date) }) }}</p>
+        <div class="rounded-md border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700 mb-4">
+          {{ t('recurring.reschedule_warning') }}
+        </div>
+        <p v-if="tpl.status === 'expired'" class="text-sm mb-3">{{ t('recurring.reschedule_expired') }}</p>
+        <label class="block text-sm">
+          <span class="text-neutral-700 font-medium">{{ t('recurring.reschedule_new_date') }}</span>
+          <DateInput v-model="rescheduleDate" @update:model-value="rescheduleConfirmed = false; rescheduleError = ''" required
+            :min="rescheduleMin" :max="tpl.end_date || undefined" :disabled="busy"
+            class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md" />
+        </label>
+        <p class="mt-2 text-xs text-neutral-600">{{ t('recurring.reschedule_date_hint') }}</p>
+        <p v-if="rescheduleError" role="alert" class="mt-3 rounded-md border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700">{{ rescheduleError }}</p>
+        <label class="flex items-start gap-2 mt-4 text-sm">
+          <input v-model="rescheduleConfirmed" type="checkbox" required :disabled="busy" class="mt-1" />
+          <span>{{ t('recurring.reschedule_confirm') }}</span>
+        </label>
+        <div class="mt-5 flex flex-wrap justify-end gap-2">
+          <button @click="rescheduleModal = false" type="button" :disabled="busy"
+            class="cursor-pointer inline-flex items-center gap-2 h-9 px-3 text-sm rounded-md whitespace-nowrap" :class="OUTLINE.neutral">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="submit" :disabled="busy"
+            class="cursor-pointer inline-flex items-center gap-2 h-9 px-3 text-sm disabled:opacity-50 text-white font-medium rounded-md whitespace-nowrap" :class="FILLED.warning">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+            {{ busy ? t('common.saving') : t('recurring.reschedule_submit') }}
+          </button>
+        </div>
+      </form>
+    </div>
+
     <!-- Run Now modal — date picker s defaultem dnes; varování pokud uživatel zvolí
          budoucí datum (issue_date = budoucnost je daňově problematické). -->
     <div v-if="runNowModal && tpl" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -503,13 +594,25 @@ const recurringActions = computed<ActionItem[]>(() => {
           {{ t('recurring.run_now_next_scheduled', { date: formatDate(tpl.next_run_date) }) }}
         </p>
 
+        <label v-if="tpl.draft_open_mode !== 'period_start'" class="flex items-start gap-2 mt-3 text-sm">
+          <input v-model="advanceSchedule" type="checkbox" class="mt-1" />
+          <span>{{ t('recurring.run_now_advance') }}</span>
+        </label>
+        <p v-if="!isPeriodDraft" class="mt-2 text-xs text-neutral-600">
+          {{ advanceSchedule ? t('recurring.run_now_advance_hint') : t('recurring.run_now_extra_hint') }}
+        </p>
+        <p class="mt-2 text-sm font-medium">{{ t('recurring.run_now_result_date', { date: formatDate(runNowNextDate) }) }}</p>
+        <p v-if="runNowNextDate && tpl.end_date && runNowNextDate > tpl.end_date" class="mt-2 text-xs text-warning-700">
+          {{ t('recurring.run_now_expires') }}
+        </p>
+
         <!-- Varování o budoucím datu jen pro „Vygenerovat teď" (vystavení) — u konceptu
              je budoucí issue_date záměr (edituje se celý měsíc), takže se nezobrazuje. -->
         <div v-if="runNowDate > todayIso() && runNowMode !== 'draft'" class="mt-3 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700">
           {{ t('recurring.run_now_future_warning') }}
         </div>
 
-        <div class="mt-5 flex justify-end gap-2">
+        <div class="mt-5 flex flex-wrap justify-end gap-2">
           <button @click="closeRunNow" type="button"
             class="cursor-pointer h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">
             {{ t('common.cancel') }}
