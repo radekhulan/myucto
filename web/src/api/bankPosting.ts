@@ -243,6 +243,7 @@ const ERROR_KEYS: Record<string, string> = {
   no_accounting_period:   'bank.posting.err_no_accounting_period',
   period_missing:         'bank.posting.err_no_accounting_period',
   already_posted:         'bank.posting.err_already_posted',
+  payroll_payment:        'bank.posting.err_payroll_payment',
   account_not_found:      'bank.posting.err_account_not_found',
   unknown_account:        'bank.posting.err_account_not_found',
   foreign_currency:       'bank.posting.err_foreign_currency',

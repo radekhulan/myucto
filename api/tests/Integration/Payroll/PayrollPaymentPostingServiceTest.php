@@ -6,6 +6,9 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Bank\BankPostingService;
+use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentEvidenceReference;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
@@ -31,6 +34,8 @@ final class PayrollPaymentPostingServiceTest extends TestCase
     private Connection $connection;
     private PDO $pdo;
     private PayrollPaymentReconciliationService $service;
+    private BankPostingService $bankPosting;
+    private PostingService $journalPosting;
     private int $supplierId;
     private int $allocationId;
     private int $statementId;
@@ -47,6 +52,8 @@ final class PayrollPaymentPostingServiceTest extends TestCase
         $this->connection = $connection;
         $this->pdo = $connection->pdo();
         $this->service = $service;
+        $this->bankPosting = $container->get(BankPostingService::class);
+        $this->journalPosting = $container->get(PostingService::class);
         $this->pdo->beginTransaction();
 
         $sourceSupplierId = (int) $this->pdo
@@ -193,6 +200,154 @@ final class PayrollPaymentPostingServiceTest extends TestCase
         );
     }
 
+    public function testPayrollMatchSupersedesPendingBankSuggestion(): void
+    {
+        $transactionId = $this->insertBankTransaction('-1000.00', 'pending');
+        $suggestionId = $this->insertSuggestion($transactionId);
+        $this->matchTransaction($transactionId);
+        self::assertSame('superseded', $this->pdo->query(
+            "SELECT status FROM bank_posting_suggestions WHERE id = {$suggestionId}",
+        )->fetchColumn());
+    }
+
+    public function testStaleSuggestionCannotPostPayrollPaymentAgain(): void
+    {
+        $transactionId = $this->insertBankTransaction('-1000.00', 'stale');
+        $this->matchTransaction($transactionId);
+        $suggestionId = $this->insertSuggestion($transactionId);
+        $this->expectException(PostingException::class);
+        $this->expectExceptionMessage('mzd');
+        $this->bankPosting->approveSuggestion($this->supplierId, $suggestionId, []);
+    }
+
+    public function testManualBankPostingCannotDuplicatePayrollPayment(): void
+    {
+        $transactionId = $this->insertBankTransaction('-1000.00', 'manual');
+        $this->matchTransaction($transactionId);
+        $this->expectException(PostingException::class);
+        $this->expectExceptionMessage('mzd');
+        $this->bankPosting->postManual($this->supplierId, $transactionId, [
+            'debit_account_code' => '336.100',
+            'credit_account_code' => '221',
+        ], []);
+    }
+
+    public function testJournalPostingCannotBypassPayrollOwnership(): void
+    {
+        $transactionId = $this->insertBankTransaction('-1000.00', 'direct');
+        $this->matchTransaction($transactionId);
+        $this->expectException(PostingException::class);
+        $this->expectExceptionMessage('mzd');
+        $this->journalPosting->postDocument($this->supplierId, 'bank', $transactionId, [
+            ['account_code' => '336.100', 'side' => 'debit', 'amount' => '1000.00'],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => '1000.00'],
+        ], ['entry_date' => '2099-01-20']);
+    }
+
+    public function testBankShowsExistingPayrollEntryInsteadOfStaleSuggestion(): void
+    {
+        $transactionId = $this->insertBankTransaction('-1000.00', 'visible');
+        $matchId = $this->matchTransaction($transactionId);
+        $this->insertSuggestion($transactionId);
+        $info = $this->bankPosting->transactionPostingInfo($this->supplierId, [$transactionId]);
+        self::assertTrue($info[$transactionId]['payroll_matched'] ?? false);
+        self::assertSame('posted', $info[$transactionId]['status']);
+        self::assertSame((int) $this->posting($matchId)['journal_entry_id'], $info[$transactionId]['journal_entry_id']);
+        self::assertArrayNotHasKey('suggestion_id', $info[$transactionId]);
+        self::assertSame([], $this->bankPosting->transactionPostingInfo($this->supplierId + 1, [$transactionId]));
+    }
+
+    public function testBankRuleBackfillSkipsPayrollAndCleansStaleSuggestion(): void
+    {
+        $transactionId = $this->insertBankTransaction('-1000.00', 'backfill');
+        $this->matchTransaction($transactionId);
+        $suggestionId = $this->insertSuggestion($transactionId);
+        $result = $this->bankPosting->applyRules($this->supplierId, $transactionId);
+        self::assertSame('payroll_payment', $result['reason']);
+        self::assertSame('superseded', $this->pdo->query(
+            "SELECT status FROM bank_posting_suggestions WHERE id = {$suggestionId}",
+        )->fetchColumn());
+    }
+
+    public function testPayrollPostingIsNotCountedAsUnpostedBankMovement(): void
+    {
+        $suggestions = new \MyInvoice\Repository\BankPostingSuggestionRepository($this->connection);
+        $transactionId = $this->insertBankTransaction('-1000.00', 'unposted-count');
+        self::assertSame(1, $suggestions->unpostedCount($this->supplierId));
+        $this->matchTransaction($transactionId);
+        self::assertSame(0, $suggestions->unpostedCount($this->supplierId));
+        self::assertSame([], $suggestions->unpostedWithoutSuggestion($this->supplierId));
+    }
+
+    public function testSkippedPayrollPostingCanBeCompletedManuallyByBank(): void
+    {
+        $revisionId = (int) $this->pdo->query(
+            "SELECT revision_id FROM payroll_payment_liabilities WHERE id = {$this->liabilityId}",
+        )->fetchColumn();
+        $this->liabilityId = $this->insertLiability($revisionId, 'benefit');
+        $this->allocationId = $this->insertAllocation($this->liabilityId, 100_000);
+        $transactionId = $this->insertBankTransaction('-1000.00', 'skipped-recovery');
+        $suggestionId = $this->insertSuggestion($transactionId);
+        $matchId = $this->matchTransaction($transactionId);
+        self::assertSame('skipped', $this->posting($matchId)['posting_status']);
+        self::assertSame('pending', $this->pdo->query(
+            "SELECT status FROM bank_posting_suggestions WHERE id = {$suggestionId}",
+        )->fetchColumn());
+        $info = $this->bankPosting->transactionPostingInfo($this->supplierId, [$transactionId]);
+        self::assertSame('suggested', $info[$transactionId]['status']);
+        self::assertSame($suggestionId, $info[$transactionId]['suggestion_id']);
+        self::assertFalse($info[$transactionId]['payroll_posting_blocked']);
+        $entryId = $this->bankPosting->approveSuggestion($this->supplierId, $suggestionId, []);
+        $info = $this->bankPosting->transactionPostingInfo($this->supplierId, [$transactionId]);
+        self::assertSame('posted', $info[$transactionId]['status']);
+        self::assertSame($entryId, $info[$transactionId]['journal_entry_id']);
+        self::assertFalse($info[$transactionId]['payroll_posting_blocked']);
+    }
+
+    public function testPartlyPostedPayrollMovementStaysUnpostedUntilFullyCovered(): void
+    {
+        $suggestions = new \MyInvoice\Repository\BankPostingSuggestionRepository($this->connection);
+        $transactionId = $this->insertBankTransaction('-1000.00', 'partial');
+        $this->matchTransaction($transactionId, 50_000, 'partial-first');
+        $info = $this->bankPosting->transactionPostingInfo($this->supplierId, [$transactionId]);
+        self::assertNull($info[$transactionId]['status']);
+        self::assertSame('payroll_partial_posting', $info[$transactionId]['note']);
+        self::assertTrue($info[$transactionId]['payroll_posting_blocked']);
+        self::assertSame(1, $suggestions->unpostedCount($this->supplierId));
+
+        $revisionId = (int) $this->pdo->query(
+            "SELECT revision_id FROM payroll_payment_liabilities WHERE id = {$this->liabilityId}",
+        )->fetchColumn();
+        $this->liabilityId = $this->insertLiability($revisionId, 'health_insurance');
+        $this->allocationId = $this->insertAllocation($this->liabilityId, 100_000);
+        $this->matchTransaction($transactionId, 50_000, 'partial-second');
+        $info = $this->bankPosting->transactionPostingInfo($this->supplierId, [$transactionId]);
+        self::assertSame('posted', $info[$transactionId]['status']);
+        self::assertSame(0, $suggestions->unpostedCount($this->supplierId));
+    }
+
+    private function matchTransaction(int $transactionId, int $amountMinor = 100_000, string $key = 'posting-regression'): int
+    {
+        return $this->service->match(new PayrollPaymentReconciliationCommand(
+            $this->supplierId,
+            $this->allocationId,
+            $amountMinor,
+            PayrollPaymentEvidenceReference::bank($this->statementId, $transactionId),
+            $key,
+            null,
+        ))->id;
+    }
+
+    private function insertSuggestion(int $transactionId): int
+    {
+        $this->pdo->prepare(
+            'INSERT INTO bank_posting_suggestions
+                (supplier_id, bank_transaction_id, source, debit_account_code, credit_account_code, amount)
+             VALUES (?, ?, "learned", "336.100", "221", 1000.00)',
+        )->execute([$this->supplierId, $transactionId]);
+        return (int) $this->pdo->lastInsertId();
+    }
+
     /** Firma na daňové evidenci deník nemá, takže není co zaúčtovat. */
     public function testTaxEvidenceCompanyRecordsNotApplicable(): void
     {
@@ -261,6 +416,7 @@ final class PayrollPaymentPostingServiceTest extends TestCase
             'employer' => [
                 'accounting_accounts' => [
                     'social_insurance_credit' => '336.100',
+                    'health_insurance_credit' => '336.100',
                 ],
             ],
         ], JSON_THROW_ON_ERROR);
@@ -305,7 +461,7 @@ final class PayrollPaymentPostingServiceTest extends TestCase
             $kind,
             $snapshot,
             hash('sha256', $snapshot),
-            hash('sha256', "posting-liability-{$this->supplierId}", true),
+            hash('sha256', "posting-liability-{$this->supplierId}-{$kind}", true),
         ]);
 
         return (int) $this->pdo->lastInsertId();

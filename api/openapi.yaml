@@ -2928,6 +2928,7 @@ paths:
     get:
       tags: [Bank]
       summary: Detail výpisu vč. stránkovaných transakcí
+      description: Mzdová úhrada vrací vazbu na existující zaúčtování v posting. Filtr zaúčtování a počty zahrnují bankovní i mzdové zápisy; pohyb se neúčtuje podruhé.
       parameters:
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 5, maximum: 200, default: 50 } }
@@ -21816,7 +21817,7 @@ components:
         account_label: { type: [string, "null"], description: "Odvozeno z currencies.label" }
 
     BankStatementDetail:
-      description: Detail i seznam zahrnují také pohyby připojené z jiného API/GPC importu. Sdílená transakce má stále jediné ID a jedinou účetní evidenci.
+      description: Detail i seznam zahrnují také pohyby připojené z jiného API/GPC importu. Sdílená transakce má stále jediné ID a jedinou účetní evidenci. Mzdové párování a odkaz na existující účetní zápis vrací posting.payroll_matched a posting.journal_entry_id.
       allOf:
         - $ref: '#/components/schemas/BankStatement'
         - type: object
@@ -21869,7 +21870,7 @@ components:
         match_status:
           type: string
           enum: [unmatched, auto_exact, auto_partial, manual, ignored]
-          description: "Stav párování. auto_* = automatika, manual = ruční přiřazení."
+          description: "Stav fakturačního párování. auto_* = automatika, manual = ruční přiřazení. Mzdovou vazbu označuje posting.payroll_matched, nemění tento stav."
         matched_invoice_id: { type: [integer, "null"], format: int64, description: "Spárovaná VYDANÁ faktura" }
         matched_purchase_invoice_id: { type: [integer, "null"], format: int64, description: "Spárovaná PŘIJATÁ faktura (z payment_matches)" }
         matched_varsymbol: { type: [string, "null"] }
@@ -21882,6 +21883,12 @@ components:
           type: [object, "null"]
           description: Stav účetního návrhu nebo zápisu bankovní transakce.
           properties:
+            status: { type: [string, "null"], enum: [posted, suggested, null] }
+            payroll_matched: { type: boolean, description: "Pohyb je použitý mzdovou platební evidencí a nesmí být spárován s fakturou. Přítomné také bez podvojného účetnictví." }
+            payroll_posting_blocked: { type: boolean, description: "Existuje aktivní mzdový účetní zápis. Banka nesmí vytvořit další zápis celého pohybu. Bez mzdového zápisu zůstává ruční zaúčtování dostupné." }
+            note: { type: [string, "null"], description: "payroll_partial_posting označuje neúplné pokrytí částky mzdovými zápisy; status je null a pohyb zůstává ve filtru unposted." }
+            journal_entry_id: { type: integer, format: int64, description: "Existující bankovní nebo mzdový účetní zápis úhrady." }
+            document_no: { type: [string, "null"] }
             suggestion_source: { type: [string, "null"], enum: [rule, learned, payment_match, transfer, null] }
             transfer: { $ref: '#/components/schemas/BankTransferPostingInfo' }
 

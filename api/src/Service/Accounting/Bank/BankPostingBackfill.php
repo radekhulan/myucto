@@ -212,8 +212,8 @@ final class BankPostingBackfill
                                     WHERE alloc_pm.supplier_id = ? AND alloc_pm.bank_transaction_id = bt.id))
                            AS has_explicit_allocation,
                        EXISTS (SELECT 1 FROM journal_entries live
-                                WHERE live.supplier_id = ? AND live.source_type = 'bank'
-                                  AND live.source_id = bt.id AND live.reversed_by IS NULL) AS has_live_entry
+                                WHERE live.supplier_id = ? AND " . \MyInvoice\Service\Bank\BankTransactionPostingScope::sourceSql('live', 'bt.id') . "
+                                  AND live.reversed_by IS NULL) AS has_live_entry
                   FROM bank_transactions bt
                   JOIN bank_statements bs ON bs.id = bt.statement_id
                  WHERE bt.source = 'statement'
@@ -229,8 +229,8 @@ final class BankPostingBackfill
                    )
                    AND (
                        NOT EXISTS (SELECT 1 FROM journal_entries je
-                                    WHERE je.supplier_id = ? AND je.source_type = 'bank'
-                                      AND je.source_id = bt.id AND je.reversed_by IS NULL)
+                                    WHERE je.supplier_id = ? AND " . \MyInvoice\Service\Bank\BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
+                                      AND je.reversed_by IS NULL)
                        -- Už zaúčtovaná tx se znovu nabídne JEN kvůli normalizaci haléřového
                        -- zbytku. Tenhle blok je pouze PŘEDFILTR: rozhoduje výhradně
                        -- {@see BankPostingService::normalizeRoundingFullPurchase()}, a když

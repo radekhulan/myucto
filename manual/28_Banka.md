@@ -185,6 +185,17 @@ připravit, zobrazí důvod a odeslání zablokuje. Po ručním zrušení zaúč
 zůstává faktura spárovaná a kontaci lze znovu nabídnout; zápis se neobnoví
 samotným otevřením dialogu.
 
+Pohyb použitý k úhradě mzdového závazku má stav **Spárováno se mzdami**.
+Označení zaúčtování otevře existující zápis úhrady v účetním deníku, ať vznikl
+z banky, nebo ze mzdového modulu. Pokud zápis vytvořily mzdy, banka další
+zaúčtování nenabízí a starší návrh kontace se zneplatní. Párování s fakturou
+se u mzdové úhrady nenabízí. Pokud mzdové párování účetní zápis nevytvořilo,
+lze pohyb ručně zaúčtovat v bance. Částečné mzdové zaúčtování má vlastní
+označení a pohyb zůstává mezi nezaúčtovanými, dokud zápisy nepokryjí celou částku.
+Příprava mzdového příkazu, e-mailové avízo ani prohlášení **Zaplatil jsem**
+samy bankovní úhradu do deníku nezapisují. Skutečný pohyb z API nebo výpisu
+se propojí s mzdovým závazkem a zaúčtuje pouze jednou.
+
 | Sloupec | Význam |
 |---|---|
 | Datum | Datum zaúčtování |

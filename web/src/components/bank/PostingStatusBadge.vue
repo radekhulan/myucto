@@ -28,7 +28,20 @@ const postedTitle = computed(() => {
 </script>
 
 <template>
-  <RouterLink v-if="posting?.status === 'posted' && posting.journal_entry_id"
+  <RouterLink v-if="posting?.note === 'payroll_partial_posting' && posting.journal_entry_id"
+    :to="`/accounting/journal?entry_id=${posting.journal_entry_id}`"
+    :title="t('bank.posting.payroll_partial_hint')"
+    class="mt-1 inline-flex items-center text-xs px-2 py-0.5 rounded font-medium bg-warning-50 text-warning-600 hover:bg-warning-100">
+    {{ t('bank.posting.badge_payroll_partial') }}
+  </RouterLink>
+
+  <span v-else-if="posting?.note === 'payroll_partial_posting'"
+    :title="t('bank.posting.payroll_partial_hint')"
+    class="mt-1 inline-flex items-center text-xs px-2 py-0.5 rounded font-medium bg-warning-50 text-warning-600">
+    {{ t('bank.posting.badge_payroll_partial') }}
+  </span>
+
+  <RouterLink v-else-if="posting?.status === 'posted' && posting.journal_entry_id"
     :to="`/accounting/journal?entry_id=${posting.journal_entry_id}`"
     :title="postedTitle"
     class="mt-1 inline-flex items-center"

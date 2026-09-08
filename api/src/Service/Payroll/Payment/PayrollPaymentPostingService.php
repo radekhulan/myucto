@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Payment;
 
 use MyInvoice\Repository\AccountingModeRepository;
+use MyInvoice\Repository\BankPostingSuggestionRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentPostingRepository;
 use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
 use MyInvoice\Service\Accounting\Bank\BankAnalyticResolver;
@@ -110,6 +111,7 @@ final class PayrollPaymentPostingService
         private readonly PostingService $posting,
         private readonly AccountingModeRepository $accountingModes,
         private readonly ?BankAnalyticResolver $bankAnalytics = null,
+        private readonly ?BankPostingSuggestionRepository $bankSuggestions = null,
     ) {}
 
     /**
@@ -144,6 +146,13 @@ final class PayrollPaymentPostingService
             $outcome['journal_entry_id'],
             $outcome['reason'],
         );
+        if ($match['bank_transaction_id'] !== null && in_array($outcome['status'], ['posted', 'posted_elsewhere'], true)) {
+            $this->bankSuggestions?->supersedePendingForTx(
+                $supplierId,
+                $match['bank_transaction_id'],
+                'payroll_payment',
+            );
+        }
 
         return $outcome;
     }

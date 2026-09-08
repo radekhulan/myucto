@@ -54,6 +54,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const auth = useAuthStore()
 const ruleTemplateOpen = ref(false)
+const payrollMatched = computed(() => props.tx.posting?.payroll_matched === true)
 // Dialog přeúčtování drží řádek, ne PostingRowActions: řádek se vykresluje ve
 // dvou podobách (tabulka i karta) a dvě instance dialogu by si přebíjely stav.
 const repostTx = ref<RowTx | null>(null)
@@ -141,7 +142,7 @@ function onPosted(payload: { result: PostResult; debit: string; credit: string }
 // Řádkové akce párování banky → 2 tlačítka inline, zbytek do „…" popupu (RowActionsMenu).
 function matchActions(tx: BankTransaction): RowAction[] {
   const st = tx.match_status
-  const canMatch = auth.canWrite('bank.match')
+  const canMatch = auth.canWrite('bank.match') && !tx.posting?.payroll_matched
   return [
     {
       key: 'open-inv', label: t('bank.open'), icon: 'doc', variant: 'neutral',
@@ -161,12 +162,12 @@ function matchActions(tx: BankTransaction): RowAction[] {
     {
       key: 'create-purchase', label: t('bank.create_purchase'), icon: 'plus', variant: 'primary',
       run: () => openCreate(tx),
-      show: auth.canWrite('purchase_invoices.create') && tx.amount < 0 && st === 'unmatched',
+      show: !tx.posting?.payroll_matched && auth.canWrite('purchase_invoices.create') && tx.amount < 0 && st === 'unmatched',
     },
     {
       key: 'request-document', label: t('bank.document_request.action'), icon: 'doc', variant: 'warning',
       run: () => openRequestDoc(tx),
-      show: auth.canWrite('documents.requests') && (st === 'unmatched' || st === 'auto_partial'),
+      show: !tx.posting?.payroll_matched && auth.canWrite('documents.requests') && (st === 'unmatched' || st === 'auto_partial'),
     },
     {
       key: 'documents', label: expandedDocs.value.has(tx.id) ? t('bank.documents_hide') : t('bank.documents_action'),
@@ -176,7 +177,7 @@ function matchActions(tx: BankTransaction): RowAction[] {
     {
       key: 'create-posting-rule', label: t('bank.posting.create_rule_from_movement'), icon: 'doc', variant: 'neutral',
       run: () => { ruleTemplateOpen.value = true },
-      show: props.isDoubleEntry && auth.canWrite('bank.rules') && tx.source !== 'email_notice' && st !== 'ignored',
+      show: !tx.posting?.payroll_matched && props.isDoubleEntry && auth.canWrite('bank.rules') && tx.source !== 'email_notice' && st !== 'ignored',
     },
     {
       key: 'ignore', label: t('bank.ignore'), icon: 'x', variant: 'neutral',
@@ -198,7 +199,7 @@ function matchActions(tx: BankTransaction): RowAction[] {
     {
       key: 'repost', label: t('accounting.repost.action'), icon: 'edit', variant: 'warning',
       run: () => { repostTx.value = tx },
-      show: props.isDoubleEntry && tx.posting?.status === 'posted' && auth.canWrite('accounting'),
+      show: !tx.posting?.payroll_posting_blocked && props.isDoubleEntry && tx.posting?.status === 'posted' && auth.canWrite('accounting'),
     },
   ]
 }
@@ -262,10 +263,10 @@ function candidateReject() {
         </template>
       </td>
       <td class="px-3 py-2 text-center">
-        <span class="text-xs px-2 py-0.5 rounded font-medium" :class="statusBadge(tx.match_status)">
-          {{ statusLabel(tx.match_status) }}
+        <span class="text-xs px-2 py-0.5 rounded font-medium" :class="statusBadge(payrollMatched ? 'auto_exact' : tx.match_status)">
+          {{ payrollMatched ? t('bank.match_status.payroll') : statusLabel(tx.match_status) }}
         </span>
-        <button v-if="tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
+        <button v-if="!payrollMatched && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
           class="mt-1 mx-auto inline-flex items-center rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-warning-50 text-warning-600"
           :aria-expanded="expandedSuggestions.has(tx.id)" :title="t('bank.match_v2.title')"
           @click="toggleSuggestion(tx.id)">
@@ -294,7 +295,7 @@ function candidateReject() {
         </div>
       </td>
     </tr>
-    <tr v-if="expandedSuggestions.has(tx.id) && suggestionFor(tx.id)">
+    <tr v-if="!payrollMatched && expandedSuggestions.has(tx.id) && suggestionFor(tx.id)">
       <td :colspan="colspan" class="bg-warning-50/40 px-4 py-3">
         <MatchSuggestionPanel variant="panel" :suggestion="suggestionFor(tx.id)!" :reviewing="reviewingSuggestion"
           :can-review="auth.canWrite('bank.match')" @accept="candidateAccept" @reject="candidateReject" />
@@ -314,10 +315,10 @@ function candidateReject() {
         {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
       </div>
       <div class="flex flex-col items-end gap-1">
-        <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="statusBadge(tx.match_status)">
-          {{ statusLabel(tx.match_status) }}
+        <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="statusBadge(payrollMatched ? 'auto_exact' : tx.match_status)">
+          {{ payrollMatched ? t('bank.match_status.payroll') : statusLabel(tx.match_status) }}
         </span>
-        <button v-if="tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
+        <button v-if="!payrollMatched && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
           class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-warning-50 text-warning-600"
           :aria-expanded="expandedSuggestions.has(tx.id)" :title="t('bank.match_v2.title')"
           @click="toggleSuggestion(tx.id)">
@@ -380,7 +381,7 @@ function candidateReject() {
       </RouterLink>
       <span v-if="tx.matched_vendor_name" class="text-neutral-500 ml-2">{{ tx.matched_vendor_name }}</span>
     </div>
-    <MatchSuggestionPanel v-if="expandedSuggestions.has(tx.id) && suggestionFor(tx.id)" variant="inline"
+    <MatchSuggestionPanel v-if="!payrollMatched && expandedSuggestions.has(tx.id) && suggestionFor(tx.id)" variant="inline"
       :suggestion="suggestionFor(tx.id)!" :reviewing="reviewingSuggestion"
       :can-review="auth.canWrite('bank.match')" @accept="candidateAccept" @reject="candidateReject" />
     <div v-if="expandedDocs.has(tx.id)" class="pt-1">

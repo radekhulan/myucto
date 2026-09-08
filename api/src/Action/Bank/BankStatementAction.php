@@ -20,6 +20,7 @@ use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\StatementImporter;
 use MyInvoice\Service\Bank\StatementTransactionScope;
+use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Bank\Match\MatchSuggestionException;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
@@ -682,8 +683,8 @@ final class BankStatementAction
                 $transactionConditions[] = "bt.source = 'statement' AND bt.match_status <> 'ignored'
                     AND NOT EXISTS (
                         SELECT 1 FROM journal_entries je
-                         WHERE je.supplier_id = ? AND je.source_type = 'bank'
-                           AND je.source_id = bt.id AND je.reversed_by IS NULL
+                         WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
+                           AND je.reversed_by IS NULL
                     )";
                 $transactionParams[] = $sid;
             }
@@ -729,8 +730,8 @@ final class BankStatementAction
                         AND ubt.match_status <> 'ignored'
                         AND NOT EXISTS (
                             SELECT 1 FROM journal_entries uje
-                             WHERE uje.supplier_id = ? AND uje.source_type = 'bank'
-                               AND uje.source_id = ubt.id AND uje.reversed_by IS NULL
+                             WHERE uje.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('uje', 'ubt.id') . "
+                               AND uje.reversed_by IS NULL
                         )) AS unposted_count,
                     (SELECT CASE
                               WHEN COUNT(DISTINCT COALESCE(NULLIF(cur.bank_code, ''), '?')) = 1
@@ -1488,8 +1489,8 @@ final class BankStatementAction
         if ($postingFilter !== '') {
             $exists = "EXISTS (
                 SELECT 1 FROM journal_entries je
-                 WHERE je.supplier_id = ? AND je.source_type = 'bank'
-                   AND je.source_id = bt.id AND je.reversed_by IS NULL
+                 WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
+                   AND je.reversed_by IS NULL
             )";
             if ($postingFilter === 'posted') {
                 $txWhere .= ' AND ' . $exists;
@@ -1662,8 +1663,8 @@ final class BankStatementAction
                 AND bt.match_status <> 'ignored'
                 AND NOT EXISTS (
                   SELECT 1 FROM journal_entries je
-                   WHERE je.supplier_id = ? AND je.source_type = 'bank'
-                     AND je.reversed_by IS NULL AND je.source_id = bt.id
+                   WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
+                     AND je.reversed_by IS NULL
                 )"
         );
         $stmt->execute([$supplierId]);

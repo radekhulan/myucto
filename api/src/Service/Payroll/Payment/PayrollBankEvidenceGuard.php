@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Payment;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Bank\BankTransactionPostingScope;
+use PDO;
 
 /**
  * Ví, jestli bankovní pohyb už spotřebovaly mzdy.
@@ -68,8 +71,94 @@ final class PayrollBankEvidenceGuard
     {
         try {
             return $this->isUsedByPayroll($bankTransactionId);
-        } catch (\PDOException) {
+        } catch (\PDOException $exception) {
+            if ((int) ($exception->errorInfo[1] ?? 0) !== 1146) {
+                throw $exception;
+            }
             return false;
+        }
+    }
+
+    public function assertAvailableForBankPosting(int $bankTransactionId): void
+    {
+        $statement = $this->db->pdo()->prepare('SELECT id FROM bank_transactions WHERE id = ? FOR UPDATE');
+        $statement->execute([$bankTransactionId]);
+        try {
+            $statement = $this->db->pdo()->prepare(
+                'SELECT payment_match.id FROM payroll_payment_matches payment_match
+                   JOIN journal_entries entry
+                     ON entry.supplier_id = payment_match.supplier_id
+                    AND entry.source_type = "payroll_payment" AND entry.source_id = payment_match.id
+                    AND entry.reversed_by IS NULL AND entry.posted_at IS NOT NULL
+                  WHERE payment_match.bank_transaction_id = ? LIMIT 1 FOR UPDATE',
+            );
+            $statement->execute([$bankTransactionId]);
+            if ($statement->fetchColumn() !== false) {
+                throw new PostingException(
+                    'payroll_payment',
+                    'Pohyb je spárovaný se mzdami. Použijte jeho existující mzdovou vazbu.',
+                    409,
+                );
+            }
+        } catch (\PDOException $exception) {
+            if ((int) ($exception->errorInfo[1] ?? 0) !== 1146) {
+                throw $exception;
+            }
+        }
+    }
+
+    public function postingInfo(int $supplierId, array $transactionIds): array
+    {
+        if ($transactionIds === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($transactionIds), '?'));
+        try {
+            $statement = $this->db->pdo()->prepare(
+                "SELECT payment_match.bank_transaction_id, entry.id AS journal_entry_id, entry.document_no,
+                        entry.source_type,
+                        " . BankTransactionPostingScope::payrollFullyPostedSql('payment_match.supplier_id', 'payment_match.bank_transaction_id') . " AS fully_posted
+                   FROM payroll_payment_matches payment_match
+              LEFT JOIN payroll_payment_match_postings posting
+                     ON posting.supplier_id = payment_match.supplier_id AND posting.match_id = payment_match.id
+              LEFT JOIN journal_entries entry
+                     ON entry.supplier_id = payment_match.supplier_id AND entry.id = posting.journal_entry_id
+                    AND entry.reversed_by IS NULL AND entry.posted_at IS NOT NULL
+                    AND ((entry.source_type = 'payroll_payment' AND entry.source_id = payment_match.id)
+                         OR (entry.source_type = 'bank' AND entry.source_id = payment_match.bank_transaction_id))
+                  WHERE payment_match.supplier_id = ? AND payment_match.bank_transaction_id IN ($placeholders)
+                  ORDER BY payment_match.id",
+            );
+            $statement->execute([$supplierId, ...$transactionIds]);
+            $result = [];
+            foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $transactionId = (int) $row['bank_transaction_id'];
+                $result[$transactionId] ??= ['status' => null, 'payroll_matched' => true, 'payroll_posting_blocked' => false];
+                if ($row['journal_entry_id'] !== null) {
+                    $result[$transactionId] += [
+                        'journal_entry_id' => (int) $row['journal_entry_id'],
+                        'document_no' => $row['document_no'],
+                    ];
+                    if ($row['source_type'] === 'payroll_payment') {
+                        $result[$transactionId]['payroll_posting_blocked'] = true;
+                    }
+                    if ($row['source_type'] === 'bank' || (bool) $row['fully_posted']) {
+                        $result[$transactionId]['status'] = 'posted';
+                    }
+                }
+            }
+            foreach ($result as &$posting) {
+                if ($posting['payroll_posting_blocked'] && $posting['status'] === null) {
+                    $posting['note'] = 'payroll_partial_posting';
+                }
+            }
+            unset($posting);
+            return $result;
+        } catch (\PDOException $exception) {
+            if ((int) ($exception->errorInfo[1] ?? 0) !== 1146) {
+                throw $exception;
+            }
+            return [];
         }
     }
 }

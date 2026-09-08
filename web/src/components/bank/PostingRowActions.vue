@@ -18,6 +18,7 @@ const auth = useAuthStore()
 const toast = useToast()
 
 const posting = computed(() => props.tx.posting ?? null)
+const payrollPostingBlocked = computed(() => posting.value?.payroll_posting_blocked === true)
 const isIgnored = computed(() => props.tx.match_status === 'ignored')
 const periodClosed = computed(() => props.tx.period_closed === true || posting.value?.note === 'period_closed')
 
@@ -25,7 +26,7 @@ const periodClosed = computed(() => props.tx.period_closed === true || posting.v
 // člověk s doklady v ruce ji zaúčtovat umí. Bez toho by cizoměnové pohyby visely ve frontě navždy
 // a nešly zaúčtovat vůbec nijak (back-end to povoluje přes assertPostableTx(allowForeign: true)).
 const canPost = computed(() =>
-  auth.canWrite('bank.post') && !isIgnored.value && !periodClosed.value
+  auth.canWrite('bank.post') && !payrollPostingBlocked.value && !isIgnored.value && !periodClosed.value
     && (posting.value === null || posting.value.status === null),
 )
 
@@ -44,7 +45,7 @@ const repostOpen = ref(false)
  * server toutéž cestou jako u ručního zaúčtování — viz BankPostingService::prepareRepostLines().
  */
 const canRepost = computed(() =>
-  posting.value?.status === 'posted' && auth.canWrite('accounting'))
+  !payrollPostingBlocked.value && posting.value?.status === 'posted' && auth.canWrite('accounting'))
 
 async function onReposted() {
   toast.success(t('accounting.repost.done'))
@@ -135,7 +136,7 @@ function onPosted(payload: { result: PostResult; debit: string; credit: string }
 </script>
 
 <template>
-  <div class="inline-flex flex-col items-end gap-1">
+  <div v-if="!payrollPostingBlocked" class="inline-flex flex-col items-end gap-1">
     <!-- Zaúčtovat… -->
     <button v-if="canPost" @click="showModal = true" :disabled="busy" :class="btnFilledSm('primary')">
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin"/></svg>

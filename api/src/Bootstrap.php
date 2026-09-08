@@ -623,6 +623,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Accounting\PostingService::class),
                 $c->get(\MyInvoice\Repository\AccountingModeRepository::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\BankAnalyticResolver::class),
+                $c->get(\MyInvoice\Repository\BankPostingSuggestionRepository::class),
             ),
             // Totéž pro ?PayrollPaymentPostingService a ?PayrollPaymentSettlementSignalRepository
             // v párovací službě — bez explicitní vazby by zůstal viset zhasnutý

@@ -12,6 +12,7 @@ use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Report\VatLedgerService;
 use PDO;
 
@@ -234,6 +235,9 @@ final class PostingService
             $pdo->beginTransaction();
         }
         try {
+            if ($sourceType === 'bank' && $sourceId !== null) {
+                (new PayrollBankEvidenceGuard($this->db))->assertAvailableForBankPosting($sourceId);
+            }
             $period = $this->periods->findForDateForUpdate($supplierId, $entryDate);
             if ($period === null) {
                 // Chybějící období (zapomenutý přelom roku, naimportovaná historie) se

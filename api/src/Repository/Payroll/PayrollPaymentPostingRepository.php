@@ -127,7 +127,7 @@ final class PayrollPaymentPostingRepository
                         AND entry.source_type = "bank"
                         AND entry.source_id = bank_tx.id
                         AND entry.reversed_by IS NULL
-                      LIMIT 1) AS bank_entry_id
+                      LIMIT 1 FOR UPDATE) AS bank_entry_id
                FROM bank_statements statement
                JOIN bank_transactions bank_tx
                  ON bank_tx.statement_id = statement.id

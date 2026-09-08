@@ -84,6 +84,8 @@ export interface BankTransaction {
   /** Stav zaúčtování transakce (Epic AUTOMATIZACE) — jen u double_entry firmy, jinak null. */
   posting?: {
     status: 'posted' | 'suggested' | null
+    payroll_matched?: boolean
+    payroll_posting_blocked?: boolean
     journal_entry_id?: number
     document_no?: string
     automated?: boolean

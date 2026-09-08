@@ -247,7 +247,7 @@ final class BankPostingService
                 return ['action' => 'skipped', 'reason' => 'ignored'];
             }
             // 4b) pohyb spotřebovaný mzdovou platbou účtuje mzdová strana.
-            if ($this->payrollEvidence?->isUsedByPayrollSafely($txId) === true) {
+            if ($this->skipPayrollPayment($supplierId, $txId)) {
                 return ['action' => 'skipped', 'reason' => 'payroll_payment'];
             }
             $isMatched = in_array((string) $tx['match_status'], ['auto_exact', 'auto_partial', 'manual'], true)
@@ -327,6 +327,9 @@ final class BankPostingService
     private function matchedOutcome(int $supplierId, array $tx, ?int $userId, bool $activationBackfill = false): array
     {
         $txId = (int) $tx['id'];
+        if ($this->skipPayrollPayment($supplierId, $txId)) {
+            return ['action' => 'skipped', 'reason' => 'payroll_payment'];
+        }
         $amount = (float) $tx['amount'];
         $absCents = (int) round(abs($amount) * 100.0);
         if ($absCents === 0) {
@@ -1400,6 +1403,9 @@ final class BankPostingService
         if ($tx === null) {
             return ['action' => 'skipped', 'reason' => 'transaction_not_found'];
         }
+        if ($this->skipPayrollPayment($supplierId, $txId)) {
+            return ['action' => 'skipped', 'reason' => 'payroll_payment'];
+        }
         $amount = (float) $tx['amount'];
         $absCents = (int) round(abs($amount) * 100.0);
         if ($absCents === 0) {
@@ -1478,6 +1484,9 @@ final class BankPostingService
         $tx = $this->loadTx($txId);
         if ($tx === null || (int) ($tx['statement_supplier_id'] ?? 0) !== $supplierId) {
             return ['action' => 'skipped', 'reason' => 'transaction_not_found'];
+        }
+        if ($this->skipPayrollPayment($supplierId, $txId)) {
+            return ['action' => 'skipped', 'reason' => 'payroll_payment'];
         }
         $amount = (float) $tx['amount'];
         $direction = $amount > 0 ? 'incoming' : 'outgoing';
@@ -1932,6 +1941,8 @@ final class BankPostingService
             if (!in_array((string) $sug['status'], ['pending', 'needs_input', 'blocked'], true)) {
                 throw new PostingException('suggestion_not_pending', 'Návrh už byl vyřízen.', 409);
             }
+            ($this->payrollEvidence ?? new PayrollBankEvidenceGuard($this->db))
+                ->assertAvailableForBankPosting((int) $sug['bank_transaction_id']);
             if (in_array((string) $sug['source'], ['rule', 'learned'], true) && $this->transfers !== null) {
                 $transfer = $this->transfers->detectTransaction($supplierId, (int) $sug['bank_transaction_id']);
                 if ($transfer !== null) {
@@ -2900,6 +2911,8 @@ final class BankPostingService
     /** @param array<string,mixed> $tx */
     private function assertPostableTx(array $tx, bool $allowForeign = false): void
     {
+        ($this->payrollEvidence ?? new PayrollBankEvidenceGuard($this->db))
+            ->assertAvailableForBankPosting((int) $tx['id']);
         if ((string) $tx['match_status'] === 'ignored') {
             throw new PostingException('transaction_ignored', 'Ignorovanou transakci nelze účtovat.');
         }
@@ -3580,11 +3593,13 @@ final class BankPostingService
         if ($txIds === []) {
             return [];
         }
+        $payroll = ($this->payrollEvidence ?? new PayrollBankEvidenceGuard($this->db))
+            ->postingInfo($supplierId, $txIds);
         $pdo = $this->db->pdo();
         $mode = $pdo->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
         $mode->execute([$supplierId]);
         if ((string) $mode->fetchColumn() !== 'double_entry') {
-            return [];
+            return $payroll;
         }
 
         $ph = implode(',', array_fill(0, count($txIds), '?'));
@@ -3627,6 +3642,12 @@ final class BankPostingService
             ];
         }
 
+        foreach ($payroll as $txId => $posting) {
+            $out[$txId] = isset($posting['journal_entry_id'])
+                ? $posting + ($out[$txId] ?? [])
+                : ($out[$txId] ?? []) + $posting;
+        }
+
         $sugs = $pdo->prepare(
             "SELECT s.bank_transaction_id AS tx_id, s.id, s.source, s.rule_id,
                     s.debit_account_code, s.credit_account_code, s.note, r.name AS rule_name
@@ -3637,7 +3658,7 @@ final class BankPostingService
         $sugs->execute(array_merge([$supplierId], $txIds));
         foreach ($sugs->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $txId = (int) $r['tx_id'];
-            if (isset($out[$txId])) {
+            if (($out[$txId]['status'] ?? null) === 'posted' || !empty($out[$txId]['payroll_posting_blocked'])) {
                 continue; // posted má přednost
             }
             $out[$txId] = [
@@ -3649,7 +3670,7 @@ final class BankPostingService
                 'debit_account_code'  => (string) $r['debit_account_code'],
                 'credit_account_code' => (string) $r['credit_account_code'],
                 'note'                => $r['note'] !== null ? (string) $r['note'] : null,
-            ];
+            ] + ($out[$txId] ?? []);
         }
 
         $accountStmt = $pdo->prepare(
@@ -3710,5 +3731,18 @@ final class BankPostingService
         }
 
         return $out;
+    }
+
+    private function skipPayrollPayment(int $supplierId, int $txId): bool
+    {
+        if (!(($this->payrollEvidence ?? new PayrollBankEvidenceGuard($this->db))->isUsedByPayrollSafely($txId))) {
+            return false;
+        }
+        $posting = ($this->payrollEvidence ?? new PayrollBankEvidenceGuard($this->db))
+            ->postingInfo($supplierId, [$txId])[$txId] ?? [];
+        if (!empty($posting['payroll_posting_blocked']) || ($posting['status'] ?? null) === 'posted') {
+            $this->suggestions->supersedePendingForTx($supplierId, $txId, 'payroll_payment');
+        }
+        return true;
     }
 }

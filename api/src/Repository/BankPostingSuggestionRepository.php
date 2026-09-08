@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
+use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use PDO;
 use PDOException;
 
@@ -417,8 +418,8 @@ final class BankPostingSuggestionRepository
                    AND s.note IN ({$in})
                    AND (s.snoozed_until IS NULL OR s.snoozed_until <= NOW())
                    AND NOT EXISTS (SELECT 1 FROM journal_entries je
-                                    WHERE je.supplier_id = s.supplier_id AND je.source_type = 'bank'
-                                      AND je.source_id = s.bank_transaction_id AND je.reversed_by IS NULL)
+                                    WHERE je.supplier_id = s.supplier_id AND " . BankTransactionPostingScope::sourceSql('je', 's.bank_transaction_id') . "
+                                      AND je.reversed_by IS NULL)
                    AND NOT EXISTS (SELECT 1 FROM bank_posting_suggestions rej
                                     WHERE rej.supplier_id = s.supplier_id
                                       AND rej.bank_transaction_id = s.bank_transaction_id
@@ -474,8 +475,8 @@ final class BankPostingSuggestionRepository
             )
             AND NOT EXISTS (
                 SELECT 1 FROM journal_entries je
-                 WHERE je.supplier_id = ? AND je.source_type = 'bank'
-                   AND je.source_id = bt.id AND je.reversed_by IS NULL
+                 WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
+                   AND je.reversed_by IS NULL
             )
             AND NOT EXISTS (
                 SELECT 1 FROM bank_posting_suggestions s2
@@ -700,8 +701,8 @@ final class BankPostingSuggestionRepository
             . ($unpostedOnly ? "
             AND NOT EXISTS (
                 SELECT 1 FROM journal_entries je
-                 WHERE je.supplier_id = ? AND je.source_type = 'bank'
-                   AND je.source_id = bt.id AND je.reversed_by IS NULL
+                 WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
+                   AND je.reversed_by IS NULL
             )" : '') . "
             AND (
                 " . BankStatementOwnershipResolver::sql() . "
@@ -957,8 +958,8 @@ final class BankPostingSuggestionRepository
             AND bt.match_status <> 'ignored'
             AND NOT EXISTS (
                 SELECT 1 FROM journal_entries je
-                 WHERE je.supplier_id = ? AND je.source_type = 'bank'
-                   AND je.source_id = bt.id AND je.reversed_by IS NULL
+                 WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
+                   AND je.reversed_by IS NULL
             )
             AND NOT EXISTS (
                 SELECT 1 FROM bank_posting_suggestions s2
