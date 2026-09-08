@@ -47,6 +47,10 @@ V přehledu i detailu vidíte vypočtený nebo bankou potvrzený konečný zůst
 Tlačítko **GPC** stáhne dostupný bankovní originál, případně vypočtený export.
 Pokud chybí výchozí zůstatek nebo výpočet nelze ověřit, vypočtený export není dostupný.
 
+Při načtení nebo opakovaném párování výpisu se doplní chybějící evidence úhrady
+u přesně spárované příchozí platby, která pokrývá celou dosud neuhrazenou fakturu.
+Existující platby a ruční označení faktury jako zaplacené se zachovají.
+
 Jednotlivé odpovědi banky se v seznamu nezobrazují jako další překrývající
 se výpisy. GPC pro účet s API evidencí se začlení do stejného měsíce.
 Pokud pokrývá všechny jeho pohyby, nahradí API přehled jako hlavní bankovní

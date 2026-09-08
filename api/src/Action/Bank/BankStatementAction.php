@@ -3472,7 +3472,7 @@ final class BankStatementAction
      * uživatel ex-post doplnil přijaté/vystavené faktury, které by se daly napárovat.
      *
      * Volá StatementMatcher::matchBatch() pro transakce ve stavu 'unmatched' nebo
-     * 'auto_partial'. Stávající 'auto_exact', 'manual' a 'ignored' nejsou dotčeny.
+     * 'auto_partial' a přesné shody, kterým chybí evidence platby u neuhrazené faktury.
      */
     public function rematch(Request $request, Response $response, array $args): Response
     {
@@ -3490,9 +3490,15 @@ final class BankStatementAction
         $txs = $pdo->prepare(
             "SELECT bt.id FROM bank_transactions bt
               WHERE " . StatementTransactionScope::sql($statementId) . "
-                AND bt.match_status IN ('unmatched', 'auto_partial')"
+                AND (bt.match_status IN ('unmatched', 'auto_partial')
+                    OR (bt.match_status = 'auto_exact' AND EXISTS (
+                        SELECT 1 FROM invoices i WHERE i.id = bt.matched_invoice_id
+                          AND i.supplier_id = ? AND i.status IN ('issued', 'sent', 'reminded')
+                          AND i.paid_total = 0
+                          AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = i.id)
+                    )))"
         );
-        $txs->execute();
+        $txs->execute([$sid]);
         $txIds = $txs->fetchAll(\PDO::FETCH_COLUMN);
 
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
@@ -3511,6 +3517,7 @@ final class BankStatementAction
             if ($takeover !== null) {
                 $takenOver++;
                 $newlyMatched++;
+                if ($takeover['match_status'] === 'auto_exact') $this->matcher->match((int) $txId);
                 $this->bankPosting->handleTransaction((int) $txId, $userId ?: null);
                 continue;
             }
@@ -3520,9 +3527,9 @@ final class BankStatementAction
 
         foreach ($this->matcher->matchBatch($matchIds) as $txId => $r) {
             $s = (string) ($r['status'] ?? 'unmatched');
-            if ($s === 'auto_exact') $newlyMatched++;
+            if ($s === 'auto_exact' && empty($r['already_recorded'])) $newlyMatched++;
             elseif ($s === 'auto_partial') $newlyPartial++;
-            else $stillUnmatched++;
+            elseif ($s === 'unmatched') $stillUnmatched++;
             // Automatizace: zaúčtování po (re)match (best-effort, no-op mimo double_entry).
             $this->bankPosting->handleTransaction(
                 $txId,

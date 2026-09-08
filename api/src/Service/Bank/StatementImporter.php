@@ -150,9 +150,11 @@ final class StatementImporter
         $state = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ?');
         foreach (array_unique($processingIds) as $txId) {
             $state->execute([$txId]);
-            if ($state->fetchColumn() === 'unmatched') {
+            $matchStatus = $state->fetchColumn();
+            if ($matchStatus === 'unmatched') {
                 $pendingIds[] = $txId;
             } else {
+                if ($matchStatus === 'auto_exact') $this->matcher->match($txId);
                 $this->bankPosting?->handleTransaction($txId, $userId);
             }
         }
@@ -428,8 +430,10 @@ final class StatementImporter
         $matched = 0;
         $matchIds = [];
         foreach ($transactionIds as $txId) {
-            if ($this->reconciler->takeOverFromEmailNotice($txId) !== null) {
+            $takeover = $this->reconciler->takeOverFromEmailNotice($txId);
+            if ($takeover !== null) {
                 $matched++;
+                if ($takeover['match_status'] === 'auto_exact') $this->matcher->match($txId);
                 $this->bankPosting?->handleTransaction($txId, $userId);
             } else {
                 $matchIds[] = $txId;

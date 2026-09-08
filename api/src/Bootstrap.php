@@ -553,6 +553,7 @@ final class Bootstrap
                 // C-09 — bankovní pohyb spotřebovaný mzdovou platbou se nesmí
                 // nabídnout znovu k fakturačnímu párování.
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
+                $c->get(\MyInvoice\Service\Bank\MatchedInvoicePaymentRepair::class),
             ),
 
             // Autowire by optional ?PayrollBankEvidenceGuard nevyplnil (nullable

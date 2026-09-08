@@ -81,6 +81,7 @@ final class StatementMatcher
         // by se saldo. Nullable kvůli izolovaným konstrukcím v testech;
         // Bootstrap injektuje vždy.
         private readonly ?PayrollBankEvidenceGuard $payrollEvidence = null,
+        private readonly ?MatchedInvoicePaymentRepair $paymentRepair = null,
     ) {}
 
     /**
@@ -288,7 +289,12 @@ final class StatementMatcher
         }
         $storedStatus = (string) ($row['match_status'] ?? 'unmatched');
         if (in_array($storedStatus, ['auto_exact', 'manual', 'ignored'], true)) {
-            $result = ['status' => $storedStatus, 'already_recorded' => true];
+            $repaired = $storedStatus === 'auto_exact' && ($this->paymentRepair?->repair($transactionId) ?? false);
+            $result = ['status' => $storedStatus, 'already_recorded' => !$repaired];
+            if ($repaired) {
+                $this->logPaymentMatch('invoice', (int) $row['matched_invoice_id'], null, $storedStatus,
+                    (float) $row['amount'], (string) ($row['variable_symbol'] ?? ''), $transactionId);
+            }
             if (!empty($row['matched_invoice_id'])) {
                 $result['invoice_id'] = (int) $row['matched_invoice_id'];
             } else {

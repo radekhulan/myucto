@@ -29,6 +29,7 @@ final class EmailNoticeReconcilerTest extends TestCase
     private Connection $db;
     private InvoicePaymentService $payments;
     private EmailNoticeReconciler $reconciler;
+    private \MyInvoice\Service\Bank\StatementMatcher $matcher;
     private int $supplierId = 0;
     private int $clientId = 0;
     private int $currencyId = 0;
@@ -52,6 +53,7 @@ final class EmailNoticeReconcilerTest extends TestCase
             $this->db = $c->get(Connection::class);
             $this->payments = $c->get(InvoicePaymentService::class);
             $this->reconciler = $c->get(EmailNoticeReconciler::class);
+            $this->matcher = $c->get(\MyInvoice\Service\Bank\StatementMatcher::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -95,8 +97,20 @@ final class EmailNoticeReconcilerTest extends TestCase
                JOIN invoices i ON i.id = p.invoice_id
               WHERE i.supplier_id = ? AND i.varsymbol IN ($place)"
         )->execute([$this->supplierId, ...self::ALL_VS]);
+        $monthly = $pdo->prepare('SELECT DISTINCT m.monthly_statement_id FROM bank_api_evidence_months m JOIN bank_statements bs ON bs.id = m.evidence_statement_id WHERE bs.file_name LIKE ?');
+        $monthly->execute(['%' . self::FILE_MARKER . '%']);
+        $monthlyIds = $monthly->fetchAll(PDO::FETCH_COLUMN);
+        $pdo->prepare('DELETE link FROM bank_transaction_imports link JOIN bank_statements bs ON bs.id = link.original_statement_id WHERE bs.file_name LIKE ?')
+            ->execute(['%' . self::FILE_MARKER . '%']);
+        $pdo->prepare('DELETE link FROM bank_api_evidence_months link JOIN bank_statements bs ON bs.id = link.evidence_statement_id WHERE bs.file_name LIKE ?')
+            ->execute(['%' . self::FILE_MARKER . '%']);
         $pdo->prepare("DELETE FROM bank_statements WHERE file_name LIKE ?")
             ->execute(['%' . self::FILE_MARKER . '%']);
+        foreach ($monthlyIds as $id) {
+            $pdo->prepare('DELETE FROM bank_api_months WHERE statement_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
+        }
+        $pdo->prepare('DELETE FROM currencies WHERE supplier_id = ? AND label = "Synthetic API lifecycle"')->execute([$this->supplierId]);
         // payment_matches na ně visí přes FK ON DELETE CASCADE (tx i přijatá faktura).
         $pdo->prepare("DELETE FROM purchase_invoices WHERE supplier_id = ? AND vendor_invoice_number LIKE ?")
             ->execute([$this->supplierId, self::FILE_MARKER . '%']);
@@ -361,6 +375,149 @@ final class EmailNoticeReconcilerTest extends TestCase
         )->fetch(PDO::FETCH_ASSOC);
         self::assertSame('ignored', $secondary['match_status']);
         self::assertNull($secondary['matched_invoice_id']);
+    }
+
+    #[\PHPUnit\Framework\Attributes\TestWith(['bank_api'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['gpc'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['pdf'])]
+    public function testAuthoritativeMatchRepairsMissingInvoicePaymentOnlyOnce(string $source): void
+    {
+        $invoiceId = $this->insertInvoice(self::VS_A, 1000.00);
+        [$statementId, $txId] = $this->insertStatementWithTx('gpc', 1000.00, self::VS_A, 'missing-payment');
+        $this->db->pdo()->prepare('UPDATE bank_statements SET source = ? WHERE id = ?')->execute([$source, $statementId]);
+        $this->markTxMatched($txId, $invoiceId, 'auto_exact');
+
+        $this->matcher->match($txId);
+        $this->matcher->match($txId);
+
+        self::assertSame(1, $this->paymentCountForTx($txId));
+        $invoice = $this->db->pdo()->query("SELECT status, paid_total FROM invoices WHERE id = $invoiceId")->fetch(PDO::FETCH_ASSOC);
+        self::assertSame('paid', $invoice['status']);
+        self::assertSame(1000.0, (float) $invoice['paid_total']);
+    }
+
+    public function testAuthoritativeMatchPreservesManuallyPaidInvoiceWithoutPayment(): void
+    {
+        $invoiceId = $this->insertInvoice(self::VS_A, 1000.00);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid', paid_at = '2099-06-15' WHERE id = ?")->execute([$invoiceId]);
+        [, $txId] = $this->insertStatementWithTx('gpc', 1000.00, self::VS_A, 'manual-paid');
+        $this->markTxMatched($txId, $invoiceId, 'auto_exact');
+        $this->matcher->match($txId);
+        self::assertSame(0, $this->paymentCountForTx($txId));
+    }
+
+    #[\PHPUnit\Framework\Attributes\TestWith(['partial'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['currency'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['existing-payment'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['secondary-source'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['proforma-final'])]
+    public function testMissingPaymentRepairRejectsAmbiguousEvidence(string $scenario): void
+    {
+        $invoiceId = $this->insertInvoice(self::VS_A, 1000.00);
+        [, $txId] = $this->insertStatementWithTx($scenario === 'secondary-source' ? 'idoklad' : 'gpc', $scenario === 'partial' ? 500.00 : 1000.00, self::VS_A, 'repair-guard');
+        $this->markTxMatched($txId, $invoiceId, 'auto_exact');
+        if ($scenario === 'currency') {
+            $this->db->pdo()->prepare("UPDATE bank_transactions SET currency = 'EUR' WHERE id = ?")->execute([$txId]);
+        }
+        if ($scenario === 'existing-payment') {
+            $this->payments->recordPayment($invoiceId, 500.00, '2099-06-15', ['source' => 'manual']);
+        }
+        if ($scenario === 'proforma-final') {
+            $this->db->pdo()->prepare("UPDATE invoices SET invoice_type = 'proforma' WHERE id = ?")->execute([$invoiceId]);
+            $finalId = $this->insertInvoice(self::VS_B, 1000.00);
+            $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ? WHERE id = ?')->execute([$invoiceId, $finalId]);
+        }
+        $this->matcher->match($txId);
+        self::assertSame(0, $this->paymentCountForTx($txId));
+        self::assertSame('issued', $this->db->pdo()->query("SELECT status FROM invoices WHERE id = $invoiceId")->fetchColumn());
+    }
+
+    public function testMissingPaymentRepairRejectsInvoiceOfAnotherSupplier(): void
+    {
+        $invoiceId = $this->insertInvoice(self::VS_A, 1000.00);
+        [$statementId, $txId] = $this->insertStatementWithTx('gpc', 1000.00, self::VS_A, 'repair-tenant');
+        $this->markTxMatched($txId, $invoiceId, 'auto_exact');
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO supplier (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id)
+            SELECT 'Synthetic payment repair tenant', 'Test 1', 'Praha', '11000', country_id, 'repair@example.test', default_currency_id, default_vat_rate_id
+              FROM supplier WHERE id = ?")->execute([$this->supplierId]);
+        $otherSupplier = (int) $pdo->lastInsertId();
+        try {
+            $pdo->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ?')->execute([$otherSupplier, $statementId]);
+            $this->matcher->match($txId);
+            self::assertSame(0, $this->paymentCountForTx($txId));
+            self::assertSame('issued', $pdo->query("SELECT status FROM invoices WHERE id = $invoiceId")->fetchColumn());
+        } finally {
+            $pdo->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ?')->execute([$this->supplierId, $statementId]);
+            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$otherSupplier]);
+        }
+    }
+
+    #[\PHPUnit\Framework\Attributes\TestWith(['email_notice', false])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['email_notice', true])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['idoklad', false])]
+    public function testBankApiImportKeepsOnePaymentAfterSecondaryEvidence(string $source, bool $unmatch): void
+    {
+        $pdo = $this->db->pdo();
+        $oldAccount = $this->account;
+        $oldBank = $this->bankCode;
+        $this->account = '1000000005';
+        $this->bankCode = '0100';
+        $pdo->prepare('INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default, account_number, bank_code)
+            VALUES (?, "CZK", "Synthetic API lifecycle", "CZK", "CZK", "CZK", 2, 1, 0, ?, ?)')
+            ->execute([$this->supplierId, $this->account, $this->bankCode]);
+        $currencyId = (int) $pdo->lastInsertId();
+        try {
+            $invoiceId = $this->insertInvoice(self::VS_A, 1000.00);
+            [, $secondaryTx] = $this->insertStatementWithTx($source, 1000.00, self::VS_A, 'api-lifecycle');
+            if ($source === 'email_notice') {
+                $this->payments->recordPayment($invoiceId, 1000.00, '2099-06-15', ['source' => 'bank', 'bank_transaction_id' => $secondaryTx]);
+            }
+            $this->markTxMatched($secondaryTx, $invoiceId, 'auto_exact');
+            if ($unmatch) {
+                $this->payments->deleteForBankTransaction($secondaryTx);
+                $pdo->prepare("UPDATE bank_transactions SET match_status = 'unmatched', matched_invoice_id = NULL, matched_at = NULL WHERE id = ?")->execute([$secondaryTx]);
+            }
+            $parsed = [
+                'header' => ['account_number' => $this->account, 'statement_number' => null, 'statement_date' => '2099-06-15', 'prev_balance' => null, 'curr_balance' => null, 'credit_total' => 1000, 'debit_total' => 0],
+                'transactions' => [['posted_at' => '2099-06-15', 'amount' => 1000, 'currency' => 'CZK', 'variable_symbol' => self::VS_A,
+                    'constant_symbol' => '', 'specific_symbol' => '', 'counterparty_account' => '', 'counterparty_bank' => '',
+                    'counterparty_name' => '', 'description' => 'Synthetic payment', 'bank_ref' => 'SYNTHETIC-API-1']],
+            ];
+            $importer = new \MyInvoice\Service\Bank\StatementImporter($this->db, new \MyInvoice\Service\Bank\GpcParser(), $this->matcher, $this->reconciler);
+            $result = $importer->importConnectedParsed($parsed, 'synthetic-api-lifecycle', self::FILE_MARKER . 'api.json', null, $currencyId, $this->supplierId);
+            $importer->importConnectedParsed($parsed, 'synthetic-api-lifecycle-repeat', self::FILE_MARKER . 'api-repeat.json', null, $currencyId, $this->supplierId);
+            $payments = $this->payments->listFor($invoiceId);
+            self::assertCount(1, $payments);
+            self::assertNotSame($secondaryTx, (int) $payments[0]['bank_transaction_id']);
+            self::assertSame('paid', $pdo->query("SELECT status FROM invoices WHERE id = $invoiceId")->fetchColumn());
+            self::assertSame(1000.0, (float) $pdo->query("SELECT paid_total FROM invoices WHERE id = $invoiceId")->fetchColumn());
+            self::assertSame(1, $result['matched']);
+        } finally {
+            $this->cleanup();
+            $pdo->prepare('DELETE FROM currencies WHERE id = ?')->execute([$currencyId]);
+            $this->account = $oldAccount;
+            $this->bankCode = $oldBank;
+        }
+    }
+
+    #[\PHPUnit\Framework\Attributes\TestWith([1000.0, 1])]
+    #[\PHPUnit\Framework\Attributes\TestWith([500.0, 0])]
+    public function testRematchRepairsPaymentAndReportsUnchangedMatchesAccurately(float $amount, int $repaired): void
+    {
+        $invoiceId = $this->insertInvoice(self::VS_A, 1000.00);
+        [$statementId, $txId] = $this->insertStatementWithTx('gpc', $amount, self::VS_A, 'repair-rematch');
+        $this->markTxMatched($txId, $invoiceId, 'auto_exact');
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/bank-statements/' . $statementId . '/rematch')
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+        $action = Bootstrap::buildContainer()->get(\MyInvoice\Action\Bank\BankStatementAction::class);
+        $response = $action->rematch($request, new \Slim\Psr7\Response(), ['id' => (string) $statementId]);
+        self::assertSame(200, $response->getStatusCode());
+        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame($repaired, $body['newly_matched']);
+        self::assertSame(0, $body['still_unmatched']);
+        self::assertSame($repaired, $this->paymentCountForTx($txId));
     }
 
     public function testIdokladIsIgnoredWhenGpcAlreadyExists(): void
