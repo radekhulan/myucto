@@ -2892,6 +2892,7 @@ final class Routes
         $app->post ('/api/bank-transactions/{id:[0-9]+}/create-purchase-invoice', [BankStatementAction::class, 'createPurchaseInvoice']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/document-request', [BankStatementAction::class, 'createDocumentRequest']);
         // Automatizace (mini-epic) — ruční zaúčtování / storno transakce.
+        $app->get  ('/api/bank-transactions/{id:[0-9]+}/posting-preview', [\MyInvoice\Action\Accounting\Bank\BankTransactionPostingAction::class, 'preview']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/post',   [\MyInvoice\Action\Accounting\Bank\BankTransactionPostingAction::class, 'post']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/unpost', [\MyInvoice\Action\Accounting\Bank\BankTransactionPostingAction::class, 'unpost']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/ai-suggest', \MyInvoice\Action\Ai\BankAiSuggestionAction::class);

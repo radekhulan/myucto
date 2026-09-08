@@ -131,6 +131,7 @@ final class RoutePermissionMap
         ['*', '#^/api/bank-transactions/[0-9]+/match(/|$)#', 'bank.match', AccessLevel::WRITE],
         ['*', '#^/api/bank-match-suggestions/[0-9]+/(accept|reject)$#', 'bank.match', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/post$#', 'bank.post', AccessLevel::WRITE],
+        ['GET', '#^/api/bank-transactions/[0-9]+/posting-preview$#', 'bank.post', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/ai-suggest$#', 'bank.post', AccessLevel::WRITE],
         ['GET', '#^/api/bank-ai-suggestion-availability$#', 'bank.post', AccessLevel::WRITE],
         ['GET', '#^/api/purchase-ai-suggestion-availability$#', 'accounting', AccessLevel::WRITE],

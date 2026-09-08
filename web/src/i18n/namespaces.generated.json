@@ -308,6 +308,7 @@
       "stock"
     ],
     "invoice-detail": [
+      "activation",
       "automation",
       "bank",
       "cash",
@@ -381,6 +382,7 @@
       "vendor"
     ],
     "purchase-invoice-detail": [
+      "activation",
       "automation",
       "bank",
       "cash",
@@ -642,6 +644,7 @@
       "purchase_invoice"
     ],
     "bank-statements": [
+      "activation",
       "automation",
       "bank",
       "bank_accounts",
@@ -659,6 +662,7 @@
       "gopay"
     ],
     "bank-detail": [
+      "activation",
       "automation",
       "bank",
       "document_requests",
@@ -735,6 +739,7 @@
       "bank_template_admin"
     ],
     "templates": [
+      "activation",
       "automation",
       "bank",
       "purchase_invoice",
@@ -754,6 +759,7 @@
       "portfolio"
     ],
     "automation-cockpit": [
+      "activation",
       "automation",
       "bank",
       "imports",

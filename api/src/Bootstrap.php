@@ -975,12 +975,12 @@ final class Bootstrap
                         'handle_factory' => new \MyInvoice\Service\Bank\Connector\BankCertificateCurlFactory(),
                     ])),
                 ])),
-            \MyInvoice\Service\Bank\Connector\CreditasPremiumClient::class => fn ()
+            \MyInvoice\Service\Bank\Connector\CreditasPremiumClient::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Bank\Connector\CreditasPremiumClient(new \GuzzleHttp\Client([
                     'handler' => \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\CurlHandler([
                         'handle_factory' => new \MyInvoice\Service\Bank\Connector\BankCertificateCurlFactory(allowTokenOnly: true),
                     ])),
-                ])),
+                ]), $c->get(LoggerInterface::class)),
             \MyInvoice\Service\Bank\Connector\KbPlusApiClient::class => fn ()
                 => new \MyInvoice\Service\Bank\Connector\KbPlusApiClient(new \GuzzleHttp\Client()),
             \MyInvoice\Service\Bank\Connector\CsasApiClient::class => fn (ContainerInterface $c)

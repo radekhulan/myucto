@@ -68,6 +68,68 @@ final class CreditasPremiumClientTest extends TestCase
         }
     }
 
+    public function testSavingsAccountAndEmptyTransactionSearchFollowDocumentedContract(): void
+    {
+        $history = [];
+        $account = ['accountId' => self::ACCOUNT_ID, 'iban' => 'CZ3022500000001000000005', 'bban' => '1000000005', 'bankCode' => '2250', 'currency' => 'CZK'];
+        $client = $this->clientWith([
+            $this->json(['savingsAccount' => $account]),
+            $this->json(['transactions' => [], 'itemCount' => 0]),
+        ], $history);
+        self::assertSame($account, $client->savingsAccount(['bearer_token' => str_repeat('A', 64)], self::ACCOUNT_ID));
+        [$from, $to] = $this->range();
+        self::assertSame([], $client->transactions(['bearer_token' => str_repeat('A', 64)], self::ACCOUNT_ID, $from, $to));
+        self::assertCount(2, $history);
+        self::assertSame('/oam/v1/account/savings/get', $history[0]['request']->getUri()->getPath());
+        self::assertSame('/oam/v1/account/transaction/search', $history[1]['request']->getUri()->getPath());
+    }
+
+    public function testMissingTransactionsWithExplicitZeroCountIsEmptyPage(): void
+    {
+        $client = $this->clientWith([$this->json(['itemCount' => 0])]);
+        [$from, $to] = $this->range();
+        self::assertSame([], $client->transactions(['bearer_token' => str_repeat('A', 64)], self::ACCOUNT_ID, $from, $to));
+    }
+
+    public function testMissingTransactionsWithPositiveCountIsRejected(): void
+    {
+        $client = $this->clientWith([$this->json(['itemCount' => 1])]);
+        [$from, $to] = $this->range();
+        $this->expectException(BankConnectorException::class);
+        $client->transactions(['bearer_token' => str_repeat('A', 64)], self::ACCOUNT_ID, $from, $to);
+    }
+
+    public function testInvalidSavingsResponseLogsOnlySafeStageAndReason(): void
+    {
+        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
+        $logger->expects(self::once())->method('warning')->with('creditas_response_rejected', [
+            'stage' => 'savings_account', 'reason' => 'account_object', 'http_status' => 200,
+        ]);
+        $client = new CreditasPremiumClient(new Client(['handler' => HandlerStack::create(new MockHandler([
+            $this->json(['unexpected' => 'synthetic-private-response', 'token' => str_repeat('A', 64)]),
+        ]))]), $logger);
+        $this->expectException(BankConnectorException::class);
+        $client->savingsAccount($this->credentials(), self::ACCOUNT_ID);
+    }
+
+    public function testInvalidTransactionPageLogsOnlySafeStageAndReason(): void
+    {
+        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
+        $logger->expects(self::once())->method('notice')->with('creditas_transaction_page_shape', [
+            'transactions_type' => 'null', 'transactions_list' => false,
+            'item_count_type' => 'int', 'item_count_zero' => true,
+        ]);
+        $logger->expects(self::once())->method('warning')->with('creditas_response_rejected', [
+            'stage' => 'transactions', 'reason' => 'transaction_page', 'http_status' => 200,
+        ]);
+        $client = new CreditasPremiumClient(new Client(['handler' => HandlerStack::create(new MockHandler([
+            $this->json(['transactions' => null, 'itemCount' => 0, 'private' => 'synthetic-private-response']),
+        ]))]), $logger);
+        [$from, $to] = $this->range();
+        $this->expectException(BankConnectorException::class);
+        $client->transactions($this->credentials(), self::ACCOUNT_ID, $from, $to);
+    }
+
     public function testTransactionsReturnsAllRawPagesUsingZeroBasedPaging(): void
     {
         $history = [];

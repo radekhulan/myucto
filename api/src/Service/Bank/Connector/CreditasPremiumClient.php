@@ -9,6 +9,7 @@ use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Psr7\FnStream;
 use GuzzleHttp\Psr7\Utils;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Log\LoggerInterface;
 
 final class CreditasPremiumClient
 {
@@ -30,7 +31,7 @@ final class CreditasPremiumClient
     private const MAX_TRANSACTIONS = 50_000;
     private const MAX_TRANSACTION_DURATION_SECONDS = 120.0;
 
-    public function __construct(private readonly ClientInterface $http)
+    public function __construct(private readonly ClientInterface $http, private readonly ?LoggerInterface $diagnostics = null)
     {
     }
 
@@ -61,6 +62,20 @@ final class CreditasPremiumClient
      * @return list<array<string,mixed>>
      */
     public function transactions(
+        #[\SensitiveParameter] array $credentials,
+        string $accountId,
+        string $from,
+        string $to,
+    ): array {
+        try {
+            return $this->loadTransactions($credentials, $accountId, $from, $to);
+        } catch (BankConnectorException $e) {
+            $this->diagnose($e, 'transactions');
+            throw $e;
+        }
+    }
+
+    private function loadTransactions(
         #[\SensitiveParameter] array $credentials,
         string $accountId,
         string $from,
@@ -257,6 +272,19 @@ final class CreditasPremiumClient
      * @return array<string,mixed>
      */
     private function account(
+        #[\SensitiveParameter] array $credentials,
+        string $accountId,
+        string $kind,
+    ): array {
+        try {
+            return $this->loadAccount($credentials, $accountId, $kind);
+        } catch (BankConnectorException $e) {
+            $this->diagnose($e, $kind . '_account');
+            throw $e;
+        }
+    }
+
+    private function loadAccount(
         #[\SensitiveParameter] array $credentials,
         string $accountId,
         string $kind,
@@ -533,7 +561,16 @@ final class CreditasPremiumClient
     {
         $items = $data['transactions'] ?? null;
         $itemCount = $data['itemCount'] ?? null;
+        if ($itemCount === 0 && !array_key_exists('transactions', $data)) {
+            $items = [];
+        }
         if (!is_array($items) || !array_is_list($items) || !is_int($itemCount) || $itemCount < 0 || count($items) > self::PAGE_SIZE) {
+            $this->diagnostics?->notice('creditas_transaction_page_shape', [
+                'transactions_type' => array_key_exists('transactions', $data) ? get_debug_type($data['transactions']) : 'missing',
+                'transactions_list' => is_array($items) && array_is_list($items),
+                'item_count_type' => array_key_exists('itemCount', $data) ? get_debug_type($data['itemCount']) : 'missing',
+                'item_count_zero' => $itemCount === 0,
+            ]);
             throw new BankConnectorException(BankConnectorException::INVALID_RESPONSE, 'Banka vrátila neplatnou stránku transakcí.', false, $httpStatus);
         }
         foreach ($items as $item) {
@@ -667,6 +704,34 @@ final class CreditasPremiumClient
     private function invalidResponse(string $message, ResponseInterface $response, bool $payment = false): BankConnectorException
     {
         return new BankConnectorException(BankConnectorException::INVALID_RESPONSE, $message, $payment, $response->getStatusCode());
+    }
+
+    private function diagnose(BankConnectorException $e, string $stage): void
+    {
+        if ($e->errorCode !== BankConnectorException::INVALID_RESPONSE) {
+            return;
+        }
+        $reason = match ($e->getMessage()) {
+            'Banka vrátila neplatná data účtu.' => 'account_object',
+            'Banka vrátila neplatnou identitu účtu.' => 'account_identity',
+            'Banka vrátila neplatnou stránku transakcí.' => 'transaction_page',
+            'Banka vrátila neplatnou transakci.' => 'transaction_item',
+            'Banka během stránkování změnila počet transakcí.' => 'transaction_count_changed',
+            'Banka vrátila duplicitní transakci.' => 'transaction_duplicate',
+            'Banka vrátila více transakcí, než deklarovala.' => 'transaction_count_exceeded',
+            'Banka vrátila předčasně prázdnou stránku transakcí.' => 'transaction_page_empty',
+            'Banka vrátila neočekávaný formát odpovědi.' => 'content_type',
+            'Banka vrátila nečitelnou JSON odpověď.' => 'json_syntax',
+            'Banka vrátila neplatnou strukturu JSON odpovědi.' => 'json_object',
+            'Odpověď banky se nepodařilo bezpečně přečíst.' => 'response_stream',
+            'Odpověď banky je prázdná nebo překročila povolenou velikost.' => 'response_empty',
+            default => 'invalid_response',
+        };
+        $this->diagnostics?->warning('creditas_response_rejected', [
+            'stage' => $stage,
+            'reason' => $reason,
+            'http_status' => $e->remoteHttpStatus,
+        ]);
     }
 
     private function paginationLimit(string $message): BankConnectorException

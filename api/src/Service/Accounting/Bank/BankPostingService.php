@@ -1773,16 +1773,39 @@ final class BankPostingService
 
     // ── approve / reject / postManual / unpost ──────────────────────────────────
 
-    /**
-     * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
-     * @param array{debit_account_code?:string, credit_account_code?:string} $overrides
-     */
-    /**
-     * Čistý plán účetního dopadu návrhu. Provádí stejné účetní guardy jako approve,
-     * ale nevytváří zápis ani nemění stav návrhu.
-     *
-     * @return array{suggestion_id:int,bank_transaction_id:int,currency:string,lines:list<array<string,mixed>>}
-     */
+    public function previewTransaction(int $supplierId, int $txId): array
+    {
+        if (!$this->txOwnedBySupplier($txId, $supplierId)) {
+            throw new PostingException('not_found', 'Transakce nenalezena.', 404);
+        }
+        $tx = $this->loadTx($txId);
+        if ($tx === null) throw new PostingException('not_found', 'Transakce nenalezena.', 404);
+        $matched = !empty($tx['has_explicit_allocation'])
+            || (in_array((string) $tx['match_status'], ['auto_exact', 'auto_partial', 'manual'], true)
+                && (!empty($tx['matched_invoice_id']) || !empty($tx['matched_purchase_invoice_id'])));
+        $bank = $this->previews?->code($supplierId, $tx, '221');
+        $result = ['bank_account_code' => $bank['code'] ?? null, 'matched' => $matched,
+            'lines' => [], 'resolved' => $bank['resolved'] ?? false, 'reason' => null];
+        try {
+            if ((string) ($tx['source'] ?? 'statement') !== 'statement') {
+                throw new PostingException('email_notice_provisional', 'Avízo se neúčtuje.');
+            }
+            $this->assertPostableTx($tx, true);
+            if (!$matched) return $result;
+            $lines = $this->buildMatched($supplierId, $tx)['lines'];
+            PostingService::assertBalanced($lines);
+            foreach ($lines as $i => $line) {
+                $preview = $this->previews?->code($supplierId, $tx, (string) $line['account_code']);
+                $lines[$i]['account_code'] = $preview['code'] ?? $line['account_code'];
+                $result['resolved'] = $result['resolved'] && ($preview['resolved'] ?? false);
+            }
+            $result['lines'] = $lines;
+        } catch (PostingException $e) {
+            $result['reason'] = $e->errorCode;
+        }
+        return $result;
+    }
+
     public function previewSuggestion(int $supplierId, int $suggestionId): array
     {
         $sug = $this->suggestions->find($supplierId, $suggestionId);

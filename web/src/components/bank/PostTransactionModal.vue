@@ -55,8 +55,16 @@ const bankOptions = computed(() => accountPickerOptions(accounts.value, a => a.a
 // že po napsání „311" nepřišla ŽÁDNÁ nápověda: ani syntetika, ani 311.100.
 const counterOptions = activeAccounts
 
-const debit = ref(props.tx.posting?.debit_account_code ?? (isIncoming.value ? BANK_PREFIX : ''))
-const credit = ref(props.tx.posting?.credit_account_code ?? (isIncoming.value ? '' : BANK_PREFIX))
+const debit = ref(props.tx.posting?.debit_account_code ?? '')
+const credit = ref(props.tx.posting?.credit_account_code ?? '')
+const previewLoading = ref(true)
+const previewError = ref<string | null>(null)
+const debitEdited = ref(false)
+const creditEdited = ref(false)
+const splitEdited = ref(false)
+let applyingPreview = false
+watch(debit, () => { if (!applyingPreview) debitEdited.value = true }, { flush: 'sync' })
+watch(credit, () => { if (!applyingPreview) creditEdited.value = true }, { flush: 'sync' })
 const description = ref(props.tx.description ?? props.tx.counterparty_name ?? '')
 const aiOpen = ref(false)
 const aiQuery = ref('')
@@ -108,6 +116,7 @@ const canSplit = computed(() => absAmountCzk.value != null)
 type SplitLine = { account_code: string; side: 'debit' | 'credit'; amount: number | null }
 const splitMode = ref(false)
 const splitLines = ref<SplitLine[]>([])
+watch([splitMode, splitLines], () => { if (!applyingPreview) splitEdited.value = true }, { deep: true, flush: 'sync' })
 
 function toggleSplit() {
   if (!canSplit.value) return
@@ -118,7 +127,7 @@ function toggleSplit() {
     // bankovní nohy liší o kurzový rozdíl, takže předvyplnit ji by bylo zavádějící.
     const bank = absAmountCzk.value ?? 0
     splitLines.value = [
-      { account_code: '221', side: isIncoming.value ? 'debit' : 'credit', amount: bank },
+      { account_code: bankSideCode.value, side: isIncoming.value ? 'debit' : 'credit', amount: bank },
       { account_code: '', side: isIncoming.value ? 'credit' : 'debit', amount: isForeign.value ? null : bank },
     ]
   }
@@ -153,7 +162,8 @@ const splitValid = computed(() =>
   && splitBankOk.value)
 
 const canSubmit = computed(() =>
-  splitMode.value ? splitValid.value : debitValid.value && creditValid.value && bankSideValid.value)
+  !previewLoading.value && !previewError.value
+  && (splitMode.value ? splitValid.value : debitValid.value && creditValid.value && bankSideValid.value))
 
 // Volitelné pravidlo z této platby
 const withRule = ref(false)
@@ -270,7 +280,45 @@ async function submit() {
   }
 }
 
+async function loadPreview() {
+  try {
+    const preview = await bankPostingApi.previewTransaction(props.tx.id)
+    if (preview.reason || (preview.matched && preview.lines.length === 0)) {
+      previewError.value = bankPostingErrorMessage({ response: { data: { error: { code: preview.reason } } } }, t)
+      return
+    }
+    const debitLine = preview.lines.find(l => l.side === 'debit')
+    const creditLine = preview.lines.find(l => l.side === 'credit')
+    const simple = preview.lines.length === 2 && debitLine && creditLine
+      && Math.abs(debitLine.amount - creditLine.amount) < 0.005
+      && absAmountCzk.value != null && Math.abs(debitLine.amount - absAmountCzk.value) < 0.005
+    if (preview.lines.some(line => line.currency_code != null || line.fx_rate != null || line.amount_foreign != null)
+      || (preview.lines.length && !simple && isForeign.value)) {
+      previewError.value = bankPostingErrorMessage({ response: { data: { error: { code: 'cross_currency_manual_only' } } } }, t)
+      return
+    }
+    applyingPreview = true
+    if (!debitEdited.value && !props.tx.posting?.debit_account_code) {
+      debit.value = simple ? debitLine.account_code : (isIncoming.value ? preview.bank_account_code ?? '' : '')
+    }
+    if (!creditEdited.value && !props.tx.posting?.credit_account_code) {
+      credit.value = simple ? creditLine.account_code : (isIncoming.value ? '' : preview.bank_account_code ?? '')
+    }
+    if (preview.lines.length && !simple && !splitEdited.value && !debitEdited.value && !creditEdited.value
+      && !props.tx.posting?.debit_account_code && !props.tx.posting?.credit_account_code) {
+      splitLines.value = preview.lines.map(line => ({ ...line }))
+      splitMode.value = true
+    }
+  } catch (e) {
+    previewError.value = bankPostingErrorMessage(e, t)
+  } finally {
+    applyingPreview = false
+    previewLoading.value = false
+  }
+}
+
 onMounted(async () => {
+  void loadPreview()
   const [loadedAccounts, aiAvailability] = await Promise.all([
     accountingApi.listAccounts(),
     bankPostingApi.aiAvailability().catch(() => ({ available: false })),
@@ -294,6 +342,8 @@ onMounted(async () => {
         <span v-if="tx.counterparty_name" class="text-neutral-400"> · {{ tx.counterparty_name }}</span>
       </p>
       <p v-if="tx.description" class="text-xs text-neutral-500 font-mono mb-3 truncate">{{ tx.description }}</p>
+      <p v-if="previewLoading" role="status" class="text-xs text-neutral-500 mb-3">{{ t('common.loading') }}</p>
+      <p v-if="previewError" role="alert" class="text-sm text-danger-600 mb-3">{{ previewError }}</p>
 
       <p v-if="isForeign" class="text-xs text-neutral-500 mb-3">
         {{ t('bank.posting.foreign_hint') }}
@@ -442,7 +492,15 @@ onMounted(async () => {
       <div class="mt-3 border border-neutral-200 rounded-md p-3">
         <div class="text-xs font-medium text-neutral-500 uppercase mb-1.5">{{ t('bank.posting.preview_title') }}</div>
         <table class="w-full text-sm">
-          <tbody>
+          <tbody v-if="splitMode">
+            <tr v-for="(line, index) in splitLines" :key="index">
+              <td class="py-0.5 font-mono" :class="accountByCode[line.account_code] ? 'text-neutral-700' : 'text-danger-500'">
+                {{ t(line.side === 'debit' ? 'bank.posting.debit' : 'bank.posting.credit') }} {{ line.account_code || '—' }}
+              </td>
+              <td class="py-0.5 text-right font-mono text-neutral-700">{{ formatMoney(line.amount ?? 0, 'CZK') }}</td>
+            </tr>
+          </tbody>
+          <tbody v-else>
             <tr>
               <td class="py-0.5 font-mono" :class="debitValid ? 'text-neutral-700' : 'text-danger-500'">
                 {{ t('bank.posting.debit') }} {{ debit || '—' }}

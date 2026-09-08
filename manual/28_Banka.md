@@ -178,6 +178,13 @@ v takovém případě je dopočítaný export zablokovaný, dokud jej nenahradí
 
 Tabulka transakcí:
 
+Dialog **Zaúčtovat** předvyplňuje analytiku vlastního bankovního účtu a u
+spárované úhrady kontaci podle faktury. Používá stejný výpočet jako účetní
+zpracování, včetně víceřádkového rozúčtování. Pokud nelze kontaci bezpečně
+připravit, zobrazí důvod a odeslání zablokuje. Po ručním zrušení zaúčtování
+zůstává faktura spárovaná a kontaci lze znovu nabídnout; zápis se neobnoví
+samotným otevřením dialogu.
+
 | Sloupec | Význam |
 |---|---|
 | Datum | Datum zaúčtování |

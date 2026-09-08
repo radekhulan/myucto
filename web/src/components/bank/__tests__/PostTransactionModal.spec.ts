@@ -6,6 +6,7 @@ import type { BankTransaction } from '@/api/bank'
 
 const m = vi.hoisted(() => ({
   listAccounts: vi.fn(),
+  previewTransaction: vi.fn(),
   aiAvailability: vi.fn(),
   postTransaction: vi.fn(),
   createRule: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('@/api/accounting', () => ({
 vi.mock('@/api/bankPosting', () => ({
   bankPostingApi: {
     aiAvailability: m.aiAvailability,
+    previewTransaction: m.previewTransaction,
     postTransaction: m.postTransaction,
     createRule: m.createRule,
   },
@@ -114,9 +116,116 @@ const optionValues = (wrapper: ReturnType<typeof mount>, side: string): string[]
 describe('PostTransactionModal — našeptávač účtů', () => {
   beforeEach(() => {
     m.listAccounts.mockResolvedValue(CHART)
+    m.previewTransaction.mockReset().mockResolvedValue({ bank_account_code: '221', matched: false, lines: [], resolved: true, reason: null })
     m.aiAvailability.mockResolvedValue({ available: false })
     m.postTransaction.mockReset()
     m.createRule.mockReset().mockResolvedValue({ rule: { id: 10 } })
+  })
+
+  it('prefills matched invoice accounts from the backend preview, including bank analytic', async () => {
+    m.previewTransaction.mockResolvedValue({ bank_account_code: '221.400', matched: true, resolved: true, reason: null, lines: [
+      { account_code: '221.400', side: 'debit', amount: 10 },
+      { account_code: '311.100', side: 'credit', amount: 10 },
+    ] })
+    const wrapper = await open(10)
+    expect(m.previewTransaction).toHaveBeenCalledWith(1)
+    expect((wrapper.get('[data-test="posting-debit"]').element as HTMLInputElement).value).toBe('221.400')
+    expect((wrapper.get('[data-test="posting-credit"]').element as HTMLInputElement).value).toBe('311.100')
+    expect(m.postTransaction).not.toHaveBeenCalled()
+  })
+
+  it('blocks posting while loading and preserves changes made before the preview returns', async () => {
+    let resolve!: (value: unknown) => void
+    m.previewTransaction.mockReturnValue(new Promise(r => { resolve = r }))
+    const wrapper = await open(10)
+    await wrapper.get('[data-test="posting-debit"]').setValue('221.100')
+    await wrapper.get('[data-test="posting-credit"]').setValue('518')
+    const submit = () => wrapper.findAll('button').find(b => b.text() === 'bank.posting.action_post')!
+    expect(submit().attributes('disabled')).toBeDefined()
+    resolve({ bank_account_code: '221.400', matched: true, resolved: true, reason: null, lines: [
+      { account_code: '221.400', side: 'debit', amount: 10 },
+      { account_code: '311.100', side: 'credit', amount: 10 },
+    ] })
+    await flushPromises()
+    expect((wrapper.get('[data-test="posting-debit"]').element as HTMLInputElement).value).toBe('221.100')
+    expect((wrapper.get('[data-test="posting-credit"]').element as HTMLInputElement).value).toBe('518')
+    expect(submit().attributes('disabled')).toBeUndefined()
+  })
+
+  it('allows manual accounts when the preview cannot yet resolve the bank analytic', async () => {
+    m.previewTransaction.mockResolvedValue({ bank_account_code: null, matched: false, lines: [], resolved: false, reason: null })
+    m.postTransaction.mockResolvedValue({ journal_entry_id: 1, document_no: 'TEST' })
+    const wrapper = await open(10)
+    expect((wrapper.get('[data-test="posting-debit"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('[data-test="posting-debit"]').setValue('221')
+    await wrapper.get('[data-test="posting-credit"]').setValue('518')
+    const submit = wrapper.findAll('button').find(b => b.text() === 'bank.posting.action_post')!
+    expect(submit.attributes('disabled')).toBeUndefined()
+    await submit.trigger('click')
+    expect(m.postTransaction).toHaveBeenCalledWith(1, expect.objectContaining({ debit_account_code: '221', credit_account_code: '518' }))
+  })
+
+  it('retains explicit existing posting accounts', async () => {
+    m.previewTransaction.mockResolvedValue({ bank_account_code: '221.400', matched: false, lines: [], resolved: true, reason: null })
+    const movement = tx(10)
+    movement.posting = { debit_account_code: '221.100', credit_account_code: '518' } as BankTransaction['posting']
+    const wrapper = mount(PostTransactionModal, { props: { tx: movement, currency: 'CZK' } })
+    await flushPromises()
+    expect((wrapper.get('[data-test="posting-debit"]').element as HTMLInputElement).value).toBe('221.100')
+    expect((wrapper.get('[data-test="posting-credit"]').element as HTMLInputElement).value).toBe('518')
+  })
+
+  it('does not enable posting after preview failure even with valid manual accounts', async () => {
+    m.previewTransaction.mockRejectedValue(new Error('offline'))
+    const wrapper = await open(10)
+    await wrapper.get('[data-test="posting-debit"]').setValue('221.400')
+    await wrapper.get('[data-test="posting-credit"]').setValue('311.100')
+    expect(wrapper.get('[role="alert"]').text()).toBe('err')
+    const submit = wrapper.findAll('button').find(b => b.text() === 'bank.posting.action_post')!
+    expect(submit.attributes('disabled')).toBeDefined()
+    await submit.trigger('click')
+    expect(m.postTransaction).not.toHaveBeenCalled()
+  })
+
+  it('uses full CZK preview lines instead of collapsing a complex payment into a pair', async () => {
+    const lines = [
+      { account_code: '221.400', side: 'debit', amount: 10 },
+      { account_code: '311.100', side: 'credit', amount: 7 },
+      { account_code: '518', side: 'credit', amount: 3 },
+    ]
+    m.previewTransaction.mockResolvedValue({ bank_account_code: '221.400', matched: true, lines, resolved: true, reason: null })
+    m.postTransaction.mockResolvedValue({ journal_entry_id: 1, document_no: 'TEST' })
+    const wrapper = await open(10)
+    expect(wrapper.find('[data-test="posting-debit"]').exists()).toBe(false)
+    await wrapper.findAll('button').find(b => b.text() === 'bank.posting.action_post')!.trigger('click')
+    expect(m.postTransaction).toHaveBeenCalledWith(1, expect.objectContaining({ lines }))
+  })
+
+  it('blocks complex foreign preview rather than discarding currency metadata', async () => {
+    m.previewTransaction.mockResolvedValue({ bank_account_code: '221.400', matched: true, resolved: true, reason: null, lines: [
+      { account_code: '221.400', side: 'debit', amount: 250 },
+      { account_code: '311.100', side: 'credit', amount: 240 },
+      { account_code: '518', side: 'credit', amount: 10 },
+    ] })
+    const movement = { ...tx(10), currency: 'EUR', amount_czk: 250, fx_rate: 25 }
+    const wrapper = mount(PostTransactionModal, { props: { tx: movement, currency: 'EUR' } })
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('err')
+    expect(wrapper.findAll('button').find(b => b.text() === 'bank.posting.action_post')!.attributes('disabled')).toBeDefined()
+    expect(m.postTransaction).not.toHaveBeenCalled()
+  })
+
+  it('blocks CZK receipt with foreign invoice trace even when both lines are equal', async () => {
+    m.previewTransaction.mockResolvedValue({ bank_account_code: '221.400', matched: true, resolved: true, reason: null, lines: [
+      { account_code: '221.400', side: 'debit', amount: 10 },
+      { account_code: '311.100', side: 'credit', amount: 10, currency_code: 'EUR', fx_rate: 25, amount_foreign: 0.4 },
+    ] })
+    const wrapper = await open(10)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(true)
+    const submit = wrapper.findAll('button').find(b => b.text() === 'bank.posting.action_post')!
+    expect(submit.attributes('disabled')).toBeDefined()
+    await submit.trigger('click')
+    expect(m.postTransaction).not.toHaveBeenCalled()
   })
 
   it('opens the original rule dialog from the movement menu and only saves a rule', async () => {

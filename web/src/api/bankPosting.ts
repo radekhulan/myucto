@@ -129,7 +129,17 @@ export interface AiManualPostingSuggestion {
   confidence: number
 }
 
+export interface BankTransactionPostingPreview {
+  bank_account_code: string | null
+  matched: boolean
+  lines: Array<{ account_code: string; side: 'debit' | 'credit'; amount: number; currency_code?: string; fx_rate?: number; amount_foreign?: number }>
+  resolved: boolean
+  reason: string | null
+}
+
 export const bankPostingApi = {
+  previewTransaction: (txId: number) =>
+    api.get<BankTransactionPostingPreview>(`/bank-transactions/${txId}/posting-preview`).then(r => r.data),
   // Buď dvojice MD/D (obě strany na částku pohybu), nebo `lines[]` s vlastními částkami —
   // to druhé je nutné tam, kde se částka řádku liší od částky pohybu (prodej cenných papírů,
   // kurzový rozdíl, rozúčtování na víc účtů).
@@ -222,6 +232,9 @@ export interface SupplierBankAccount {
 }
 
 const ERROR_KEYS: Record<string, string> = {
+  document_not_posted: 'automation.reason.document_not_posted',
+  already_paid_verify: 'automation.reason.already_paid_verify',
+  allocation_mismatch: 'activation.skip.allocation_mismatch',
   period_closed:          'bank.posting.err_period_closed',
   period_not_open:        'bank.posting.err_period_closed',
   // „Období neexistuje" NENÍ „období je uzavřené": náprava je opačná (založit,

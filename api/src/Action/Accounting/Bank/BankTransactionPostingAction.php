@@ -30,6 +30,18 @@ final class BankTransactionPostingAction
         private readonly IpMatcher $ipMatcher,
     ) {}
 
+    public function preview(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'bank.post', \MyInvoice\Security\AccessLevel::WRITE, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        try {
+            return Json::ok($response, $this->service->previewTransaction($supplierId, (int) $args['id']));
+        } catch (\Throwable $e) {
+            return $this->mapPostingError($response, $e);
+        }
+    }
+
     public function post(Request $request, Response $response, array $args): Response
     {
         if (!$this->requireWrite($request, $response, $err)) {
