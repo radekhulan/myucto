@@ -375,6 +375,7 @@ final readonly class JmhzPreparationSnapshotService
     {
         $identities = [];
         $mappings = [];
+        $checkedComponents = [];
         $issues = [];
         $eldpSources = [];
         $people = $input['people'] ?? [];
@@ -453,6 +454,10 @@ final readonly class JmhzPreparationSnapshotService
                         continue;
                     }
                     $componentId = $component['component_id'];
+                    if (isset($checkedComponents[$componentId])) {
+                        continue;
+                    }
+                    $checkedComponents[$componentId] = true;
                     $mapping = $this->mappingSupplement($supplierId, $componentId);
                     if ($mapping !== null) {
                         $mappings[$componentId] = $mapping;

@@ -136,6 +136,10 @@ se do tohoto počtu nezahrnují.
 | Spárováno | `12/14` — 12 z 14 transakcí spárováno na faktury |
 | Importováno | Datum + uživatel |
 
+V seznamu výpisů lze protistranu vyhledat psaním do filtru. Nabídka ukazuje
+nejvýše 50 shod; další najdeš upřesněním hledání. Vybraná protistrana zůstává
+součástí odkazu i uloženého filtru.
+
 ### 28.3.1 Všechny pohyby
 
 Záložka **Všechny pohyby** je společný přehled transakcí napříč výpisy, účty a

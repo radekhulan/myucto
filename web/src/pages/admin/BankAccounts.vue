@@ -50,6 +50,7 @@ const tab = ref<Tab>(initialTab())
 watch(tab, (v) => {
   if (route.query.tab !== v) router.replace({ query: { ...route.query, tab: v } })
   if (v === 'balances') loadBalances()
+  if (v === 'email') void loadEmailOverview()
 })
 // Obrácený směr (embedded): přepnutí záložky v obálce mění jen ?tab= → propiš dovnitř.
 watch(() => route.query.tab, (q) => {
@@ -133,7 +134,7 @@ const messagesPerPage = ref(50)
 const messagesTotalPages = computed(() => Math.max(1, Math.ceil(messagesTotal.value / messagesPerPage.value)))
 const messagesFrom = computed(() => (messagesTotal.value === 0 ? 0 : (messagesPage.value - 1) * messagesPerPage.value + 1))
 const messagesTo = computed(() => Math.min(messagesPage.value * messagesPerPage.value, messagesTotal.value))
-const loading = ref(false)
+const loading = ref(true)
 const saving = ref(false)
 const testingAccountId = ref<number | null>(null)
 const browsingFolders = ref(false)
@@ -151,6 +152,9 @@ const parserProviderRef = ref<string | null>(null)
 const parserResult = ref<Record<string, any> | null>(null)
 const scanSummary = ref<Record<string, any> | null>(null)
 const bankEmailLoadError = ref<string | null>(null)
+const bankEmailLoading = ref(false)
+const bankEmailLoaded = ref(false)
+let bankEmailGeneration = 0
 const folderOptions = ref<string[]>([])
 
 // CRPDPH (registr plátců DPH) → bankovní účet do editované měny
@@ -252,14 +256,46 @@ function fieldLabel(key: RegexFieldKey): string {
   return t(`bank_accounts.field_${key}`)
 }
 
+async function loadEmailOverview() {
+  if (bankEmailLoaded.value || bankEmailLoading.value) return
+  bankEmailLoading.value = true
+  const generation = bankEmailGeneration
+  bankEmailLoadError.value = null
+  try {
+    const overview = await settingsApi.getBankEmailOverview()
+    if (generation !== bankEmailGeneration) return
+    mappings.value = overview.mappings.map(normalizeMappingForUi)
+    providers.value = overview.providers
+    imapAccounts.value = overview.imap_accounts ?? (overview.imap?.id ? [overview.imap] : [])
+    messages.value = overview.messages
+    messagesTotal.value = overview.messages_total ?? overview.messages.length
+    messagesPage.value = 1
+    attachmentIngests.value = overview.attachments ?? []
+    bankEmailLoaded.value = true
+  } catch (e) {
+    if (generation !== bankEmailGeneration) return
+    bankEmailLoadError.value = apiErrorMessage(e, t('bank_accounts.load_config_failed'))
+    mappings.value = []
+    providers.value = []
+    imapAccounts.value = []
+    messages.value = []
+    messagesTotal.value = 0
+    attachmentIngests.value = []
+  } finally {
+    bankEmailLoading.value = false
+    if (generation !== bankEmailGeneration && tab.value === 'email') void loadEmailOverview()
+  }
+}
+
 async function load() {
   loading.value = true
+  bankEmailLoaded.value = false
+  bankEmailGeneration++
+  if (tab.value === 'email') void loadEmailOverview()
   try {
-    bankEmailLoadError.value = null
-    const [supplierResult, currenciesResult, overviewResult] = await Promise.allSettled([
+    const [supplierResult, currenciesResult] = await Promise.allSettled([
       settingsApi.getSupplier(),
       settingsApi.listCurrencies(),
-      settingsApi.getBankEmailOverview(),
     ])
     if (supplierResult.status === 'fulfilled') {
       supplier.value = supplierResult.value
@@ -269,29 +305,10 @@ async function load() {
     } else {
       toast.error(apiErrorMessage(currenciesResult.reason, t('bank_accounts.load_currencies_failed')))
     }
-    if (overviewResult.status === 'fulfilled') {
-      const overview = overviewResult.value
-      mappings.value = overview.mappings.map(normalizeMappingForUi)
-      providers.value = overview.providers
-      imapAccounts.value = overview.imap_accounts ?? (overview.imap?.id ? [overview.imap] : [])
-      messages.value = overview.messages
-      messagesTotal.value = overview.messages_total ?? overview.messages.length
-      messagesPage.value = 1
-      attachmentIngests.value = overview.attachments ?? []
-    } else {
-      bankEmailLoadError.value = apiErrorMessage(overviewResult.reason, t('bank_accounts.load_config_failed'))
-      mappings.value = []
-      providers.value = []
-      imapAccounts.value = []
-      messages.value = []
-      messagesTotal.value = 0
-      attachmentIngests.value = []
-    }
   } finally {
     loading.value = false
   }
 }
-
 onMounted(load)
 
 async function loadMessagesPage(p: number) {
@@ -1038,7 +1055,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
       </div>
 
       <!-- E-mailová bankovní avíza (IMAP) — vlastní záložka, vždy rozbalená -->
-      <div v-show="tab === 'email'" class="space-y-5">
+      <div v-if="tab === 'email' && bankEmailLoading" class="text-sm text-neutral-500">{{ t('bank_accounts.loading') }}</div>
+      <div v-show="tab === 'email' && !bankEmailLoading" class="space-y-5">
       <div v-if="bankEmailLoadError" class="bg-warning-50 border border-warning-200 text-warning-700 rounded-lg px-4 py-3 text-sm">
         {{ bankEmailLoadError }}
       </div>

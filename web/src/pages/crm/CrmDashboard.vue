@@ -56,21 +56,17 @@ const displayCurrency = computed(() => currencyFilter.value === ALL_CURRENCIES ?
 
 const availableCurrencies = computed(() => overview.value?.currencies || [])
 
-// Default: u více měn „Vše" (CZK agregát), u jediné měny ta jedna (přepínač se skrývá).
-watch(availableCurrencies, (curs) => {
-  if (curs.length > 0 && !currencyFilter.value) {
-    currencyFilter.value = curs.length > 1 ? ALL_CURRENCIES : curs[0]
-  }
-})
-
 async function loadAll() {
   loading.value = true
   try {
+    const ov = await crmApi.overview()
+    if (!currencyFilter.value && ov.currencies.length > 0) {
+      currencyFilter.value = ov.currencies.length > 1 ? ALL_CURRENCIES : ov.currencies[0]
+    }
     // U „Vše" neposíláme měnu (cur=undefined) → endpointy vrátí všechny měny a
     // agregaci do CZK uděláme klientsky přes *_czk pole.
     const cur = (currencyFilter.value && currencyFilter.value !== ALL_CURRENCIES) ? currencyFilter.value : undefined
-    const [ov, mo, yr, tc, tv, ar, ap, d, p, conc, vc, dp, exp, rev, ch, cf, lr, re, ph, m24] = await Promise.all([
-      crmApi.overview(),
+    const [mo, yr, tc, tv, ar, ap, d, p, conc, vc, dp, exp, rev, ch, cf, lr, re, ph, m24] = await Promise.all([
       crmApi.monthly(periodMonths.value, cur),
       crmApi.yearly(cur),
       crmApi.topClients(periodMonths.value, 10, cur),
@@ -410,8 +406,8 @@ const wcCycle = computed<number | null>(() => {
 /** Krátký štítek zvoleného analytického období pro hlavičky sekcí (např. "12 m"). */
 const periodChip = computed(() => t('crm.period_chip', { n: periodMonths.value }))
 
-watch([periodMonths, currencyFilter], () => {
-  if (currencyFilter.value) loadAll()
+watch([periodMonths, currencyFilter], (_values, previous) => {
+  if (previous[1] && currencyFilter.value) loadAll()
 })
 
 onMounted(loadAll)

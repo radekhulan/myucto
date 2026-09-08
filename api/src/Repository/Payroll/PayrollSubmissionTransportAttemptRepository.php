@@ -24,6 +24,8 @@ final class PayrollSubmissionTransportAttemptRepository
 {
     private const TABLE = 'payroll_submission_transport_attempts';
 
+    private const DUE_POLL_CONDITION = 'status = "awaiting_protocol" AND correlation_reference IS NOT NULL';
+
     /**
      * Tvrdý strop stránky historie přenosů. Ledger je append-only, takže roste
      * s každým pokusem o odeslání a nikdy se nezmenší.
@@ -975,7 +977,7 @@ final class PayrollSubmissionTransportAttemptRepository
     public function listDuePolls(int $limit = 50): array
     {
         return $this->listDue(
-            'status = "awaiting_protocol" AND correlation_reference IS NOT NULL',
+            self::DUE_POLL_CONDITION,
             $limit,
         );
     }
@@ -989,11 +991,28 @@ final class PayrollSubmissionTransportAttemptRepository
     public function listDueCloses(int $limit, int $maxCloseAttempts): array
     {
         return $this->listDue(
-            'status = "completed" AND closed_at IS NULL
-               AND correlation_reference IS NOT NULL
-               AND close_attempts < ' . max(1, $maxCloseAttempts),
+            self::dueCloseCondition($maxCloseAttempts),
             $limit,
         );
+    }
+
+    public static function hasDueWork(PDO $pdo, int $maxCloseAttempts): bool
+    {
+        $statement = $pdo->query(
+            'SELECT 1 FROM ' . self::TABLE . ' WHERE '
+            . self::dueCondition('(' . self::DUE_POLL_CONDITION . ') OR ('
+                . self::dueCloseCondition($maxCloseAttempts) . ')')
+            . ' LIMIT 1',
+        );
+
+        return $statement === false || $statement->fetchColumn() !== false;
+    }
+
+    private static function dueCloseCondition(int $maxCloseAttempts): string
+    {
+        return 'status = "completed" AND closed_at IS NULL
+               AND correlation_reference IS NOT NULL
+               AND close_attempts < ' . max(1, $maxCloseAttempts);
     }
 
     /** @return list<array<string,mixed>> */
@@ -1006,8 +1025,24 @@ final class PayrollSubmissionTransportAttemptRepository
         $statement = $this->db->pdo()->prepare(
             'SELECT ' . self::COLUMNS . '
                FROM ' . self::TABLE . '
-              WHERE ' . $condition . '
-                AND EXISTS (
+              WHERE ' . self::dueCondition($condition) . '
+              ORDER BY next_retry_at IS NOT NULL, next_retry_at, id
+              LIMIT ' . $limit,
+        );
+        $statement->execute();
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_array($row)) {
+                $rows[] = self::normalize($row);
+            }
+        }
+
+        return $rows;
+    }
+
+    private static function dueCondition(string $condition): string
+    {
+        return '(' . $condition . ') AND EXISTS (
                     SELECT 1
                       FROM payroll_submissions due_submission
                       JOIN payroll_obligations due_obligation
@@ -1022,19 +1057,7 @@ final class PayrollSubmissionTransportAttemptRepository
                         . self::TABLE . '.submission_id
                        AND due_obligation.agenda_code IN ("JMHZ", "JMHZ25")
                 )
-                AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())
-              ORDER BY next_retry_at IS NOT NULL, next_retry_at, id
-              LIMIT ' . $limit,
-        );
-        $statement->execute();
-        $rows = [];
-        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            if (is_array($row)) {
-                $rows[] = self::normalize($row);
-            }
-        }
-
-        return $rows;
+                AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())';
     }
 
     /**

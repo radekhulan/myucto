@@ -132,12 +132,14 @@ final class PaymentMatchAuditChecker
         );
         $stmt->execute([$supplierId, $from, $to]);
 
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $fxBooked = $this->bankFxBooked(array_column($rows, 'tx_id'));
         $items = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($rows as $row) {
             // Proti dokladu se poměřuje ČÁST platby, která na něj byla přiřazena — ne celá
             // transakce. Bez evidence úhrady (starší data) zbývá jen celá částka.
             $allocated = $row['allocated_amount'] !== null ? (float) $row['allocated_amount'] : null;
-            $item = $this->evaluate('invoice', $row, abs($allocated ?? (float) $row['tx_amount_raw']));
+            $item = $this->evaluate('invoice', $row, abs($allocated ?? (float) $row['tx_amount_raw']), $fxBooked[(int) $row['tx_id']] ?? null);
             if ($item !== null) {
                 $items[] = $item;
             }
@@ -169,9 +171,11 @@ final class PaymentMatchAuditChecker
         );
         $stmt->execute([$supplierId, $supplierId, $from, $to]);
 
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $fxBooked = $this->bankFxBooked(array_column($rows, 'tx_id'));
         $items = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $item = $this->evaluate('purchase_invoice', $row, abs((float) $row['tx_amount_raw']));
+        foreach ($rows as $row) {
+            $item = $this->evaluate('purchase_invoice', $row, abs((float) $row['tx_amount_raw']), $fxBooked[(int) $row['tx_id']] ?? null);
             if ($item !== null) {
                 $items[] = $item;
             }
@@ -185,7 +189,7 @@ final class PaymentMatchAuditChecker
      *
      * @param array<string,mixed> $row
      */
-    private function evaluate(string $matchKind, array $row, float $txAmountAbs): ?array
+    private function evaluate(string $matchKind, array $row, float $txAmountAbs, ?float $fxBooked): ?array
     {
         $txCurrency = self::effectiveCurrency($row['tx_currency'] ?? null, $row['stmt_currency'] ?? null);
         $docCurrency = strtoupper((string) $row['doc_currency']);
@@ -232,7 +236,7 @@ final class PaymentMatchAuditChecker
                 // CZK úhrada cizoměnového dokladu se počítá kurzem DOKLADU, ale platí se
                 // kurzem dne úhrady. Rozdíl je kurzový a účtuje se na 563/663 — pokud tam
                 // zaúčtovaný JE, není to nesoulad, ale správně zachycený kurzový rozdíl.
-                $explained = abs((float) ($this->bankFxBooked($txId) ?? 0.0));
+                $explained = abs($fxBooked ?? 0.0);
             }
             if (abs($diff) - $explained > $tolerance) {
                 $issues[] = 'amount_mismatch';
@@ -255,7 +259,6 @@ final class PaymentMatchAuditChecker
         // 3) Kurzový rozdíl (563/663) zaúčtovaný na bankovním zápisu, kde JAK tx, TAK
         // doklad jsou CZK — konverze tam nemá co dělat, tedy vymyšlený rozdíl (dnešní nález).
         if ($txCurrency === 'CZK' && $docCurrency === 'CZK') {
-            $fxBooked = $this->bankFxBooked($txId);
             if ($fxBooked !== null && abs($fxBooked) > 0.005) {
                 $issues[] = 'fx_on_czk_czk';
                 $detail['fx_on_czk_czk'] = ['amount' => round($fxBooked, 2)];
@@ -304,25 +307,32 @@ final class PaymentMatchAuditChecker
     /**
      * Součet částek na řádcích 563 (kurzová ztráta) / 663 (kurzový zisk) na bankovním zápisu
      * dané transakce — jde jen o MAGNITUDU dopadu (amount je v deníku vždy kladný, MD/D dané
-     * `side`), ne o výsledovkové znaménko. Vrací null, pokud žádný takový řádek neexistuje.
+     * `side`), ne o výsledovkové znaménko. Transakce bez takových řádků ve výsledku chybí.
      * Jen aktuálně platné (zaúčtované, nestornované) zápisy.
      */
-    private function bankFxBooked(int $bankTransactionId): ?float
+    private function bankFxBooked(array $bankTransactionIds): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT SUM(l.amount) AS total
-               FROM journal_entries e
-               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
-               JOIN chart_of_accounts ca ON ca.id = l.account_id
-          LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
-              WHERE e.source_type = 'bank' AND e.source_id = ?
-                AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
-                AND (ca.account_code LIKE '563%' OR ca.account_code LIKE '663%'
-                     OR COALESCE(pa.account_code, '') LIKE '563%' OR COALESCE(pa.account_code, '') LIKE '663%')"
-        );
-        $stmt->execute([$bankTransactionId]);
-        $total = $stmt->fetchColumn();
-        return $total === false || $total === null ? null : (float) $total;
+        $totals = [];
+        foreach (array_chunk(array_values(array_unique(array_map('intval', $bankTransactionIds))), 500) as $ids) {
+            $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT e.source_id, SUM(l.amount) AS total
+                   FROM journal_entries e
+                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                   JOIN chart_of_accounts ca ON ca.id = l.account_id
+              LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+                  WHERE e.source_type = 'bank' AND e.source_id IN ($placeholders)
+                    AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                    AND (ca.account_code LIKE '563%' OR ca.account_code LIKE '663%'
+                         OR COALESCE(pa.account_code, '') LIKE '563%' OR COALESCE(pa.account_code, '') LIKE '663%')
+                  GROUP BY e.source_id"
+            );
+            $stmt->execute($ids);
+            foreach ($stmt->fetchAll(PDO::FETCH_KEY_PAIR) as $id => $total) {
+                $totals[(int) $id] = $total === null ? null : (float) $total;
+            }
+        }
+        return $totals;
     }
 
     /** Efektivní měna transakce — tx.currency, jinak výpis, jinak CZK (vzor BankPostingService::effectiveCurrency). */

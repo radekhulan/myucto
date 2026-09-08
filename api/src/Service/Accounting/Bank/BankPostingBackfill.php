@@ -211,9 +211,7 @@ final class BankPostingBackfill
                         OR EXISTS (SELECT 1 FROM payment_matches alloc_pm
                                     WHERE alloc_pm.supplier_id = ? AND alloc_pm.bank_transaction_id = bt.id))
                            AS has_explicit_allocation,
-                       EXISTS (SELECT 1 FROM journal_entries live
-                                WHERE live.supplier_id = ? AND " . \MyInvoice\Service\Bank\BankTransactionPostingScope::sourceSql('live', 'bt.id') . "
-                                  AND live.reversed_by IS NULL) AS has_live_entry
+                       " . \MyInvoice\Service\Bank\BankTransactionPostingScope::existsSql($supplierId, 'bt.id') . " AS has_live_entry
                   FROM bank_transactions bt
                   JOIN bank_statements bs ON bs.id = bt.statement_id
                  WHERE bt.source = 'statement'
@@ -228,9 +226,7 @@ final class BankPostingBackfill
                                    WHERE matched_i.supplier_id = ? AND matched_i.id = bt.matched_invoice_id)
                    )
                    AND (
-                       NOT EXISTS (SELECT 1 FROM journal_entries je
-                                    WHERE je.supplier_id = ? AND " . \MyInvoice\Service\Bank\BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
-                                      AND je.reversed_by IS NULL)
+                       NOT " . \MyInvoice\Service\Bank\BankTransactionPostingScope::existsSql($supplierId, 'bt.id') . "
                        -- Už zaúčtovaná tx se znovu nabídne JEN kvůli normalizaci haléřového
                        -- zbytku. Tenhle blok je pouze PŘEDFILTR: rozhoduje výhradně
                        -- {@see BankPostingService::normalizeRoundingFullPurchase()}, a když
@@ -276,14 +272,13 @@ final class BankPostingBackfill
                    )
                    {$fromSql}
                  ORDER BY bt.posted_at ASC, bt.id ASC";
-        // pořadí parametrů: příznak explicitní alokace 2×, live,
-        // vlastnictví účtu přes resolver (2× — SEC-01) + explicitní vazby 3×, journal,
+        // pořadí parametrů: příznak explicitní alokace 2×,
+        // vlastnictví účtu přes resolver (2× - SEC-01) + explicitní vazby 3×,
         // normalizace partial: supplier + sdílené tolerance + supplier, [from]
         $params = array_merge(
-            [$supplierId, $supplierId, $supplierId],
+            [$supplierId, $supplierId],
             \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId),
             [$supplierId, $supplierId, $supplierId],
-            [$supplierId],
             [
                 $supplierId,
                 FxPaymentSettlement::AMOUNT_TOLERANCE,

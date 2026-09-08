@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Cron;
 
+use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzPollSchedule;
 use PDO;
 use Throwable;
 
@@ -51,23 +53,19 @@ final class CronPreflight
     /**
      * Čeká nějaké mzdové podání na protokol ČSSZ nebo na uzavření transakce?
      *
-     * Permisivní protějšek
-     * {@see \MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository::listDuePolls()}
-     * a `listDueCloses()` — bez podmínky na correlation reference a bez stropu
-     * pokusů o uzavření. Odchylka stojí nanejvýš jeden zbytečný bootstrap,
-     * nikdy ne zmeškaný protokol.
+     * Výběr sdílí s frontou, aby jiné agendy a vyčerpaná uzavření
+     * nespouštěly worker, který pro ně nemá práci.
      */
     public static function hasJmhzTransportWork(PDO $pdo): bool
     {
-        return self::probe($pdo, "
-            SELECT 1 FROM payroll_submission_transport_attempts
-             WHERE (
-                     status = 'awaiting_protocol'
-                     OR (status = 'completed' AND closed_at IS NULL)
-                   )
-               AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())
-             LIMIT 1
-        ");
+        try {
+            return PayrollSubmissionTransportAttemptRepository::hasDueWork(
+                $pdo,
+                JmhzPollSchedule::MAX_CLOSE_ATTEMPTS,
+            );
+        } catch (Throwable) {
+            return true;
+        }
     }
 
     /**

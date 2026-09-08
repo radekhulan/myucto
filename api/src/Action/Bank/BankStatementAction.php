@@ -711,12 +711,7 @@ final class BankStatementAction
             }
             if ($postingStatus === 'unposted') {
                 $transactionConditions[] = "bt.source = 'statement' AND bt.match_status <> 'ignored'
-                    AND NOT EXISTS (
-                        SELECT 1 FROM journal_entries je
-                         WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
-                           AND je.reversed_by IS NULL
-                    )";
-                $transactionParams[] = $sid;
+                    AND NOT " . BankTransactionPostingScope::existsSql($sid, 'bt.id');
             }
             $transactionSql = ' AND EXISTS (SELECT 1 FROM bank_transactions bt WHERE '
                 . implode(' AND ', $transactionConditions) . ')';
@@ -749,20 +744,13 @@ final class BankStatementAction
                     ) AS bank_code,
                     bs.currency, bs.statement_date, bs.statement_number,
                     bs.prev_balance, bs.curr_balance, bs.imported_at,
-                    (SELECT COUNT(*) FROM bank_transactions cbt WHERE " . StatementTransactionScope::sql('bs.id', 'cbt') . ") AS transaction_count,
-                    (SELECT COUNT(*) FROM bank_transactions mbt WHERE " . StatementTransactionScope::sql('bs.id', 'mbt') . " AND mbt.match_status IN ('auto_exact', 'auto_partial', 'manual')) AS matched_count,
+                    " . StatementTransactionScope::countSql('bs.id', 'cbt') . " AS transaction_count,
+                    " . StatementTransactionScope::countSql('bs.id', 'mbt', "mbt.match_status IN ('auto_exact', 'auto_partial', 'manual')") . " AS matched_count,
                     (bs.file_content IS NOT NULL) AS has_file,
                     (bs.pdf_content IS NOT NULL) AS has_pdf, bs.pdf_name,
-                    (SELECT COUNT(*) FROM bank_transactions ibt
-                      WHERE " . StatementTransactionScope::sql('bs.id', 'ibt') . " AND ibt.match_status = 'ignored') AS ignored_count,
-                    (SELECT COUNT(*) FROM bank_transactions ubt
-                      WHERE " . StatementTransactionScope::sql('bs.id', 'ubt') . " AND ubt.source = 'statement'
-                        AND ubt.match_status <> 'ignored'
-                        AND NOT EXISTS (
-                            SELECT 1 FROM journal_entries uje
-                             WHERE uje.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('uje', 'ubt.id') . "
-                               AND uje.reversed_by IS NULL
-                        )) AS unposted_count,
+                    " . StatementTransactionScope::countSql('bs.id', 'ibt', "ibt.match_status = 'ignored'") . " AS ignored_count,
+                    " . StatementTransactionScope::countSql('bs.id', 'ubt', "ubt.source = 'statement'
+                        AND ubt.match_status <> 'ignored' AND NOT " . BankTransactionPostingScope::existsSql($sid, 'ubt.id')) . " AS unposted_count,
                     (SELECT CASE
                               WHEN COUNT(DISTINCT COALESCE(NULLIF(cur.bank_code, ''), '?')) = 1
                               THEN MAX(cur.label)
@@ -780,9 +768,9 @@ final class BankStatementAction
               ORDER BY bs.statement_date DESC, bs.id DESC
               LIMIT $limit OFFSET $offset"
         );
-        // Pořadí: 3× $sid ze SELECT subselectů (bank_code, unposted_count, account_label),
+        // Pořadí: 2× $sid ze SELECT subselectů (bank_code, account_label),
         // pak parametry scope predikátu ve WHERE a nakonec filtry.
-        $stmt->execute(array_merge([$sid, $sid, $sid], $scopeParams, $filterParams));
+        $stmt->execute(array_merge([$sid, $sid], $scopeParams, $filterParams));
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         foreach ($rows as &$r) {
             $r['id'] = (int) $r['id'];
@@ -1523,17 +1511,12 @@ final class BankStatementAction
             $txParams[] = $statusFilter;
         }
         if ($postingFilter !== '') {
-            $exists = "EXISTS (
-                SELECT 1 FROM journal_entries je
-                 WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
-                   AND je.reversed_by IS NULL
-            )";
+            $exists = BankTransactionPostingScope::existsSql($sid, 'bt.id');
             if ($postingFilter === 'posted') {
                 $txWhere .= ' AND ' . $exists;
             } else {
                 $txWhere .= " AND bt.source = 'statement' AND bt.match_status <> 'ignored' AND NOT " . $exists;
             }
-            $txParams[] = $sid;
         }
 
         $txCountStmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM bank_transactions bt WHERE $txWhere");
@@ -1698,13 +1681,9 @@ final class BankStatementAction
               WHERE " . StatementTransactionScope::sql($statementId) . "
                 AND bt.source = 'statement'
                 AND bt.match_status <> 'ignored'
-                AND NOT EXISTS (
-                  SELECT 1 FROM journal_entries je
-                   WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
-                     AND je.reversed_by IS NULL
-                )"
+                AND NOT " . BankTransactionPostingScope::existsSql($supplierId, 'bt.id')
         );
-        $stmt->execute([$supplierId]);
+        $stmt->execute();
         return (int) $stmt->fetchColumn();
     }
 

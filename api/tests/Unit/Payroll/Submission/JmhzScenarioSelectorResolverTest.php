@@ -10,6 +10,22 @@ use PHPUnit\Framework\TestCase;
 
 final class JmhzScenarioSelectorResolverTest extends TestCase
 {
+    public function testSelectorsShareOneValidatedCatalogWithinEachLoad(): void
+    {
+        $resolver = JmhzScenarioSelectorResolver::load();
+        $scenarios = new \ReflectionProperty($resolver, 'scenarios');
+        $scenarioOne = (new \ReflectionProperty($resolver, 'scenarioOne'))->getValue($resolver);
+        $nestedScenarios = new \ReflectionProperty($scenarioOne, 'scenarios');
+
+        self::assertSame($scenarios->getValue($resolver), $nestedScenarios->getValue($scenarioOne));
+        self::assertNotSame(
+            $scenarios->getValue($resolver),
+            $scenarios->getValue(JmhzScenarioSelectorResolver::load()),
+        );
+        self::assertTrue($resolver->resolve('A', null)['preparation_supported']);
+        self::assertSame('scenario_2', $resolver->resolve('M', '1')['evidence']['scenario_key']);
+    }
+
     /** @return iterable<string,array{string,?string,?string,string,string}> */
     public static function pinnedSelectors(): iterable
     {

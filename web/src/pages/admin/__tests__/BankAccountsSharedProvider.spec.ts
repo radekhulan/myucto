@@ -9,6 +9,8 @@ import type { BankEmailProvider } from '@/api/settings'
 // umlčet, a jediným východiskem byla ruční kopie přes Duplikovat.
 
 const m = vi.hoisted(() => ({
+  tab: 'email',
+  bankPanelMount: vi.fn(),
   getSupplier: vi.fn(),
   listCurrencies: vi.fn(),
   getBankEmailOverview: vi.fn(),
@@ -42,6 +44,9 @@ vi.mock('@/composables/useFormat', () => ({
   formatDate: (v: string) => v,
   formatDateTime: (v: string) => v,
 }))
+vi.mock('@/components/bank/BankConnectionsPanel.vue', () => ({
+  default: { name: 'BankConnectionsPanel', setup: () => { m.bankPanelMount(); return () => null } },
+}))
 vi.mock('@/components/charts/BalanceTrendChart.vue', () => ({
   default: { name: 'BalanceTrendChart', template: '<div />' },
 }))
@@ -55,7 +60,7 @@ vi.mock('@/components/ui/buttonStyles', () => ({
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ query: { tab: 'email' } }),
+  useRoute: () => ({ query: { tab: m.tab } }),
   useRouter: () => ({ replace: vi.fn() }),
 }))
 
@@ -103,6 +108,7 @@ function toggleButton(wrapper: Awaited<ReturnType<typeof mountWith>>) {
 describe('BankAccounts — společný parser provider', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.tab = 'email'
     m.updateBankEmailProvider.mockResolvedValue(undefined)
   })
 
@@ -144,4 +150,46 @@ describe('BankAccounts — společný parser provider', () => {
 
     expect(toggleButton(wrapper)).toBeUndefined()
   })
+})
+
+it('loads email overview only after opening its tab and reuses the result', async () => {
+  vi.clearAllMocks()
+  m.tab = 'accounts'
+  const wrapper = await mountWith([])
+  expect(m.getBankEmailOverview).not.toHaveBeenCalled()
+  expect(m.bankPanelMount).toHaveBeenCalledTimes(1)
+  const emailTab = wrapper.findAll('button').find(b => b.text() === 'bank_accounts.tab_email_notices')!
+  await emailTab.trigger('click')
+  await flushPromises()
+  expect(m.getBankEmailOverview).toHaveBeenCalledTimes(1)
+  const accountsTab = wrapper.findAll('button').find(b => b.text() === 'bank_accounts.tab_accounts')!
+  await accountsTab.trigger('click')
+  await emailTab.trigger('click')
+  await flushPromises()
+  expect(m.getBankEmailOverview).toHaveBeenCalledTimes(1)
+  wrapper.unmount()
+})
+
+it('keeps account navigation available while the email overview is pending and retries failures', async () => {
+  vi.clearAllMocks()
+  m.tab = 'accounts'
+  const wrapper = await mountWith([])
+  let rejectOverview!: (error: Error) => void
+  m.getBankEmailOverview.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOverview = reject }))
+  const emailTab = wrapper.findAll('button').find(b => b.text() === 'bank_accounts.tab_email_notices')!
+  const accountsTab = wrapper.findAll('button').find(b => b.text() === 'bank_accounts.tab_accounts')!
+  await emailTab.trigger('click')
+  expect(wrapper.text()).toContain('bank_accounts.loading')
+  await accountsTab.trigger('click')
+  await emailTab.trigger('click')
+  expect(m.getBankEmailOverview).toHaveBeenCalledTimes(1)
+  rejectOverview(new Error('Unavailable'))
+  await flushPromises()
+  expect(wrapper.text()).toContain('bank_accounts.load_config_failed')
+  await accountsTab.trigger('click')
+  await emailTab.trigger('click')
+  await flushPromises()
+  expect(m.getBankEmailOverview).toHaveBeenCalledTimes(2)
+  expect(wrapper.text()).not.toContain('bank_accounts.load_config_failed')
+  wrapper.unmount()
 })

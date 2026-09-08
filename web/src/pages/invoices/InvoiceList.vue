@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
   type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssBulkFailure, type OssReviewScope } from '@/api/invoices'
@@ -840,6 +840,8 @@ function mergeGroups(existing: MonthGroup[], incoming: MonthGroup[]): MonthGroup
 
 async function load(reset = true) {
   if (reset) {
+    if (searchTimeout) clearTimeout(searchTimeout)
+    searchTimeout = null
     loading.value = true
     page.value = 1
   } else {
@@ -947,8 +949,7 @@ onMounted(async () => {
   // Včetně archivovaných — visí na starých fakturách (viz revenueCategoryOptions).
   revenueCategoriesApi.list(true).then(r => { revenueCategories.value = r }).catch(() => {})
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
-  loadFiltersFromQuery(route.query)
-  await load(true)
+  await hydrateFilters(route.query)
 })
 
 function loadFiltersFromQuery(q: typeof route.query) {
@@ -1016,52 +1017,47 @@ function syncFiltersToUrl() {
   router.replace({ query: buildQuery() })
 }
 
-function applyQueryToPage(q: Record<string, string>) {
+async function hydrateFilters(q: typeof route.query, updateUrl = false) {
+  if (searchTimeout) clearTimeout(searchTimeout)
+  searchTimeout = null
   suppressUrlSync = true
-  loadFiltersFromQuery(q)
-  router.replace({ query: q })
-  setTimeout(() => { suppressUrlSync = false }, 0)
-  load(true)
+  try {
+    loadFiltersFromQuery(q)
+    if (yearFilter.value === '' || dateFrom.value || dateTo.value) monthFilter.value = ''
+    await nextTick()
+    if (updateUrl) await router.replace({ query: q })
+  } finally {
+    suppressUrlSync = false
+  }
+  await load(true)
+}
+
+function applyQueryToPage(q: Record<string, string>) {
+  void hydrateFilters(q, true)
 }
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
        overdueOnly, unpaidOnly, unpaidAsOf, bookedFilter, ossReviewFilter, currencyFilter,
        revenueCategoryIds, revenueCategoryMode], () => {
+  if (suppressUrlSync) return
   syncFiltersToUrl()
   load(true)
 })
-// Když se vyčistí rok (vše/range), automaticky zrušit i měsíční filtr.
-watch(yearFilter, (y) => { if (y === '') monthFilter.value = '' })
-watch([dateFrom, dateTo], ([f, to]) => { if (f || to) monthFilter.value = '' })
+watch(yearFilter, (y) => { if (!suppressUrlSync && y === '') monthFilter.value = '' }, { flush: 'sync' })
+watch([dateFrom, dateTo], ([f, to]) => { if (!suppressUrlSync && (f || to)) monthFilter.value = '' }, { flush: 'sync' })
 watch(search, () => {
+  if (suppressUrlSync) return
   if (searchTimeout) clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => { syncFiltersToUrl(); load(true) }, 300)
 })
+onUnmounted(() => { if (searchTimeout) clearTimeout(searchTimeout) })
 
-// Reset filtrů při menu link click (route.query je prázdná).
 watch(() => route.query, (newQ) => {
-  if (Object.keys(newQ).length === 0) {
-    suppressUrlSync = true
-    statusFilter.value = ''
-    typeFilter.value = ''
-    clientFilter.value = ''
-    yearFilter.value = DEFAULT_YEAR
-    monthFilter.value = ''
-    dateFrom.value = ''
-    dateTo.value = ''
-    overdueOnly.value = false
-    unpaidOnly.value = false
-    unpaidAsOf.value = ''
-    bookedFilter.value = ''
-    ossReviewFilter.value = ''
-    currencyFilter.value = ''
-    revenueCategoryIds.value = []
-    revenueCategoryMode.value = 'include'
-    search.value = ''
-    setTimeout(() => { suppressUrlSync = false }, 0)
+  if (suppressUrlSync) return
+  if (Object.keys(newQ).length === 0 && Object.keys(buildQuery()).length > 0) {
+    void hydrateFilters(newQ)
   }
 })
-
 const loadedCount = computed(() => groups.value.reduce((s, g) => s + g.count, 0))
 
 const navigateRow = useRowLink()

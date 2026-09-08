@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { bankApi, type BankStatement, type BankAccountOption, type ImportResult, type AmbiguousAccount } from '@/api/bank'
@@ -11,6 +11,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { bankReconciliationCandidates } from '@/utils/bankConnectionError'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
@@ -51,6 +52,31 @@ const postingFilter = ref<'' | 'unposted'>('')
 const years = ref<number[]>([])
 const accounts = ref<BankAccountOption[]>([])
 const counterparties = ref<Client[]>([])
+const counterpartiesLoading = ref(false)
+const counterpartiesTotal = ref(0)
+const selectedCounterparty = ref<Client | null>(null)
+let counterpartySearchVersion = 0
+let counterpartySelectionVersion = 0
+const counterpartySelection = computed({
+  get: () => clientFilter.value === '' ? null : clientFilter.value,
+  set: (value: number | null) => { clientFilter.value = value ?? '' },
+})
+const counterpartyOptions = computed(() => counterparties.value.map(c => ({ value: c.id, label: c.company_name })))
+const selectedCounterpartyOption = computed(() => clientFilter.value === '' ? null : {
+  value: clientFilter.value,
+  label: selectedCounterparty.value?.id === clientFilter.value ? selectedCounterparty.value.company_name : `#${clientFilter.value}`,
+})
+watch(clientFilter, async id => {
+  const version = ++counterpartySelectionVersion
+  selectedCounterparty.value = null
+  if (id === '') return
+  const existing = counterparties.value.find(c => c.id === id)
+  if (existing) { selectedCounterparty.value = existing; return }
+  try {
+    const client = await clientsApi.get(id)
+    if (version === counterpartySelectionVersion) selectedCounterparty.value = client
+  } catch {}
+})
 const accountFilterKey = computed({
   get: () => accountFilter.value ? `${accountFilter.value}|${bankCodeFilter.value}` : '',
   set: (value: string) => {
@@ -115,8 +141,7 @@ const filterChips = computed<FilterChip[]>(() => {
     chips.push({ key: 'account', value: a ? accountLabel(a) : accountFilter.value })
   }
   if (clientFilter.value !== '') {
-    const c = counterparties.value.find(x => x.id === clientFilter.value)
-    if (c) chips.push({ key: 'client', value: c.company_name })
+    chips.push({ key: 'client', value: selectedCounterpartyOption.value!.label })
   }
   if (amountFilter.value !== '') chips.push({ key: 'amount', value: String(amountFilter.value) })
   if (postingFilter.value !== '') chips.push({ key: 'posting', value: t('bank.posting_filter_unposted_statements') })
@@ -280,22 +305,28 @@ async function load() {
   } finally { loading.value = false }
 }
 
-async function loadCounterparties() {
+async function searchCounterparties(query: string) {
+  const version = ++counterpartySearchVersion
+  counterpartiesLoading.value = true
   try {
-    const items: Client[] = []
-    let currentPage = 1
-    let pages = 1
-    do {
-      const r = await clientsApi.list({ role: 'all', page: currentPage, per_page: 200, sort: 'name' })
-      items.push(...r.data)
-      pages = r.meta.pages
-      currentPage++
-    } while (currentPage <= pages)
-    counterparties.value = items
+    const result = await clientsApi.list({ q: query.trim() || undefined, role: 'all', page: 1, per_page: 50, sort: 'name' })
+    if (version === counterpartySearchVersion) {
+      counterparties.value = result.data
+      counterpartiesTotal.value = result.meta.total
+    }
   } catch {
-    counterparties.value = []
+    if (version === counterpartySearchVersion) {
+      counterparties.value = []
+      counterpartiesTotal.value = 0
+    }
+  } finally {
+    if (version === counterpartySearchVersion) counterpartiesLoading.value = false
   }
 }
+onUnmounted(() => {
+  counterpartySearchVersion++
+  counterpartySelectionVersion++
+})
 function goToPage(p: number) {
   const np = Math.min(Math.max(1, p), totalPages.value)
   if (np !== page.value) { page.value = np; load() }
@@ -358,7 +389,6 @@ watch(() => route.query, (newQ) => {
 })
 
 onMounted(async () => {
-  loadCounterparties()
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   loadFiltersFromQuery(route.query)
   load()
@@ -629,10 +659,22 @@ async function onFileSelected(e: Event) {
           :value="`${a.account_number}|${a.bank_code ?? ''}`"
         >{{ accountLabel(a) }}</option>
       </select>
-      <select v-model="clientFilter" class="h-9 max-w-64 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-        <option :value="''">{{ t('bank.all_counterparties') }}</option>
-        <option v-for="counterparty in counterparties" :key="counterparty.id" :value="counterparty.id">{{ counterparty.company_name }}</option>
-      </select>
+      <SearchableSelect
+        v-model="counterpartySelection"
+        class="w-64 max-w-full"
+        remote
+        :options="counterpartyOptions"
+        :selected-option="selectedCounterpartyOption"
+        :loading="counterpartiesLoading"
+        :truncated="counterpartiesTotal > counterparties.length"
+        :truncated-label="t('common.loaded_count', { loaded: counterparties.length, total: counterpartiesTotal })"
+        :placeholder="t('bank.all_counterparties')"
+        :aria-label="t('bank.all_counterparties')"
+        :no-results-label="t('common.no_results')"
+        :loading-label="t('common.loading')"
+        :clear-label="t('common.bulk_clear')"
+        @search="searchCounterparties"
+      />
       <input v-model.trim="amountFilter" type="number" step="0.01"
         :placeholder="t('bank.search_amount')" :title="t('bank.search_amount_hint')"
         class="h-9 w-36 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />

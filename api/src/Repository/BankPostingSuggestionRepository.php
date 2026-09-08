@@ -417,9 +417,7 @@ final class BankPostingSuggestionRepository
                  WHERE s.status IN ('pending','needs_input','blocked')
                    AND s.note IN ({$in})
                    AND (s.snoozed_until IS NULL OR s.snoozed_until <= NOW())
-                   AND NOT EXISTS (SELECT 1 FROM journal_entries je
-                                    WHERE je.supplier_id = s.supplier_id AND " . BankTransactionPostingScope::sourceSql('je', 's.bank_transaction_id') . "
-                                      AND je.reversed_by IS NULL)
+                   AND NOT " . BankTransactionPostingScope::existsSql('s.supplier_id', 's.bank_transaction_id') . "
                    AND NOT EXISTS (SELECT 1 FROM bank_posting_suggestions rej
                                     WHERE rej.supplier_id = s.supplier_id
                                       AND rej.bank_transaction_id = s.bank_transaction_id
@@ -473,11 +471,7 @@ final class BankPostingSuggestionRepository
                 OR EXISTS (SELECT 1 FROM payment_matches alloc_pm
                             WHERE alloc_pm.supplier_id = ? AND alloc_pm.bank_transaction_id = bt.id)
             )
-            AND NOT EXISTS (
-                SELECT 1 FROM journal_entries je
-                 WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
-                   AND je.reversed_by IS NULL
-            )
+            AND NOT " . BankTransactionPostingScope::existsSql($supplierId, 'bt.id') . "
             AND NOT EXISTS (
                 SELECT 1 FROM bank_posting_suggestions s2
                  WHERE s2.bank_transaction_id = bt.id
@@ -505,7 +499,7 @@ final class BankPostingSuggestionRepository
               ORDER BY bt.posted_at, bt.id"
         );
         $stmt->execute(array_merge(
-            [$supplierId, $supplierId, $supplierId, $supplierId],
+            [$supplierId, $supplierId, $supplierId],
             BankStatementOwnershipResolver::params($supplierId),
             [$supplierId, $supplierId, $supplierId],
         ));
@@ -699,11 +693,7 @@ final class BankPostingSuggestionRepository
         $scopeSql = "bt.source = 'statement'
             AND bt.match_status <> 'ignored'"
             . ($unpostedOnly ? "
-            AND NOT EXISTS (
-                SELECT 1 FROM journal_entries je
-                 WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
-                   AND je.reversed_by IS NULL
-            )" : '') . "
+            AND NOT " . BankTransactionPostingScope::existsSql($supplierId, 'bt.id') : '') . "
             AND (
                 " . BankStatementOwnershipResolver::sql() . "
                 OR EXISTS (SELECT 1 FROM invoice_payments ip
@@ -715,8 +705,7 @@ final class BankPostingSuggestionRepository
             )";
         // SEC-01: vlastnictví výpisu rozhoduje bs.supplier_id (legacy NULL jen při
         // jednoznačném vlastníkovi účtu), ne pouhá shoda čísla účtu.
-        $scopeParams = $unpostedOnly ? [$supplierId] : [];
-        array_push($scopeParams, ...BankStatementOwnershipResolver::params($supplierId));
+        $scopeParams = BankStatementOwnershipResolver::params($supplierId);
         array_push($scopeParams, $supplierId, $supplierId, $supplierId);
 
         $year = isset($filters['year']) && (int) $filters['year'] > 0 ? (int) $filters['year'] : null;
@@ -753,6 +742,9 @@ final class BankPostingSuggestionRepository
         );
         $countStmt->execute($scopeParams);
         $total = (int) $countStmt->fetchColumn();
+        if ($limit === 0 || $total === 0) {
+            return ['items' => [], 'total' => $total];
+        }
 
         // account_number/bank_code/account_label = NÁŠ zdrojový účet výpisu (bs.*), stejný
         // vzor jako BankStatementAction::detail/list — bank_code autoritativně z currencies
@@ -888,7 +880,7 @@ final class BankPostingSuggestionRepository
 
     public function unpostedCount(int $supplierId): int
     {
-        return $this->paginateUnposted($supplierId, 1, 0)['total'];
+        return $this->paginateUnposted($supplierId, 0, 0)['total'];
     }
 
     /**
@@ -956,11 +948,7 @@ final class BankPostingSuggestionRepository
     {
         $scopeSql = "bt.source = 'statement'
             AND bt.match_status <> 'ignored'
-            AND NOT EXISTS (
-                SELECT 1 FROM journal_entries je
-                 WHERE je.supplier_id = ? AND " . BankTransactionPostingScope::sourceSql('je', 'bt.id') . "
-                   AND je.reversed_by IS NULL
-            )
+            AND NOT " . BankTransactionPostingScope::existsSql($supplierId, 'bt.id') . "
             AND NOT EXISTS (
                 SELECT 1 FROM bank_posting_suggestions s2
                  WHERE s2.bank_transaction_id = bt.id
@@ -984,9 +972,8 @@ final class BankPostingSuggestionRepository
               WHERE {$scopeSql}
               ORDER BY bt.posted_at DESC, bt.id DESC"
         );
-        // 1× journal_entries + PARAM_COUNT resolveru + 3× vazba na fakturu/platbu.
+        // PARAM_COUNT resolveru + 3× vazba na fakturu/platbu.
         $stmt->execute(array_merge(
-            [$supplierId],
             BankStatementOwnershipResolver::params($supplierId),
             [$supplierId, $supplierId, $supplierId],
         ));

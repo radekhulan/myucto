@@ -14,6 +14,9 @@ import type { BankReconciliationCandidate } from '@/types/bankReconciliation'
 
 const m = vi.hoisted(() => ({
   list: vi.fn(),
+  clientsList: vi.fn(),
+  clientGet: vi.fn(),
+  query: {} as Record<string, string>,
   upload: vi.fn(),
   toastSuccess: vi.fn(),
   toastWarning: vi.fn(),
@@ -23,7 +26,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: m.push, replace: vi.fn() }),
-  useRoute: () => ({ query: {} }),
+  useRoute: () => ({ query: m.query }),
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
 }))
 
@@ -54,7 +57,7 @@ vi.mock('@/api/bank', () => ({
 }))
 
 vi.mock('@/api/clients', () => ({
-  clientsApi: { list: vi.fn().mockResolvedValue({ data: [], meta: { pages: 1 } }) },
+  clientsApi: { list: m.clientsList, get: m.clientGet },
 }))
 
 vi.mock('@/api/errors', () => ({
@@ -95,6 +98,7 @@ vi.mock('@/composables/useSavedFilters', () => ({
 }))
 
 import StatementList from '@/pages/bank/StatementList.vue'
+
 
 const stubs = {
   FilterBar: true,
@@ -323,5 +327,73 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
 
     expect(m.upload).toHaveBeenCalledOnce()
     expect(m.push).not.toHaveBeenCalled()
+  })
+})
+
+describe('StatementList counterparty lookup', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.query = {}
+    m.list.mockResolvedValue(emptyPage())
+    m.clientsList.mockReset().mockResolvedValue({ data: [], meta: { pages: 10, total: 500 } })
+    m.clientGet.mockReset()
+  })
+
+  function mountLookup() {
+    return mount(StatementList, { global: { stubs: { ...stubs, FilterBar: { template: '<div><slot /></div>' } } } })
+  }
+
+  it('does not download counterparties until the lookup is opened and fetches one limited page', async () => {
+    const wrapper = mountLookup()
+    await flushPromises()
+    expect(m.clientsList).not.toHaveBeenCalled()
+    expect(m.clientGet).not.toHaveBeenCalled()
+    wrapper.getComponent({ name: 'SearchableSelect' }).vm.$emit('search', '')
+    await flushPromises()
+    expect(m.clientsList).toHaveBeenCalledExactlyOnceWith({ q: undefined, role: 'all', page: 1, per_page: 50, sort: 'name' })
+    expect(wrapper.getComponent({ name: 'SearchableSelect' }).props('truncated')).toBe(true)
+    expect(wrapper.getComponent({ name: 'SearchableSelect' }).props('truncatedLabel')).toContain('common.loaded_count')
+    wrapper.unmount()
+  })
+
+  it('resolves the selected deep-link label independently of search results', async () => {
+    m.query = { client_id: '17' }
+    m.clientGet.mockResolvedValue({ id: 17, company_name: 'Synthetic selected' })
+    m.clientsList.mockResolvedValue({ data: [{ id: 22, company_name: 'Synthetic search' }], meta: { pages: 1 } })
+    const wrapper = mountLookup()
+    await flushPromises()
+    expect(m.clientGet).toHaveBeenCalledExactlyOnceWith(17)
+    expect(m.clientsList).not.toHaveBeenCalled()
+    const select = wrapper.getComponent({ name: 'SearchableSelect' })
+    expect(select.props('selectedOption')).toEqual({ value: 17, label: 'Synthetic selected' })
+    select.vm.$emit('search', ' search ')
+    await flushPromises()
+    expect(m.clientsList).toHaveBeenLastCalledWith({ q: 'search', role: 'all', page: 1, per_page: 50, sort: 'name' })
+    expect(select.props('selectedOption')).toEqual({ value: 17, label: 'Synthetic selected' })
+    wrapper.unmount()
+  })
+
+  it('ignores stale search and selected-label responses', async () => {
+    let resolveSearch!: (value: unknown) => void
+    let resolveClient!: (value: unknown) => void
+    m.query = { client_id: '17' }
+    m.clientGet.mockImplementationOnce(() => new Promise(resolve => { resolveClient = resolve }))
+    m.clientsList.mockImplementationOnce(() => new Promise(resolve => { resolveSearch = resolve }))
+    const wrapper = mountLookup()
+    await flushPromises()
+    const select = wrapper.getComponent({ name: 'SearchableSelect' })
+    select.vm.$emit('search', 'old')
+    await flushPromises()
+    m.clientsList.mockResolvedValue({ data: [{ id: 22, company_name: 'Synthetic current' }], meta: { pages: 1 } })
+    select.vm.$emit('search', 'current')
+    await flushPromises()
+    select.vm.$emit('update:modelValue', 22)
+    await flushPromises()
+    resolveSearch({ data: [{ id: 17, company_name: 'Synthetic old' }], meta: { pages: 1 } })
+    resolveClient({ id: 17, company_name: 'Synthetic old' })
+    await flushPromises()
+    expect(select.props('options')).toEqual([{ value: 22, label: 'Synthetic current' }])
+    expect(select.props('selectedOption')).toEqual({ value: 22, label: 'Synthetic current' })
+    wrapper.unmount()
   })
 })

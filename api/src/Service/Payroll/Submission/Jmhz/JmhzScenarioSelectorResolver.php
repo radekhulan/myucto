@@ -13,9 +13,15 @@ final class JmhzScenarioSelectorResolver
 
     public static function load(): self
     {
+        $scenarios = JmhzScenarioRequirementSourceCatalog::load();
+        $specManifest = (new JmhzSpecPackageCatalog())->load(
+            JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+            JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+        );
+
         return new self(
-            JmhzScenarioRequirementSourceCatalog::load(),
-            JmhzScenario1SelectorResolver::load(),
+            $scenarios,
+            new JmhzScenario1SelectorResolver($scenarios, $specManifest),
         );
     }
 
