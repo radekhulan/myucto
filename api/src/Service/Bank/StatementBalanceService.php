@@ -12,6 +12,80 @@ final class StatementBalanceService
 {
     public function __construct(private readonly Connection $db) {}
 
+    public function summaries(int $supplierId, array $statementIds): array
+    {
+        if ($statementIds === []) return [];
+        $pdo = $this->db->pdo();
+        $ownTransaction = !$pdo->inTransaction();
+        if ($ownTransaction) $pdo->beginTransaction();
+        try {
+            $byId = [];
+            $groups = [];
+            foreach ($this->loadStatements($supplierId) as $row) {
+                $account = AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']);
+                if ($account === null || !BankStatementSource::isStatement((string) $row['source'])) continue;
+                $key = json_encode([$account, $row['currency']], JSON_THROW_ON_ERROR);
+                $byId[(int) $row['id']] = ['row' => $row, 'key' => $key];
+                $groups[$key][] = $row;
+            }
+            $transactions = [];
+            $results = [];
+            $periods = [];
+            foreach ($statementIds as $id) {
+                $selected = $byId[$id] ?? null;
+                if ($selected === null) continue;
+                $key = $selected['key'];
+                $to = substr((string) $selected['row']['statement_date'], 0, 10);
+                $from = substr($to, 0, 7) . '-01';
+                $periods[$key] = [
+                    'from' => min($periods[$key]['from'] ?? $from, $from),
+                    'to' => max($periods[$key]['to'] ?? $to, $to),
+                ];
+            }
+            foreach ($statementIds as $id) {
+                $selected = $byId[$id] ?? null;
+                if ($selected === null) {
+                    $results[$id] = ['status' => 'unavailable'];
+                    continue;
+                }
+                $key = $selected['key'];
+                if (!isset($transactions[$key])) {
+                    $ids = array_column($groups[$key], 'id');
+                    $query = $pdo->prepare("SELECT bt.id, bt.posted_at, bt.amount, bt.currency
+                        FROM bank_transactions bt WHERE bt.statement_id IN (" . implode(',', array_map('intval', $ids)) . ")
+                        AND bt.source = 'statement' AND bt.posted_at > ? AND bt.posted_at <= ? ORDER BY bt.posted_at, bt.id");
+                    $query->execute([self::transactionLowerBound($groups[$key], $periods[$key]['from']), $periods[$key]['to']]);
+                    $transactions[$key] = $query->fetchAll(PDO::FETCH_ASSOC);
+                }
+                try {
+                    $calculation = $this->calculateSnapshot($selected['row'], $groups[$key], $transactions[$key]);
+                    $calculation['transaction_count'] = count($calculation['transactions']);
+                    unset($calculation['transactions']);
+                    $results[$id] = $calculation;
+                } catch (\InvalidArgumentException) {
+                    $results[$id] = ['status' => 'unavailable'];
+                }
+            }
+            if ($ownTransaction) $pdo->commit();
+            return $results;
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    public function summary(int $supplierId, int $statementId): array
+    {
+        try {
+            $calculation = $this->snapshot($supplierId, $statementId);
+            $calculation['transaction_count'] = count($calculation['transactions']);
+            unset($calculation['transactions']);
+            return $calculation;
+        } catch (\InvalidArgumentException) {
+            return ['status' => 'unavailable'];
+        }
+    }
+
     public function snapshot(int $supplierId, int $statementId): array
     {
         $pdo = $this->db->pdo();
@@ -27,13 +101,29 @@ final class StatementBalanceService
         }
     }
 
-    private function readSnapshot(int $supplierId, int $statementId): array
+    private function loadStatements(int $supplierId): array
     {
         $query = $this->db->pdo()->prepare('SELECT bs.id, bs.source, bs.account_number, bs.bank_code, bs.currency,
             bs.statement_date, bs.prev_balance, bs.credit_total, bs.debit_total, bs.curr_balance,
-            (bs.pdf_content IS NOT NULL) AS has_pdf, (bs.file_content IS NOT NULL) AS has_file FROM bank_statements bs WHERE ' . BankStatementOwnershipResolver::sql());
+            (bs.pdf_content IS NOT NULL) AS has_pdf, (bs.file_content IS NOT NULL) AS has_file FROM bank_statements bs WHERE ' . BankStatementOwnershipResolver::sql() . ' ORDER BY bs.statement_date, bs.id');
         $query->execute(BankStatementOwnershipResolver::params($supplierId));
-        $statements = $query->fetchAll(PDO::FETCH_ASSOC);
+        return $query->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private static function transactionLowerBound(array $statements, string $from): string
+    {
+        $anchorDate = null;
+        foreach ($statements as $row) {
+            $date = substr((string) $row['statement_date'], 0, 10);
+            if ($date >= $from) break;
+            if (in_array($row['source'], ['gpc', 'pdf'], true) && $row['curr_balance'] !== null) $anchorDate = $date;
+        }
+        return $anchorDate ?? date('Y-m-d', strtotime($from . ' -1 day'));
+    }
+
+    private function readSnapshot(int $supplierId, int $statementId): array
+    {
+        $statements = $this->loadStatements($supplierId);
         $selected = null;
         foreach ($statements as $row) if ((int) $row['id'] === $statementId) $selected = $row;
         if ($selected === null) throw new \InvalidArgumentException('statement_not_found');
@@ -44,6 +134,12 @@ final class StatementBalanceService
         $statements = array_values(array_filter($statements, static fn (array $row): bool =>
             $row['currency'] === $selected['currency'] && BankStatementSource::isStatement((string) $row['source'])
             && AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']) === $key));
+        return $this->calculateSnapshot($selected, $statements);
+    }
+
+    private function calculateSnapshot(array $selected, array $statements, ?array $preloadedTransactions = null): array
+    {
+        $key = AuthoritativeTransactionReconciler::account((string) $selected['account_number'], (string) $selected['bank_code']);
         $to = substr((string) $selected['statement_date'], 0, 10);
         $from = substr($to, 0, 7) . '-01';
         $anchorDate = null;
@@ -52,7 +148,6 @@ final class StatementBalanceService
         $conflict = false;
         $checkpoints = [];
         $unverifiedPdf = false;
-        usort($statements, static fn (array $a, array $b): int => strcmp($a['statement_date'], $b['statement_date']));
         foreach ($statements as $row) {
             $date = substr($row['statement_date'], 0, 10);
             if ($date > $to) continue;
@@ -79,18 +174,24 @@ final class StatementBalanceService
             }
         }
         if ($conflict) throw new \InvalidArgumentException('balance_conflict');
-        $ids = array_map(static fn (array $row): int => (int) $row['id'], $statements);
-        $tx = $this->db->pdo()->prepare("SELECT bt.id, bt.posted_at, bt.amount, bt.currency, bt.bank_ref,
+        $after = self::transactionLowerBound($statements, $from);
+        if ($preloadedTransactions === null) {
+            $ids = array_map(static fn (array $row): int => (int) $row['id'], $statements);
+            $tx = $this->db->pdo()->prepare("SELECT bt.id, bt.posted_at, bt.amount, bt.currency, bt.bank_ref,
             bt.variable_symbol, bt.constant_symbol, bt.specific_symbol, bt.counterparty_account,
             bt.counterparty_bank, bt.counterparty_name, bt.description
             FROM bank_transactions bt WHERE bt.statement_id IN (" . implode(',', $ids) . ")
             AND bt.source = 'statement' AND bt.posted_at > ? AND bt.posted_at <= ? ORDER BY bt.posted_at, bt.id");
-        $tx->execute([$anchorDate ?? date('Y-m-d', strtotime($from . ' -1 day')), $to]);
+            $tx->execute([$after, $to]);
+            $preloadedTransactions = $tx->fetchAll(PDO::FETCH_ASSOC);
+        }
         $opening = $anchor;
         $credit = 0;
         $debit = 0;
         $transactions = [];
-        foreach ($tx->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($preloadedTransactions as $row) {
+            if ($row['posted_at'] <= $after) continue;
+            if ($row['posted_at'] > $to) break;
             if ($row['currency'] !== null && $row['currency'] !== '' && $row['currency'] !== $selected['currency']) {
                 throw new \InvalidArgumentException('gpc_currency_mismatch');
             }

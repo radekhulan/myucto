@@ -2804,6 +2804,9 @@ paths:
         sjednocuje desítky agregací do jednoho dotazu (cache je řízena DB
         cache tabulkami `*_revenue_cache`).
 
+        `has_purchase_invoices` označuje existenci přijaté faktury aktuální firmy
+        bez omezení období a slouží ke skrytí úvodního průvodce.
+
         **Obrat (VAT-aware):**
         Pro plátce DPH (`supplier.is_vat_payer = 1`) se ve všech agregacích
         obratu používá `total_without_vat`; pro neplátce `total_with_vat`.
@@ -2851,6 +2854,8 @@ paths:
         kterých projekce vznikla, seznam nevrací. Jejich existující detailní URL
         zůstávají platné a `BankTransaction.statement_id` nadále ukazuje na
         původní výpis pohybu.
+        U bank_api vrací balance_calculation stejný přepočet zůstatku jako detail,
+        včetně stavu a odkazu na dostupný originální GPC.
         Úplný GPC pro stejný účet a měsíc přebírá tentýž měsíční řádek:
         ID se zachová, source se změní na gpc a soubor lze stáhnout.
         Neúplný GPC již evidované pohyby neodstraňuje.
@@ -15803,9 +15808,12 @@ paths:
       description: |
         Pro každý měnový účet (currencies) vrací aktuální zůstatek, měsíční vývoj
         (carry-forward) a přepočet do CZK kurzem ČNB ke konci každého měsíce
-        (`exchange_rates` cache). Zdroj zůstatku: GPC výpisy (`source=gpc`,
-        autoritativní) nebo e-mailová avíza (`bank_transactions.balance`) — novější
-        datum vyhrává, při shodě GPC. Měny bez dostupného kurzu jsou v `missing_rates`.
+        (`exchange_rates` cache). Zdroj zůstatku: GPC/PDF výpisy, bankovní API
+        nebo e-mailová avíza (`bank_transactions.balance`). U API bez uloženého
+        zůstatku se použije stejný přepočet jako v detailu, pouze ve stavu calculated
+        nebo confirmed. Novější datum vyhrává, při shodě má GPC/PDF přednost.
+        statement_date odpovídá použitému zdroji, current_source jej označuje.
+        Měny bez dostupného kurzu jsou v `missing_rates`.
         Grafy jsou omezené na posledních 36 měsíců.
       responses:
         '200':
@@ -21353,6 +21361,9 @@ components:
         `total_with_vat`. Flag `is_vat_payer` v response signalizuje použitou
         variantu.
       properties:
+        has_purchase_invoices:
+          type: boolean
+          description: Aktuální firma má alespoň jednu přijatou fakturu bez omezení roku, částky nebo stavu; úvodní průvodce se již nezobrazuje.
         today: { type: string, format: date }
         year: { type: integer, example: 2026 }
         prev_year: { type: integer, example: 2025 }
@@ -21945,6 +21956,25 @@ components:
         statement_number: { type: [string, "null"], description: "U měsíční projekce `bank_api` je vždy null." }
         prev_balance: { type: [number, "null"], format: float }
         curr_balance: { type: [number, "null"], format: float }
+        balance_calculation:
+          type: [object, "null"]
+          description: Read-only přepočet měsíční evidence z předchozího bankovního zůstatku. Nikdy nepřepisuje originální zůstatky ani účetní zápisy.
+          properties:
+            status: { type: string, enum: [calculated, confirmed, missing_anchor, mismatch, unavailable] }
+            account_number: { type: string }
+            bank_code: { type: string }
+            currency: { type: [string, "null"] }
+            from: { type: string, format: date }
+            to: { type: string, format: date }
+            anchor_date: { type: [string, "null"], format: date }
+            opening: { type: [number, "null"] }
+            closing: { type: [number, "null"] }
+            credit: { type: number }
+            debit: { type: number }
+            confirmed_closing: { type: [number, "null"] }
+            bank_statement_id: { type: [integer, "null"], description: Originální GPC pokrývající všechny pohyby měsíční evidence; má přednost před rekonstruovaným exportem. }
+            difference: { type: [number, "null"] }
+            transaction_count: { type: integer }
         transaction_count: { type: integer }
         matched_count: { type: integer }
         ignored_count: { type: integer, description: "Počet sekundárních pohybů převzatých autoritativním výpisem a označených jako ignorované." }
@@ -21970,25 +22000,6 @@ components:
                 properties:
                   id: { type: integer, format: int64 }
                   pdf_name: { type: [string, "null"] }
-            balance_calculation:
-              type: [object, "null"]
-              description: Read-only přepočet měsíční evidence z předchozího bankovního zůstatku. Nikdy nepřepisuje originální zůstatky ani účetní zápisy.
-              properties:
-                status: { type: string, enum: [calculated, confirmed, missing_anchor, mismatch, unavailable] }
-                account_number: { type: string }
-                bank_code: { type: string }
-                currency: { type: [string, "null"] }
-                from: { type: string, format: date }
-                to: { type: string, format: date }
-                anchor_date: { type: [string, "null"], format: date }
-                opening: { type: [number, "null"] }
-                closing: { type: [number, "null"] }
-                credit: { type: number }
-                debit: { type: number }
-                confirmed_closing: { type: [number, "null"] }
-                bank_statement_id: { type: [integer, "null"], description: Originální GPC pokrývající všechny pohyby měsíční evidence; má přednost před rekonstruovaným exportem. }
-                difference: { type: [number, "null"] }
-                transaction_count: { type: integer }
             file_hash: { type: string, description: "SHA-256 originálního souboru" }
             credit_total: { type: [number, "null"], format: float }
             debit_total: { type: [number, "null"], format: float }

@@ -75,7 +75,9 @@ describe('navigace podle RBAC oprávnění', () => {
 
   it('nabízí na tabletu volitelný levý pruh sekcí místo hamburgeru', () => {
     expect(appLayout).toContain('(isDesktop.value && forceNavigationRail.value)')
-    expect(appLayout).toContain('(isTablet.value && tabletNavigationRailPreference.value)')
+    expect(appLayout).toContain('!isDesktop.value && compactNavigationFits.value')
+    expect(appLayout).toContain('prefersCompactNavigation(tabletNavigationRailPreference.value, forceNavigationRail.value)')
+    expect(appLayout).toContain('v-if="compactNavigationFits"')
     expect(appLayout).toContain('<TabletNavigationRail')
     expect(appLayout).toContain('v-if="!tabletNavigationRail"')
     expect(appLayout).toContain("'nav.tablet_menu_drawer' : 'nav.tablet_menu_rail'")

@@ -35,7 +35,7 @@ import { usesClientNavigation } from '@/security/clientRoutePolicy'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { manualChapter } from '@/config/manualChapters'
-import { shouldUseAutomaticSideNavigation } from '@/utils/navigationLayout'
+import { canFitCompactNavigation, prefersCompactNavigation, shouldUseAutomaticSideNavigation } from '@/utils/navigationLayout'
 
 const { t, locale } = useI18n()
 
@@ -906,7 +906,7 @@ const orderedNav = computed(() => nav.orderedSections(navSections.value))
 
 // Od tabletové šířky je navigace buď nahoře, nebo jako trvalý levý panel.
 const isDesktop = ref(false)
-const isTablet = ref(false)
+const compactNavigationFits = ref(false)
 let desktopResizeObserver: ResizeObserver | null = null
 const desktopNavHost = ref<HTMLElement | null>(null)
 const sideSupplierHost = ref<HTMLElement | null>(null)
@@ -937,10 +937,14 @@ const desktopNavigationPreference = ref<DesktopNavigationPreference>(
 const preferSideNavigation = computed(() => desktopNavigationPreference.value === 'side')
 const forceNavigationRail = computed(() => desktopNavigationPreference.value === 'rail')
 const sideNavigation = computed(() => isDesktop.value && !forceNavigationRail.value && (preferSideNavigation.value || autoSideNavigation.value))
-const tabletNavigationRailPreference = ref(readCookie(TABLET_NAV_RAIL_COOKIE) === '1')
+const storedTabletNavigationPreference = readCookie(TABLET_NAV_RAIL_COOKIE)
+const tabletNavigationRailPreference = ref<boolean | null>(
+  storedTabletNavigationPreference === '1' ? true : storedTabletNavigationPreference === '0' ? false : null,
+)
 const tabletNavigationRail = computed(() => (
   (isDesktop.value && forceNavigationRail.value)
-  || (isTablet.value && tabletNavigationRailPreference.value)
+  || (!isDesktop.value && compactNavigationFits.value
+    && prefersCompactNavigation(tabletNavigationRailPreference.value, forceNavigationRail.value))
 ))
 const topNavigation = computed(() => isDesktop.value && !sideNavigation.value && !tabletNavigationRail.value)
 const desktopNavigationMode = computed<'top' | 'side' | 'rail'>(() => {
@@ -984,10 +988,10 @@ function scheduleDesktopNavFit(): void {
 function updateDesktopState(): void {
   const containerWidth = document.body.clientWidth
   const desktop = containerWidth >= 1024
-  const tablet = containerWidth >= 768 && containerWidth < 1024
-  if (desktop === isDesktop.value && tablet === isTablet.value) return
+  const compactFits = canFitCompactNavigation(containerWidth, Number.parseFloat(getComputedStyle(document.documentElement).fontSize))
+  if (desktop === isDesktop.value && compactFits === compactNavigationFits.value) return
   isDesktop.value = desktop
-  isTablet.value = tablet
+  compactNavigationFits.value = compactFits
   void nextTick(scheduleDesktopNavFit)
 }
 
@@ -1016,11 +1020,11 @@ function setDesktopNavigationMode(mode: 'top' | 'side' | 'rail'): void {
 }
 
 function toggleTabletNavigationRail(): void {
-  tabletNavigationRailPreference.value = !tabletNavigationRailPreference.value
+  tabletNavigationRailPreference.value = !tabletNavigationRail.value
   mobileOpen.value = false
   document.cookie = tabletNavigationRailPreference.value
     ? `${TABLET_NAV_RAIL_COOKIE}=1; Path=/; Max-Age=31536000; SameSite=Lax`
-    : `${TABLET_NAV_RAIL_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
+    : `${TABLET_NAV_RAIL_COOKIE}=0; Path=/; Max-Age=31536000; SameSite=Lax`
 }
 
 watch([orderedNav, locale], () => { void nextTick(scheduleDesktopNavFit) })
@@ -1932,7 +1936,7 @@ onBeforeUnmount(() => {
               <div class="relative">
                 <button
                   type="button"
-                  class="cursor-pointer h-8 w-8 inline-flex items-center justify-center rounded-md border border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700"
+                  class="cursor-pointer h-8 inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-200 px-2 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700"
                   :class="navigationLayoutOpen ? 'bg-neutral-100 text-primary-700' : ''"
                   :title="t('nav.menu_layout')"
                   :aria-label="t('nav.menu_layout')"
@@ -1949,6 +1953,7 @@ onBeforeUnmount(() => {
                   <svg v-else class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h5v16H3V4zm2 3h1m-1 4h1m-1 4h1m6-10h9m-9 5h9m-9 5h9" />
                   </svg>
+                  {{ t('nav.menu_style') }}
                 </button>
                 <div v-if="navigationLayoutOpen" class="fixed inset-0 z-10" aria-hidden="true" @click="navigationLayoutOpen = false"></div>
                 <div v-if="navigationLayoutOpen" class="absolute bottom-full right-0 z-40 mb-2 w-56 rounded-lg border border-neutral-200 bg-surface p-1.5 text-sm shadow-xl" role="menu">
@@ -2030,17 +2035,18 @@ onBeforeUnmount(() => {
           <div class="lg:hidden min-h-12 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-500">
             <div class="flex items-center gap-1.5">
               <button
-                v-if="isTablet"
+                v-if="compactNavigationFits"
                 type="button"
-                class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700"
-                :title="t(tabletNavigationRailPreference ? 'nav.tablet_menu_drawer' : 'nav.tablet_menu_rail')"
-                :aria-label="t(tabletNavigationRailPreference ? 'nav.tablet_menu_drawer' : 'nav.tablet_menu_rail')"
+                class="inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-200 px-2 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700"
+                :title="t(tabletNavigationRail ? 'nav.tablet_menu_drawer' : 'nav.tablet_menu_rail')"
+                :aria-label="t(tabletNavigationRail ? 'nav.tablet_menu_drawer' : 'nav.tablet_menu_rail')"
                 @click="toggleTabletNavigationRail"
               >
                 <svg class="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path v-if="tabletNavigationRailPreference" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                  <path v-if="tabletNavigationRail" stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                   <path v-else stroke-linecap="round" stroke-linejoin="round" d="M3 4h5v16H3V4zm9 0h9m-9 4h9m-9 4h9m-9 4h9m-9 4h9" />
                 </svg>
+                {{ t(tabletNavigationRail ? 'nav.tablet_menu_drawer_short' : 'nav.tablet_menu_rail_short') }}
               </button>
               <LanguageToggle />
               <ThemeToggle />

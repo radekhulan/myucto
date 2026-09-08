@@ -221,6 +221,40 @@ final class StatementPdfAttachTest extends TestCase
         self::assertSame($apiId, $this->target($this->parsedPdf(self::TX, account: '1000000005')));
     }
 
+    public function testBatchBalancesReuseAccountReadsAndMatchFreshSnapshots(): void
+    {
+        $pdo = $this->db->pdo();
+        $anchor = $this->insertGpcStatement([], date: '2099-06-30');
+        $pdo->prepare('UPDATE bank_statements SET curr_balance = 100 WHERE id = ?')->execute([$anchor]);
+        $july = $this->insertGpcStatement([['2099-07-02', 10]], date: '2099-07-31');
+        $august = $this->insertGpcStatement([['2099-08-02', -3]], date: '2099-08-31');
+        $pdo->prepare("UPDATE bank_statements SET source = 'bank_api' WHERE id IN (?, ?)")->execute([$july, $august]);
+        $service = new \MyInvoice\Service\Bank\StatementBalanceService($this->db);
+        $selectCount = static fn (): int => (int) $pdo->query("SHOW SESSION STATUS LIKE 'Com_select'")->fetch(PDO::FETCH_NUM)[1];
+        $before = $selectCount();
+        $single = $service->summaries($this->supplierId, [$july]);
+        $singleReads = $selectCount() - $before;
+        $before = $selectCount();
+        $batch = $service->summaries($this->supplierId, [$july, $august]);
+        self::assertSame($singleReads, $selectCount() - $before);
+        self::assertSame($single[$july], $batch[$july]);
+        self::assertSame($service->summary($this->supplierId, $july), $batch[$july]);
+        self::assertSame($service->summary($this->supplierId, $august), $batch[$august]);
+        self::assertEquals(107, $batch[$august]['closing']);
+        $rowsSent = static fn (): int => (int) $pdo->query("SHOW SESSION STATUS LIKE 'Rows_sent'")->fetch(PDO::FETCH_NUM)[1];
+        $before = $rowsSent();
+        $service->summaries($this->supplierId, [$july, $august]);
+        $requiredRows = $rowsSent() - $before;
+        $oldTransaction = $pdo->prepare("INSERT INTO bank_transactions (statement_id, source, posted_at, amount, currency)
+            VALUES (?, 'statement', '2099-06-01', 1, 'CZK')");
+        for ($i = 0; $i < 100; $i++) $oldTransaction->execute([$anchor]);
+        $before = $rowsSent();
+        $service->summaries($this->supplierId, [$july, $august]);
+        self::assertSame($requiredRows, $rowsSent() - $before);
+        $pdo->prepare('UPDATE bank_transactions SET amount = -5 WHERE statement_id = ?')->execute([$august]);
+        self::assertEquals(105, $service->summaries($this->supplierId, [$august])[$august]['closing']);
+    }
+
     public function testMonthlyBalanceUsesCanonicalMovementsAndReconcilesLaterGpc(): void
     {
         $pdo = $this->db->pdo();

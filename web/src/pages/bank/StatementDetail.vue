@@ -15,6 +15,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatAccountNumber } from '@/utils/bankAccount'
+import { statementClosingBalance, statementGpcUrl, statementGpcTitle } from '@/utils/bankStatement'
 import RuleHintBanner from '@/components/bank/RuleHintBanner.vue'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
 import BankMatchModal from '@/components/bank/BankMatchModal.vue'
@@ -285,13 +286,10 @@ const statementActions = computed<ActionItem[]>(() => {
       icon: 'download',
       tier: 'secondary',
       show: s.has_file || s.source === 'bank_api',
-      disabled: s.source === 'bank_api' && !s.balance_calculation?.bank_statement_id && !['calculated', 'confirmed'].includes(s.balance_calculation?.status ?? ''),
+      disabled: !statementGpcUrl(s),
       disabledReason: t(`bank.balance_${s.balance_calculation?.status ?? 'unavailable'}`),
-      title: t(s.source === 'bank_api' && !s.balance_calculation?.bank_statement_id ? 'bank.gpc_calculated_hint' : 'bank.download_gpc'),
-      href: s.source === 'bank_api'
-        ? (s.balance_calculation?.bank_statement_id ? bankApi.downloadUrl(s.balance_calculation.bank_statement_id)
-          : ['calculated', 'confirmed'].includes(s.balance_calculation?.status ?? '') ? bankApi.gpcExportUrl(s.id) : undefined)
-        : bankApi.downloadUrl(s.id),
+      title: t(statementGpcTitle(s)),
+      href: statementGpcUrl(s),
     },
     {
       key: 'pdf',
@@ -403,7 +401,7 @@ const statementActions = computed<ActionItem[]>(() => {
       </div>
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.curr_balance') }}</div>
-        <div class="text-lg font-mono font-semibold">{{ (statement.curr_balance ?? statement.balance_calculation?.confirmed_closing ?? statement.balance_calculation?.closing) == null ? '-' : formatMoney(statement.curr_balance ?? statement.balance_calculation?.confirmed_closing ?? statement.balance_calculation?.closing, statement.currency ?? 'CZK') }}</div>
+        <div class="text-lg font-mono font-semibold">{{ (statementClosingBalance(statement)) == null ? '-' : formatMoney(statementClosingBalance(statement), statement.currency ?? 'CZK') }}</div>
       </div>
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.credit_total') }}</div>

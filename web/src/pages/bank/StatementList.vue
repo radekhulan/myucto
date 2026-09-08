@@ -17,6 +17,7 @@ import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
 import { formatAccountNumber } from '@/utils/bankAccount'
+import { statementClosingBalance, statementGpcUrl, statementGpcTitle } from '@/utils/bankStatement'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import BankReconciliationConfirmation from '@/components/bank/BankReconciliationConfirmation.vue'
@@ -735,7 +736,7 @@ async function onFileSelected(e: Event) {
           </tr>
           <tr v-for="s in group.items" :key="s.id" @click="router.push(`/bank/${s.id}`)" class="cursor-pointer hover:bg-neutral-50">
             <td class="px-3 py-2 text-xs">
-              <span class="inline-flex items-center gap-1.5">
+              <span class="inline-flex flex-wrap items-center gap-1.5">
                 <RouterLink class="row-link" :to="`/bank/${s.id}`" @click.stop @auxclick.stop>{{ statementDateLabel(s) }}</RouterLink>
                 <span v-if="s.source === 'email_notice'" :title="t('bank.email_notice_hint')"
                   class="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
@@ -761,7 +762,7 @@ async function onFileSelected(e: Event) {
               <span v-else class="text-xs text-neutral-400">—</span>
             </td>
             <td class="px-3 py-2 text-xs text-neutral-600 truncate max-w-xs">{{ s.file_name }}</td>
-            <td class="px-3 py-2 text-right font-mono text-xs">{{ s.curr_balance == null ? '-' : formatMoney(s.curr_balance, s.currency ?? 'CZK') }}</td>
+            <td class="px-3 py-2 text-right font-mono text-xs">{{ statementClosingBalance(s) == null ? '-' : formatMoney(statementClosingBalance(s), s.currency ?? 'CZK') }}</td>
             <td class="px-3 py-2 text-center">{{ s.transaction_count }}</td>
             <td class="px-3 py-2 text-center">
               <span v-if="s.unposted_count > 0" class="text-xs px-2 py-0.5 rounded bg-warning-50 text-warning-600 font-medium">
@@ -776,16 +777,18 @@ async function onFileSelected(e: Event) {
               </span>
             </td>
             <td class="px-3 py-2 text-right whitespace-nowrap">
-              <div class="inline-flex items-center gap-1.5">
-                <a v-if="s.has_file && s.source !== 'bank_api'" :href="bankApi.downloadUrl(s.id)" @click.stop
-                   :title="t('bank.download_gpc')"
-                   class="inline-flex items-center gap-1 px-2 h-7 text-xs border border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded">
+              <div class="inline-flex flex-wrap items-center gap-1.5">
+                <a v-if="s.has_file || s.source === 'bank_api'" :href="statementGpcUrl(s)" @click.stop
+                   :aria-disabled="!statementGpcUrl(s) || undefined" :tabindex="statementGpcUrl(s) ? undefined : -1"
+                   :class="{ 'opacity-50 cursor-not-allowed': !statementGpcUrl(s) }"
+                   :title="t(statementGpcTitle(s))"
+                   class="inline-flex whitespace-nowrap items-center gap-1 px-2 h-7 text-xs border border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                   GPC
                 </a>
                 <a v-if="s.has_pdf" :href="bankApi.pdfUrl(s.id)" @click.stop
                    :title="t('bank.download_pdf')"
-                   class="inline-flex items-center gap-1 px-2 h-7 text-xs border border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded">
+                   class="inline-flex whitespace-nowrap items-center gap-1 px-2 h-7 text-xs border border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                   PDF
                 </a>
@@ -828,7 +831,7 @@ async function onFileSelected(e: Event) {
               </span>
               <span v-if="s.currency" class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700 font-medium">{{ s.currency }}</span>
             </div>
-            <div class="font-mono text-sm font-semibold whitespace-nowrap">{{ formatMoney(s.curr_balance, s.currency ?? 'CZK') }}</div>
+            <div class="font-mono text-sm font-semibold whitespace-nowrap">{{ statementClosingBalance(s) == null ? '-' : formatMoney(statementClosingBalance(s), s.currency ?? 'CZK') }}</div>
           </div>
           <div class="font-mono text-xs text-neutral-500 mt-0.5">{{ formatAccountNumber(s.account_number, s.bank_code) }}</div>
           <div v-if="s.account_label" class="text-xs text-neutral-400">{{ s.account_label }}</div>
@@ -843,14 +846,17 @@ async function onFileSelected(e: Event) {
           <div v-if="s.unposted_count > 0" class="mt-1 text-xs text-warning-600 font-medium">
             {{ t('bank.unposted_count', { count: s.unposted_count }) }}
           </div>
-          <div class="flex items-center gap-1.5 mt-2">
-            <a v-if="s.has_file && s.source !== 'bank_api'" :href="bankApi.downloadUrl(s.id)" @click.stop
-               class="inline-flex items-center gap-1 px-2 h-7 text-xs border border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded">
+          <div class="flex flex-wrap items-center gap-1.5 mt-2">
+            <a v-if="s.has_file || s.source === 'bank_api'" :href="statementGpcUrl(s)" @click.stop
+                   :aria-disabled="!statementGpcUrl(s) || undefined" :tabindex="statementGpcUrl(s) ? undefined : -1"
+                   :class="{ 'opacity-50 cursor-not-allowed': !statementGpcUrl(s) }"
+               :title="t(statementGpcTitle(s))"
+               class="inline-flex whitespace-nowrap items-center gap-1 px-2 h-7 text-xs border border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               GPC
             </a>
             <a v-if="s.has_pdf" :href="bankApi.pdfUrl(s.id)" @click.stop
-               class="inline-flex items-center gap-1 px-2 h-7 text-xs border border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded">
+               class="inline-flex whitespace-nowrap items-center gap-1 px-2 h-7 text-xs border border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               PDF
             </a>

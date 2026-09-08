@@ -192,6 +192,7 @@ export interface DraftInvoiceItem {
 }
 
 export interface DashboardSummary {
+  has_purchase_invoices?: boolean
   kpi: DashboardKpi
   overdue: DashboardInvoiceItem[]
   unpaid_upcoming: DashboardInvoiceItem[]

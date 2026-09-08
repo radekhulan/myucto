@@ -772,6 +772,10 @@ final class BankStatementAction
         // pak parametry scope predikátu ve WHERE a nakonec filtry.
         $stmt->execute(array_merge([$sid, $sid], $scopeParams, $filterParams));
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $balanceSummaries = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summaries(
+            $sid,
+            array_map('intval', array_column(array_filter($rows, static fn (array $row): bool => $row['source'] === 'bank_api'), 'id')),
+        );
         foreach ($rows as &$r) {
             $r['id'] = (int) $r['id'];
             $r['transaction_count'] = (int) $r['transaction_count'];
@@ -782,6 +786,7 @@ final class BankStatementAction
             $r['curr_balance'] = $r['curr_balance'] === null ? null : (float) $r['curr_balance'];
             $r['has_file'] = (bool) $r['has_file'];
             $r['has_pdf'] = (bool) $r['has_pdf'];
+            $r['balance_calculation'] = $balanceSummaries[$r['id']] ?? null;
         }
         unset($r);
 
@@ -904,13 +909,20 @@ final class BankStatementAction
         );
         $accStmt->execute([$sid]);
         $currencyAccounts = $accStmt->fetchAll(\PDO::FETCH_ASSOC);
+        $apiStatements = $pdo->prepare("SELECT bs.id FROM bank_statements bs
+            WHERE $scopeSql AND bs.source = 'bank_api' AND bs.curr_balance IS NULL
+            AND " . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql());
+        $apiStatements->execute($scopeParams);
+        $balanceSummaries = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summaries(
+            $sid, array_map('intval', $apiStatements->fetchAll(\PDO::FETCH_COLUMN)),
+        );
 
         // Oficiální GPC/PDF výpisy pro konkrétní účet: normalizovaný match čísla účtu
         // (padding/lomítko), přesný kód banky a měna. Starý výpis bez bank_code lze
         // použít jen tehdy, když je číslo+měna mezi účty dodavatele jednoznačné;
         // jinak by se při stejném čísle u Fio /2010 a RB /5500 započetl 2× (#206).
         $stStmt = $pdo->prepare(
-            "SELECT DATE_FORMAT(bs.statement_date, '%Y-%m') AS ym,
+            "SELECT bs.id, DATE_FORMAT(bs.statement_date, '%Y-%m') AS ym,
                     bs.statement_date AS sdate,
                     bs.curr_balance   AS bal,
                     bs.source         AS src
@@ -918,7 +930,7 @@ final class BankStatementAction
               WHERE bs.source IN " . \MyInvoice\Service\Bank\BankStatementSource::sqlList() . "
                 AND $scopeSql
                 AND bs.statement_date IS NOT NULL
-                AND bs.curr_balance IS NOT NULL
+                AND (bs.curr_balance IS NOT NULL OR (bs.source = 'bank_api' AND " . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql() . "))
                 AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
                   = TRIM(LEADING '0' FROM REGEXP_REPLACE(?, '[^0-9]', ''))
                 AND (bs.bank_code = ? OR ((bs.bank_code IS NULL OR bs.bank_code = '') AND ? = 1))
@@ -971,10 +983,22 @@ final class BankStatementAction
             // přepíše se); avízo přebije výpis jen s ostře novějším datem (shoda → výpis).
             $closings = [];
             foreach ($rows as $r) {
+                $reported = $r['bal'] !== null;
+                if ($r['bal'] === null) {
+                    $calculation = $balanceSummaries[(int) $r['id']];
+                    if (!in_array($calculation['status'], ['calculated', 'confirmed'], true)) continue;
+                    $r['bal'] = $calculation['confirmed_closing'] ?? $calculation['closing'];
+                    if ($r['bal'] === null) continue;
+                }
+                $previous = $closings[(string) $r['ym']] ?? null;
+                if ($previous !== null && $previous['date'] === (string) $r['sdate']
+                    && $r['src'] === 'bank_api'
+                    && (in_array($previous['src'], ['gpc', 'pdf'], true) || ($previous['reported'] && !$reported))) continue;
                 $closings[(string) $r['ym']] = [
                     'bal' => (float) $r['bal'],
                     'date' => (string) $r['sdate'],
                     'src' => (string) $r['src'],
+                    'reported' => $reported,
                 ];
             }
             foreach ($emailRows as $r) {
@@ -984,6 +1008,7 @@ final class BankStatementAction
                     $closings[$ym] = ['bal' => (float) $r['bal'], 'date' => (string) $r['sdate'], 'src' => 'email_notice'];
                 }
             }
+            if ($closings === []) continue;
             ksort($closings);
             $monthClosings = array_map(static fn (array $c): float => $c['bal'], $closings);
             $months = array_keys($closings);
@@ -1613,14 +1638,7 @@ final class BankStatementAction
             : null;
         $s['balance_calculation'] = null;
         if (\MyInvoice\Service\Bank\BankStatementSource::isStatement((string) $s['source'])) {
-            try {
-                $calculation = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->snapshot($sid, $id);
-                $calculation['transaction_count'] = count($calculation['transactions']);
-                unset($calculation['transactions']);
-                $s['balance_calculation'] = $calculation;
-            } catch (\InvalidArgumentException) {
-                $s['balance_calculation'] = ['status' => 'unavailable'];
-            }
+            $s['balance_calculation'] = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($sid, $id);
         }
         return Json::ok($response, $s);
     }

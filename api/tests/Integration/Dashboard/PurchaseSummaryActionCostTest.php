@@ -318,6 +318,34 @@ final class PurchaseSummaryActionCostTest extends TestCase
 
     // ── seed helpers ───────────────────────────────────────────────────────────
 
+    public function testDashboardDetectsOldZeroAmountPurchaseOnlyForItsSupplier(): void
+    {
+        $container = Bootstrap::buildApp()->getContainer();
+        $action = $container->get(\MyInvoice\Action\Dashboard\SummaryAction::class);
+        $this->pdo->prepare("INSERT INTO supplier
+            (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id)
+            SELECT 'Test onboarding', 'Test 1', 'Test', '11000', country_id, 'onboarding@example.test',
+                default_currency_id, default_vat_rate_id FROM supplier WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $emptySupplierId = (int) $this->pdo->lastInsertId();
+        $read = function (int $sid) use ($action): array {
+            $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('GET', '/api/dashboard/summary')
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $sid);
+            return json_decode((string) $action($request, new \Slim\Psr7\Response())->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        };
+        self::assertFalse($read($emptySupplierId)['has_purchase_invoices']);
+        $originalSupplierId = $this->supplierId;
+        $this->supplierId = $emptySupplierId;
+        $vendor = $this->vendor('Test onboarding vendor');
+        $this->purchase($vendor, '2000-01-01', '2000-01-01', 0, 0, status: 'paid');
+        $result = $read($emptySupplierId);
+        self::assertTrue($result['has_purchase_invoices']);
+        self::assertSame(0, $result['kpi']['purchase_count_ytd']);
+        self::assertSame(0, $result['kpi']['issued_count_ytd']);
+        self::assertFalse($read(0)['has_purchase_invoices']);
+        $this->supplierId = $originalSupplierId;
+    }
+
     private function vendor(string $name): int
     {
         $stmt = $this->pdo->prepare(

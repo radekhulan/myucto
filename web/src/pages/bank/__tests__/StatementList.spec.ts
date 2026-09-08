@@ -51,7 +51,8 @@ vi.mock('@/api/bank', () => ({
     importPdf: vi.fn(),
     scan: vi.fn(),
     delete: vi.fn(),
-    downloadUrl: () => '',
+    downloadUrl: (id: number) => `/download/${id}`,
+    gpcExportUrl: (id: number) => `/export-gpc/${id}`,
     pdfUrl: () => '',
   },
 }))
@@ -167,6 +168,36 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
   beforeEach(() => {
     vi.clearAllMocks()
     m.list.mockResolvedValue(emptyPage())
+  })
+
+  it.each([
+    ['calculated', 1250, undefined, '/export-gpc/42'],
+    ['confirmed', 0, 81, '/download/81'],
+    ['missing_anchor', null, undefined, undefined],
+    ['mismatch', 1250, undefined, undefined],
+    ['unavailable', null, undefined, undefined],
+  ] as const)('bank_api: %s zobrazí zůstatek a odpovídající GPC akci v tabulce i kartě', async (status, closing, bankStatementId, href) => {
+    m.list.mockResolvedValue({ ...emptyPage(), total: 1, items: [{
+      id: 42, source: 'bank_api', file_name: 'API-2026-03',
+      account_number: '1000000005', bank_code: '0100', currency: 'CZK',
+      statement_date: '2026-03-31', curr_balance: null, prev_balance: null,
+      transaction_count: 1, matched_count: 0, unposted_count: 0, has_file: false, has_pdf: false,
+      balance_calculation: { status, closing: status === 'confirmed' ? 999 : closing, confirmed_closing: status === 'confirmed' ? closing : null, bank_statement_id: bankStatementId },
+    }] })
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    const actions = wrapper.findAll('a').filter(a => a.text() === 'GPC')
+    expect(actions).toHaveLength(2)
+    for (const action of actions) {
+      expect(action.attributes('href')).toBe(href)
+      if (!href) expect(action.attributes('aria-disabled')).toBe('true')
+    }
+    const { formatMoney } = await import('@/composables/useFormat')
+    if (closing !== null) expect(wrapper.text().split(formatMoney(closing, 'CZK')).length - 1).toBe(2)
+    else expect(wrapper.find('tbody tr td:nth-child(5)').text()).toBe('-')
+    await actions[0]!.trigger('click')
+    expect(m.push).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('jinak nový výpis s přeskočenými duplicitami uvnitř → toast.warning s přesnými čísly, ne tichý souhrn', async () => {

@@ -965,6 +965,10 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                       </td>
                       <td class="px-3 py-2 text-xs whitespace-nowrap">
                         {{ formatDate(a.statement_date) }}
+                        <span v-if="a.current_source === 'bank_api'" :title="t('bank_accounts.balances_source_api_hint')"
+                          class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
+                          {{ t('bank_accounts.balances_source_api') }}
+                        </span>
                         <span v-if="a.current_source === 'email_notice'" :title="t('bank_accounts.balances_source_email_hint')"
                           class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
                           {{ t('bank_accounts.balances_source_email') }}
@@ -998,6 +1002,10 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                   </div>
                   <div class="text-xs text-neutral-500">
                     {{ t('bank_accounts.balances_th_as_of') }}: {{ formatDate(a.statement_date) }}
+                    <span v-if="a.current_source === 'bank_api'" :title="t('bank_accounts.balances_source_api_hint')"
+                      class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
+                      {{ t('bank_accounts.balances_source_api') }}
+                    </span>
                     <span v-if="a.current_source === 'email_notice'" :title="t('bank_accounts.balances_source_email_hint')"
                       class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
                       {{ t('bank_accounts.balances_source_email') }}

@@ -108,6 +108,7 @@ const upcomingPerCurrency = computed(() => {
 const hasAnyData = computed(() => {
   if (!summary.value || !summary.value.kpi) return false
   return (summary.value.kpi.issued_count_ytd ?? 0) > 0
+      || summary.value.has_purchase_invoices === true
       || (summary.value.overdue?.length ?? 0) > 0
       || (summary.value.unpaid_upcoming?.length ?? 0) > 0
 })

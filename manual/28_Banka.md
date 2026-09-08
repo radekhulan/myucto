@@ -43,6 +43,10 @@ na měsíc obvykle.
 ## 28.2 Upload výpisu do MyÚčto
 
 Přímé API načítání sdružuje pohyby do jednoho výpisu za měsíc, účet a měnu.
+V přehledu i detailu vidíte vypočtený nebo bankou potvrzený konečný zůstatek.
+Tlačítko **GPC** stáhne dostupný bankovní originál, případně vypočtený export.
+Pokud chybí výchozí zůstatek nebo výpočet nelze ověřit, vypočtený export není dostupný.
+
 Jednotlivé odpovědi banky se v seznamu nezobrazují jako další překrývající
 se výpisy. GPC pro účet s API evidencí se začlení do stejného měsíce.
 Pokud pokrývá všechny jeho pohyby, nahradí API přehled jako hlavní bankovní

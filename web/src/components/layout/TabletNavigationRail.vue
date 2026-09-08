@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { NAVIGATION_RAIL_WIDTH_REM, NAVIGATION_RAIL_MENU_WIDTH_REM } from '@/utils/navigationLayout'
 
 type Accent = 'primary' | 'primaryDeep' | 'warning' | 'success' | 'danger' | 'neutral' | 'accent' | 'teal' | 'payroll'
 
@@ -107,7 +108,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside ref="root" class="relative z-20 w-[4.5rem] shrink-0 nav-inverted bg-surface border-r border-neutral-200 shadow-sm">
+  <aside ref="root" :style="{ width: `${NAVIGATION_RAIL_WIDTH_REM}rem` }" class="relative z-20 shrink-0 nav-inverted bg-surface border-r border-neutral-200 shadow-sm">
     <nav class="flex h-full flex-col items-center gap-1.5 overflow-y-auto scrollbar-slim px-1 py-2" :aria-label="menuLabel">
       <button
         v-if="expandLabel"
@@ -171,7 +172,7 @@ onBeforeUnmount(() => {
       leave-from-class="opacity-100 translate-x-0"
       leave-to-class="opacity-0 -translate-x-1"
     >
-      <div v-if="openSection" class="absolute left-full top-0 z-30 flex h-full w-72 flex-col border-r border-neutral-200 bg-surface shadow-xl">
+      <div v-if="openSection" :style="{ width: `${NAVIGATION_RAIL_MENU_WIDTH_REM}rem` }" class="absolute left-full top-0 z-30 flex h-full flex-col border-r border-neutral-200 bg-surface shadow-xl">
         <div class="flex h-12 shrink-0 items-center gap-2 border-b border-neutral-200 px-3">
           <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg shadow-sm ring-1" :class="ACCENT_TILE[openSection.accent ?? 'primary']">
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.25" aria-hidden="true">

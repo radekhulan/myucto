@@ -50,8 +50,11 @@ final class SummaryAction
         $isVatPayer = $this->fetchIsVatPayer($pdo, $sid);
         // revenueByYear počítáme jednou a sdílíme s forecastem (CAGR trend) — žádný druhý dotaz.
         $revenueByYear = $this->revenueByYear($pdo, $sid, $isVatPayer);
+        $purchaseExists = $pdo->prepare('SELECT EXISTS (SELECT 1 FROM purchase_invoices WHERE supplier_id = ?)');
+        $purchaseExists->execute([$sid]);
 
         return Json::ok($response, [
+            'has_purchase_invoices'  => (bool) $purchaseExists->fetchColumn(),
             'kpi'                    => $this->kpi($pdo, $year, $prevYear, $sid, $isVatPayer),
             'overdue'                => $this->overdue($pdo, $sid),
             'unpaid_upcoming'        => $this->unpaidUpcoming($pdo, $sid),

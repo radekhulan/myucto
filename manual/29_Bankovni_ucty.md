@@ -32,8 +32,12 @@ nemíchaly s parsery a IMAP účty.
 
 Záložka **Stavy na účtech** zobrazuje každý bankovní účet samostatně podle
 čísla účtu, kódu banky a měny. Aktuální stav vychází z posledního oficiálního
-GPC nebo PDF výpisu; pokud je dostupné novější e-mailové avízo s disponibilním
-zůstatkem, použije se novější údaj.
+GPC nebo PDF výpisu, novějšího API výpisu s dostupným zůstatkem nebo
+e-mailového avíza s disponibilním zůstatkem. U bankovního API se použije také
+zůstatek vypočtený z předchozího bankovního výpisu a navazujících pohybů.
+Datum odpovídá použitému výpisu a údaj je označen **z API**. Stejný zůstatek
+se promítá do měsíčního vývoje i přepočtu do CZK. Neověřitelný výpočet
+nenahrazuje poslední známý stav; při shodném datu má GPC nebo PDF přednost.
 
 Pod tabulkou je pro každý účet samostatný graf měsíčních konečných zůstatků
 v jeho vlastní měně. Graf **Celkový vývoj v CZK** zobrazuje jednotlivé účty

@@ -316,6 +316,36 @@ final class StatementAccountResolutionTest extends TestCase
         $this->assertSame(2000.0, (float) ($rbMonths['2026-06'] ?? 0));
     }
 
+    public function testAccountBalancesAndListUseCalculatedApiClosing(): void
+    {
+        $account = '1000000005';
+        $currencyId = $this->registerCurrency('CZK', $account, '2250');
+        $this->insertStatement('gpc', $account, '2250', '2099-06-30', 100.0, 'balance-anchor');
+        $apiId = $this->insertStatement('bank_api', $account, '2250', '2099-07-15', 0.0, 'balance-api');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE bank_statements SET curr_balance = NULL WHERE id = ?')->execute([$apiId]);
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-15', 25, 'CZK')")->execute([$apiId]);
+        $request = $this->mockRequest($this->supplierId, 'admin', [], [], ['filter' => ['year' => 2099, 'account' => $account]]);
+        $response = $this->action->accountBalances($request, new Response());
+        $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $accounts = array_column($body['accounts'], null, 'id');
+        self::assertArrayHasKey($currencyId, $accounts);
+        self::assertSame(125.0, (float) $accounts[$currencyId]['current_balance']);
+        self::assertSame('2099-07-15', $accounts[$currencyId]['statement_date']);
+        self::assertSame('bank_api', $accounts[$currencyId]['current_source']);
+        $months = array_column($accounts[$currencyId]['months'], 'balance', 'month');
+        self::assertSame(125.0, (float) $months['2099-07']);
+        $series = array_column($body['total_czk']['series'], null, 'account_id');
+        $czkMonths = array_column($series[$currencyId]['months'], 'balance_czk', 'month');
+        self::assertSame(125.0, (float) $czkMonths['2099-07']);
+        $list = json_decode((string) $this->action->list($request, new Response())->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $items = array_column($list['items'], null, 'id');
+        self::assertArrayHasKey($apiId, $items);
+        self::assertSame('calculated', $items[$apiId]['balance_calculation']['status']);
+        self::assertSame(125.0, (float) $items[$apiId]['balance_calculation']['closing']);
+        self::assertArrayNotHasKey('transactions', $items[$apiId]['balance_calculation']);
+    }
+
     public function testApiBalanceIsAuthoritativeOnlyWhenProvided(): void
     {
         $account = '1000000005';
@@ -330,6 +360,22 @@ final class StatementAccountResolutionTest extends TestCase
         self::assertSame(100.0, (float) $accounts[$currencyId]['current_balance']);
         self::assertSame('bank_api', $accounts[$currencyId]['current_source']);
         self::assertSame('2099-06-30', $accounts[$currencyId]['statement_date']);
+    }
+
+    public function testReportedApiBalanceWinsOverSameDateCalculation(): void
+    {
+        $account = '1000000005';
+        $currencyId = $this->registerCurrency('CZK', $account, '2250');
+        $this->insertStatement('gpc', $account, '2250', '2099-06-30', 100.0, 'reported-anchor');
+        $this->insertStatement('bank_api', $account, '2250', '2099-07-15', 200.0, 'reported-api');
+        $calculated = $this->insertStatement('bank_api', $account, '2250', '2099-07-15', 0.0, 'reported-projection');
+        $this->db->pdo()->prepare('UPDATE bank_statements SET curr_balance = NULL WHERE id = ?')->execute([$calculated]);
+        $response = $this->action->accountBalances($this->mockRequest($this->supplierId, 'admin', [], []), new Response());
+        $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $accounts = array_column($body['accounts'], null, 'id');
+        self::assertSame(200.0, (float) $accounts[$currencyId]['current_balance']);
+        $months = array_column($accounts[$currencyId]['months'], 'balance', 'month');
+        self::assertSame(200.0, (float) $months['2099-07']);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

@@ -4,6 +4,10 @@ Přehled je úvodní obrazovka po přihlášení — okamžitý report, kolik js
 co je po splatnosti, jaký je obrat za letošní a loňský rok, a kdo jsou tví
 top klienti.
 
+Průvodce úvodním nastavením se nezobrazuje, pokud firma už eviduje přijatou
+fakturu, i když dosud žádnou fakturu nevystavila. Rozhoduje existence dokladu,
+nikoli jeho částka nebo rok.
+
 ![Přehled (dashboard)](img/05_dashboard.webp)
 
 ## 10.1 KPI dlaždice (horní řada)
@@ -79,7 +83,7 @@ sekci nezobrazuje. Nápověda je dál dostupná přes kontextovou ikonu.
 
 Pokud by se názvy sekcí do horní lišty nevešly, aplikace to změří a automaticky
 zobrazí menu jako trvalý levý panel. Na dostatečně široké obrazovce můžeš mezi
-horní a levou variantou přepnout ikonou rozložení ve spodní liště; přetékající
+horní a levou variantou přepnout tlačítkem **Styl menu** ve spodní liště; přetékající
 horní variantu nelze vynutit. Výchozí je horní menu; ručně zvolená levá
 varianta se uloží do cookie tohoto prohlížeče. Přepínač rozložení nabízí horní
 menu, plný levý panel a kompaktní levý pruh. Sbalovací šipka v prvním řádku
@@ -91,11 +95,16 @@ tlačítkem **☰** zprava. Přepínač firmy pod hlavičkou také
 využívá celou dostupnou šířku. Jazyk a motiv zůstávají ve spodní liště; jazyk
 přepíná jediná vlaječka na druhý dostupný jazyk.
 
-Na tabletu lze ikonou ve spodní liště nahradit hamburger připnutým levým pruhem.
-Pruh zobrazuje pouze barevné ikony sekcí, aby nezabíral místo položkami celého
-menu. Klepnutí na ikonu otevře vedle pruhu položky vybrané sekce. Stejnou ikonou
-ve spodní liště se lze kdykoli vrátit k hamburger menu. Volba se ukládá do cookie
-prohlížeče a na telefonu se neuplatní.
+Na menší obrazovce lze tlačítkem **Menu vlevo** ve spodní liště
+nahradit hamburger kompaktním levým pruhem. Volba je dostupná, pokud pruh
+a rozbalené menu společně zaberou nejvýše 90 % šířky obrazovky. Při běžné
+velikosti textu to odpovídá šířce alespoň 400 px. Barevné ikony a názvy sekcí
+zůstávají viditelné; klepnutí otevře položky vedle pruhu. Tlačítkem
+**Hamburger** se lze vrátit k hamburgeru.
+
+Volba se ukládá v prohlížeči. Dokud pro menší obrazovku nevyberete jiný režim,
+přebírá se kompaktní menu z desktopového nastavení. Při dalším zúžení se
+dočasně zobrazí hamburger; po rozšíření se kompaktní menu vrátí.
 
 Aktuální hlavní struktura menu je:
 
