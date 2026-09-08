@@ -239,6 +239,11 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
             (new PayrollRegistrationXmlValidator(
                 new PayrollRegistrationSchemaCatalog(),
             ))->validate($payload, $xml);
+            self::assertStringContainsString(
+                '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"'
+                    . ' version="1.4" partialAccept="A">',
+                $xml,
+            );
             self::assertStringContainsString(' rel="' . $activity . '"', $xml);
             self::assertStringContainsString('<adr ', $xml);
             if ($activity === '10') {

@@ -436,6 +436,12 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
             );
             $xml = $serializer->serialize($payload);
             $validator->validate($payload, $xml);
+            // Bez `partialAccept` zamítá ČSSZ celé podání, ne jen chybnou větu.
+            self::assertStringContainsString(
+                '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"'
+                    . ' version="1.4" partialAccept="A">',
+                $xml,
+            );
             self::assertStringContainsString('act="' . $actionCode . '"', $xml);
             self::assertStringContainsString('oid="200000000000000000002"', $xml);
             // `VENDOR` stojí první ve `regzecType`; ČSSZ podle něj pozná, ze
@@ -855,7 +861,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
     {
         return <<<'XML'
 <?xml version="1.0" encoding="UTF-8"?>
-<PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026">
+<PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026" version="1.2" partialAccept="A">
   <VENDOR productName="MyÚčto.cz" productVersion="5.6.0"/>
   <employees>
     <employee sqnr="1" act="9" idform="12345678-1234-1234-1234-123456789ABC" dat="2026-08-04" predat="2026-08-05">
@@ -875,7 +881,7 @@ XML;
     {
         return <<<'XML'
 <?xml version="1.0" encoding="UTF-8"?>
-<PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026">
+<PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026" version="1.2" partialAccept="A">
   <VENDOR productName="MyÚčto.cz" productVersion="5.6.0"/>
   <employees>
     <employee sqnr="1" act="10" idform="12345678-1234-1234-1234-123456789ABC" dat="2026-08-04">

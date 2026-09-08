@@ -34,6 +34,30 @@ final class PayrollRegistrationXmlSerializer
         'disposal',
     ];
 
+    /**
+     * Kořenové atributy obou registračních vět.
+     *
+     * `partialAccept` rozhoduje, co ČSSZ udělá s podáním, ve kterém je jedna
+     * věta chybná a druhá správná. Bez něj se zamítá CELÉ podání — doloženo
+     * odpovědí vývojáře MPSV v diskusi k JMHZ („V XML podání chybí
+     * partialAccept="A", proto bylo zamítnuto celé podání") i registracemi,
+     * které ČSSZ přijala z cizího mzdového systému. Aplikace posílá jednu větu
+     * na podání, takže se rozdíl dnes neprojeví; projevil by se až u prvního
+     * dávkového podání, tedy na ostrých datech.
+     *
+     * `version` je verze datové věty, kterou odesílatel implementuje. Schéma
+     * ji má jako `xs:string` bez výčtu, takže se nevaliduje. Drží se proto
+     * major.minor PŘIPNUTÉHO balíčku ({@see PayrollRegistrationSchemaCatalog}),
+     * ne atributu `xs:schema/@version` — ten je v obou schématech starší než
+     * balíček sám (PREZEC26 1.2 nese 1.1, REGZEC25 1.4.0.4 nese 1.2).
+     *
+     * @var array<string,array<string,string>>
+     */
+    private const ROOT_ATTRIBUTES = [
+        'PREZEC26' => ['version' => '1.2', 'partialAccept' => 'A'],
+        'REGZEC25' => ['version' => '1.4', 'partialAccept' => 'A'],
+    ];
+
     public function serialize(PayrollRegistrationXmlPayload $payload): string
     {
         // Výjimky v serializéru zůstávají: tady se skládá soubor, který půjde
@@ -94,8 +118,7 @@ final class PayrollRegistrationXmlSerializer
     {
         $namespace = 'http://schemas.cssz.cz/PREZEC/2026';
         $document = $this->document();
-        $root = $document->createElementNS($namespace, 'PREZEC');
-        $document->appendChild($root);
+        $root = $this->root($document, $namespace, 'PREZEC', 'PREZEC26');
         $this->appendVendor($document, $namespace, $root, $payload);
         $employees = $this->element($document, $namespace, 'employees');
         $employee = $this->element($document, $namespace, 'employee');
@@ -132,8 +155,7 @@ final class PayrollRegistrationXmlSerializer
             );
         }
         $document = $this->document();
-        $root = $document->createElementNS($namespace, 'REGZEC');
-        $document->appendChild($root);
+        $root = $this->root($document, $namespace, 'REGZEC', 'REGZEC25');
         $this->appendVendor($document, $namespace, $root, $payload);
         $employees = $this->element($document, $namespace, 'employees');
         $employee = $this->element($document, $namespace, 'employee');
@@ -393,8 +415,7 @@ final class PayrollRegistrationXmlSerializer
         }
         $namespace = 'http://schemas.cssz.cz/REGZEC/2025';
         $document = $this->document();
-        $root = $document->createElementNS($namespace, 'REGZEC');
-        $document->appendChild($root);
+        $root = $this->root($document, $namespace, 'REGZEC', 'REGZEC25');
         $this->appendVendor($document, $namespace, $root, $payload);
         $employees = $this->element($document, $namespace, 'employees');
         $employee = $this->element($document, $namespace, 'employee');
@@ -845,6 +866,25 @@ final class PayrollRegistrationXmlSerializer
         string $name,
     ): DOMElement {
         return $document->createElementNS($namespace, $name);
+    }
+
+    /**
+     * Kořen věty i s atributy podle {@see self::ROOT_ATTRIBUTES}. Kdyby si je
+     * každá ze tří větví stavěla sama, chybí zase jen v jedné z nich.
+     */
+    private function root(
+        DOMDocument $document,
+        string $namespace,
+        string $name,
+        string $documentType,
+    ): DOMElement {
+        $root = $document->createElementNS($namespace, $name);
+        foreach (self::ROOT_ATTRIBUTES[$documentType] as $attribute => $value) {
+            $root->setAttribute($attribute, $value);
+        }
+        $document->appendChild($root);
+
+        return $root;
     }
 
     private function save(DOMDocument $document): string
