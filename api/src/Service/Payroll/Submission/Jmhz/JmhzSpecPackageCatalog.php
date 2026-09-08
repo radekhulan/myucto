@@ -9,9 +9,9 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 final class JmhzSpecPackageCatalog
 {
     public const DEFAULT_PACKAGE_KEY =
-        'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1';
+        'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.9_manifest-v1';
     public const DEFAULT_MANIFEST_SHA256 =
-        '429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205';
+        '3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3';
 
     private const PACKAGE_DIRECTORIES = [
         self::DEFAULT_PACKAGE_KEY => 'dictionary-1.4.1.6',

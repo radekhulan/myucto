@@ -536,7 +536,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             hash('sha256', $this->golden()),
             $result['sha256'],
         );
-        self::assertSame('jmhz-1.4.3.4', $result['schema']['package_key']);
+        self::assertSame('jmhz-1.4.3.6', $result['schema']['package_key']);
         self::assertSame('1.4.3', $result['schema']['data_version']);
     }
 

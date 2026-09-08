@@ -15,11 +15,11 @@ final class JmhzOfficialExamplePackageBuilder
     private const XML_COUNT = 35;
     private const UNCOMPRESSED_BYTES = 286380;
     private const SPEC_PACKAGE_KEY =
-        'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1';
+        'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.9_manifest-v1';
     private const SPEC_MANIFEST_SHA256 =
-        '429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205';
+        '3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3';
     private const XSD_INVENTORY_SHA256 =
-        '72285ef5c8924d55041d54b075cbcc135a3229e6954fe81a25ef773a8d12215c';
+        '7a7be1c395125c683c28d6cd7aa7899b4acf5f3a791389b75c2fe51ad94c605a';
 
     /** @var array<string, array{target_key:string,agenda:string,version:string,entrypoint:string,entrypoint_sha256:string,official_xsd_archive_sha256:string}> */
     private const TARGETS = [
@@ -32,12 +32,12 @@ final class JmhzOfficialExamplePackageBuilder
             'official_xsd_archive_sha256' => '1e89ec55b56b3e00f3f6a066e92bf3e39d29b05a5e2f0f8c7be95ead65111d06',
         ],
         'http://schemas.cssz.cz/JMHZ/podani/1.0|jmhz' => [
-            'target_key' => 'jmhz-1.4.3.4',
+            'target_key' => 'jmhz-1.4.3.6',
             'agenda' => 'jmhz',
-            'version' => '1.4.3.4',
-            'entrypoint' => 'jmhz-1.4.3.4/jmhzPodani.xsd',
-            'entrypoint_sha256' => 'c602cdf018dc6a0c4379000e004f2c4609d7313d265defa323e70663efc66216',
-            'official_xsd_archive_sha256' => 'f189885ad637c4343b4b7ce195f13fd4f6f8b87f5b5b94c5c74fe85a9df0ee9d',
+            'version' => '1.4.3.6',
+            'entrypoint' => 'jmhz-1.4.3.6/jmhzPodani.xsd',
+            'entrypoint_sha256' => '228db1ee19d9e897d4f1f5f541d6c1c5e7e6c02d07ac7bbd33d987a35cd110f7',
+            'official_xsd_archive_sha256' => '79a08fc60b2cb7753a772100463a1f80259437ab99cfcee8d2e06061e220e879',
         ],
         'http://schemas.cssz.cz/REGZEC/2025|REGZEC' => [
             'target_key' => 'regzec-1.4.0.4',

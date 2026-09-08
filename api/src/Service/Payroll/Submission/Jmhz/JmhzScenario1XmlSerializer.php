@@ -15,7 +15,7 @@ use DOMElement;
  * Pracuje VÝHRADNĚ s vyřešeným normalizovaným dokumentem. Nesahá do databáze,
  * nedopočítává a nezaokrouhluje — každá hodnota, která v dokumentu není
  * zmrazená, je tvrdá chyba, nikdy nula ani `false`. Pořadí elementů odpovídá
- * `xs:sequence` připnutého JMHZ 1.4.3.4; nepovinné bloky, pro které nemáme
+ * `xs:sequence` připnutého JMHZ 1.4.3.6; nepovinné bloky, pro které nemáme
  * doložený zdroj, se raději neuvádějí, než aby se odhadovaly.
  */
 final class JmhzScenario1XmlSerializer

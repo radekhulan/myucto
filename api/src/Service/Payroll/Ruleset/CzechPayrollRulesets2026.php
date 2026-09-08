@@ -763,7 +763,7 @@ final class CzechPayrollRulesets2026
             [self::jmhzDocumentation()],
             [
                 'dzmh.schema_version' => PayrollRuleValue::text('1.1'),
-                'jmhz.schema_version' => PayrollRuleValue::text('1.4.3.4'),
+                'jmhz.schema_version' => PayrollRuleValue::text('1.4.3.6'),
                 'prezec.schema_version' => PayrollRuleValue::text('1.2'),
                 'regzec.schema_version' => PayrollRuleValue::text('1.4.0.4'),
                 'regzeldopl.schema_version' => PayrollRuleValue::text('1.2'),

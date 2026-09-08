@@ -97,7 +97,7 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
       xml,
       xml_sha256: 'b'.repeat(64),
       schema: {
-        package_key: 'jmhz-1.4.3.4',
+        package_key: 'jmhz-1.4.3.6',
         data_version: '1.4.3',
         bundle_sha256: 'c'.repeat(64),
         document_sha256: 'd'.repeat(64),
@@ -133,7 +133,7 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
       xml,
       xml_sha256: 'b'.repeat(64),
       schema: {
-        package_key: 'jmhz-1.4.3.4',
+        package_key: 'jmhz-1.4.3.6',
         data_version: '1.4.3',
         bundle_sha256: 'c'.repeat(64),
         document_sha256: 'd'.repeat(64),
@@ -296,7 +296,7 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
       xml,
       xml_sha256: 'b'.repeat(64),
       schema: {
-        package_key: 'jmhz-1.4.3.4',
+        package_key: 'jmhz-1.4.3.6',
         data_version: '1.4.3',
         bundle_sha256: 'c'.repeat(64),
         document_sha256: 'd'.repeat(64),

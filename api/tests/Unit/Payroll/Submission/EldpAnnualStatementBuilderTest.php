@@ -488,7 +488,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         self::assertStringContainsString('<odecitaneDobyCelkem>0</odecitaneDobyCelkem>', $xml);
 
         $evidence = (new EldpXmlValidator())->validate($statement, $xml);
-        self::assertSame('jmhz-1.4.3.4', $evidence['package_key']);
+        self::assertSame('jmhz-1.4.3.6', $evidence['package_key']);
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $evidence['bundle_sha256']);
     }
 

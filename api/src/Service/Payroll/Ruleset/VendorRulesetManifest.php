@@ -76,7 +76,7 @@ final class VendorRulesetManifest
         // cz-payroll-2026.social-insurance.v1
         '9a0ec0de0f24085f7b12d5ee1971fd2526d6724b07ff3c29ff5b93db4b7ab4b4',
         // cz-payroll-2026.submissions.v1
-        '5d4150f71b70da998f465b1ef5f5d396b3a457ff373cce434230a476854cf377',
+        'cc830b0602502e64812d0520c2451707a611947413766f8225d4866a35f7997e',
         // cz-payroll-2026.travel-allowances.v1
         '4894d8ce93b013d4314c89362c39a7667f33185c8348e2a6ece9fe4a0024b8dd',
         // cz-payroll-2026.travel-allowances.v2

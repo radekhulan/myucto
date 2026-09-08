@@ -43,6 +43,8 @@ Verze 1.4.3.1,  01.12.2025 - změna povinnosti (na nepovinný) elementu primarni
 Verze 1.4.3.2,  08.12.2025 - formOdlozenyPrijem - odstranění komplexního elementu vykonavanaPozice
 Verze 1.4.3.3,  25.03.2026 - změna povinnosti (na nepovinný) elementu rocniZuctovaniZadost (ID 10319)
 Verze 1.4.3.4,  25.03.2026 - přidána restrikce minLength u typů: jmenoType, prijmeniType, idPpvType a v elementu kategorizaceRizika (ID 10247)
+Verze 1.4.3.5,  01.06.2026 - msgPodani - přidány nepovinné elementy produktNazev a produktVerze (odpovídající elementu VENDOR)
+Verze 1.4.3.6,  03.08.2026 - formCommonTypes - změna povinnosti (na nepovinný) elementu zakladDane (ID 10307)
     </xs:documentation>
   </xs:annotation>
 

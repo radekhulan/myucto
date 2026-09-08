@@ -50,9 +50,9 @@ final readonly class JmhzPvpojPreview
                 'reason_code' => 'pvpoj_only_identity_snapshot_incomplete',
             ],
             'xsd' => [
-                'bundle_version' => '1.4.3.4',
+                'bundle_version' => '1.4.3.6',
                 'schema_version' => '1.4.3',
-                'entry_point' => 'jmhz-1.4.3.4/PVPOJ.xsd',
+                'entry_point' => 'jmhz-1.4.3.6/PVPOJ.xsd',
                 'namespace' => 'http://schemas.cssz.cz/JMHZ/PVPOJ/1.0',
             ],
             'supplier_id' => $this->supplierId,

@@ -15,7 +15,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
  */
 final class JmhzSchemaCatalog
 {
-    public const PACKAGE_KEY = 'jmhz-1.4.3.4';
+    public const PACKAGE_KEY = 'jmhz-1.4.3.6';
     public const ENTRY_POINT = 'jmhzPodani.xsd';
 
     /**
@@ -41,7 +41,7 @@ final class JmhzSchemaCatalog
         'formCinnostKS.xsd' =>
             '713ec54e94dd9be40523e1d3357e0b9a12de9a37d0bd420c3560400094140f3d',
         'formCommonTypes.xsd' =>
-            '17a061b3270b1c9f873e6c4c79173e08ef21a0ef6b6ab287d9a282882e996407',
+            '072d2e3002be26c602ccb23326647c1489fd734d1fb976bc8a50165148b5d881',
         'formJinyPrijem.xsd' =>
             '2daf24a0388f692912147a17f9234210bdbed921d5f0ffcebc0c7267b7755f76',
         'formMezinarodniPronajemSily.xsd' =>
@@ -55,7 +55,7 @@ final class JmhzSchemaCatalog
         'formVezen.xsd' =>
             '54f3d6eda6602ad958201320aa6ec2fb4a839239b0a7a6dd6d98b9e9e96a8cdd',
         'jmhzPodani.xsd' =>
-            'c602cdf018dc6a0c4379000e004f2c4609d7313d265defa323e70663efc66216',
+            '228db1ee19d9e897d4f1f5f541d6c1c5e7e6c02d07ac7bbd33d987a35cd110f7',
         'souhrn.xsd' =>
             '4d5be0d5fd0a0fa2e6f7c0ba66a19ff2e9bb122a1c2c03e8d2858a6958a747f7',
     ];

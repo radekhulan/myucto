@@ -214,7 +214,7 @@ final class JmhzScenario1XmlDryRunServiceTest extends TestCase
             'xml' => $xml,
             'sha256' => hash('sha256', $xml),
             'schema' => [
-                'package_key' => 'jmhz-1.4.3.4',
+                'package_key' => 'jmhz-1.4.3.6',
                 'data_version' => '1.4.3',
                 'bundle_sha256' => str_repeat('c', 64),
                 'document_sha256' => str_repeat('d', 64),

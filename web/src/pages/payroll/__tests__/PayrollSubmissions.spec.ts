@@ -334,7 +334,7 @@ function setup() {
     xsd: {
       bundle_version: '1.4.3.4',
       schema_version: '1.4.3',
-      entry_point: 'jmhz-1.4.3.4/PVPOJ.xsd',
+      entry_point: 'jmhz-1.4.3.6/PVPOJ.xsd',
       namespace: 'http://schemas.cssz.cz/JMHZ/PVPOJ/1.0',
     },
     supplier_id: 1,

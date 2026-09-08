@@ -3,23 +3,28 @@
 declare(strict_types=1);
 
 /**
+ * `xsd_root` je nepovinný podadresář archivu, ze kterého se schémata berou.
+ * Bez něj se bere celý archiv, což platilo pro všechny balíčky do JMHZ 1.4.3.4.
+ *
  * @return array<string,array{
  *     target:string,
  *     version:string,
  *     url:string,
  *     sha256:string,
  *     xsd_count:int,
- *     entry_points:list<string>
+ *     entry_points:list<string>,
+ *     xsd_root?:string
  * }>
  */
 return [
     'jmhz' => [
-        'target' => 'jmhz-1.4.3.4',
-        'version' => '1.4.3.4',
-        'url' => 'https://developers.mpsv.cz/assets/documents/71d47c9e-15de-471d-b7a2-88e7127b17a1/JMHZ_podani_1_4_3_4_xsd.zip',
-        'sha256' => 'f189885ad637c4343b4b7ce195f13fd4f6f8b87f5b5b94c5c74fe85a9df0ee9d',
+        'target' => 'jmhz-1.4.3.6',
+        'version' => '1.4.3.6',
+        'url' => 'https://developers.mpsv.cz/assets/documents/a0ca7983-9aed-40cc-aa96-8a97c3641a88/JMHZ_pod%C3%A1n%C3%AD_1.4.3.6.zip',
+        'sha256' => '79a08fc60b2cb7753a772100463a1f80259437ab99cfcee8d2e06061e220e879',
         'xsd_count' => 14,
         'entry_points' => ['jmhzPodani.xsd'],
+        'xsd_root' => 'xsd_1_4_3_6/externi_xsd',
     ],
     'regzec' => [
         'target' => 'regzec-1.4.0.4',

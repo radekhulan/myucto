@@ -8,8 +8,8 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzControlSourceCatalog
 {
-    public const CATALOG_KEY = 'jmhz-controls-1.4.2.8-source-v4';
-    public const MANIFEST_SHA256 = '83ec6a985cf1c6d6e2429657d4ba6d12b09bfb849a32b504fff882383fb03800';
+    public const CATALOG_KEY = 'jmhz-controls-1.4.2.9-source-v4';
+    public const MANIFEST_SHA256 = '65ccaa12d3ac0485f5b901f91b8a7a4398486aadafc3b33fe6a79bd30a76c2e7';
 
     /** @var array<int, JmhzControlDefinition> */
     private array $definitions = [];

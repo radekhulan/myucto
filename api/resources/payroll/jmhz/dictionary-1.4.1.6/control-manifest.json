@@ -1,14 +1,14 @@
 {
-    "manifest_sha256": "83ec6a985cf1c6d6e2429657d4ba6d12b09bfb849a32b504fff882383fb03800",
+    "manifest_sha256": "65ccaa12d3ac0485f5b901f91b8a7a4398486aadafc3b33fe6a79bd30a76c2e7",
     "payload": {
         "schema_version": "jmhz-control-source-catalog.v4",
-        "catalog_key": "jmhz-controls-1.4.2.8-source-v4",
-        "version": "1.4.2.8",
-        "spec_package_key": "jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1",
-        "spec_manifest_sha256": "429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205",
+        "catalog_key": "jmhz-controls-1.4.2.9-source-v4",
+        "version": "1.4.2.9",
+        "spec_package_key": "jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.9_manifest-v1",
+        "spec_manifest_sha256": "3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3",
         "source": {
-            "filename": "Katalog kontrol MH(public)_1.4.2.8.xlsx",
-            "sha256": "8c861badbd6229e9185482b0caaf19d6ded4797b27bf37f8b53dcb3b31151b49",
+            "filename": "Katalog kontrol MH(public)_1.4.2.9.xlsx",
+            "sha256": "94ce830c8c70ba99235cb6af663f4f14464911df2b127e2e53ff180e112dcb8f",
             "sheets": [
                 "MH",
                 "Parametrické konstanty"
@@ -4574,7 +4574,7 @@
                 "category": "T9",
                 "detail_text": "Pro opravné podání (10016) = \"O\" součásti individualizované části musí odpovídat dvojice klíčů (10051) a (10228) předchozím hodnotám ze zpracovaného řádného podání (10016) = \"R\", tj. pro konkrétní GUID formuláře (10012) musí být použita vždy stejná kombinace IK MPSV a ID pracovněprávního vztahu.\n---\n10012 GUID formuláře\n10016 Typ formuláře\n10051 IK MPSV\n10228 ID pracovněprávního vztahu",
                 "detail_formula": null,
-                "error_message": "V rámci opravného podání nebyl nalezen GUID součásti (a zároveň odpovídající klíčů OIČ a ID zaměstnání). \n\na) Pošlete NOVÝ ŘÁDNÝ formulář zaměstnance(typ formuláře = řádný) s NOVĚ vygenerovaným GUID formuláře, OIČ {ikmpsv} a ID zaměstnání {idppv} beze změny.\n\nb) Zaslaná součást (formulář) musí mít stejný GUID, pošlete OPRAVNÝ formulář zaměstnance (typ formuláře = opravný) s EXISTUJÍCÍM {guid} formuláře (GUID přijatého řádného formuláře — NEgenerujte nový), OIČ {ikmpsv} a ID zaměstnání {idppv} beze změny.",
+                "error_message": "V rámci opravného podání nebyl nalezen GUID součásti (a zároveň odpovídající klíčů OIČ a ID zaměstnání).\n\na1) Pošlete NOVÝ ŘÁDNÝ formulář zaměstnance (typ formuláře = řádný) s NOVĚ vygenerovaným GUID formuláře, OIČ {ikmpsv} a ID zaměstnání {idppv} beze změny.\na2) Pro opravný formulář typu odložený příjem s GUID {guid} a ID zaměstnání {idppv} nebyl nalezen odpovídající ŘÁDNÝ formulář.\n\nb) Zaslaná součást (formulář) musí mít stejný GUID, pošlete OPRAVNÝ formulář zaměstnance (typ formuláře = opravný) s EXISTUJÍCÍM {guid} formuláře (GUID přijatého řádného formuláře — NEgenerujte nový), OIČ {ikmpsv} a ID zaměstnání {idppv} beze změny.",
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": null,
@@ -4600,7 +4600,7 @@
                         "row_hash": "2dadc73feb24b06f6a53bf0ffda1ff9f4b9b06aa253ff84291fa47eb5feb6cd9"
                     }
                 ],
-                "row_hash": "1aa1b46fed8a90291e054216ec0bbd92a3d3ba482fce8ff080e63936f8cd983c"
+                "row_hash": "890b2b0476adf54cd2a40a1b73875ddeb28246b02aa09a51deaf472d90850f5c"
             },
             {
                 "control_id": 240,

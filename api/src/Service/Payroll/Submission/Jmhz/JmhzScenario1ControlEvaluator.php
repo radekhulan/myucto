@@ -10,7 +10,7 @@ use MyInvoice\Service\Payroll\CzechBirthNumber;
  * Vykonávací implementace kontrol katalogu ČSSZ nad prvním profilem měsíčního
  * hlášení (`scenario_1`, `form:bezPriznaku`, řádné podání).
  *
- * Katalog 1.4.2.8 popisuje 199 kontrol textem, ne strojově. Tahle třída je
+ * Katalog 1.4.2.9 popisuje 199 kontrol textem, ne strojově. Tahle třída je
  * jediné místo, kde se text překládá do kódu, a drží tři pravidla:
  *
  * 1. **Sazby se nezadrátovávají.** Každý koeficient se bere z parametrických
@@ -111,7 +111,7 @@ final class JmhzScenario1ControlEvaluator
             . ' který první profil nevykazuje.',
         326 => 'Jedinečnost řádného podání za období se rozhoduje nad evidencí'
             . ' podání, ne nad obsahem jednoho XML.',
-        333 => 'Oficiální katalog 1.4.2.8 má u kontroly časového omezení slevy'
+        333 => 'Oficiální katalog 1.4.2.9 má u kontroly časového omezení slevy'
             . ' rozporné odkazy na atributy. Věcný výsledek navíc závisí na datu'
             . ' přijetí podání, které přiděluje až ČSSZ; lokálně se proto'
             . ' neodhaduje a rozhodne protokol ČSSZ.',

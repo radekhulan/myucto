@@ -9,7 +9,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 final class JmhzScenarioRequirementSourceCatalog
 {
     public const CATALOG_KEY = 'jmhz-scenario-requirements-1.4.0.2-source-v1';
-    public const MANIFEST_SHA256 = 'bb43e8621c713729d534c026379c87e761711c53c42ce7e97377b68b0868b4e0';
+    public const MANIFEST_SHA256 = '31d8b0f859ab0ac197e08d08b0b7d9c4814b8bba62a5ef3c287e7122978aa0e1';
     public const SOURCE_SHA256 = 'cc282115d58a3744348b500a2dcc6eec4a5899b12753ec756f01fe261fd7ff37';
 
     private const EXPECTED_COUNTS = [
@@ -160,7 +160,7 @@ final class JmhzScenarioRequirementSourceCatalog
         if (!is_string($actual) || !hash_equals(self::SOURCE_SHA256, $actual)) {
             throw new \UnexpectedValueException('Zdroj katalogu scénářů JMHZ neodpovídá připnutému SHA-256.');
         }
-        $xsdDirectory = dirname($root, 3) . '/xsd/jmhz/jmhz-1.4.3.4';
+        $xsdDirectory = dirname($root, 3) . '/xsd/jmhz/jmhz-1.4.3.6';
         foreach ($catalog->scenarios as $scenario) {
             if (basename($scenario->xsdEntrypoint) !== $scenario->xsdEntrypoint
                 || !is_file($xsdDirectory . DIRECTORY_SEPARATOR . $scenario->xsdEntrypoint)

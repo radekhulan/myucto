@@ -11,15 +11,15 @@ final class JmhzExternalCodebookCatalog
     public const HISTORICAL_OVERLAY_KEY =
         'jmhz-external-codebooks-cisob-2026_czemalfa-2026-08-13-v1';
     public const HISTORICAL_MANIFEST_SHA256 =
-        'ec79c28524b0a8e6a9102dbc879ce69fb7ec8dfdf5489873c81066f4d26b230c';
+        '5e0806c21b9c0b94a70e21ca6b01a18997042ea169f2e37c0e030268d10c3e12';
     public const AUGUST_2026_OVERLAY_KEY =
         'jmhz-external-codebooks-cisob-511-2025-through-2026-08-31_czemalfa-2026-08-13-v1';
     public const AUGUST_2026_MANIFEST_SHA256 =
-        '2af12a425ccb063e8356cd8959ea2921e3693bf2dad278cc1c3276e431bfabaf';
+        '3b721a584603c7c8bfae34956abf47841ef2732bbf1cf8b7e74f2d0c3099a5eb';
     public const DEFAULT_OVERLAY_KEY =
         'jmhz-external-codebooks-cisob-145-2026_czemalfa-2026-08-26-v1';
     public const DEFAULT_MANIFEST_SHA256 =
-        'd33b1a05add27f1da2033736f377d03b0efe4a2b34390f084f2b3922733940b6';
+        '8eec649bd98bc35cc866b8e547efb99a9f96407c3e1a9cb245ee865b635c8853';
 
     /** @var array<string,array{manifest_sha256:string,directory:string,snapshot_date:string,effective_from:string,effective_to:?string,verified_through:string,selectable:bool}> */
     private const PACKAGES = [

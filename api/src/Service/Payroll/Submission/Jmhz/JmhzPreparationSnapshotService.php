@@ -581,7 +581,7 @@ final readonly class JmhzPreparationSnapshotService
     /**
      * Nepřidělené identifikátory od ČSSZ. NENÍ to vada vstupu.
      *
-     * `identifikaceType` v JMHZ 1.4.3.4 je `xs:choice`: buď dvojice OIČ (10051)
+     * `identifikaceType` v JMHZ 1.4.3.6 je `xs:choice`: buď dvojice OIČ (10051)
      * + ID PPV (10228), nebo jmenná větev příjmení / jméno / datum narození /
      * datum nástupu / druh činnosti. ČSSZ obě čísla přiděluje sama až
      * protokolem o přijetí registrace, takže první hlášení za nově

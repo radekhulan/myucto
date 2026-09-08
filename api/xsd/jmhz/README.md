@@ -5,12 +5,18 @@ hlášení zaměstnavatelů a související registrační datové věty. Každý
 ve vlastním verzovaném adresáři, aby se stejně pojmenované závislosti
 `baseTypes2.xsd` nemíchaly mezi různými formuláři.
 
-Staženo a znovu ověřeno dne 4. 8. 2026 z
+Balíček JMHZ nově veze vedle vnějších schémat i vnitřní (`interni_xsd`) a HTML
+dokumentaci. Připíná se proto jen podstrom `xsd_1_4_3_6/externi_xsd`, který
+manifest uvádí jako `xsd_root`; uložený tvar tím zůstává plochý jako dřív.
+Vnitřní schémata se odkazují přes `../externi_xsd/…`, aplikace proti nim nic
+nevaliduje a kontrola cest je záměrně nepřipouští.
+
+Staženo a znovu ověřeno dne 8. 9. 2026 z
 [vývojářské dokumentace MPSV](https://developers.mpsv.cz/api-list/jednotne-mesicni-hlaseni-zamestnavatelu/documentation/4589f5c6-30e8-4e2b-b341-fe8481ad4e70).
 
 | Balíček | Vstupní XSD | Oficiální archiv | SHA-256 archivu |
 |---|---|---|---|
-| JMHZ 1.4.3.4 | `jmhz-1.4.3.4/jmhzPodani.xsd` | [JMHZ_podani_1_4_3_4_xsd.zip](https://developers.mpsv.cz/assets/documents/71d47c9e-15de-471d-b7a2-88e7127b17a1/JMHZ_podani_1_4_3_4_xsd.zip) | `f189885ad637c4343b4b7ce195f13fd4f6f8b87f5b5b94c5c74fe85a9df0ee9d` |
+| JMHZ 1.4.3.6 | `jmhz-1.4.3.6/jmhzPodani.xsd` | [JMHZ_podání_1.4.3.6.zip](https://developers.mpsv.cz/assets/documents/a0ca7983-9aed-40cc-aa96-8a97c3641a88/JMHZ_pod%C3%A1n%C3%AD_1.4.3.6.zip) | `79a08fc60b2cb7753a772100463a1f80259437ab99cfcee8d2e06061e220e879` |
 | REGZEC 1.4.0.4 | `regzec-1.4.0.4/REGZEC25.xsd` | [REGZEC25_ver_1.4.0.4.zip](https://developers.mpsv.cz/assets/documents/1929cebf-fc5e-41e9-8319-97248cb22e8e/REGZEC25_ver_1.4.0.4.zip) | `0d0396fd857a6602b01a3ecf234fe02da96f00f316eea34de6e67b06e4cc2b1f` |
 | PREZEC 1.2 | `prezec-1.2/PREZEC26 1.2.xsd` | [PREZEC26_ver_1.2.zip](https://developers.mpsv.cz/assets/documents/893169c6-1c40-4555-a5b4-a5621d80d98c/PREZEC26_ver_1.2.zip) | `dda370c1f24ebbef1462c305b526e61fdebd6c280e97624aad8e8a6426216224` |
 | REGZELDOPL 1.2 | `regzeldopl-1.2/REGZELDOPL25.xsd` | [REGZELDOPL25_v1_2.zip](https://developers.mpsv.cz/assets/documents/eddd6a43-f713-43c8-91e3-eceb9b1a796f/REGZELDOPL25_v1_2.zip) | `6f0eb190573336d3250130206a34d84fa228c7bc9fec2f0dd9176cb29e120dd3` |

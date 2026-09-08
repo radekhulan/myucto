@@ -34,7 +34,7 @@ final class JmhzXsdDownloaderTest extends TestCase
 
         self::assertSame(
             [
-                'jmhz' => ['1.4.3.4', 'f189885a', 14, ['jmhzPodani.xsd']],
+                'jmhz' => ['1.4.3.6', '79a08fc6', 14, ['jmhzPodani.xsd']],
                 'regzec' => ['1.4.0.4', '0d0396fd', 2, ['REGZEC25.xsd']],
                 'prezec' => ['1.2', 'dda370c1', 2, ['PREZEC26 1.2.xsd']],
                 'regzeldopl' => ['1.2', '6f0eb190', 2, ['REGZELDOPL25.xsd']],
@@ -51,6 +51,17 @@ final class JmhzXsdDownloaderTest extends TestCase
                 $packages,
             ),
         );
+
+        // Podstrom se připíná jen tam, kde ho oficiální archiv skutečně má.
+        // U ostatních balíčků by `xsd_root` znamenal, že se tiše instaluje
+        // něco jiného, než co je v archivu.
+        $raw = require dirname(__DIR__, 4) . '/tools/jmhz-xsd-packages.php';
+        self::assertIsArray($raw);
+        self::assertSame('xsd_1_4_3_6/externi_xsd', $raw['jmhz']['xsd_root'] ?? null);
+        foreach (['regzec', 'prezec', 'regzeldopl', 'dzmh', 'orezam-zrezam'] as $flatPackage) {
+            self::assertIsArray($raw[$flatPackage]);
+            self::assertArrayNotHasKey('xsd_root', $raw[$flatPackage]);
+        }
 
         foreach ($packages as $id => $package) {
             self::assertSame($id . '-' . $package['version'], $package['target']);
@@ -85,7 +96,7 @@ final class JmhzXsdDownloaderTest extends TestCase
     {
         $root = dirname(__DIR__, 4) . '/api/xsd/jmhz';
         $expectedCounts = [
-            'jmhz-1.4.3.4' => 14,
+            'jmhz-1.4.3.6' => 14,
             'regzec-1.4.0.4' => 2,
             'prezec-1.2' => 2,
             'regzeldopl-1.2' => 2,
@@ -162,6 +173,64 @@ final class JmhzXsdDownloaderTest extends TestCase
             ],
             explode("\n", (string) file_get_contents($target . '/SHA256SUMS')),
         );
+    }
+
+    /**
+     * Oficiální balíček JMHZ veze od verze 1.4.3.5 vedle vnějších schémat i
+     * vnitřní (`interni_xsd`) a k tomu HTML dokumentaci. `xsd_root` vybírá
+     * podstrom, ze kterého se schémata připínají: bez něj by se nainstalovala
+     * i vnitřní schémata, jejichž závislosti míří přes `../` mimo vlastní
+     * adresář, a kontrola cest by celý balíček odmítla.
+     */
+    public function testXsdRootPinsOnlyTheSelectedSubtreeAndFlattensIt(): void
+    {
+        $archive = $this->createArchive([
+            'official-package/xsd/externi/main.xsd' => $this->schema('main'),
+            'official-package/xsd/externi/base.xsd' => $this->schema('base'),
+            'official-package/xsd/interni/message.xsd' => '<?xml version="1.0"?>'
+                . '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                . '<xs:include schemaLocation="../externi/base.xsd"/>'
+                . '</xs:schema>',
+            'official-package/html/index.html' => '<html lang="cs"></html>',
+        ]);
+        $target = $this->tempDir . '/jmhz';
+
+        $downloader = new JmhzXsdDownloader([
+            'sample' => [
+                'target' => 'sample-9.9',
+                'version' => '9.9',
+                'url' => $this->officialUrl(),
+                'sha256' => $this->hash($archive),
+                'xsd_count' => 2,
+                'entry_points' => ['main.xsd'],
+                'xsd_root' => 'xsd/externi',
+            ],
+        ]);
+        $downloader->installFromArchives(['sample' => $archive], $target);
+
+        self::assertFileExists($target . '/sample-9.9/main.xsd');
+        self::assertFileExists($target . '/sample-9.9/base.xsd');
+        self::assertFileDoesNotExist($target . '/sample-9.9/xsd/interni/message.xsd');
+        self::assertFileDoesNotExist($target . '/sample-9.9/message.xsd');
+    }
+
+    public function testManifestRejectsAnUnsafeXsdRoot(): void
+    {
+        foreach (['../externi', '/xsd/externi', 'xsd\\externi', 'xsd/./externi', 'xsd/externi/', ''] as $root) {
+            try {
+                new JmhzXsdDownloader([
+                    'sample' => $this->package(
+                        $this->officialUrl(),
+                        str_repeat('0', 64),
+                        1,
+                        ['schema.xsd'],
+                    ) + ['xsd_root' => $root],
+                ]);
+                self::fail("Nebezpečný xsd_root musí být odmítnut: {$root}");
+            } catch (RuntimeException $e) {
+                self::assertStringContainsString('manifest entry', $e->getMessage());
+            }
+        }
     }
 
     public function testHashMismatchLeavesExistingTreeUntouched(): void

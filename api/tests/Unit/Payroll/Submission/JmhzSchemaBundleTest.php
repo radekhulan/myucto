@@ -19,7 +19,7 @@ final class JmhzSchemaBundleTest extends TestCase
     /** @return iterable<string, array{string}> */
     public static function entryPoints(): iterable
     {
-        yield 'JMHZ' => ['jmhz-1.4.3.4/jmhzPodani.xsd'];
+        yield 'JMHZ' => ['jmhz-1.4.3.6/jmhzPodani.xsd'];
         yield 'REGZEC' => ['regzec-1.4.0.4/REGZEC25.xsd'];
         yield 'PREZEC' => ['prezec-1.2/PREZEC26 1.2.xsd'];
         yield 'REGZELDOPL' => ['regzeldopl-1.2/REGZELDOPL25.xsd'];

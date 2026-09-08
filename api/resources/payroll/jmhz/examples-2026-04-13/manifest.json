@@ -1,11 +1,11 @@
 {
-    "manifest_sha256": "c4c28906f38fdf116ed1f15506494b70d423cfc55da6f3909bbf0fdd4dff3e89",
+    "manifest_sha256": "9e4fde1997a1f84df1cc5b40c31531a4825c2cfefb4699959a300476799464b7",
     "payload": {
         "schema_version": "jmhz-official-xml-example-source-catalog.v1",
         "catalog_key": "jmhz-official-xml-examples-2026-04-13-source-v1",
-        "spec_package_key": "jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1",
-        "spec_manifest_sha256": "429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205",
-        "xsd_inventory_sha256": "72285ef5c8924d55041d54b075cbcc135a3229e6954fe81a25ef773a8d12215c",
+        "spec_package_key": "jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.9_manifest-v1",
+        "spec_manifest_sha256": "3d8b45317198db8d21d1eda6aed304ad70bdf8448bc4a118d7092c7bd5a05fe3",
+        "xsd_inventory_sha256": "7a7be1c395125c683c28d6cd7aa7899b4acf5f3a791389b75c2fe51ad94c605a",
         "usage_policy": "source_evidence_only",
         "privacy_policy": "xml_bytes_external_not_redistributed",
         "source_archive": {
@@ -27,12 +27,12 @@
                 "official_xsd_archive_sha256": "1e89ec55b56b3e00f3f6a066e92bf3e39d29b05a5e2f0f8c7be95ead65111d06"
             },
             {
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "agenda": "jmhz",
-                "version": "1.4.3.4",
-                "entrypoint": "jmhz-1.4.3.4/jmhzPodani.xsd",
-                "entrypoint_sha256": "c602cdf018dc6a0c4379000e004f2c4609d7313d265defa323e70663efc66216",
-                "official_xsd_archive_sha256": "f189885ad637c4343b4b7ce195f13fd4f6f8b87f5b5b94c5c74fe85a9df0ee9d"
+                "version": "1.4.3.6",
+                "entrypoint": "jmhz-1.4.3.6/jmhzPodani.xsd",
+                "entrypoint_sha256": "228db1ee19d9e897d4f1f5f541d6c1c5e7e6c02d07ac7bbd33d987a35cd110f7",
+                "official_xsd_archive_sha256": "79a08fc60b2cb7753a772100463a1f80259437ab99cfcee8d2e06061e220e879"
             },
             {
                 "target_key": "regzec-1.4.0.4",
@@ -549,7 +549,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -558,7 +558,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "23719efa996c9c25efd0dc272d903b08b51c93b76b52daeb3aaf01ace40ff299"
+                "row_hash": "051ff03f4b1887b3603909b5ab825b62f7a0006353d958fa8a569cb3cfa1d48d"
             },
             {
                 "example_key": "example-007",
@@ -571,7 +571,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -580,7 +580,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "4201497ed6575afa33375891a49d1e7cc08519df76e0d55f2104e74ce5972602"
+                "row_hash": "0d9087a6fd5fc9539f86a4f0163753feda15b6638f3e14d77517ab6b391122ff"
             },
             {
                 "example_key": "example-008",
@@ -593,7 +593,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -602,7 +602,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "1f43d271e0cd04015fb773b154ef87d5a36082fd687a23cfc01287366c81009f"
+                "row_hash": "ded093640d400e78cf732720cf6737ef3fb2bcd66a0992030147b8013b92bb35"
             },
             {
                 "example_key": "example-009",
@@ -615,7 +615,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -624,7 +624,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "d6b3d850ecdb1a57b565bb3501ebe4e97733b3a704b435ceb734c4b98763c4f7"
+                "row_hash": "22f1091cc756b46f4fc0c4f3e31c4259ee48dbca2567536726fe503083efea02"
             },
             {
                 "example_key": "example-010",
@@ -637,7 +637,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "fail",
                 "classification": "unresolved",
                 "reason_code": "xsd_year_below_pinned_minimum",
@@ -648,7 +648,7 @@
                     "source_version_not_established"
                 ],
                 "usage": "source_evidence_only",
-                "row_hash": "3f1d239ba84c6678918e60ca1b626d8ef910d6ffd4f987393d514743d58e7850"
+                "row_hash": "51f3760b8856c4e175213a8fabd0fa111b4274928f07da40a2da6b7284f27bf7"
             },
             {
                 "example_key": "example-011",
@@ -661,7 +661,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "fail",
                 "classification": "unresolved",
                 "reason_code": "xsd_year_below_pinned_minimum",
@@ -672,7 +672,7 @@
                     "source_version_not_established"
                 ],
                 "usage": "source_evidence_only",
-                "row_hash": "b21410cf7751fdb1169031b4e9c7f6a4efec15adef70864ca96b0397d81aeb08"
+                "row_hash": "a23ec2837bccf472a2044fddf95e3357a880eaffcf12bd09f6d96e707f105d51"
             },
             {
                 "example_key": "example-012",
@@ -685,7 +685,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -694,7 +694,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "b2c85bbd6414426d11a175571a388e457c0ca954466725b411d04ec00396063c"
+                "row_hash": "aeb916e583c321a8d049017e72e9286bcdf95cb9abbde4530dfe1a6e4adf7a01"
             },
             {
                 "example_key": "example-013",
@@ -707,7 +707,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -716,7 +716,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "e924ddf80580c82f8065437bfc5862288d5465d1c9d21afb1b1b0a902f22037e"
+                "row_hash": "0e098405b15ac0d2528c91a9da22a9cba837c65c2e972c232c7a67947114deb6"
             },
             {
                 "example_key": "example-014",
@@ -729,7 +729,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -738,7 +738,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "1a7f64f32663199de8f65845244bb899612e1284c0f4796eb24b100c4a7bba55"
+                "row_hash": "240d0503ad8ba9c6118e3f19752535d1824931c4404fe50a06231fda58f7db05"
             },
             {
                 "example_key": "example-015",
@@ -751,7 +751,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -760,7 +760,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "2c3635f21b53987fa53e66cab62558811610f787da802546fe69711f66f7c7dc"
+                "row_hash": "456d0e8554ef386f290699756d565ecda756553b5209a4e0d517066cd3650cf0"
             },
             {
                 "example_key": "example-016",
@@ -773,7 +773,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -782,7 +782,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "d3089307e2fbec249e38d08ec516867504eeb50a8c14081dba1d570e1b1d4211"
+                "row_hash": "b87d7d85387ca5ce469e8f944dcb728741a4f906d59ab4842a114f96c70a5aca"
             },
             {
                 "example_key": "example-017",
@@ -795,7 +795,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -804,7 +804,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "0efb94a054ee72a451cf194ea153c18d5b3fe3eb836d18f2201628c7cf29ea4d"
+                "row_hash": "fb5e5f1c7a5b676ba40a2389c7acf9f5b06786cecada41fce15c2db3ff3dcd96"
             },
             {
                 "example_key": "example-018",
@@ -817,7 +817,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -826,7 +826,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "22b4de3fdfdbb55190c6d4c6d5ba633506256003f69fa91d47d35f26dacbe3a8"
+                "row_hash": "e4900c15e98fa4288aa1c9d231157716b6b11e8abe9abe568d2ecfe9984a2778"
             },
             {
                 "example_key": "example-019",
@@ -839,7 +839,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -848,7 +848,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "8118fb2ddec34903b436f252bd5755aa6a3cbbd1ce76b676b9417bb85c70ae26"
+                "row_hash": "b280e7ba978a6721728dd3939ceb3c8d814dfe7fe6d46359f54d316146dbd663"
             },
             {
                 "example_key": "example-020",
@@ -861,7 +861,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -870,7 +870,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "e8d95c76384290a3f52eb2833c4bc840f9b8d4c00590e1d489f5fa3d18964ff4"
+                "row_hash": "4e3f5c2b01a94f1ba4ddeed4c2521aa438ddcaf070358ae367d4d4e4a8bf41b2"
             },
             {
                 "example_key": "example-021",
@@ -883,7 +883,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "fail",
                 "classification": "unresolved",
                 "reason_code": "xsd_year_below_pinned_minimum",
@@ -894,7 +894,7 @@
                     "source_version_not_established"
                 ],
                 "usage": "source_evidence_only",
-                "row_hash": "7d6b557f62ebc736615a6c287e53fd1aa2b14f2fe462a735bd9b8a112f1d0254"
+                "row_hash": "4dc89df651c06dc6b1856ba1eb03eb8dbaa7ba334d3926e2a68cee5510184c16"
             },
             {
                 "example_key": "example-022",
@@ -907,7 +907,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "fail",
                 "classification": "unresolved",
                 "reason_code": "xsd_year_below_pinned_minimum",
@@ -918,7 +918,7 @@
                     "source_version_not_established"
                 ],
                 "usage": "source_evidence_only",
-                "row_hash": "31255a91db7576521e822202f6c3ee737cd59383d08fe7211f656af597d8e745"
+                "row_hash": "61d1f2099a6b8d37d0077ec004a7cc7b7e239583eee4586a42eef40d756612f1"
             },
             {
                 "example_key": "example-023",
@@ -931,7 +931,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "fail",
                 "classification": "unresolved",
                 "reason_code": "xsd_year_below_pinned_minimum",
@@ -942,7 +942,7 @@
                     "source_version_not_established"
                 ],
                 "usage": "source_evidence_only",
-                "row_hash": "c3c8787934672cd554942ca41dfaf42d683f3c0d69d920892a1b26bffcdfa014"
+                "row_hash": "11e21b3249e2f0d319b34287656226c6abce9c950a05cf52a57decb0a3b7b7af"
             },
             {
                 "example_key": "example-024",
@@ -955,7 +955,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "fail",
                 "classification": "unresolved",
                 "reason_code": "xsd_year_below_pinned_minimum",
@@ -966,7 +966,7 @@
                     "source_version_not_established"
                 ],
                 "usage": "source_evidence_only",
-                "row_hash": "657781705945d9f8d3dbf84dc4b5f9b0c9389d74fad1dc6f8227b5bfbe05bd25"
+                "row_hash": "d1836c9ab51ba7a33c4db2fcb1447220a04fc558d2dcff74361f26322f20c75b"
             },
             {
                 "example_key": "example-025",
@@ -979,7 +979,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "fail",
                 "classification": "unresolved",
                 "reason_code": "xsd_year_below_pinned_minimum",
@@ -990,7 +990,7 @@
                     "source_version_not_established"
                 ],
                 "usage": "source_evidence_only",
-                "row_hash": "e2076e9ce9dba4a1ab99f4074623833c3ee70b4dc96608fec6ad4942eb4085e8"
+                "row_hash": "b8917ee27fe58c07038edad34965517c5a1f842c0ebca56b436c1b1d7faf122c"
             },
             {
                 "example_key": "example-026",
@@ -1003,7 +1003,7 @@
                 "root_local_name": "jmhz",
                 "root_namespace": "http://schemas.cssz.cz/JMHZ/podani/1.0",
                 "well_formed": true,
-                "target_key": "jmhz-1.4.3.4",
+                "target_key": "jmhz-1.4.3.6",
                 "xsd_validation": "pass",
                 "classification": "valid_against_pinned_xsd",
                 "reason_code": "pinned_xsd_validation_passed",
@@ -1012,7 +1012,7 @@
                 ],
                 "blocking_reasons": [],
                 "usage": "source_evidence_only",
-                "row_hash": "29dc2f02eb76877375cff86dbdb72851ca22f1a72a65d396595c2f648705cb74"
+                "row_hash": "3e047f572e6825affbb344a36743861c17edd12f7472c62783c37c66362d7409"
             },
             {
                 "example_key": "example-028",

@@ -16,7 +16,7 @@ final class JmhzControlCatalogBundleTest extends TestCase
         $counts = $manifest['payload']['counts'];
 
         self::assertSame(JmhzControlSourceCatalog::MANIFEST_SHA256, $manifest['manifest_sha256']);
-        self::assertSame('1.4.2.8', $manifest['payload']['version']);
+        self::assertSame('1.4.2.9', $manifest['payload']['version']);
         self::assertSame(199, $counts['controls']);
         self::assertSame(825, $counts['attribute_refs']);
         self::assertSame(219, $counts['unique_attributes']);

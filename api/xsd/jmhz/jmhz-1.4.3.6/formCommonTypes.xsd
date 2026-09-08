@@ -178,7 +178,7 @@ DS: Souhrnná data zaměstnance > Výpočet zálohy na daň (ID 10306)</xs:docum
       <xs:documentation>Výpočet daně podle zvláštní sazby daně</xs:documentation>
     </xs:annotation>
     <xs:sequence>
-      <xs:element name="zakladDane" type="cislo14Type">
+      <xs:element name="zakladDane" type="cislo14Type" minOccurs="0">
         <xs:annotation>
           <xs:documentation>Základ pro výpočet daně podle zvláštní sazby daně
 DS: Souhrnná data zaměstnance > Příjem v daném měsíci > Výpočet daně podle zvláštní sazby daně (ID 10307)</xs:documentation>

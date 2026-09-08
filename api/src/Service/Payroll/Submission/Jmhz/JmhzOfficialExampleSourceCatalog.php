@@ -9,9 +9,9 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 final class JmhzOfficialExampleSourceCatalog
 {
     public const CATALOG_KEY = 'jmhz-official-xml-examples-2026-04-13-source-v1';
-    public const MANIFEST_SHA256 = 'c4c28906f38fdf116ed1f15506494b70d423cfc55da6f3909bbf0fdd4dff3e89';
+    public const MANIFEST_SHA256 = '9e4fde1997a1f84df1cc5b40c31531a4825c2cfefb4699959a300476799464b7';
     public const ARCHIVE_SHA256 = 'd31c89be8e2f0e4e93b20edd0beda05030e48884aa45dbfb4db0ee88e313a507';
-    public const XSD_INVENTORY_SHA256 = '72285ef5c8924d55041d54b075cbcc135a3229e6954fe81a25ef773a8d12215c';
+    public const XSD_INVENTORY_SHA256 = '7a7be1c395125c683c28d6cd7aa7899b4acf5f3a791389b75c2fe51ad94c605a';
 
     private const EXPECTED_COUNTS = [
         'archive_entries' => 40,
@@ -152,7 +152,7 @@ final class JmhzOfficialExampleSourceCatalog
     {
         $expected = [
             'dzmh-1.1' => 'b0959ab50cf627a57abd7f8f78681848b6df7ac90d3e6ced1eb15be2bc7946d1',
-            'jmhz-1.4.3.4' => 'c602cdf018dc6a0c4379000e004f2c4609d7313d265defa323e70663efc66216',
+            'jmhz-1.4.3.6' => '228db1ee19d9e897d4f1f5f541d6c1c5e7e6c02d07ac7bbd33d987a35cd110f7',
             'regzec-1.4.0.4' => 'bbf96586cccd36457283f8474a982d3bee8ae98bbdba120f240065aa6d40a83b',
             'regzeldopl-1.2' => '566a124a708492d783a75296eb37a4f76a49ccc5d0aa7d5119a0fa02eee6eedf',
         ];

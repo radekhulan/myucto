@@ -32,7 +32,7 @@ final class JmhzOfficialExamplePackageBuilderTest extends TestCase
         try {
             $this->copyDirectory($source, $temporary);
             self::assertNotFalse(file_put_contents(
-                $temporary . '/jmhz-1.4.3.4/baseTypes2.xsd',
+                $temporary . '/jmhz-1.4.3.6/baseTypes2.xsd',
                 "\n",
                 FILE_APPEND,
             ));

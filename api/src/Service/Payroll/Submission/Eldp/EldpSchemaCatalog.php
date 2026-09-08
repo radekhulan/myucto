@@ -16,7 +16,7 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  *    a evidenční příznaky zaměstnavatele. Požadavek na schéma odesílaného
  *    ELDP proto končí fail-closed, stejně jako u chybějících REGZEL interakcí.
  * 2. **Strukturu ELDP naproti tomu oficiálně a připnutě popisuje JMHZ**
- *    (`jmhz-1.4.3.4/formCommonTypes.xsd`, typy `eldpType`, `vylouceneDnyType`
+ *    (`jmhz-1.4.3.6/formCommonTypes.xsd`, typy `eldpType`, `vylouceneDnyType`
  *    a `odecitaneDnyType`). Sestavený evidenční list se proti nim validuje.
  *
  * `formCommonTypes.xsd` nemá žádný globální element, takže se nedá validovat
@@ -27,14 +27,14 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  */
 final class EldpSchemaCatalog
 {
-    public const PACKAGE_KEY = 'jmhz-1.4.3.4';
+    public const PACKAGE_KEY = 'jmhz-1.4.3.6';
     public const DATA_VERSION = '1.4.3';
     public const NAMESPACE_URI = 'http://schemas.cssz.cz/JMHZ/form/1.0';
     public const ROOT_ELEMENT = 'eldpSeznam';
 
     private const BUNDLE = [
         'formCommonTypes.xsd' =>
-            '17a061b3270b1c9f873e6c4c79173e08ef21a0ef6b6ab287d9a282882e996407',
+            '072d2e3002be26c602ccb23326647c1489fd734d1fb976bc8a50165148b5d881',
         'baseTypes2.xsd' =>
             '839973458fa82559dfb56114ef2e555523db64d5af9b4f203ece6e941f946660',
     ];

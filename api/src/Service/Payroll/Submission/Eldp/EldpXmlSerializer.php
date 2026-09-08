@@ -8,7 +8,7 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  * Deterministický zápis evidenčního listu do XML.
  *
  * Struktura i pořadí elementů se řídí připnutým oficiálním typem `eldpType`
- * z `jmhz-1.4.3.4/formCommonTypes.xsd`. Bajty musí být stabilní: zmrazený
+ * z `jmhz-1.4.3.6/formCommonTypes.xsd`. Bajty musí být stabilní: zmrazený
  * artefakt se při každém dalším čtení znovu porovnává se svým otiskem, takže
  * jakákoliv nedeterminovanost (pořadí klíčů, odsazení, konce řádků) by
  * z dříve platného evidenčního listu udělala neověřitelný.

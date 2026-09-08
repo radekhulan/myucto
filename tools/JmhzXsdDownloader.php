@@ -26,7 +26,8 @@ final class JmhzXsdDownloader
      *     url:string,
      *     sha256:string,
      *     xsd_count:int,
-     *     entry_points:list<string>
+     *     entry_points:list<string>,
+     *     xsd_root:?string
      * }>
      */
     private array $packages;
@@ -112,7 +113,11 @@ final class JmhzXsdDownloader
                     throw new RuntimeException("Cannot create package target {$versionTarget}.");
                 }
 
-                $count = $this->extractXsd($archives[$id], $versionTarget);
+                $count = $this->extractXsd(
+                    $archives[$id],
+                    $versionTarget,
+                    $package['xsd_root'],
+                );
                 $this->validatePackageTree($id, $package, $versionTarget, $count);
                 $this->log("Prepared {$id} {$package['version']}: {$count} XSD file(s).");
             }
@@ -135,7 +140,8 @@ final class JmhzXsdDownloader
      *     url:string,
      *     sha256:string,
      *     xsd_count:int,
-     *     entry_points:list<string>
+     *     entry_points:list<string>,
+     *     xsd_root:?string
      * }>
      */
     private function validateManifest(array $packages): array
@@ -156,6 +162,7 @@ final class JmhzXsdDownloader
             $url = $package['url'] ?? null;
             $xsdCount = $package['xsd_count'] ?? null;
             $entryPoints = $package['entry_points'] ?? null;
+            $xsdRoot = $package['xsd_root'] ?? null;
             if (
                 preg_match('/\A[a-z0-9][a-z0-9-]*\z/D', $id) !== 1
                 || !is_string($target)
@@ -170,6 +177,7 @@ final class JmhzXsdDownloader
                 || $xsdCount > 500
                 || !is_array($entryPoints)
                 || $entryPoints === []
+                || ($xsdRoot !== null && !$this->isSafeRelativeDirectory($xsdRoot))
             ) {
                 throw new RuntimeException("Invalid JMHZ package manifest entry {$id}.");
             }
@@ -197,6 +205,7 @@ final class JmhzXsdDownloader
                 'sha256' => $sha256,
                 'xsd_count' => $xsdCount,
                 'entry_points' => array_values($validatedEntryPoints),
+                'xsd_root' => $xsdRoot === null ? null : trim($xsdRoot, '/'),
             ];
         }
 
@@ -399,7 +408,7 @@ final class JmhzXsdDownloader
         }
     }
 
-    private function extractXsd(string $archive, string $target): int
+    private function extractXsd(string $archive, string $target, ?string $xsdRoot): int
     {
         $zip = new ZipArchive();
         if ($zip->open($archive) !== true) {
@@ -431,9 +440,17 @@ final class JmhzXsdDownloader
             }
 
             $prefix = $this->commonTopLevelDirectory(array_column($entries, 'name'));
+            $scope = $xsdRoot === null ? '' : $xsdRoot . '/';
             $destinations = [];
+            $extracted = 0;
             foreach ($entries as $entry) {
                 $relative = $prefix === '' ? $entry['name'] : substr($entry['name'], strlen($prefix) + 1);
+                if ($scope !== '') {
+                    if (!str_starts_with($relative, $scope)) {
+                        continue;
+                    }
+                    $relative = substr($relative, strlen($scope));
+                }
                 $key = strtolower($relative);
                 if ($relative === '' || isset($destinations[$key])) {
                     throw new RuntimeException("Duplicate XSD path {$relative} in {$archive}.");
@@ -456,9 +473,16 @@ final class JmhzXsdDownloader
                 if (file_put_contents($destination, $contents, LOCK_EX) !== strlen($contents)) {
                     throw new RuntimeException("Cannot write XSD file {$destination}.");
                 }
+                $extracted++;
             }
 
-            return count($entries);
+            if ($extracted === 0) {
+                throw new RuntimeException(
+                    "JMHZ archive {$archive} contains no XSD files under {$scope}.",
+                );
+            }
+
+            return $extracted;
         } finally {
             $zip->close();
         }
@@ -471,7 +495,8 @@ final class JmhzXsdDownloader
      *     url:string,
      *     sha256:string,
      *     xsd_count:int,
-     *     entry_points:list<string>
+     *     entry_points:list<string>,
+     *     xsd_root:?string
      * } $package
      */
     private function validatePackageTree(string $id, array $package, string $target, int $extractedCount): void
@@ -579,6 +604,40 @@ final class JmhzXsdDownloader
         }
 
         return preg_match('/[\x00-\x1F\x7F]/', $path) !== 1;
+    }
+
+    /**
+     * Podadresář archivu, ze kterého se schémata berou (`xsd_root`).
+     *
+     * Oficiální balíček JMHZ od verze 1.4.3.5 veze vedle vnějších schémat
+     * i vnitřní (`interni_xsd`) a k tomu vygenerovanou HTML dokumentaci.
+     * Vnitřní schémata se odkazují přes `../externi_xsd/…`, takže by je
+     * kontrola závislostí odmítla — a připínat je nemá smysl, aplikace proti
+     * nim nic nevaliduje. Připíná se proto jen podstrom s vnějšími schématy;
+     * uložený tvar tím zůstane plochý jako u starších balíčků.
+     *
+     * Stejná pravidla jako u cest v archivu, jen bez povinné přípony.
+     */
+    private function isSafeRelativeDirectory(mixed $path): bool
+    {
+        if (
+            !is_string($path)
+            || $path === ''
+            || str_contains($path, "\0")
+            || str_contains($path, '\\')
+            || str_starts_with($path, '/')
+            || str_ends_with($path, '/')
+            || preg_match('/[\x00-\x1F\x7F]/', $path) === 1
+        ) {
+            return false;
+        }
+        foreach (explode('/', $path) as $segment) {
+            if ($this->isUnsafePathSegment($segment)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function isXsdDocument(string $contents): bool

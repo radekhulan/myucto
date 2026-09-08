@@ -90,7 +90,7 @@ final class PayrollEldpAction
             ),
             'supported' => [
                 'agenda_code' => EldpStatementService::AGENDA_CODE,
-                'evidence_schema' => 'jmhz-1.4.3.4 eldpType',
+                'evidence_schema' => 'jmhz-1.4.3.6 eldpType',
                 'submission_schema_available' => false,
                 'stops_at_status' => 'prepared',
                 'legal_basis' => 'Zákon č. 582/1991 Sb., § 38 odst. 4 a § 39 odst. 2 '

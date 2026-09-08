@@ -147,7 +147,7 @@ final class JmhzSpecialScenarioDocumentResolverTest extends TestCase
                     'scenario_set' => ['scenario_7', 'scenario_5', 'scenario_3', 'scenario_6', 'scenario_4'],
                 ],
                 'specification' => [
-                    'package_key' => 'jmhz-1.4.3.4',
+                    'package_key' => 'jmhz-1.4.3.6',
                     'spec_manifest_sha256' => str_repeat('a', 64),
                 ],
                 'people' => [[

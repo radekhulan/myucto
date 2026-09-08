@@ -124,7 +124,7 @@ final class JmhzScenario2DocumentResolverTest extends TestCase
                 'scenario_set' => ['scenario_1', 'scenario_2'],
             ],
             'specification' => [
-                'package_key' => 'jmhz-1.4.3.4',
+                'package_key' => 'jmhz-1.4.3.6',
                 'spec_manifest_sha256' => str_repeat('a', 64),
                 'scenario_catalog_key' => JmhzScenarioRequirementSourceCatalog::CATALOG_KEY,
                 'scenario_manifest_sha256' => JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256,
