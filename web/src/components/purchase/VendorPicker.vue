@@ -21,6 +21,7 @@ const { t } = useI18n()
 const cache = ref<Client[]>([])    // akumulovaná cache (výsledky hledání + vybraný)
 const options = ref<Opt[]>([])      // aktuální výsledky hledání (server-side)
 const loading = ref(false)
+let searchVersion = 0
 const selectedOption = ref<Opt | null>(null)
 
 function toOpt(c: Client): Opt {
@@ -32,15 +33,17 @@ function merge(list: Client[]) {
   cache.value = Array.from(byId.values())
 }
 
-// Našeptávač dodavatelů — hledá v DB (role=vendors), ne jen v prvních N.
 async function onSearch(q: string) {
+  const version = ++searchVersion
   loading.value = true
   try {
-    const res = await clientsApi.list({ q: q || undefined, role: 'vendors', archived: false, per_page: 50 })
+    const query = q.trim()
+    const res = await clientsApi.list({ q: query || undefined, role: query ? 'all' : 'vendors', archived: false, per_page: 50 })
+    if (version !== searchVersion) return
     merge(res.data)
     options.value = res.data.map(toOpt)
   } catch { /* ignore */ } finally {
-    loading.value = false
+    if (version === searchVersion) loading.value = false
   }
 }
 

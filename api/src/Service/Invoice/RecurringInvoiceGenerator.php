@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\RecurringTemplateRepository;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
@@ -68,6 +69,7 @@ final class RecurringInvoiceGenerator
         // uživatelem (a jeho platnost k DUZP hlídá VatRateValidityGuard). Přepárovat
         // sazbu tady by uživateli tiše vyměnilo jeho volbu za jinou.
         private readonly OssItemDeriver $ossDeriver,
+        private readonly ClientRepository $clients,
     ) {}
 
     /**
@@ -684,32 +686,31 @@ final class RecurringInvoiceGenerator
             $invoiceId,
         ];
 
-        if ($this->stockIssue->isStockEnabled($supplierId)) {
-            // Sklad zapnutý (Epic SKLAD §5.2): flip statusu + auto-výdejka = JEDNA
-            // transakce v READ COMMITTED (FOR UPDATE zámky StockDocumentService
-            // nesmí číst stale RR snapshot; SET bez SESSION platí pro příští tx).
-            $pdo = $this->db->pdo();
-            $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
-            $pdo->beginTransaction();
-            try {
-                $pdo->prepare($issueSql)->execute($issueParams);
-                $this->stockIssue->issueForInvoice(
-                    $supplierId,
-                    array_merge($invoice, ['varsymbol' => $varsymbol]),
-                    $userId,
-                );
-                $pdo->commit();
-            } catch (\Throwable $e) {
-                // Typicky StockException insufficient_stock — rollback nechá fakturu
-                // v draftu; performIssue → failIssueOnStock zapíše last_error (A15).
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                throw $e;
+        $stockEnabled = $this->stockIssue->isStockEnabled($supplierId);
+        $pdo = $this->db->pdo();
+        $ownTransaction = $stockEnabled || !$pdo->inTransaction();
+        if ($stockEnabled && $ownTransaction) $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+        if ($ownTransaction) $pdo->beginTransaction();
+        try {
+            $issue = $pdo->prepare($issueSql);
+            $issue->execute($issueParams);
+            if ($issue->rowCount() === 0) {
+                throw new \RuntimeException('Faktura byla mezitím změněna.');
             }
-        } else {
-            // Sklad vypnutý — PŮVODNÍ cesta beze změny (žádná transakce).
-            $this->db->pdo()->prepare($issueSql)->execute($issueParams);
+            if ($stockEnabled) $this->stockIssue->issueForInvoice(
+                $supplierId,
+                array_merge($invoice, ['varsymbol' => $varsymbol]),
+                $userId,
+            );
+            $this->clients->markAsCustomer((int) $invoice['client_id'], $supplierId);
+            if ($ownTransaction) $pdo->commit();
+        } catch (\Throwable $e) {
+            // Typicky StockException insufficient_stock — rollback nechá fakturu
+            // v draftu; performIssue → failIssueOnStock zapíše last_error (A15).
+            if ($pdo->inTransaction()) {
+                if ($ownTransaction) $pdo->rollBack();
+            }
+            throw $e;
         }
 
         $this->stats->recomputeForInvoiceId($invoiceId);

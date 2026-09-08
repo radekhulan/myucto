@@ -111,10 +111,6 @@ final class CreatePurchaseInvoiceAction
             return Json::error($response, 'vendor_not_found', 'Dodavatel neexistuje.', 400);
         }
 
-        // Auto-set is_vendor=1 pokud dosud nebyl označen jako dodavatel (může být dosud jen customer).
-        if (empty($vendor['is_vendor'])) {
-            $this->clients->markAsVendor((int) $vendor['id']);
-        }
 
         // Dodavatel neplátce DPH → odpočet nelze uplatnit. Když volající vat_deduction
         // explicitně neposlal, vynutíme 'none' (bezpečný default); když zvolil jinak,
@@ -241,6 +237,7 @@ final class CreatePurchaseInvoiceAction
                     'manual',
                 );
             }
+            $this->clients->markAsVendor((int) $vendor['id'], $supplierId);
             if ($ownTransaction) $pdo->commit();
         } catch (PurchaseInvoiceSubmissionException $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();

@@ -257,6 +257,28 @@ final class VatStatusAtIssueTest extends TestCase
         return (array) $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
+    public function testVendorBecomesCustomerOnlyAfterSuccessfulIssue(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE clients SET is_customer = 0, is_vendor = 1 WHERE id = ?')->execute([$this->clientId]);
+        $id = $this->draftInvoice('invoice', $this->payerDate, $this->payerDate);
+        $flags = fn (): array => $pdo->query('SELECT is_customer, is_vendor FROM clients WHERE id = ' . $this->clientId)->fetch(PDO::FETCH_ASSOC);
+        self::assertSame(0, (int) $flags()['is_customer']);
+        $res = $this->issue($id);
+        self::assertSame(200, $res['status'], json_encode($res['body']));
+        self::assertSame(1, (int) $flags()['is_customer']);
+        self::assertSame(1, (int) $flags()['is_vendor']);
+    }
+
+    public function testRejectedIssueDoesNotPromoteVendor(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE clients SET is_customer = 0, is_vendor = 1 WHERE id = ?')->execute([$this->clientId]);
+        $id = $this->draftInvoice('invoice', $this->nonPayerDate, $this->nonPayerDate);
+        self::assertSame(422, $this->issue($id)['status']);
+        self::assertSame(0, (int) $pdo->query('SELECT is_customer FROM clients WHERE id = ' . $this->clientId)->fetchColumn());
+    }
+
     private function draftInvoice(
         string $type,
         string $issueDate,

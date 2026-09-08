@@ -189,9 +189,6 @@ final class UpdatePurchaseInvoiceAction
         if (!SupplierGuard::owns($request, $vendor)) {
             return Json::error($response, 'vendor_not_found', 'Dodavatel neexistuje.', 400);
         }
-        if (empty($vendor['is_vendor'])) {
-            $this->clients->markAsVendor((int) $vendor['id']);
-        }
 
         // Dodavatel neplátce DPH → bez nároku na odpočet. Default 'none' když neposláno;
         // explicitní volbu respektujeme (vědomý override), ale níže přidáme varování.
@@ -320,6 +317,7 @@ final class UpdatePurchaseInvoiceAction
                 );
             }
             $this->repo->reprefixVarsymbol($id, $supplierId);
+            $this->clients->markAsVendor((int) $vendor['id'], $supplierId);
             if ($ownTransaction) $pdo->commit();
         } catch (\InvalidArgumentException $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();

@@ -275,6 +275,28 @@ final class PriceListItemResolverTest extends TestCase
         self::assertSame(1250.00, $savedWithStock['unit_price_without_vat']);
     }
 
+    public function testInvoicePriceReadsAcceptVendorWithoutPromotingAndKeepTenantScope(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->createdItemId = $this->createItem(false, 1250.00);
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare('UPDATE clients SET is_customer = 0, is_vendor = 1 WHERE id = ?')->execute([$this->clientId]);
+            $request = (new ServerRequestFactory())
+                ->createServerRequest('GET', '/api/price-list-items')
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                ->withQueryParams(['client_id' => (string) $this->clientId, 'currency' => $this->currencyCode, 'currency_id' => $this->currencyId]);
+            self::assertSame(200, $this->action->list($request, new Psr7Response())->getStatusCode());
+            $resolved = $this->action->resolve($request, new Psr7Response(), ['id' => $this->createdItemId]);
+            self::assertSame(200, $resolved->getStatusCode(), (string) $resolved->getBody());
+            self::assertSame(0, (int) $pdo->query('SELECT is_customer FROM clients WHERE id = ' . $this->clientId)->fetchColumn());
+            self::assertFalse($this->items->clientExists($this->supplierId, $this->clientId));
+            self::assertFalse($this->items->clientExists(0, $this->clientId, false));
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+
     private function createItem(bool $pricesIncludeVat, float $price): int
     {
         return $this->items->create($this->supplierId, [

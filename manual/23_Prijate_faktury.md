@@ -135,7 +135,7 @@ Limity:
 
 | Pole | Význam |
 |---|---|
-| **Dodavatel** | Vyber z dropdownu (autocomplete). Pokud chybí, klikni „+ Vytvořit nového dodavatele" — využije ARES lookup podle IČO. |
+| **Dodavatel** | Vyber ze seznamu nebo začni psát. Vyhledávání nabídne i firmu vedenou pouze jako odběratel; po úspěšném uložení faktury se jí doplní role dodavatele. Bez hledaného textu se nabízejí jen dodavatelé. Pokud firma v adresáři chybí, klikni „+ Vytvořit nového dodavatele" a využij ARES lookup podle IČO. |
 | **Číslo dokladu dodavatele** | Tak jak je vytištěno na originálu (např. `FA-2026-001`). Max 50 znaků. Unique per (dodavatel, datum vystavení) — nelze importovat 2× stejnou. |
 | **Naše interní číslo** | Volitelné. Pokud necháš prázdné, vygeneruje se automaticky podle **šablony** při přechodu na stav Přijatá. Výchozí šablona je `{PP}{YY}{MM}{CCC}` (např. `PF2602001`), prefix `{PP}` odpovídá daňovému typu (viz § 23.2.4): **PF/PN** plný nárok (uznatelný/ne), **KU/KN** krácený §75, **KR/RN** krácený §76, **NU/NN** bez nároku. Počítadlo je per měsíc (přeteče na 4+ místa nad 999 dokladů). Šablonu lze změnit v **Nastavení → Číslování faktur → Šablona pro přijatou fakturu** (např. `PF-{YYYY}{MM}-{CCCC}` → `PF-202605-0001`). Při ručním zadání čísla systém hlídá kolize (nepovolí duplicitu) a auto-generátor obsazená čísla přeskakuje. |
 | **Typ dokladu** | Faktura / Doklad o úhradě / Dobropis / Záloha (pro filtrování v seznamu). |

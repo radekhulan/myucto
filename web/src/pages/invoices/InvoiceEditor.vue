@@ -98,6 +98,7 @@ const clients = ref<Client[]>([])  // akumulovaná cache (výsledky hledání + 
 // Server-side našeptávač klientů (zákazníků) — SearchableSelect v remote režimu.
 const clientOptions = ref<{ value: number; label: string; secondary?: string }[]>([])
 const clientsLoading = ref(false)
+let clientSearchVersion = 0
 const selectedClientOption = ref<{ value: number; label: string; secondary?: string } | null>(null)
 function clientToOption(c: Client) {
   return { value: c.id, label: c.company_name, secondary: c.ic ?? undefined }
@@ -108,13 +109,16 @@ function mergeClients(list: Client[]) {
   clients.value = Array.from(byId.values())
 }
 async function onClientSearch(q: string) {
+  const version = ++clientSearchVersion
   clientsLoading.value = true
   try {
-    const res = await clientsApi.list({ q: q || undefined, role: 'customers', archived: false, per_page: 50 })
+    const query = q.trim()
+    const res = await clientsApi.list({ q: query || undefined, role: query ? 'all' : 'customers', archived: false, per_page: 50 })
+    if (version !== clientSearchVersion) return
     mergeClients(res.data)
     clientOptions.value = res.data.map(clientToOption)
   } catch { /* ignore */ } finally {
-    clientsLoading.value = false
+    if (version === clientSearchVersion) clientsLoading.value = false
   }
 }
 // Edit / pre-select: dotáhni klienta podle id (do cache + label), fallback na denorm jméno z faktury.

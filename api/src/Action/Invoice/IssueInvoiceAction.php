@@ -10,6 +10,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\WorkReportRepository;
@@ -65,6 +66,7 @@ final class IssueInvoiceAction
         private readonly VatStatusService $vatStatus,
         private readonly CashSettlementService $cashSettlement,
         private readonly TaxConstantsRepository $taxConstants,
+        private readonly ClientRepository $clients,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -381,68 +383,48 @@ final class IssueInvoiceAction
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
 
-        if ($this->stockIssue->isStockEnabled($supplierId)) {
-            // Sklad zapnutý (Epic SKLAD §5.2): flip statusu + auto-výdejka = JEDNA
-            // transakce. READ COMMITTED je nutné pro FOR UPDATE zámky
-            // StockDocumentService (stale RR snapshot by obešel lock-order B3);
-            // SET bez SESSION platí jen pro NÁSLEDUJÍCÍ transakci.
-            $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
-            $pdo->beginTransaction();
-            try {
-                $stmt->execute($issueParams);
-                if ($stmt->rowCount() === 0) {
-                    $pdo->rollBack();
-                    return Json::error($response, 'race_condition', 'Faktura byla mezitím změněna.', 409);
-                }
-                $this->stockIssue->issueForInvoice(
-                    $supplierId,
-                    array_merge($invoice, ['varsymbol' => $varsymbol]),
-                    isset($user['id']) ? (int) $user['id'] : null,
-                );
-                $pdo->commit();
-            } catch (StockException $e) {
-                // Typicky insufficient_stock (409 + výčet chybějících položek) —
-                // rollback vrátí fakturu do draftu, nic se nevystavilo.
-                $pdo->rollBack();
-                return Json::error(
-                    $response,
-                    'stock.error.' . $e->errorCode,
-                    $e->getMessage(),
-                    $e->httpStatus,
-                    ['items' => $e->details],
-                );
-            } catch (\PDOException $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                // Zachovaná pojistka proti porušení unique indexu (supplier_id, varsymbol).
-                if ($dupMsg = self::varsymbolDuplicateMessage($e, $varsymbol)) {
-                    return Json::error($response, 'varsymbol_duplicate', $dupMsg, 409);
-                }
-                throw $e;
-            } catch (\Throwable $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                throw $e;
-            }
-        } else {
-            // Sklad vypnutý — PŮVODNÍ cesta beze změny (žádná transakce).
-            try {
-                $stmt->execute($issueParams);
-            } catch (\PDOException $e) {
-                // Poslední pojistka proti porušení unique indexu (supplier_id, varsymbol) — typicky
-                // souběžné vystavení nebo číslo, které proklouzlo kontrolami. Generátor se sice
-                // duplicitám aktivně vyhýbá, ale DB constraint je definitivní ochrana proti race.
-                if ($dupMsg = self::varsymbolDuplicateMessage($e, $varsymbol)) {
-                    return Json::error($response, 'varsymbol_duplicate', $dupMsg, 409);
-                }
-                throw $e;
-            }
-
+        $stockEnabled = $this->stockIssue->isStockEnabled($supplierId);
+        $ownTransaction = $stockEnabled || !$pdo->inTransaction();
+        if ($stockEnabled && $ownTransaction) $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+        if ($ownTransaction) $pdo->beginTransaction();
+        try {
+            $stmt->execute($issueParams);
             if ($stmt->rowCount() === 0) {
+                if ($ownTransaction) $pdo->rollBack();
                 return Json::error($response, 'race_condition', 'Faktura byla mezitím změněna.', 409);
             }
+            if ($stockEnabled) $this->stockIssue->issueForInvoice(
+                $supplierId,
+                array_merge($invoice, ['varsymbol' => $varsymbol]),
+                isset($user['id']) ? (int) $user['id'] : null,
+            );
+            $this->clients->markAsCustomer((int) $invoice['client_id'], $supplierId);
+            if ($ownTransaction) $pdo->commit();
+        } catch (StockException $e) {
+            // Typicky insufficient_stock (409 + výčet chybějících položek) —
+            // rollback vrátí fakturu do draftu, nic se nevystavilo.
+            if ($ownTransaction) $pdo->rollBack();
+            return Json::error(
+                $response,
+                'stock.error.' . $e->errorCode,
+                $e->getMessage(),
+                $e->httpStatus,
+                ['items' => $e->details],
+            );
+        } catch (\PDOException $e) {
+            if ($pdo->inTransaction()) {
+                if ($ownTransaction) $pdo->rollBack();
+            }
+            // Zachovaná pojistka proti porušení unique indexu (supplier_id, varsymbol).
+            if ($dupMsg = self::varsymbolDuplicateMessage($e, $varsymbol)) {
+                return Json::error($response, 'varsymbol_duplicate', $dupMsg, 409);
+            }
+            throw $e;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                if ($ownTransaction) $pdo->rollBack();
+            }
+            throw $e;
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

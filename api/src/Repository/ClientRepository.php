@@ -347,11 +347,12 @@ final class ClientRepository
      * nedělá nic. Volá se z CreatePurchaseInvoiceAction po ověření vendor scope.
      * is_customer flag se NEMĚNÍ — klient může být současně zákazník i dodavatel.
      */
-    public function markAsVendor(int $id): void
+    public function markAsVendor(int $id, ?int $supplierId = null): void
     {
         $this->db->pdo()
-            ->prepare('UPDATE clients SET is_vendor = 1 WHERE id = ? AND is_vendor = 0')
-            ->execute([$id]);
+            ->prepare('UPDATE clients SET is_vendor = 1 WHERE id = ? AND is_vendor = 0'
+                . ($supplierId !== null ? ' AND supplier_id = ?' : ''))
+            ->execute($supplierId !== null ? [$id, $supplierId] : [$id]);
     }
 
     /**
@@ -400,11 +401,12 @@ final class ClientRepository
      * Označí klienta jako zákazníka (is_customer=1). Symetrické s markAsVendor.
      * Volá se např. při importu vystavené faktury pro nový kontakt.
      */
-    public function markAsCustomer(int $id): void
+    public function markAsCustomer(int $id, ?int $supplierId = null): void
     {
         $this->db->pdo()
-            ->prepare('UPDATE clients SET is_customer = 1 WHERE id = ? AND is_customer = 0')
-            ->execute([$id]);
+            ->prepare('UPDATE clients SET is_customer = 1 WHERE id = ? AND is_customer = 0'
+                . ($supplierId !== null ? ' AND supplier_id = ?' : ''))
+            ->execute($supplierId !== null ? [$id, $supplierId] : [$id]);
     }
 
     /**

@@ -28,6 +28,8 @@ Editor je rozdělený na tři bloky:
 ### 15.2.2 Klient + Zakázka
 
 - **Klient** (povinný) — vyber z dropdownu, vyhledávání podle jména / IČO.
+  Při psaní se nabízí také firmy vedené pouze jako dodavatelé. Po vystavení
+  faktury se jim doplní role odběratele. Prázdný seznam zůstává jen pro odběratele.
 - **Zakázka** (volitelná) — pokud klient má zakázky, dropdown nabídne jen jeho
   vlastní. Po výběru zakázky se předvyplní hodinová sazba a splatnost.
 

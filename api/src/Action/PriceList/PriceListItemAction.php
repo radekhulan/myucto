@@ -49,7 +49,7 @@ final class PriceListItemAction
             return Json::error($response, 'validation_failed', 'Neplatné datum kurzu.', 400);
         }
         $clientId = !empty($q['client_id']) ? (int) $q['client_id'] : 0;
-        if ($clientId > 0 && !$this->repo->clientExists($supplierId, $clientId)) {
+        if ($clientId > 0 && !$this->repo->clientExists($supplierId, $clientId, false)) {
             return Json::error($response, 'validation_failed', 'Zákazník nebyl nalezen.', 400);
         }
 
@@ -341,7 +341,7 @@ final class PriceListItemAction
         $q = $request->getQueryParams();
         $clientId = (int) ($q['client_id'] ?? 0);
         $currencyId = (int) ($q['currency_id'] ?? 0);
-        if ($clientId > 0 && !$this->repo->clientExists($supplierId, $clientId)) {
+        if ($clientId > 0 && !$this->repo->clientExists($supplierId, $clientId, false)) {
             return Json::error($response, 'validation_failed', 'Zákazník nebyl nalezen.', 400);
         }
         try {

@@ -113,6 +113,60 @@ final class PurchaseInvoiceDuplicateTest extends TestCase
             'chybový kód identifikuje duplicitní přijatou fakturu');
     }
 
+    public function testSuccessfulSavePromotesCustomerAndFailedDuplicateDoesNot(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE clients SET is_customer = 1, is_vendor = 0 WHERE id = ?')->execute([$this->vendorId]);
+        $body = [
+            'vendor_id' => $this->vendorId,
+            'vendor_invoice_number' => 'ROLE-2098-001',
+            'document_kind' => 'invoice',
+            'issue_date' => '2098-03-15',
+            'tax_date' => '2098-03-15',
+            'due_date' => '2098-03-29',
+            'currency_id' => $this->currencyId,
+            'items' => [],
+        ];
+        self::assertSame(201, $this->create($body)->getStatusCode());
+        $flags = fn (): array => $pdo->query('SELECT is_customer, is_vendor FROM clients WHERE id = ' . $this->vendorId)->fetch(PDO::FETCH_ASSOC);
+        self::assertSame(1, (int) $flags()['is_vendor']);
+        self::assertSame(1, (int) $flags()['is_customer']);
+        $pdo->prepare('UPDATE clients SET is_vendor = 0 WHERE id = ?')->execute([$this->vendorId]);
+        self::assertSame(409, $this->create($body)->getStatusCode());
+        self::assertSame(0, (int) $flags()['is_vendor']);
+    }
+
+    public function testUpdatePromotesCustomerOnlyWhenWholeSaveSucceeds(): void
+    {
+        $pdo = $this->db->pdo();
+        $body = [
+            'vendor_id' => $this->vendorId,
+            'vendor_invoice_number' => 'ROLE-UPDATE-2098-001',
+            'document_kind' => 'invoice',
+            'issue_date' => '2098-03-15',
+            'tax_date' => '2098-03-15',
+            'due_date' => '2098-03-29',
+            'currency_id' => $this->currencyId,
+            'items' => [],
+        ];
+        $created = $this->create($body);
+        self::assertSame(201, $created->getStatusCode());
+        $id = (int) $pdo->query('SELECT id FROM purchase_invoices WHERE vendor_id = ' . $this->vendorId)->fetchColumn();
+        $pdo->prepare('UPDATE clients SET is_customer = 1, is_vendor = 0 WHERE id = ?')->execute([$this->vendorId]);
+        $action = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Action\PurchaseInvoice\UpdatePurchaseInvoiceAction::class);
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('PUT', '/api/purchase-invoices/' . $id)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+        $invalid = $action($request->withParsedBody($body + ['vat_allocations' => [[]]]), new Psr7Response(), ['id' => $id]);
+        self::assertSame(400, $invalid->getStatusCode(), (string) $invalid->getBody());
+        self::assertSame(0, (int) $pdo->query('SELECT is_vendor FROM clients WHERE id = ' . $this->vendorId)->fetchColumn());
+        $valid = $action($request->withParsedBody($body), new Psr7Response(), ['id' => $id]);
+        self::assertSame(200, $valid->getStatusCode(), (string) $valid->getBody());
+        self::assertSame(1, (int) $pdo->query('SELECT is_vendor FROM clients WHERE id = ' . $this->vendorId)->fetchColumn());
+        self::assertSame(1, (int) $pdo->query('SELECT is_customer FROM clients WHERE id = ' . $this->vendorId)->fetchColumn());
+    }
+
     private function create(array $body): Psr7Response
     {
         $req = (new ServerRequestFactory())

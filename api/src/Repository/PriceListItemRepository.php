@@ -417,11 +417,12 @@ final class PriceListItemRepository
         return (int) $stmt->fetchColumn() > 0;
     }
 
-    public function clientExists(int $supplierId, int $clientId): bool
+    public function clientExists(int $supplierId, int $clientId, bool $requireCustomer = true): bool
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT COUNT(*) FROM clients
-              WHERE supplier_id = ? AND id = ? AND is_customer = 1"
+              WHERE supplier_id = ? AND id = ?"
+                . ($requireCustomer ? ' AND is_customer = 1' : '')
         );
         $stmt->execute([$supplierId, $clientId]);
         return (int) $stmt->fetchColumn() > 0;

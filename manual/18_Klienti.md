@@ -6,6 +6,14 @@ odeslat fakturu ani upomínku. Pod klientem můžeš mít jednu nebo více
 **zakázek** (viz [19. Zakázky](19_Zakazky.md)) — typicky 1 zakázka = 1 projekt
 nebo dlouhodobá spolupráce.
 
+Jedna protistrana může být odběratelem i dodavatelem. Při psaní do vyhledávače
+odběratele na vydané faktuře se nabízí také dodavatelé; při hledání dodavatele
+na přijaté faktuře také odběratelé. Bez hledaného textu seznam nabízí pouze
+protistrany s odpovídající rolí. Není potřeba zakládat druhý záznam stejné firmy.
+Vystavením vydané faktury se zapne role odběratele, úspěšným uložením přijaté
+faktury role dodavatele. Dosavadní role zůstane zachovaná. Samotné hledání ani
+výběr protistrany její role nemění.
+
 ## 18.1 Seznam klientů
 
 V hlavním menu klikni **Klienti**.
