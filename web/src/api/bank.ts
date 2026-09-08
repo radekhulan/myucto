@@ -4,8 +4,8 @@ export type { BankReconciliationCandidate } from '@/types/bankReconciliation'
 
 export interface BankStatement {
   id: number
-  /** Zdroj výpisu: 'gpc' = nahraný/importovaný GPC výpis, 'pdf' = rozparsovaný PDF výpis (banka bez GPC exportu), 'email_notice' = měsíční agregát e-mailových avíz, 'idoklad' = měsíční agregát pohybů z iDokladu. */
-  source?: 'gpc' | 'pdf' | 'email_notice' | 'idoklad' | 'bank_api'
+  /** Zdroj výpisu: 'gpc' = nahraný/importovaný GPC výpis, 'pdf' = rozparsovaný PDF výpis (banka bez GPC exportu), 'email_notice' = měsíční agregát e-mailových avíz, 'idoklad' = měsíční agregát pohybů z iDokladu, 'import' = migrace z jiného účetního systému. */
+  source?: 'gpc' | 'pdf' | 'email_notice' | 'idoklad' | 'bank_api' | 'import'
   file_name: string
   account_number: string
   /** Kód banky (4místný), pokud je u výpisu evidovaný — pro zobrazení „účet / kód". */
@@ -336,7 +336,7 @@ export interface AccountBalance {
   /** Datum, ke kterému aktuální stav platí (výpis / avízo). */
   statement_date: string
   /** Odkud aktuální stav pochází: GPC výpis, nebo disponibilní zůstatek z avíza. */
-  current_source: 'gpc' | 'pdf' | 'email_notice' | 'idoklad' | 'bank_api'
+  current_source: 'gpc' | 'pdf' | 'email_notice' | 'idoklad' | 'bank_api' | 'import'
   statement_count: number
   months: AccountBalanceMonth[]
 }

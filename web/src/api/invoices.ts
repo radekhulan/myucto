@@ -67,7 +67,7 @@ export interface InvoicePaymentsResponse {
 export interface RelatedBankTransaction {
   id: number
   statement_id: number
-  statement_source: 'gpc' | 'pdf' | 'email_notice' | 'idoklad' | 'bank_api'
+  statement_source: 'gpc' | 'pdf' | 'email_notice' | 'idoklad' | 'bank_api' | 'import'
   posted_at: string
   amount: number
   currency: string | null
