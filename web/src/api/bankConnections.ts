@@ -1,5 +1,7 @@
 import { api } from './client'
 
+export type { BankReconciliationCandidate } from '@/types/bankReconciliation'
+
 export interface BankConnectionProvider {
   code: string
   label: string
@@ -31,6 +33,12 @@ export interface BankSyncResult {
   period: { from: string; to: string }
 }
 
+export interface BankSyncRequest {
+  from?: string
+  to?: string
+  reconciliation_confirmations?: string[]
+}
+
 export interface BankPaymentSubmission {
   id: number
   payment_order_id: number
@@ -47,7 +55,7 @@ export const bankConnectionsApi = {
   save: (currencyId: number, payload: { provider: string; enabled: boolean; token?: string; credentials?: Record<string, string> }) =>
     api.put(`/settings/bank-connections/${currencyId}`, payload).then(r => r.data),
   disconnect: (currencyId: number) => api.delete(`/settings/bank-connections/${currencyId}`),
-  sync: (currencyId: number, period: { from?: string; to?: string }) =>
+  sync: (currencyId: number, period: BankSyncRequest) =>
     api.post<BankSyncResult>(`/settings/bank-connections/${currencyId}/sync`, period).then(r => r.data),
   submission: (orderId: number) =>
     api.get<{ submission: BankPaymentSubmission | null }>(`/purchase-invoices/payment-orders/${orderId}/submission`).then(r => r.data.submission),

@@ -40,6 +40,8 @@ final class ConnectedStatementImporterTest extends TestCase
         $db = $this->createStub(Connection::class);
         $this->pdo->exec('CREATE TABLE bank_transaction_imports (statement_id INTEGER, bank_transaction_id INTEGER, import_fingerprint TEXT, supplier_id INTEGER, original_statement_id INTEGER, PRIMARY KEY (statement_id, bank_transaction_id))');
         $db->method('pdo')->willReturn($this->pdo);
+        $this->pdo->exec('CREATE TABLE bank_api_months (supplier_id INTEGER, account_key TEXT, currency TEXT, month_start TEXT, statement_id INTEGER UNIQUE, PRIMARY KEY (supplier_id, account_key, currency, month_start))');
+        $this->pdo->exec('CREATE TABLE bank_api_evidence_months (supplier_id INTEGER, evidence_statement_id INTEGER, monthly_statement_id INTEGER, PRIMARY KEY (evidence_statement_id, monthly_statement_id))');
         $this->matcher = $this->createMock(StatementMatcher::class);
         $reconciler = $this->createStub(EmailNoticeReconciler::class);
         $reconciler->method('takeOverFromEmailNotice')->willReturn(null);
@@ -60,6 +62,63 @@ final class ConnectedStatementImporterTest extends TestCase
         self::assertSame('bank_api', $this->pdo->query('SELECT source FROM bank_statements LIMIT 1')->fetchColumn());
         self::assertSame('{"synthetic":1}', $this->pdo->query('SELECT file_content FROM bank_statements LIMIT 1')->fetchColumn());
         self::assertNull($this->pdo->query('SELECT curr_balance FROM bank_statements LIMIT 1')->fetchColumn());
+    }
+
+    public function testApiOverlapsAndEmptyDownloadsReuseMonthlyStatementWithoutMovingTransactions(): void
+    {
+        $parsed = new GpcParser()->parse($this->gpc());
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+        $first = $this->importer->importConnectedParsed($parsed, 'synthetic-month-first', 'first.json', null, 1, 10);
+        $before = $this->pdo->query('SELECT * FROM bank_transactions ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+        $second = $this->importer->importConnectedParsed($parsed, 'synthetic-month-overlap', 'second.json', null, 1, 10);
+        self::assertSame($first['statement_id'], $second['statement_id']);
+        $parsed['transactions'] = [];
+        $empty = $this->importer->importConnectedParsed($parsed, 'synthetic-month-empty', 'empty.json', null, 1, 10);
+        self::assertSame($first['statement_id'], $empty['statement_id']);
+        self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions ORDER BY id')->fetchAll(PDO::FETCH_ASSOC));
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_statements bs WHERE ' . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql())->fetchColumn());
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions bt WHERE ' . \MyInvoice\Service\Bank\StatementTransactionScope::sql($first['statement_id']))->fetchColumn());
+        self::assertSame(3, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_statements WHERE file_content IS NOT NULL')->fetchColumn());
+    }
+
+    public function testApiDownloadSpanningMonthsSeparatesTransactionsByBookingDate(): void
+    {
+        $parsed = new GpcParser()->parse($this->gpc());
+        $parsed['transactions'][1]['posted_at'] = '2026-02-02';
+        $parsed['header']['statement_date'] = '2026-02-05';
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+        $result = $this->importer->importConnectedParsed($parsed, 'synthetic-two-months', 'months.json', null, 1, 10);
+        self::assertCount(2, $result['statement_ids'] ?? []);
+        $months = $this->pdo->query('SELECT month_start, statement_id FROM bank_api_months ORDER BY month_start')->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame(['2026-01-01', '2026-02-01'], array_column($months, 'month_start'));
+        foreach ($months as $month) {
+            $dates = $this->pdo->query('SELECT posted_at FROM bank_transactions bt WHERE ' . \MyInvoice\Service\Bank\StatementTransactionScope::sql((int) $month['statement_id']))->fetchAll(PDO::FETCH_COLUMN);
+            self::assertCount(1, $dates);
+            self::assertSame(substr($month['month_start'], 0, 7), substr($dates[0], 0, 7));
+        }
+        self::assertSame($months[1]['statement_id'], $result['statement_id']);
+        $retry = $this->importer->importConnectedParsed($parsed, 'synthetic-two-months', 'months.json', null, 1, 10);
+        self::assertSame($result['statement_ids'], $retry['statement_ids']);
+    }
+
+    public function testMonthlyAccountNormalizationAndOlderEmptyDownloadKeepCoverage(): void
+    {
+        $parsed = new GpcParser()->parse($this->gpc());
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
+        $first = $this->importer->importConnectedParsed($parsed, 'synthetic-covered', 'covered.json', null, 1, 10);
+        $parsed['transactions'] = [];
+        $parsed['header']['account_number'] = '1000000005';
+        $parsed['header']['statement_date'] = '2026-01-10';
+        $older = $this->importer->importConnectedParsed($parsed, 'synthetic-older', 'older.json', null, 1, 10);
+        self::assertSame($first['statement_id'], $older['statement_id']);
+        self::assertSame('2026-01-31', $this->pdo->query('SELECT statement_date FROM bank_statements WHERE id = ' . $first['statement_id'])->fetchColumn());
+        $this->pdo->exec("INSERT INTO currencies VALUES (2, 20, '1000000005', NULL, '2010', 'EUR', 1)");
+        $foreign = $this->importer->importConnectedParsed($parsed, 'synthetic-other-tenant', 'foreign.json', null, 2, 20);
+        self::assertNotSame($first['statement_id'], $foreign['statement_id']);
+        $this->pdo->exec("INSERT INTO currencies VALUES (3, 10, '1000000005', NULL, '2010', 'CZK', 1)");
+        $currency = $this->importer->importConnectedParsed($parsed, 'synthetic-other-currency', 'currency.json', null, 3, 10);
+        self::assertNotSame($first['statement_id'], $currency['statement_id']);
+        self::assertSame(3, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_api_months')->fetchColumn());
     }
 
     public function testReconstructedExportCannotBecomeConfirmedBankEvidence(): void
@@ -181,7 +240,10 @@ final class ConnectedStatementImporterTest extends TestCase
         $this->pdo->exec('PRAGMA foreign_keys = ON');
         $this->pdo->exec('CREATE UNIQUE INDEX evidence_parent ON bank_transactions(statement_id, id)');
         $this->pdo->exec('CREATE TABLE synthetic_payroll_evidence (statement_id INTEGER, transaction_id INTEGER, frozen_hash TEXT, FOREIGN KEY (statement_id, transaction_id) REFERENCES bank_transactions(statement_id, id) ON DELETE RESTRICT)');
-        $this->pdo->prepare('INSERT INTO synthetic_payroll_evidence VALUES (?, 1, ?)')->execute([$api['statement_id'], hash('sha256', 'synthetic-frozen-evidence')]);
+        $this->pdo->prepare('INSERT INTO synthetic_payroll_evidence VALUES (?, 1, ?)')->execute([$api['evidence_statement_id'], hash('sha256', 'synthetic-frozen-evidence')]);
+        $this->pdo->exec('CREATE TABLE synthetic_journal (id INTEGER PRIMARY KEY, transaction_id INTEGER UNIQUE REFERENCES bank_transactions(id), debit TEXT, credit TEXT)');
+        $this->pdo->exec("INSERT INTO synthetic_journal VALUES (1, 1, '221', '311')");
+        $journal = $this->pdo->query('SELECT * FROM synthetic_journal')->fetchAll(PDO::FETCH_ASSOC);
         $before = $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC);
 
         $gpc = $this->importer->import($content, 'synthetic-month.gpc', null, 1);
@@ -190,13 +252,31 @@ final class ConnectedStatementImporterTest extends TestCase
         self::assertSame(1, $gpc['skipped_duplicates']);
         self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC));
         self::assertSame(hash('sha256', 'synthetic-frozen-evidence'), $this->pdo->query('SELECT frozen_hash FROM synthetic_payroll_evidence')->fetchColumn());
-        self::assertNotSame($api['statement_id'], $gpc['statement_id']);
+        self::assertSame($api['statement_id'], $gpc['statement_id']);
         self::assertSame(1, $gpc['matched']);
-        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transaction_imports')->fetchColumn());
+        self::assertSame('gpc', $this->pdo->query('SELECT source FROM bank_statements WHERE id = ' . $gpc['statement_id'])->fetchColumn());
+        self::assertSame($content, $this->pdo->query('SELECT file_content FROM bank_statements WHERE id = ' . $gpc['statement_id'])->fetchColumn());
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_statements bs WHERE ' . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql())->fetchColumn());
+        self::assertSame($content, $this->pdo->query('SELECT file_content FROM bank_statements WHERE id = ' . $gpc['evidence_statement_id'])->fetchColumn());
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transaction_imports')->fetchColumn());
         $scope = \MyInvoice\Service\Bank\StatementTransactionScope::sql($gpc['statement_id']);
         self::assertSame(1, (int) $this->pdo->query("SELECT COUNT(*) FROM bank_transactions bt WHERE $scope")->fetchColumn());
         self::assertTrue($this->importer->import($content, 'synthetic-month.gpc', null, 1)['duplicate']);
         self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC));
+        self::assertSame($journal, $this->pdo->query('SELECT * FROM synthetic_journal')->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    public function testPartialGpcCannotHideApiMovementMissingFromBankDocument(): void
+    {
+        $parsed = new GpcParser()->parse($this->gpc());
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+        $api = $this->importer->importConnectedParsed($parsed, 'synthetic-full-api', 'api.json', null, 1, 10);
+        $before = $this->pdo->query('SELECT * FROM bank_transactions ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+        $gpc = $this->importer->import($this->transferGpc(), 'partial.gpc', null, 1);
+        self::assertSame($api['statement_id'], $gpc['statement_id']);
+        self::assertSame('bank_api', $this->pdo->query('SELECT source FROM bank_statements WHERE id = ' . $api['statement_id'])->fetchColumn());
+        self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions ORDER BY id')->fetchAll(PDO::FETCH_ASSOC));
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions bt WHERE ' . \MyInvoice\Service\Bank\StatementTransactionScope::sql($api['statement_id']))->fetchColumn());
     }
 
     public function testApiAfterGpcPreservesTransactionAndResumesUnmatchedMovement(): void
@@ -217,6 +297,106 @@ final class ConnectedStatementImporterTest extends TestCase
         self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    public function testConfirmedCrossSourceIdentityPreservesEvidenceAndSubsequentOverlap(): void
+    {
+        $content = $this->transferGpc();
+        $parsed = new GpcParser()->parse($content);
+        $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-API-REFERENCE';
+        $this->matcher->expects(self::exactly(3))->method('matchBatch')->willReturn([]);
+        $this->importer->import($content, 'synthetic.gpc', null, 1);
+        $before = $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC);
+        try {
+            $this->importer->importConnectedParsed($parsed, 'synthetic-confirmed-api', 'synthetic.json', null, 1, 10);
+            self::fail('Different references require confirmation.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertObjectHasProperty('candidates', $e);
+            $confirmations = array_column($e->candidates, 'confirmation_key');
+            self::assertCount(1, $confirmations);
+        }
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_statements')->fetchColumn());
+        $result = $this->importer->importConnectedParsed($parsed, 'synthetic-confirmed-api', 'synthetic.json', null, 1, 10, 'bank_api', $confirmations);
+        self::assertSame(0, $result['transactions']);
+        self::assertSame(1, $result['skipped_duplicates']);
+        $retry = $this->importer->importConnectedParsed($parsed, 'synthetic-overlap-after-confirmation', 'synthetic-overlap.json', null, 1, 10);
+        self::assertSame(0, $retry['transactions']);
+        self::assertSame(1, $retry['skipped_duplicates']);
+        self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC));
+        self::assertSame(3, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transaction_imports')->fetchColumn());
+    }
+
+    public function testChangedIncomingIdentityCannotReuseConfirmation(): void
+    {
+        $content = $this->transferGpc();
+        $parsed = new GpcParser()->parse($content);
+        $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-API-REFERENCE';
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
+        $this->importer->import($content, 'synthetic.gpc', null, 1);
+        try {
+            $this->importer->importConnectedParsed($parsed, 'synthetic-first', 'synthetic.json', null, 1, 10);
+            self::fail('Confirmation required.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertObjectHasProperty('candidates', $e);
+            $confirmations = array_column($e->candidates, 'confirmation_key');
+        }
+        $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-CHANGED-REFERENCE';
+        try {
+            $this->importer->importConnectedParsed($parsed, 'synthetic-changed', 'synthetic.json', null, 1, 10, 'bank_api', $confirmations);
+            self::fail('Stale confirmation must not merge changed movement.');
+        } catch (\InvalidArgumentException) {
+            self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+            self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_statements')->fetchColumn());
+        }
+    }
+
+    public function testMonthlyGpcWithDifferentReferenceReusesConfirmedApiMovement(): void
+    {
+        $content = $this->transferGpc();
+        $parsed = new GpcParser()->parse($content);
+        $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-API-REFERENCE';
+        $this->matcher->expects(self::exactly(3))->method('matchBatch')->willReturn([]);
+        $this->importer->importConnectedParsed($parsed, 'synthetic-first-api', 'synthetic.json', null, 1, 10);
+        $before = $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC);
+        try {
+            $this->importer->import($content, 'synthetic.gpc', null, 1);
+            self::fail('Confirmation required.');
+        } catch (\MyInvoice\Service\Bank\StatementReconciliationException $e) {
+            $keys = array_column($e->candidates, 'confirmation_key');
+            self::assertCount(1, $keys);
+        }
+        $result = $this->importer->import($content, 'synthetic.gpc', null, 1, $keys);
+        self::assertSame(0, $result['transactions']);
+        self::assertSame(1, $result['skipped_duplicates']);
+        $retry = $this->importer->import($content . "\r\n", 'synthetic-overlap.gpc', null, 1);
+        self::assertSame(0, $retry['transactions']);
+        self::assertSame(1, $retry['skipped_duplicates']);
+        self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    public function testConfirmedAliasCannotAbsorbAnotherPaymentInNextBatch(): void
+    {
+        $content = $this->transferGpc();
+        $parsed = new GpcParser()->parse($content);
+        $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-API-REFERENCE';
+        $this->matcher->expects(self::exactly(2))->method('matchBatch')->willReturn([]);
+        $this->importer->import($content, 'synthetic.gpc', null, 1);
+        try {
+            $this->importer->importConnectedParsed($parsed, 'synthetic-first', 'synthetic.json', null, 1, 10);
+            self::fail('Confirmation required.');
+        } catch (\MyInvoice\Service\Bank\StatementReconciliationException $e) {
+            $keys = array_column($e->candidates, 'confirmation_key');
+        }
+        $this->importer->importConnectedParsed($parsed, 'synthetic-first', 'synthetic.json', null, 1, 10, 'bank_api', $keys);
+        $parsed['transactions'][] = $parsed['transactions'][0];
+        $parsed['transactions'][1]['bank_ref'] = 'SYNTHETIC-ANOTHER-PAYMENT';
+        try {
+            $this->importer->importConnectedParsed($parsed, 'synthetic-next', 'synthetic.json', null, 1, 10, 'bank_api', $keys);
+            self::fail('An alias must not absorb another payment.');
+        } catch (\MyInvoice\Service\Bank\StatementReconciliationException $e) {
+            self::assertSame([], $e->candidates);
+            self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+        }
+    }
+
     public function testAmbiguousBatchRollsBackRatherThanMergingRepeatedPayments(): void
     {
         $content = $this->transferGpc();
@@ -232,7 +412,7 @@ final class ConnectedStatementImporterTest extends TestCase
         } catch (\InvalidArgumentException $e) {
             self::assertStringContainsString('nejednoznačnou', $e->getMessage());
             self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
-            self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_statements')->fetchColumn());
+            self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_statements')->fetchColumn());
             self::assertFalse($this->pdo->inTransaction());
         }
     }

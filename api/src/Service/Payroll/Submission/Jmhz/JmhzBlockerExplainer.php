@@ -71,7 +71,7 @@ final class JmhzBlockerExplainer
         'jmhz_scenario1_child_credit_caregiver_unknown' => 'Není zodpovězeno, zda tytéž děti vyživuje i jiná osoba v téže domácnosti.',
         'jmhz_scenario1_child_credit_caregiver_inconsistent' => 'Nároky na děti si u téže domácnosti odporují v údaji o jiné vyživující osobě.',
         'jmhz_scenario1_child_credit_caregiver_identity_missing' => 'Jiná osoba vyživující tytéž děti není v podání pojmenovaná.',
-        'jmhz_scenario1_child_identity_incomplete' => 'Vyživované dítě nemá zvlášť vyplněné jméno a příjmení.',
+        'jmhz_scenario1_child_identity_incomplete' => 'U vyživovaného dítěte chybí jméno, příjmení nebo platné datum narození.',
         'jmhz_scenario1_child_order_unsupported' => 'Pořadí vyživovaného dítěte je mimo číselník měsíčního hlášení.',
         'jmhz_scenario1_withholding_tax_unsupported' => 'Srážková daň není pro tento profil JMHZ připravená.',
         'jmhz_scenario1_multiple_employments_unsupported' => 'Více pracovních vztahů není pro tento profil JMHZ připraveno.',
@@ -190,7 +190,7 @@ final class JmhzBlockerExplainer
         'jmhz_scenario1_child_credit_caregiver_unknown' => 'Otevřete Mzdy → Zaměstnanci → Vyživované osoby a u nároku rozhodněte, zda tytéž děti vyživuje i jiná osoba.',
         'jmhz_scenario1_child_credit_caregiver_inconsistent' => 'Otevřete Mzdy → Zaměstnanci → Vyživované osoby a sjednoťte odpověď u všech nároků téže domácnosti.',
         'jmhz_scenario1_child_credit_caregiver_identity_missing' => 'Otevřete Mzdy → Zaměstnanci → Vyživované osoby a doplňte jméno, příjmení a datum narození jiné vyživující osoby.',
-        'jmhz_scenario1_child_identity_incomplete' => 'Otevřete Mzdy → Zaměstnanci → Vyživované osoby a doplňte dítěti zvlášť jméno a příjmení.',
+        'jmhz_scenario1_child_identity_incomplete' => 'Otevřete Mzdy → Zaměstnanci → Vyživované osoby, zkontrolujte jméno, příjmení a datum narození dítěte a připravte hlášení znovu.',
         'jmhz_preparation_not_ready' => 'Otevřete test JMHZ a postupně doplňte zvýrazněné skupiny údajů.',
         'jmhz_xml_identity_name_incomplete' => 'Otevřete Mzdy → Zaměstnanci a na kartě zaměstnance a jeho pracovního vztahu doplňte jméno, příjmení, datum narození, den nástupu a druh činnosti; OIČ ani ID PPV shánět nemusíte, ta přidělí ČSSZ až v protokolu o přijetí.',
     ];

@@ -2843,7 +2843,17 @@ paths:
       - $ref: '#/components/parameters/SupplierIdHeader'
     get:
       tags: [Bank]
-      summary: Seznam nahraných bankovních výpisů
+      summary: Seznam nahraných a měsíčních API výpisů
+      description: |
+        Výpisy se zdrojem `bank_api` jsou v seznamu zobrazené jako měsíční
+        projekce seskupené podle dodavatele, normalizovaného čísla účtu, kódu
+        banky, měny a kalendářního měsíce. Jednotlivé technické importy, ze
+        kterých projekce vznikla, seznam nevrací. Jejich existující detailní URL
+        zůstávají platné a `BankTransaction.statement_id` nadále ukazuje na
+        původní výpis pohybu.
+        Úplný GPC pro stejný účet a měsíc přebírá tentýž měsíční řádek:
+        ID se zachová, source se změní na gpc a soubor lze stáhnout.
+        Neúplný GPC již evidované pohyby neodstraňuje.
       parameters:
         - in: query
           name: page
@@ -4800,6 +4810,20 @@ paths:
                   description: |
                     Cílový měnový účet (`currencies.id`). Povinné jen u víceměnového účtu
                     se sdíleným číslem účtu (jinak server vrátí 409 `ambiguous_account_currency`).
+                reconciliation_confirmations:
+                  type: string
+                  contentMediaType: application/json
+                  contentSchema:
+                    type: array
+                    uniqueItems: true
+                    items:
+                      type: string
+                      pattern: '^[a-f0-9]{64}$'
+                  description: |
+                    JSON pole unikátních potvrzovacích klíčů z předchozí
+                    odpovědi `409 statement_reconciliation_required`. Každý klíč je
+                    SHA-256 zapsaný 64 malými hexadecimálními znaky. Klient smí klíče
+                    poslat až po výslovném potvrzení zobrazených dvojic uživatelem.
       responses:
         '200':
           description: Naparsováno — souhrn importu (ne entita výpisu)
@@ -4817,12 +4841,23 @@ paths:
           description: |
             Číslo účtu není registrované u dodavatele (`wrong_supplier_account`),
             nebo má více měnových variant a chybí `account_id` (`ambiguous_account_currency`
-            — `error.candidates` nese seznam `{account_id, code, label}`).
+            a `error.candidates` nese seznam `{account_id, code, label}`). Pokud se
+            GPC pohyb shoduje s pohybem z jiného zdroje jen podle slabých údajů,
+            vrátí server `statement_reconciliation_required`; pole
+            `error.reconciliation_candidates` obsahuje jednoznačné dvojice k ručnímu
+            potvrzení. Prázdné pole znamená mnohoznačnou shodu, kterou tímto
+            mechanismem potvrdit nelze.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/StatementReconciliationError'
         '422':
-          description: Zvolený `account_id` neodpovídá číslu účtu výpisu / dodavateli (`invalid_account`)
+          description: |
+            Zvolený `account_id` neodpovídá číslu účtu výpisu nebo dodavateli
+            (`invalid_account`), případně `reconciliation_confirmations` není platné
+            JSON pole unikátních SHA-256 klíčů (`validation_failed`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -21751,6 +21786,59 @@ components:
           items: { $ref: '#/components/schemas/BankMatchSuggestionCandidate' }
         created_at: { type: string, format: date-time }
 
+    StatementReconciliationCandidate:
+      type: object
+      description: |
+        Jednoznačná dvojice nového a už evidovaného bankovního pohybu, kterou
+        server kvůli slabým společným údajům nesloučí bez potvrzení uživatele.
+      required:
+        - confirmation_key
+        - posted_at
+        - amount
+        - currency
+        - existing_transaction_id
+        - existing_statement_id
+        - description
+        - existing_description
+        - counterparty_account
+        - existing_counterparty_account
+        - variable_symbol
+        - existing_variable_symbol
+      properties:
+        confirmation_key:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Neprůhledný identifikátor konkrétní navržené dvojice.
+        posted_at: { type: string, format: date }
+        amount: { type: string, description: Částka nově importovaného pohybu v desetinném zápisu. }
+        currency: { type: string, description: ISO 4217 měna pohybu. }
+        existing_transaction_id: { type: integer, format: int64 }
+        existing_statement_id: { type: integer, format: int64 }
+        description: { type: string, description: Popis nově importovaného pohybu; může být prázdný. }
+        existing_description: { type: string, description: Popis už evidovaného pohybu; může být prázdný. }
+        counterparty_account: { type: string, description: Protiúčet nového pohybu; může být prázdný. }
+        existing_counterparty_account: { type: string, description: Protiúčet už evidovaného pohybu; může být prázdný. }
+        variable_symbol: { type: string, description: Variabilní symbol nového pohybu; může být prázdný. }
+        existing_variable_symbol: { type: string, description: Variabilní symbol už evidovaného pohybu; může být prázdný. }
+
+    StatementReconciliationError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, reconciliation_candidates]
+          properties:
+            code: { type: string, const: statement_reconciliation_required }
+            message: { type: string }
+            reconciliation_candidates:
+              type: array
+              description: |
+                Dvojice, které lze potvrdit opakováním stejného uploadu s jejich
+                `confirmation_key`. Prázdné pole značí mnohoznačnou shodu bez
+                bezpečné automatické nabídky.
+              items: { $ref: '#/components/schemas/StatementReconciliationCandidate' }
+
     BankStatementImportResult:
       type: object
       description: |
@@ -21758,6 +21846,11 @@ components:
         výpisu — detail se načítá přes `GET /bank-statements/{id}`.
       properties:
         statement_id: { type: integer, format: int64 }
+        evidence_statement_id: { type: integer, format: int64, description: "Původní importní doklad při začlenění do měsíčního přehledu. statement_id v tom případě odkazuje na měsíční přehled." }
+        statement_ids:
+          type: array
+          description: Dotčené měsíční přehledy v pořadí měsíců; statement_id je poslední z nich.
+          items: { type: integer, format: int64 }
         transactions: { type: integer, description: Počet skutečně založených pohybů. }
         matched: { type: integer, description: Počet spárovaných pohybů výpisu včetně již evidovaných pohybů připojených z API/GPC. }
         duplicate:
@@ -21794,16 +21887,22 @@ components:
 
     BankStatement:
       type: object
-      description: "Položka seznamu výpisů (GET /bank-statements). Bankovní spojení dodavatele je per-měna na /settings/currencies, ne tady."
+      description: |
+        Položka seznamu výpisů (`GET /bank-statements`). Bankovní spojení
+        dodavatele je per-měna na `/settings/currencies`. U `source=bank_api`
+        jde o měsíční projekci společnou pro dodavatele, účet, banku, měnu a měsíc;
+        surové technické importy jsou ze seznamu skryté.
+        Po nahrazení úplným GPC zůstává měsíční ID stejné a source je gpc;
+        file_name, statement_number, zůstatky a dostupný originál pocházejí z GPC.
       properties:
         id: { type: integer, format: int64 }
         source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api], description: "Původ výpisu: gpc/pdf = bankovní výpis, bank_api = pohyby z přímého API bez konečného zůstatku, email_notice/idoklad = virtuální měsíční výpis." }
-        file_name: { type: string, example: "vypis_2026_05.gpc" }
+        file_name: { type: string, example: "vypis_2026_05.gpc", description: "U měsíční projekce `bank_api` má syntetickou hodnotu `API-YYYY-MM`." }
         account_number: { type: string, example: "1234567890/0100" }
         bank_code: { type: [string, "null"], example: "0100", description: "Kód banky účtu — autoritativně z konfigurovaného účtu (currencies.bank_code), fallback z výpisu. GPC výpisy ho samy nenesou." }
         currency: { type: [string, "null"], example: EUR, description: "ISO 4217. Odvozeno z transakcí výpisu nebo z currencies.account_number. NULL u výpisů importovaných před v4.1.0." }
-        statement_date: { type: string, format: date }
-        statement_number: { type: [string, "null"] }
+        statement_date: { type: string, format: date, description: "Datum výpisu. U `bank_api` je to nejpozdější datum, do kterého projekce daný měsíc aktuálně pokrývá." }
+        statement_number: { type: [string, "null"], description: "U měsíční projekce `bank_api` je vždy null." }
         prev_balance: { type: [number, "null"], format: float }
         curr_balance: { type: [number, "null"], format: float }
         transaction_count: { type: integer }
@@ -21811,7 +21910,7 @@ components:
         ignored_count: { type: integer, description: "Počet sekundárních pohybů převzatých autoritativním výpisem a označených jako ignorované." }
         unposted_count: { type: integer, description: "Počet skutečných pohybů bez aktivního účetního zápisu; ignorované položky se nepočítají." }
         imported_at: { type: string, format: date-time }
-        has_file: { type: boolean, description: "True pokud server má uložený originál výpisu — ke stažení přes /bank-statements/{id}/download." }
+        has_file: { type: boolean, description: "True pokud server má uložený originál výpisu ke stažení přes /bank-statements/{id}/download. U měsíční projekce `bank_api` je false; případný raw obsah zůstává u skrytých původních importů." }
         has_pdf: { type: boolean, description: "True pokud je nahrán doprovodný PDF výpis." }
         pdf_name: { type: [string, "null"] }
         account_label: { type: [string, "null"], description: "Odvozeno z currencies.label" }
@@ -21822,6 +21921,15 @@ components:
         - $ref: '#/components/schemas/BankStatement'
         - type: object
           properties:
+            evidence_pdfs:
+              type: array
+              description: PDF přílohy původních podkladů měsíčního výpisu. Stahují se přes existující PDF endpoint s uvedeným ID výpisu.
+              items:
+                type: object
+                required: [id, pdf_name]
+                properties:
+                  id: { type: integer, format: int64 }
+                  pdf_name: { type: [string, "null"] }
             balance_calculation:
               type: [object, "null"]
               description: Read-only přepočet měsíční evidence z předchozího bankovního zůstatku. Nikdy nepřepisuje originální zůstatky ani účetní zápisy.

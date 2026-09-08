@@ -71,6 +71,8 @@ final class StatementImporterCurrencyTest extends TestCase
         }
         $pdo = $this->db->pdo();
         foreach ($this->statementIds as $id) {
+            $pdo->prepare('DELETE FROM bank_api_evidence_months WHERE evidence_statement_id = ? OR monthly_statement_id = ?')->execute([$id, $id]);
+            $pdo->prepare('DELETE FROM bank_api_months WHERE statement_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM bank_transaction_imports WHERE original_statement_id = ? OR statement_id = ?')->execute([$id, $id]);
             $pdo->prepare('DELETE FROM bank_transactions WHERE statement_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
@@ -111,9 +113,10 @@ final class StatementImporterCurrencyTest extends TestCase
         $parsed = (new \MyInvoice\Service\Bank\CreditasTransactionParser())->parse([], '1000000005', '2026-09-07');
         $result = $this->importer->importConnectedParsed($parsed, 'synthetic-creditas-' . bin2hex(random_bytes(8)), 'synthetic.json', null, $currencyId, $this->supplierId);
         $this->statementIds[] = $result['statement_id'];
+        $this->statementIds[] = $result['evidence_statement_id'];
         $query = $this->db->pdo()->prepare('SELECT statement_number, source FROM bank_statements WHERE id = ? AND supplier_id = ?');
         $query->execute([$result['statement_id'], $this->supplierId]);
-        self::assertSame(['statement_number' => $parsed['header']['statement_number'], 'source' => 'bank_api'], $query->fetch(PDO::FETCH_ASSOC));
+        self::assertSame(['statement_number' => null, 'source' => 'bank_api'], $query->fetch(PDO::FETCH_ASSOC));
     }
 
     public function testFioEurStatementMatchesAccountRegisteredByIbanOnly(): void

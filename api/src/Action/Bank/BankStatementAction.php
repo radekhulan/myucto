@@ -18,6 +18,8 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Bank\StatementReconciliationConfirmation;
+use MyInvoice\Service\Bank\StatementReconciliationException;
 use MyInvoice\Service\Bank\StatementImporter;
 use MyInvoice\Service\Bank\StatementTransactionScope;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
@@ -152,6 +154,19 @@ final class BankStatementAction
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
         }
 
+        try {
+            $body = $request->getParsedBody();
+            $rawConfirmations = is_array($body) ? ($body['reconciliation_confirmations'] ?? null) : null;
+            if ($rawConfirmations !== null && !is_string($rawConfirmations)) {
+                throw new \InvalidArgumentException('Neplatná potvrzení shod výpisu.');
+            }
+            $reconciliationConfirmations = StatementReconciliationConfirmation::parse(
+                $rawConfirmations === null ? null : json_decode($rawConfirmations, true, 512, JSON_THROW_ON_ERROR)
+            );
+        } catch (\JsonException|\InvalidArgumentException) {
+            return Json::error($response, 'validation_failed', 'Neplatná potvrzení shod výpisu.', 422);
+        }
+
         $files = $request->getUploadedFiles();
         $file = $files['file'] ?? null;
         if (!$file || $file->getError() !== UPLOAD_ERR_OK) {
@@ -207,13 +222,27 @@ final class BankStatementAction
         }
 
         try {
-            $r = $this->importer->import($content, $name, (int) ($user['id'] ?? 0), $resolved['currency_id']);
+            $r = $this->importer->import(
+                $content,
+                $name,
+                (int) ($user['id'] ?? 0),
+                $resolved['currency_id'],
+                $reconciliationConfirmations,
+            );
+        } catch (StatementReconciliationException $e) {
+            return Json::error(
+                $response,
+                StatementReconciliationException::ERROR_CODE,
+                $e->getMessage(),
+                409,
+                ['reconciliation_candidates' => $e->candidates],
+            );
         } catch (\Throwable $e) {
             return Json::error($response, 'parse_failed', 'Nelze parsovat: ' . $e->getMessage(), 400);
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
-        $this->logger->log('bank.statement_imported', $user['id'] ?? null, 'bank_statement', $r['statement_id'], $r, $ip, $request->getHeaderLine('User-Agent'));
+        $this->logger->log('bank.statement_imported', $user['id'] ?? null, 'bank_statement', $r['statement_id'], $r + ['reconciliation_confirmation_count' => count($reconciliationConfirmations)], $ip, $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, $r);
     }
@@ -336,7 +365,7 @@ final class BankStatementAction
     private function statementWithPdfHash(string $pdfHash, int $sid): ?int
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id FROM bank_statements WHERE pdf_hash = ? OR file_hash = ? ORDER BY id LIMIT 20'
+            'SELECT bs.id FROM bank_statements bs WHERE bs.pdf_hash = ? OR bs.file_hash = ? ORDER BY (' . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql() . ') DESC, bs.id'
         );
         $stmt->execute([$pdfHash, $pdfHash]);
         foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $id) {
@@ -382,8 +411,9 @@ final class BankStatementAction
 
         $candidates = $this->db->pdo()->prepare(
             "SELECT id, account_number, currency, statement_number, source
-               FROM bank_statements
+               FROM bank_statements bs
               WHERE source IN " . \MyInvoice\Service\Bank\BankStatementSource::sqlList() . "
+                AND " . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql() . "
                 AND (pdf_content IS NULL OR OCTET_LENGTH(pdf_content) = 0)
                 AND statement_date BETWEEN DATE_SUB(?, INTERVAL 10 DAY) AND DATE_ADD(?, INTERVAL 10 DAY)
               ORDER BY id"
@@ -610,7 +640,7 @@ final class BankStatementAction
 
         // Filtr WHERE fragment + parametry (sdílený mezi COUNT a výběrem řádků). Účet
         // porovnáváme normalizovaně (stejně jako scope), ať padding/lomítko nevadí.
-        $filterSql = '';
+        $filterSql = ' AND ' . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql();
         $filterParams = [];
         if ($year !== null)  { $filterSql .= ' AND YEAR(bs.statement_date) = ?';  $filterParams[] = $year; }
         if ($month !== null) { $filterSql .= ' AND MONTH(bs.statement_date) = ?'; $filterParams[] = $month; }
@@ -1169,6 +1199,12 @@ final class BankStatementAction
         }
         $fileName = (string) $ownedRow['file_name'];
 
+        $monthly = $pdo->prepare('SELECT 1 FROM bank_api_months WHERE statement_id = ?');
+        $monthly->execute([$id]);
+        if ($monthly->fetchColumn() !== false) {
+            return Json::error($response, 'monthly_api_statement', 'Měsíční API výpis se průběžně doplňuje z banky a nelze jej samostatně smazat.', 409);
+        }
+
         // Avízo-výpis (e-mailová bankovní avíza) smí jít smazat jen když na něm nezbývá
         // žádná spárovaná položka — typicky poté, co párování převzal oficiální GPC výpis
         // (EmailNoticeReconciler). Smazání výpisu se spárovanými transakcemi by jinak
@@ -1575,6 +1611,7 @@ final class BankStatementAction
         $s['id'] = (int) $s['id'];
         $s['has_file'] = (bool) ($s['has_file'] ?? false);
         $s['has_pdf'] = (bool) ($s['has_pdf'] ?? false);
+        $s['evidence_pdfs'] = (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($this->db->pdo()))->evidencePdfs($id, $sid);
         $s['transactions'] = $transactions;
         $summary = $this->db->pdo()->query(
             "SELECT COUNT(*) AS total, SUM(bt.match_status IN ('auto_exact', 'auto_partial', 'manual')) AS matched

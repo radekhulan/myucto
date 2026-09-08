@@ -599,7 +599,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         self::assertFalse($childCredit['other_household_caregiver']);
         self::assertSame(
             [[
-                'identity' => ['given_name' => 'Jana', 'family_name' => 'Nováková'],
+                'identity' => ['given_name' => 'Jana', 'family_name' => 'Nováková', 'birth_date' => '2015-02-02'],
                 'ztp_p' => false,
                 'order' => '1',
             ]],
@@ -640,7 +640,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         yield 'pořadí mimo číselník 10440' => [
             ['children' => [[
                 'reference' => 'dependant-1',
-                'identity' => ['given_name' => 'Jana', 'family_name' => 'Nováková'],
+                'identity' => ['given_name' => 'Jana', 'family_name' => 'Nováková', 'birth_date' => '2015-02-02'],
                 'order' => 4,
                 'ztp_p' => false,
             ]]],
@@ -674,6 +674,22 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    public function testChildCreditRequiresValidFrozenBirthDate(): void
+    {
+        foreach ([null, '', '2015-02-30', 'invalid'] as $date) {
+            $payload = $this->payloadWithChildCredit();
+            $payload['people'][0]['child_credit_evidence']['children'][0]['identity']['birth_date'] = $date;
+            $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+                $this->withPayload($this->preparation(), $payload), $this->pvpoj(),
+            );
+
+            self::assertContains(
+                'jmhz_scenario1_child_identity_incomplete',
+                array_map(static fn ($blocker): string => $blocker->code, $resolution->blockers),
+            );
+        }
+    }
+
     /** @return array<string,mixed> */
     private function payloadWithChildCredit(): array
     {
@@ -692,6 +708,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                 'identity' => [
                     'given_name' => 'Jana',
                     'family_name' => 'Nováková',
+                    'birth_date' => '2015-02-02',
                 ],
                 'order' => 1,
                 'ztp_p' => false,

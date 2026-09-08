@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use DOMDocument;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
@@ -14,6 +15,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlPassability;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlEvaluator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
 use PHPUnit\Framework\TestCase;
 
 final class JmhzScenario1ControlValidatorTest extends TestCase
@@ -120,6 +122,164 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
             XML));
 
         self::assertContains(4, $this->blockingIds($report));
+    }
+
+    public function testSurchargeTotalCannotBeBelowNamedSurcharges(): void
+    {
+        $xml = str_replace(
+            '<form:tarif>1000</form:tarif>',
+            '<form:tarif>1000</form:tarif>'
+                . '<form:priplatky><form:celkem>200</form:celkem>'
+                . '<form:nocni>80</form:nocni>'
+                . '<form:sobotaNedele>90</form:sobotaNedele>'
+                . '<form:svatek>40</form:svatek></form:priplatky>',
+            JmhzXmlSample::minimal(),
+        );
+
+        self::assertContains(29, $this->failedIds($this->validate($xml)));
+
+        $equal = str_replace(
+            '<form:celkem>200</form:celkem>',
+            '<form:celkem>210</form:celkem>',
+            $xml,
+        );
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($this->validate($equal), 29)->outcome);
+    }
+
+    public function testCompleteMonthlyChildCreditPassesItsControls(): void
+    {
+        $report = $this->validate($this->monthlyChildCreditXml());
+
+        foreach ([110, 114, 127, 128, 215, 229, 265] as $controlId) {
+            self::assertSame(
+                JmhzControlOutcome::Passed,
+                $this->finding($report, $controlId)->outcome,
+                "Kontrola {$controlId} neprošla nad úplným měsíčním blokem dětí.",
+            );
+        }
+    }
+
+    public function testMonthlyChildOrderMustBeContinuousAndUnique(): void
+    {
+        $gap = $this->validate($this->monthlyChildCreditXml([
+            $this->monthlyChild('Jana', 'Nováková', '2015-04-11', '2'),
+        ]));
+        self::assertContains(110, $this->failedIds($gap));
+
+        $collision = $this->validate($this->monthlyChildCreditXml([
+            $this->monthlyChild('Jana', 'Nováková', '2015-04-11', '1'),
+            $this->monthlyChild('Petr', 'Novák', '2017-06-03', '1'),
+        ]));
+        self::assertContains(229, $this->failedIds($collision));
+    }
+
+    public function testMonthlyChildOrderMustComeFromTheCatalog(): void
+    {
+        $report = $this->validate($this->monthlyChildCreditXml([
+            $this->monthlyChild('Jana', 'Nováková', '2015-04-11', '4'),
+        ], schemaValid: false));
+
+        self::assertContains(265, $this->failedIds($report));
+    }
+
+    public function testUnclaimedChildrenCanSupplyLowerPositionsInTheSequence(): void
+    {
+        $second = $this->validate($this->monthlyChildCreditXml([
+            $this->monthlyChild('Jana', 'Nováková', '2015-04-11', 'N'),
+            $this->monthlyChild('Petr', 'Novák', '2017-06-03', '2'),
+        ]));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($second, 110)->outcome);
+
+        $third = $this->validate($this->monthlyChildCreditXml([
+            $this->monthlyChild('Jana', 'Nováková', '2015-04-11', 'N'),
+            $this->monthlyChild('Petr', 'Novák', '2017-06-03', 'N'),
+            $this->monthlyChild('Eva', 'Nováková', '2019-08-05', '3'),
+        ]));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($third, 110)->outcome);
+    }
+
+    public function testRepeatedThirdChildOrderAndUnclaimedChildAreAllowed(): void
+    {
+        $report = $this->validate($this->monthlyChildCreditXml([
+            $this->monthlyChild('Jana', 'Nováková', '2015-04-11', '1'),
+            $this->monthlyChild('Petr', 'Novák', '2017-06-03', '2'),
+            $this->monthlyChild('Eva', 'Nováková', '2019-08-05', '3'),
+            $this->monthlyChild('Jan', 'Novák', '2021-10-07', '3'),
+            $this->monthlyChild('Marie', 'Nováková', '1990-01-01', 'N'),
+        ]));
+
+        foreach ([110, 215, 229, 265] as $controlId) {
+            self::assertSame(JmhzControlOutcome::Passed, $this->finding($report, $controlId)->outcome);
+        }
+    }
+
+    public function testMonthlyChildBirthNumberCanSupplyBirthDate(): void
+    {
+        $child = '<form:vyzivovaneDite><form:dite>'
+            . '<form:jmeno>Jana</form:jmeno><form:prijmeni>Nováková</form:prijmeni>'
+            . '<form:rodneCislo>1504110003</form:rodneCislo>'
+            . '</form:dite><form:prukazZtpp>false</form:prukazZtpp>'
+            . '<form:poradi>1</form:poradi></form:vyzivovaneDite>';
+        $report = $this->validate($this->monthlyChildCreditXml([$child]));
+
+        foreach ([114, 128, 215] as $controlId) {
+            self::assertSame(JmhzControlOutcome::Passed, $this->finding($report, $controlId)->outcome);
+        }
+    }
+
+    public function testMonthlyChildCreditRequiresCompleteChildIdentity(): void
+    {
+        $child = '<form:vyzivovaneDite><form:dite>'
+            . '<form:jmeno>Jana</form:jmeno><form:prijmeni>Nováková</form:prijmeni>'
+            . '</form:dite><form:prukazZtpp>false</form:prukazZtpp>'
+            . '<form:poradi>1</form:poradi></form:vyzivovaneDite>';
+        $report = $this->validate($this->monthlyChildCreditXml([$child]));
+
+        self::assertContains(114, $this->failedIds($report));
+        self::assertContains(128, $this->failedIds($report));
+    }
+
+    public function testOtherHouseholdCaregiverRequiresCompleteIdentity(): void
+    {
+        $report = $this->validate($this->monthlyChildCreditXml(
+            otherCaregiver: true,
+            caregiverXml: '<form:jineOsoby><form:jinaOsoba>'
+                . '<form:jmeno>Petr</form:jmeno><form:prijmeni>Novák</form:prijmeni>'
+                . '</form:jinaOsoba></form:jineOsoby>',
+        ));
+
+        self::assertContains(127, $this->failedIds($report));
+    }
+
+    public function testCompleteOtherHouseholdCaregiverPasses(): void
+    {
+        $report = $this->validate($this->monthlyChildCreditXml(
+            otherCaregiver: true,
+            caregiverXml: '<form:jineOsoby><form:jinaOsoba>'
+                . '<form:jmeno>Petr</form:jmeno><form:prijmeni>Novák</form:prijmeni>'
+                . '<form:datumNarozeni>1985-03-07</form:datumNarozeni>'
+                . '</form:jinaOsoba></form:jineOsoby>',
+        ));
+
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($report, 127)->outcome);
+    }
+
+    public function testChildAgedTwentySixOnFirstDayOfMonthCannotBeClaimed(): void
+    {
+        $report = $this->validate($this->monthlyChildCreditXml([
+            $this->monthlyChild('Jana', 'Nováková', '2000-07-01', '1'),
+        ]));
+
+        self::assertContains(215, $this->failedIds($report));
+    }
+
+    public function testChildTurningTwentySixAfterFirstDayOfMonthCanBeClaimed(): void
+    {
+        $report = $this->validate($this->monthlyChildCreditXml([
+            $this->monthlyChild('Jana', 'Nováková', '2000-07-02', '1'),
+        ]));
+
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($report, 215)->outcome);
     }
 
     public function testPersonIdentifierChecksumIsEnforced(): void
@@ -1227,5 +1387,66 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         }
 
         self::fail("Kontrola {$controlId} v reportu chybí.");
+    }
+
+    /** @param list<string>|null $children */
+    private function monthlyChildCreditXml(
+        ?array $children = null,
+        bool $otherCaregiver = false,
+        string $caregiverXml = '',
+        bool $schemaValid = true,
+    ): string {
+        $children ??= [$this->monthlyChild('Jana', 'Nováková', '2015-04-11', '1')];
+        $flag = $otherCaregiver ? 'true' : 'false';
+        $credit = '<form:prohlaseniPoplatnikaDane>'
+            . '<form:danoveZvyhodneniDetiMesic>1267</form:danoveZvyhodneniDetiMesic>'
+            . '<form:zvyhodneniDetiMesic><form:vyzivujeJinaOsoba>' . $flag
+            . '</form:vyzivujeJinaOsoba>' . $caregiverXml
+            . '<form:vyzivovaneDeti>' . implode('', $children)
+            . '</form:vyzivovaneDeti></form:zvyhodneniDetiMesic>'
+            . '<form:slevaDite>1267</form:slevaDite>'
+            . '</form:prohlaseniPoplatnikaDane>';
+
+        $xml = str_replace(
+            '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+            '<form:prohlaseniPoplatnika>true</form:prohlaseniPoplatnika>' . $credit,
+            JmhzXmlSample::minimal(),
+        );
+        if ($schemaValid) {
+            $this->assertSchemaValid($xml);
+        }
+
+        return $xml;
+    }
+
+    private function monthlyChild(
+        string $givenName,
+        string $familyName,
+        string $birthDate,
+        string $order,
+    ): string {
+        return '<form:vyzivovaneDite><form:dite>'
+            . '<form:jmeno>' . $givenName . '</form:jmeno>'
+            . '<form:prijmeni>' . $familyName . '</form:prijmeni>'
+            . '<form:datumNarozeni>' . $birthDate . '</form:datumNarozeni>'
+            . '</form:dite><form:prukazZtpp>false</form:prukazZtpp>'
+            . '<form:poradi>' . $order . '</form:poradi></form:vyzivovaneDite>';
+    }
+
+    private function assertSchemaValid(string $xml): void
+    {
+        $dom = new DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        $valid = $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOBLANKS)
+            && $dom->schemaValidate((new JmhzSchemaCatalog())->entryPoint()['path']);
+        $messages = array_map(
+            static fn (\LibXMLError $error): string => trim($error->message),
+            libxml_get_errors(),
+        );
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        self::assertTrue($valid, implode('; ', $messages));
     }
 }

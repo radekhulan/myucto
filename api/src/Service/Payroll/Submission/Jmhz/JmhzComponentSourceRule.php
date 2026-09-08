@@ -21,6 +21,15 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
  */
 final class JmhzComponentSourceRule
 {
+    /** @var list<string> */
+    private const EXEMPT_KINDS_WITHOUT_DETAIL = [
+        'benefit_meal',
+        'benefit_accommodation',
+        'benefit_education',
+        'benefit_recreation',
+        'benefit_health',
+    ];
+
     /**
      * Kód nálezu, nebo `null`, když je složka v pořádku.
      *
@@ -29,29 +38,32 @@ final class JmhzComponentSourceRule
      *
      * @param array<string,mixed>|null $mapping
      * @param mixed $taxTreatment daňové zacházení téže složky
+     * @param mixed $componentKind věcný druh mzdové složky
      */
     public static function issueCode(
         mixed $treatment,
         ?array $mapping,
         mixed $taxTreatment = null,
+        mixed $componentKind = null,
     ): ?string {
         if ($treatment === 'manual_review') {
             return 'component_jmhz_manual_review';
         }
         if ($treatment === 'included') {
             /*
-             * Osvobozený příjem se do hlášení nezařazuje, ale VYKAZUJE se —
-             * jako osvobozená část zúčtovaného příjmu (10289). Vlastní kolonku
-             * v rozpadu mzdy nemá a mít nesmí: rozpad popisuje mzdu za práci
-             * a náhrady, kdežto stravenka ani přechodné ubytování ani jedním
-             * nejsou. Žádat po účetní zařazení do rozpadu by ji nutilo vybrat
-             * kolonku, do které plnění nepatří.
+             * Některé osvobozené benefity se vykazují jen jako osvobozená část
+             * zúčtovaného příjmu (10289) a vlastní kolonku nemají. Náhrada při
+             * DPN a příspěvky zaměstnavatele však vlastní detailní atribut mají,
+             * takže i při osvobození potřebují zařazení.
              *
              * Úhrn osvobozených příjmů proto vzniká ODVOZENÍM z daňového
-             * zacházení složek, ne jejich zařazením; složka s `exempt` je tím
-             * pádem v pořádku i bez zařazení.
+             * zacházení složek, ne jejich zařazením. Výjimka je proto svázaná
+             * jen s druhy benefitů, pro které detailní atribut neexistuje.
              */
-            if ($taxTreatment === 'exempt') {
+            if ($mapping === null
+                && $taxTreatment === 'exempt'
+                && in_array($componentKind, self::EXEMPT_KINDS_WITHOUT_DETAIL, true)
+            ) {
                 return null;
             }
 

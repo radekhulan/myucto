@@ -10,7 +10,7 @@ final class AuthoritativeTransactionReconciler
 {
     public function __construct(private readonly PDO $pdo) {}
 
-    public function candidates(array $transactions, int $supplierId, string $account, string $bank, string $currency, string $source): array
+    public function candidates(array $transactions, int $supplierId, string $account, string $bank, string $currency, string $source, array $confirmations = [], array $fingerprints = []): array
     {
         if ($transactions === [] || $supplierId <= 0 || !in_array($source, ['gpc', 'bank_api'], true)) return [];
         $accountKey = self::account($account, $bank);
@@ -27,13 +27,31 @@ final class AuthoritativeTransactionReconciler
             self::account((string) $row['own_account'], (string) $row['own_bank']) === $accountKey
         ));
         $byDateAmount = [];
+        $byId = [];
         foreach ($stored as $row) {
             $byDateAmount[self::dateAmount($row)][] = $row;
+            $byId[(int) $row['id']] = $row;
+        }
+        $known = [];
+        if ($fingerprints !== []) {
+            $alias = $this->pdo->prepare(
+                'SELECT DISTINCT link.bank_transaction_id FROM bank_transaction_imports link
+                 JOIN bank_statements imported ON imported.id = link.statement_id
+                 WHERE link.import_fingerprint = ? AND imported.supplier_id = ? AND imported.source = ?'
+            );
+            foreach ($fingerprints as $index => $fingerprint) {
+                $alias->execute([$fingerprint, $supplierId, $source]);
+                $ids = array_values(array_filter(array_map('intval', $alias->fetchAll(PDO::FETCH_COLUMN)), static fn (int $id): bool => isset($byId[$id])));
+                if (count($ids) > 1) throw new StatementReconciliationException();
+                if ($ids !== []) $known[$index] = $ids[0];
+            }
         }
         $matches = [];
         $reverse = [];
         $strong = [];
+        foreach ($known as $index => $id) $reverse[$id][] = $index;
         foreach ($transactions as $index => $tx) {
+            if (isset($known[$index])) continue;
             $possible = array_values(array_filter($byDateAmount[self::dateAmount($tx)] ?? [], static fn (array $row): bool =>
                 $row['statement_source'] !== $source && self::compatible($tx, $row)
             ));
@@ -47,14 +65,52 @@ final class AuthoritativeTransactionReconciler
                 $strong[$index][$id] = self::strong($tx, $row);
             }
         }
-        $result = [];
+        $result = $known;
+        $review = [];
         foreach ($matches as $index => $ids) {
-            if (count($ids) !== 1 || count($reverse[$ids[0]]) !== 1 || !$strong[$index][$ids[0]]) {
-                throw new \InvalidArgumentException('Výpis obsahuje nejednoznačnou shodu s dříve načtenými pohyby API/GPC. Import nebyl uložen; pohyby je nutné nejprve zkontrolovat.');
+            if (count($ids) !== 1 || count($reverse[$ids[0]]) !== 1) {
+                throw new StatementReconciliationException();
+            }
+            if (!$strong[$index][$ids[0]]) {
+                $tx = $transactions[$index];
+                $existing = $byId[$ids[0]];
+                $key = hash('sha256', json_encode([
+                    $supplierId, $accountKey, $currency, $source,
+                    $fingerprints[$index] ?? null,
+                    self::confirmationIdentity($tx), $ids[0], (int) $existing['statement_id'],
+                    $existing['import_fingerprint'] ?? null, self::confirmationIdentity($existing),
+                ], JSON_THROW_ON_ERROR));
+                if (!in_array($key, $confirmations, true)) {
+                    $review[] = [
+                        'confirmation_key' => $key,
+                        'posted_at' => $tx['posted_at'],
+                        'amount' => number_format((float) $tx['amount'], 2, '.', ''),
+                        'currency' => $currency,
+                        'existing_transaction_id' => $ids[0],
+                        'existing_statement_id' => (int) $existing['statement_id'],
+                        'description' => (string) ($tx['description'] ?? ''),
+                        'existing_description' => (string) ($existing['description'] ?? ''),
+                        'counterparty_account' => (string) ($tx['counterparty_account'] ?? ''),
+                        'existing_counterparty_account' => (string) ($existing['counterparty_account'] ?? ''),
+                        'variable_symbol' => (string) ($tx['variable_symbol'] ?? ''),
+                        'existing_variable_symbol' => (string) ($existing['variable_symbol'] ?? ''),
+                    ];
+                }
             }
             $result[$index] = $ids[0];
         }
+        if ($review !== []) throw new StatementReconciliationException($review);
         return $result;
+    }
+
+    private static function confirmationIdentity(array $transaction): array
+    {
+        $identity = [];
+        foreach (['posted_at', 'bank_ref', 'variable_symbol', 'constant_symbol', 'specific_symbol', 'counterparty_account', 'counterparty_bank', 'counterparty_name', 'description'] as $field) {
+            $identity[$field] = (string) ($transaction[$field] ?? '');
+        }
+        $identity['amount'] = number_format((float) $transaction['amount'], 2, '.', '');
+        return $identity;
     }
 
     public static function account(string $number, string $bank): ?string

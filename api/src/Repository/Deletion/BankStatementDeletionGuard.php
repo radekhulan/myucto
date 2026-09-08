@@ -27,6 +27,14 @@ final class BankStatementDeletionGuard extends ForeignKeyDeletionGuard
     protected static function blockers(): array
     {
         return [
+            'bank_api_monthly_evidence' => [
+                'message' => 'Výpis je součástí průběžné měsíční evidence bankovního API (%d vazeb) a nelze jej samostatně smazat.',
+                'references' => [
+                    ['table' => 'bank_api_months', 'column' => 'statement_id'],
+                    ['table' => 'bank_api_evidence_months', 'column' => 'evidence_statement_id'],
+                    ['table' => 'bank_api_evidence_months', 'column' => 'monthly_statement_id'],
+                ],
+            ],
             'bank_import_evidence' => [
                 'message' => 'Výpis nelze smazat, protože %d jeho pohybů je doloženo také jiným importem. Nejprve odstraňte navazující výpis.',
                 'references' => [

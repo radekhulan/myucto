@@ -74,7 +74,7 @@ final class JmhzPreparationSnapshotBuilder
      *        skutečnosti podle `employee_id`, načtené ve stejné transakci
      * @param array<string,mixed>|null $employerAnnualEvidence prosincová
      *        neměnná roční evidence zaměstnavatele
-     * @param array<int,array<string,array{given_name:string,family_name:string}>> $childIdentitySources
+     * @param array<int,array<string,array{given_name:string,family_name:string,birth_date:string}>> $childIdentitySources
      *        jméno a příjmení vyživovaného dítěte podle `employee_id` a
      *        `child_reference`. Nárok sám nese jen neosobní referenci, XSD
      *        (`osobaType`) ale u dítěte jméno vyžaduje — viz
@@ -365,6 +365,7 @@ final class JmhzPreparationSnapshotBuilder
                         $treatment,
                         is_array($mapping) ? $mapping : null,
                         $component['tax_treatment'] ?? null,
+                        $component['component_kind'] ?? null,
                     );
                     if ($componentIssue !== null) {
                         $issues[] = $this->issue($componentIssue, 'component', $componentId);
@@ -1608,15 +1609,15 @@ final class JmhzPreparationSnapshotBuilder
      *
      * Nároky bere ze zmrazené zákonné evidence mzdové revize, ne z živé
      * tabulky — jinak by se podání rozešlo s výpočtem, ze kterého vzniklo.
-     * Identita dítěte se dohledává zvlášť (nárok ji nenese) a zmrazují se JEN
-     * jméno a příjmení, protože víc XSD u měsíčního bloku nechce.
+     * Identita dítěte se dohledává zvlášť (nárok ji nenese) a zmrazují se
+     * jméno, příjmení a datum narození pro obsahové kontroly 114, 128 a 215.
      *
      * Nedoložený nárok (`evidence_status = unverified`) se vynechává stejně
      * jako ve výpočtu daně — kalkulátor ho do zvýhodnění nepustí, takže by
      * v podání stálo dítě, které se v částce neprojevilo.
      *
      * @param array<string,mixed> $person řádek `input.people[]`
-     * @param array<string,array{given_name:string,family_name:string}> $identities
+     * @param array<string,array{given_name:string,family_name:string,birth_date:string}> $identities
      * @return array<string,mixed>
      */
     private function childCreditEvidence(array $person, array $identities): array

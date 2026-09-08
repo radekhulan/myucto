@@ -88,6 +88,14 @@ pojištění, průměrného výdělku, exekučního základu, JMHZ, statistiky a
 účetnictví. Schválený vstup si uloží neměnný snapshot této klasifikace; pozdější
 změna katalogu proto nepřepíše již zpracované období.
 
+Osvobození od daně samo o sobě nenahrazuje zařazení do JMHZ. Náhrada mzdy
+při nemoci a příspěvky na penzijní produkty nebo pojištění dlouhodobé péče
+potřebují zařazení do odpovídajícího údaje hlášení i tehdy, když jsou
+osvobozené. Chybějící nebo deaktivované zařazení použitých složek zastaví
+přípravu hlášení. Osvobozené příspěvky na stravování, ubytování, vzdělávání,
+rekreaci a zdravotní benefity se mohou vykázat pouze v úhrnu příjmů bez
+zařazení do rozpadu mzdy.
+
 Omylem založenou vlastní složku nebo pravidelný předpis lze tlačítkem
 **Smazat** odstranit, dokud ještě nevstoupily do žádného mzdového vstupu,
 výpočtu ani jiné navazující evidence. Před odstraněním se vždy zobrazí

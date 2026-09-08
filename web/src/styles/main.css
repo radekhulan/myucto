@@ -11,6 +11,10 @@
 @custom-variant xl (@container workspace (width >= 80rem));
 @custom-variant 2xl (@container workspace (width >= 96rem));
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   container-name: workspace;
   container-type: inline-size;

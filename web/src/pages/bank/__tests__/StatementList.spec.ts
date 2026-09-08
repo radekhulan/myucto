@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { BankStatementPage, ImportResult } from '@/api/bank'
+import type { BankReconciliationCandidate } from '@/types/bankReconciliation'
 
 // #19: dnes se v BE opravila tichá ztráta pohybů při GPC importu (commit 6d09abe6) —
 // `/bank-statements/upload` teď vrací `parsed_transactions`/`skipped_duplicates`/
@@ -57,6 +58,7 @@ vi.mock('@/api/clients', () => ({
 }))
 
 vi.mock('@/api/errors', () => ({
+  apiErrorCode: (e: any) => e?.response?.data?.error?.code ?? '',
   apiErrorMessage: (e: unknown) => String((e as { message?: string })?.message ?? e),
 }))
 
@@ -106,6 +108,48 @@ function emptyPage(): BankStatementPage {
 
 function gpcFile(name = 'vypis.gpc'): File {
   return new File(['some gpc content'], name, { type: 'text/plain' })
+}
+
+function reconciliationCandidate(): BankReconciliationCandidate {
+  return {
+    confirmation_key: 'a'.repeat(64),
+    posted_at: '2026-03-12',
+    amount: '925.18',
+    currency: 'CZK',
+    existing_transaction_id: 81,
+    existing_statement_id: 18,
+    description: 'Nový popis',
+    existing_description: 'Původní popis',
+    counterparty_account: '',
+    existing_counterparty_account: '',
+    variable_symbol: '',
+    existing_variable_symbol: '',
+  }
+}
+
+function importedResult(): ImportResult {
+  return {
+    statement_id: 42,
+    transactions: 0,
+    matched: 0,
+    duplicate: false,
+    parsed_transactions: 1,
+    skipped_duplicates: 1,
+    warnings: [],
+  }
+}
+
+function reconciliationConflict(candidate = reconciliationCandidate()) {
+  return {
+    response: {
+      data: {
+        error: {
+          code: 'statement_reconciliation_required',
+          reconciliation_candidates: [candidate],
+        },
+      },
+    },
+  }
 }
 
 async function selectFiles(wrapper: ReturnType<typeof mount>, files: File[]) {
@@ -208,5 +252,76 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
     expect(m.toastWarning).toHaveBeenCalledWith(
       'bank.warning.transactions_skipped_as_duplicate_batch:' + JSON.stringify({ count: 2 }),
     )
+  })
+
+  it('po potvrzení kandidáta zopakuje tentýž GPC upload s confirmation key', async () => {
+    const candidate = reconciliationCandidate()
+    const result = importedResult()
+    const nextCandidate = { ...candidate, confirmation_key: 'b'.repeat(64) }
+    m.upload.mockRejectedValueOnce(reconciliationConflict(candidate))
+      .mockRejectedValueOnce(reconciliationConflict(nextCandidate)).mockResolvedValueOnce(result)
+    const file = gpcFile()
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+
+    const selection = selectFiles(wrapper, [file])
+    await flushPromises()
+    expect(wrapper.find('[data-testid="reconciliation-panel"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="confirm-reconciliation"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="confirm-reconciliation"]').trigger('click')
+    await selection
+
+    expect(m.upload).toHaveBeenNthCalledWith(1, file, undefined, [])
+    expect(m.upload).toHaveBeenNthCalledWith(2, file, undefined, [candidate.confirmation_key])
+    expect(m.upload).toHaveBeenNthCalledWith(3, file, undefined, [candidate.confirmation_key, nextCandidate.confirmation_key])
+    await flushPromises()
+    expect(m.push).toHaveBeenCalledWith('/bank/42')
+  })
+
+  it('po volbě účtu zachová account_id i při navazujícím potvrzeném retry', async () => {
+    const candidate = reconciliationCandidate()
+    m.upload
+      .mockRejectedValueOnce({
+        response: {
+          data: {
+            error: {
+              code: 'ambiguous_account_currency',
+              candidates: [{ account_id: 7, currency: 'CZK', bank_code: '0100', label: 'CZK /0100' }],
+            },
+          },
+        },
+      })
+      .mockRejectedValueOnce(reconciliationConflict(candidate))
+      .mockResolvedValueOnce(importedResult())
+    const file = gpcFile()
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+
+    const selection = selectFiles(wrapper, [file])
+    await flushPromises()
+    const accountConfirm = wrapper.findAll('button').find(button => button.text() === 'bank.choose_account_confirm')
+    expect(accountConfirm).toBeDefined()
+    await accountConfirm!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="confirm-reconciliation"]').trigger('click')
+    await selection
+
+    expect(m.upload).toHaveBeenNthCalledWith(2, file, 7, [])
+    expect(m.upload).toHaveBeenNthCalledWith(3, file, 7, [candidate.confirmation_key])
+  })
+
+  it('zrušení review neodesílá potvrzení ani další upload', async () => {
+    m.upload.mockRejectedValueOnce(reconciliationConflict())
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+
+    const selection = selectFiles(wrapper, [gpcFile()])
+    await flushPromises()
+    await wrapper.get('[data-testid="cancel-reconciliation"]').trigger('click')
+    await selection
+
+    expect(m.upload).toHaveBeenCalledOnce()
+    expect(m.push).not.toHaveBeenCalled()
   })
 })

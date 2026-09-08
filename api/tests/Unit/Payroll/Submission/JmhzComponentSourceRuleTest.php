@@ -37,9 +37,22 @@ final class JmhzComponentSourceRuleTest extends TestCase
      */
     public function testExemptIncomeNeedsNoMapping(): void
     {
-        self::assertNull(
-            JmhzComponentSourceRule::issueCode('included', null, 'exempt'),
-        );
+        foreach (['benefit_meal', 'benefit_accommodation', 'benefit_education', 'benefit_recreation', 'benefit_health'] as $kind) {
+            self::assertNull(JmhzComponentSourceRule::issueCode('included', null, 'exempt', $kind));
+        }
+    }
+
+    public function testExemptIncomeWithDetailedReportingRequiresMapping(): void
+    {
+        foreach (['compensation', 'benefit_pension', 'benefit_care', 'risky_savings', null, 'unknown'] as $kind) {
+            self::assertSame(
+                'component_jmhz_mapping_missing',
+                JmhzComponentSourceRule::issueCode('included', null, 'exempt', $kind),
+            );
+            self::assertNull(JmhzComponentSourceRule::issueCode(
+                'included', ['target_attribute_id' => '10342'], 'exempt', $kind,
+            ));
+        }
     }
 
     /**

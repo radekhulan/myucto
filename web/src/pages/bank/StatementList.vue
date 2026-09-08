@@ -8,6 +8,7 @@ import type { AxiosError } from 'axios'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
+import { bankReconciliationCandidates } from '@/utils/bankConnectionError'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
@@ -17,6 +18,8 @@ import type { SavedFilter } from '@/api/preferences'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import BankReconciliationConfirmation from '@/components/bank/BankReconciliationConfirmation.vue'
+import type { BankReconciliationCandidate } from '@/types/bankReconciliation'
 
 // embedded = vykresleno jako záložka „Bankovní výpisy" uvnitř BankPage.vue
 // (hlavičku stránky dodává obálka, tady zůstávají jen akční tlačítka).
@@ -182,6 +185,9 @@ const error = ref('')
 const ambiguityModal = ref<{ fileName: string; candidates: AmbiguousAccount[] } | null>(null)
 const ambiguitySelected = ref<number | null>(null)
 let ambiguityResolver: ((accountId: number | null) => void) | null = null
+const reconciliationModal = ref<{ fileName: string; candidates: BankReconciliationCandidate[] } | null>(null)
+const reconciliationBusy = ref(false)
+let reconciliationResolver: ((confirmationKeys: string[] | null) => void) | null = null
 
 function ambiguousCandidates(e: unknown): AmbiguousAccount[] | null {
   const err = e as AxiosError<{ error?: { code?: string; candidates?: AmbiguousAccount[] } }>
@@ -209,6 +215,26 @@ function cancelAmbiguity() {
   ambiguityModal.value = null
   ambiguityResolver?.(null)
   ambiguityResolver = null
+}
+
+function askForReconciliation(fileName: string, candidates: BankReconciliationCandidate[]): Promise<string[] | null> {
+  reconciliationBusy.value = false
+  reconciliationModal.value = { fileName, candidates }
+  return new Promise(resolve => { reconciliationResolver = resolve })
+}
+
+function confirmReconciliation() {
+  const keys = reconciliationModal.value?.candidates.map(candidate => candidate.confirmation_key) ?? null
+  reconciliationBusy.value = true
+  reconciliationModal.value = null
+  reconciliationResolver?.(keys)
+  reconciliationResolver = null
+}
+
+function cancelReconciliation() {
+  reconciliationModal.value = null
+  reconciliationResolver?.(null)
+  reconciliationResolver = null
 }
 
 async function onScan() {
@@ -385,8 +411,38 @@ async function onDelete(s: BankStatement, ev: MouseEvent) {
 // Jeden vstup pro GPC/ABO i PDF — rozhoduje se PER SOUBOR podle přípony (uživatel
 // může naráz vybrat mix obojího), backend endpointy zůstávají oddělené (GPC parser
 // vs bank-specifický PDF parser — Creditas/ČSOB/KB/Raiffeisenbank, viz BankStatementPdfParserRegistry).
-function uploadFnFor(file: File): (file: File, accountId?: number) => Promise<ImportResult> {
-  return file.name.toLowerCase().endsWith('.pdf') ? bankApi.importPdf : bankApi.upload
+async function uploadStatementFile(file: File): Promise<ImportResult | null> {
+  const isPdf = file.name.toLowerCase().endsWith('.pdf')
+  let accountId: number | undefined
+  let reconciliationConfirmations: string[] = []
+  let accountPrompted = false
+
+  while (true) {
+    try {
+      return isPdf
+        ? await bankApi.importPdf(file, accountId)
+        : await bankApi.upload(file, accountId, reconciliationConfirmations)
+    } catch (e) {
+      const accounts = ambiguousCandidates(e)
+      if (accounts && !accountPrompted) {
+        accountPrompted = true
+        const selected = await askForAccount(file.name, accounts)
+        if (selected === null) return null
+        accountId = selected
+        continue
+      }
+
+      const reconciliations = isPdf ? [] : bankReconciliationCandidates(e)
+      if (reconciliations.some(candidate => !reconciliationConfirmations.includes(candidate.confirmation_key))) {
+        const confirmed = await askForReconciliation(file.name, reconciliations)
+        if (confirmed === null) return null
+        reconciliationConfirmations = [...new Set([...reconciliationConfirmations, ...confirmed])]
+        continue
+      }
+
+      throw e
+    }
+  }
 }
 
 async function onFileSelected(e: Event) {
@@ -410,25 +466,12 @@ async function onFileSelected(e: Event) {
 
   const results: ImportResult[] = []
   for (const file of files) {
-    const uploadFn = uploadFnFor(file)
     try {
-      results.push(await uploadFn(file))
+      const result = await uploadStatementFile(file)
+      if (result !== null) results.push(result)
     } catch (e) {
-      // #167: sdílené číslo účtu napříč měnami → nech uživatele zvolit cílový účet a zkus znovu.
-      const candidates = ambiguousCandidates(e)
-      if (candidates) {
-        const accountId = await askForAccount(file.name, candidates)
-        if (accountId === null) continue  // uživatel zrušil → soubor přeskočíme (ne chyba)
-        try {
-          results.push(await uploadFn(file, accountId))
-        } catch (e2) {
-          errorCount++
-          errors.push(`${file.name}: ${apiErrorMessage(e2)}`)
-        }
-      } else {
-        errorCount++
-        errors.push(`${file.name}: ${apiErrorMessage(e)}`)
-      }
+      errorCount++
+      errors.push(`${file.name}: ${apiErrorMessage(e)}`)
     }
   }
   // #19: `duplicate=true` = celý soubor (file_hash) je znovunahraný — očekávaná
@@ -791,6 +834,23 @@ async function onFileSelected(e: Event) {
           class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
       </div>
     </nav>
+
+    <div v-if="reconciliationModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 space-y-4">
+        <p class="font-medium break-all">{{ reconciliationModal.fileName }}</p>
+        <BankReconciliationConfirmation
+          :candidates="reconciliationModal.candidates"
+          :busy="reconciliationBusy"
+          @confirm="confirmReconciliation"
+        />
+        <div class="flex justify-end">
+          <button type="button" :class="btnOutline('neutral')" :disabled="reconciliationBusy" data-testid="cancel-reconciliation" @click="cancelReconciliation">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="m6 6 12 12M6 18 18 6" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- #167: volba cílového měnového účtu u sdíleného čísla účtu. Bez click-outside. -->
     <div v-if="ambiguityModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

@@ -1303,6 +1303,7 @@ final class JmhzScenario1DocumentResolver
             $order = $child['order'] ?? null;
             if (!$this->isPersonName($identity['given_name'] ?? null)
                 || !$this->isPersonName($identity['family_name'] ?? null)
+                || !$this->isPersonBirthDate($identity['birth_date'] ?? null)
             ) {
                 // Jméno dítěte nese karta vyživované osoby a `full_name` se
                 // úmyslně nedělí automaticky; bez rozdělených částí by do
@@ -1311,7 +1312,7 @@ final class JmhzScenario1DocumentResolver
                     'jmhz_scenario1_child_identity_incomplete',
                     'person',
                     $employeeId,
-                    ['10435', '10436'],
+                    ['10435', '10436', '10437'],
                 );
 
                 return null;
@@ -1333,6 +1334,7 @@ final class JmhzScenario1DocumentResolver
                 'identity' => [
                     'given_name' => trim((string) $identity['given_name']),
                     'family_name' => trim((string) $identity['family_name']),
+                    'birth_date' => $identity['birth_date'],
                 ],
                 'ztp_p' => ($child['ztp_p'] ?? null) === true,
                 'order' => (string) $order,
@@ -1365,6 +1367,14 @@ final class JmhzScenario1DocumentResolver
         return is_string($value)
             && trim($value) !== ''
             && mb_strlen(trim($value)) <= 100;
+    }
+
+    private function isPersonBirthDate(mixed $value): bool
+    {
+        if (!is_string($value) || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value) !== 1) {
+            return false;
+        }
+        return checkdate((int) substr($value, 5, 2), (int) substr($value, 8, 2), (int) substr($value, 0, 4));
     }
 
     /**

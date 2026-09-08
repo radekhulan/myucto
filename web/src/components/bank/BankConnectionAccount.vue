@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import type { CurrencyAccount } from '@/api/settings'
-import { bankConnectionsApi, type BankConnection, type BankConnectionProvider, type BankSyncResult } from '@/api/bankConnections'
-import { bankConnectionErrorMessage } from '@/utils/bankConnectionError'
+import { bankConnectionsApi, type BankConnection, type BankConnectionProvider, type BankReconciliationCandidate, type BankSyncRequest, type BankSyncResult } from '@/api/bankConnections'
+import { bankConnectionErrorMessage, bankReconciliationCandidates } from '@/utils/bankConnectionError'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { formatDateTime } from '@/composables/useFormat'
 import { formatAccountNumber } from '@/utils/bankAccount'
@@ -14,6 +14,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 import KbPlusOnboarding from './KbPlusOnboarding.vue'
 import CreditasConnectionSetup from './CreditasConnectionSetup.vue'
 import CsasOnboarding from './CsasOnboarding.vue'
+import BankReconciliationConfirmation from './BankReconciliationConfirmation.vue'
 
 const props = defineProps<{ account: CurrencyAccount; connection: BankConnection | null; providers: BankConnectionProvider[]; canWrite: boolean }>()
 const emit = defineEmits<{ changed: [] }>()
@@ -37,6 +38,11 @@ const saved = ref(false)
 const result = ref<BankSyncResult | null>(null)
 const from = ref('')
 const to = ref(appIsoDate())
+const reconciliationCandidates = ref<BankReconciliationCandidate[]>([])
+const reconciliationConfirmations = ref<string[]>([])
+const reconciliationRequest = ref<BankSyncRequest | null>(null)
+const reconciliationRetrySeconds = ref(0)
+let reconciliationTimer: number | null = null
 const available = computed(() => props.providers.filter(p => p.implemented && p.capabilities.statement_import && p.bank_codes.includes(props.account.bank_code || '')))
 const newCertificate = computed(() => !!clientId.value || !!certificate.value || !!certificatePassword.value)
 const canSave = computed(() => props.canWrite && !busy.value && !!provider.value && (certificateProvider.value
@@ -56,6 +62,7 @@ watch(() => props.connection, connection => {
   provider.value = connection?.provider ?? available.value[0]?.code ?? ''
 }, { immediate: true })
 watch(available, value => { if (!provider.value) provider.value = value[0]?.code ?? '' })
+watch([from, to], clearReconciliation)
 watch(() => [route.query.kb_plus, route.query.currency_id], ([outcome, currencyId]) => {
   if (props.account.bank_code === '0100' && ['connected', 'error'].includes(String(outcome)) && String(currencyId) === String(props.account.id)) opened.value = true
 }, { immediate: true })
@@ -70,6 +77,26 @@ function clearCredentials() {
 }
 watch(opened, value => { if (!value) clearCredentials() })
 watch(provider, clearCredentials)
+onBeforeUnmount(clearReconciliation)
+function clearReconciliation() {
+  reconciliationCandidates.value = []
+  reconciliationConfirmations.value = []
+  reconciliationRequest.value = null
+  reconciliationRetrySeconds.value = 0
+  if (reconciliationTimer !== null) window.clearInterval(reconciliationTimer)
+  reconciliationTimer = null
+}
+function startReconciliationCooldown() {
+  reconciliationRetrySeconds.value = 30
+  if (reconciliationTimer !== null) window.clearInterval(reconciliationTimer)
+  reconciliationTimer = window.setInterval(() => {
+    reconciliationRetrySeconds.value--
+    if (reconciliationRetrySeconds.value <= 0 && reconciliationTimer !== null) {
+      window.clearInterval(reconciliationTimer)
+      reconciliationTimer = null
+    }
+  }, 1000)
+}
 async function readCertificate(event: Event) {
   const version = ++certificateReadVersion
   certificateName.value = ''
@@ -125,20 +152,42 @@ async function disconnect() {
     busy.value = false
   }
 }
-async function sync() {
+async function runSync(request: BankSyncRequest, confirmations: string[] = [], resetReconciliation = false) {
   if (!props.canWrite || busy.value || invalidPeriod.value || !props.connection?.enabled || blockDemoMutation()) return
+  if (resetReconciliation) clearReconciliation()
   busy.value = true
   error.value = ''
   result.value = null
   try {
-    result.value = await bankConnectionsApi.sync(props.account.id, from.value ? { from: from.value, to: to.value } : {})
+    result.value = await bankConnectionsApi.sync(props.account.id, {
+      ...request,
+      ...(confirmations.length > 0 ? { reconciliation_confirmations: confirmations } : {}),
+    })
+    clearReconciliation()
     emit('changed')
   } catch (e) {
     error.value = bankConnectionErrorMessage(e, t, t('bank_connection.sync_failed'))
+    const candidates = bankReconciliationCandidates(e)
+    if (candidates.length > 0) {
+      reconciliationConfirmations.value = confirmations
+      reconciliationCandidates.value = candidates
+      reconciliationRequest.value = { ...request }
+      startReconciliationCooldown()
+    }
     emit('changed')
   } finally {
     busy.value = false
   }
+}
+async function sync() {
+  await runSync(from.value ? { from: from.value, to: to.value } : {}, [], true)
+}
+async function confirmReconciliation() {
+  if (reconciliationRetrySeconds.value > 0 || reconciliationRequest.value === null) return
+  await runSync(
+    reconciliationRequest.value,
+    [...new Set([...reconciliationConfirmations.value, ...reconciliationCandidates.value.map(candidate => candidate.confirmation_key)])],
+  )
 }
 </script>
 
@@ -221,6 +270,13 @@ async function sync() {
         <RouterLink v-if="result.imported_statement_id" :to="{ name: 'bank-detail', params: { id: result.imported_statement_id } }" class="underline">{{ t('bank_connection.open_statement') }}</RouterLink>
       </div>
       <p v-if="error" class="text-sm text-danger-600" role="alert">{{ error }}</p>
+      <BankReconciliationConfirmation
+        v-if="reconciliationCandidates.length"
+        :candidates="reconciliationCandidates"
+        :busy="busy"
+        :retry-seconds="reconciliationRetrySeconds"
+        @confirm="confirmReconciliation"
+      />
     </div>
   </div>
 </template>

@@ -1,5 +1,7 @@
 import { api } from './client'
 
+export type { BankReconciliationCandidate } from '@/types/bankReconciliation'
+
 export interface BankStatement {
   id: number
   /** Zdroj výpisu: 'gpc' = nahraný/importovaný GPC výpis, 'pdf' = rozparsovaný PDF výpis (banka bez GPC exportu), 'email_notice' = měsíční agregát e-mailových avíz, 'idoklad' = měsíční agregát pohybů z iDokladu. */
@@ -39,6 +41,7 @@ export interface BankStatement {
   has_pdf: boolean
   /** Původní název nahraného PDF, pokud je. */
   pdf_name?: string | null
+  evidence_pdfs?: Array<{ id: number; pdf_name: string | null }>
 }
 
 export type MatchStatus = 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'
@@ -385,10 +388,13 @@ export const bankApi = {
    * u víceměnového účtu se sdíleným číslem účtu, kdy server vrátí 409
    * `ambiguous_account_currency` se seznamem kandidátů (#167).
    */
-  upload: (file: File, accountId?: number) => {
+  upload: (file: File, accountId?: number, reconciliationConfirmations: string[] = []) => {
     const fd = new FormData()
     fd.append('file', file)
     if (accountId !== undefined) fd.append('account_id', String(accountId))
+    if (reconciliationConfirmations.length > 0) {
+      fd.append('reconciliation_confirmations', JSON.stringify(reconciliationConfirmations))
+    }
     return api.post<ImportResult>('/bank-statements/upload', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)

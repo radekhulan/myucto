@@ -302,6 +302,13 @@ const statementActions = computed<ActionItem[]>(() => {
       title: s.pdf_name ?? t('bank.download_pdf'),
       href: bankApi.pdfUrl(s.id),
     },
+    ...(s.evidence_pdfs ?? []).map(pdf => ({
+      key: `evidence_pdf_${pdf.id}`,
+      label: t('bank.evidence_pdf', { name: pdf.pdf_name ?? String(pdf.id) }),
+      icon: 'download' as const,
+      tier: 'overflow' as const,
+      href: bankApi.pdfUrl(pdf.id),
+    })),
     {
       key: 'pdf_upload',
       label: t('bank.pdf_upload'),

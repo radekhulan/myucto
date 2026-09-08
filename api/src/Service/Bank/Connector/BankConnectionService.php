@@ -8,6 +8,7 @@ use MyInvoice\Repository\BankConnectionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\GpcParser;
+use MyInvoice\Service\Bank\StatementReconciliationException;
 use MyInvoice\Service\Bank\StatementImporter;
 
 final class BankConnectionService
@@ -147,9 +148,10 @@ final class BankConnectionService
         ?string $from = null,
         ?string $to = null,
         ?int $userId = null,
+        array $reconciliationConfirmations = [],
     ): array {
         return $this->calls->withConnectionLock($supplierId, $currencyId, function () use (
-            $supplierId, $currencyId, $from, $to, $userId,
+            $supplierId, $currencyId, $from, $to, $userId, $reconciliationConfirmations,
         ): array {
             $connection = $this->connections->findWithCredentialByCurrency($supplierId, $currencyId);
             if ($connection === null) {
@@ -190,15 +192,38 @@ final class BankConnectionService
                 if ($connector instanceof MultiFileBankConnector) {
                     $result = ['statement_id' => null, 'statement_ids' => [], 'transactions' => 0, 'matched' => 0, 'skipped_duplicates' => 0];
                     foreach ($connector->statementFiles($content) as $file) {
-                        $imported = $this->importer->importConnected($file['content'], $file['filename'], $userId, $currencyId, $supplierId);
+                        $imported = $this->importer->importConnected(
+                            $file['content'],
+                            $file['filename'],
+                            $userId,
+                            $currencyId,
+                            $supplierId,
+                            $reconciliationConfirmations,
+                        );
                         $result['statement_id'] = $imported['statement_id'];
                         $result['statement_ids'][] = $imported['statement_id'];
                         foreach (['transactions', 'matched', 'skipped_duplicates'] as $key) $result[$key] += (int) ($imported[$key] ?? 0);
                     }
                 } else {
                     $result = $connector instanceof StructuredBankConnector
-                        ? $this->importer->importConnectedParsed($parsed, $content, $fileName, $userId, $currencyId, $supplierId)
-                        : $this->importer->importConnected($content, $fileName, $userId, $currencyId, $supplierId);
+                        ? $this->importer->importConnectedParsed(
+                            $parsed,
+                            $content,
+                            $fileName,
+                            $userId,
+                            $currencyId,
+                            $supplierId,
+                            'bank_api',
+                            $reconciliationConfirmations,
+                        )
+                        : $this->importer->importConnected(
+                            $content,
+                            $fileName,
+                            $userId,
+                            $currencyId,
+                            $supplierId,
+                            $reconciliationConfirmations,
+                        );
                 }
                 $this->connections->recordSyncSuccess($supplierId, $connectionId, $watermarkTo);
 
@@ -208,6 +233,16 @@ final class BankConnectionService
                     'import_result' => $result,
                     'period' => ['from' => $periodFrom, 'to' => $periodTo],
                 ];
+            } catch (StatementReconciliationException $e) {
+                $this->connections->recordSyncError(
+                    $supplierId,
+                    $connectionId,
+                    StatementReconciliationException::ERROR_CODE,
+                );
+                throw new BankConnectorOperationException(
+                    StatementReconciliationException::ERROR_CODE,
+                    ['reconciliation_candidates' => $e->candidates],
+                );
             } catch (BankConnectorOperationException $e) {
                 $this->connections->recordSyncError($supplierId, $connectionId, $e->errorCode);
                 throw $e;

@@ -42,6 +42,15 @@ na měsíc obvykle.
 
 ## 28.2 Upload výpisu do MyÚčto
 
+Přímé API načítání sdružuje pohyby do jednoho výpisu za měsíc, účet a měnu.
+Jednotlivé odpovědi banky se v seznamu nezobrazují jako další překrývající
+se výpisy. GPC pro účet s API evidencí se začlení do stejného měsíce.
+Pokud pokrývá všechny jeho pohyby, nahradí API přehled jako hlavní bankovní
+výpis pod stejným odkazem. Zachová se párování i zaúčtování a originální
+GPC lze stáhnout. Neúplný GPC nesmaže pohyby, které už byly načtené přes API.
+PDF příloha úplného podkladu zůstane dostupná u měsíčního výpisu. Další PDF
+původních podkladů najdeš v nabídce akcí jeho detailu.
+
 V hlavním menu **Peníze → Bankovní účty**, záložka **Bankovní výpisy** →
 tlačítko **Nahrát GPC/ABO nebo PDF**.
 
@@ -79,6 +88,11 @@ a počet automaticky spárovaných. Jestliže se některé pohyby shodují s ji�
 evidovanými, zobrazí se samostatné varování s počty **nalezeno / založeno /
 přeskočeno jako duplicita**. U dávkového nahrání se přeskočené pohyby sečtou do
 společného varování. Zkontroluj je, zvlášť pokud nejde o očekávaný překryv výpisů.
+
+Pokud měsíční GPC obsahuje platby již načtené z API, připojí se k existujícím
+pohybům. Rozdílné bankovní reference mohou vyžadovat potvrzení nalezených dvojic.
+Před potvrzením porovnej údaje obou zdrojů; původní párování a zaúčtování zůstane
+zachované. Podrobnosti jsou v [kapitole Bankovní účty](29_Bankovni_ucty.md).
 
 Příklad výsledku bez přeskočených duplicit:
 

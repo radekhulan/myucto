@@ -12,10 +12,9 @@ use PDO;
  *
  * Nárok (`payroll_person_tax_child_claims`) nese jen neosobní `child_reference`,
  * protože do snímku mzdového běhu osobní údaje nepatří. XSD (`osobaType`) ale
- * u dítěte vyžaduje jméno a příjmení, takže se do zmrazené PŘÍPRAVY JMHZ
- * dohledávají až tady — a jen ty dva údaje. Datum narození ani rodné číslo
- * měsíční blok nevyžaduje (`minOccurs=0`), takže se nezmrazují: rodné číslo je
- * navíc v `payroll_dependants` šifrované a do podání nemá důvod jít.
+ * u dítěte vyžaduje jméno a příjmení. Kontroly 114, 128 a 215 navíc vyžadují
+ * identifikaci pro ověření věku, proto se do přípravy dohledává také datum
+ * narození. Šifrované rodné číslo se nenačítá.
  */
 final readonly class PayrollDependantJmhzIdentityRepository
 {
@@ -23,7 +22,7 @@ final readonly class PayrollDependantJmhzIdentityRepository
 
     /**
      * @param list<int> $employeeIds
-     * @return array<int,array<string,array{given_name:string,family_name:string}>>
+     * @return array<int,array<string,array{given_name:string,family_name:string,birth_date:string}>>
      *         zaměstnanec → `child_reference` → identita
      */
     public function identitiesFor(int $supplierId, array $employeeIds): array
@@ -38,7 +37,7 @@ final readonly class PayrollDependantJmhzIdentityRepository
 
         $placeholders = implode(', ', array_fill(0, count($ids), '?'));
         $statement = $this->db->pdo()->prepare(
-            "SELECT employee_id, id, given_name, family_name
+            "SELECT employee_id, id, given_name, family_name, birth_date
                FROM payroll_dependants
               WHERE supplier_id = ? AND employee_id IN ({$placeholders})
               ORDER BY employee_id, id"
@@ -58,6 +57,7 @@ final readonly class PayrollDependantJmhzIdentityRepository
             $result[(int) $row['employee_id']]['dependant-' . (int) $row['id']] = [
                 'given_name' => $givenName,
                 'family_name' => $familyName,
+                'birth_date' => (string) ($row['birth_date'] ?? ''),
             ];
         }
 

@@ -45,46 +45,46 @@ final class StatementImporter
      *               parsed_transactions:int, skipped_duplicates:int,
      *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int}>}
      */
-    public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null): array
+    public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null, array $reconciliationConfirmations = []): array
     {
         $parsed = $this->parser->parse($content);
         $account = $currencyId !== null ? $this->loadCurrencyById($currencyId) : $this->lookupAccount($parsed['header']['account_number']);
         $owner = $currencyId !== null ? $account : $this->lookupRegisteredOwner($parsed['header']['account_number']);
         if (!empty($account['id']) && !empty($owner['supplier_id']) && $owner['supplier_id'] === $account['supplier_id']) {
-            return $this->importScoped($parsed, $content, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'gpc', false);
+            return $this->importScoped($parsed, $content, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'gpc', false, $reconciliationConfirmations);
         }
         return $this->persist($parsed, $content, $fileName, $userId, $currencyId, 'gpc');
     }
 
-    public function importConnected(string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId): array
+    public function importConnected(string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, array $reconciliationConfirmations = []): array
     {
-        return $this->importConnectedParsed($this->parser->parse($content), $content, $fileName, $userId, $currencyId, $supplierId, 'gpc');
+        return $this->importConnectedParsed($this->parser->parse($content), $content, $fileName, $userId, $currencyId, $supplierId, 'gpc', $reconciliationConfirmations);
     }
 
-    public function importConnectedParsed(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source = 'bank_api'): array
+    public function importConnectedParsed(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source = 'bank_api', array $reconciliationConfirmations = []): array
     {
-        return $this->importScoped($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, true);
+        return $this->importScoped($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, true, $reconciliationConfirmations);
     }
 
-    private function importScoped(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive): array
+    private function importScoped(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive, array $reconciliationConfirmations = []): array
     {
         $pdo = $this->db->pdo();
         if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'mysql') {
-            return $this->importScopedLocked($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, $requireActive);
+            return $this->importScopedLocked($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, $requireActive, $reconciliationConfirmations);
         }
         $name = \MyInvoice\Infrastructure\Database\NamedLockName::for($this->db, 'bank-import', (string) $supplierId);
         $lock = $pdo->prepare('SELECT GET_LOCK(?, 30)');
         $lock->execute([$name]);
         if ((int) $lock->fetchColumn() !== 1) throw new \RuntimeException('Probíhá jiný import bankovních pohybů této firmy. Opakujte načtení později.');
         try {
-            return $this->importScopedLocked($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, $requireActive);
+            return $this->importScopedLocked($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, $requireActive, $reconciliationConfirmations);
         } finally {
             $release = $pdo->prepare('SELECT RELEASE_LOCK(?)');
             $release->execute([$name]);
         }
     }
 
-    private function importScopedLocked(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive): array
+    private function importScopedLocked(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive, array $reconciliationConfirmations = []): array
     {
         if (!in_array($source, ['gpc', 'bank_api'], true)) {
             throw new \InvalidArgumentException('Unsupported connected statement source.');
@@ -113,7 +113,7 @@ final class StatementImporter
                 throw new \InvalidArgumentException('Nastavení účtu se během importu změnilo. Opakujte načtení.');
             }
             $processingIds = [];
-            $result = $this->persist($parsed, $content, $fileName, $userId, $currencyId, $source, true, $processingIds);
+            $result = $this->persist($parsed, $content, $fileName, $userId, $currencyId, $source, true, $processingIds, $reconciliationConfirmations);
             $scope = $pdo->prepare("SELECT id FROM bank_statements WHERE id = ? AND supplier_id = ? AND source = ? AND currency = ? AND COALESCE(bank_code, '') = ?");
             $scope->execute([$result['statement_id'], $supplierId, $source, $account['code'], $account['bank_code'] ?? '']);
             if ($scope->fetchColumn() === false) {
@@ -128,6 +128,17 @@ final class StatementImporter
                     throw new \InvalidArgumentException('Pohyb nelze přiřadit připojenému účtu firmy.');
                 }
                 $affectedStatements[] = (int) $owner['id'];
+            }
+            $monthly = new BankApiMonthlyStatements($pdo);
+            if ($source === 'bank_api' || $monthly->hasApiAccount($supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'])) {
+                $months = $monthly->projectAccount(
+                    $supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'], $userId,
+                );
+                $result['evidence_statement_id'] = $result['statement_id'];
+                $result['statement_ids'] = $monthly->monthIds((int) $result['statement_id'], $supplierId);
+                $result['statement_id'] = $result['statement_ids'][array_key_last($result['statement_ids'])];
+                foreach ($months as $ids) array_push($affectedStatements, ...$ids);
+                array_push($affectedStatements, ...$result['statement_ids']);
             }
             $pdo->commit();
         } catch (\Throwable $e) {
@@ -146,16 +157,14 @@ final class StatementImporter
             }
         }
         $this->processTransactions($pendingIds, $userId);
-        $count = $pdo->prepare("SELECT COUNT(*) FROM bank_transactions WHERE statement_id = ? AND match_status IN ('auto_exact', 'auto_partial', 'manual')");
         $update = $pdo->prepare('UPDATE bank_statements SET matched_count = ? WHERE id = ?');
         foreach (array_unique($affectedStatements) as $statementId) {
-            $count->execute([$statementId]);
-            $matched = (int) $count->fetchColumn();
+            $matched = (int) $pdo->query("SELECT COUNT(*) FROM bank_transactions bt WHERE " . StatementTransactionScope::sql((int) $statementId) . " AND bt.match_status IN ('auto_exact', 'auto_partial', 'manual')")->fetchColumn();
             $update->execute([$matched, $statementId]);
             if ($statementId === $result['statement_id']) $result['matched'] = $matched;
         }
         $result['matched'] = (int) $pdo->query(
-            "SELECT COUNT(*) FROM bank_transactions bt WHERE " . StatementTransactionScope::sql((int) $result['statement_id'])
+            "SELECT COUNT(*) FROM bank_transactions bt WHERE " . StatementTransactionScope::sql((int) ($result['evidence_statement_id'] ?? $result['statement_id']))
             . " AND bt.match_status IN ('auto_exact', 'auto_partial', 'manual')"
         )->fetchColumn();
         try {
@@ -183,7 +192,7 @@ final class StatementImporter
      * @param string $rawBytes Originální bajty souboru — hashují se pro dedup a ukládají
      *   se buď do file_content (source='gpc') nebo pdf_content (source='pdf').
      */
-    private function persist(array $parsed, string $rawBytes, string $fileName, ?int $userId, ?int $currencyId, string $source, bool $deferProcessing = false, ?array &$processingIds = null): array
+    private function persist(array $parsed, string $rawBytes, string $fileName, ?int $userId, ?int $currencyId, string $source, bool $deferProcessing = false, ?array &$processingIds = null, array $reconciliationConfirmations = []): array
     {
         $hash = hash('sha256', $rawBytes);
         $pdo = $this->db->pdo();
@@ -246,10 +255,13 @@ final class StatementImporter
         $statementCurrency = $accountCurrency
             ?? $this->detectStatementCurrency($parsed['transactions']);
 
+        $identities = $this->transactionIdentities($parsed['transactions'], (string) $h['account_number'], $accountBankCode, $accountCurrency, $statementCurrency);
+
         $crossSource = $deferProcessing && $statementSupplierId !== null
             ? (new AuthoritativeTransactionReconciler($pdo))->candidates(
                 $parsed['transactions'], $statementSupplierId, (string) $h['account_number'],
                 (string) $accountBankCode, (string) $statementCurrency, $source,
+                $reconciliationConfirmations, array_column($identities, 'fingerprint'),
             ) : [];
 
         if ($statementSupplierId !== null) {
@@ -308,70 +320,12 @@ final class StatementImporter
              WHERE bti.import_fingerprint = ? AND bs.supplier_id = ? LIMIT 1'
         ) : null;
 
-        // Bankovní reference je identitou pohybu jen tehdy, když je v souboru JEDINEČNÁ.
-        // Některé banky do pole čísla dokladu píšou konstantu nebo denní pořadí — kdyby
-        // se taková hodnota vzala jako identita, splynuly by v otisku dva různé pohyby.
-        $referenceCounts = [];
-        foreach ($parsed['transactions'] as $tx) {
-            $ref = trim((string) ($tx['bank_ref'] ?? ''));
-            if ($ref !== '') {
-                $referenceCounts[$ref] = ($referenceCounts[$ref] ?? 0) + 1;
-            }
-        }
-        /** @var array<string,int> $identitySeen Pořadí pohybu se shodným náhradním otiskem V RÁMCI souboru. */
-        $identitySeen = [];
-
         $matched = 0;
         $inserted = 0;
         $skipped = 0;
         $matchIds = [];
         foreach ($parsed['transactions'] as $index => $tx) {
-            // Měna registrovaného účtu přebíjí i per-tx pole (#109): výpis je
-            // jednoměnový a Fio do 075 píše konstantně CZK i u EUR účtu — per-tx
-            // hodnota by rozbila currency guard v matcheru. Per-tx kód se použije
-            // jen jako fallback, když účet není registrovaný (CREDITAS/KB ho
-            // plní reálně) — aby se EUR transakce neztratila.
-            $txCurrency = $accountCurrency ?? $tx['currency'] ?? $statementCurrency;
-
-            // Pořadí pohybu se shodným náhradním otiskem v souboru: tři legitimní platby
-            // téže částky, dne a VS dostanou pořadí 0, 1, 2 a přestanou splývat. Pořadí 0
-            // otisk NEMĚNÍ, takže překrývající se výpisy dedup dál drží (týž pohyb je
-            // v obou souborech pod stejným pořadím) a historické otisky zůstávají platné.
-            $identityKey = implode("\x1f", $this->fallbackIdentity($tx, 0));
-            $ordinal = $identitySeen[$identityKey] ?? 0;
-            $identitySeen[$identityKey] = $ordinal + 1;
-
-            $reference = trim((string) ($tx['bank_ref'] ?? ''));
-            $useReference = $reference !== '' && ($referenceCounts[$reference] ?? 0) === 1;
-            $identity = $useReference
-                ? ['bank_ref', $reference]
-                : $this->fallbackIdentity($tx, $ordinal);
-            $fingerprint = $this->transactionFingerprint(
-                (string) $h['account_number'],
-                $accountBankCode,
-                $txCurrency,
-                $tx,
-                $identity,
-            );
-
-            // Zpětná kompatibilita: pohyby naimportované DŘÍV (kdy GPC bank_ref neplnil)
-            // nesou otisk z náhradní identity bez pořadí. Bez tohohle kandidáta by je
-            // překrývající se výpis po upgradu založil ZNOVU — z opravy tiché ztráty dat
-            // by se stalo tiché zdvojení. Legacy otisk platí jen pro PRVNÍ výskyt identity
-            // v souboru, aby druhá legitimní platba dál prošla.
-            $candidates = [$fingerprint];
-            if ($ordinal === 0) {
-                $legacy = $this->transactionFingerprint(
-                    (string) $h['account_number'],
-                    $accountBankCode,
-                    $txCurrency,
-                    $tx,
-                    $this->fallbackIdentity($tx, 0),
-                );
-                if ($legacy !== $fingerprint) {
-                    $candidates[] = $legacy;
-                }
-            }
+            ['currency' => $txCurrency, 'fingerprint' => $fingerprint, 'candidates' => $candidates] = $identities[$index];
             $alreadyStored = false;
             $duplicateId = $crossSource[$index] ?? false;
             if ($duplicateId === false && $findAlias !== null) {
@@ -488,6 +442,74 @@ final class StatementImporter
             $this->bankPosting?->handleTransaction((int) $txId, $userId, !empty($result['requires_review']));
         }
         return $matched;
+    }
+
+    private function transactionIdentities(array $transactions, string $accountNumber, ?string $accountBankCode, ?string $accountCurrency, ?string $statementCurrency): array
+    {
+        // Bankovní reference je identitou pohybu jen tehdy, když je v souboru JEDINEČNÁ.
+        // Některé banky do pole čísla dokladu píšou konstantu nebo denní pořadí — kdyby
+        // se taková hodnota vzala jako identita, splynuly by v otisku dva různé pohyby.
+        $referenceCounts = [];
+        foreach ($transactions as $tx) {
+            $ref = trim((string) ($tx['bank_ref'] ?? ''));
+            if ($ref !== '') {
+                $referenceCounts[$ref] = ($referenceCounts[$ref] ?? 0) + 1;
+            }
+        }
+        /** @var array<string,int> $identitySeen Pořadí pohybu se shodným náhradním otiskem V RÁMCI souboru. */
+        $identitySeen = [];
+
+        $result = [];
+        foreach ($transactions as $index => $tx) {
+            // Měna registrovaného účtu přebíjí i per-tx pole (#109): výpis je
+            // jednoměnový a Fio do 075 píše konstantně CZK i u EUR účtu — per-tx
+            // hodnota by rozbila currency guard v matcheru. Per-tx kód se použije
+            // jen jako fallback, když účet není registrovaný (CREDITAS/KB ho
+            // plní reálně) — aby se EUR transakce neztratila.
+            $txCurrency = $accountCurrency ?? $tx['currency'] ?? $statementCurrency;
+
+            // Pořadí pohybu se shodným náhradním otiskem v souboru: tři legitimní platby
+            // téže částky, dne a VS dostanou pořadí 0, 1, 2 a přestanou splývat. Pořadí 0
+            // otisk NEMĚNÍ, takže překrývající se výpisy dedup dál drží (týž pohyb je
+            // v obou souborech pod stejným pořadím) a historické otisky zůstávají platné.
+            $identityKey = implode("\x1f", $this->fallbackIdentity($tx, 0));
+            $ordinal = $identitySeen[$identityKey] ?? 0;
+            $identitySeen[$identityKey] = $ordinal + 1;
+
+            $reference = trim((string) ($tx['bank_ref'] ?? ''));
+            $useReference = $reference !== '' && ($referenceCounts[$reference] ?? 0) === 1;
+            $identity = $useReference
+                ? ['bank_ref', $reference]
+                : $this->fallbackIdentity($tx, $ordinal);
+            $fingerprint = $this->transactionFingerprint(
+                $accountNumber,
+                $accountBankCode,
+                $txCurrency,
+                $tx,
+                $identity,
+            );
+
+            // Zpětná kompatibilita: pohyby naimportované DŘÍV (kdy GPC bank_ref neplnil)
+            // nesou otisk z náhradní identity bez pořadí. Bez tohohle kandidáta by je
+            // překrývající se výpis po upgradu založil ZNOVU — z opravy tiché ztráty dat
+            // by se stalo tiché zdvojení. Legacy otisk platí jen pro PRVNÍ výskyt identity
+            // v souboru, aby druhá legitimní platba dál prošla.
+            $candidates = [$fingerprint];
+            if ($ordinal === 0) {
+                $legacy = $this->transactionFingerprint(
+                    $accountNumber,
+                    $accountBankCode,
+                    $txCurrency,
+                    $tx,
+                    $this->fallbackIdentity($tx, 0),
+                );
+                if ($legacy !== $fingerprint) {
+                    $candidates[] = $legacy;
+                }
+            }
+            $result[$index] = ['currency' => $txCurrency, 'fingerprint' => $fingerprint, 'candidates' => $candidates];
+        }
+        return $result;
     }
 
     /**

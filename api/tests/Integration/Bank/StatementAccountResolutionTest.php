@@ -72,7 +72,10 @@ final class StatementAccountResolutionTest extends TestCase
             return;
         }
         $pdo = $this->db->pdo();
+        if ($pdo->inTransaction()) $pdo->rollBack();
         foreach ($this->statementIds as $id) {
+            $pdo->prepare('DELETE FROM bank_api_evidence_months WHERE evidence_statement_id = ? OR monthly_statement_id = ?')->execute([$id, $id]);
+            $pdo->prepare('DELETE FROM bank_api_months WHERE statement_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM bank_transaction_imports WHERE original_statement_id = ? OR statement_id = ?')->execute([$id, $id]);
             $pdo->prepare('DELETE FROM bank_transactions WHERE statement_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
@@ -188,6 +191,84 @@ final class StatementAccountResolutionTest extends TestCase
         $this->statementIds[] = $sid;
     }
 
+    public function testGpcReconciliationRequiresExplicitConfirmationAndRetriesSameUpload(): void
+    {
+        $account = '1000000005';
+        $currencyId = $this->registerCurrency('CZK', $account, '0100');
+        $apiStatementId = $this->insertStatement('bank_api', $account, '0100', '2026-03-31', 1337.00, 'reconciliation-api');
+        $this->db->pdo()->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ?')
+            ->execute([$this->supplierId, $apiStatementId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, currency, description, bank_ref)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        )->execute([$apiStatementId, '2026-03-12', 925.18, 'CZK', 'PRICHOZI TEST', 'RLZ-0000000001']);
+        $apiTransactionId = (int) $this->db->pdo()->lastInsertId();
+
+        $content = $this->gpc($account);
+        [$conflictResponse, $conflictBody] = $this->upload($content, accountId: $currencyId);
+
+        $this->assertSame(409, $conflictResponse->getStatusCode());
+        $this->assertSame('statement_reconciliation_required', $conflictBody['error']['code'] ?? null);
+        $candidates = $conflictBody['error']['reconciliation_candidates'] ?? [];
+        $this->assertCount(1, $candidates);
+        $this->assertSame([
+            'confirmation_key',
+            'posted_at',
+            'amount',
+            'currency',
+            'existing_transaction_id',
+            'existing_statement_id',
+            'description',
+            'existing_description',
+            'counterparty_account',
+            'existing_counterparty_account',
+            'variable_symbol',
+            'existing_variable_symbol',
+        ], array_keys($candidates[0]));
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', (string) $candidates[0]['confirmation_key']);
+        $this->assertSame($apiTransactionId, $candidates[0]['existing_transaction_id']);
+        $this->assertSame($apiStatementId, $candidates[0]['existing_statement_id']);
+        $this->assertSame(0, $this->countStatementsBySource($account, 'gpc'), 'konfliktní pokus nesmí uložit GPC výpis');
+
+        [$confirmedResponse, $confirmedBody] = $this->upload(
+            $content,
+            accountId: $currencyId,
+            reconciliationConfirmations: json_encode([$candidates[0]['confirmation_key']], JSON_THROW_ON_ERROR),
+        );
+
+        $this->assertSame(200, $confirmedResponse->getStatusCode(), json_encode($confirmedBody));
+        $gpcStatementId = (int) ($confirmedBody['statement_id'] ?? 0);
+        $this->assertGreaterThan(0, $gpcStatementId);
+        $this->statementIds[] = $gpcStatementId;
+        $this->statementIds[] = (int) $confirmedBody['evidence_statement_id'];
+        $this->assertSame(0, $confirmedBody['transactions'] ?? null);
+        $this->assertSame(1, $confirmedBody['skipped_duplicates'] ?? null);
+        $alias = $this->db->pdo()->prepare(
+            'SELECT bank_transaction_id FROM bank_transaction_imports WHERE statement_id = ?'
+        );
+        $alias->execute([$gpcStatementId]);
+        $this->assertSame($apiTransactionId, (int) $alias->fetchColumn());
+    }
+
+    public function testGpcReconciliationConfirmationsRejectMalformedMultipartJson(): void
+    {
+        $account = '1000000005';
+        $invalidValues = [
+            'not-json',
+            json_encode([str_repeat('a', 63)], JSON_THROW_ON_ERROR),
+            json_encode([str_repeat('b', 64), str_repeat('b', 64)], JSON_THROW_ON_ERROR),
+            str_repeat(' ', 40001),
+        ];
+
+        foreach ($invalidValues as $raw) {
+            [$response, $body] = $this->upload($this->gpc($account), reconciliationConfirmations: $raw);
+            $this->assertSame(422, $response->getStatusCode());
+            $this->assertSame('validation_failed', $body['error']['code'] ?? null);
+        }
+        $this->assertSame(0, $this->countStatements($account));
+    }
+
     /**
      * Stavy na účtech musí rozlišit stejné číslo u různých bank a zahrnout jak GPC,
      * tak bankovní PDF. Starý výpis bez bank_code je při dvou bankách nejednoznačný
@@ -277,6 +358,85 @@ final class StatementAccountResolutionTest extends TestCase
         $pdo->prepare("INSERT INTO bank_match_suggestions (supplier_id, bank_transaction_id, kind, reason, candidates_json, top_score) VALUES (?, ?, 'single', 'no_vs', '[]', 0)")->execute([$this->supplierId, $txId]);
         $suggestions = Bootstrap::buildContainer()->get(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class)->listForStatement($gpcId, $this->supplierId);
         self::assertSame([$txId], array_column($suggestions, 'bank_transaction_id'));
+
+        $before = $pdo->query('SELECT * FROM bank_transactions WHERE id = ' . $txId)->fetch(PDO::FETCH_ASSOC);
+        $pdo->beginTransaction();
+        $monthly = new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo);
+        $mapping = $monthly->projectAccount($this->supplierId, $account, '2250', 'CZK');
+        $pdo->commit();
+        $monthId = $mapping[$apiId][0];
+        $this->statementIds[] = $monthId;
+        $response = $this->action->list($request, new Response());
+        $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $rows = array_column($body['items'], null, 'id');
+        self::assertArrayNotHasKey($apiId, $rows);
+        self::assertArrayHasKey($monthId, $rows);
+        self::assertArrayNotHasKey($gpcId, $rows);
+        self::assertSame('gpc', $rows[$monthId]['source']);
+        self::assertSame(1, $rows[$monthId]['transaction_count']);
+        self::assertSame(1, $rows[$monthId]['unposted_count']);
+        self::assertSame($before, $pdo->query('SELECT * FROM bank_transactions WHERE id = ' . $txId)->fetch(PDO::FETCH_ASSOC));
+        $pdo->beginTransaction();
+        self::assertSame([], $monthly->projectAccount($this->supplierId, $account, '2250', 'CZK'));
+        self::assertSame([$monthId], $monthly->monthIds($apiId, $this->supplierId));
+        $pdo->commit();
+        $pdo->prepare('UPDATE bank_statements SET statement_number = ? WHERE id = ?')->execute(['099', $gpcId]);
+        $attachment = new \ReflectionMethod(BankStatementAction::class, 'findStatementForPdfAttachment');
+        self::assertSame($monthId, $attachment->invoke($this->action, $this->supplierId, [
+            'header' => ['statement_date' => '2099-07-31', 'statement_number' => '042'],
+            'transactions' => [['posted_at' => '2099-07-15', 'amount' => 100]],
+        ], null, $account));
+        $deleted = $this->action->delete($request, new Response(), ['id' => $monthId]);
+        self::assertSame(409, $deleted->getStatusCode());
+        self::assertSame('monthly_api_statement', json_decode((string) $deleted->getBody(), true)['error']['code']);
+    }
+
+    public static function pdfEvidenceCases(): array
+    {
+        return [['gpc', false], ['bank_api', false], ['gpc', true]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('pdfEvidenceCases')]
+    public function testCompleteEvidencePdfRemainsAccessibleOnMonthlyStatement(string $source, bool $partial): void
+    {
+        $account = '1000000005';
+        $this->registerCurrency('CZK', $account, '2250');
+        $apiId = $this->insertStatement('bank_api', $account, '2250', '2099-08-31', 100.0, 'pdf-api');
+        $gpcId = $this->insertStatement($source, $account, '2250', '2099-08-31', 100.0, 'pdf-gpc');
+        $pdo = $this->db->pdo();
+        $pdf = '%PDF-1.4 synthetic monthly document';
+        $hash = hash('sha256', $pdf);
+        $pdo->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id IN (?, ?)')->execute([$this->supplierId, $apiId, $gpcId]);
+        $pdo->prepare('UPDATE bank_statements SET pdf_content = ?, pdf_name = ?, pdf_hash = ?, pdf_size_bytes = ?, pdf_uploaded_at = NOW() WHERE id = ?')->execute([$pdf, 'synthetic.pdf', $hash, strlen($pdf), $gpcId]);
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-08-15', 100, 'CZK')")->execute([$apiId]);
+        $txId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id) VALUES (?, ?, ?, ?, ?)')->execute([$gpcId, $txId, hash('sha256', 'synthetic-pdf-alias'), $this->supplierId, $apiId]);
+        if ($partial) $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-08-16', 200, 'CZK')")->execute([$apiId]);
+        $pdo->beginTransaction();
+        $mapping = (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo))->projectAccount($this->supplierId, $account, '2250', 'CZK');
+        $pdo->commit();
+        $monthId = $mapping[$apiId][0];
+        $this->statementIds[] = $monthId;
+        $row = $pdo->query('SELECT pdf_content, pdf_name, pdf_hash, pdf_size_bytes FROM bank_statements WHERE id = ' . $monthId)->fetch(PDO::FETCH_ASSOC);
+        if ($partial) {
+            $monthly = new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo);
+            self::assertNull($row['pdf_content']);
+            self::assertSame([['id' => $gpcId, 'pdf_name' => 'synthetic.pdf']], $monthly->evidencePdfs($monthId, $this->supplierId));
+            self::assertSame([], $monthly->evidencePdfs($monthId, $this->supplierId + 1000000));
+            $lookup = new \ReflectionMethod(BankStatementAction::class, 'statementWithPdfHash');
+            self::assertSame($gpcId, $lookup->invoke($this->action, $hash, $this->supplierId));
+            return;
+        }
+        self::assertSame($pdf, $row['pdf_content']);
+        self::assertSame('synthetic.pdf', $row['pdf_name']);
+        self::assertSame($hash, $row['pdf_hash']);
+        self::assertSame(strlen($pdf), (int) $row['pdf_size_bytes']);
+        $lookup = new \ReflectionMethod(BankStatementAction::class, 'statementWithPdfHash');
+        self::assertSame($monthId, $lookup->invoke($this->action, $hash, $this->supplierId));
+        $pdo->prepare('UPDATE bank_statements SET pdf_content = ? WHERE id = ?')->execute(['%PDF-1.4 manual attachment', $monthId]);
+        $preserve = new \ReflectionMethod(\MyInvoice\Service\Bank\BankApiMonthlyStatements::class, 'preservePdf');
+        $preserve->invoke(new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo), $monthId, $this->supplierId);
+        self::assertSame('%PDF-1.4 manual attachment', $pdo->query('SELECT pdf_content FROM bank_statements WHERE id = ' . $monthId)->fetchColumn());
     }
 
     private function registerCurrency(string $code, string $accountNumber, string $bankCode, bool $isDefault = false): int
@@ -300,10 +460,17 @@ final class StatementAccountResolutionTest extends TestCase
      *
      * @return array{0: Response, 1: array<string,mixed>}
      */
-    private function upload(string $content, ?int $accountId = null): array
+    private function upload(
+        string $content,
+        ?int $accountId = null,
+        ?string $reconciliationConfirmations = null,
+    ): array
     {
         $file = $this->uploadedFile($content);
         $parsedBody = $accountId !== null ? ['account_id' => $accountId] : [];
+        if ($reconciliationConfirmations !== null) {
+            $parsedBody['reconciliation_confirmations'] = $reconciliationConfirmations;
+        }
         $req = $this->mockRequest($this->supplierId, 'admin', ['file' => $file], $parsedBody);
         $resp = $this->action->upload($req, new Response());
         /** @var array<string,mixed> $body */
@@ -357,6 +524,18 @@ final class StatementAccountResolutionTest extends TestCase
             }
         }
         return $n;
+    }
+
+    private function countStatementsBySource(string $account, string $source): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM bank_statements
+              WHERE source = ?
+                AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(account_number, ''), '[^0-9]', ''))
+                  = TRIM(LEADING '0' FROM REGEXP_REPLACE(?, '[^0-9]', ''))"
+        );
+        $stmt->execute([$source, $account]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function insertStatement(

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\CzechBirthNumber;
+
 /**
  * Vykonávací implementace kontrol katalogu ČSSZ nad prvním profilem měsíčního
  * hlášení (`scenario_1`, `form:bezPriznaku`, řádné podání).
@@ -34,6 +36,8 @@ final class JmhzScenario1ControlEvaluator
      * neměly obě pohromadě.
      */
     private const ELDP_SECTION_DEPTH = 3;
+
+    private const MONTHLY_CHILD_DEPTH = 5;
 
     /**
      * Kontroly, které ověřují stav v systémech ČSSZ nebo v naší evidenci
@@ -201,14 +205,14 @@ final class JmhzScenario1ControlEvaluator
     public function implementedControlIds(): array
     {
         return [
-            1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
+            1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
-            103, 109, 112, 118, 121, 124, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
+            103, 109, 110, 112, 114, 118, 121, 124, 127, 128, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
             150, 151, 153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
-            204, 207, 208,
-            191, 192, 193, 211, 216, 227, 232, 233, 235,
+            204, 207, 208, 215,
+            191, 192, 193, 211, 216, 227, 229, 232, 233, 235,
             236, 237, 240, 244, 248, 251,
-            253, 255, 260, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
+            253, 255, 260, 265, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
             296, 299, 300, 301, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
             335, 341, 342, 354, 355,
         ];
@@ -354,6 +358,7 @@ final class JmhzScenario1ControlEvaluator
             12 => $this->employeeInsuranceMatchesForms($projection),
             13 => $this->insuranceTotal($projection),
             20 => $this->workedHoursCoverOvertime($projection),
+            29 => $this->surchargeTotalCoversNamedSurcharges($projection),
             36 => $this->overtimeHoursRequireSurchargeAmount($projection),
             23 => $this->unworkedHoursCoverVacation($projection),
             43, 44 => $this->insuranceIntervalOrderedAndFilled($projection),
@@ -371,6 +376,10 @@ final class JmhzScenario1ControlEvaluator
             98 => $this->dayCountsWithinMonth($projection),
             99 => $this->eldpValidityWithinPeriod($projection),
             109 => $this->atMostIncome($projection, '10416'),
+            110 => $this->monthlyChildOrdersAreContinuous($projection),
+            114 => $this->monthlyChildHasBirthIdentifier($projection),
+            127 => $this->otherHouseholdCaregiverComplete($projection),
+            128 => $this->monthlyChildCreditComplete($projection),
             118 => $this->employeeSocialInsuranceRate($projection),
             315 => $this->employerSocialInsuranceRate($projection),
             121 => $this->sumMatchesWhenPositive(
@@ -390,6 +399,7 @@ final class JmhzScenario1ControlEvaluator
                 'source_row_9',
             ),
             208 => $this->onlyWithFlag($projection, '10491', '10490'),
+            215 => $this->monthlyChildUnderTwentySix($projection),
             216 => $this->assessmentBaseSum($projection),
             270 => $this->employeeDiscountTolerance(
                 $projection,
@@ -421,6 +431,7 @@ final class JmhzScenario1ControlEvaluator
             233 => $this->amendmentStructureNonEmpty($projection),
             235 => $this->declaredFormCountMatchesReality($projection),
             227 => $this->totalFormCountMatchesReality($projection),
+            229 => $this->monthlyChildOrdersDoNotCollide($projection),
             236 => $this->regularSubmissionHasOnlyRegularForms($projection),
             237 => $this->cancelledFormsHaveHeaderOnly($projection),
             240 => $this->packageMetadataPresent($projection),
@@ -466,6 +477,7 @@ final class JmhzScenario1ControlEvaluator
             253 => $this->employmentIdentifierUnique($projection),
             255 => $this->primaryEmploymentAtLeastOne($projection),
             260 => $this->primaryEmploymentAtMostOne($projection),
+            265 => $this->monthlyChildOrderFromCodebook($projection),
             286 => $this->unworkedHoursBreakdownEmpty($projection),
             299 => $this->insuranceIntervalWithinPeriod($projection),
             304 => $this->taxBaseNotNegative($projection),
@@ -2495,6 +2507,32 @@ final class JmhzScenario1ControlEvaluator
         });
     }
 
+    /** @return list<JmhzControlVerdict> */
+    private function surchargeTotalCoversNamedSurcharges(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                $total = $form->integer('10332');
+                $named = 0;
+                foreach (['10334', '10335', '10336'] as $attributeId) {
+                    $named += $form->integer($attributeId) ?? 0;
+                }
+                if ($total === null) {
+                    return $named === 0
+                        ? null
+                        : 'Jsou vykázané jednotlivé příplatky, ale chybí jejich úhrn 10332.';
+                }
+
+                return $total >= $named
+                    ? null
+                    : "Příplatky celkem {$total} Kč jsou nižší než součet"
+                        . " příplatků za noc, víkend a svátek {$named} Kč.";
+            },
+        );
+    }
+
     /**
      * Kontrola 36: má-li měsíc přesčasové hodiny, musí být vykázaná i výše
      * příplatku za práci přesčas.
@@ -2869,6 +2907,207 @@ final class JmhzScenario1ControlEvaluator
                     if ($form->has($attributeId)) {
                         return 'Bez podepsaného prohlášení poplatníka nesmí být'
                             . " uplatněna sleva ani zvýhodnění ({$attributeId}).";
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function monthlyChildOrdersAreContinuous(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                $orders = [];
+                foreach ($form->all('10440') as $occurrence) {
+                    $orders[] = $occurrence->value;
+                }
+                foreach ($orders as $order) {
+                    if (!in_array($order, ['2', '3'], true)) {
+                        continue;
+                    }
+                    $lowerOrUnclaimed = count(array_filter(
+                        $orders,
+                        static fn (string $candidate): bool => $candidate === 'N'
+                            || (in_array($candidate, ['1', '2'], true)
+                                && (int) $candidate < (int) $order),
+                    ));
+                    if ($lowerOrUnclaimed < (int) $order - 1) {
+                        return "Pořadí dětí obsahuje {$order} bez dostatečného počtu"
+                            . ' dětí s nižším pořadím nebo s hodnotou N.';
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function monthlyChildHasBirthIdentifier(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                $children = $form->groupedBy(
+                    ['10435', '10436', '10437', '10438', '10439', '10440'],
+                    self::MONTHLY_CHILD_DEPTH,
+                );
+                foreach ($children as $child) {
+                    if (isset($child['10440'])
+                        && !isset($child['10437'])
+                        && !isset($child['10438'])
+                    ) {
+                        return 'Vyživované dítě nemá datum narození ani rodné číslo.';
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function otherHouseholdCaregiverComplete(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                if ($form->boolean('10453') !== true) {
+                    return null;
+                }
+                $caregivers = $form->groupedBy(
+                    ['10431', '10432', '10433', '10434'],
+                    self::MONTHLY_CHILD_DEPTH,
+                );
+                if ($caregivers === []) {
+                    return 'Chybí údaje jiné osoby vyživující děti ve společné domácnosti.';
+                }
+                foreach ($caregivers as $caregiver) {
+                    if (!isset($caregiver['10431'], $caregiver['10432'])
+                        || (!isset($caregiver['10433']) && !isset($caregiver['10434']))
+                    ) {
+                        return 'Jiná vyživující osoba nemá úplné jméno a datum narození nebo rodné číslo.';
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function monthlyChildCreditComplete(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                $credit = $form->integer('10303');
+                if ($credit === null || $credit <= 0) {
+                    return null;
+                }
+                $children = $form->groupedBy(
+                    ['10435', '10436', '10437', '10438', '10439', '10440'],
+                    self::MONTHLY_CHILD_DEPTH,
+                );
+                if ($children === []) {
+                    return 'Měsíční daňové zvýhodnění nemá uvedené žádné vyživované dítě.';
+                }
+                foreach ($children as $child) {
+                    if (!isset($child['10435'], $child['10436'], $child['10439'], $child['10440'])
+                        || (!isset($child['10437']) && !isset($child['10438']))
+                    ) {
+                        return 'Vyživované dítě nemá všechny povinné údaje měsíčního zvýhodnění.';
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function monthlyChildUnderTwentySix(
+        JmhzAttributeProjection $projection,
+    ): array {
+        $periodStart = self::calendarDay($this->periodStart($projection));
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($periodStart): ?string {
+                $children = $form->groupedBy(
+                    ['10437', '10438', '10440'],
+                    self::MONTHLY_CHILD_DEPTH,
+                );
+                foreach ($children as $child) {
+                    $order = $child['10440'] ?? null;
+                    if (!in_array($order, ['1', '2', '3'], true)) {
+                        continue;
+                    }
+                    $birthDate = self::calendarDay($child['10437'] ?? null);
+                    if ($birthDate === null && isset($child['10438'])) {
+                        try {
+                            $birthDate = self::calendarDay(CzechBirthNumber::birthDate(
+                                CzechBirthNumber::normalize($child['10438']),
+                            ));
+                        } catch (\InvalidArgumentException) {
+                            return 'Z rodného čísla dítěte nelze určit platné datum narození.';
+                        }
+                    }
+                    if ($birthDate === null) {
+                        return 'Pro kontrolu věku dítěte chybí platné datum narození.';
+                    }
+                    if ($periodStart !== null && $birthDate->modify('+26 years') <= $periodStart) {
+                        return 'Dítě dosáhlo 26 let nejpozději první den vykazovaného měsíce.';
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function monthlyChildOrdersDoNotCollide(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                $counts = ['1' => 0, '2' => 0];
+                foreach ($form->all('10440') as $occurrence) {
+                    if (isset($counts[$occurrence->value])) {
+                        ++$counts[$occurrence->value];
+                    }
+                }
+                foreach ($counts as $order => $count) {
+                    if ($count > 1) {
+                        return "Pořadí {$order} je uvedeno u více vyživovaných dětí.";
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function monthlyChildOrderFromCodebook(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                foreach ($form->all('10440') as $occurrence) {
+                    if (!in_array($occurrence->value, ['1', '2', '3', 'N'], true)) {
+                        return "Pořadí dítěte {$occurrence->value} není v číselníku 1, 2, 3, N.";
                     }
                 }
 

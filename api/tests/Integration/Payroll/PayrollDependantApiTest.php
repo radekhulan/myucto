@@ -629,6 +629,20 @@ final class PayrollDependantApiTest extends TestCase
         self::assertSame(1, $this->claimCount());
     }
 
+    public function testJmhzIdentityIncludesBirthDateWithoutBirthNumber(): void
+    {
+        $id = $this->createChild(['given_name' => 'Jana', 'family_name' => 'Nováková']);
+        $repository = new \MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository($this->db);
+        self::assertSame([
+            $this->employeeId => ['dependant-' . $id => [
+                'given_name' => 'Jana',
+                'family_name' => 'Nováková',
+                'birth_date' => '2001-01-01',
+            ]],
+        ], $repository->identitiesFor($this->supplierId, [$this->employeeId]));
+        self::assertSame([], $repository->identitiesFor($this->otherSupplierId, [$this->employeeId]));
+    }
+
     // --- pomocníci ---------------------------------------------------------
 
     /** @param array<string,mixed> $overrides @return array<string,mixed> */

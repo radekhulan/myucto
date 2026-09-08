@@ -7,7 +7,11 @@ import type { CurrencyAccount } from '@/api/settings'
 const m = vi.hoisted(() => ({ save: vi.fn(), sync: vi.fn(), disconnect: vi.fn() }))
 vi.mock('@/api/bankConnections', () => ({ bankConnectionsApi: m }))
 vi.mock('@/composables/useDemoMode', () => ({ useDemoMode: () => ({ blockDemoMutation: () => false }) }))
-vi.mock('@/composables/useFormat', () => ({ formatDateTime: (s: string) => s }))
+vi.mock('@/composables/useFormat', () => ({
+  formatDate: (s: string) => s,
+  formatDateTime: (s: string) => s,
+  formatMoney: (amount: number, currency: string) => `${amount.toFixed(2)} ${currency}`,
+}))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }))
 
@@ -127,5 +131,58 @@ describe('Bank connection account', () => {
     await wrapper.find('button').trigger('click')
     await wrapper.find('button').trigger('click')
     expect((wrapper.find('input[type="password"]').element as HTMLInputElement).value).toBe('')
+  })
+  it('shows reconciliation evidence and retries only after an explicit confirmation', async () => {
+    vi.useFakeTimers()
+    try {
+      const candidate = {
+        confirmation_key: 'a'.repeat(64), posted_at: '2026-01-12', amount: '1250.00', currency: 'CZK',
+        existing_transaction_id: 901, existing_statement_id: 801,
+        description: 'Nový syntetický popis', existing_description: 'Dřívější syntetický popis',
+        counterparty_account: 'synthetic-new-account', existing_counterparty_account: 'synthetic-old-account',
+        variable_symbol: '1001', existing_variable_symbol: '1002',
+      }
+      m.sync
+        .mockRejectedValueOnce({ response: { data: { error: {
+          code: 'statement_reconciliation_required', message: 'synthetic',
+          reconciliation_candidates: [candidate],
+        } } } })
+        .mockRejectedValueOnce({ response: { data: { error: {
+          code: 'statement_reconciliation_required', message: 'synthetic',
+          reconciliation_candidates: [{ ...candidate, confirmation_key: 'b'.repeat(64) }],
+        } } } })
+        .mockResolvedValueOnce({ status: 'success', import_result: { transactions: 0, matched: 0 }, period: { from: '2026-01-01', to: '2026-01-31' } })
+      const wrapper = await open()
+
+      await wrapper.findAll('form')[1].trigger('submit')
+      await Promise.resolve()
+      await wrapper.vm.$nextTick()
+
+      const panel = wrapper.find('[data-testid="reconciliation-panel"]')
+      expect(panel.text()).toContain('Nový syntetický popis')
+      expect(panel.text()).toContain('Dřívější syntetický popis')
+      expect(panel.text()).toContain('1001 / 1002')
+      const confirm = panel.find('[data-testid="confirm-reconciliation"]')
+      expect(confirm.attributes('disabled')).toBeDefined()
+
+      vi.advanceTimersByTime(30_000)
+      await wrapper.vm.$nextTick()
+      expect(confirm.attributes('disabled')).toBeUndefined()
+      await confirm.trigger('click')
+      await Promise.resolve()
+      await wrapper.vm.$nextTick()
+
+      expect(m.sync).toHaveBeenNthCalledWith(1, 3, {})
+      expect(m.sync).toHaveBeenNthCalledWith(2, 3, { reconciliation_confirmations: ['a'.repeat(64)] })
+      vi.advanceTimersByTime(30_000)
+      await wrapper.vm.$nextTick()
+      await wrapper.find('[data-testid="confirm-reconciliation"]').trigger('click')
+      await Promise.resolve()
+      await wrapper.vm.$nextTick()
+      expect(m.sync).toHaveBeenNthCalledWith(3, 3, { reconciliation_confirmations: ['a'.repeat(64), 'b'.repeat(64)] })
+      expect(wrapper.find('[data-testid="reconciliation-panel"]').exists()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

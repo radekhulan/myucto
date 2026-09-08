@@ -6,8 +6,11 @@ namespace MyInvoice\Service\Bank\Connector;
 
 final class BankConnectorOperationException extends \RuntimeException
 {
-    public function __construct(public readonly string $errorCode)
-    {
+    /** @param array<string,mixed> $details */
+    public function __construct(
+        public readonly string $errorCode,
+        public readonly array $details = [],
+    ) {
         parent::__construct($errorCode);
     }
 }

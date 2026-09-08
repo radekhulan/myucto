@@ -984,7 +984,7 @@ function scheduleDesktopNavFit(): void {
 function updateDesktopState(): void {
   const containerWidth = document.body.clientWidth
   const desktop = containerWidth >= 1024
-  const tablet = window.innerWidth >= 768 && containerWidth < 1024
+  const tablet = containerWidth >= 768 && containerWidth < 1024
   if (desktop === isDesktop.value && tablet === isTablet.value) return
   isDesktop.value = desktop
   isTablet.value = tablet

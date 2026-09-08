@@ -13,6 +13,7 @@ use MyInvoice\Service\Bank\Connector\BankConnectorException;
 use MyInvoice\Service\Bank\Connector\BankConnectorOperationException;
 use MyInvoice\Service\Bank\Connector\BankConnectorRegistry;
 use MyInvoice\Service\Bank\GpcParser;
+use MyInvoice\Service\Bank\StatementReconciliationException;
 use MyInvoice\Service\Bank\StatementImporter;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\TestCase;
@@ -189,6 +190,51 @@ final class BankConnectionServiceTest extends TestCase
         }
         self::assertSame(1, $connector->downloadCalls);
         self::assertSame(0, $importer->calls);
+    }
+
+    public function testAmbiguousStatementDuplicateRequiresManualReconciliation(): void
+    {
+        $connector = new SyncConnector();
+        $importer = new RecordingStatementImporter(
+            static fn (): array => throw new StatementReconciliationException([[
+                'confirmation_key' => str_repeat('a', 64),
+                'posted_at' => '2026-01-12',
+                'amount' => '1250.00',
+                'currency' => 'CZK',
+                'existing_transaction_id' => 901,
+                'existing_statement_id' => 801,
+            ]]),
+        );
+        $h = $this->harness($connector, $importer, $this->connection());
+        $h['connections']->expects(self::never())->method('recordSyncSuccess');
+        $h['connections']->expects(self::once())->method('recordSyncError')
+            ->with(1, 101, StatementReconciliationException::ERROR_CODE);
+
+        try {
+            $h['service']->sync(1, 11);
+            self::fail('Nejednoznačná duplicita musí zastavit synchronizaci bezpečným kódem.');
+        } catch (BankConnectorOperationException $e) {
+            self::assertSame(StatementReconciliationException::ERROR_CODE, $e->errorCode);
+            self::assertSame(str_repeat('a', 64), $e->details['reconciliation_candidates'][0]['confirmation_key']);
+        }
+        self::assertSame(1, $importer->calls);
+    }
+
+    public function testConfirmedIdentitiesReachImporterBeforeCursorAdvances(): void
+    {
+        $keys = [str_repeat('a', 64)];
+        $importer = new RecordingStatementImporter(
+            static function (string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, array $confirmations) use ($keys): array {
+                self::assertSame($keys, $confirmations);
+                self::assertSame(7, $userId);
+                return self::importResult();
+            },
+        );
+        $h = $this->harness(new SyncConnector(), $importer, $this->connection());
+        $h['connections']->expects(self::once())->method('recordSyncSuccess')->with(1, 101, date('Y-m-d'));
+        $result = $h['service']->sync(1, 11, userId: 7, reconciliationConfirmations: $keys);
+        self::assertSame('success', $result['status']);
+        self::assertSame(1, $importer->calls);
     }
 
     public function testNarrowManualPeriodImportsButDoesNotSkipInitialCursor(): void
@@ -397,8 +443,9 @@ final class RecordingStatementImporter extends StatementImporter
         ?int $userId,
         int $currencyId,
         int $supplierId,
+        array $reconciliationConfirmations = [],
     ): array {
         $this->calls++;
-        return ($this->import)($content, $fileName, $userId, $currencyId, $supplierId);
+        return ($this->import)($content, $fileName, $userId, $currencyId, $supplierId, $reconciliationConfirmations);
     }
 }

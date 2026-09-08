@@ -524,6 +524,63 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         return $mapping;
     }
 
+    public function testExemptCompensationWithoutMappingBlocksPreparation(): void
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7, 'test', $this->sourceWithExemptComponent('compensation'), [], [],
+        );
+
+        self::assertContains('component_jmhz_mapping_missing', $snapshot->payload['readiness_issue_codes']);
+    }
+
+    public function testMappedExemptCompensationPreservesBothIncomeAndDetail(): void
+    {
+        $mapping = $this->negativeIncomeComponentMapping();
+        unset($mapping['mapping_hash']);
+        $mapping['target_attribute_id'] = '10342';
+        $mapping['target_xsd_mapping'] = 'form:docasnaNeschopnost';
+        $mapping['mapping_hash'] = hash('sha256', CanonicalJson::encode($mapping));
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7, 'test', $this->sourceWithExemptComponent('compensation'), [], [502 => $mapping],
+        );
+
+        self::assertNotContains('component_jmhz_mapping_missing', $snapshot->payload['readiness_issue_codes']);
+        $employment = $snapshot->payload['people'][0]['employments'][0];
+        self::assertSame(10_000, $employment['exempt_income_minor']);
+        self::assertSame(10_000, $employment['earnings_by_attribute_minor']['10342']);
+    }
+
+    public function testExemptMealWithoutMappingRemainsInIncomeSummary(): void
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7, 'test', $this->sourceWithExemptComponent('benefit_meal'), [], [],
+        );
+
+        self::assertNotContains('component_jmhz_mapping_missing', $snapshot->payload['readiness_issue_codes']);
+        self::assertSame(10_000, $snapshot->payload['people'][0]['employments'][0]['exempt_income_minor']);
+    }
+
+    private function sourceWithExemptComponent(string $kind): array
+    {
+        $source = $this->source(negativeIncomeComponent: true);
+        $revision = &$source['revision'];
+        $input = json_decode($revision['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $row = &$input['people'][0]['employments'][0]['inputs'][0];
+        $row['component']['component_kind'] = $kind;
+        $row['component']['tax_treatment'] = 'exempt';
+        $row['amount_minor'] = 10_000;
+        $row['component_snapshot_hash'] = hash('sha256', CanonicalJson::encode($row['component']));
+        unset($row);
+        $revision['input_snapshot_json'] = CanonicalJson::encode($input);
+        $revision['input_snapshot_hash'] = hash('sha256', $revision['input_snapshot_json']);
+        $result = json_decode($revision['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $result['source_snapshot_hash'] = $revision['input_snapshot_hash'];
+        $revision['result_snapshot_json'] = CanonicalJson::encode($result);
+        $revision['result_snapshot_hash'] = hash('sha256', $revision['result_snapshot_json']);
+
+        return $source;
+    }
+
     public function testRejectsExtraSocialInsuranceRelationship(): void
     {
         $source = $this->source();
@@ -799,6 +856,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                 'dependant-9' => [
                     'given_name' => 'Jana',
                     'family_name' => 'Nováková',
+                    'birth_date' => '2015-02-02',
                 ],
                 'dependant-8' => [
                     'given_name' => 'Petr',
@@ -816,6 +874,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                     'identity' => [
                         'given_name' => 'Jana',
                         'family_name' => 'Nováková',
+                        'birth_date' => '2015-02-02',
                     ],
                     'order' => 1,
                     'ztp_p' => false,

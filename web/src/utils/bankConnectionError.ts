@@ -1,4 +1,27 @@
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
+import type { BankReconciliationCandidate } from '@/api/bankConnections'
+
+export function bankReconciliationCandidates(error: unknown): BankReconciliationCandidate[] {
+  if (apiErrorCode(error) !== 'statement_reconciliation_required') return []
+  const candidates = (error as any)?.response?.data?.error?.reconciliation_candidates
+  if (!Array.isArray(candidates)) return []
+  return candidates.filter((candidate): candidate is BankReconciliationCandidate =>
+    !!candidate
+      && typeof candidate.confirmation_key === 'string'
+      && /^[a-f0-9]{64}$/.test(candidate.confirmation_key)
+      && typeof candidate.posted_at === 'string'
+      && typeof candidate.amount === 'string'
+      && typeof candidate.currency === 'string'
+      && Number.isInteger(candidate.existing_transaction_id)
+      && Number.isInteger(candidate.existing_statement_id)
+      && typeof candidate.description === 'string'
+      && typeof candidate.existing_description === 'string'
+      && typeof candidate.counterparty_account === 'string'
+      && typeof candidate.existing_counterparty_account === 'string'
+      && typeof candidate.variable_symbol === 'string'
+      && typeof candidate.existing_variable_symbol === 'string',
+  )
+}
 
 export function bankConnectionErrorMessage(error: unknown, t: (key: string) => string, fallback: string): string {
   const keys: Record<string, string> = {
@@ -14,6 +37,7 @@ export function bankConnectionErrorMessage(error: unknown, t: (key: string) => s
     bank_rate_limited: 'cooldown', rate_limited: 'cooldown', bank_connection_busy: 'busy',
     invalid_token: 'token', token_invalid: 'token', token_required: 'token',
     history_locked: 'history', history_gap: 'history',
+    statement_reconciliation_required: 'reconciliation',
     encryption_key_unavailable: 'encryption', credential_unavailable: 'encryption', credential_format_invalid: 'encryption',
     statement_account_mismatch: 'account', provider_account_mismatch: 'account', account_changed_revalidation_required: 'account',
     statement_too_large: 'period', period_invalid: 'period', period_incomplete: 'period',

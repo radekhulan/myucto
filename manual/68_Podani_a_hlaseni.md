@@ -424,6 +424,13 @@ běžného měsíčního hlášení a projde s ním trojí kontrolu: sestaviteln
 dokumentu, shodu s připnutým schématem a katalog kontrol ČSSZ. Nic se
 neodesílá ani neukládá jako podání.
 
+Při měsíčním daňovém zvýhodnění na děti musí evidence obsahovat jméno,
+příjmení a datum narození každého uplatňovaného dítěte. Datum narození se
+přenáší do hlášení a slouží také ke kontrole věkové hranice. Příprava ověřuje
+pořadí dětí a při společném vyživování další osobou i její identifikační
+údaje. U příplatků kontroluje, že jejich celková částka není menší než součet
+vykázaných příplatků za noc, víkend a svátek.
+
 Nálezy z katalogu se dělí podle dopadu, ne podle závažnosti textu.
 **Nepropustná vada** by způsobila neúčinnost podání a vyvolala výzvu
 k opravnému hlášení. **Propustná vada** podání nezneplatní, ale úřady dostanou

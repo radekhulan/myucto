@@ -782,15 +782,25 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             '<form:prijmeni>Nováková</form:prijmeni>',
             $result['xml'],
         );
+        self::assertStringContainsString(
+            '<form:datumNarozeni>2015-04-11</form:datumNarozeni>',
+            $result['xml'],
+        );
         self::assertStringContainsString('<form:poradi>1</form:poradi>', $result['xml']);
         self::assertStringContainsString(
             '<form:slevaDite>1500</form:slevaDite>',
             $result['xml'],
         );
         self::assertStringNotContainsString('form:jineOsoby', $result['xml']);
-        // Rodné číslo ani datum narození dítěte XSD u měsíčního bloku nechce,
-        // takže se do podání nedostávají.
+        // Rodné číslo není potřeba posílat, protože podmíněnou povinnost
+        // identity i kontrolu věku pokryje datum narození.
         self::assertStringNotContainsString('form:rodneCislo', $result['xml']);
+
+        $report = JmhzScenario1ControlValidator::create(
+            CzechPayrollRulesets2026::provider(),
+        )->validate($result['xml'], new JmhzControlContext('2026-08-14', schemaValidated: true));
+        self::assertSame([], $report->coverageGaps());
+        self::assertTrue($report->submittable());
     }
 
     /**
@@ -845,6 +855,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                 'identity' => [
                     'given_name' => 'Jana',
                     'family_name' => 'Nováková',
+                    'birth_date' => '2015-04-11',
                 ],
                 'order' => 1,
                 'ztp_p' => false,

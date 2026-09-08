@@ -238,6 +238,14 @@ function runAutoBackfills(\PDO $db, string $binDir): void
 {
     $checks = [
         [
+            'name' => 'bank-api-months',
+            'reason' => 'API výpisů k měsíčnímu seskupení',
+            'count' => "SELECT COUNT(*) FROM bank_statements bs WHERE bs.source IN ('bank_api', 'gpc') AND bs.supplier_id IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM bank_api_months m WHERE m.statement_id = bs.id)
+                AND NOT EXISTS (SELECT 1 FROM bank_api_evidence_months e WHERE e.evidence_statement_id = bs.id)",
+            'script' => 'backfill-bank-api-months.php',
+        ],
+        [
             'name'    => 'exchange-rates',
             // #238: počítej OBĚ strany — přijaté i VYSTAVENÉ faktury. Skript
             // backfill-exchange-rates.php řeší obojí, ale pokud žádná přijatá kurz

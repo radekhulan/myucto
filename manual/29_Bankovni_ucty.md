@@ -88,6 +88,18 @@ nikdy nepřidělí, aby nový účet nezdědil cizí zůstatek.
 
 ### 29.1.3 Přímé napojení na banku
 
+Pohyby ukládané jako `bank_api` se zobrazují v jednom měsíčním výpisu pro
+danou firmu, číslo účtu, kód banky a měnu. Opakované načtení doplní stejný
+měsíc; překrývající se pohyby se nezapočítají podruhé. Pohyby z odpovědi
+přesahující více měsíců se rozdělí podle data zaúčtování.
+Prázdné načtení nezakládá další výpis téhož měsíce. Původní odpovědi banky
+zůstávají uložené jako podklady a původní odkazy na pohyby zůstávají platné.
+Měsíční přehled se průběžně doplňuje a nelze jej samostatně smazat.
+Úplný GPC nahraný pro tentýž účet a měsíc jej nahradí jako hlavní výpis
+se zachováním odkazu, párování a zaúčtování. Nové pohyby se doplní.
+Pokud GPC některé evidované pohyby neobsahuje, zůstanou v měsíčním přehledu;
+neúplný dokument je uložený jako podklad.
+
 Na záložce **Měny a účty** je pod seznamem účtů sekce **Přímé napojení na banku**.
 Napojení je v testovacím režimu. Pokud používáš účet u některé z uvedených
 bank, kontaktuj nás pro společné ověření připojení. U názvů bank se nezobrazuje
@@ -285,8 +297,14 @@ Shoda vyžaduje stejnou firmu, vlastní účet, banku, měnu, den a částku se 
 Kontrolují se dostupné symboly a protiúčet; automatické spojení vyžaduje společnou
 bankovní referenci (u číselných referencí se ignorují úvodní nuly).
 Samotná shoda částky, dne a protiúčtu nestačí, protože může jít o další skutečnou platbu.
-Pokud nelze bezpečně odlišit několik stejných plateb nebo chybí potřebná identita,
-import se zastaví bez uložení nového výpisu a vyžádá kontrolu. Již zaúčtované pohyby
+Pokud banka používá v API a GPC jiné reference, načítání nabídne jednoznačné dvojice
+ke kontrole. Porovnej datum, částku, popisy a dostupné platební údaje s původním
+výpisem. Potvrď je pouze tehdy, když jde o stejné platby. Potvrzení připojí nový
+výpis k existujícím pohybům a další překrývající se načítání už tyto vazby pozná.
+Při zrušení se nový výpis neuloží. Automatické načítání samo slabé shody nepotvrzuje;
+vyřeš je ručním načtením se stejným rozsahem nebo s prázdným datem Od.
+Pokud nelze odlišit několik stejných plateb, import se zastaví bez možnosti hromadného
+potvrzení a pohyby je potřeba jednotlivě prověřit. Již zaúčtované pohyby
 se tím nemění. Historické duplicity vytvořené staršími importy se automaticky nemažou.
 
 Seznam i detail výpisu ukazují také připojené pohyby z jiného importu, včetně
