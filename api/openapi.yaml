@@ -15830,7 +15830,7 @@ paths:
                         current_balance: { type: number }
                         current_balance_czk: { type: [number, "null"] }
                         statement_date: { type: [string, "null"], format: date }
-                        current_source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api] }
+                        current_source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api, import] }
                         statement_count: { type: integer }
                         months:
                           type: array
@@ -21936,7 +21936,7 @@ components:
         file_name, statement_number, zůstatky a dostupný originál pocházejí z GPC.
       properties:
         id: { type: integer, format: int64 }
-        source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api], description: "Původ výpisu: gpc/pdf = bankovní výpis, bank_api = pohyby z přímého API bez konečného zůstatku, email_notice/idoklad = virtuální měsíční výpis." }
+        source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api, import], description: "Původ výpisu: gpc/pdf = bankovní výpis, bank_api = pohyby z přímého API bez konečného zůstatku, email_notice/idoklad = virtuální měsíční výpis, import = migrace z jiného účetního systému." }
         file_name: { type: string, example: "vypis_2026_05.gpc", description: "U měsíční projekce `bank_api` má syntetickou hodnotu `API-YYYY-MM`." }
         account_number: { type: string, example: "1234567890/0100" }
         bank_code: { type: [string, "null"], example: "0100", description: "Kód banky účtu — autoritativně z konfigurovaného účtu (currencies.bank_code), fallback z výpisu. GPC výpisy ho samy nenesou." }
@@ -22245,7 +22245,7 @@ components:
       properties:
         id: { type: integer, format: int64 }
         statement_id: { type: integer, format: int64 }
-        statement_source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api] }
+        statement_source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api, import] }
         posted_at: { type: string, format: date }
         amount: { type: number, format: float }
         currency: { type: [string, "null"] }
