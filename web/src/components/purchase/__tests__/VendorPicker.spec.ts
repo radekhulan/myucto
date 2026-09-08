@@ -1,7 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import VendorPicker from '../VendorPicker.vue'
-import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn() }))
 vi.mock('@/api/clients', () => ({ clientsApi: mocks }))
@@ -15,7 +14,7 @@ describe('VendorPicker counterparty roles', () => {
     mocks.list.mockImplementationOnce(() => new Promise(resolve => { finishSearch = resolve }))
       .mockResolvedValueOnce({ data: [] })
     const wrapper = mount(VendorPicker, { props: { modelValue: null } })
-    const select = wrapper.getComponent(SearchableSelect)
+    const select = wrapper.getComponent({ name: 'SearchableSelect' })
     select.vm.$emit('search', 'Synthetic')
     select.vm.$emit('search', '')
     await flushPromises()
@@ -28,7 +27,7 @@ describe('VendorPicker counterparty roles', () => {
     const customer = { id: 7, company_name: 'Synthetic customer', is_customer: true, is_vendor: false }
     mocks.list.mockImplementation(async ({ role }) => ({ data: role === 'vendors' ? [] : [customer] }))
     const wrapper = mount(VendorPicker, { props: { modelValue: null } })
-    const select = wrapper.getComponent(SearchableSelect)
+    const select = wrapper.getComponent({ name: 'SearchableSelect' })
     select.vm.$emit('search', '   ')
     await flushPromises()
     expect(mocks.list).toHaveBeenLastCalledWith({ q: undefined, role: 'vendors', archived: false, per_page: 50 })
