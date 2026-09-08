@@ -303,7 +303,14 @@ final class JmhzScenario1DocumentResolver
             $declarationSigned = null;
 
             $normalizedEmployments = [];
+            // `null` dokud některý vztah úhrn nenese: zmrazená příprava starší
+            // než odvozování osvobozených příjmů ho nemá a element se vynechá.
+            $exemptIncomeMinor = null;
             foreach ($employments as $employment) {
+                if (is_int($employment['exempt_income_minor'] ?? null)) {
+                    $exemptIncomeMinor = ($exemptIncomeMinor ?? 0)
+                        + $employment['exempt_income_minor'];
+                }
                 $employmentId = is_int($employment['employment_id'] ?? null)
                     ? $employment['employment_id']
                     : null;
@@ -446,6 +453,24 @@ final class JmhzScenario1DocumentResolver
                         $employeeId,
                         $blockers,
                     ),
+                    /*
+                     * Osvobozené příjmy ze zúčtovaných příjmů (10289) za OSOBU.
+                     * Souhrnná data zaměstnance se vykazují jednou za osobu na
+                     * primárním vztahu, takže se sčítají přes všechny vztahy
+                     * téže osoby stejně jako zúčtovaný příjem.
+                     *
+                     * `null` znamená NEUVEDENO: příprava zmrazená dřív, než se
+                     * úhrn odvozoval, ho nenese a element se nezapíše.
+                     */
+                    'exempt_income_czk' => $exemptIncomeMinor === null
+                        ? null
+                        : $this->wholeCzk(
+                            $exemptIncomeMinor,
+                            '10289',
+                            'person',
+                            $employeeId,
+                            $blockers,
+                        ),
                     'net_income_czk' => $this->wholeCzk(
                         is_int($net['net_before_deductions_minor_units'] ?? null)
                             ? $net['net_before_deductions_minor_units']

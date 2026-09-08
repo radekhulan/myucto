@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1NormalizedDocument;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlValidator;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzVerifiedPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
@@ -607,6 +608,118 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             static fn (string $path): bool => !isset($known[$path]),
         ));
         self::assertSame([], $unknown);
+    }
+
+    /**
+     * BRÁNA: atribut, který matice povinností vede jako NEPODMÍNĚNĚ povinný,
+     * musí být ve výstupu i u zcela běžné součásti.
+     *
+     * Vzniklo z opakovaného nálezu. Nejdřív chyběly příznaky slevy na
+     * pojistném zaměstnance (10490, 10546), potom se ukázalo, že táž chyba je
+     * i u slevy zaměstnavatele (10372): element se uměl zapsat, ale jen když
+     * ho zapnula podmínka, kterou běžná součást nesplní. Ruční hledání „umíme
+     * ten název vypsat?" na to nestačí — v obou případech název ve zdrojovém
+     * kódu byl.
+     *
+     * Kontrola proto porovnává SKUTEČNÝ výstup se seznamem z připnutého
+     * manifestu: povinnost `required` v jádru `CORE DATA`, tedy bez interakce,
+     * která by ji podmiňovala. Atributy bez XSD mapování (třeba kanál podání)
+     * se přeskočí, protože v datové větě žádný element nemají.
+     */
+    public function testEveryUnconditionallyMandatoryCoreFieldIsAlwaysSerialized(): void
+    {
+        $manifest = json_decode(
+            (string) file_get_contents(
+                dirname(__DIR__, 4)
+                    . '/resources/payroll/jmhz/dictionary-1.4.1.6'
+                    . '/scenario-requirement-manifest.json',
+            ),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($manifest);
+        self::assertSame(
+            JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256,
+            $manifest['manifest_sha256'],
+        );
+
+        $required = [];
+        foreach ($manifest['payload']['matrices'] as $matrix) {
+            if (($matrix['matrix_key'] ?? null) !== 'scenario_1') {
+                continue;
+            }
+            foreach ($matrix['requirements'] as $requirement) {
+                if (($requirement['requirement_kind'] ?? null) !== 'required'
+                    || ($requirement['translation_raw'] ?? null) !== 'CORE DATA'
+                ) {
+                    continue;
+                }
+                $mapping = $requirement['xsd_mapping_raw'] ?? null;
+                if (!is_string($mapping)) {
+                    continue;
+                }
+                $path = preg_replace('/\s*\(ID \d+\)$/D', '', $mapping);
+                self::assertIsString($path);
+                $required[$path] = (string) $requirement['attribute_id'];
+            }
+        }
+        // Pojistka proti tichému rozpadu filtru: kdyby se manifest načetl
+        // prázdný nebo se klíč matice přejmenoval, prošlo by cokoliv.
+        self::assertGreaterThan(25, count($required));
+
+        $dom = new \DOMDocument();
+        $dom->loadXML(
+            (new JmhzScenario1XmlValidator())
+                ->dryRun($this->resolution(), $this->envelope())['xml'],
+            LIBXML_NONET | LIBXML_NOBLANKS,
+        );
+        $emitted = self::emittedLeafPaths($dom);
+
+        $missing = [];
+        foreach ($required as $path => $attributeId) {
+            if (!isset($emitted[$path])) {
+                $missing[$path] = $attributeId;
+            }
+        }
+        self::assertSame([], $missing);
+    }
+
+    /**
+     * Listové cesty výstupu ve tvaru datového slovníku: hlavička podání pod
+     * `hlavicka.…`, součást relativně ke kořeni `bezPriznaku`.
+     *
+     * @return array<string, true>
+     */
+    private static function emittedLeafPaths(\DOMDocument $dom): array
+    {
+        $xpath = new \DOMXPath($dom);
+        $xpath->registerNamespace('n', 'http://schemas.cssz.cz/JMHZ/podani/1.0');
+        $xpath->registerNamespace('form', 'http://schemas.cssz.cz/JMHZ/form/1.0');
+        $paths = [];
+        foreach ([
+            'hlavicka' => '/n:jmhz/n:hlavicka//*[not(*)]',
+            'bezPriznaku' => '//form:bezPriznaku//form:*[not(*)]',
+        ] as $root => $query) {
+            $leaves = $xpath->query($query);
+            self::assertInstanceOf(\DOMNodeList::class, $leaves);
+            foreach ($leaves as $leaf) {
+                self::assertInstanceOf(\DOMElement::class, $leaf);
+                $segments = [];
+                for (
+                    $node = $leaf;
+                    $node instanceof \DOMElement && $node->localName !== $root;
+                    $node = $node->parentNode
+                ) {
+                    array_unshift($segments, $node->localName);
+                }
+                if ($root === 'hlavicka') {
+                    array_unshift($segments, 'hlavicka');
+                }
+                $paths[implode('.', $segments)] = true;
+            }
+        }
+
+        return $paths;
     }
 
     /**
@@ -1271,6 +1384,92 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     }
 
     /**
+     * Osvobozené příjmy (10289) jsou PODMNOŽINOU zúčtovaného příjmu (10286),
+     * ne veličina vedle něj — kontrola 97 ČSSZ zní „(10289) =< (10286)".
+     *
+     * Plnění osvobozené podle § 6 odst. 9 ZDP (stravenka, přechodné ubytování)
+     * je příjmem ze závislé činnosti, jen se nezdaňuje. Do úhrnu proto patří
+     * a v hlášení se vykáže jako osvobozená část.
+     */
+    public function testExemptIncomeIsReportedAsPartOfTheAccruedTotal(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['exempt_income_minor'] = 20_000;
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:prijmy><form:zuctovanoCelkem>1000</form:zuctovanoCelkem>'
+                . '<form:osvobozenoCelkem>200</form:osvobozenoCelkem></form:prijmy>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+    }
+
+    /**
+     * Řez zmrazený dřív, než se úhrn osvobozených příjmů odvozoval, ho nenese.
+     * Nula by tvrdila, že zaměstnanec žádný osvobozený příjem neměl — a to
+     * z takového řezu neplyne, takže se element vynechá.
+     */
+    public function testExemptIncomeIsOmittedWhenTheFrozenSliceDoesNotCarryIt(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolution(),
+            $this->envelope(),
+        );
+
+        self::assertStringNotContainsString('<form:osvobozenoCelkem>', $result['xml']);
+    }
+
+    public function testExemptIncomeAboveTheAccruedTotalIsRefused(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['exempt_income_minor'] = 200_000;
+
+        try {
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            );
+            self::fail('Osvobozený příjem nad úhrnem musel podání zablokovat.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame(
+                'jmhz_xml_exempt_income_exceeds_total',
+                $exception->validationCode,
+            );
+        }
+    }
+
+    /**
+     * Příznak slevy zaměstnavatele (10372) je povinné jádro scénáře, ne údaj
+     * podmíněný interakcí: vztah BEZ slevy ho vykazuje jako „ne".
+     *
+     * Vynechávat celý blok nešlo. Kontrola 1 ČSSZ čte hodnotu příznaku, ne
+     * přítomnost bloku, a mlčení na formuláři při vyplněné pojistné části je
+     * rozpor uvnitř jednoho podání — tentýž tvar jako u slevy zaměstnance.
+     * Rozpad (10373, 10374) patří pod interakci IN02, takže tady být nesmí.
+     */
+    public function testRelationshipWithoutDiscountStillReportsTheEmployerFlag(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolution(),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:slevaZamestnavatele><form:slevaZamestnavateleEvidovana>false'
+                . '</form:slevaZamestnavateleEvidovana></form:slevaZamestnavatele>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+        self::assertStringNotContainsString(
+            '<form:slevaZamestnavateleRozpad>',
+            $result['xml'],
+        );
+    }
+
+    /**
      * § 7a odst. 2 váže podmínku kratší pracovní doby jen na písmena a) až f).
      * Zaměstnanci mladšímu 21 let podle písmene g) sleva náleží i při plném
      * úvazku a kontrola 138 ČSSZ u něj rozsah zakazuje.
@@ -1889,6 +2088,9 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                         <form:slevaZamestnanceEvidovana>false</form:slevaZamestnanceEvidovana>
                         <form:slevaZamestnanceOvoZelEvidovana>false</form:slevaZamestnanceOvoZelEvidovana>
                       </form:slevaZamestnance>
+                      <form:slevaZamestnavatele>
+                        <form:slevaZamestnavateleEvidovana>false</form:slevaZamestnavateleEvidovana>
+                      </form:slevaZamestnavatele>
                     </form:pojisteni>
                     <form:vykonavanaPozice>
                       <form:mistoVykonuPrace>

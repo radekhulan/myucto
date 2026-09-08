@@ -331,6 +331,7 @@ final class JmhzPreparationSnapshotBuilder
                     $usedOrdinaryEvidence[$employmentId] = $ordinary;
                 }
                 $componentMappings = [];
+                $exemptIncome = 0;
                 $earnings = [
                     '10328' => 0,
                     '10329' => 0,
@@ -363,10 +364,43 @@ final class JmhzPreparationSnapshotBuilder
                     $componentIssue = JmhzComponentSourceRule::issueCode(
                         $treatment,
                         is_array($mapping) ? $mapping : null,
+                        $component['tax_treatment'] ?? null,
                     );
                     if ($componentIssue !== null) {
                         $issues[] = $this->issue($componentIssue, 'component', $componentId);
-                    } elseif ($treatment === 'included' && is_array($mapping)) {
+                    } elseif ($treatment === 'included'
+                        && ($component['tax_treatment'] ?? null) === 'exempt'
+                        && is_int($inputRow['amount_minor'] ?? null)
+                    ) {
+                        /*
+                         * Osvobozený příjem (10289) se přičítá NAVÍC, ne místo
+                         * zařazení. Do zúčtovaného příjmu celkem (10286) patří —
+                         * kontrola 97 ČSSZ jej vede jako jeho podmnožinu — a
+                         * některá osvobozená plnění mají ještě vlastní kolonku
+                         * v rozpadu: náhrada při dočasné pracovní neschopnosti
+                         * se vykazuje jako 10342 A ZÁROVEŇ patří do osvobozené
+                         * části. Vyřadit ji tady z rozpadu by ji z náhrad
+                         * ztratilo.
+                         *
+                         * Plnění, které podle § 6 odst. 7 ZDP příjmem vůbec
+                         * NENÍ (cestovní náhrada do limitu), se sem nedostane:
+                         * má `jmhz_treatment = excluded`, takže neprojde ani do
+                         * 10286, ani sem.
+                         *
+                         * Chybějící částka se neřeší tady — propadne do větve
+                         * se zařazením, která ji hlásí jako blokaci, případně
+                         * (u složky bez zařazení) zůstane bez dopadu stejně
+                         * jako dřív.
+                         */
+                        $exemptIncome = $this->checkedAdd(
+                            $exemptIncome,
+                            $inputRow['amount_minor'],
+                        );
+                    }
+                    if ($componentIssue === null
+                        && $treatment === 'included'
+                        && is_array($mapping)
+                    ) {
                         $this->assertMapping($mapping, $componentId);
                         $componentMappings[] = $mapping;
                         $amount = $inputRow['amount_minor'] ?? null;
@@ -465,6 +499,9 @@ final class JmhzPreparationSnapshotBuilder
                     'work_month' => $entry['time_month'] ?? null,
                     'average_earning' => $averageEarning,
                     'earnings_by_attribute_minor' => $earnings,
+                    // Úhrn osvobozených příjmů (10289). Odvozený z daňového
+                    // zacházení složek, ne z jejich zařazení do rozpadu mzdy.
+                    'exempt_income_minor' => $exemptIncome,
                     'insurance' => $insurance,
                     'calculation' => $employmentResult,
                     'component_mappings' => $componentMappings,

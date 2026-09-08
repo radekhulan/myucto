@@ -145,7 +145,17 @@ final class PayrollComponentDefaults
                 // docházky ({@see PayrollMealShiftEvidenceService}). Do limitu se
                 // neodvádí nic; nadlimitní část odbaví samostatná složka
                 // `.nadlimit` ve výpočtu běhu, stejně jako u ročního koše.
-                ['PRISPEVEK_STRAVOVANI', 'Příspěvek na stravování', 'benefit_meal', 'monetary', 'regular', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included', 'meal_per_shift', 'periodic_benefit_limit'],
+                //
+                // Do JMHZ složka PATŘÍ. Zúčtovaný příjem celkem (10286) je podle
+                // datového slovníku nadmnožinou osvobozených příjmů (10289) —
+                // kontrola 97 ČSSZ říká přímo „(10289) =< (10286)". Plnění
+                // osvobozené podle § 6 odst. 9 je příjmem ze závislé činnosti,
+                // jen se nezdaňuje, takže se do úhrnu započítává a v hlášení se
+                // vykáže jako osvobozená část. Tím se liší od § 6 odst. 7, kde
+                // plnění příjmem VŮBEC NENÍ (viz CESTOVNI_NAHRADA_LIMIT
+                // a {@see PayrollExemptionBasis::NotSubjectToTax}) a do 10286
+                // se nezapočítává.
+                ['PRISPEVEK_STRAVOVANI', 'Příspěvek na stravování', 'benefit_meal', 'monetary', 'regular', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'included', 'included', 'meal_per_shift', 'periodic_benefit_limit'],
                 // § 6 odst. 9 písm. i) ZDP — hodnota přechodného ubytování do
                 // 3 500 Kč měsíčně. Osvobozeno je jen NEPENĚŽNÍ plnění, jen mimo
                 // pracovní cestu a jen tehdy, není-li obec přechodného ubytování
@@ -153,7 +163,9 @@ final class PayrollComponentDefaults
                 // v datech nemá; tyhle podmínky nese ZAŘAZENÍ složky, které volí
                 // účetní, a aplikace hlídá to jediné, co spočítat umí — měsíční
                 // strop.
-                ['PRECHODNE_UBYTOVANI', 'Přechodné ubytování zaměstnance', 'benefit_accommodation', 'non_monetary', 'regular', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included', 'temporary_accommodation', 'periodic_benefit_limit'],
+                // Do JMHZ patří ze stejného důvodu jako příspěvek na stravování:
+                // § 6 odst. 9 osvobozuje PŘÍJEM, nevyjímá ho z příjmů.
+                ['PRECHODNE_UBYTOVANI', 'Přechodné ubytování zaměstnance', 'benefit_accommodation', 'non_monetary', 'regular', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'included', 'included', 'temporary_accommodation', 'periodic_benefit_limit'],
                 // Soukromé užití vozidla je podle § 6 odst. 6 ZDP OCENĚNÍ příjmu
                 // (1 % / 0,5 % / 0,25 % vstupní ceny měsíčně), ne osvobozený
                 // benefit — žádný roční strop osvobození neexistuje.

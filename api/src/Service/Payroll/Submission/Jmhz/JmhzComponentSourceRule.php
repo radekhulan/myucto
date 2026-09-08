@@ -28,13 +28,33 @@ final class JmhzComponentSourceRule
      * nemá (nebo není aktivní v připnutém balíku specifikace).
      *
      * @param array<string,mixed>|null $mapping
+     * @param mixed $taxTreatment daňové zacházení téže složky
      */
-    public static function issueCode(mixed $treatment, ?array $mapping): ?string
-    {
+    public static function issueCode(
+        mixed $treatment,
+        ?array $mapping,
+        mixed $taxTreatment = null,
+    ): ?string {
         if ($treatment === 'manual_review') {
             return 'component_jmhz_manual_review';
         }
         if ($treatment === 'included') {
+            /*
+             * Osvobozený příjem se do hlášení nezařazuje, ale VYKAZUJE se —
+             * jako osvobozená část zúčtovaného příjmu (10289). Vlastní kolonku
+             * v rozpadu mzdy nemá a mít nesmí: rozpad popisuje mzdu za práci
+             * a náhrady, kdežto stravenka ani přechodné ubytování ani jedním
+             * nejsou. Žádat po účetní zařazení do rozpadu by ji nutilo vybrat
+             * kolonku, do které plnění nepatří.
+             *
+             * Úhrn osvobozených příjmů proto vzniká ODVOZENÍM z daňového
+             * zacházení složek, ne jejich zařazením; složka s `exempt` je tím
+             * pádem v pořádku i bez zařazení.
+             */
+            if ($taxTreatment === 'exempt') {
+                return null;
+            }
+
             return $mapping === null ? 'component_jmhz_mapping_missing' : null;
         }
         if ($treatment === 'excluded') {

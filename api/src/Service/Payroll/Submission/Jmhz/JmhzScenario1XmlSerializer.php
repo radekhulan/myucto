@@ -872,13 +872,41 @@ final class JmhzScenario1XmlSerializer
     ): DOMElement {
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:souhrnDataZec');
         $income = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:prijmy');
+        $incomeTotal = $this->int($summary['income_total_czk'] ?? null, '10286');
         $this->text(
             $dom,
             $income,
             JmhzSchemaCatalog::NS_FORM,
             'form:zuctovanoCelkem',
-            (string) $this->int($summary['income_total_czk'] ?? null, '10286'),
+            (string) $incomeTotal,
         );
+        /*
+         * Osvobozené příjmy ze zúčtovaných příjmů (10289) stojí v sekvenci
+         * hned za úhrnem a jsou jeho PODMNOŽINOU: kontrola 97 ČSSZ zní
+         * „(10289) =< (10286)".
+         *
+         * `null` znamená NEUVEDENO — příprava zmrazená dřív, než se úhrn
+         * odvozoval. Nula by tvrdila, že zaměstnanec žádný osvobozený příjem
+         * neměl, což z takového řezu neplyne.
+         */
+        $exemptIncome = $summary['exempt_income_czk'] ?? null;
+        if ($exemptIncome !== null) {
+            $exemptIncome = $this->int($exemptIncome, '10289');
+            if ($exemptIncome > $incomeTotal) {
+                $this->invalid(
+                    'jmhz_xml_exempt_income_exceeds_total',
+                    'Osvobozené příjmy nesmějí být vyšší než zúčtovaný příjem'
+                        . ' celkem.',
+                );
+            }
+            $this->text(
+                $dom,
+                $income,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:osvobozenoCelkem',
+                (string) $exemptIncome,
+            );
+        }
         $node->appendChild($income);
 
         $declarationSigned = $this->bool(
@@ -1610,15 +1638,27 @@ final class JmhzScenario1XmlSerializer
         );
         $node->appendChild($employeeDiscounts);
 
-        // Sleva zaměstnavatele podle § 7a stojí v sekvenci
-        // `pojisteniBezPriznakuType` až za pojistným, a to jen tehdy, když se
-        // uplatňuje: prázdný blok by kontrole 1 ČSSZ přidal zaměstnance, který
-        // v pojistné části slevu nemá. Částka slevy tady NENÍ — § 7c odst. 1 ji
-        // odečítá z pojistného za všechny kategorie § 5a odst. 1 dohromady,
-        // takže ji hlášení vykazuje jednou za zaměstnavatele (10032), ne po
-        // součástech.
+        /*
+         * Sleva na pojistném ZAMĚSTNAVATELE podle § 7a stojí v sekvenci
+         * `pojisteniBezPriznakuType` až za pojistným.
+         *
+         * Příznak 10372 je povinné jádro scénáře, ne údaj podmíněný interakcí,
+         * takže se vykazuje VŽDY — u vztahu bez slevy jako „ne". Rozpad
+         * (10373/10374) patří pod interakci IN02 a připíná se jen tam, kde se
+         * sleva opravdu uplatňuje.
+         *
+         * Dřív se celý blok vynechával s odůvodněním, že prázdný blok přidá
+         * kontrole 1 ČSSZ zaměstnance, který slevu nemá. To neplatí: kontrola
+         * čte HODNOTU příznaku, ne přítomnost bloku, stejně jako u slevy
+         * zaměstnance (10490). Přijatá hlášení jiných mzdových systémů mají
+         * 10372 na každém formuláři.
+         *
+         * Částka slevy tady NENÍ — § 7c odst. 1 ji odečítá z pojistného za
+         * všechny kategorie § 5a odst. 1 dohromady, takže ji hlášení vykazuje
+         * jednou za zaměstnavatele (10032), ne po součástech.
+         */
         $discount = $this->object($employment['part_time_discount'] ?? null);
-        if (!$cinnostKs && $discount !== []) {
+        if (!$cinnostKs) {
             $wrapper = $this->node(
                 $dom,
                 JmhzSchemaCatalog::NS_FORM,
@@ -1629,34 +1669,36 @@ final class JmhzScenario1XmlSerializer
                 $wrapper,
                 JmhzSchemaCatalog::NS_FORM,
                 'form:slevaZamestnavateleEvidovana',
-                'true',
+                $discount === [] ? 'false' : 'true',
             );
-            $split = $this->node(
-                $dom,
-                JmhzSchemaCatalog::NS_FORM,
-                'form:slevaZamestnavateleRozpad',
-            );
-            // Kontrola 138: rozsah kratší doby se vyplňuje právě u důvodů
-            // A až F. U písmene G (§ 7a odst. 1 písm. g), zaměstnanec mladší
-            // 21 let) sleva náleží i při plném úvazku a 10373 se uvést NESMÍ.
-            $centihours = $discount['weekly_working_time_centihours'] ?? null;
-            if ($centihours !== null) {
+            if ($discount !== []) {
+                $split = $this->node(
+                    $dom,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:slevaZamestnavateleRozpad',
+                );
+                // Kontrola 138: rozsah kratší doby se vyplňuje právě u důvodů
+                // A až F. U písmene G (§ 7a odst. 1 písm. g), zaměstnanec mladší
+                // 21 let) sleva náleží i při plném úvazku a 10373 se uvést NESMÍ.
+                $centihours = $discount['weekly_working_time_centihours'] ?? null;
+                if ($centihours !== null) {
+                    $this->text(
+                        $dom,
+                        $split,
+                        JmhzSchemaCatalog::NS_FORM,
+                        'form:pracovniDobaKratsi',
+                        $this->decimal($centihours, 2, '10373'),
+                    );
+                }
                 $this->text(
                     $dom,
                     $split,
                     JmhzSchemaCatalog::NS_FORM,
-                    'form:pracovniDobaKratsi',
-                    $this->decimal($centihours, 2, '10373'),
+                    'form:duvodUplatneni',
+                    $this->string($discount['reason_code'] ?? null, '10374'),
                 );
+                $wrapper->appendChild($split);
             }
-            $this->text(
-                $dom,
-                $split,
-                JmhzSchemaCatalog::NS_FORM,
-                'form:duvodUplatneni',
-                $this->string($discount['reason_code'] ?? null, '10374'),
-            );
-            $wrapper->appendChild($split);
             $node->appendChild($wrapper);
         }
 

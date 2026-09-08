@@ -555,6 +555,7 @@ final readonly class JmhzPreparationSnapshotService
                         $treatment === 'included'
                             ? $this->mappingSupplement($supplierId, $componentId)
                             : null,
+                        $component['tax_treatment'] ?? null,
                     );
                     if ($code !== null) {
                         $issues[] = [

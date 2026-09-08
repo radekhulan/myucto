@@ -30,6 +30,31 @@ final class JmhzComponentSourceRuleTest extends TestCase
     }
 
     /**
+     * Osvobozený příjem se vykazuje jako osvobozená část zúčtovaného příjmu
+     * (10289), ne jako položka rozpadu mzdy. Vlastní kolonku v rozpadu nemá,
+     * takže po účetní nelze chtít zařazení — vybírala by kolonku, do které
+     * plnění nepatří. Úhrn se odvozuje z daňového zacházení složek.
+     */
+    public function testExemptIncomeNeedsNoMapping(): void
+    {
+        self::assertNull(
+            JmhzComponentSourceRule::issueCode('included', null, 'exempt'),
+        );
+    }
+
+    /**
+     * Zdanitelná složka zařazení potřebuje dál: bez něj by se nevědělo, do
+     * které kolonky rozpadu mzdy patří.
+     */
+    public function testTaxableComponentStillNeedsMapping(): void
+    {
+        self::assertSame(
+            'component_jmhz_mapping_missing',
+            JmhzComponentSourceRule::issueCode('included', null, 'included'),
+        );
+    }
+
+    /**
      * Vyřazená složka nemá co mapovat — chybějící zařazení u ní není nález,
      * je to správný stav.
      */
