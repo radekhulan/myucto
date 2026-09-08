@@ -172,15 +172,15 @@ onMounted(async () => {
             item.severity === 'high' ? 'bg-danger-500' :
             item.severity === 'medium' ? 'bg-warning-500' : 'bg-neutral-400']"></span>
           <div class="min-w-0">
-            <div class="text-sm font-medium text-neutral-700">{{ item.title }}</div>
-            <div class="text-xs text-neutral-500 mt-0.5">{{ item.hint }}</div>
+            <div class="text-sm font-medium text-neutral-700">{{ item.title_key ? t(item.title_key, { account: item.title }) : item.title }}</div>
+            <div class="text-xs text-neutral-500 mt-0.5">{{ item.hint_key ? t(item.hint_key) : item.hint }}</div>
           </div>
         </RouterLink>
         <div class="flex items-center gap-1 ml-3 shrink-0">
           <RouterLink :to="item.link" class="text-neutral-400 hover:text-primary-700 p-1 transition-transform hover:translate-x-0.5" :title="t('crm.action_items.go_to')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
           </RouterLink>
-          <button v-if="auth.canWrite('dashboard')" type="button" @click.stop="toggleMenu(idx)"
+          <button v-if="item.dismissible !== false && auth.canWrite('dashboard')" type="button" @click.stop="toggleMenu(idx)"
             class="text-neutral-400 hover:text-neutral-700 p-1 rounded hover:bg-neutral-100"
             :title="t('crm.action_items.dismiss')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm0 7a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm0 7a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/></svg>

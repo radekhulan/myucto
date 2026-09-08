@@ -18302,6 +18302,9 @@
     "title": "Profit",
     "subtitle": "Revenue, costs, profit, top clients and vendors.",
     "action_items": {
+      "bank_sync_title": "Restore bank synchronization: {account}",
+      "bank_sync_reconciliation": "Synchronization needs a review of ambiguous matches. Open the account and load transactions.",
+      "bank_sync_failed": "Automatic synchronization failed. Open the account and check the connection.",
       "title": "Action items",
       "go_to": "Go to detail",
       "dismiss": "Dismiss notification",

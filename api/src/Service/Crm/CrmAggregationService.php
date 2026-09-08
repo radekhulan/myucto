@@ -1076,9 +1076,9 @@ final class CrmAggregationService
      *   total: int
      * }
      */
-    public function actionItems(int $supplierId, ?int $userId = null, ?\DateTimeImmutable $now = null): array
+    public function actionItems(int $supplierId, ?int $userId = null, ?\DateTimeImmutable $now = null, bool $canManageBankConnections = false): array
     {
-        $items = [];
+        $items = $this->bankSyncActionItems($supplierId, $canManageBankConnections);
         $pdo = $this->db->pdo();
         $nowDt = $now ?? new \DateTimeImmutable();
         $today = $nowDt->format('Y-m-d');
@@ -1615,6 +1615,38 @@ final class CrmAggregationService
             'total' => count($items),
             'dismissed_count' => count($dismissals),
         ];
+    }
+
+    public function bankSyncActionItems(int $supplierId, bool $canManageBankConnections): array
+    {
+        if (!$canManageBankConnections) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT bc.id, bc.currency_id, bc.last_sync_error_code, c.label, c.code
+               FROM bank_connections bc
+               JOIN currencies c ON c.id = bc.currency_id AND c.supplier_id = bc.supplier_id
+              WHERE bc.supplier_id = ? AND bc.enabled = 1 AND bc.token_ciphertext IS NOT NULL
+                AND c.is_active = 1 AND bc.last_sync_status = 'error'
+           ORDER BY bc.id"
+        );
+        $stmt->execute([$supplierId]);
+        $items = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $items[] = [
+                'type' => 'bank_sync_error_' . (int) $row['id'],
+                'severity' => 'high',
+                'title' => trim((string) $row['label']) . ' (' . $row['code'] . ')',
+                'title_key' => 'crm.action_items.bank_sync_title',
+                'hint' => '',
+                'hint_key' => $row['last_sync_error_code'] === 'statement_reconciliation_required'
+                    ? 'crm.action_items.bank_sync_reconciliation' : 'crm.action_items.bank_sync_failed',
+                'link' => '/bank?tab=accounts&currency_id=' . (int) $row['currency_id'],
+                'count' => 1,
+                'dismissible' => false,
+            ];
+        }
+        return $items;
     }
 
     /**

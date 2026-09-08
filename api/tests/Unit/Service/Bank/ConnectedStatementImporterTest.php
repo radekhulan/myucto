@@ -467,6 +467,84 @@ final class ConnectedStatementImporterTest extends TestCase
         return $lines[0] . "\r\n" . $lines[1] . "\r\n";
     }
 
+    public static function automaticCrossSourceCases(): array
+    {
+        $cases = [];
+        foreach (['gpc', 'bank_api'] as $source) {
+            $cases[] = [$source, 'Invoice transfer', 'Bank transfer', '00012345', '12345', '1000000005', '0000001000000005'];
+            $cases[] = [$source, "TEST SHOP s.r.o.\nPraha 123\nKarta: ****1234", 'TEST SHOP s.r.o. Praha 123 Karta: ****1234', null, null, null, null];
+            $cases[] = [$source, 'Banka Test | Úrok z kladného zůstatku na účtu', 'Úrok z kladného zůstatku na účtu', null, null, null, null];
+        }
+        return $cases;
+    }
+
+    public function testMatchingDescriptionsCannotMergeTwoRepeatedPayments(): void
+    {
+        $stored = new GpcParser()->parse($this->transferGpc());
+        $stored['transactions'] = [$stored['transactions'][0]];
+        $stored['transactions'][0]['description'] = 'TEST SHOP Praha 123 karta 1234';
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
+        $this->importer->importConnectedParsed($stored, 'synthetic-original', 'synthetic.txt', null, 1, 10, 'gpc');
+        $incoming = $stored;
+        $incoming['transactions'][0]['bank_ref'] = 'SYNTHETIC-FIRST';
+        $incoming['transactions'][] = array_replace($incoming['transactions'][0], ['bank_ref' => 'SYNTHETIC-SECOND']);
+        try {
+            $this->importer->importConnectedParsed($incoming, 'synthetic-ambiguous', 'synthetic.txt', null, 1, 10);
+            self::fail('Two payments must not share one movement.');
+        } catch (\MyInvoice\Service\Bank\StatementReconciliationException $e) {
+            self::assertSame([], $e->candidates);
+            self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+        }
+    }
+
+    public static function conflictingDescriptions(): array
+    {
+        return [
+            ['TEST SHOP Praha 123 karta 1234', 'TEST SHOP Praha 123 karta 9999'],
+            ['SYNTHETIC BANK NAME | Shop Alpha Praha', 'SYNTHETIC BANK NAME | Shop Beta Praha'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('conflictingDescriptions')]
+    public function testDifferentCardDetailsStillRequireReview(string $originalDescription, string $incomingDescription): void
+    {
+        $stored = new GpcParser()->parse($this->transferGpc());
+        $stored['transactions'] = [$stored['transactions'][0]];
+        $stored['transactions'][0]['description'] = $originalDescription;
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
+        $this->importer->importConnectedParsed($stored, 'synthetic-original', 'synthetic.txt', null, 1, 10, 'gpc');
+        $incoming = $stored;
+        $incoming['transactions'][0]['bank_ref'] = 'SYNTHETIC-OTHER';
+        $incoming['transactions'][0]['description'] = $incomingDescription;
+        $this->expectException(\MyInvoice\Service\Bank\StatementReconciliationException::class);
+        $this->importer->importConnectedParsed($incoming, 'synthetic-other', 'synthetic.txt', null, 1, 10);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('automaticCrossSourceCases')]
+    public function testUniqueCrossSourceEvidenceReconcilesAutomatically(string $source, string $oldDescription, string $newDescription, ?string $oldVs, ?string $newVs, ?string $oldAccount, ?string $newAccount): void
+    {
+        $stored = new GpcParser()->parse($this->transferGpc());
+        $stored['transactions'] = [array_replace($stored['transactions'][0], [
+            'description' => $oldDescription, 'variable_symbol' => $oldVs,
+            'counterparty_account' => $oldAccount, 'counterparty_bank' => $oldAccount === null ? null : '0100',
+        ])];
+        $this->matcher->expects(self::exactly(3))->method('matchBatch')->willReturn([]);
+        $this->importer->importConnectedParsed($stored, 'synthetic-original', 'synthetic-original.txt', null, 1, 10, $source);
+        $before = $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC);
+        $incoming = $stored;
+        $incoming['transactions'][0] = array_replace($incoming['transactions'][0], [
+            'bank_ref' => 'SYNTHETIC-OTHER-REFERENCE', 'description' => $newDescription,
+            'variable_symbol' => $newVs, 'counterparty_account' => $newAccount,
+        ]);
+        $otherSource = $source === 'gpc' ? 'bank_api' : 'gpc';
+        foreach (['first', 'overlap'] as $batch) {
+            $result = $this->importer->importConnectedParsed($incoming, 'synthetic-' . $batch, 'synthetic.txt', null, 1, 10, $otherSource);
+            self::assertSame(0, $result['transactions']);
+            self::assertSame(1, $result['skipped_duplicates']);
+            self::assertSame($before, $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC));
+        }
+    }
+
     private function gpc(): string
     {
         $account = str_pad('1000000005', 16, '0', STR_PAD_LEFT);

@@ -18302,6 +18302,9 @@
     "title": "Zisk",
     "subtitle": "Tržby, náklady, zisk, top klienti a vendoři.",
     "action_items": {
+      "bank_sync_title": "Obnov načítání banky: {account}",
+      "bank_sync_reconciliation": "Načítání čeká na kontrolu nejednoznačných shod. Otevři účet a načti pohyby.",
+      "bank_sync_failed": "Automatické načítání selhalo. Otevři účet a zkontroluj připojení.",
       "title": "Akce pro tebe",
       "go_to": "Přejít na detail",
       "dismiss": "Skrýt upozornění",

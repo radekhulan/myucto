@@ -90,7 +90,11 @@ přeskočeno jako duplicita**. U dávkového nahrání se přeskočené pohyby s
 společného varování. Zkontroluj je, zvlášť pokud nejde o očekávaný překryv výpisů.
 
 Pokud měsíční GPC obsahuje platby již načtené z API, připojí se k existujícím
-pohybům. Rozdílné bankovní reference mohou vyžadovat potvrzení nalezených dvojic.
+pohybům. Rozdílné bankovní reference se propojí automaticky, pokud kromě účtu,
+měny, data a částky souhlasí protiúčet s variabilním symbolem nebo dostatečně
+podrobný popis platby. Rozdíly v mezerách, interpunkci a doplněném názvu před
+oddělovačem se zohledňují. Každá platba musí mít jediný protějšek v obou zdrojích.
+Samotné datum a částka bez dalších údajů mohou vyžadovat potvrzení nalezených dvojic.
 Před potvrzením porovnej údaje obou zdrojů; původní párování a zaúčtování zůstane
 zachované. Podrobnosti jsou v [kapitole Bankovní účty](29_Bankovni_ucty.md).
 

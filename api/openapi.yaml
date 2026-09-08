@@ -7162,8 +7162,24 @@ paths:
         s datem mimo ni. Její `breakdown[]` nese NABÍDKU CEST, ne rozpad počtu, takže
         položky jsou `{ key: accounting_activation|bank_posting_wizard|accounting_periods, link }`
         BEZ `count`.
+        Uživatel s právem zápisu `settings.bank_accounts` dostává také položky
+        `bank_sync_error_{connectionId}` pro aktivní bankovní účty se selháním
+        synchronizace. Obsahují `title_key`, `hint_key`, `dismissible: false`
+        a odkaz na nastavení konkrétního účtu; úspěšné načtení je odstraní.
       parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
-      responses: { '200': { description: 'items + total + dismissed_count' } }
+      responses:
+        '200':
+          description: items + total + dismissed_count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CrmActionItem' }
+                  total: { type: integer }
+                  dismissed_count: { type: integer }
 
   /api/v1/crm/cash-flow-forecast:
     get:
@@ -17933,6 +17949,30 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    CrmActionItem:
+      type: object
+      required: [type, severity, title, hint, link]
+      properties:
+        type: { type: string }
+        severity: { type: string }
+        title: { type: string }
+        hint: { type: string }
+        link: { type: string }
+        count: { type: integer }
+        days: { type: integer }
+        title_key:
+          type: string
+          description: Volitelný překladový klíč; parametr account obsahuje title.
+        hint_key: { type: string }
+        dismissible: { type: boolean, default: true }
+        breakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              link: { type: string }
+              count: { type: integer }
     PayrollPersonEmploymentRef:
       type: object
       required: [id, code, relation_type, status, is_primary]

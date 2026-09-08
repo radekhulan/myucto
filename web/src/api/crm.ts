@@ -227,6 +227,9 @@ export interface ActionItemBreakdown {
   link: string
 }
 export interface ActionItem {
+  title_key?: string
+  hint_key?: string
+  dismissible?: boolean
   type: string
   severity: 'low' | 'medium' | 'high'
   title: string

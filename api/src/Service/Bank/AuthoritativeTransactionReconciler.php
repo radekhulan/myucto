@@ -162,7 +162,24 @@ final class AuthoritativeTransactionReconciler
         $refA = self::reference($a);
         $refB = self::reference($b);
         if ($refA !== '' && $refA === $refB) return true;
-        return false;
+        $accountA = self::account((string) ($a['counterparty_account'] ?? ''), (string) ($a['counterparty_bank'] ?? ''));
+        $accountB = self::account((string) ($b['counterparty_account'] ?? ''), (string) ($b['counterparty_bank'] ?? ''));
+        $symbolA = ltrim(trim((string) ($a['variable_symbol'] ?? '')), '0');
+        $symbolB = ltrim(trim((string) ($b['variable_symbol'] ?? '')), '0');
+        if ($accountA !== null && $accountA === $accountB && $symbolA !== '' && $symbolA === $symbolB) return true;
+        $descriptionA = self::descriptionParts((string) ($a['description'] ?? ''));
+        $descriptionB = self::descriptionParts((string) ($b['description'] ?? ''));
+        return isset($descriptionA[0], $descriptionB[0])
+            && (in_array($descriptionA[0], $descriptionB, true) || in_array($descriptionB[0], $descriptionA, true));
+    }
+
+    private static function descriptionParts(string $description): array
+    {
+        $parts = array_merge([$description], explode('|', $description));
+        $parts = array_map(static fn (string $part): string =>
+            (string) preg_replace('/[^\p{L}\p{N}]+/u', '', mb_strtolower($part)), $parts);
+        return array_values(array_filter($parts, static fn (string $part): bool =>
+            mb_strlen($part) >= 16 && preg_match('/\p{L}/u', $part) === 1));
     }
 
     private static function reference(array $tx): string

@@ -63,6 +63,9 @@ watch(() => props.connection, connection => {
 }, { immediate: true })
 watch(available, value => { if (!provider.value) provider.value = value[0]?.code ?? '' })
 watch([from, to], clearReconciliation)
+watch(() => route.query.currency_id, currencyId => {
+  if (String(currencyId) === String(props.account.id)) opened.value = true
+}, { immediate: true })
 watch(() => [route.query.kb_plus, route.query.currency_id], ([outcome, currencyId]) => {
   if (props.account.bank_code === '0100' && ['connected', 'error'].includes(String(outcome)) && String(currencyId) === String(props.account.id)) opened.value = true
 }, { immediate: true })

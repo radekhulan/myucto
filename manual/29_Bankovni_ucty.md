@@ -294,10 +294,14 @@ jednou. Původní API údaje se nepřepisují méně podrobným GPC. Stejná och
 i při následném načtení API po GPC. Dosud nespárované pohyby se znovu zkusí spárovat.
 
 Shoda vyžaduje stejnou firmu, vlastní účet, banku, měnu, den a částku se znaménkem.
-Kontrolují se dostupné symboly a protiúčet; automatické spojení vyžaduje společnou
-bankovní referenci (u číselných referencí se ignorují úvodní nuly).
-Samotná shoda částky, dne a protiúčtu nestačí, protože může jít o další skutečnou platbu.
-Pokud banka používá v API a GPC jiné reference, načítání nabídne jednoznačné dvojice
+Kontrolují se dostupné symboly a protiúčet. Automatické spojení rozpozná společnou
+bankovní referenci, shodný protiúčet s neprázdným variabilním symbolem nebo shodný
+dostatečně podrobný popis platby. U popisu se ignorují mezery a interpunkce;
+rozpozná se také zpráva doplněná názvem před oddělovačem. Každá platba musí mít
+jediný protějšek. Tyto shody automaticky zpracuje i cron a uloží jejich vazbu
+pro další načítání bez zásahu uživatele.
+Samotná shoda částky a dne nestačí, protože může jít o další skutečnou platbu.
+Při nedostatku dalších údajů načítání nabídne jednoznačné dvojice
 ke kontrole. Porovnej datum, částku, popisy a dostupné platební údaje s původním
 výpisem. Potvrď je pouze tehdy, když jde o stejné platby. Potvrzení připojí nový
 výpis k existujícím pohybům a další překrývající se načítání už tyto vazby pozná.
@@ -306,6 +310,11 @@ vyřeš je ručním načtením se stejným rozsahem nebo s prázdným datem Od.
 Pokud nelze odlišit několik stejných plateb, import se zastaví bez možnosti hromadného
 potvrzení a pohyby je potřeba jednotlivě prověřit. Již zaúčtované pohyby
 se tím nemění. Historické duplicity vytvořené staršími importy se automaticky nemažou.
+
+Selhání načítání aktivního účtu se zobrazí také v přehledu **Akce pro tebe**
+uživateli s oprávněním spravovat bankovní účty. Upozornění rozliší nejednoznačné
+shody od ostatních chyb a otevře nastavení konkrétního účtu. Po úspěšném
+načtení samo zmizí.
 
 Seznam i detail výpisu ukazují také připojené pohyby z jiného importu, včetně
 stavu párování a zaúčtování. Sdílený pohyb je v účetních součtech stále jen jednou.

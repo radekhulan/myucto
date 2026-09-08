@@ -4,7 +4,7 @@ import BankConnectionAccount from '../BankConnectionAccount.vue'
 import type { BankConnection } from '@/api/bankConnections'
 import type { CurrencyAccount } from '@/api/settings'
 
-const m = vi.hoisted(() => ({ save: vi.fn(), sync: vi.fn(), disconnect: vi.fn() }))
+const m = vi.hoisted(() => ({ save: vi.fn(), sync: vi.fn(), disconnect: vi.fn(), query: {} as Record<string, string> }))
 vi.mock('@/api/bankConnections', () => ({ bankConnectionsApi: m }))
 vi.mock('@/composables/useDemoMode', () => ({ useDemoMode: () => ({ blockDemoMutation: () => false }) }))
 vi.mock('@/composables/useFormat', () => ({
@@ -13,7 +13,7 @@ vi.mock('@/composables/useFormat', () => ({
   formatMoney: (amount: number, currency: string) => `${amount.toFixed(2)} ${currency}`,
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: m.query }) }))
 
 const account: CurrencyAccount = {
   id: 3, code: 'CZK', label: 'Test', symbol: 'Kč', name_cs: 'Koruna', name_en: 'Crown', decimals: 2,
@@ -35,11 +35,30 @@ async function open(overrides: { connection?: BankConnection | null; canWrite?: 
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  m.query = {}
   m.save.mockResolvedValue(connection)
   m.sync.mockResolvedValue({ status: 'success', import_result: { transactions: 0, matched: 0 }, period: { from: '2026-01-01', to: '2026-01-31' } })
 })
 
 describe('Bank connection account', () => {
+  it('opens the account targeted by an action item without starting an import', () => {
+    m.query = { currency_id: '3' }
+    const wrapper = mount(BankConnectionAccount, {
+      props: { account, connection, canWrite: true, providers: [provider] },
+      global: { stubs: { DateInput: true, RouterLink: true } },
+    })
+    expect(wrapper.find('form').exists()).toBe(true)
+    expect(m.sync).not.toHaveBeenCalled()
+  })
+  it('keeps other accounts collapsed when following an action item', () => {
+    m.query = { currency_id: '99' }
+    const wrapper = mount(BankConnectionAccount, {
+      props: { account, connection, canWrite: true, providers: [provider] },
+      global: { stubs: { DateInput: true, RouterLink: true } },
+    })
+    expect(wrapper.find('form').exists()).toBe(false)
+  })
+
   it('offers a styled certificate button and accepts a certificate without a password', async () => {
     const wrapper = mount(BankConnectionAccount, {
       props: { account: { ...account, bank_code: '0300' }, connection: null, canWrite: true,
