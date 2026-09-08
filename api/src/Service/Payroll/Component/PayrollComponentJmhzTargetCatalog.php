@@ -43,7 +43,40 @@ final class PayrollComponentJmhzTargetCatalog
          */
         ['attribute_id' => '10342', 'parent' => null, 'role' => 'detail'],
         ['attribute_id' => '10343', 'parent' => null, 'role' => 'detail'],
-        ['attribute_id' => '10417', 'parent' => null, 'role' => 'detail'],
+        /*
+         * Příspěvek zaměstnavatele na produkty spoření na stáří a pojištění
+         * dlouhodobé péče. 10417 je ÚHRN, ne samostatná položka: podle vlastního
+         * názvu atributu sčítá produkty spoření na stáří I pojištění dlouhodobé
+         * péče, tedy 10417 = 10418 + 10292 + 10293 + 10294 + 10295 + 10296.
+         * Proto je `catch_all_total` — složka bez rozpoznaného produktu se dá
+         * zařadit rovnou na něj a detailní uzly se do něj dopočítají samy.
+         *
+         * Pořadí odpovídá XSD (souhrnDataZec.prijmy.prispevekZamestnavatele).
+         */
+        ['attribute_id' => '10417', 'parent' => null, 'role' => 'catch_all_total'],
+        ['attribute_id' => '10418', 'parent' => '10417', 'role' => 'detail'],
+        ['attribute_id' => '10292', 'parent' => '10417', 'role' => 'detail'],
+        ['attribute_id' => '10293', 'parent' => '10417', 'role' => 'detail'],
+        ['attribute_id' => '10294', 'parent' => '10417', 'role' => 'detail'],
+        ['attribute_id' => '10295', 'parent' => '10417', 'role' => 'detail'],
+        ['attribute_id' => '10296', 'parent' => '10417', 'role' => 'detail'],
+    ];
+
+    /**
+     * Cíle, které se vykazují v souhrnných datech zaměstnance, ne po vztazích.
+     *
+     * Příspěvek zaměstnavatele na produkty spoření na stáří (úhrn 10417 i jeho
+     * rozpad) sedí v XSD pod `souhrnDataZec`, tedy JEDNOU ZA OSOBU na primárním
+     * pracovněprávním vztahu. Kdyby se počítal po vztazích jako mzda, měl by
+     * zaměstnanec se dvěma souběžnými vztahy příspěvek v hlášení dvakrát.
+     *
+     * Rozsah drží tenhle seznam, ne výčet ifů: přibude-li další souhrnný cíl,
+     * dopisuje se na jedno místo vedle jeho řádku v {@see self::TARGETS}.
+     *
+     * @var list<string>
+     */
+    private const EMPLOYEE_SUMMARY_TARGETS = [
+        '10417', '10418', '10292', '10293', '10294', '10295', '10296',
     ];
 
     /** @var list<array{attribute_id:string,name:string,xsd_mapping:string,data_type:string,monthly_marker:string,parent_attribute_id:?string,ancestor_attribute_ids:list<string>,aggregation_role:string,aggregation_scope:string}>|null */
@@ -189,6 +222,8 @@ final class PayrollComponentJmhzTargetCatalog
 
     private function aggregationScope(string $attributeId): string
     {
-        return $attributeId === '10417' ? 'employee_summary' : 'employment';
+        return in_array($attributeId, self::EMPLOYEE_SUMMARY_TARGETS, true)
+            ? 'employee_summary'
+            : 'employment';
     }
 }

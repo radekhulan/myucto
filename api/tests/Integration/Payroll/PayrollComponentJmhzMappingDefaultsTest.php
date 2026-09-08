@@ -29,6 +29,22 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
      * Složky výchozího číselníku, které do JMHZ patří, ale výchozí zařazení
      * ZÁMĚRNĚ nemají — u nich je cílový atribut úsudek účetní.
      */
+    /**
+     * Složky, které výchozí zařazení MAJÍ, ale nové firmě se neuplatní.
+     *
+     * Příspěvek na dlouhodobou péči patří jednoznačně na atribut 10418, takže
+     * výchozí zařazení dává smysl. Daňové ani hlášenkové zacházení té složky
+     * ale aplikace odhadnout nesmí — osvobození závisí na podmínkách, které
+     * v datech nejsou, a složka je proto `manual_review`. Zakládání výchozích
+     * zařazení bere jen složky se zacházením `included`, takže se uplatní až
+     * poté, co ji účetní zařadí.
+     *
+     * @var list<string>
+     */
+    private const DEFAULT_AWAITS_CLASSIFICATION = [
+        'PRISPEVEK_DLOUHODOBA_PECE',
+    ];
+
     private const WITHOUT_DEFAULT = [
         'PROVIZE',
         'ODSTUPNE',
@@ -113,9 +129,13 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
             'NAHRADA_MZDY' => '10337',
             'NAHRADA_MZDY_DOVOLENA' => '10338',
             'NAHRADA_MZDY_DPN' => '10342',
+            'PRISPEVEK_DLOUHODOBA_PECE' => '10418',
         ];
         self::assertSame($expected, PayrollComponentJmhzMappingDefaults::all());
         foreach ($expected as $code => $target) {
+            if (in_array($code, self::DEFAULT_AWAITS_CLASSIFICATION, true)) {
+                continue;
+            }
             $mapping = $this->mappingByCode($code);
             self::assertIsArray($mapping, "Složka {$code} nedostala výchozí zařazení.");
             self::assertSame($target, $mapping['target_attribute_id'], "Špatný cíl u {$code}.");

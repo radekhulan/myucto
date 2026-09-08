@@ -1614,12 +1614,28 @@ final class PayrollRunSnapshotBuilder
             $conditionalBlocksConfirmed = (int) $row['conditional_blocks_confirmed'] === 1;
             $interactions = null;
             /*
-             * v3 nese navíc hodiny nepřítomností bez atributu hlášení. Verze se
+             * v3 nese navíc hodiny nepřítomností bez atributu hlášení, v4 k nim
+             * ještě rozpad odpracované doby na dny a přesčas. Verze se
              * NESLUČUJÍ: obsahový otisk se počítá z kanonického JSONu hodnot,
              * takže dřív zmrazený v2 souhrn musí i dál vydat přesně tentýž
              * výčet klíčů, jaký měl při schválení.
              */
-            $conditionalVersions = ['jmhz-work-month.v2', 'jmhz-work-month.v3'];
+            $conditionalVersions = [
+                'jmhz-work-month.v2',
+                'jmhz-work-month.v3',
+                'jmhz-work-month.v4',
+            ];
+            if (in_array(
+                $derivationVersion,
+                PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_WORKED_BREAKDOWN,
+                true,
+            )) {
+                // Dny jsou u v4 vždy vyplněné, přesčas smí být NEUVEDENÝ.
+                $values['worked_days'] = (int) $row['worked_days'];
+                $values['overtime_millihours'] = $row['overtime_millihours'] === null
+                    ? null
+                    : (int) $row['overtime_millihours'];
+            }
             if (in_array($derivationVersion, $conditionalVersions, true)) {
                 if (!$conditionalBlocksConfirmed
                     || !in_array($row['unworked_hours_occurred'], [0, 1, '0', '1'], true)
@@ -1639,7 +1655,11 @@ final class PayrollRunSnapshotBuilder
                     'employee_obstacle_paid_millihours',
                     'employer_obstacle_millihours',
                 ];
-                if ($derivationVersion === 'jmhz-work-month.v3') {
+                if (in_array(
+                    $derivationVersion,
+                    PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_LOCAL_EVIDENCE,
+                    true,
+                )) {
                     $conditionalFields = array_merge(
                         $conditionalFields,
                         PayrollJmhzWorkMonthSummaryBuilder::localEvidenceFields(),
@@ -1705,7 +1725,11 @@ final class PayrollRunSnapshotBuilder
                 ? 'unverified'
                 : (in_array(
                     (string) $summary['derivation_version'],
-                    ['jmhz-work-month.v2', 'jmhz-work-month.v3'],
+                    [
+                        'jmhz-work-month.v2',
+                        'jmhz-work-month.v3',
+                        'jmhz-work-month.v4',
+                    ],
                     true,
                 )
                     ? 'frozen_work_summary'

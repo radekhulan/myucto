@@ -292,7 +292,8 @@ final class PayrollTimeRepository
                     summary.control_catalog_key, summary.control_manifest_sha256,
                     summary.standard_fund_millihours, summary.agreed_fund_millihours,
                     summary.weekly_work_centihours, summary.evidence_days,
-                    summary.worked_millihours, summary.conditional_blocks_confirmed,
+                    summary.worked_millihours, summary.worked_days,
+                    summary.overtime_millihours, summary.conditional_blocks_confirmed,
                     summary.unworked_hours_occurred, summary.work_obstacles_occurred,
                     summary.unworked_total_millihours, summary.unworked_paid_millihours,
                     summary.dpn_without_employer_compensation_millihours,
@@ -324,6 +325,9 @@ final class PayrollTimeRepository
             'id', 'time_month_id', 'time_month_revision_no',
             'standard_fund_millihours', 'agreed_fund_millihours',
             'weekly_work_centihours', 'evidence_days', 'worked_millihours',
+            // Dny a přesčas nese jen v4; u starších souhrnů zůstává NULL,
+            // tedy NEUVEDENO, ne nula.
+            'worked_days', 'overtime_millihours',
             'conditional_blocks_confirmed', 'unworked_hours_occurred',
             'work_obstacles_occurred', 'unworked_total_millihours',
             'unworked_paid_millihours',
@@ -1409,7 +1413,8 @@ final class PayrollTimeRepository
                  derivation_version, source_snapshot_json,
                  source_snapshot_sha256, standard_fund_millihours,
                  agreed_fund_millihours, weekly_work_centihours, evidence_days,
-                 worked_millihours, conditional_blocks_confirmed,
+                 worked_millihours, worked_days, overtime_millihours,
+                 conditional_blocks_confirmed,
                  unworked_hours_occurred, work_obstacles_occurred,
                  unworked_total_millihours, unworked_paid_millihours,
                  dpn_without_employer_compensation_millihours,
@@ -1420,7 +1425,7 @@ final class PayrollTimeRepository
                  unpaid_leave_millihours, unexcused_millihours,
                  confirmation_note, provenance_json, summary_sha256,
                  approved_by, approved_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $specification = PayrollTimeValue::row(
             $summary['specification'] ?? null,
@@ -1461,6 +1466,11 @@ final class PayrollTimeRepository
             PayrollTimeValue::int($values['weekly_work_centihours'] ?? null, 'weekly_work_centihours'),
             PayrollTimeValue::int($values['evidence_days'] ?? null, 'evidence_days'),
             PayrollTimeValue::int($values['worked_millihours'] ?? null, 'worked_millihours'),
+            // Rozpad odpracované doby nese jen v4; starší souhrn ho v `values`
+            // nemá vůbec a do sloupců jde NULL. Přesčas smí chybět i u v4,
+            // když ho nejde vyjádřit na celé millihodiny.
+            $values['worked_days'] ?? null,
+            $values['overtime_millihours'] ?? null,
             1,
             PayrollTimeValue::bool($interactions['IN07'] ?? null, 'IN07') ? 1 : 0,
             PayrollTimeValue::bool($interactions['IN08'] ?? null, 'IN08') ? 1 : 0,

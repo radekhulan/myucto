@@ -70,6 +70,8 @@ final class PayrollRunSnapshotBatchLoader
                     summary.weekly_work_centihours,
                     summary.evidence_days,
                     summary.worked_millihours,
+                    summary.worked_days,
+                    summary.overtime_millihours,
                     summary.conditional_blocks_confirmed,
                     summary.unworked_hours_occurred,
                     summary.work_obstacles_occurred,

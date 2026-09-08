@@ -36,6 +36,13 @@ final class PayrollComponentJmhzMappingDefaults
      * prošla do hlášení tiše, kdežto prázdné zařazení obrazovka viditelně
      * hlásí jako `missing` a účetní ho musí vyřešit.
      *
+     * Totéž platí pro rozpad příspěvku zaměstnavatele na produkty spoření na
+     * stáří (10292–10296): která smlouva to je — penzijní připojištění,
+     * doplňkové penzijní spoření, penzijní pojištění, životní pojištění nebo
+     * DIP — z číselníku složek nijak neplyne. Společná složka
+     * PRISPEVEK_PENZE_ZIVOTNI nese všechny produkty naráz, takže default by byl
+     * hádání; zařazení dělá účetní podle konkrétní smlouvy.
+     *
      * @var array<string,string>
      */
     private const DEFAULTS = [
@@ -60,6 +67,11 @@ final class PayrollComponentJmhzMappingDefaults
         'NAHRADA_MZDY' => '10337',
         'NAHRADA_MZDY_DOVOLENA' => '10338',
         'NAHRADA_MZDY_DPN' => '10342',
+        // Jediné jednoznačné zařazení z rozpadu příspěvku zaměstnavatele:
+        // příspěvek na dlouhodobou péči má vlastní detailní uzel a žádný jiný
+        // produkt do něj nespadá. Ostatní produkty spoření na stáří tu záměrně
+        // nejsou — viz komentář nad konstantou.
+        'PRISPEVEK_DLOUHODOBA_PECE' => '10418',
     ];
 
     public function __construct(

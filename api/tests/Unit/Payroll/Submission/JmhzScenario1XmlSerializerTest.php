@@ -1409,6 +1409,121 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     }
 
     /**
+     * Příspěvek zaměstnavatele na produkty spoření na stáří se vykazuje
+     * rozepsaný podle druhu produktu. Je to část osvobozeného příjmu, takže se
+     * tatáž částka objeví i v úhrnu osvobozených příjmů — dva pohledy na jedny
+     * peníze, ne dvojí vykázání.
+     */
+    public function testEmployerPensionContributionsAreReportedByProduct(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['exempt_income_minor'] = 20_000;
+        $payload['people'][0]['employments'][0]['earnings_by_attribute_minor'] += [
+            '10417' => 20_000,
+            '10292' => 15_000,
+            '10296' => 5_000,
+        ];
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:osvobozenoCelkem>200</form:osvobozenoCelkem>'
+                . '<form:prispevekZamestnavatele>'
+                . '<form:prispevekZelSporeniOsvob>200</form:prispevekZelSporeniOsvob>'
+                . '<form:prispevekPenzPripoj>150</form:prispevekPenzPripoj>'
+                . '<form:prispevekDip>50</form:prispevekDip>'
+                . '</form:prispevekZamestnavatele>',
+            preg_replace('/>\s+</', '><', $result['xml']) ?? '',
+        );
+    }
+
+    /**
+     * Zaměstnavatel, který na penzijní produkty nepřispívá, nemá složku vůbec
+     * zavedenou. Blok se sedmi nulami by tvrdil víc, než z čeho plyne.
+     */
+    public function testEmployerContributionBlockIsOmittedWithoutContributions(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolution(),
+            $this->envelope(),
+        );
+
+        self::assertStringNotContainsString('<form:prispevekZamestnavatele>', $result['xml']);
+    }
+
+    /**
+     * Počet odpracovaných dnů (10267) a přesčas (10269) nese až pracovní
+     * souhrn v4. Přesčas je PODMNOŽINOU odpracovaných hodin, ne časem navíc.
+     */
+    public function testWorkedDaysAndOvertimeAreReportedFromTheWorkSummary(): void
+    {
+        $payload = $this->payload();
+        $values = &$payload['people'][0]['employments'][0]['work_month']
+            ['jmhz_work_summary']['values'];
+        $values['worked_days'] = 16;
+        $values['overtime_millihours'] = 3_000;
+        unset($values);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+        $xml = preg_replace('/>\s+</', '><', $result['xml']) ?? '';
+
+        self::assertStringContainsString(
+            '<form:dnyEvidencniStav>31</form:dnyEvidencniStav>'
+                . '<form:dnyOdpracovanePocet>16</form:dnyOdpracovanePocet>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<form:pocet>184.000</form:pocet><form:rozpad>'
+                . '<form:prescas>3.000</form:prescas></form:rozpad>',
+            $xml,
+        );
+    }
+
+    /**
+     * Starší zmrazený souhrn obě veličiny nemá. Nula by tvrdila, že zaměstnanec
+     * neodpracoval ani den; oba atributy jsou nepovinné, takže se vynechají.
+     */
+    public function testWorkedDaysAndOvertimeAreOmittedForOlderWorkSummaries(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolution(),
+            $this->envelope(),
+        );
+
+        self::assertStringNotContainsString('<form:dnyOdpracovanePocet>', $result['xml']);
+        self::assertStringNotContainsString('<form:rozpad>', $result['xml']);
+    }
+
+    public function testOvertimeAboveWorkedHoursIsRefused(): void
+    {
+        $payload = $this->payload();
+        $values = &$payload['people'][0]['employments'][0]['work_month']
+            ['jmhz_work_summary']['values'];
+        $values['worked_days'] = 16;
+        $values['overtime_millihours'] = 200_000;
+        unset($values);
+
+        try {
+            (new JmhzScenario1XmlValidator())->dryRun(
+                $this->resolutionFor($payload),
+                $this->envelope(),
+            );
+            self::fail('Přesčas nad odpracované hodiny musel podání zablokovat.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame(
+                'jmhz_xml_overtime_exceeds_worked_hours',
+                $exception->validationCode,
+            );
+        }
+    }
+
+    /**
      * Řez zmrazený dřív, než se úhrn osvobozených příjmů odvozoval, ho nenese.
      * Nula by tvrdila, že zaměstnanec žádný osvobozený příjem neměl — a to
      * z takového řezu neplyne, takže se element vynechá.

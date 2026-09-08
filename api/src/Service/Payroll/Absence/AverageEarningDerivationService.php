@@ -114,11 +114,16 @@ final class AverageEarningDerivationService
     /**
      * Verze odvození pracovního souhrnu, ze kterých umíme číst rozpad směn.
      *
-     * v3 se od v2 liší jen o hodiny nepřítomností bez atributu hlášení;
-     * zdrojový snapshot směn a jeho `schema_version` mají obě verze shodné,
-     * takže se průměr počítá z obou stejně.
+     * v3 se od v2 liší jen o hodiny nepřítomností bez atributu hlášení, v4
+     * od v3 o počet odpracovaných dnů a přesčas pro měsíční hlášení; zdrojový
+     * snapshot směn a jeho `schema_version` mají všechny tři verze shodné,
+     * takže se průměr počítá ze všech stejně.
      */
-    public const SUPPORTED_WORK_SUMMARY_VERSIONS = ['jmhz-work-month.v2', 'jmhz-work-month.v3'];
+    public const SUPPORTED_WORK_SUMMARY_VERSIONS = [
+        'jmhz-work-month.v2',
+        'jmhz-work-month.v3',
+        'jmhz-work-month.v4',
+    ];
 
     /**
      * Důvody, kvůli kterým se místo skutečného průměru smí použít pravděpodobný

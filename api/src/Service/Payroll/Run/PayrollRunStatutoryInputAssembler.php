@@ -807,7 +807,7 @@ final class PayrollRunStatutoryInputAssembler
         if ($summary === null
             || !in_array(
                 $summary['derivation_version'] ?? null,
-                ['jmhz-work-month.v2', 'jmhz-work-month.v3'],
+                ['jmhz-work-month.v2', 'jmhz-work-month.v3', 'jmhz-work-month.v4'],
                 true,
             )
         ) {

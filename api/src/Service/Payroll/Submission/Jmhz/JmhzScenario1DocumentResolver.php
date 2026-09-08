@@ -46,6 +46,19 @@ final class JmhzScenario1DocumentResolver
      *
      * @var list<string>
      */
+    /**
+     * Příspěvek zaměstnavatele na produkty spoření na stáří (úhrn 10417
+     * a rozpad 10418, 10292-10296) v pořadí sekvence XSD.
+     *
+     * Souhrnná data zaměstnance se vykazují jednou za osobu, takže se tyhle
+     * atributy sčítají přes všechny její pracovněprávní vztahy.
+     *
+     * @var list<string>
+     */
+    private const EMPLOYER_CONTRIBUTION_ATTRIBUTES = [
+        '10417', '10418', '10292', '10293', '10294', '10295', '10296',
+    ];
+
     private const NEGATIVE_INCOME_REPORTED_AS_ZERO = [
         '10286',
         '10328',
@@ -306,6 +319,7 @@ final class JmhzScenario1DocumentResolver
             // `null` dokud některý vztah úhrn nenese: zmrazená příprava starší
             // než odvozování osvobozených příjmů ho nemá a element se vynechá.
             $exemptIncomeMinor = null;
+            $employerContributions = [];
             foreach ($employments as $employment) {
                 if (is_int($employment['exempt_income_minor'] ?? null)) {
                     $exemptIncomeMinor = ($exemptIncomeMinor ?? 0)
@@ -380,6 +394,25 @@ final class JmhzScenario1DocumentResolver
                     }
                 }
                 ksort($earningsCzk, SORT_STRING);
+                /*
+                 * Příspěvek zaměstnavatele na produkty spoření na stáří sedí
+                 * v XSD pod `souhrnDataZec`, tedy JEDNOU ZA OSOBU, kdežto
+                 * vektor výdělků je po vztazích. Sčítá se proto přes všechny
+                 * vztahy téže osoby stejně jako zúčtovaný příjem — jinak by
+                 * zaměstnanec se dvěma souběžnými vztahy měl příspěvek
+                 * v hlášení dvakrát, nebo naopak jen z jednoho vztahu.
+                 *
+                 * Úhrn 10417 je ve vektoru už dopočítaný rollupem topologie
+                 * cílových atributů, takže se jen opisuje.
+                 */
+                foreach (self::EMPLOYER_CONTRIBUTION_ATTRIBUTES as $attributeId) {
+                    if (!array_key_exists($attributeId, $earningsCzk)) {
+                        continue;
+                    }
+                    $employerContributions[$attributeId] =
+                        ($employerContributions[$attributeId] ?? 0)
+                        + $earningsCzk[$attributeId];
+                }
                 $identity = $this->object($employment['identity'] ?? null);
                 $personIdentifier = $this->object(
                     $identity['person_external_identifier'] ?? null,
@@ -462,6 +495,10 @@ final class JmhzScenario1DocumentResolver
                      * `null` znamená NEUVEDENO: příprava zmrazená dřív, než se
                      * úhrn odvozoval, ho nenese a element se nezapíše.
                      */
+                    // Prázdné pole = zaměstnavatel na penzijní produkty
+                    // nepřispívá nebo složku nemá zavedenou; blok se pak
+                    // nevykazuje vůbec.
+                    'employer_contributions_czk' => $employerContributions,
                     'exempt_income_czk' => $exemptIncomeMinor === null
                         ? null
                         : $this->wholeCzk(

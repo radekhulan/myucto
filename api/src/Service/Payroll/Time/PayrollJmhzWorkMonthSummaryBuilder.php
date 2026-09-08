@@ -13,7 +13,7 @@ use PDO;
 
 final class PayrollJmhzWorkMonthSummaryBuilder
 {
-    public const DERIVATION_VERSION = 'jmhz-work-month.v3';
+    public const DERIVATION_VERSION = 'jmhz-work-month.v4';
 
     /**
      * Neodpracované hodiny bez vlastního atributu hlášení.
@@ -46,12 +46,44 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     ];
 
     /** Verze souhrnu, které nesou {@see LOCAL_EVIDENCE_FIELDS}. */
-    public const VERSIONS_WITH_LOCAL_EVIDENCE = ['jmhz-work-month.v3'];
+    public const VERSIONS_WITH_LOCAL_EVIDENCE = [
+        'jmhz-work-month.v3',
+        'jmhz-work-month.v4',
+    ];
+
+    /**
+     * Rozpad odpracované doby: dny (10267) a přesčas (10269).
+     *
+     * Oba atributy jsou v matici povinností NEPOVINNÉ, ale v přijatých
+     * hlášeních jsou vyplněné vždy — účetní je jinak musí dopisovat ručně,
+     * přestože je aplikace umí odvodit ze stejných časových záznamů, ze
+     * kterých počítá odpracované hodiny (10268).
+     *
+     * Dny se počítají jako RŮZNÉ kalendářní dny s alespoň jedním záznamem
+     * kategorie `regular` nebo `overtime` — dvě směny v jednom dni jsou
+     * jeden odpracovaný den, ne dva. Přesčas je podmnožina odpracovaných
+     * hodin, ne přičítaná položka.
+     *
+     * @var list<string>
+     */
+    private const WORKED_BREAKDOWN_FIELDS = [
+        'worked_days',
+        'overtime_millihours',
+    ];
+
+    /** Verze souhrnu, které nesou {@see WORKED_BREAKDOWN_FIELDS}. */
+    public const VERSIONS_WITH_WORKED_BREAKDOWN = ['jmhz-work-month.v4'];
 
     /** @return list<string> */
     public static function localEvidenceFields(): array
     {
         return self::LOCAL_EVIDENCE_FIELDS;
+    }
+
+    /** @return list<string> */
+    public static function workedBreakdownFields(): array
+    {
+        return self::WORKED_BREAKDOWN_FIELDS;
     }
 
     /**
@@ -155,7 +187,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 break;
             }
         }
-        [$workedMinutes, $entryIssues] = self::workedMinutes($entries, $periodStart);
+        [$worked, $entryIssues] = self::workedMinutes($entries, $periodStart);
         $source = [
             'schema_version' => self::DERIVATION_VERSION,
             'specification' => self::specification(),
@@ -177,7 +209,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 'agreed_fund_hours' => self::minutesSuggestion($agreedMinutes),
                 'weekly_work_hours' => $employment['weekly_hours'],
                 'evidence_days' => $evidenceDays,
-                'worked_hours' => self::minutesSuggestion($workedMinutes),
+                'worked_hours' => self::minutesSuggestion($worked['minutes']),
+                'worked_days' => $worked['days'],
+                'overtime_hours' => self::minutesSuggestion($worked['overtime_minutes']),
             ] + self::conditionalSuggestions($this->absenceHours->derive(
                 $supplierId,
                 $employmentId,
@@ -344,6 +378,27 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 3,
                 8,
             ),
+            /*
+             * Dny (10267) a přesčas (10269) se neberou ze vstupu dialogu, ale
+             * z náhledu — stejně jako evidence_days (10265). Jsou to čistá
+             * odvození z časových záznamů, které náhled zamkl hashem; kdyby
+             * šly přes vstup, dala by se odpracovaná doba popsat jinými dny
+             * a jiným přesčasem, než z jakých vznikly hodiny 10268.
+             */
+            'worked_days' => self::nonNegativeInt(
+                $preview['suggestions']['worked_days'] ?? null,
+                'worked_days',
+            ),
+            /*
+             * Přesčas, který nejde vyjádřit na celé millihodiny (minuty
+             * nedělitelné třemi), zůstává NEUVEDENÝ. Atribut je nepovinný,
+             * takže prázdno je pravdivější než zaokrouhlená hodnota —
+             * politika souhrnu je `exact_..._without_rounding`.
+             */
+            'overtime_millihours' => self::nullableScaledDecimal(
+                $preview['suggestions']['overtime_hours'] ?? null,
+                'overtime_hours',
+            ),
         ];
         self::assertScaledMaximum(
             $values['standard_fund_millihours'],
@@ -365,6 +420,18 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             99999999,
             'worked_hours',
         );
+        /*
+         * Přesčas je částí odpracovaných hodin (10269 je rozpad 10268), takže
+         * ho nesmí přerůst. Hodiny 10268 jde v dialogu přepsat, dny a přesčas
+         * ne — bez téhle kontroly by snížené hodiny tiše popřely rozpad.
+         */
+        if ($values['overtime_millihours'] !== null
+            && $values['overtime_millihours'] > $values['worked_millihours']
+        ) {
+            throw new \InvalidArgumentException(
+                'Přesčasové hodiny nesmí překročit odpracované hodiny.',
+            );
+        }
         $unworkedHoursOccurred = self::strictBool(
             $input['unworked_hours_occurred'] ?? null,
             'unworked_hours_occurred',
@@ -447,7 +514,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 '10260' => 'explicit_confirmation_with_calendar_suggestion',
                 '10261' => 'explicit_confirmation_with_term_suggestion',
                 '10265' => 'employment_interval_derivation',
+                '10267' => 'time_entry_derivation',
                 '10268' => 'explicit_confirmation_with_time_entry_suggestion',
+                '10269' => $values['overtime_millihours'] === null
+                    ? 'not_expressible_in_millihours'
+                    : 'time_entry_derivation',
                 '10275' => $unworkedHoursOccurred
                     ? 'explicit_confirmation'
                     : 'not_applicable_by_IN07',
@@ -769,12 +840,25 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     }
 
     /**
+     * Odpracované minuty (10268) i jejich rozpad na dny (10267) a přesčas (10269).
+     *
+     * Všechny tři veličiny musí vzniknout z téhož průchodu záznamy: záznam
+     * vyřazený kvůli přesahu měsíce nebo záporné čistě odpracované době se
+     * nesmí objevit ani v hodinách, ani ve dnech, ani v přesčasu. Den se bere
+     * podle LOKÁLNÍHO data začátku záznamu, stejně jako se podle lokálního
+     * měsíce rozhoduje o zařazení do období.
+     *
      * @param list<array<string,mixed>> $entries
-     * @return array{int,list<array<string,string>>}
+     * @return array{
+     *   array{minutes:int,days:int,overtime_minutes:int},
+     *   list<array<string,string>>
+     * }
      */
     private static function workedMinutes(array $entries, string $periodStart): array
     {
         $minutes = 0;
+        $overtimeMinutes = 0;
+        $days = [];
         $issues = [];
         $intervals = [];
         foreach ($entries as $entry) {
@@ -786,7 +870,8 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $start = new \DateTimeImmutable((string) $entry['starts_at_utc'], $utc);
             $end = new \DateTimeImmutable((string) $entry['ends_at_utc'], $utc);
             $periodMonth = substr($periodStart, 0, 7);
-            $startMonth = $start->setTimezone($timezone)->format('Y-m');
+            $localStart = $start->setTimezone($timezone);
+            $startMonth = $localStart->format('Y-m');
             $endMonth = $end->setTimezone($timezone)->format('Y-m');
             if ($startMonth !== $periodMonth && $endMonth !== $periodMonth) {
                 if ($startMonth === $endMonth) {
@@ -820,8 +905,19 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 continue;
             }
             $minutes += $net;
+            if ($entry['category'] === 'overtime') {
+                $overtimeMinutes += $net;
+            }
+            $days[$localStart->format('Y-m-d')] = true;
         }
-        return [$minutes, $issues];
+        return [
+            [
+                'minutes' => $minutes,
+                'days' => count($days),
+                'overtime_minutes' => $overtimeMinutes,
+            ],
+            $issues,
+        ];
     }
 
     private static function period(string $periodStart): \DateTimeImmutable

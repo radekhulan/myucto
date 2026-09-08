@@ -295,7 +295,7 @@ final class JmhzEldpEvidenceBuilder
         if (!is_array($workSummary)
             || !in_array(
                 $workSummary['derivation_version'] ?? null,
-                ['jmhz-work-month.v2', 'jmhz-work-month.v3'],
+                ['jmhz-work-month.v2', 'jmhz-work-month.v3', 'jmhz-work-month.v4'],
                 true,
             )
             || !is_int($workSummary['id'] ?? null)
@@ -676,7 +676,7 @@ final class JmhzEldpEvidenceBuilder
          * evidenčního listu, takže tam zůstává zakázaná přesně jako dřív.
          */
         $obstacleAbsences = self::hasObstacleAbsence($absences)
-            && $summaryVersion === 'jmhz-work-month.v3';
+            && self::carriesV3Blocks($summaryVersion);
         if (($interactions['IN08'] ?? null) !== $obstacleAbsences) {
             $this->invalid(
                 'jmhz_eldp_work_summary_mismatch',
@@ -715,7 +715,7 @@ final class JmhzEldpEvidenceBuilder
      */
     private static function unworkedFields(string $summaryVersion): array
     {
-        return $summaryVersion === 'jmhz-work-month.v3'
+        return self::carriesV3Blocks($summaryVersion)
             ? array_merge(self::UNWORKED_FIELDS, self::V3_UNWORKED_FIELDS)
             : array_merge(self::UNWORKED_FIELDS, [
                 'employee_obstacle_paid_millihours',
@@ -817,13 +817,31 @@ final class JmhzEldpEvidenceBuilder
     }
 
     /**
+     * Nese souhrn hodinové bloky, které přibyly ve verzi v3?
+     *
+     * Verze se přidávají shora: v4 je v3 plus počet odpracovaných dnů a
+     * přesčas pro měsíční hlášení, hodinové bloky má stejné. Porovnávat na
+     * rovnost s v3 by proto každou další verzi tiše shodilo zpátky na chování
+     * v2 a fail-closed by zablokovalo nepřítomnosti, které souhrn ve
+     * skutečnosti doloží.
+     */
+    private static function carriesV3Blocks(string $summaryVersion): bool
+    {
+        return in_array(
+            $summaryVersion,
+            ['jmhz-work-month.v3', 'jmhz-work-month.v4'],
+            true,
+        );
+    }
+
+    /**
      * Druh nepřítomnosti → hodinové bloky, podle verze pracovního souhrnu.
      *
      * @return array<string,list<string>>
      */
     private static function absenceWorkSummaryFields(string $summaryVersion): array
     {
-        return $summaryVersion === 'jmhz-work-month.v3'
+        return self::carriesV3Blocks($summaryVersion)
             ? self::ABSENCE_WORK_SUMMARY_FIELDS + self::V3_ABSENCE_WORK_SUMMARY_FIELDS
             : self::ABSENCE_WORK_SUMMARY_FIELDS;
     }

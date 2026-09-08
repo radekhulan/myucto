@@ -907,6 +907,7 @@ final class JmhzScenario1XmlSerializer
                 (string) $exemptIncome,
             );
         }
+        $this->appendEmployerContributions($dom, $income, $summary);
         $node->appendChild($income);
 
         $declarationSigned = $this->bool(
@@ -1181,6 +1182,73 @@ final class JmhzScenario1XmlSerializer
         }
 
         return $node;
+    }
+
+    /**
+     * Příspěvek zaměstnavatele na produkty spoření na stáří a na pojištění
+     * dlouhodobé péče (10417 a rozpad 10418, 10292–10296).
+     *
+     * Stojí uvnitř `prijmy` za osvobozeným úhrnem a je jeho ČÁSTÍ: příspěvek
+     * na penzijní produkt je osvobozený příjem podle § 6 odst. 9 písm. p) ZDP,
+     * takže se objeví jednou v 10289 a podruhé tady, rozepsaný podle druhu
+     * produktu. Není to dvojí vykázání částky, ale dva pohledy na tutéž.
+     *
+     * Úhrn 10417 je podle vlastního názvu atributu součtem produktů spoření na
+     * stáří I pojištění dlouhodobé péče, takže rozpad se do něj rolluje přes
+     * topologii cílových atributů; serializér ho jen opíše z vektoru výdělků.
+     *
+     * Blok vzniká jen tehdy, když vektor nese aspoň jeden z atributů. Prázdný
+     * blok se sedmi nulami by tvrdil, že zaměstnavatel na penzijní produkty
+     * nepřispívá — což u zaměstnavatele, který složku vůbec nemá zavedenou,
+     * neplyne z ničeho.
+     *
+     * @param array<string,mixed> $summary
+     */
+    private function appendEmployerContributions(
+        DOMDocument $dom,
+        DOMElement $income,
+        array $summary,
+    ): void {
+        $contributions = $this->object($summary['employer_contributions_czk'] ?? null);
+        if ($contributions === []) {
+            return;
+        }
+        $values = [];
+        /*
+         * Znaménko se řídí XSD, ne jednotným pravidlem: `cisloN14Type` je
+         * `xs:int`, tedy se znaménkem (vratka příspěvku je legitimní vstup),
+         * kdežto `cislo14Type` je nezáporný. Vykázat zápornou hodnotu tam, kde
+         * schéma povoluje jen nezápornou, by podání shodilo až na validaci
+         * u ČSSZ, takže se rozlišuje tady.
+         */
+        foreach ([
+            'form:prispevekZelSporeniOsvob' => ['10417', true],
+            'form:prispevekZelPojDlPece' => ['10418', false],
+            'form:prispevekPenzPripoj' => ['10292', true],
+            'form:prispevekDoplnPenzPripoj' => ['10293', true],
+            'form:prispevekPenzPoj' => ['10294', true],
+            'form:prispevekZivotPoj' => ['10295', false],
+            'form:prispevekDip' => ['10296', false],
+        ] as $element => [$attributeId, $signed]) {
+            if (!array_key_exists($attributeId, $contributions)) {
+                continue;
+            }
+            $values[$element] = $signed
+                ? $this->signedInt($contributions[$attributeId], $attributeId)
+                : $this->int($contributions[$attributeId], $attributeId);
+        }
+        if ($values === []) {
+            return;
+        }
+        $node = $this->node(
+            $dom,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:prispevekZamestnavatele',
+        );
+        foreach ($values as $element => $value) {
+            $this->text($dom, $node, JmhzSchemaCatalog::NS_FORM, $element, (string) $value);
+        }
+        $income->appendChild($node);
     }
 
     /** @param array<string,mixed> $result */
@@ -1823,6 +1891,23 @@ final class JmhzScenario1XmlSerializer
             'form:dnyEvidencniStav',
             (string) $this->int($values['evidence_days'] ?? null, '10265'),
         );
+        /*
+         * Počet odpracovaných dnů (10267) a přesčasové hodiny (10269) nese až
+         * pracovní souhrn `jmhz-work-month.v4`. Starší zmrazený souhrn je nemá
+         * vůbec a `null` tady znamená NEUVEDENO, ne nulu: nula by tvrdila, že
+         * zaměstnanec neodpracoval ani den, což ze staršího řezu neplyne.
+         * Oba atributy jsou v matici povinností nepovinné, takže je vynechání
+         * legální.
+         */
+        if (($values['worked_days'] ?? null) !== null) {
+            $this->text(
+                $dom,
+                $days,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:dnyOdpracovanePocet',
+                (string) $this->int($values['worked_days'], '10267'),
+            );
+        }
         $node->appendChild($days);
         $hours = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:odpracovaneHodiny');
         $this->text(
@@ -1832,6 +1917,28 @@ final class JmhzScenario1XmlSerializer
             'form:pocet',
             $this->decimal($values['worked_millihours'] ?? null, 3, '10268'),
         );
+        if (($values['overtime_millihours'] ?? null) !== null) {
+            // Kontrola ČSSZ hlídá, že přesčas není vyšší než odpracované
+            // hodiny — je to jejich PODMNOŽINA, ne přičtený čas navíc.
+            $overtime = $this->int($values['overtime_millihours'], '10269');
+            $worked = $this->int($values['worked_millihours'] ?? null, '10268');
+            if ($overtime > $worked) {
+                $this->invalid(
+                    'jmhz_xml_overtime_exceeds_worked_hours',
+                    'Přesčasové hodiny nesmějí být vyšší než počet'
+                        . ' odpracovaných hodin.',
+                );
+            }
+            $breakdown = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:rozpad');
+            $this->text(
+                $dom,
+                $breakdown,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:prescas',
+                $this->decimal($overtime, 3, '10269'),
+            );
+            $hours->appendChild($breakdown);
+        }
         $node->appendChild($hours);
 
         $unworked = [

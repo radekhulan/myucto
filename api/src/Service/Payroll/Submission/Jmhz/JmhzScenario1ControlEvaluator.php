@@ -201,7 +201,7 @@ final class JmhzScenario1ControlEvaluator
     public function implementedControlIds(): array
     {
         return [
-            1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 37, 43, 44, 45, 50, 56, 57, 58,
+            1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
             103, 109, 112, 118, 121, 124, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
             150, 151, 153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
@@ -354,6 +354,7 @@ final class JmhzScenario1ControlEvaluator
             12 => $this->employeeInsuranceMatchesForms($projection),
             13 => $this->insuranceTotal($projection),
             20 => $this->workedHoursCoverOvertime($projection),
+            36 => $this->overtimeHoursRequireSurchargeAmount($projection),
             23 => $this->unworkedHoursCoverVacation($projection),
             43, 44 => $this->insuranceIntervalOrderedAndFilled($projection),
             56 => $this->dateNotAfterFilling($projection, '10272'),
@@ -2488,6 +2489,34 @@ final class JmhzScenario1ControlEvaluator
             }
             if (self::compareScaled($risky, $worked) > 0) {
                 return 'Hodiny v rizikové práci překračují počet odpracovaných hodin.';
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 36: má-li měsíc přesčasové hodiny, musí být vykázaná i výše
+     * příplatku za práci přesčas.
+     *
+     * Rozhoduje PŘÍTOMNOST atributu 10333, ne jeho velikost. Katalog to říká
+     * výslovně: „pokud nebyly v daném měsíci příplatky proplaceny, je nutné
+     * uvést 0". Odpracovaný přesčas bez jakéhokoli údaje o příplatku je pro
+     * MPSV a ČSÚ díra ve statistice, ne nula.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function overtimeHoursRequireSurchargeAmount(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $overtime = $form->scaled('10269');
+            if ($overtime === null || self::compareScaled($overtime, [0, 0]) <= 0) {
+                return null;
+            }
+            if ($form->all('10333') === []) {
+                return 'Jsou vykázané přesčasové hodiny, ale chybí výše'
+                    . ' příplatku za práci přesčas.';
             }
 
             return null;

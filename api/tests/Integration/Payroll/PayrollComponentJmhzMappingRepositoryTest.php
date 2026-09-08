@@ -212,7 +212,7 @@ final class PayrollComponentJmhzMappingRepositoryTest extends TestCase
         );
         self::assertSame(200, $targetsResponse->getStatusCode());
         $targets = $this->json($targetsResponse);
-        self::assertCount(17, PayrollTimeValue::rows($targets['targets'] ?? null, 'targets'));
+        self::assertCount(23, PayrollTimeValue::rows($targets['targets'] ?? null, 'targets'));
         self::assertSame(64, strlen(PayrollTimeValue::string(
             $targets['topology_hash'] ?? null,
             'topology_hash',
