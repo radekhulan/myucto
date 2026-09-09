@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { stockApi, type StockItem, type StockItemType, type Warehouse } from '@/api/stock'
+import { stockApi, type StockItem, type StockItemType, type Warehouse, type StockItemAttributeFilter } from '@/api/stock'
+import { eshopApi, type Manufacturer, type Category, type Tag, type Attribute, type AttributeOption } from '@/api/eshop'
+import { clientsApi, type Client } from '@/api/clients'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
@@ -33,12 +35,49 @@ const page = ref(1)
 const pages = ref(1)
 const total = ref(0)
 const warehouses = ref<Warehouse[]>([])
+const manufacturers = ref<Manufacturer[]>([])
+const categories = ref<Category[]>([])
+const tags = ref<Tag[]>([])
+const attributes = ref<Attribute[]>([])
+const attributeOptions = ref<Record<number, AttributeOption[]>>({})
+const vendors = ref<Client[]>([])
 const filters = reactive({
   type: '' as StockItemType | '',
   warehouse_id: '' as number | '',
+  manufacturer_id: '' as number | '',
+  category_id: '' as number | '',
+  vendor_id: '' as number | '',
+  tag_ids: [] as number[],
+  missing: '' as '' | 'manufacturer' | 'category' | 'image' | 'price' | 'ean',
+  availability: '' as '' | 'in_stock' | 'out_of_stock' | 'below_min',
+  qty_min: '',
+  qty_max: '',
+  attribute_id: '' as number | '',
+  attribute_value: '',
   only_below_min: false,
   active: true,
   q: '',
+})
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let requestController: AbortController | undefined
+let requestVersion = 0
+let attributeOptionVersion = 0
+
+const selectedAttribute = computed(() => attributes.value.find(a => a.id === filters.attribute_id))
+const selectedAttributeOptions = computed(() => filters.attribute_id === '' ? [] : (attributeOptions.value[filters.attribute_id] ?? []))
+function categoryLabel(category: Category): string {
+  return `${'\u00a0\u00a0'.repeat(category.depth)}${category.name}`
+}
+const attributeFilters = computed<StockItemAttributeFilter[]>(() => {
+  const attribute = selectedAttribute.value
+  if (!attribute || filters.attribute_value === '') return []
+  switch (attribute.data_type) {
+    case 'bool': return [{ attribute_id: attribute.id, value_bool: filters.attribute_value === 'true' }]
+    case 'number': return [{ attribute_id: attribute.id, value_num_min: filters.attribute_value }]
+    case 'enum': return [{ attribute_id: attribute.id, option_id: Number(filters.attribute_value) }]
+    default: return [{ attribute_id: attribute.id, value_text: filters.attribute_value }]
+  }
 })
 
 /**
@@ -51,6 +90,14 @@ const activeFilterCount = computed(() => {
   let n = 0
   if (filters.type) n++
   if (filters.warehouse_id !== '') n++
+  if (filters.manufacturer_id !== '') n++
+  if (filters.category_id !== '') n++
+  if (filters.vendor_id !== '') n++
+  if (filters.tag_ids.length) n++
+  if (filters.missing) n++
+  if (filters.availability) n++
+  if (filters.qty_min !== '' || filters.qty_max !== '') n++
+  if (attributeFilters.value.length) n++
   if (filters.only_below_min) n++
   if (!filters.active) n++
   return n
@@ -67,6 +114,23 @@ const filterChips = computed<FilterChip[]>(() => {
     const w = warehouses.value.find(x => x.id === filters.warehouse_id)
     if (w) chips.push({ key: 'warehouse', value: w.name })
   }
+  if (filters.manufacturer_id !== '') {
+    const manufacturer = manufacturers.value.find(x => x.id === filters.manufacturer_id)
+    if (manufacturer) chips.push({ key: 'manufacturer', label: t('stock.items.filter_manufacturer'), value: manufacturer.name })
+  }
+  if (filters.category_id !== '') {
+    const category = categories.value.find(x => x.id === filters.category_id)
+    if (category) chips.push({ key: 'category', label: t('stock.items.filter_category'), value: category.name })
+  }
+  if (filters.vendor_id !== '') {
+    const vendor = vendors.value.find(x => x.id === filters.vendor_id)
+    if (vendor) chips.push({ key: 'vendor', label: t('stock.items.filter_vendor'), value: vendor.company_name })
+  }
+  if (filters.tag_ids.length) chips.push({ key: 'tags', label: t('stock.items.filter_tags'), value: filters.tag_ids.map(id => tags.value.find(x => x.id === id)?.name).filter(Boolean).join(', ') })
+  if (filters.missing) chips.push({ key: 'missing', label: t('stock.items.filter_missing'), value: t(`stock.items.missing_${filters.missing}`) })
+  if (filters.availability) chips.push({ key: 'availability', label: t('stock.items.filter_availability'), value: t(`stock.items.availability_${filters.availability}`) })
+  if (filters.qty_min !== '' || filters.qty_max !== '') chips.push({ key: 'quantity', label: t('stock.items.filter_quantity'), value: `${filters.qty_min || '−'} – ${filters.qty_max || '∞'}` })
+  if (attributeFilters.value.length) chips.push({ key: 'attribute', label: t('stock.items.filter_attribute'), value: `${selectedAttribute.value?.name}: ${filters.attribute_value}` })
   if (filters.only_below_min) chips.push({ key: 'below_min', value: t('stock.items.filter_below_min') })
   if (!filters.active) chips.push({ key: 'active', value: t('stock.items.filter_inactive_included') })
   return chips
@@ -76,6 +140,14 @@ function clearFilter(key: string) {
   switch (key) {
     case 'type': filters.type = ''; break
     case 'warehouse': filters.warehouse_id = ''; break
+    case 'manufacturer': filters.manufacturer_id = ''; break
+    case 'category': filters.category_id = ''; break
+    case 'vendor': filters.vendor_id = ''; break
+    case 'tags': filters.tag_ids = []; break
+    case 'missing': filters.missing = ''; break
+    case 'availability': filters.availability = ''; break
+    case 'quantity': filters.qty_min = ''; filters.qty_max = ''; break
+    case 'attribute': filters.attribute_id = ''; filters.attribute_value = ''; break
     case 'below_min': filters.only_below_min = false; break
     case 'active': filters.active = true; break
   }
@@ -83,12 +155,14 @@ function clearFilter(key: string) {
 }
 
 async function load(reset = true) {
+  const version = ++requestVersion
+  requestController?.abort()
+  requestController = new AbortController()
+  const targetPage = reset ? 1 : page.value + 1
   if (reset) {
     loading.value = true
-    page.value = 1
   } else {
     loadingMore.value = true
-    page.value++
   }
   try {
     const res = await stockApi.listItems({
@@ -97,27 +171,70 @@ async function load(reset = true) {
       q: filters.q || undefined,
       only_below_min: filters.only_below_min || undefined,
       warehouse_id: filters.warehouse_id || undefined,
+      manufacturer_id: filters.manufacturer_id || undefined,
+      category_id: filters.category_id || undefined,
+      vendor_id: filters.vendor_id || undefined,
+      tag_ids: filters.tag_ids,
+      missing: filters.missing ? [filters.missing] : undefined,
+      availability: filters.availability || undefined,
+      qty_min: filters.qty_min || undefined,
+      qty_max: filters.qty_max || undefined,
+      attribute_filters: attributeFilters.value,
       sort: tbl.sort.value?.key as 'sku' | 'name' | 'type' | 'qty' | 'value' | undefined,
       direction: tbl.sort.value?.dir,
-      page: page.value,
+      page: targetPage,
       per_page: PER_PAGE,
-    })
+    }, { signal: requestController.signal })
+    if (version !== requestVersion) return
+    page.value = targetPage
     items.value = reset ? res.data : items.value.concat(res.data)
     total.value = res.meta.total
     pages.value = res.meta.pages ?? 1
 
   } catch (e: any) {
+    if (e?.code === 'ERR_CANCELED' || version !== requestVersion) return
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
-    loading.value = false
-    loadingMore.value = false
+    if (version === requestVersion) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
 }
 
-function applyFilters() { load(true) }
+function applyFilters() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = undefined
+  void load(true)
+}
+function scheduleSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => applyFilters(), 300)
+}
+async function ensureAttributeOptions(attributeId: number) {
+  if (attributeOptions.value[attributeId]) return
+  const version = ++attributeOptionVersion
+  const options = await eshopApi.listAttributeOptions(attributeId).catch(() => [] as AttributeOption[])
+  if (version === attributeOptionVersion) attributeOptions.value[attributeId] = options
+}
+function onAttributeChange() {
+  filters.attribute_value = ''
+  if (selectedAttribute.value?.data_type === 'enum') void ensureAttributeOptions(selectedAttribute.value.id)
+  applyFilters()
+}
 function resetFilters() {
   filters.type = ''
   filters.warehouse_id = ''
+  filters.manufacturer_id = ''
+  filters.category_id = ''
+  filters.vendor_id = ''
+  filters.tag_ids = []
+  filters.missing = ''
+  filters.availability = ''
+  filters.qty_min = ''
+  filters.qty_max = ''
+  filters.attribute_id = ''
+  filters.attribute_value = ''
   filters.only_below_min = false
   filters.active = true
   filters.q = ''
@@ -128,6 +245,15 @@ function buildQuery(): Record<string, string> {
   const q: Record<string, string> = {}
   if (filters.type) q.type = filters.type
   if (filters.warehouse_id !== '') q.warehouse_id = String(filters.warehouse_id)
+  if (filters.manufacturer_id !== '') q.manufacturer_id = String(filters.manufacturer_id)
+  if (filters.category_id !== '') q.category_id = String(filters.category_id)
+  if (filters.vendor_id !== '') q.vendor_id = String(filters.vendor_id)
+  if (filters.tag_ids.length) q.tag_ids = filters.tag_ids.join(',')
+  if (filters.missing) q.missing = filters.missing
+  if (filters.availability) q.availability = filters.availability
+  if (filters.qty_min !== '') q.qty_min = filters.qty_min
+  if (filters.qty_max !== '') q.qty_max = filters.qty_max
+  if (filters.attribute_id !== '' && filters.attribute_value !== '') q.attribute = `${filters.attribute_id}:${filters.attribute_value}`
   if (filters.only_below_min) q.only_below_min = '1'
   if (!filters.active) q.active = '0'
   if (filters.q) q.q = filters.q
@@ -136,6 +262,18 @@ function buildQuery(): Record<string, string> {
 function applyQueryToPage(q: Record<string, string>) {
   filters.type = (q.type as StockItemType) || ''
   filters.warehouse_id = q.warehouse_id ? Number(q.warehouse_id) : ''
+  filters.manufacturer_id = q.manufacturer_id ? Number(q.manufacturer_id) : ''
+  filters.category_id = q.category_id ? Number(q.category_id) : ''
+  filters.vendor_id = q.vendor_id ? Number(q.vendor_id) : ''
+  filters.tag_ids = q.tag_ids ? q.tag_ids.split(',').map(Number).filter(Number.isInteger) : []
+  filters.missing = (q.missing as typeof filters.missing) || ''
+  filters.availability = (q.availability as typeof filters.availability) || ''
+  filters.qty_min = q.qty_min ?? ''
+  filters.qty_max = q.qty_max ?? ''
+  const attribute = q.attribute?.match(/^(\d+):(.*)$/)
+  filters.attribute_id = attribute ? Number(attribute[1]) : ''
+  filters.attribute_value = attribute ? attribute[2] : ''
+  if (filters.attribute_id !== '' && selectedAttribute.value?.data_type === 'enum') void ensureAttributeOptions(filters.attribute_id)
   filters.only_below_min = q.only_below_min === '1'
   filters.active = q.active !== '0'
   filters.q = q.q ?? ''
@@ -175,7 +313,8 @@ function onViewClick(f: SavedFilter) {
   else saved.apply(f)
 }
 
-watch(() => tbl.sort.value, () => load())
+watch(() => tbl.sort.value, () => void load())
+watch(() => filters.q, scheduleSearch)
 
 function qty(i: StockItem): number { return Number(i.qty ?? 0) }
 function value(i: StockItem): number { return Number(i.value_total ?? 0) }
@@ -193,9 +332,33 @@ function openDetail(i: StockItem, e?: MouseEvent) {
 }
 
 onMounted(async () => {
-  try { warehouses.value = await stockApi.listWarehouses(true) } catch { warehouses.value = [] }
+  const [wh, mf, cat, tg, attr] = await Promise.all([
+    stockApi.listWarehouses(true).catch(() => [] as Warehouse[]),
+    eshopApi.listManufacturers().catch(() => [] as Manufacturer[]),
+    eshopApi.listCategories().catch(() => [] as Category[]),
+    eshopApi.listTags().catch(() => [] as Tag[]),
+    eshopApi.listAttributes().catch(() => [] as Attribute[]),
+  ])
+  warehouses.value = wh
+  manufacturers.value = mf.filter(x => !x.archived)
+  categories.value = cat.filter(x => !x.archived)
+  tags.value = tg.filter(x => !x.archived)
+  attributes.value = attr.filter(x => !x.archived && x.is_filterable)
+  const loadedVendors: Client[] = []
+  for (let vendorPage = 1; ; vendorPage++) {
+    const result = await clientsApi.list({ role: 'vendors', per_page: 500, page: vendorPage, sort: 'name' }).catch(() => null)
+    if (!result) break
+    loadedVendors.push(...result.data)
+    if (vendorPage >= result.meta.pages) break
+  }
+  vendors.value = loadedVendors
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   await load()
+})
+
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+  requestController?.abort()
 })
 </script>
 
@@ -267,9 +430,31 @@ onMounted(async () => {
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
           </svg>
           <input v-model="filters.q" type="search" :placeholder="t('stock.items.filter_q_placeholder')"
-            @keyup.enter="applyFilters" @change="applyFilters"
+            @keyup.enter="applyFilters"
             class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm" />
         </div>
+        <select v-model="filters.manufacturer_id" @change="applyFilters" class="h-9 min-w-32 max-w-44 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+          :title="t('stock.items.filter_manufacturer')">
+          <option value="">{{ t('stock.items.filter_manufacturer') }}: {{ t('common.all') }}</option>
+          <option v-for="manufacturer in manufacturers" :key="manufacturer.id" :value="manufacturer.id">{{ manufacturer.name }}</option>
+        </select>
+        <select v-model="filters.vendor_id" @change="applyFilters" class="h-9 min-w-32 max-w-44 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+          :title="t('stock.items.filter_vendor')">
+          <option value="">{{ t('stock.items.filter_vendor') }}: {{ t('common.all') }}</option>
+          <option v-for="vendor in vendors" :key="vendor.id" :value="vendor.id">{{ vendor.company_name }}</option>
+        </select>
+        <select v-model="filters.category_id" @change="applyFilters" class="h-9 min-w-36 max-w-52 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+          :title="t('stock.items.filter_category')">
+          <option value="">{{ t('stock.items.filter_category') }}: {{ t('common.all') }}</option>
+          <option v-for="category in categories" :key="category.id" :value="category.id">{{ categoryLabel(category) }}</option>
+        </select>
+        <select v-model="filters.availability" @change="applyFilters" class="h-9 min-w-32 max-w-44 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+          :title="t('stock.items.filter_availability')">
+          <option value="">{{ t('stock.items.filter_availability') }}: {{ t('common.all') }}</option>
+          <option value="in_stock">{{ t('stock.items.availability_in_stock') }}</option>
+          <option value="out_of_stock">{{ t('stock.items.availability_out_of_stock') }}</option>
+          <option value="below_min">{{ t('stock.items.availability_below_min') }}</option>
+        </select>
       </template>
 
       <select v-model="filters.type" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
@@ -292,6 +477,49 @@ onMounted(async () => {
         <input v-model="filters.active" type="checkbox" @change="applyFilters" />
         {{ t('stock.items.filter_active') }}
       </label>
+
+      <div class="basis-full border-t border-neutral-100 pt-3 mt-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 items-center">
+        <fieldset class="min-w-0">
+          <legend class="sr-only">{{ t('stock.items.filter_tags') }}</legend>
+          <select v-model="filters.tag_ids" multiple size="1" @change="applyFilters" class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+            :title="t('stock.items.filter_tags')">
+            <option v-for="tag in tags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
+          </select>
+        </fieldset>
+        <select v-model="filters.missing" @change="applyFilters" class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+          :title="t('stock.items.filter_missing')">
+          <option value="">{{ t('stock.items.filter_missing') }}: {{ t('common.all') }}</option>
+          <option value="manufacturer">{{ t('stock.items.missing_manufacturer') }}</option>
+          <option value="category">{{ t('stock.items.missing_category') }}</option>
+          <option value="image">{{ t('stock.items.missing_image') }}</option>
+          <option value="price">{{ t('stock.items.missing_price') }}</option>
+          <option value="ean">{{ t('stock.items.missing_ean') }}</option>
+        </select>
+        <div class="grid grid-cols-2 gap-2">
+          <input v-model="filters.qty_min" type="number" inputmode="decimal" :placeholder="t('stock.items.filter_qty_min')" @change="applyFilters"
+            class="min-w-0 h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+          <input v-model="filters.qty_max" type="number" inputmode="decimal" :placeholder="t('stock.items.filter_qty_max')" @change="applyFilters"
+            class="min-w-0 h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <select v-model="filters.attribute_id" @change="onAttributeChange" class="min-w-0 h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+            :title="t('stock.items.filter_attribute')">
+            <option value="">{{ t('stock.items.filter_attribute') }}</option>
+            <option v-for="attribute in attributes" :key="attribute.id" :value="attribute.id">{{ attribute.name }}</option>
+          </select>
+          <select v-if="selectedAttribute?.data_type === 'enum'" v-model="filters.attribute_value" @change="applyFilters" class="min-w-0 h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('stock.items.filter_attribute_value') }}</option>
+            <option v-for="option in selectedAttributeOptions" :key="option.id" :value="option.id">{{ option.label }}</option>
+          </select>
+          <select v-else-if="selectedAttribute?.data_type === 'bool'" v-model="filters.attribute_value" @change="applyFilters" class="min-w-0 h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('stock.items.filter_attribute_value') }}</option>
+            <option value="true">{{ t('common.yes') }}</option>
+            <option value="false">{{ t('common.no') }}</option>
+          </select>
+          <input v-else v-model="filters.attribute_value" :disabled="!selectedAttribute" :type="selectedAttribute?.data_type === 'number' ? 'number' : 'search'"
+            inputmode="decimal" :placeholder="t('stock.items.filter_attribute_value')" @change="applyFilters" class="min-w-0 h-9 px-3 border border-neutral-300 rounded-md text-sm disabled:bg-neutral-50" />
+        </div>
+      </div>
 
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />

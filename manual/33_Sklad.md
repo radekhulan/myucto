@@ -53,9 +53,13 @@ vydání funkčně implementované.
 **Sklad → Skladové karty** je stránkovaný seznam karet materiálu, zboží a výrobků
 (výchozí stránkování 50 karet na stránku).
 
-**Filtry**: typ karty (Materiál/Zboží/Výrobek), sklad (omezí zobrazený stav a hodnotu
-na vybraný sklad), **jen pod minimem**, jen aktivní a fulltextové hledání (SKU, název,
-EAN). Filtry si můžeš uložit jako výchozí přes uložené filtry, sloupce si zapneš/vypneš
+Vedle hledání podle SKU, názvu nebo EAN jsou rovnou **výrobce, dodavatel, kategorie
+a dostupnost**. Kategorie zahrnuje i své podkategorie. Rozbalené **Filtry** přidávají
+typ karty, sklad, štítky, chybějící obrázek/kategorii/cenu/výrobce/EAN, rozsah množství
+a filtrovatelný atribut. Sklad omezí stav a hodnotu na vybraný sklad. Podmínky platí
+pro celý katalog, ne pouze zobrazenou stránku.
+
+Filtry si můžeš uložit jako výchozí přes uložené filtry, sloupce si zapneš/vypneš
 přes výběr sloupců a hustotu řádků přes přepínač hustoty (viz
 [§ 92.9 Uložené filtry a předvolby zobrazení](92_Nastaveni.md#929-ulozene-filtry-a-predvolby-zobrazeni)).
 

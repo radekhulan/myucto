@@ -350,8 +350,10 @@ Vzorce pro přepočet:
 
 ### 34.8.4 Záložka „Ceny"
 
-Karta může mít **libovolný počet cenových řádků — jeden na měnu**. Tlačítkem
-**„Přidat měnu"** přidáš řádek, ikonou koše ho odebereš.
+Záložka rovnou připraví **řádek pro každou aktivní prodejní měnu**. Prázdné
+řádky se neukládají. Ikonou koše odstraníš uloženou cenu; aktivní měna zůstane
+připravená k novému vyplnění. Dříve uložené ceny neaktivních měn jsou označené
+a zůstávají viditelné.
 
 | Sloupec | Význam |
 |---|---|
@@ -647,7 +649,7 @@ dodavatel s cenou** je doporučené nastavení pro dropshipping.
 1. Založ kartu, nech **„Skladová položka"** zapnutou.
 2. Cenová báze → **Vážený průměr**.
 3. Naskladni příjemkou (tím vznikne nákupní cena).
-4. Záložka **Ceny** → „Přidat měnu" → `CZK`, režim **Přirážka %**, hodnota podle
+4. Záložka **Ceny**, připravený řádek `CZK`, režim **Přirážka %**, hodnota podle
    cílové marže (viz převodní tabulka v [§ 34.8.3](#3483-prirazka-vs-marze-neplet-si-je)),
    zaokrouhlení **Na koruny** nebo **Na 9 na konci**.
 5. **„Přepočítat"** a zkontroluj sloupec „Výsledná cena".
@@ -758,15 +760,17 @@ Ať si nastavíš očekávání správně — tohle cenotvorba v MyÚčto **neum
 **Cesta: `E-shop → Jazyky`**
 
 Číselník jazykových mutací, ve kterých vedeš názvy a popisy zboží a kategorií.
-Karta zboží na záložce „Jazyky" nabídne **právě jazyky z tohoto číselníku** —
-žádný pevný seznam, který by ti vnucoval jazyky, ve kterých neprodáváš.
+Karta zboží na záložce **Jazyky** rovnou otevře češtinu. Další jazyk vybereš
+z aktivních jazyků tohoto číselníku; výběr ihned přidá a otevře jeho formulář.
+Mezi rozepsanými překlady přepínáš jazykovými záložkami. Prázdný připravený
+český řádek se neukládá, překlad s obsahem vyžaduje také název.
 
 | Pole | Význam |
 |---|---|
 | **Kód** | Kód jazyka ve tvaru `cs`, nebo `pt-BR` pro regionální variantu. Používá se v datech překladů |
 | **Název** | Jak se jazyk zobrazí v nabídce (`Čeština`, `English`) |
 | **Pořadí** | Řadí jazyky v nabídce; při shodě rozhoduje kód |
-| **Výchozí jazyk** | Předvyplní se na nové kartě. Výchozí smí být jen jeden |
+| **Výchozí jazyk** | Výchozí jazyk číselníku. Výchozí smí být jen jeden; editor karty otevírá češtinu |
 | **Aktivní** | Neaktivní (archivovaný) jazyk se nenabízí pro nové překlady |
 
 Ve formuláři je nahoře **rychlá volba** nejčastějších jazyků — klepnutím
@@ -784,4 +788,5 @@ s takovým překladem jde dál uložit.
 > [!NOTE]
 > Při zapnutí modulu dostaneš do číselníku češtinu a všechny jazyky, ve kterých
 > už nějaký překlad existuje. Nová firma, která si sklad zapne později, začíná
-> s prázdným číselníkem — jazyky si přidá sama, než začne zboží překládat.
+> s prázdným číselníkem. První uložení českého překladu do něj češtinu doplní;
+> další jazyky přidáš v číselníku.

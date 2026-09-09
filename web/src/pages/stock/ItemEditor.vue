@@ -107,19 +107,37 @@ const eshop = ref({
 // zůstává editovatelný — proto se do popisků sahá přes localeLabel().
 const i18nRows = ref<ProductI18nRow[]>([])
 const newLocale = ref('')
+const selectedLocale = ref('cs')
+const persistedLocales = ref<Set<string>>(new Set())
 const freeLocales = computed(() =>
   locales.value.filter(l => !l.archived && !i18nRows.value.some(r => r.locale === l.code)))
+const orderedI18nRows = computed(() => [
+  ...i18nRows.value.filter(r => r.locale === 'cs'),
+  ...i18nRows.value.filter(r => r.locale !== 'cs'),
+])
 function localeLabel(code: string): string {
   return locales.value.find(l => l.code === code)?.name ?? code.toUpperCase()
+}
+function emptyI18nRow(locale: string): ProductI18nRow {
+  return { locale, name: null, short_desc: null, description: null, seo_title: null, seo_description: null, seo_slug: null }
+}
+function ensureCzechRow() {
+  if (!i18nRows.value.some(r => r.locale === 'cs')) i18nRows.value.unshift(emptyI18nRow('cs'))
 }
 function addLocale() {
   const l = newLocale.value
   if (!l || i18nRows.value.some(r => r.locale === l)) return
-  i18nRows.value.push({ locale: l, name: null, short_desc: null, description: null, seo_title: null, seo_description: null, seo_slug: null })
+  i18nRows.value.push(emptyI18nRow(l))
+  selectedLocale.value = l
   newLocale.value = ''
 }
 function removeLocale(l: string) {
   i18nRows.value = i18nRows.value.filter(r => r.locale !== l)
+  if (selectedLocale.value === l) {
+    selectedLocale.value = i18nRows.value.some(r => r.locale === 'cs')
+      ? 'cs'
+      : (i18nRows.value[0]?.locale ?? '')
+  }
 }
 
 // ── Kategorie & štítky ──────────────────────────────────────────────────
@@ -181,6 +199,7 @@ interface PriceRow {
 const ROUNDING_MODES: PriceRounding[] = ['none', '0.01', '0.10', '0.50', '1', '9_ending']
 const prices = ref<PriceRow[]>([])
 const recomputing = ref(false)
+const configuredCurrencyCodes = computed(() => new Set(currencies.value.map(c => c.code.toUpperCase())))
 
 /**
  * Měny bere karta z číselníku PRODEJNÍCH měn e-shopu (/eshop/currencies), ne
@@ -200,16 +219,6 @@ function currencyOptions(current: string): { code: string; known: boolean }[] {
   if (current && !opts.some(o => o.code === current)) opts.unshift({ code: current, known: false })
   return opts
 }
-/** Měny už použité na jiném řádku cen — jedna měna smí být na kartě jen jednou. */
-function currencyTaken(code: string, selfIdx: number): boolean {
-  return prices.value.some((p, i) => i !== selfIdx && p.currency_code === code)
-}
-function nextFreeCurrency(): string {
-  const used = new Set(prices.value.map(p => p.currency_code))
-  if (defaultCurrency.value && !used.has(defaultCurrency.value)) return defaultCurrency.value
-  return currencies.value.find(c => !used.has(c.code))?.code ?? ''
-}
-
 function priceRowFrom(p: ProductPrice): PriceRow {
   return {
     id: p.id,
@@ -225,10 +234,10 @@ function priceRowFrom(p: ProductPrice): PriceRow {
     is_manual_override: p.is_manual_override,
   }
 }
-function addPriceRow() {
-  prices.value.push({
+function emptyPriceRow(currencyCode: string): PriceRow {
+  return {
     id: null,
-    currency_code: nextFreeCurrency(),
+    currency_code: currencyCode,
     price_mode: 'markup',
     markup_pct: null,
     fixed_price: null,
@@ -238,10 +247,23 @@ function addPriceRow() {
     computed_rate: null,
     computed_at: null,
     is_manual_override: false,
-  })
+  }
+}
+function withConfiguredCurrencyRows(rows: PriceRow[]): PriceRow[] {
+  const byCurrency = new Map(rows.map(row => [row.currency_code.toUpperCase(), row]))
+  const result = currencies.value.map(currency =>
+    byCurrency.get(currency.code.toUpperCase()) ?? emptyPriceRow(currency.code))
+  const configured = configuredCurrencyCodes.value
+  result.push(...rows.filter(row => !configured.has(row.currency_code.toUpperCase())))
+  return result
 }
 function removePriceRow(idx: number) {
-  prices.value.splice(idx, 1)
+  const row = prices.value[idx]
+  if (configuredCurrencyCodes.value.has(row.currency_code.toUpperCase())) {
+    prices.value.splice(idx, 1, emptyPriceRow(row.currency_code))
+  } else {
+    prices.value.splice(idx, 1)
+  }
 }
 async function recomputePrices() {
   if (!itemId.value || !editorLoaded.value || !canWriteEshop.value) return
@@ -252,7 +274,7 @@ async function recomputePrices() {
       rowVersion.value,
       meaningfulPriceRows().map(pricePayloadFrom),
     )
-    prices.value = result.prices.map(priceRowFrom)
+    prices.value = withConfiguredCurrencyRows(result.prices.map(priceRowFrom))
     rowVersion.value = result.row_version
     toast.success(t('common.saved'))
   } catch (err: any) {
@@ -261,11 +283,7 @@ async function recomputePrices() {
     recomputing.value = false
   }
 }
-/**
- * Řádky, které se opravdu ukládají. Předvyplněný řádek (jediná měna / jediný
- * jazyk) je jen UI zkratka — dokud do něj uživatel nic nenapsal, nemá vznikat
- * v datech. Platí i pro řádek, který uživatel přidal ručně a nechal prázdný.
- */
+/** Prázdné řádky aktivních měn jsou jen připravená pole editoru. */
 function meaningfulPriceRows(): PriceRow[] {
   return prices.value.filter(r =>
     r.id !== null
@@ -274,10 +292,13 @@ function meaningfulPriceRows(): PriceRow[] {
     || String(r.fixed_price ?? '').trim() !== '')
 }
 
+function i18nRowHasContent(r: ProductI18nRow): boolean {
+  return [r.name, r.short_desc, r.description, r.seo_title, r.seo_description, r.seo_slug]
+    .some(v => String(v ?? '').trim() !== '')
+}
+
 function meaningfulI18nRows(): ProductI18nRow[] {
-  return i18nRows.value.filter(r =>
-    [r.name, r.short_desc, r.description, r.seo_title, r.seo_description, r.seo_slug]
-      .some(v => String(v ?? '').trim() !== ''))
+  return i18nRows.value.filter(r => persistedLocales.value.has(r.locale) || i18nRowHasContent(r))
 }
 
 function pricePayloadFrom(r: PriceRow) {
@@ -542,6 +563,8 @@ async function loadProduct(id: number) {
     seo_description: r.seo_description ?? null,
     seo_slug: r.seo_slug ?? null,
   }))
+  persistedLocales.value = new Set(i18nRows.value.map(r => r.locale))
+  ensureCzechRow()
   // kategorie & štítky
   selectedCategoryIds.value = (p.categories ?? []).map(c => c.category_id)
   primaryCategoryId.value = (p.categories ?? []).find(c => c.is_primary)?.category_id ?? null
@@ -565,38 +588,24 @@ async function loadProduct(id: number) {
     eshopApi.getPromoPrices(id),
     eshopApi.getVendors(id),
   ])
-  prices.value = pr.map(priceRowFrom)
+  prices.value = withConfiguredCurrencyRows(pr.map(priceRowFrom))
   promos.value = pp.map(promoRowFrom)
   vendors.value = vn.map(vendorRowFrom)
   editorLoaded.value = true
 }
 
-/**
- * S jediným jazykem (resp. měnou) v číselníku není co vybírat — přesto musel
- * uživatel řádek nejdřív ručně přidat, než mohl napsat popis nebo cenu.
- * Prázdný řádek proto předvyplníme; jde jen o UI zkratku, do dat se nedostane,
- * dokud v něm něco nevyplní (viz buildProductPayload / buildPricePayloads).
- *
- * Jen při načtení, ne watcherem: řádek smazaný uživatelem se nesmí sám vrátit.
- */
-function prefillSingleOptions() {
-  const active = locales.value.filter(l => !l.archived)
-  if (active.length === 1 && i18nRows.value.length === 0) {
-    i18nRows.value.push({
-      locale: active[0].code, name: null, short_desc: null, description: null,
-      seo_title: null, seo_description: null, seo_slug: null,
-    })
-  }
-  if (currencies.value.length === 1 && prices.value.length === 0) {
-    addPriceRow()
-  }
+/** Čeština a aktivní měny jsou připravené k psaní, prázdné se ale neukládají. */
+function prepareEditorRows() {
+  ensureCzechRow()
+  selectedLocale.value = 'cs'
+  prices.value = withConfiguredCurrencyRows(prices.value)
 }
 
 onMounted(async () => {
   try {
     await loadCodebooks()
     if (isEdit.value && itemId.value) await loadProduct(itemId.value)
-    prefillSingleOptions()
+    prepareEditorRows()
   } catch (e: any) {
     error.value = mapError(e)
   }
@@ -647,6 +656,13 @@ function buildProductPayload(): Omit<ProductUpdatePayload, 'row_version'> {
  * jazyků a kategorií. Chytáme to dřív a rovnou přepneme na tab, kde chyba je.
  */
 function validateBeforeSubmit(): boolean {
+  const unnamedTranslation = i18nRows.value.find(r => i18nRowHasContent(r) && String(r.name ?? '').trim() === '')
+  if (unnamedTranslation) {
+    error.value = t('eshop.languages.translation_name_required', { language: localeLabel(unnamedTranslation.locale) })
+    selectedLocale.value = unnamedTranslation.locale
+    tab.value = 'languages'
+    return false
+  }
   if (prices.value.some(p => !p.currency_code) || promos.value.some(p => !p.currency_code)) {
     error.value = t('eshop.prices.currency_required')
     tab.value = 'prices'
@@ -782,8 +798,9 @@ function onImgError(e: Event) {
     </div>
 
     <!-- Tab strip (e-shopové taby jen v editaci) -->
-    <div v-if="isEdit" class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
+    <div v-if="isEdit" role="tablist" class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
       <button v-for="tt in tabs" :key="tt"
+        type="button" role="tab" :aria-selected="tab === tt"
         @click="tab = tt"
         class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap"
         :class="tab === tt
@@ -927,28 +944,38 @@ function onImgError(e: Event) {
       <!-- ═══════════ TAB: JAZYKY ═══════════ -->
       <div v-if="isEdit" v-show="tab === 'languages'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
-          <div class="flex flex-wrap items-center gap-2">
-            <select v-model="newLocale" :disabled="freeLocales.length === 0"
-              class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface disabled:bg-neutral-100 disabled:text-neutral-500">
-              <option value="">{{ t('eshop.languages.select_locale') }}</option>
-              <option v-for="l in freeLocales" :key="l.code" :value="l.code">{{ l.name }} ({{ l.code.toUpperCase() }})</option>
-            </select>
-            <button type="button" @click="addLocale" :disabled="!newLocale" :class="btnOutline('primary')" class="whitespace-nowrap">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-              {{ t('eshop.languages.add_locale') }}
-            </button>
+          <div class="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <label :for="`${pageId}-new-locale`" class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.languages.select_locale') }}</label>
+              <select :id="`${pageId}-new-locale`" v-model="newLocale" @change="addLocale" :disabled="freeLocales.length === 0"
+                class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface disabled:bg-neutral-100 disabled:text-neutral-500">
+                <option value="">{{ t('eshop.languages.select_locale') }}</option>
+                <option v-for="l in freeLocales" :key="l.code" :value="l.code">{{ l.name }} ({{ l.code.toUpperCase() }})</option>
+              </select>
+            </div>
             <RouterLink to="/eshop?tab=locales" :class="btnOutline('neutral')" class="whitespace-nowrap">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
               {{ t('eshop.languages.manage_locales') }}
             </RouterLink>
           </div>
 
-          <EmptyState v-if="locales.length === 0" dense accent="neutral" icon="doc"
-            :title="t('eshop.languages.no_codebook')" :message="t('eshop.languages.no_codebook_hint')" />
-          <EmptyState v-else-if="i18nRows.length === 0" dense accent="neutral" icon="doc"
+          <div v-if="i18nRows.length" role="tablist" class="flex flex-wrap gap-2 border-b border-neutral-200 pb-3">
+            <button v-for="row in orderedI18nRows" :key="row.locale" type="button" role="tab"
+              :aria-selected="selectedLocale === row.locale" @click="selectedLocale = row.locale"
+              class="cursor-pointer inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition whitespace-nowrap"
+              :class="selectedLocale === row.locale
+                ? 'border-primary-500 bg-primary-50 text-primary-700 font-medium'
+                : 'border-neutral-300 text-neutral-600 hover:bg-neutral-50'">
+              {{ localeLabel(row.locale) }}
+              <span class="font-mono text-xs uppercase opacity-70">{{ row.locale }}</span>
+            </button>
+          </div>
+
+          <EmptyState v-if="i18nRows.length === 0" dense accent="neutral" icon="doc"
             :title="t('eshop.languages.empty')" />
 
-          <div v-for="row in i18nRows" :key="row.locale" class="border border-neutral-200 rounded-md p-4 space-y-3">
+          <div v-for="row in i18nRows.filter(r => r.locale === selectedLocale)" :key="row.locale" role="tabpanel"
+            :data-locale="row.locale" class="border border-neutral-200 rounded-md p-4 space-y-3">
             <div class="flex items-center justify-between">
               <span class="text-sm font-semibold">{{ localeLabel(row.locale) }} <span class="text-neutral-400 font-mono font-normal uppercase">{{ row.locale }}</span></span>
               <button type="button" @click="removeLocale(row.locale)" :title="t('eshop.languages.remove_locale')" class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1">
@@ -958,7 +985,8 @@ function onImgError(e: Event) {
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.languages.field_name') }}</label>
-                <input v-model="row.name" type="text" maxlength="255" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                <input v-model="row.name" type="text" maxlength="255" :required="i18nRowHasContent(row)"
+                  class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('eshop.languages.field_seo_slug') }}</label>
@@ -1068,11 +1096,7 @@ function onImgError(e: Event) {
       <div v-if="isEdit" v-show="tab === 'prices'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
           <div class="flex flex-wrap items-center gap-2">
-            <button type="button" @click="addPriceRow" :class="btnOutline('primary')">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-              {{ t('eshop.prices.add_currency') }}
-            </button>
-            <button type="button" @click="recomputePrices" :disabled="recomputing || prices.length === 0 || !editorLoaded || !canWriteEshop" :class="btnOutline('neutral')">
+            <button type="button" @click="recomputePrices" :disabled="recomputing || meaningfulPriceRows().length === 0 || !editorLoaded || !canWriteEshop" :class="btnOutline('neutral')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
               {{ recomputing ? t('eshop.prices.recomputing') : t('eshop.prices.recompute') }}
             </button>
@@ -1096,13 +1120,16 @@ function onImgError(e: Event) {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(p, idx) in prices" :key="p.id ?? `new-${idx}`" class="border-b border-neutral-100 align-top">
+                <tr v-for="(p, idx) in prices" :key="p.id ?? `new-${idx}`" :data-currency="p.currency_code"
+                  class="border-b border-neutral-100 align-top">
                   <td class="py-2 pr-3">
-                    <select v-model="p.currency_code" required
-                      class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono bg-surface">
-                      <option value="">{{ t('eshop.prices.select_currency') }}</option>
-                      <option v-for="c in currencyOptions(p.currency_code)" :key="c.code" :value="c.code" :disabled="currencyTaken(c.code, idx)">{{ c.code }}{{ c.known ? '' : ' ⚠' }}</option>
-                    </select>
+                    <div class="h-9 flex items-center gap-2 whitespace-nowrap">
+                      <span class="font-mono font-semibold text-neutral-800">{{ p.currency_code }}</span>
+                      <span v-if="!configuredCurrencyCodes.has(p.currency_code.toUpperCase())"
+                        class="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-500">
+                        {{ t('eshop.prices.inactive_currency') }}
+                      </span>
+                    </div>
                   </td>
                   <td class="py-2 pr-3">
                     <select v-model="p.price_mode" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
@@ -1129,7 +1156,7 @@ function onImgError(e: Event) {
                   <td class="py-2 pr-3 text-right font-mono text-neutral-700">{{ p.computed_price ?? '—' }}</td>
                   <td class="py-2 pr-1 text-right font-mono text-neutral-500 text-xs">{{ p.computed_rate ?? '—' }}</td>
                   <td class="py-2 text-right">
-                    <button type="button" @click="removePriceRow(idx)" :title="t('common.delete')" class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1">
+                    <button v-if="p.id !== null" type="button" @click="removePriceRow(idx)" :title="t('common.delete')" class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1">
                       <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                     </button>
                   </td>

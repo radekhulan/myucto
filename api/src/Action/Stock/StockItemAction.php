@@ -11,6 +11,7 @@ use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockLevelRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
+use MyInvoice\Service\Eshop\CatalogFilter;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\StockItemMovementsPdfRenderer;
 use MyInvoice\Service\Stock\StockReportXlsxExporter;
@@ -81,128 +82,16 @@ final class StockItemAction
             return $err;
         }
         $q = $request->getQueryParams();
-        $filters = [];
-        if (!empty($q['type'])) {
-            $filters['type'] = (string) $q['type'];
-        }
-        if (array_key_exists('active', $q) && $q['active'] !== '') {
-            $filters['active'] = (bool) (int) $q['active'];
-        }
-        if (!empty($q['q'])) {
-            $filters['q'] = (string) $q['q'];
-        }
-        if (!empty($q['only_below_min'])) {
-            $filters['only_below_min'] = true;
-        }
-        foreach (['warehouse_id', 'manufacturer_id', 'category_id', 'vendor_id'] as $field) {
-            if (isset($q[$field]) && (int) $q[$field] > 0) {
-                $filters[$field] = (int) $q[$field];
-            }
-        }
-        if (!empty($q['tag_ids'])) {
-            $tagIds = self::csvIds((string) $q['tag_ids']);
-            if ($tagIds === null) {
-                return Json::error($response, 'validation_failed', 'Identifikátory štítků musí být kladná celá čísla.', 400);
-            }
-            $filters['tag_ids'] = $tagIds;
-        }
-        if (!empty($q['missing'])) {
-            $missing = array_values(array_unique(array_filter(array_map(
-                static fn (string $value): string => trim($value),
-                explode(',', (string) $q['missing']),
-            ))));
-            if (array_diff($missing, StockItemRepository::MISSING_FIELDS) !== []) {
-                return Json::error($response, 'validation_failed', 'Neznámý filtr chybějících údajů.', 400);
-            }
-            $filters['missing'] = $missing;
-        }
-        if (!empty($q['availability'])) {
-            $availability = (string) $q['availability'];
-            if (!in_array($availability, StockItemRepository::AVAILABILITY_FILTERS, true)) {
-                return Json::error($response, 'validation_failed', 'Neznámý filtr dostupnosti.', 400);
-            }
-            $filters['availability'] = $availability;
-        }
-        foreach (['qty_min', 'qty_max'] as $field) {
-            if (isset($q[$field]) && $q[$field] !== '') {
-                if (!is_numeric($q[$field])) {
-                    return Json::error($response, 'validation_failed', 'Množstevní filtr musí být číslo.', 400);
-                }
-                $filters[$field] = (string) $q[$field];
-            }
-        }
-        if (!empty($q['attribute_filters'])) {
-            try {
-                $attributes = json_decode((string) $q['attribute_filters'], true, 32, JSON_THROW_ON_ERROR);
-            } catch (\JsonException) {
-                return Json::error($response, 'validation_failed', 'Filtr atributů nemá platný JSON formát.', 400);
-            }
-            if (!self::validAttributeFilters($attributes)) {
-                return Json::error($response, 'validation_failed', 'Filtr atributů má neplatnou strukturu.', 400);
-            }
-            $filters['attribute_filters'] = $attributes;
-        }
-        if (!empty($q['sort'])) {
-            $sort = (string) $q['sort'];
-            if (!in_array($sort, StockItemRepository::SORT_FIELDS, true)) {
-                return Json::error($response, 'validation_failed', 'Neznámý sloupec řazení.', 400);
-            }
-            $filters['sort'] = $sort;
-        }
-        if (!empty($q['direction'])) {
-            $direction = strtolower((string) $q['direction']);
-            if (!in_array($direction, ['asc', 'desc'], true)) {
-                return Json::error($response, 'validation_failed', 'Neznámý směr řazení.', 400);
-            }
-            $filters['direction'] = $direction;
+        try {
+            $filters = CatalogFilter::normalize($q);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
 
         $p = Pagination::fromQuery($q, 50);
         [$rows, $total] = $this->items->listPaged($supplierId, $filters, $p['per_page'], $p['offset']);
         $rows = $this->withEffectivePrice($supplierId, $rows);
         return Json::ok($response, Pagination::envelope($rows, $total, $p['page'], $p['per_page']));
-    }
-
-    /** @return list<int>|null */
-    private static function csvIds(string $value): ?array
-    {
-        $ids = [];
-        foreach (explode(',', $value) as $rawId) {
-            $rawId = trim($rawId);
-            if ($rawId === '' || !ctype_digit($rawId) || (int) $rawId <= 0) {
-                return null;
-            }
-            $ids[] = (int) $rawId;
-        }
-
-        return array_values(array_unique($ids));
-    }
-
-    private static function validAttributeFilters(mixed $filters): bool
-    {
-        if (!is_array($filters) || !array_is_list($filters)) {
-            return false;
-        }
-        $allowed = ['attribute_id', 'option_id', 'value_text', 'value_bool', 'value_num_min', 'value_num_max'];
-        foreach ($filters as $filter) {
-            if (!is_array($filter) || (int) ($filter['attribute_id'] ?? 0) <= 0
-                || array_diff(array_keys($filter), $allowed) !== []) {
-                return false;
-            }
-            if (isset($filter['option_id']) && (int) $filter['option_id'] <= 0) {
-                return false;
-            }
-            foreach (['value_num_min', 'value_num_max'] as $field) {
-                if (isset($filter[$field]) && !is_numeric($filter[$field])) {
-                    return false;
-                }
-            }
-            if (array_key_exists('value_bool', $filter) && !is_bool($filter['value_bool'])) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     public function search(Request $request, Response $response): Response

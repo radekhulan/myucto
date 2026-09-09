@@ -11,14 +11,14 @@ final class CatalogJobService
 {
     public function __construct(private readonly Connection $db) {}
 
-    public function enqueue(int $supplierId, string $kind, array $input, int $total = 0, int $inputVersion = 1): int
+    public function enqueue(int $supplierId, string $kind, array $input, int $total = 0, int $inputVersion = 1, ?int $createdBy = null): int
     {
         if (!preg_match('/^[a-z][a-z0-9_]{0,49}$/D', $kind) || $total < 0 || $inputVersion < 1) {
             throw new \InvalidArgumentException('Neplatná katalogová úloha.');
         }
         $pdo = $this->db->pdo();
-        $pdo->prepare('INSERT INTO catalog_jobs (supplier_id, kind, input_json, total, input_version) VALUES (?, ?, ?, ?, ?)')
-            ->execute([$supplierId, $kind, json_encode($input, JSON_THROW_ON_ERROR), $total, $inputVersion]);
+        $pdo->prepare('INSERT INTO catalog_jobs (supplier_id, kind, input_json, total, input_version, created_by) VALUES (?, ?, ?, ?, ?, ?)')
+            ->execute([$supplierId, $kind, json_encode($input, JSON_THROW_ON_ERROR), $total, $inputVersion, $createdBy]);
         return (int) $pdo->lastInsertId();
     }
 
@@ -30,11 +30,15 @@ final class CatalogJobService
         return $row === false ? null : $this->cast($row);
     }
 
-    public function history(int $supplierId, int $beforeId = PHP_INT_MAX, int $limit = 50): array
+    public function history(int $supplierId, int $beforeId = PHP_INT_MAX, int $limit = 50, ?array $kinds = null): array
     {
+        if ($kinds === []) {
+            return [];
+        }
         $limit = max(1, min(100, $limit));
-        $stmt = $this->db->pdo()->prepare('SELECT * FROM catalog_jobs WHERE supplier_id = ? AND id < ? ORDER BY id DESC LIMIT ' . $limit);
-        $stmt->execute([$supplierId, $beforeId]);
+        $where = $kinds === null ? '' : ' AND kind IN (' . implode(',', array_fill(0, count($kinds), '?')) . ')';
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM catalog_jobs WHERE supplier_id = ? AND id < ?' . $where . ' ORDER BY id DESC LIMIT ' . $limit);
+        $stmt->execute([$supplierId, $beforeId, ...($kinds ?? [])]);
         return array_map($this->cast(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
@@ -170,6 +174,7 @@ final class CatalogJobService
         $row['report'] = json_decode($row['report_json'], true, 512, JSON_THROW_ON_ERROR);
         unset($row['input_json'], $row['report_json']);
         $row['cancel_requested'] = (bool) $row['cancel_requested'];
+        $row['created_by'] = isset($row['created_by']) ? (int) $row['created_by'] : null;
         return $row;
     }
 }

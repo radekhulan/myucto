@@ -3167,6 +3167,7 @@ final class Routes
             $g->get   ('/jobs',                                [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'list']);
             $g->post  ('/jobs/prices-recompute',                [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'prices']);
             $g->get   ('/jobs/{id:[0-9]+}',                     [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'get']);
+            $g->get   ('/jobs/{id:[0-9]+}/items',               [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'items']);
             $g->post  ('/jobs/{id:[0-9]+}/{operation:retry|cancel}', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'change']);
 
             // Karta Zboží (agregát) + média; specifické PŘED generickými.

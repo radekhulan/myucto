@@ -9,6 +9,8 @@ use MyInvoice\Action\Stock\GuardsStockEnabled;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Eshop\CatalogJobService;
+use MyInvoice\Service\Eshop\CatalogJobAccessPolicy;
+use MyInvoice\Repository\CatalogJobItemRepository;
 use MyInvoice\Service\Eshop\Pricing\CatalogPriceJobService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -27,6 +29,7 @@ final class CatalogJobAction
         private readonly Connection $db,
         private readonly CatalogJobService $jobs,
         private readonly CatalogPriceJobService $prices,
+        private readonly CatalogJobItemRepository $items,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -36,7 +39,7 @@ final class CatalogJobAction
             return $err;
         }
         $q = $request->getQueryParams();
-        return Json::ok($response, array_map($this->present(...), $this->jobs->history($supplierId, (int) ($q['before_id'] ?? PHP_INT_MAX), (int) ($q['limit'] ?? 50))));
+        return Json::ok($response, array_map($this->present(...), $this->jobs->history($supplierId, (int) ($q['before_id'] ?? PHP_INT_MAX), (int) ($q['limit'] ?? 50), CatalogJobAccessPolicy::readableKinds($request))));
     }
 
     public function get(Request $request, Response $response, array $args): Response
@@ -46,7 +49,34 @@ final class CatalogJobAction
             return $err;
         }
         $job = $this->jobs->find($supplierId, (int) $args['id']);
-        return $job === null ? Json::error($response, 'not_found', 'Úloha nenalezena.', 404) : Json::ok($response, $this->present($job));
+        return $job === null || !CatalogJobAccessPolicy::allows($request, $job['kind'])
+            ? Json::error($response, 'not_found', 'Úloha nenalezena.', 404) : Json::ok($response, $this->present($job));
+    }
+
+    public function items(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $job = $this->jobs->find($supplierId, (int) $args['id']);
+        if ($job === null || !CatalogJobAccessPolicy::allows($request, $job['kind'], audit: true)) {
+            return Json::error($response, 'not_found', 'Úloha nenalezena.', 404);
+        }
+        $q = $request->getQueryParams();
+        foreach (['page' => 1, 'limit' => 50] as $key => $default) {
+            if (isset($q[$key]) && (!is_scalar($q[$key]) || !ctype_digit((string) $q[$key]))) {
+                return Json::error($response, 'validation_failed', 'Neplatné stránkování reportu.', 400);
+            }
+        }
+        if (isset($q['status']) && !is_string($q['status'])) {
+            return Json::error($response, 'validation_failed', 'Neplatný stav položky.', 400);
+        }
+        try {
+            return Json::ok($response, $this->items->page($supplierId, $job['id'], (int) ($q['page'] ?? 1), (int) ($q['limit'] ?? 50), $q['status'] ?? null));
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
     }
 
     public function change(Request $request, Response $response, array $args): Response
@@ -62,6 +92,9 @@ final class CatalogJobAction
         $job = $this->jobs->find($supplierId, $id);
         if ($job === null) {
             return Json::error($response, 'not_found', 'Úloha nenalezena.', 404);
+        }
+        if (!CatalogJobAccessPolicy::allows($request, $job['kind'], write: true)) {
+            return Json::error($response, 'forbidden', 'K této operaci nemáte oprávnění.', 403);
         }
         if ($job['kind'] === 'stock_valuation'
             && !$this->requirePermission($request, $response, 'stock', \MyInvoice\Security\AccessLevel::WRITE, $err)) {

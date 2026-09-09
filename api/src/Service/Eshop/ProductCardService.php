@@ -334,10 +334,18 @@ final class ProductCardService
             if (mb_strlen($locale) > 5) {
                 throw new EshopException('validation_failed', "Neplatný kód jazyka „{$locale}\".", 400);
             }
-            // Jazyky vede číselník stock_locales (1370) — mimo něj se překlad
-            // nezaloží, jinak by na kartě vznikla mutace, kterou UI nenabízí.
             if (!in_array($locale, $known, true)) {
-                throw new EshopException('unknown_locale', "Jazyk „{$locale}\" není v číselníku jazyků.", 400);
+                if ($locale !== 'cs') {
+                    throw new EshopException('unknown_locale', "Jazyk „{$locale}\" není v číselníku jazyků.", 400);
+                }
+                $this->locales->insert($supplierId, [
+                    'code' => 'cs',
+                    'name' => 'Čeština',
+                    'display_order' => 0,
+                    'is_default' => $known === [],
+                    'archived' => false,
+                ]);
+                $known[] = 'cs';
             }
             $keep[$locale] = true;
             $this->i18n->upsert($supplierId, $id, $locale, [

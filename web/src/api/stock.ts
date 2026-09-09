@@ -513,7 +513,7 @@ export const stockApi = {
   deleteWarehouse: (id: number) => api.delete<{ deleted: true }>(`/stock/warehouses/${id}`).then(r => r.data),
 
   // ── Skladové karty ──────────────────────────────────────────────────────
-  listItems: (filters: StockItemListFilters = {}) => {
+  listItems: (filters: StockItemListFilters = {}, options: { signal?: AbortSignal } = {}) => {
     const { tag_ids, attribute_filters, missing, ...rest } = filters
     return api.get<{ data: StockItem[]; meta: StockPageMeta }>('/stock/items', {
       params: toParams({
@@ -522,6 +522,7 @@ export const stockApi = {
         attribute_filters: attribute_filters?.length ? JSON.stringify(attribute_filters) : undefined,
         missing: missing?.length ? missing.join(',') : undefined,
       }),
+      signal: options.signal,
     }).then(r => r.data)
   },
   searchItems: (q: string, limit = 50) =>

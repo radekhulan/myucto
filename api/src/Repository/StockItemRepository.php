@@ -111,6 +111,44 @@ final class StockItemRepository
         return [$rows, $total];
     }
 
+    public function snapshotCatalogSelection(int $supplierId, int $jobId, array $filters, array $excludedIds = [], int $maximum = 30000): int
+    {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException('Výběr musí být součástí transakce úlohy.');
+        }
+        $parent = $pdo->prepare("SELECT id FROM catalog_jobs WHERE supplier_id = ? AND id = ? AND status = 'queued' FOR UPDATE");
+        $parent->execute([$supplierId, $jobId]);
+        if ($parent->fetchColumn() === false) {
+            throw new \OutOfBoundsException('Úloha nenalezena.');
+        }
+        $parts = $this->buildListQueryParts($supplierId, $filters);
+        if ($excludedIds !== []) {
+            $parts['where'] .= ' AND si.id NOT IN (' . implode(',', array_fill(0, count($excludedIds), '?')) . ')';
+            array_push($parts['params'], ...$excludedIds);
+        }
+        $stmt = $pdo->prepare('INSERT INTO catalog_job_items (supplier_id, job_id, ordinal, stock_item_id, expected_version, input_json)
+            SELECT ?, ?, ROW_NUMBER() OVER (ORDER BY si.id), si.id, si.row_version, JSON_OBJECT()
+            FROM stock_items si' . $parts['join'] . ' WHERE ' . $parts['where'] . ' ORDER BY si.id LIMIT ' . ($maximum + 1));
+        $stmt->execute([$supplierId, $jobId, ...$parts['params']]);
+        $count = $stmt->rowCount();
+        if ($count > $maximum) {
+            throw new \InvalidArgumentException('Výběr obsahuje více než ' . $maximum . ' položek.');
+        }
+        return $count;
+    }
+
+    public function versionsForIds(int $supplierId, array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT id, row_version FROM stock_items WHERE supplier_id = ? AND id IN ('
+            . implode(',', array_fill(0, count($ids), '?')) . ')');
+        $stmt->execute([$supplierId, ...$ids]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+    }
+
     /**
      * Sestaví sdílené WHERE/JOIN/params pro list()/listPaged() (stejné filtry,
      * bez LIMIT/OFFSET) — aby COUNT(*) a datový dotaz vždy zůstaly konzistentní.
