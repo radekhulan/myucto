@@ -110,6 +110,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/recurring$#', 'recurring.create', AccessLevel::WRITE],
         ['POST', '#^/api/recurring/[0-9]+/(run|run-now|generate)$#', 'recurring.run', AccessLevel::WRITE],
         ['POST', '#^/api/recurring/[0-9]+/(pause|resume)$#', 'recurring.pause', AccessLevel::WRITE],
+        ['POST', '#^/api/recurring/[0-9]+/reschedule$#', 'recurring', AccessLevel::WRITE],
         ['DELETE', '#^/api/recurring/[0-9]+$#', 'recurring.delete', AccessLevel::WRITE],
         ['GET', '#^/api/recurring(/|$)#', 'recurring', AccessLevel::READ],
         ['*', '#^/api/recurring(/|$)#', 'recurring', AccessLevel::WRITE],

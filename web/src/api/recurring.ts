@@ -237,8 +237,13 @@ export const recurringApi = {
     api.delete<{ deleted: true }>(`/recurring/${id}`).then(r => r.data),
   pause:  (id: number) => api.post<RecurringTemplate>(`/recurring/${id}/pause`).then(r => r.data),
   resume: (id: number) => api.post<RecurringTemplate>(`/recurring/${id}/resume`).then(r => r.data),
-  runNow: (id: number, issueDate?: string, draft = false) =>
+  reschedule: (id: number, nextRunDate: string, expectedNextRunDate: string) =>
+    api.post<RecurringTemplate>(`/recurring/${id}/reschedule`, {
+      next_run_date: nextRunDate, expected_next_run_date: expectedNextRunDate,
+    }).then(r => r.data),
+  runNow: (id: number, issueDate?: string, draft = false, advanceSchedule = true) =>
     api.post<RunNowResult>(`/recurring/${id}/run-now`, {
+      advance_schedule: advanceSchedule,
       ...(issueDate ? { issue_date: issueDate } : {}),
       ...(draft ? { draft: true } : {}),
     }).then(r => r.data),

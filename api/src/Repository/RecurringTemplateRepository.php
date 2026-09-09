@@ -578,26 +578,29 @@ final class RecurringTemplateRepository
         $dayOfMonth = $endOfMonth ? null : (isset($data['day_of_month']) && $data['day_of_month'] !== null ? (int) $data['day_of_month'] : null);
 
         // Přepočet next_run_date:
-        //  - šablona ještě neběžela (last_run_date IS NULL) → next = anchor_date
+        //  - šablona ještě neběžela a mění se anchor_date → next = anchor_date
         //    (uživatel mění harmonogram před prvním generováním).
         //  - už běží → přemapuj DEN nejbližšího naplánovaného next_run_date dle
         //    nového pravidla (end_of_month / day_of_month) v rámci JEHO měsíce —
         //    bez posunu cyklu. Tím se např. změna „20. v měsíci" → „konec měsíce"
         //    projeví hned na nejbližším vystavení (20.6. → 30.6.), ne až o cyklus dál.
         $cur = $this->db->pdo()->prepare(
-            'SELECT last_run_date, next_run_date, supplier_id FROM recurring_invoice_templates WHERE id = ?'
+            'SELECT last_run_date, next_run_date, anchor_date, day_of_month, end_of_month, supplier_id FROM recurring_invoice_templates WHERE id = ?'
         );
         $cur->execute([$id]);
         $existing = $cur->fetch(PDO::FETCH_ASSOC) ?: [];
 
-        if (empty($existing['last_run_date'])) {
+        if (empty($existing['last_run_date']) && ($existing['anchor_date'] ?? null) !== $data['anchor_date']) {
             $nextRunDate = (string) $data['anchor_date'];
-        } else {
+        } elseif ((bool) ($existing['end_of_month'] ?? false) !== $endOfMonth
+            || ($existing['day_of_month'] !== null ? (int) $existing['day_of_month'] : null) !== $dayOfMonth) {
             $nextRunDate = PeriodicityCalculator::snapToDayRule(
                 (string) $existing['next_run_date'],
                 $endOfMonth,
                 $dayOfMonth,
             );
+        } else {
+            $nextRunDate = (string) $existing['next_run_date'];
         }
 
         $sql = 'UPDATE recurring_invoice_templates SET
@@ -646,6 +649,11 @@ final class RecurringTemplateRepository
     }
 
     public function updateWithItems(int $id, array $data, array $items): void
+    {
+        $this->withScheduleLock($id, fn () => $this->updateWithItemsLocked($id, $data, $items));
+    }
+
+    private function updateWithItemsLocked(int $id, array $data, array $items): void
     {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
@@ -769,6 +777,41 @@ final class RecurringTemplateRepository
         }
     }
 
+    public function withScheduleLock(int $id, callable $callback, ?string $expectedNextRunDate = null): mixed
+    {
+        $pdo = $this->db->pdo();
+        $name = \MyInvoice\Infrastructure\Database\NamedLockName::for($this->db, 'recurring-schedule', $id);
+        $lock = $pdo->prepare('SELECT GET_LOCK(?, 0)');
+        $lock->execute([$name]);
+        if ((int) $lock->fetchColumn() !== 1) {
+            throw new \DomainException('Plán právě mění jiný požadavek. Zkuste akci znovu.');
+        }
+        try {
+            if ($expectedNextRunDate !== null && ($this->find($id)['next_run_date'] ?? null) !== $expectedNextRunDate) {
+                throw new \DomainException('Plán se mezitím změnil. Obnovte detail a zkuste to znovu.');
+            }
+            return $callback();
+        } finally {
+            $pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]);
+        }
+    }
+
+    /** Zachová historii; podmíněný zápis odmítne mezitím změněný plán. */
+    public function reschedule(array $template, string $nextRunDate): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE recurring_invoice_templates
+                SET next_run_date = ?, last_reminder_date = NULL,
+                    status = CASE WHEN status = 'expired' THEN 'paused' ELSE status END
+              WHERE id = ? AND supplier_id = ? AND next_run_date = ?
+                AND last_run_date <=> ? AND status = ? AND end_date <=> ?"
+        );
+        $stmt->execute([
+            $nextRunDate, $template['id'], $template['supplier_id'], $template['next_run_date'],
+            $template['last_run_date'], $template['status'], $template['end_date'],
+        ]);
+        return $stmt->rowCount() === 1;
+    }
 
     /** Posun next_run_date + last_run_date po úspěšném vygenerování faktury. */
     public function advanceSchedule(int $id, string $newNextRunDate, string $lastRunDate, string $newStatus): void

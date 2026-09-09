@@ -1209,6 +1209,94 @@ final class RecurringGeneratorTest extends TestCase
         );
     }
 
+    public static function scheduleOperations(): array
+    {
+        return [['generate'], ['openDraft'], ['issuePeriod'], ['reschedule'], ['update']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('scheduleOperations')]
+    public function testScheduleOperationsRejectConcurrentOwner(string $operation): void
+    {
+        $id = $this->createPeriodTemplate('2090-06-30', ['auto_issue' => false]);
+        $container = Bootstrap::buildContainer();
+        $other = Connection::withoutSharedTestConnection(fn () => new Connection($container->get(\MyInvoice\Infrastructure\Config\Config::class)));
+        $name = \MyInvoice\Infrastructure\Database\NamedLockName::for($this->db, 'recurring-schedule', $id);
+        $lock = $other->pdo()->prepare('SELECT GET_LOCK(?, 0)');
+        $lock->execute([$name]);
+        self::assertSame(1, (int) $lock->fetchColumn());
+        try {
+            if ($operation === 'update') {
+                $blocked = false;
+                try {
+                    $tpl = $this->repo->find($id);
+                    $this->repo->updateWithItems($id, $tpl, $tpl['items']);
+                } catch (\DomainException $e) {
+                    $blocked = str_contains($e->getMessage(), 'Plán');
+                }
+                self::assertTrue($blocked, 'Ordinary edits must use the schedule lock.');
+            } elseif ($operation === 'reschedule') {
+                $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/recurring/' . $id . '/reschedule')
+                    ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                    ->withParsedBody(['next_run_date' => '2090-07-31', 'expected_next_run_date' => '2090-06-30']);
+                $response = $container->get(\MyInvoice\Action\Recurring\RecurringTemplateAction::class)->reschedule(
+                    $request, (new \Slim\Psr7\Factory\ResponseFactory())->createResponse(), ['id' => $id],
+                );
+                self::assertSame(409, $response->getStatusCode());
+            } else {
+                $blocked = false;
+                try {
+                    $this->generator->{$operation}($id, ...($operation === 'generate' ? [null, $this->userId] : [$this->userId]));
+                } catch (\DomainException $e) {
+                    $blocked = str_contains($e->getMessage(), 'Plán');
+                }
+                self::assertTrue($blocked, 'Concurrent schedule operation must stop before creating an invoice.');
+            }
+            self::assertSame(0, $this->countInvoicesForTemplate($id));
+            self::assertSame('2090-06-30', $this->templateRow($id)['next_run_date']);
+        } finally {
+            $other->pdo()->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]);
+            $stmt = $this->db->pdo()->prepare('SELECT id FROM invoices WHERE recurring_template_id = ?');
+            $stmt->execute([$id]);
+            array_push($this->createdInvoiceIds, ...array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        }
+    }
+
+    public static function staleScheduleOperations(): array
+    {
+        return [['generate'], ['openDraft'], ['issuePeriod'], ['reschedule']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('staleScheduleOperations')]
+    public function testStaleScheduleCannotGenerateOrOverwriteNewDate(string $operation): void
+    {
+        $id = $this->createPeriodTemplate('2090-06-30', ['auto_issue' => false]);
+        $old = $this->repo->find($id);
+        self::assertTrue($this->repo->reschedule($old, '2090-07-31'));
+        try {
+            if ($operation === 'reschedule') {
+                self::assertFalse($this->repo->reschedule($old, '2090-08-31'));
+            } else {
+                $blocked = false;
+                try {
+                    if ($operation === 'generate') {
+                        $this->generator->generate($id, userId: $this->userId, expectedNextRunDate: '2090-06-30');
+                    } else {
+                        $this->generator->{$operation}($id, userId: $this->userId, expectedNextRunDate: '2090-06-30');
+                    }
+                } catch (\DomainException $e) {
+                    $blocked = str_contains($e->getMessage(), 'Plán');
+                }
+                self::assertTrue($blocked, 'A stale cron candidate must not generate the rescheduled period.');
+            }
+            self::assertSame(0, $this->countInvoicesForTemplate($id));
+            self::assertSame('2090-07-31', $this->templateRow($id)['next_run_date']);
+        } finally {
+            $stmt = $this->db->pdo()->prepare('SELECT id FROM invoices WHERE recurring_template_id = ?');
+            $stmt->execute([$id]);
+            array_push($this->createdInvoiceIds, ...array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        }
+    }
+
     private function createPeriodTemplate(string $nextRun, array $overrides = []): int
     {
         $base = [

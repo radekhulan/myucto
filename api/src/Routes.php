@@ -738,6 +738,7 @@ final class Routes
         $app->post   ('/api/recurring/{id:[0-9]+}/pause',     [RecurringTemplateAction::class, 'pause']);
         $app->post   ('/api/recurring/{id:[0-9]+}/resume',    [RecurringTemplateAction::class, 'resume']);
         $app->post   ('/api/recurring/{id:[0-9]+}/run-now',   [RecurringTemplateAction::class, 'runNow']);
+        $app->post   ('/api/recurring/{id:[0-9]+}/reschedule', [RecurringTemplateAction::class, 'reschedule']);
 
         // Work reports — výkaz víceprací (M5)
         $app->get    ('/api/invoices/{id:[0-9]+}/work-report', GetWorkReportAction::class);
