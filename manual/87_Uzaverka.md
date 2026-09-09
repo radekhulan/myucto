@@ -308,6 +308,15 @@ spuštění je idempotentní (přepíše zápis téže pohledávky), takže náv
 ladit. Vazba zápisu na fakturu umožňuje pozdější rozpuštění OP (391/558, resp. 391/559)
 při úhradě nebo odpisu pohledávky.
 
+Ve sloupci **Paragraf ZoR** u každé zákonné OP vyber ustanovení, podle kterého se
+uplatňuje — **§ 8** (pohledávky za dlužníky v insolvenčním řízení), **§ 8a**
+(nepromlčené pohledávky), **§ 8b** (ručení za celní dluh) nebo **§ 8c** (drobné
+pohledávky). Volba je předvyplněná návrhem systému, ale rozhoduje účetní. Je to jediný
+podklad pro rozpad **tabulky C přílohy č. 1 II. oddílu** přiznání DPPO (§ 8 → ř. 3/4,
+§ 8a → ř. 6/7, § 8b → ř. 8/9, § 8c → ř. 10/11) — z hlavní knihy paragraf odvodit nejde,
+kontace 558/391 je pro všechny stejná. Bez vyplněného paragrafu přiznání rozpad
+nevygeneruje a upozorní na to varováním.
+
 Účet **559** je v účtové osnově označen jako daňově neuznatelný, takže se účetní OP
 automaticky promítne do úprav základu daně (DPPO); zákonná OP na **558** zůstává
 daňově uznatelná. Krok lze **přeskočit** a administrátor ho může tlačítkem **„Vzít

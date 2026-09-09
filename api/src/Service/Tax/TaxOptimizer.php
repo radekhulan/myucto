@@ -273,13 +273,17 @@ final class TaxOptimizer
             ];
         }
 
-        // Doporučení „odlož fakturu": překročení 2 M nastane pozdě v roce → posun do ledna.
+        // Doporučení „odlož fakturu": překročení limitu nastane pozdě v roce → posun do ledna.
+        // Číslo limitu se do textu formátuje ze STEJNÉ hodnoty, kterou nese `value` (tedy
+        // z `vat_limit_low` ročních konstant) — natvrdo zapsané „2 M" by po změně limitu
+        // tvrdilo staré číslo, přestože `crossings` už počítá s novým.
         $defer = null;
         foreach ($crossings as $cr) {
             if ($cr['key'] === 'vat_low' && $cr['will_cross'] && $cr['month'] !== null && $cr['month'] >= 11 && $cr['month'] <= 12) {
                 $defer = [
                     'month'   => $cr['month'],
-                    'message' => 'Překročení 2 M nastane na konci roku. Posunutím prosincových faktur do ledna zůstaneš pod limitem (neplátce + paušál).',
+                    'message' => 'Překročení ' . self::formatMillions((float) $cr['value']) . ' nastane na konci roku. '
+                        . 'Posunutím prosincových faktur do ledna zůstaneš pod limitem (neplátce + paušál).',
                 ];
             }
         }

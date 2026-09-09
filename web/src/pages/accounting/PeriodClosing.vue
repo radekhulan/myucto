@@ -14,6 +14,7 @@ import {
   type AssistedEntryRef,
   type EstimatesSuggest,
   type EstimateSuggestItem,
+  type LegalProvisionSection,
   type ProvisionsPreview,
   type IncomeTaxPreview,
   type ProfitDistributionPreview,
@@ -530,7 +531,10 @@ function applyEstimateSuggestion(it: EstimateSuggestItem) {
 // ── D9: opravné položky k pohledávkám ──────────────────────────────────────
 const provisionsPreview = ref<ProvisionsPreview | null>(null)
 const provisionsLoading = ref(false)
-const provisionInputs = reactive<Record<number, { legal: number | null; acct: number | null }>>({})
+/** Paragrafy zákona o rezervách, které mají v tabulce C DPPO vlastní řádek. */
+const LEGAL_SECTIONS = ['8', '8a', '8b', '8c'] as const
+
+const provisionInputs = reactive<Record<number, { legal: number | null; acct: number | null; section: LegalProvisionSection }>>({})
 
 async function loadProvisions() {
   provisionsLoading.value = true
@@ -542,6 +546,8 @@ async function loadProvisions() {
       provisionInputs[it.invoice_id] = {
         legal: it.existing ? it.existing.legal_amount : it.suggested_legal_amount,
         acct: it.existing ? it.existing.acct_amount : it.suggested_acct_amount,
+        // Už zaúčtovaná volba účetní má přednost před návrhem systému.
+        section: it.existing?.legal_section ?? it.legal_section ?? null,
       }
     }
   } catch (e: any) {
@@ -557,6 +563,7 @@ function runProvisions() {
     document_no: it.document_no,
     legal_amount: Number(provisionInputs[it.invoice_id]?.legal ?? 0) || 0,
     acct_amount: Number(provisionInputs[it.invoice_id]?.acct ?? 0) || 0,
+    legal_section: provisionInputs[it.invoice_id]?.section ?? null,
   }))
   mutate(() => closingApi.runStep(periodId, 'provisions', { row_version: rowVersion.value, items }),
     t('accounting.closing.provisions.booked')).then(ok => { if (ok) loadProvisions() })
@@ -1263,6 +1270,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                     <th class="px-2 py-2 text-right font-medium">{{ t('accounting.closing.provisions.col_remaining') }}</th>
                     <th class="px-2 py-2 text-center font-medium">{{ t('accounting.closing.provisions.col_suggestion') }}</th>
                     <th class="px-2 py-2 text-right font-medium w-32">{{ t('accounting.closing.provisions.col_legal') }}</th>
+                    <th class="px-2 py-2 text-left font-medium w-28">{{ t('accounting.closing.provisions.col_section') }}</th>
                     <th class="px-2 py-2 text-right font-medium w-32">{{ t('accounting.closing.provisions.col_acct') }}</th>
                   </tr>
                 </thead>
@@ -1287,6 +1295,16 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                         type="number" step="0.01" min="0" :disabled="!isClosing"
                         class="w-28 h-8 px-2 border border-neutral-300 rounded-md text-sm text-right font-mono" />
                     </td>
+                    <!-- Paragraf ZoR — bez něj se zákonná OP nedostane do rozpadu tabulky C
+                         přílohy č. 1 II. oddílu DPPO (VetaG, ř. 3–11). -->
+                    <td class="px-2 py-1.5">
+                      <select v-if="provisionInputs[it.invoice_id]" v-model="provisionInputs[it.invoice_id].section"
+                        :disabled="!isClosing || !Number(provisionInputs[it.invoice_id].legal)"
+                        class="w-24 h-8 px-1 border border-neutral-300 rounded-md text-sm bg-surface">
+                        <option :value="null">{{ t('accounting.closing.provisions.section_none') }}</option>
+                        <option v-for="s in LEGAL_SECTIONS" :key="s" :value="s">§&nbsp;{{ s }}</option>
+                      </select>
+                    </td>
                     <td class="px-2 py-1.5">
                       <input v-if="provisionInputs[it.invoice_id]" v-model.number="provisionInputs[it.invoice_id].acct"
                         type="number" step="0.01" min="0" :disabled="!isClosing"
@@ -1300,6 +1318,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                     <td class="px-2 py-2 text-right font-mono">{{ formatMoney(provisionsPreview.totals.remaining) }}</td>
                     <td></td>
                     <td class="px-2 py-2 text-right font-mono">{{ formatMoney(provisionsPreview.totals.suggested_legal) }}</td>
+                    <td></td>
                     <td></td>
                   </tr>
                 </tfoot>
