@@ -545,6 +545,13 @@ final class Routes
         $app->put   ('/api/codebooks/oss-member-state-rates/{id:[0-9]+}',    [\MyInvoice\Action\Codebook\OssMemberStateRatesAction::class, 'update']);
         $app->delete('/api/codebooks/oss-member-state-rates/{id:[0-9]+}',    [\MyInvoice\Action\Codebook\OssMemberStateRatesAction::class, 'delete']);
 
+        // Státní a ostatní svátky (globální číselník, z. 245/2000 Sb.; zápis jen superadmin — migrace 1783).
+        // Jeden řádek posouvá přes § 33 odst. 4 daňového řádu lhůty všech firem v instanci.
+        $app->get   ('/api/codebooks/public-holidays',              [\MyInvoice\Action\Codebook\PublicHolidaysAction::class, 'list']);
+        $app->post  ('/api/codebooks/public-holidays',              [\MyInvoice\Action\Codebook\PublicHolidaysAction::class, 'create']);
+        $app->put   ('/api/codebooks/public-holidays/{id:[0-9]+}',  [\MyInvoice\Action\Codebook\PublicHolidaysAction::class, 'update']);
+        $app->delete('/api/codebooks/public-holidays/{id:[0-9]+}',  [\MyInvoice\Action\Codebook\PublicHolidaysAction::class, 'delete']);
+
         // VAT klasifikační kódy (pro DPHDP3 + KH)
         $app->get   ('/api/vat-classifications',                 [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'list']);
         $app->post  ('/api/vat-classifications',                 [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'create']);

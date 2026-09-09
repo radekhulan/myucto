@@ -7021,6 +7021,62 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/OssMemberStateRate' }
 
+  # ── Státní a ostatní svátky (globální číselník) ──────────────────────────
+  /api/v1/codebooks/public-holidays:
+    get:
+      tags: [Codebooks]
+      summary: Číselník státních a ostatních svátků (z. č. 245/2000 Sb.)
+      description: |
+        GLOBÁLNÍ číselník (ne per-supplier). Svátek posouvá podle § 33 odst. 4
+        daňového řádu VŠECHNY lhůty podání — přiznání k DPH, kontrolní i souhrnné
+        hlášení, přehledy OSVČ, odvody ze mzdy — takže jeden řádek platí pro celou
+        instanci.
+
+        Řádky nejsou konkrétní data, ale PRAVIDLA s datovanou platností:
+        `rule_type = fixed` nese pevné `month_day` (MM-DD), `rule_type = easter`
+        nese `easter_offset`, tedy posun ve dnech od Velikonoční neděle (Velký
+        pátek −2, Velikonoční pondělí +1). Datum Velikonoc se počítá, protože ho
+        neurčuje zákon, ale gregoriánský computus.
+
+        `preview` je číselník rozpočítaný na konkrétní rok (parametr `year`,
+        výchozí je aktuální). `fallback = true` znamená, že tabulka je prázdná
+        nebo nedostupná a lhůty se počítají z pojistky zapečené v kódu — tedy
+        podle stavu zákona k vydání aplikace.
+
+        Zápis je záměrně mimo veřejné API: mění autoritu společnou pro všechny
+        firmy v instanci a je dostupný jen správci instance z webového rozhraní.
+      parameters:
+        - in: query
+          name: year
+          required: false
+          schema: { type: integer, minimum: 1900, maximum: 2200, example: 2026 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  can_write: { type: boolean, example: false }
+                  fallback:  { type: boolean, example: false }
+                  year:      { type: integer, example: 2026 }
+                  rule_types:
+                    type: array
+                    items: { type: string, enum: [fixed, easter] }
+                  rules:
+                    type: array
+                    items: { $ref: '#/components/schemas/PublicHoliday' }
+                  preview:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date: { type: string, format: date, example: '2026-04-03' }
+                        code: { type: string, example: good_friday }
+                        name: { type: string, example: Velký pátek }
+        '403': { description: Chybí oprávnění k číselníkům }
+
   # ── Purchase invoices — chybějící endpointy ──────────────────────────────
   /api/v1/purchase-invoices/export:
     get:
@@ -20553,6 +20609,26 @@ components:
         note:               { type: string, nullable: true }
         created_at:         { type: string, format: date-time }
         updated_at:         { type: string, format: date-time, nullable: true }
+
+    PublicHoliday:
+      type: object
+      description: |
+        Pravidlo jednoho svátku podle z. č. 245/2000 Sb. Není to konkrétní datum, ale
+        předpis, ze kterého se datum v daném roce teprve spočítá — a k tomu datovaná
+        platnost, takže novela zákona je řádek v číselníku, ne nová verze aplikace.
+        `month_day` je vyplněné právě pro `rule_type = fixed`, `easter_offset` právě
+        pro `rule_type = easter`.
+      properties:
+        id:            { type: integer }
+        code:          { type: string, example: good_friday }
+        name:          { type: string, example: Velký pátek }
+        rule_type:     { type: string, enum: [fixed, easter] }
+        month_day:     { type: string, nullable: true, pattern: '^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$', example: '07-05' }
+        easter_offset: { type: integer, nullable: true, example: -2 }
+        valid_from:    { type: string, format: date }
+        valid_to:      { type: string, format: date, nullable: true }
+        note:          { type: string, nullable: true }
+        updated_at:    { type: string, format: date-time }
 
     Currency:
       type: object
