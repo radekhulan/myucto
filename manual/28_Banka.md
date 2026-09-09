@@ -242,6 +242,13 @@ se propojí s mzdovým závazkem a zaúčtuje pouze jednou.
 | Stav | `Spárováno` (zelená) / `Bez shody` (šedá) / `Ignorováno` (oranž.) |
 | Faktura | Pokud spárováno, číslo faktury (klikatelné) |
 
+Odchozí platby se u přijatých faktur párují také podle **platebního variabilního
+symbolu**, vedle interního a dodavatelského čísla dokladu. Doslovná shoda má
+přednost před numerickou normalizací; nejednoznačné shody vyžadují kontrolu.
+Očekávaná částka zahrnuje **zaokrouhlení dokladu**, odečtené zálohy a již
+zaevidované úhrady. Zaokrouhlení se zohledňuje také při náhradním hledání
+podle protistrany nebo částky a data a při vrácení peněz z přijatého dobropisu.
+
 ### 28.4.1 Částečné platby (více převodů na jednu fakturu)
 
 Příchozí platba se **shodným variabilním symbolem**, ale nižší částkou než
