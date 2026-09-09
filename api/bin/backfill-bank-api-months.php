@@ -13,17 +13,12 @@ use MyInvoice\Service\Bank\BankApiMonthlyStatements;
 
 $db = new Connection(Config::load(Bootstrap::rootDir()));
 $pdo = $db->pdo();
-$query = "SELECT DISTINCT bs.supplier_id, bs.account_number, bs.bank_code, bs.currency
-    FROM bank_statements bs WHERE bs.source IN ('bank_api', 'gpc') AND bs.supplier_id IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM bank_api_months m WHERE m.statement_id = bs.id)
-    AND " . BankApiMonthlyStatements::visibleSql() . ' ORDER BY bs.supplier_id';
-$accounts = $pdo->query($query)->fetchAll(PDO::FETCH_ASSOC);
+$accounts = (new BankApiMonthlyStatements($pdo))->pendingBackfillAccounts();
 $apply = in_array('--apply', $argv, true);
 $done = [];
 $processed = 0;
 foreach ($accounts as $account) {
     $supplierId = (int) $account['supplier_id'];
-    if (!(new BankApiMonthlyStatements($pdo))->hasApiAccount($supplierId, (string) $account['account_number'], (string) $account['bank_code'], (string) $account['currency'])) continue;
     $key = AuthoritativeTransactionReconciler::account((string) $account['account_number'], (string) $account['bank_code']);
     if ($key === null || empty($account['currency'])) throw new RuntimeException('API evidence has an unresolved account or currency.');
     $scope = $supplierId . ':' . $key . ':' . $account['currency'];

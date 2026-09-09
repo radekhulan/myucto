@@ -10,6 +10,17 @@ final class BankApiMonthlyStatements
 {
     public function __construct(private readonly PDO $pdo) {}
 
+    public function pendingBackfillAccounts(): array
+    {
+        $query = "SELECT bs.supplier_id, bs.account_number, bs.bank_code, bs.currency, COUNT(*) AS statement_count
+            FROM bank_statements bs WHERE bs.source IN ('bank_api', 'gpc') AND bs.supplier_id IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM bank_api_months m WHERE m.statement_id = bs.id)
+            AND " . self::visibleSql() . '
+            GROUP BY bs.supplier_id, bs.account_number, bs.bank_code, bs.currency ORDER BY bs.supplier_id';
+        return array_values(array_filter($this->pdo->query($query)->fetchAll(PDO::FETCH_ASSOC), fn (array $account): bool =>
+            $this->hasApiAccount((int) $account['supplier_id'], (string) $account['account_number'], (string) $account['bank_code'], (string) $account['currency'])));
+    }
+
     public static function visibleSql(string $alias = 'bs'): string
     {
         if (preg_match('/^[a-z][a-z0-9_]*$/D', $alias) !== 1) throw new \InvalidArgumentException('Invalid statement alias.');
