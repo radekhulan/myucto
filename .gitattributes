@@ -1,6 +1,7 @@
 *.sh  text eol=lf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+.githooks/* text eol=lf
 
 # PHP zdroják musí mít stejné konce řádků na Windows i na Linuxu — golden
 # heredocy v testech se jinak porovnávají proti CRLF verzi sebe sama.

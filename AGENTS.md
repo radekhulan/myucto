@@ -150,6 +150,11 @@ Praktické důsledky:
 
 ## Konvence
 
+- Release tagy pushuj jednotlivě, nikdy přes `git push --tags` ani `--mirror`. Tag musí odpovídat `VERSION`, mít release notes a ukazovat do historie MyÚčto `master`.
+- V novém checkoutu aktivuj kontrolu tagů přes `git config core.hooksPath .githooks`. Hook kontroluje i atomický push `master` s tagem.
+- GitHub ruleset `MyUcto release series` povoluje vytváření a změny pouze tagů `v6.*.*`, bez bypassu. Před přechodem na další major verzi aktualizuj ruleset i `tools/release-guard.mjs`.
+- Ruční Docker build spouštěj z aktuálního `master` pouze s tagem `edge`, `test` nebo jejich prefixem (`edge-*`, `test-*`). Produkční tagy a `latest` vznikají vydáním.
+
 - Drž se stylu okolního kódu (pojmenování, idiomy, hustota komentářů). Nepřidávej komentáře, které kód jen opakují.
 - Commit messages česky, conventional-commits styl: `feat(scope): …`, `fix(scope): …`, `release: X.Y.Z — …` (viz `git log`).
 - `VERSION` a poznámky k vydání (`.github/release-notes/vX.Y.Z.md`) mění maintainer při release — v běžném PR na ně nesahej.

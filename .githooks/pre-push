@@ -1,0 +1,23 @@
+#!/usr/bin/env node
+const { execFileSync } = require('node:child_process');
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
+
+if (!/^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)radekhulan\/myucto(?:\.git)?\/?$/i.test(process.argv[3] ?? '')) process.exit(0);
+
+try {
+  const updates = readFileSync(0, 'utf8').trim().split(/\r?\n/).filter(Boolean).map(line => line.split(/\s+/));
+  const mainUpdate = updates.find(([, , ref]) => ref === 'refs/heads/master');
+  let master = 'refs/remotes/origin/master';
+  if (mainUpdate && !/^0+$/.test(mainUpdate[1])) {
+    execFileSync('git', ['merge-base', '--is-ancestor', master, mainUpdate[1]], { stdio: 'pipe' });
+    master = mainUpdate[1];
+  }
+  for (const [, sha, ref] of updates) {
+    if (!ref.startsWith('refs/tags/') || /^0+$/.test(sha)) continue;
+    execFileSync(process.execPath, [resolve(__dirname, '../tools/release-guard.mjs'), sha, master, ref.slice(10)], { stdio: 'inherit' });
+  }
+} catch (error) {
+  console.error(`MyUcto tag push blocked: ${error.message}`);
+  process.exitCode = 1;
+}
