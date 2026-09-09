@@ -69,6 +69,7 @@ JSON schema:
   "document_kind": "invoice"|"credit_note"|"advance"|"receipt"|"tax_document",
   "issue_date": "YYYY-MM-DD",
   "tax_date": "YYYY-MM-DD"|null,
+  "delivery_date": "YYYY-MM-DD"|null,
   "due_date": "YYYY-MM-DD"|null,
   "currency": "CZK"|"EUR"|"USD"|...,
   "items": [
@@ -114,6 +115,12 @@ DŮLEŽITÉ k DATŮM (`issue_date`, `tax_date`, `due_date`):
   jen od jeho popisku; když popisek chybí, vrať null.
 - `tax_date` = DUZP = datum uskutečnění zdanitelného plnění (DUZP, Datum plnění,
   Datum dodání, Date of supply). Pokud na dokladu NENÍ → vrať null.
+- `delivery_date` = DATUM DODÁNÍ / PŘEVZETÍ zboží nebo poskytnutí služby ("Datum dodání",
+  "Datum plnění", "Leistungsdatum", "Lieferdatum", "Date of supply", "Delivery date",
+  "Datum uskutečnění dodávky"). Je-li na dokladu jediné datum plnění, uveď TOTÉŽ datum
+  i v `tax_date`. Pokud doklad datum dodání neuvádí, vrať null — NEODVOZUJ ho z data
+  vystavení ani z období. U pořízení zboží z jiného členského státu z něj vzniká zákonné
+  DUZP dle § 25 ZDPH, takže odhad by přesunul daň do jiného zdaňovacího období.
 - `due_date` = DATUM SPLATNOSTI (Splatnost, Splatno do, Zaplaťte do, Due date). Když
   doklad splatnost NEUVÁDÍ, vrať null — NEOPISUJ do ní datum vystavení ani jiné datum.
 - LOGICKÁ KONTROLA (týká se JEN splatnosti): splatnost je platební lhůta, takže
@@ -435,6 +442,7 @@ EOT;
                 'document_kind'          => ['type' => 'string', 'enum' => ['invoice', 'credit_note', 'advance', 'receipt', 'tax_document']],
                 'issue_date'             => ['type' => 'string'],
                 'tax_date'               => ['type' => ['string', 'null']],
+                'delivery_date'          => ['type' => ['string', 'null']],
                 'due_date'               => ['type' => ['string', 'null']],
                 'currency'               => ['type' => 'string'],
                 'items'                  => [

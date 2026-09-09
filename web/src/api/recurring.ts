@@ -37,6 +37,8 @@ export interface RecurringTemplateItem extends RecurringTemplateItemOss {
   unit_price_without_vat: number
   vat_rate_id: number
   vat_rate_percent?: number
+  /** Ručně zvolená klasifikace DPH; null = odvodit ze SSOT při generování faktury. */
+  vat_classification_code?: string | null
   order_index: number
   price_list_item_id?: number | null
   price_list_item_name?: string | null
@@ -146,6 +148,7 @@ export interface RecurringTemplatePayload {
     unit: string
     unit_price_without_vat: number
     vat_rate_id: number
+    vat_classification_code?: string | null
     order_index: number
     price_list_item_id?: number | null
     catalog_policy?: CatalogPolicy

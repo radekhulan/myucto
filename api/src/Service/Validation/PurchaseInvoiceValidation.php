@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Validation;
 
+use MyInvoice\Service\Tax\Vat\EuAcquisitionTaxDate;
 use MyInvoice\Support\PaymentMethods;
 use MyInvoice\Support\PublicAuthorityFeeText;
 
@@ -100,6 +101,12 @@ final class PurchaseInvoiceValidation
 
         if (!empty($data['received_at']) && !self::isValidDate((string) $data['received_at'])) {
             $err['received_at'][] = 'Neplatné datum přijetí';
+        }
+
+        // Datum dodání (§ 25 vstup, migrace 1785) — evidenční, ale nesmí být nesmysl:
+        // z něj se počítá zákonné DUZP pořízení zboží z JČS.
+        if (!empty($data['delivery_date']) && !self::isValidDate((string) $data['delivery_date'])) {
+            $err['delivery_date'][] = 'Neplatné datum dodání';
         }
 
         // Manuální varsymbol — volitelný
@@ -219,6 +226,25 @@ final class PurchaseInvoiceValidation
         // klasifikace správný výsledek, proto se ptáme jen na nenulovou sazbu nebo RC.
         if (self::hasUnclassifiedTaxableLine($invoice)) {
             $warn[] = 'missing_vat_classification';
+        }
+
+        // § 25 ZDPH u pořízení zboží z JČS (audit VAT klasifikací 2026-08, nález M-7).
+        // Zákonné DUZP je 15. den měsíce následujícího po měsíci pořízení (dřív den
+        // vystavení dokladu), takže se počítá z DATA DODÁNÍ. Bez něj se nic nedomýšlí:
+        // z data vystavení měsíc pořízení určit nelze a tichý odhad by přesunul daň
+        // do jiného období — i s kurzem ČNB (§ 4 odst. 8). Proto jen varování.
+        if (EuAcquisitionTaxDate::appliesTo($invoice)) {
+            $delivery = trim((string) ($invoice['delivery_date'] ?? ''));
+            $issue = trim((string) ($invoice['issue_date'] ?? ''));
+            if ($delivery === '') {
+                $warn[] = 'eu_acquisition_delivery_date_missing';
+            } else {
+                $expected = EuAcquisitionTaxDate::for($delivery, $issue);
+                $taxDate = trim((string) ($invoice['tax_date'] ?? ''));
+                if ($expected !== null && $taxDate !== '' && $taxDate !== $expected) {
+                    $warn[] = 'eu_acquisition_tax_date_mismatch';
+                }
+            }
         }
 
         return $warn;

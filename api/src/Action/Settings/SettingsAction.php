@@ -23,6 +23,7 @@ use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Mail\RecipientResolver;
 use MyInvoice\Service\Mail\SafeLogoPath;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
+use MyInvoice\Service\Tax\Return\TaxpayerTypeCodebook;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -562,6 +563,12 @@ final class SettingsAction
             // Tax settings pro EPO výkazy (migrace 0038, fáze 6)
             'taxpayer_type', 'vat_period', 'financial_office_code', 'workplace_code',
             'cz_nace_code', 'data_box_type', 'data_box_id', 'flat_tax_band',
+            // Vědomé příznaky poplatníka pro přiznání k dani z příjmů (migrace 1782).
+            // Aplikace je z účetních dat odvodit neumí; blokují přiznání, které by
+            // o poplatníkovi tvrdilo nepravdu (viz UnsupportedCaseDetector).
+            'epo_taxpayer_code', 'tax_entity_status', 'tax_entity_status_date',
+            'tax_accounting_decree', 'tax_investment_incentive', 'tax_atad_cfc',
+            'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit',
             'oss_enabled', 'oss_valid_from', 'oss_valid_to', 'oss_identification_country', 'oss_return_currency',
             // Identifikátory ČSSZ/ZP pro přehled OSVČ (Epic DP v2, migrace 1032)
             'cssz_vsdp', 'cssz_ossz_code', 'health_insurance_number',
@@ -612,6 +619,35 @@ final class SettingsAction
             && !in_array($body['accounting_mode'], ['tax_evidence', 'double_entry'], true)
         ) {
             return Json::error($response, 'validation_failed', "accounting_mode musí být 'tax_evidence' nebo 'double_entry'.", 400);
+        }
+
+        // Vědomé příznaky poplatníka (migrace 1782). CHECK constraint v DB by z cizí
+        // hodnoty udělal PDOException → 500; tady je z ní čitelná 400. Prázdný řetězec
+        // u typu poplatníka znamená „neurčeno" a ukládá se jako NULL — je to jiný stav
+        // než výslovně potvrzená „1" (viz UnsupportedCaseDetector).
+        if (array_key_exists('epo_taxpayer_code', $body)) {
+            $code = trim((string) ($body['epo_taxpayer_code'] ?? ''));
+            if ($code !== '' && !TaxpayerTypeCodebook::isValidTaxpayerType($code)) {
+                return Json::error($response, 'validation_failed', 'epo_taxpayer_code musí být číslice 0-9 podle číselníku typ_popldpp.', 400);
+            }
+            $body['epo_taxpayer_code'] = $code === '' ? null : $code;
+        }
+        if (array_key_exists('tax_entity_status', $body)
+            && !array_key_exists((string) $body['tax_entity_status'], TaxpayerTypeCodebook::ENTITY_STATUSES)
+        ) {
+            return Json::error($response, 'validation_failed', "tax_entity_status musí být 'normal', 'liquidation', 'insolvency' nebo 'transformation'.", 400);
+        }
+        if (array_key_exists('tax_accounting_decree', $body)
+            && !array_key_exists((string) $body['tax_accounting_decree'], TaxpayerTypeCodebook::ACCOUNTING_DECREES)
+        ) {
+            return Json::error($response, 'validation_failed', 'tax_accounting_decree musí být číslo účetní vyhlášky (500/501/502/503/504/325/410).', 400);
+        }
+        if (array_key_exists('tax_entity_status_date', $body)) {
+            $statusDate = trim((string) ($body['tax_entity_status_date'] ?? ''));
+            if ($statusDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $statusDate) !== 1) {
+                return Json::error($response, 'validation_failed', 'tax_entity_status_date musí být datum ve tvaru RRRR-MM-DD.', 400);
+            }
+            $body['tax_entity_status_date'] = $statusDate === '' ? null : $statusDate;
         }
 
         // Jaký doklad vzniká po úhradě proformy (issue #39, migrace 1565). Cizí hodnota
@@ -936,7 +972,7 @@ final class SettingsAction
             }
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
-                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required'], true)
+                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit'], true)
                     ? ((int) (bool) $body[$f])
                     : $body[$f];
             }

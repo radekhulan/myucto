@@ -11,6 +11,7 @@ import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/code
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
 import { priceListApi, type CatalogDescriptionSource, type CatalogPolicy, type PriceListItem, type ResolvedPriceListItem } from '@/api/priceList'
 import { settingsApi, type BrandingProfile } from '@/api/settings'
+import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
@@ -132,6 +133,9 @@ type FormItem = {
   unit: string
   unit_price_without_vat: number
   vat_rate_id: number
+  // Ručně zvolená klasifikace DPH (migrace 1783). Prázdné = derivovat ze SSOT při
+  // generování; vyplněné rozhodnutí účetní se přenese na každou vygenerovanou fakturu.
+  vat_classification_code: string | null
   order_index: number
   price_list_item_id: number | null
   catalog_policy: CatalogPolicy
@@ -254,6 +258,21 @@ function vatRatesForItem(item: FormItem): VatRate[] {
   if (!ossAvailable.value) return vatRates.value
   return item.oss_applicable ? selectableVatRates.value : domesticVatRates.value
 }
+/**
+ * Klasifikace DPH na řádku šablony (migrace 1783, nález M-8 auditu VAT klasifikací).
+ *
+ * Prázdné = odvodit při generování ze sazby a měrné jednotky. Vyplněné rozhodnutí
+ * účetní se přenese na každou vygenerovanou fakturu — bez toho se dodání zboží do JČS
+ * (kód „20") u jednotky „ks" každý měsíc přepsalo na službu („22"), tedy ř. 21 přiznání
+ * a kód plnění 3 v souhrnném hlášení místo ř. 20 a kódu 0.
+ */
+const vatClassifications = ref<VatClassification[]>([])
+
+function vatClassificationLabel(c: VatClassification): string {
+  const label = c.label.length > 48 ? `${c.label.slice(0, 48)}…` : c.label
+  return `${c.code} — ${label}`
+}
+
 function vatRateLabel(r: VatRate): string {
   const prefix = r.country !== 'CZ' ? `${r.country} ` : ''
   if (Number(r.rate_percent) > 0) return `${prefix}${r.rate_percent} %`
@@ -284,6 +303,7 @@ function blankItem(): FormItem {
     unit: defaultItemUnit(),
     unit_price_without_vat: 0,
     vat_rate_id: defaultVatRateId(),
+    vat_classification_code: null,
     order_index: form.value.items.length,
     price_list_item_id: null,
     catalog_policy: 'fixed',
@@ -629,7 +649,7 @@ onMounted(async () => {
   loading.value = true
   try {
     // Klienti se hledají server-side (onClientSearch); cache se plní výsledky + vybraným.
-    const [cur, vat, un, rcat, profiles] = await Promise.all([
+    const [cur, vat, un, rcat, profiles, vatCls] = await Promise.all([
       codebooksApi.currencies(),
       // Dodavatel v OSS potřebuje i sazby států spotřeby — bez nich by OSS řádek
       // šablony musel nést tuzemskou sazbu a generoval by měsíčně špatnou daň.
@@ -637,12 +657,14 @@ onMounted(async () => {
       codebooksApi.units(),
       revenueCategoriesApi.list(false).catch(() => [] as RevenueCategory[]),  // jen aktivní
       settingsApi.listAvailableBrandingProfiles().catch(() => [] as BrandingProfile[]),
+      vatClassificationsApi.list('sale').catch(() => [] as VatClassification[]),
     ])
     currencies.value = cur
     vatRates.value = vat
     units.value = un
     revenueCategories.value = rcat
     brandingProfiles.value = profiles
+    vatClassifications.value = vatCls
     await loadPriceListItems()
 
     if (form.value.currency_id === 0) {
@@ -697,6 +719,9 @@ onMounted(async () => {
           unit: it.unit,
           unit_price_without_vat: it.unit_price_without_vat,
           vat_rate_id: it.vat_rate_id,
+          // Klasifikace z předlohy se přenáší ze stejného důvodu jako OSS: šablona má
+          // rozhodnutí zopakovat, ne ho zapomenout.
+          vat_classification_code: it.vat_classification_code ?? null,
           order_index: i,
           price_list_item_id: null,
           catalog_policy: 'fixed',
@@ -758,6 +783,7 @@ onMounted(async () => {
           unit: it.unit,
           unit_price_without_vat: it.unit_price_without_vat,
           vat_rate_id: it.vat_rate_id,
+          vat_classification_code: it.vat_classification_code ?? null,
           order_index: it.order_index,
           price_list_item_id: it.price_list_item_id ?? null,
           catalog_policy: it.catalog_policy ?? 'fixed',
@@ -865,6 +891,8 @@ async function submit() {
         unit: it.unit,
         unit_price_without_vat: it.unit_price_without_vat,
         vat_rate_id: it.vat_rate_id,
+        // OSS řádek se přiznává v zemi spotřeby, český klasifikační kód na něj nepatří.
+        vat_classification_code: it.oss_applicable ? null : (it.vat_classification_code || null),
         order_index: i,
         price_list_item_id: it.price_list_item_id,
         catalog_policy: it.catalog_policy,
@@ -1228,6 +1256,15 @@ async function submit() {
                     {{ vatRates.find(r => r.id === it.vat_rate_id) ? vatRateLabel(vatRates.find(r => r.id === it.vat_rate_id)!) : '—' }}
                   </option>
                 </select>
+                <!-- Klasifikace DPH se drží u sazby: obojí rozhoduje o řádku přiznání. -->
+                <select v-if="!it.oss_applicable" v-model="it.vat_classification_code"
+                  :title="t('recurring.vat_classification_hint')"
+                  class="mt-1 w-full h-7 px-1 border border-neutral-300 rounded bg-surface text-xs">
+                  <option :value="null">{{ t('recurring.vat_classification_auto') }}</option>
+                  <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">{{ vatClassificationLabel(vc) }}</option>
+                  <option v-if="it.vat_classification_code && !vatClassifications.some(vc => vc.code === it.vat_classification_code)"
+                    :value="it.vat_classification_code">{{ it.vat_classification_code }}</option>
+                </select>
               </td>
               <td class="py-1.5 text-right">
                 <div class="flex items-center justify-end gap-2 whitespace-nowrap">
@@ -1344,6 +1381,16 @@ async function submit() {
                   </option>
                 </select>
               </div>
+            </div>
+            <div v-if="supplierIsVatPayer && !it.oss_applicable">
+              <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('recurring.vat_classification') }}</label>
+              <select v-model="it.vat_classification_code" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm">
+                <option :value="null">{{ t('recurring.vat_classification_auto') }}</option>
+                <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">{{ vatClassificationLabel(vc) }}</option>
+                <option v-if="it.vat_classification_code && !vatClassifications.some(vc => vc.code === it.vat_classification_code)"
+                  :value="it.vat_classification_code">{{ it.vat_classification_code }}</option>
+              </select>
+              <p class="mt-1 text-xs text-neutral-500">{{ t('recurring.vat_classification_hint') }}</p>
             </div>
             <div v-if="ossAvailable || it.oss_applicable" class="border border-neutral-200 rounded-md p-2">
               <label class="inline-flex items-center gap-2 text-sm">

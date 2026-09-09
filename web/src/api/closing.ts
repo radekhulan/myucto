@@ -338,6 +338,13 @@ export interface PrepaidExpenseAccrualPreview {
 }
 
 // ── D9: opravné položky k pohledávkám ──────────────────────────────────────
+/**
+ * Paragraf zákona o rezervách, pod kterým se zákonná OP uplatňuje. Rozhoduje
+ * o řádku tabulky C přílohy č. 1 II. oddílu DPPO (VetaG): §8 → ř. 3/4,
+ * §8a → ř. 6/7, §8b → ř. 8/9, §8c → ř. 10/11. Bez něj se rozpad nevygeneruje.
+ */
+export type LegalProvisionSection = '8' | '8a' | '8b' | '8c' | null
+
 export interface ProvisionItem {
   invoice_id: number
   document_no: string
@@ -355,7 +362,7 @@ export interface ProvisionItem {
   suggested_acct_amount: number
   potentially_time_barred: boolean
   warning: string | null
-  existing: { entry_id: number; legal_amount: number; acct_amount: number } | null
+  existing: { entry_id: number; legal_amount: number; acct_amount: number; legal_section: LegalProvisionSection } | null
 }
 
 export interface ProvisionsPreview {
@@ -393,6 +400,8 @@ export interface ProvisionInput {
   invoice_id: number
   legal_amount: number
   acct_amount: number
+  /** Paragraf ZoR zvolený účetní — podklad rozpadu tabulky C DPPO (VetaG). */
+  legal_section?: LegalProvisionSection
   note?: string
   document_no?: string
 }

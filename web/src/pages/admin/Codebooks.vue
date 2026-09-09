@@ -7,6 +7,7 @@ import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategor
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { ossRatesApi, type OssMemberStateRate, type OssRateType } from '@/api/ossRates'
+import { publicHolidaysApi, type PublicHoliday, type PublicHolidayPreviewDay, type PublicHolidayRuleType } from '@/api/publicHolidays'
 import { taxConstantsApi, type TaxConstantsYear } from '@/api/taxConstants'
 import type { TaxConstantsData } from '@/api/tax'
 import { useAuthStore } from '@/stores/auth'
@@ -20,7 +21,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const route = useRoute()
 const toast = useToast()
 const auth = useAuthStore()
@@ -34,10 +35,10 @@ const props = withDefaults(defineProps<{
 // Firma → Číselníky (?scope=company): jen firemní číselníky (kategorie CRM rozpadu).
 // Globální nastavení → Sazby a číselníky (?scope=global): sdílené systémové číselníky.
 // Dodavatelé (multi-tenant firmy) mají od Fáze F vlastní stránku /admin/suppliers.
-type Tab = 'currencies' | 'vat' | 'countries' | 'units' | 'expense_categories' | 'revenue_categories' | 'vat_classifications' | 'oss_rates' | 'tax_constants'
+type Tab = 'currencies' | 'vat' | 'countries' | 'units' | 'expense_categories' | 'revenue_categories' | 'vat_classifications' | 'oss_rates' | 'public_holidays' | 'tax_constants'
 type Scope = 'company' | 'global'
 const COMPANY_TABS: Tab[] = ['expense_categories', 'revenue_categories']
-const GLOBAL_TABS: Tab[] = ['vat', 'vat_classifications', 'oss_rates', 'countries', 'units']
+const GLOBAL_TABS: Tab[] = ['vat', 'vat_classifications', 'oss_rates', 'public_holidays', 'countries', 'units']
 const scope = computed<Scope>(() => route.query.scope === 'company' ? 'company' : 'global')
 const visibleTabs = computed<Tab[]>(() => scope.value === 'company' ? COMPANY_TABS : GLOBAL_TABS)
 const tab = ref<Tab>('vat')
@@ -56,7 +57,7 @@ async function loadAll() {
     ])
   } finally { loading.value = false }
 }
-const TABS: Tab[] = ['currencies', 'vat', 'countries', 'units', 'expense_categories', 'revenue_categories', 'vat_classifications', 'oss_rates']
+const TABS: Tab[] = ['currencies', 'vat', 'countries', 'units', 'expense_categories', 'revenue_categories', 'vat_classifications', 'oss_rates', 'public_holidays']
 
 function resolveTab() {
   if (props.taxConstantsOnly) {
@@ -413,7 +414,8 @@ const vatClsSlug = useAutoSlug((s) => { vatClsDraft.code = s }, { maxLen: 8 })
 // Deklarace patří sem, ne k sekci OSS níž — seznam dialogů se vyhodnocuje hned
 // a `const` z pozdější sekce by v něm skončil v temporal dead zone.
 const ossOpen = ref(false)
-const codebookDialogs = [vatOpen, countryOpen, unitOpen, expenseOpen, revenueOpen, vatClsOpen, ossOpen]
+const holidayOpen = ref(false)
+const codebookDialogs = [vatOpen, countryOpen, unitOpen, expenseOpen, revenueOpen, vatClsOpen, ossOpen, holidayOpen]
 
 function onDialogEscape(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
@@ -425,8 +427,41 @@ function onDialogEscape(e: KeyboardEvent) {
 onMounted(() => document.addEventListener('keydown', onDialogEscape))
 onBeforeUnmount(() => document.removeEventListener('keydown', onDialogEscape))
 
+/**
+ * Řádky přiznání pro výběr — chodí z backendu, aby se whitelist validace nerozešel
+ * s nabídkou. Volný text tu byl past: kódy se jmenují jako čísla řádků (kód „42" =
+ * přijaté plnění bez nároku na odpočet, řádek 42 = odpočet při dovozu přes celní úřad),
+ * takže se do políčka dalo omylem opsat číslo kódu a vyrobit neexistující odpočet.
+ */
+const dphLines = ref<string[]>([])
+
+/**
+ * Aktuální hodnota se do nabídky doplní, i když ji whitelist nezná (starší per-tenant
+ * záznam, nedostupný endpoint) — jinak by editace jiného pole tiše smazala řádek.
+ */
+const dphLineOptions = computed(() => {
+  const current = vatClsDraft.dphdp3_line
+  return current && !dphLines.value.includes(current)
+    ? [current, ...dphLines.value]
+    : dphLines.value
+})
+
+function dphLineLabel(line: string): string {
+  // Plochý klíč (`line_42`), ne vnořený `line_opt.42` — číselný segment cesty si
+  // vue-i18n vykládá jako index pole.
+  const key = `vat_classifications.line_${line}`
+  return te(key) ? `${line} — ${t(key)}` : line
+}
+
 async function loadVatClassifications() {
   vatClassifications.value = await vatClassificationsApi.list(undefined, true)
+  if (dphLines.value.length === 0) {
+    try {
+      dphLines.value = await vatClassificationsApi.lines()
+    } catch {
+      dphLines.value = []
+    }
+  }
 }
 
 function newVatCls() {
@@ -619,6 +654,97 @@ async function removeOssRate(r: OssMemberStateRate) {
     await ossRatesApi.remove(r.id)
     toast.success(t('common.deleted'))
     await loadOssRates()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+// ─── Státní a ostatní svátky (z. č. 245/2000 Sb.) ────────────────────────
+//
+// Číselník je GLOBÁLNÍ a jeden řádek posouvá přes § 33 odst. 4 daňového řádu
+// lhůty podání všem firmám v instanci — proto ho čte kdokoli s přístupem
+// k číselníkům, ale mění jen správce instance (`can_write` z API).
+//
+// Řádek není datum, ale pravidlo, takže tabulka sama o sobě nikomu neřekne,
+// na který den letos Velký pátek padne. Náhled roku vedle ní proto není
+// ozdoba: bez něj se překlep v `MM-DD` pozná až podle propásnutého termínu.
+const holidays = ref<PublicHoliday[]>([])
+const holidayPreview = ref<PublicHolidayPreviewDay[]>([])
+const holidayRuleTypes = ref<PublicHolidayRuleType[]>(['fixed', 'easter'])
+const holidayCanWrite = ref(false)
+const holidayFallback = ref(false)
+const holidayYear = ref<number>(new Date().getFullYear())
+const holidayDraft = reactive({
+  id: 0,
+  code: '',
+  name: '',
+  rule_type: 'fixed' as PublicHolidayRuleType,
+  month_day: '',
+  easter_offset: 0 as number,
+  valid_from: '',
+  valid_to: '',
+  note: '',
+})
+
+async function loadHolidays() {
+  try {
+    const r = await publicHolidaysApi.list(holidayYear.value)
+    holidays.value = r.rules
+    holidayPreview.value = r.preview
+    holidayCanWrite.value = r.can_write
+    holidayFallback.value = r.fallback
+    holidayYear.value = r.year
+    if (r.rule_types.length > 0) holidayRuleTypes.value = r.rule_types
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+function newHoliday() {
+  Object.assign(holidayDraft, {
+    id: 0, code: '', name: '', rule_type: 'fixed', month_day: '', easter_offset: 0,
+    valid_from: `${holidayYear.value}-01-01`, valid_to: '', note: '',
+  })
+  holidayOpen.value = true
+}
+
+function editHoliday(h: PublicHoliday) {
+  Object.assign(holidayDraft, {
+    id: h.id, code: h.code, name: h.name, rule_type: h.rule_type,
+    month_day: h.month_day ?? '', easter_offset: h.easter_offset ?? 0,
+    valid_from: h.valid_from, valid_to: h.valid_to ?? '', note: h.note ?? '',
+  })
+  holidayOpen.value = true
+}
+
+async function saveHoliday() {
+  const payload = {
+    code: holidayDraft.code.trim(),
+    name: holidayDraft.name.trim(),
+    rule_type: holidayDraft.rule_type,
+    month_day: holidayDraft.rule_type === 'fixed' ? holidayDraft.month_day.trim() : null,
+    easter_offset: holidayDraft.rule_type === 'easter' ? Number(holidayDraft.easter_offset) : null,
+    valid_from: holidayDraft.valid_from,
+    valid_to: holidayDraft.valid_to || null,
+    note: holidayDraft.note || null,
+  }
+  try {
+    if (holidayDraft.id === 0) await publicHolidaysApi.create(payload)
+    else await publicHolidaysApi.update(holidayDraft.id, payload)
+    holidayOpen.value = false
+    toast.success(t('common.saved'))
+    await loadHolidays()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+async function removeHoliday(h: PublicHoliday) {
+  if (!confirm(t('public_holidays.delete_confirm', { name: h.name }))) return
+  try {
+    await publicHolidaysApi.remove(h.id)
+    toast.success(t('common.deleted'))
+    await loadHolidays()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   }
@@ -818,6 +944,7 @@ watch(tab, (newTab) => {
   if (newTab === 'revenue_categories') loadRevenueCategories()
   if (newTab === 'vat_classifications') loadVatClassifications()
   if (newTab === 'oss_rates') loadOssRates()
+  if (newTab === 'public_holidays') loadHolidays()
 })
 </script>
 
@@ -840,6 +967,7 @@ watch(tab, (newTab) => {
         {{ tt === 'vat' ? t('codebooks.tab_vat')
           : tt === 'vat_classifications' ? t('codebooks.tab_vat_classifications')
           : tt === 'oss_rates' ? t('codebooks.tab_oss_rates')
+          : tt === 'public_holidays' ? t('codebooks.tab_public_holidays')
           : tt === 'expense_categories' ? t('codebooks.tab_expense_categories')
           : tt === 'revenue_categories' ? t('codebooks.tab_revenue_categories')
           : tt === 'countries' ? t('codebooks.tab_countries')
@@ -1334,6 +1462,89 @@ watch(tab, (newTab) => {
       </div>
     </section>
 
+    <!-- ====== STÁTNÍ A OSTATNÍ SVÁTKY (z. č. 245/2000 Sb.) ====== -->
+    <section v-else-if="tab === 'public_holidays'">
+      <div class="flex flex-col gap-3 mb-3">
+        <p class="text-sm text-neutral-500">{{ t('public_holidays.hint') }}</p>
+
+        <div v-if="holidayFallback" class="rounded-md border border-danger-200 bg-danger-50 p-3 text-sm text-danger-600">
+          {{ t('public_holidays.fallback_warning') }}
+        </div>
+        <div v-else-if="!holidayCanWrite" class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
+          {{ t('public_holidays.readonly_for_role') }}
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="text-sm text-neutral-600">{{ t('public_holidays.preview_year') }}:</label>
+          <input v-model.number="holidayYear" @change="loadHolidays" type="number" min="1900" max="2200"
+            class="h-9 w-24 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+          <span class="text-xs text-neutral-500">{{ t('public_holidays.count', { n: holidays.length }) }}</span>
+          <button v-if="holidayCanWrite" @click="newHoliday"
+            :class="[btnFilled('primary'), 'ml-auto shrink-0 whitespace-nowrap']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('public_holidays.new') }}
+          </button>
+        </div>
+      </div>
+
+      <EmptyState v-if="holidays.length === 0" boxed icon="clipboardCheck" :title="t('public_holidays.empty')" />
+
+      <div v-else class="grid gap-4 lg:grid-cols-3">
+        <div class="lg:col-span-2 bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+                <tr>
+                  <th class="px-3 py-2 text-left font-medium">{{ t('public_holidays.name') }}</th>
+                  <th class="px-3 py-2 text-left font-medium w-40">{{ t('public_holidays.rule') }}</th>
+                  <th class="px-3 py-2 text-center font-medium w-28">{{ t('public_holidays.valid_from') }}</th>
+                  <th class="px-3 py-2 text-center font-medium w-28">{{ t('public_holidays.valid_to') }}</th>
+                  <th class="px-3 py-2 w-40"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="h in holidays" :key="h.id" class="hover:bg-neutral-50">
+                  <td class="px-3 py-2">
+                    <div class="font-medium">{{ h.name }}</div>
+                    <div class="text-xs text-neutral-500 font-mono">{{ h.code }}</div>
+                    <div v-if="h.note" class="text-xs text-neutral-500">{{ h.note }}</div>
+                  </td>
+                  <td class="px-3 py-2 text-xs">
+                    <span v-if="h.rule_type === 'fixed'" class="font-mono">{{ h.month_day }}</span>
+                    <span v-else>{{ t('public_holidays.easter_rule', { days: h.easter_offset }) }}</span>
+                  </td>
+                  <td class="px-3 py-2 text-center font-mono text-xs">{{ h.valid_from }}</td>
+                  <td class="px-3 py-2 text-center font-mono text-xs">{{ h.valid_to ?? '—' }}</td>
+                  <td class="px-3 py-2 text-right whitespace-nowrap">
+                    <div class="flex items-center justify-end gap-1.5 flex-wrap">
+                      <button @click="editHoliday(h)" :disabled="!holidayCanWrite" :class="btnOutlineSm('primary')">
+                        {{ t('common.edit') }}
+                      </button>
+                      <button @click="removeHoliday(h)" :disabled="!holidayCanWrite" :class="btnOutlineSm('danger')">
+                        {{ t('common.delete') }}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+          <div class="px-3 py-2 bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide font-medium">
+            {{ t('public_holidays.preview_title', { year: holidayYear }) }}
+          </div>
+          <ul class="divide-y divide-neutral-100">
+            <li v-for="d in holidayPreview" :key="d.date" class="px-3 py-1.5 text-sm flex items-center gap-2">
+              <span class="font-mono text-xs text-neutral-500 shrink-0">{{ d.date }}</span>
+              <span class="truncate">{{ d.name }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
     <!-- ====== TAX CONSTANTS (roční daňové konstanty) ====== -->
     <section v-else-if="tab === 'tax_constants'">
       <div class="flex flex-wrap items-center gap-3 mb-3">
@@ -1523,6 +1734,7 @@ watch(tab, (newTab) => {
                 :disabled="vatClsEditMode === 'edit'"
                 @input="vatClsSlug.markManual(($event.target as HTMLInputElement).value)"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" />
+              <p class="mt-1 text-xs text-neutral-500">{{ t('vat_classifications.code_hint') }}</p>
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('vat_classifications.direction') }}</label>
@@ -1547,8 +1759,11 @@ watch(tab, (newTab) => {
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('vat_classifications.dphdp3_line') }}</label>
-              <input v-model="vatClsDraft.dphdp3_line" type="text" maxlength="10" placeholder="1"
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+              <select v-model="vatClsDraft.dphdp3_line"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option value="">{{ t('vat_classifications.dphdp3_line_none') }}</option>
+                <option v-for="line in dphLineOptions" :key="line" :value="line">{{ dphLineLabel(line) }}</option>
+              </select>
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('vat_classifications.kh_section') }}</label>
@@ -1673,6 +1888,77 @@ watch(tab, (newTab) => {
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}</button>
           <button @click="saveOssRate" :class="btnFilled('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('common.save') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Public holiday modal — řádek je PRAVIDLO (pevné MM-DD nebo posun od Velikonoc),
+         ne konkrétní datum; platnost je datovaná, aby novela zákona byla řádek, ne release. -->
+    <div v-if="holidayOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-surface rounded-xl shadow-lg max-w-lg w-full p-5">
+        <h3 class="text-lg font-semibold mb-1">
+          {{ holidayDraft.id ? t('public_holidays.edit_title') : t('public_holidays.new_title') }}
+        </h3>
+        <p class="text-sm text-neutral-500 mb-3">{{ t('public_holidays.new_hint') }}</p>
+
+        <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('public_holidays.name') }} *</label>
+              <input v-model="holidayDraft.name" maxlength="190"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('public_holidays.code') }} *</label>
+              <input v-model="holidayDraft.code" maxlength="40"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm font-mono" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('public_holidays.rule') }} *</label>
+              <select v-model="holidayDraft.rule_type"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option v-for="rt in holidayRuleTypes" :key="rt" :value="rt">{{ t('public_holidays.rule_' + rt) }}</option>
+              </select>
+            </div>
+            <div v-if="holidayDraft.rule_type === 'fixed'">
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('public_holidays.month_day') }} *</label>
+              <input v-model="holidayDraft.month_day" maxlength="5" placeholder="07-05"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm font-mono" />
+            </div>
+            <div v-else>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('public_holidays.easter_offset') }} *</label>
+              <input v-model.number="holidayDraft.easter_offset" type="number" min="-60" max="60"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('public_holidays.valid_from') }} *</label>
+              <DateInput v-model="holidayDraft.valid_from"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('public_holidays.valid_to') }}</label>
+              <DateInput v-model="holidayDraft.valid_to"
+                class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('public_holidays.note') }}</label>
+            <input v-model="holidayDraft.note" maxlength="255"
+              class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-4 mt-3 border-t border-neutral-200">
+          <button @click="holidayOpen = false" :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}</button>
+          <button @click="saveHoliday" :class="btnFilled('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ t('common.save') }}</button>
         </div>

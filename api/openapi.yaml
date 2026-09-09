@@ -6881,6 +6881,26 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/VatClassification' }
 
+  /api/v1/vat-classifications/lines:
+    get:
+      tags: [Codebooks]
+      summary: Řádky přiznání, které smí klasifikace nést
+      description: >-
+        Whitelist hodnot pro `dphdp3_line` / `dphdp3_line_secondary`. UI z něj staví výběr,
+        aby se číslo řádku nedalo zaměnit s názvem kódu (kód „42" ≠ řádek 42).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      responses:
+        '200':
+          description: Seznam podporovaných řádků
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lines:
+                    type: array
+                    items: { type: string, example: '51b' }
+
   /api/v1/vat-classifications/{id}:
     put:
       tags: [Codebooks]
@@ -7020,6 +7040,62 @@ paths:
                   rates:
                     type: array
                     items: { $ref: '#/components/schemas/OssMemberStateRate' }
+
+  # ── Státní a ostatní svátky (globální číselník) ──────────────────────────
+  /api/v1/codebooks/public-holidays:
+    get:
+      tags: [Codebooks]
+      summary: Číselník státních a ostatních svátků (z. č. 245/2000 Sb.)
+      description: |
+        GLOBÁLNÍ číselník (ne per-supplier). Svátek posouvá podle § 33 odst. 4
+        daňového řádu VŠECHNY lhůty podání — přiznání k DPH, kontrolní i souhrnné
+        hlášení, přehledy OSVČ, odvody ze mzdy — takže jeden řádek platí pro celou
+        instanci.
+
+        Řádky nejsou konkrétní data, ale PRAVIDLA s datovanou platností:
+        `rule_type = fixed` nese pevné `month_day` (MM-DD), `rule_type = easter`
+        nese `easter_offset`, tedy posun ve dnech od Velikonoční neděle (Velký
+        pátek −2, Velikonoční pondělí +1). Datum Velikonoc se počítá, protože ho
+        neurčuje zákon, ale gregoriánský computus.
+
+        `preview` je číselník rozpočítaný na konkrétní rok (parametr `year`,
+        výchozí je aktuální). `fallback = true` znamená, že tabulka je prázdná
+        nebo nedostupná a lhůty se počítají z pojistky zapečené v kódu — tedy
+        podle stavu zákona k vydání aplikace.
+
+        Zápis je záměrně mimo veřejné API: mění autoritu společnou pro všechny
+        firmy v instanci a je dostupný jen správci instance z webového rozhraní.
+      parameters:
+        - in: query
+          name: year
+          required: false
+          schema: { type: integer, minimum: 1900, maximum: 2200, example: 2026 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  can_write: { type: boolean, example: false }
+                  fallback:  { type: boolean, example: false }
+                  year:      { type: integer, example: 2026 }
+                  rule_types:
+                    type: array
+                    items: { type: string, enum: [fixed, easter] }
+                  rules:
+                    type: array
+                    items: { $ref: '#/components/schemas/PublicHoliday' }
+                  preview:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date: { type: string, format: date, example: '2026-04-03' }
+                        code: { type: string, example: good_friday }
+                        name: { type: string, example: Velký pátek }
+        '403': { description: Chybí oprávnění k číselníkům }
 
   # ── Purchase invoices — chybějící endpointy ──────────────────────────────
   /api/v1/purchase-invoices/export:
@@ -11201,6 +11277,8 @@ paths:
         §8a (18 měs. 50 %, 30 měs. 100 %) a §8c (do 30 000 Kč nad 12 měs. 100 %).
         Od 36 měsíců se automatický návrh vynuluje a položka nese upozornění na možné promlčení.
         Systém návrh jen nabízí — účetní ho per pohledávka potvrdí/upraví v /steps/provisions/run.
+        U již zaúčtované OP nese `existing.legal_section` paragraf zvolený účetní (podklad
+        rozpadu tabulky C přílohy č. 1 II. oddílu DPPO); `null` = nezařazeno.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -11278,6 +11356,11 @@ paths:
                       invoice_id: { type: integer }
                       legal_amount: { type: number, description: "Zákonná OP (558)" }
                       acct_amount: { type: number, description: "Účetní OP nad rámec (559)" }
+                      legal_section:
+                        type: string
+                        nullable: true
+                        enum: ['8', 8a, 8b, 8c]
+                        description: "Paragraf zákona o rezervách u zákonné OP — podklad rozpadu tabulky C přílohy č. 1 II. oddílu DPPO (§8 → ř. 3/4, §8a → ř. 6/7, §8b → ř. 8/9, §8c → ř. 10/11). Neznámá hodnota se uloží jako nezařazeno."
                       note: { type: string }
                 bank_rows:
                   type: array
@@ -12175,7 +12258,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [register_id, doc_type, purpose, issue_date, description, total_amount], properties: { register_id: { type: integer }, doc_type: { type: string, enum: [in, out] }, purpose: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] }, issue_date: { type: string, format: date }, tax_date: { type: string, format: date }, partner_name: { type: string }, partner_ic: { type: string }, partner_dic: { type: string }, description: { type: string }, vat_mode: { type: string, enum: [none, vat] }, total_amount: { type: number }, amount_foreign: { type: number, nullable: true, description: "Částka v měně pokladny u valutové pokladny (§11); CZK ekvivalent do total_amount dopočítá server" }, fx_rate: { type: number, description: "Ruční kurz; vynechte, ať se použije kurz ČNB k datu vystavení" }, vat_lines: { type: array, items: { type: object, properties: { vat_rate: { type: number }, base_amount: { type: number }, vat_amount: { type: number }, vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Rozsah nároku na odpočet DPH řádku (§ 75/76)" }, vat_deduction_percent: { type: number, default: 100, description: "Poměrný / skutečný roční koeficient odpočtu v procentech (0–100)" }, tax_treatment: { type: string, enum: [deductible, non_deductible, not_expense], default: deductible, description: "Uznatelnost řádku pro daň z příjmů (§ 24/25), nezávislá na DPH" } } } }, invoice_id: { type: integer }, purchase_invoice_id: { type: integer }, rule_key: { type: string }, counter_account_code: { type: string }, post: { type: boolean, default: true } } } } }
+        content: { application/json: { schema: { type: object, required: [register_id, doc_type, purpose, issue_date, description, total_amount], properties: { register_id: { type: integer }, doc_type: { type: string, enum: [in, out] }, purpose: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] }, issue_date: { type: string, format: date }, tax_date: { type: string, format: date }, partner_name: { type: string }, partner_ic: { type: string }, partner_dic: { type: string }, description: { type: string }, vat_mode: { type: string, enum: [none, vat] }, total_amount: { type: number }, amount_foreign: { type: number, nullable: true, description: "Částka v měně pokladny u valutové pokladny (§11); CZK ekvivalent do total_amount dopočítá server" }, fx_rate: { type: number, description: "Ruční kurz; vynechte, ať se použije kurz ČNB k datu vystavení" }, vat_lines: { type: array, items: { type: object, properties: { vat_rate: { type: number }, base_amount: { type: number }, vat_amount: { type: number }, vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Rozsah nároku na odpočet DPH řádku (§ 75/76)" }, vat_deduction_percent: { type: number, default: 100, description: "Poměrný / skutečný roční koeficient odpočtu v procentech (0–100)" }, tax_treatment: { type: string, enum: [deductible, non_deductible, not_expense], default: deductible, description: "Uznatelnost řádku pro daň z příjmů (§ 24/25), nezávislá na DPH" }, is_fixed_asset: { type: boolean, default: false, description: "Pořízení dlouhodobého majetku (§ 4 odst. 4) — hodnota se v přiznání uvede navíc na ř. 47. Uplatní se jen u výdajového dokladu (doc_type=out); u příjmového se ignoruje." } } } }, invoice_id: { type: integer }, purchase_invoice_id: { type: integer }, rule_key: { type: string }, counter_account_code: { type: string }, post: { type: boolean, default: true } } } } }
       responses:
         '201': { description: Vytvořeno, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -17063,6 +17146,13 @@ paths:
     get:
       tags: [TaxReturn]
       summary: Řádky, ruční vstupy a upozornění přiznání
+      description: >-
+        U DPFO (`type=fo`) nese `podklady.section10_codebook` číselník druhů ostatních
+        příjmů podle § 10 odst. 1 zákona (`kinds`, A–H) a volitelných kódů (`codes`,
+        P/S/Z/N) pro položky `inputs.s10_items[]`; `podklady.payroll_gross` je úhrn
+        zúčtovaných mezd nabídnutý mzdovou agendou pro ruční vstup `inputs.s7_payroll_gross`
+        (null = agenda za rok nic nevykazuje). Zrušený jednořádkový vstup `inputs.s10_other`
+        se při čtení i uložení převádí na jednu položku `inputs.s10_items[]`.
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '400': { description: Neplatný typ/rok/variant }
@@ -20554,6 +20644,26 @@ components:
         created_at:         { type: string, format: date-time }
         updated_at:         { type: string, format: date-time, nullable: true }
 
+    PublicHoliday:
+      type: object
+      description: |
+        Pravidlo jednoho svátku podle z. č. 245/2000 Sb. Není to konkrétní datum, ale
+        předpis, ze kterého se datum v daném roce teprve spočítá — a k tomu datovaná
+        platnost, takže novela zákona je řádek v číselníku, ne nová verze aplikace.
+        `month_day` je vyplněné právě pro `rule_type = fixed`, `easter_offset` právě
+        pro `rule_type = easter`.
+      properties:
+        id:            { type: integer }
+        code:          { type: string, example: good_friday }
+        name:          { type: string, example: Velký pátek }
+        rule_type:     { type: string, enum: [fixed, easter] }
+        month_day:     { type: string, nullable: true, pattern: '^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$', example: '07-05' }
+        easter_offset: { type: integer, nullable: true, example: -2 }
+        valid_from:    { type: string, format: date }
+        valid_to:      { type: string, format: date, nullable: true }
+        note:          { type: string, nullable: true }
+        updated_at:    { type: string, format: date-time }
+
     Currency:
       type: object
       properties:
@@ -22180,6 +22290,20 @@ components:
         default_branding_profile_id: { type: [integer, "null"], readOnly: true }
         auto_send_reminders: { type: boolean }
         reminder_days_after_due: { type: integer, minimum: 1, maximum: 365 }
+        epo_taxpayer_code:
+          type: [string, "null"]
+          enum: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", null]
+          description: |
+            Typ poplatníka podle číselníku `typ_popldpp` formuláře DPPDP9. Prázdný
+            řetězec se uloží jako `null` (= účetní typ poplatníka nepotvrdila).
+        tax_entity_status: { type: string, enum: [normal, liquidation, insolvency, transformation], default: normal }
+        tax_entity_status_date: { type: [string, "null"], format: date }
+        tax_accounting_decree: { type: string, enum: ["500", "501", "502", "503", "504", "325", "410"], default: "500" }
+        tax_investment_incentive: { type: boolean }
+        tax_atad_cfc: { type: boolean }
+        tax_public_benefit: { type: boolean }
+        tax_cooperating_person: { type: boolean }
+        tax_foreign_income_credit: { type: boolean }
 
     SupplierFull:
       type: object
@@ -22268,6 +22392,32 @@ components:
         vat_period: { type: [string, "null"], enum: [monthly, quarterly, null] }
         financial_office_code: { type: [string, "null"], description: "Kód FÚ pro EPO (= CRPDPH cisloFu)" }
         flat_tax_band: { type: string, enum: [none, band1, band2, band3], description: "Pásmo paušální daně" }
+        epo_taxpayer_code:
+          type: [string, "null"]
+          enum: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", null]
+          description: |
+            Typ poplatníka podle číselníku `typ_popldpp` formuláře DPPDP9 (0 a 8/9
+            investiční pobídky, 1 ostatní, 2 daňový nerezident, 3 veřejně prospěšný
+            poplatník, 4 investiční fond, 5 investiční společnost, 6 penzijní
+            společnost, 7 část období základní investiční fond). `null` = účetní typ
+            poplatníka nepotvrdila; přiznání se pak staví jako pro typ 1. Aplikace
+            umí sestavit přiznání jen pro typ 1 — u ostatních se finalizace zastaví.
+        tax_entity_status:
+          type: string
+          enum: [normal, liquidation, insolvency, transformation]
+          default: normal
+          description: "Stav poplatníka. Jiný než `normal` mění typ přiznání (`typ_dapdpp`) a finalizaci zastaví."
+        tax_entity_status_date: { type: [string, "null"], format: date, description: "Rozhodný den stavu poplatníka" }
+        tax_accounting_decree:
+          type: string
+          enum: ["500", "501", "502", "503", "504", "325", "410"]
+          default: "500"
+          description: "Účetní vyhláška závěrky (`uv_vyhl`). Aplikace sestavuje výkazy jen podle 500/2002 Sb."
+        tax_investment_incentive: { type: boolean, default: false, description: "Nositel příslibu investiční pobídky (§ 35a/§ 35b ZDP)" }
+        tax_atad_cfc: { type: boolean, default: false, description: "Dotčen pravidly ATAD/CFC (§ 23e-23h, § 38fa ZDP)" }
+        tax_public_benefit: { type: boolean, default: false, description: "Veřejně prospěšný poplatník (§ 17a ZDP)" }
+        tax_cooperating_person: { type: boolean, default: false, description: "FO rozděluje příjmy na spolupracující osobu (§ 13 ZDP)" }
+        tax_foreign_income_credit: { type: boolean, default: false, description: "FO má zahraniční příjmy se zápočtem daně (§ 38f ZDP)" }
         email_branding_enabled: { type: boolean }
         email_accent_color: { type: string, example: "#3B2D83" }
         has_email_logo: { type: boolean }
@@ -22511,6 +22661,10 @@ components:
               unit_price_without_vat: { type: number, format: float, description: "Může být záporná pro slevový řádek." }
               vat_rate_id: { type: integer }
               vat_rate_percent: { type: number, format: float }
+              vat_classification_code:
+                type: [string, "null"]
+                maxLength: 8
+                description: "Ručně zvolená klasifikace DPH přenášená na každou vygenerovanou fakturu. NULL = odvodit ze sazby a měrné jednotky při generování. Na OSS řádku se ignoruje (plnění se přiznává v zemi spotřeby)."
               order_index: { type: integer }
               oss_applicable:
                 type: boolean
@@ -22604,6 +22758,10 @@ components:
               unit: { type: string, default: ks }
               unit_price_without_vat: { type: number, format: float, description: "Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
               vat_rate_id: { type: integer }
+              vat_classification_code:
+                type: [string, "null"]
+                maxLength: 8
+                description: "Ručně zvolená klasifikace DPH (kód z `/vat-classifications` se `direction` sale/both). Přenese se na každou vygenerovanou fakturu a přebije automatické odvození ze sazby a jednotky. NULL/vynecháno = odvodit. Neznámý kód je chyba validace; u neplátce DPH a u OSS řádku se rozhodnutí zahodí."
               order_index: { type: integer }
               oss_applicable:
                 type: boolean
@@ -22930,6 +23088,7 @@ components:
         advance_link_suggested_id: { type: [integer, "null"], description: "AI/auto návrh na propojení zálohy (čeká na potvrzení)" }
         issue_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date }
+        delivery_date: { type: [string, "null"], format: date, description: "Datum dodání / převzetí z dokladu (vstup § 25 ZDPH pro DUZP). NULL = na dokladu neuvedeno; systém ho NEDOMÝŠLÍ, doklad jen dostane varování eu_acquisition_delivery_date_missing." }
         due_date: { type: string, format: date }
         received_at: { type: string, format: date }
         received_at_source: { type: string, enum: [manual, import], description: "Odkud pochází datum přijetí. 'manual' = zadal ho uživatel → vstupuje do období odpočtu (§ 73 odst. 1 písm. a ZDPH); 'import' = jen otisk dne importu / AI extrakce → do zařazení se nepočítá. Překlápí se až SKUTEČNOU změnou pole, ne pouhým přeuložením dokladu." }
@@ -23127,7 +23286,7 @@ components:
         _warnings:
           type: array
           items: { type: string }
-          description: "Jen v odpovědi POST/PUT — non-blocking varování (credit_note_positive_total, vendor_non_payer_deduction, vendor_unreliable_payer — CRPDPH nespolehlivý plátce, audit 2026-07), uložení neblokují."
+          description: "Jen v odpovědi POST/PUT — non-blocking varování (credit_note_positive_total, vendor_non_payer_deduction, vendor_unreliable_payer — CRPDPH nespolehlivý plátce, audit 2026-07, public_authority_fee_out_of_scope, missing_vat_classification, eu_acquisition_delivery_date_missing, eu_acquisition_tax_date_mismatch), uložení neblokují."
 
     PurchaseVatAllocation:
       type: object
@@ -23157,6 +23316,7 @@ components:
         document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document], default: invoice }
         issue_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date }
+        delivery_date: { type: [string, "null"], format: date, description: "Datum dodání / převzetí z dokladu (vstup § 25 ZDPH pro DUZP). NULL = na dokladu neuvedeno; systém ho NEDOMÝŠLÍ, doklad jen dostane varování eu_acquisition_delivery_date_missing." }
         due_date: { type: string, format: date }
         received_at: { type: string, format: date }
         payment_method:

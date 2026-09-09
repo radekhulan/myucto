@@ -623,9 +623,19 @@ final class RecurringTemplateAction
         if (!is_array($items) || count($items) === 0) {
             $err['items'][] = 'Šablona musí mít alespoň jednu položku';
         } else {
+            $knownCodes = null;
             foreach (array_values($items) as $i => $item) {
                 if (!is_array($item)) { $err["items.{$i}"][] = 'Neplatná položka'; continue; }
                 $err = array_merge($err, InvoiceAmountPolicy::validateItem($item, $i));
+                // Klasifikace DPH na řádku šablony (migrace 1783) se přenáší na každou
+                // vygenerovanou fakturu, takže překlep by tiše posílal roky plnění na
+                // špatný řádek přiznání. Číselník se načte jen když ho někdo použil.
+                $code = trim((string) ($item['vat_classification_code'] ?? ''));
+                if ($code === '') { continue; }
+                $knownCodes ??= $this->saleClassificationCodes((int) ($data['supplier_id'] ?? 0));
+                if (!in_array($code, $knownCodes, true)) {
+                    $err["items.{$i}"][] = "Neznámá klasifikace DPH „{$code}\"";
+                }
             }
         }
 
@@ -641,6 +651,24 @@ final class RecurringTemplateAction
         }
 
         return $err;
+    }
+
+    /**
+     * Kódy klasifikací použitelné na vystaveném dokladu (globální seed + kódy tenanta).
+     *
+     * @return list<string>
+     */
+    private function saleClassificationCodes(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT code FROM vat_classifications
+              WHERE (supplier_id IS NULL OR supplier_id = ?)
+                AND archived = 0
+                AND direction IN ("sale", "both")'
+        );
+        $stmt->execute([$supplierId]);
+
+        return array_map('strval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
     }
 
     private function prepareCatalogItems(array $body, bool $newTemplate): array

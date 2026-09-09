@@ -85,6 +85,99 @@ final class DppoXmlBuilderXsdTest extends TestCase
         self::assertStringContainsString('kc_dpp_f4="18000"', $xml);
     }
 
+    /**
+     * VetaG — tabulka C přílohy č. 1 II. oddílu (zákonné OP a rezervy podle z. 593/1992 Sb.).
+     * Věta v XSD sekvenci sedí hned za VetaF a před VetaM; musí projít validací i s
+     * naplněnými řádky obou dílčích tabulek (a) OP k pohledávkám, e) rezerva §7).
+     */
+    private function buildXmlWithLegalProvisions(): array
+    {
+        $calc = (new DppoReturnCalculator())->compute(
+            [
+                'vh' => 500000,
+                'depreciation' => ['tax' => 0, 'accounting' => 0],
+                'legal_provisions' => [
+                    'allowance_balance' => 130000.0,
+                    'allowance_declared_total' => 130000.0,
+                    'allowance_declared_legal' => 130000.0,
+                    'allowance_declared_acct' => 0.0,
+                    'allowance_by_section' => ['8' => 10000.0, '8a' => 50000.0, '8b' => 20000.0, '8c' => 50000.0],
+                    'allowance_unassigned' => 0.0,
+                    'allowance_split_reliable' => true,
+                    'allowance_created_split_reliable' => true,
+                    'legal_allowance_created' => 130000.0,
+                    'acct_allowance_created' => 0.0,
+                    'legal_reserve_balance' => 250000.0,
+                    'legal_reserve_created' => 100000.0,
+                    'receivable_writeoff_deductible' => 33000.0,
+                    'has_activity' => true,
+                ],
+            ],
+            ['tax_paid_advances' => 0],
+            TaxConstants::forYear(2025)
+        );
+
+        return (new DppoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc, [
+            'zdobd_od' => '01.01.2025',
+            'zdobd_do' => '31.12.2025',
+        ]);
+    }
+
+    public function testVetaGStructure(): void
+    {
+        $xml = $this->buildXmlWithLegalProvisions()['xml'];
+        self::assertStringContainsString('<VetaG', $xml);
+        self::assertStringContainsString('kc_dpp_c6="50000"', $xml);   // ř. 6 tvorba §8a
+        self::assertStringContainsString('kc_sop8c="50000"', $xml);    // ř. 11 stav §8c
+        self::assertStringContainsString('kc_dpp_c8="33000"', $xml);   // ř. 12 odpis §24/2/y
+        self::assertStringContainsString('kc_dpp_c19="250000"', $xml); // ř. 26 stav rezerv §7
+        self::assertStringContainsString('p_pr_2od="1"', $xml);
+    }
+
+    public function testVetaGPassesXsd(): void
+    {
+        $validator = new XmlSchemaValidator();
+        if (!$validator->hasSchema('dppdp9')) {
+            self::markTestSkipped('XSD dppdp9_epo2.xsd není k dispozici.');
+        }
+        $validation = $validator->validate($this->buildXmlWithLegalProvisions()['xml'], 'dppdp9');
+        self::assertSame('passed', $validation['status'], 'XSD chyby: ' . implode(' | ', $validation['errors']));
+        self::assertEmpty($validation['errors']);
+    }
+
+    /**
+     * § 35 odst. 4 ZDP — sleva za zastavenou exekuci. Tabulka H přílohy č. 1 II. oddílu
+     * má na ř. 3 vlastní atribut `kc_dpp_f3`, který se dřív nikdy nevyplnil, a úhrn na
+     * ř. 4 (`kc_dpp_f4` = ř. 1 + 2 + 3) ho tím pádem ani neobsahoval.
+     */
+    public function testStoppedExecutionCreditFillsTableHRow3AndTotal(): void
+    {
+        $calc = (new DppoReturnCalculator())->compute(
+            ['vh' => 500000, 'depreciation' => ['tax' => 0, 'accounting' => 0]],
+            ['disabled_employees_avg' => 1, 'stopped_execution_credit' => 900, 'tax_paid_advances' => 0],
+            TaxConstants::forYear(2025)
+        );
+        $result = (new DppoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc);
+
+        self::assertStringContainsString('kc_dpp_f1="18000"', $result['xml']);
+        self::assertStringContainsString('kc_dpp_f3="900"', $result['xml']);
+        self::assertStringContainsString('kc_dpp_f4="18900"', $result['xml'], 'ř. 4 tabulky H = ř. 1 + 2 + 3');
+
+        $validator = new XmlSchemaValidator();
+        if ($validator->hasSchema('dppdp9')) {
+            $validation = $validator->validate($result['xml'], 'dppdp9');
+            self::assertSame('passed', $validation['status'], 'XSD chyby: ' . implode(' | ', $validation['errors']));
+        }
+    }
+
+    /** Bez nároku podle § 35/4 zůstává ř. 3 tabulky H prázdný — žádná nula naslepo. */
+    public function testStoppedExecutionCreditOmittedWhenZero(): void
+    {
+        $xml = $this->buildXml()['xml'];
+        self::assertStringContainsString('<VetaM', $xml);
+        self::assertStringNotContainsString('kc_dpp_f3=', $xml);
+    }
+
     public function testPassesXsd(): void
     {
         $validator = new XmlSchemaValidator();

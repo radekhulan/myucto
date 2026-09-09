@@ -53,4 +53,46 @@ final class VatClassificationsActionValidationTest extends TestCase
             (string) $validate->invoke($action, $base + ['dphdp3_line_secondary' => '34'], false),
         );
     }
+
+    /**
+     * Nález L-1: kód klasifikace se jmenuje stejně jako řádek přiznání, ale znamená
+     * něco jiného. Kód `42` = přijaté plnění BEZ nároku na odpočet, řádek 42 = odpočet
+     * při dovozu zboží vyměřeném celním úřadem — admin, který kódu `42` nastaví řádek
+     * `42`, tiše vyrobí neexistující odpočet. Seed tu chybu udělal a musely ji opravovat
+     * migrace 0063 a 0106; per-tenant kód si ji ale může vyrobit znovu.
+     */
+    public function testCodeNamedLikeADifferentReturnLineIsRejected(): void
+    {
+        $reflection = new \ReflectionClass(VatClassificationsAction::class);
+        $action = $reflection->newInstanceWithoutConstructor();
+        $validate = $reflection->getMethod('validate');
+        $label = ['label' => 'Test', 'direction' => 'purchase'];
+
+        $err = (string) $validate->invoke($action, ['code' => '42'] + $label + ['dphdp3_line' => '42'], false);
+        self::assertStringContainsString('dphdp3_line', $err);
+        self::assertStringContainsString('celní úřad', $err, 'Hláška má vysvětlit, co řádek 42 doopravdy je.');
+
+        // Táž past na prodejní straně: kód 3 = osvobozené plnění (patří na ř. 50),
+        // řádek 3 = pořízení zboží z JČS.
+        self::assertNotNull($validate->invoke(
+            $action,
+            ['code' => '3', 'label' => 'Test', 'direction' => 'sale', 'dphdp3_line' => '3'],
+            false,
+        ));
+        // A přes secondary řádek taky.
+        self::assertNotNull($validate->invoke(
+            $action,
+            ['code' => '42'] + $label + ['dphdp3_line_secondary' => '42'],
+            false,
+        ));
+
+        // Kódy, které se svým řádkem shodují SPRÁVNĚ, projít musí — jinak by kontrola
+        // zakázala běžnou konfiguraci číselníku.
+        self::assertNull($validate->invoke($action, ['code' => '40'] + $label + ['dphdp3_line' => '40'], false));
+        self::assertNull($validate->invoke($action, ['code' => '1', 'label' => 'T', 'direction' => 'sale', 'dphdp3_line' => '1'], false));
+        // Kód 42 bez řádku (kanonický stav po migraci 0063) je v pořádku.
+        self::assertNull($validate->invoke($action, ['code' => '42'] + $label + ['dphdp3_line' => null], false));
+        // Stejnojmenný kód na JINÝ řádek se nehlídá — 42 na ř. 40 je věcné rozhodnutí účetní.
+        self::assertNull($validate->invoke($action, ['code' => '42'] + $label + ['dphdp3_line' => '40'], false));
+    }
 }

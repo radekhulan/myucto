@@ -212,6 +212,8 @@ const form = ref<{
   document_kind: PurchaseDocumentKind
   issue_date: string
   tax_date: string
+  /** Datum dodání z dokladu — evidenční vstup § 25 ZDPH, ne DUZP (migrace 1785). */
+  delivery_date: string
   due_date: string
   received_at: string
   currency_id: number | null
@@ -254,6 +256,8 @@ const form = ref<{
   document_kind: 'invoice',
   issue_date: today,
   tax_date: today,
+  // Prázdné = neuvedeno; nedoplňuje se dnešek, aby § 25 nepočítal z odhadu.
+  delivery_date: '',
   due_date: today,
   received_at: today,
   currency_id: null,
@@ -763,6 +767,7 @@ function populate(inv: PurchaseInvoice) {
   form.value.document_kind = inv.document_kind
   form.value.issue_date = inv.issue_date
   form.value.tax_date = inv.tax_date || inv.issue_date
+  form.value.delivery_date = inv.delivery_date || ''
   form.value.due_date = inv.due_date
   form.value.received_at = inv.received_at
   savedReceivedAt.value = inv.received_at ? inv.received_at.slice(0, 10) : null
@@ -1266,6 +1271,7 @@ async function submit() {
       document_kind: form.value.document_kind,
       issue_date: form.value.issue_date,
       tax_date: form.value.tax_date || null,
+      delivery_date: form.value.delivery_date || null,
       due_date: form.value.due_date,
       received_at: form.value.received_at,
       currency_id: form.value.currency_id!,
@@ -1755,7 +1761,14 @@ function fieldErr(key: string): string | null {
             <label class="block text-sm text-neutral-700 mb-1">{{ t('purchase_invoice.fields.received_at') }}</label>
             <DateInput v-model="form.received_at" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
+          <!-- Datum dodání je EVIDENČNÍ vstup § 25 (DUZP zůstává v tax_date), proto až
+               za povinnými daty a jen s vysvětlením, k čemu slouží. -->
+          <div>
+            <label class="block text-sm text-neutral-700 mb-1">{{ t('purchase_invoice.fields.delivery_date') }}</label>
+            <DateInput v-model="form.delivery_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          </div>
         </div>
+        <p class="text-xs text-neutral-500 -mt-2">{{ t('purchase_invoice.fields.delivery_date_hint') }}</p>
         <!-- RC: DPH období se řídí DUZP (§ 25 / § 24), ne datem vystavení — issue #117 -->
         <p v-if="form.reverse_charge" class="text-xs text-neutral-500 -mt-2">
           {{ t('purchase_invoice.fields.tax_date_rc_hint') }}

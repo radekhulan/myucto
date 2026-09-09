@@ -30,6 +30,14 @@ export const vatClassificationsApi = {
         ...(includeArchived ? { include_archived: 1 } : {}),
       },
     }).then(r => r.data),
+  /**
+   * Řádky přiznání, na které smí klasifikace mířit.
+   *
+   * Whitelist drží backend (`DphPriznaniBuilder::USER_SELECTABLE_LINES`) — kopie v JS
+   * by se s validací rozešla a uživatel by dostal 400 až při uložení.
+   */
+  lines: () =>
+    api.get<{ lines: string[] }>('/vat-classifications/lines').then(r => r.data.lines),
   create: (data: Omit<VatClassification, 'id' | 'supplier_id' | 'archived' | 'created_at'>) =>
     api.post<VatClassification>('/vat-classifications', data).then(r => r.data),
   update: (id: number, data: Partial<VatClassification>) =>

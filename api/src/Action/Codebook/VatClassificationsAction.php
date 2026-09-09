@@ -13,6 +13,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
+use MyInvoice\Service\Report\VatClassificationLineGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -39,6 +40,19 @@ final class VatClassificationsAction
             ? $q['direction'] : null;
         $includeArchived = !empty($q['include_archived']);
         return Json::ok($response, $this->repo->listForTenant($supplierId, $direction, $includeArchived));
+    }
+
+    /**
+     * Řádky přiznání, které smí klasifikace nést.
+     *
+     * UI z nich staví výběr místo volného textu — číslo řádku se do políčka nedá napsat
+     * omylem (past „kód se jmenuje jako řádek", nález L-1 auditu VAT klasifikací).
+     * Seznam se servíruje ze SSOT `DphPriznaniBuilder::USER_SELECTABLE_LINES`, ne z kopie
+     * v JS: jinak by se whitelist validace a nabídka v UI rozešly.
+     */
+    public function lines(Request $request, Response $response): Response
+    {
+        return Json::ok($response, ['lines' => DphPriznaniBuilder::USER_SELECTABLE_LINES]);
     }
 
     public function create(Request $request, Response $response): Response
@@ -75,6 +89,12 @@ final class VatClassificationsAction
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
+        // Update kód neposílá (měnit ho nejde), ale kontrola kolize „kód vs. řádek přiznání"
+        // ho potřebuje — jinak by past L-1 hlídala jen zakládání, ne pozdější přenastavení řádku.
+        $existing = $this->repo->find($id, $supplierId);
+        if ($existing !== null && !array_key_exists('code', $body)) {
+            $body['code'] = $existing['code'];
+        }
         $err = $this->validate($body, isUpdate: true);
         if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
         try {
@@ -157,6 +177,16 @@ final class VatClassificationsAction
             if (!in_array((string) $value, DphPriznaniBuilder::USER_SELECTABLE_LINES, true)) {
                 return $field . ' musí být jeden z podporovaných řádků přiznání ('
                     . implode(', ', DphPriznaniBuilder::USER_SELECTABLE_LINES) . ') nebo prázdné.';
+            }
+            // Past „kód se jmenuje jako řádek" (audit L-1). Seed ji v číselníku vyrobil
+            // třikrát a musely ji opravovat migrace 0063 a 0106 — u kódu 42 přitom vzniká
+            // neexistující odpočet při dovozu. SSOT je VatClassificationLineGuard.
+            $collision = VatClassificationLineGuard::lineCollision(
+                isset($body['code']) ? (string) $body['code'] : null,
+                (string) $value,
+            );
+            if ($collision !== null) {
+                return $field . ': ' . $collision;
             }
         }
         return null;

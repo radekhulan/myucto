@@ -204,4 +204,31 @@ final class PayrollMonthlyRecordRepository
         }
         return $out;
     }
+
+    /**
+     * Úhrn zúčtovaných hrubých mezd za rok přes VŠECHNY zaměstnance — údaj „Mzdy"
+     * Přílohy č. 1 přiznání DPFO (`kc_dpfmz18`, {@see \MyInvoice\Service\Tax\Return\DpfoXmlBuilder}).
+     *
+     * `retired_at IS NULL` jako u ostatních čtení: měsíc, který od ruční rekapitulace
+     * převzal modul Mzdy, se tady odloží a jeho hrubé mzdy nese roční sestava modulu
+     * ({@see \MyInvoice\Service\Payroll\Report\PayrollAnnualReportService}). Bez toho
+     * filtru by se převzatý měsíc v přiznání sečetl dvakrát.
+     *
+     * null = za rok tu není ani jeden platný řádek (mzdová agenda touhle cestou neběží).
+     */
+    public function annualGross(int $supplierId, int $year): ?float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) AS rows_found, COALESCE(SUM(gross), 0) AS total
+               FROM payroll_monthly_records
+              WHERE supplier_id = ? AND year = ? AND retired_at IS NULL'
+        );
+        $stmt->execute([$supplierId, $year]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || (int) $row['rows_found'] === 0) {
+            return null;
+        }
+
+        return round((float) $row['total'], 2);
+    }
 }

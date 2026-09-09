@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { taxReturnApi, type TaxpayerType, type TaxReturnVariant, type TaxReturnState, type InsuranceSummary, type AdvanceSchedule, type AdvanceOverride, type AdvancePeriodicity, type AdvanceKind, type TaxReturnProjection, type TaxReturnAddbackSuggestion, type TaxReturnDeductionSuggestion, type ReconcileResult, type TaxReturnBankAccount } from '@/api/taxReturn'
+import { taxReturnApi, type TaxpayerType, type TaxReturnVariant, type TaxReturnState, type InsuranceSummary, type AdvanceSchedule, type AdvanceOverride, type AdvancePeriodicity, type AdvanceKind, type TaxReturnProjection, type TaxReturnAddbackSuggestion, type TaxReturnDeductionSuggestion, type ReconcileResult, type TaxReturnBankAccount, type PreFinalizeCheck } from '@/api/taxReturn'
 import { apiErrorMessage } from '@/api/errors'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useYearOptions } from '@/composables/useYearOptions'
@@ -127,6 +127,19 @@ function bankAccountLabel(acc: TaxReturnBankAccount): string {
   return acc.bank_name ? `${parts} — ${acc.bank_name}` : parts
 }
 
+// Číselník druhů ostatních příjmů §10 (sloupec 1 a 5 Přílohy č. 2). Jediný zdroj pravdy
+// je backend (Section10Codebook) — formulář si seznam písmen nedrží vlastní, aby se
+// nemohly rozejít.
+const section10Kinds = computed<{ code: string; label: string }[]>(() =>
+  ((state.value?.podklady as any)?.section10_codebook?.kinds as { code: string; label: string }[]) ?? [])
+const section10Codes = computed<{ code: string; label: string }[]>(() =>
+  ((state.value?.podklady as any)?.section10_codebook?.codes as { code: string; label: string }[]) ?? [])
+// Mzdy (Příloha č. 1, kc_dpfmz18) — co nabídla mzdová agenda; ruční vstup ji přebíjí.
+const payrollGrossSuggested = computed<number | null>(() => {
+  const v = (state.value?.podklady as any)?.payroll_gross
+  return typeof v === 'number' ? v : null
+})
+
 // E10 — předfinalizační kontrolní checklist.
 const prefinalize = computed(() => state.value?.prefinalize_check ?? null)
 function checkTone(c: { ok: boolean; severity: string; na?: boolean }): string {
@@ -139,6 +152,33 @@ function checkStatusLabel(c: { ok: boolean; severity: string; na?: boolean }): s
   if (c.na) return t('taxReturn.check_na')
   if (c.ok) return t('taxReturn.check_ok')
   return c.severity === 'blocker' ? t('taxReturn.check_blocker') : t('taxReturn.check_warning')
+}
+
+// P-1 — nepodporované/neúplné situace (typ poplatníka, likvidace, ATAD/CFC, atypické
+// zdaňovací období…). Backend je vrací jako kontroly s klíčem `unsupported_*`, ale
+// v generickém checklistu by z nich byl jen holý titulek; hláška i doporučený krok
+// chodí ze serveru, takže se vypisují ve vlastním bloku a z checklistu se vyřadí.
+const UNSUPPORTED_PREFIX = 'unsupported_'
+const regularChecks = computed(() =>
+  (prefinalize.value?.checks ?? []).filter((c) => !c.key.startsWith(UNSUPPORTED_PREFIX)))
+const unsupportedCases = computed(() =>
+  (prefinalize.value?.checks ?? []).filter((c) => c.key.startsWith(UNSUPPORTED_PREFIX)))
+const unsupportedBlockers = computed(() =>
+  unsupportedCases.value.filter((c) => c.severity === 'blocker'))
+const unsupportedWarnings = computed(() =>
+  unsupportedCases.value.filter((c) => c.severity !== 'blocker'))
+// Souhrn v hlavičce checklistu musí počítat jen to, co je pod ním vidět. Serverové
+// `summary` zahrnuje i nálezy `unsupported_*`, které mají vlastní blok nad seznamem —
+// bez přepočtu hlásila hlavička „3 blokující" nad seznamem s jediným řádkem.
+const regularSummary = computed(() => ({
+  // Stejná pravidla jako v PreFinalizeCheckService::run(): rozhoduje `ok`, ne závažnost.
+  // Nerelevantní kontroly (`na`) se do souhrnu nepočítají vůbec.
+  ok: regularChecks.value.filter((c) => c.ok).length,
+  warning: regularChecks.value.filter((c) => !c.ok && c.severity !== 'blocker').length,
+  blocker: regularChecks.value.filter((c) => !c.ok && c.severity === 'blocker').length,
+}))
+function caseText(c: PreFinalizeCheck, field: 'message' | 'action'): string {
+  return String(c.value?.[field] ?? '')
 }
 
 function applyLossSuggestion() {
@@ -156,6 +196,8 @@ function blankInputs(): Record<string, any> {
       // § 34/4 — odečty na VaV (ř. 242) a odborné vzdělávání (ř. 243).
       rnd_deduction: 0, education_deduction: 0,
       disabled_employees_avg: 0, disabled_employees_severe_avg: 0,
+      // § 35/4 — sleva za zastavenou exekuci (ř. 3 tabulky H přílohy č. 1 II. oddílu).
+      stopped_execution_credit: 0,
       tax_paid_advances: 0, filing_deadline: '', notes: '',
       // Volba účtu pro vrácení přeplatku (null = automaticky, viz bankAccountOptions)
       // a žádost o předání Přílohy do sbírky listin (výchozí ANO, lze vypnout).
@@ -167,9 +209,14 @@ function blankInputs(): Record<string, any> {
     s6_employment: { income: 0, withholding: 0 },
     s8_capital: { base: 0 },
     s9_rental: { income: 0, expenses: 0, expense_mode: 'actual' },
-    s10_other: { income: 0, expenses: 0 },
+    // § 10 se zadává výhradně položkově (druh příjmu + částky). Dřívější jednořádkový
+    // souhrn `s10_other` už formulář nemá — server ho při načtení i uložení převede na
+    // jednu položku, protože do podání se souhrn bez položek nikdy nedostal.
+    s10_items: [],
     // § 16a — samostatný základ daně (zahraniční podíly na zisku, sazba 15 %).
     s16a_separate_base: 0,
+    // Mzdy (Příloha č. 1, kc_dpfmz18) — null = převzít ze mzdové agendy.
+    s7_payroll_gross: null,
     social_paid_advances: 0, health_paid_advances: 0,
     loss_carryforward: 0,
     tax_paid_advances: 0, notes: '',
@@ -328,7 +375,7 @@ function enableSpouse() {
 }
 function addS10Item() {
   if (!Array.isArray(inputs.s10_items)) inputs.s10_items = []
-  inputs.s10_items.push({ text: '', income: 0, expenses: 0 })
+  inputs.s10_items.push({ kind_code: '', code: '', text: '', income: 0, expenses: 0 })
 }
 function addClosingAdjustment() {
   closing.value?.adjustments.push({ adjustment_on: `${year.value}-12-31`, kind: 'section23_other',
@@ -677,19 +724,48 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
 
     <ActionBar v-if="state" :actions="actions" class="mb-4" />
 
+    <!-- P-1 — situace, které aplikace u přiznání neumí (blokující × jen na vědomí) -->
+    <div v-if="state && unsupportedCases.length" class="bg-surface border rounded-lg p-4 mb-4"
+      :class="unsupportedBlockers.length ? 'border-danger-500/40' : 'border-warning-500/40'">
+      <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+        <span class="text-sm font-semibold">{{ t('taxReturn.unsupported_title') }}</span>
+        <span class="text-xs">
+          <span v-if="unsupportedBlockers.length" class="text-danger-600">{{ t('taxReturn.unsupported_blocking_count', { n: unsupportedBlockers.length }) }}</span>
+          <span v-if="unsupportedWarnings.length" class="text-warning-700 ml-2">{{ t('taxReturn.unsupported_warning_count', { n: unsupportedWarnings.length }) }}</span>
+        </span>
+      </div>
+      <p class="text-xs text-neutral-500 mb-3">
+        {{ unsupportedBlockers.length ? t('taxReturn.unsupported_blocking_hint') : t('taxReturn.unsupported_warning_hint') }}
+      </p>
+      <ul class="space-y-2">
+        <li v-for="c in unsupportedBlockers" :key="c.key"
+          class="border border-danger-500/40 bg-danger-50 text-danger-600 rounded-md p-2.5 text-sm">
+          <div class="text-xs font-semibold uppercase mb-1">{{ t('taxReturn.unsupported_blocking_badge') }}</div>
+          <div>{{ caseText(c, 'message') }}</div>
+          <div class="text-xs mt-1 opacity-90"><strong>{{ t('taxReturn.unsupported_action') }}:</strong> {{ caseText(c, 'action') }}</div>
+        </li>
+        <li v-for="c in unsupportedWarnings" :key="c.key"
+          class="border border-warning-500/40 bg-warning-50 text-warning-700 rounded-md p-2.5 text-sm">
+          <div class="text-xs font-semibold uppercase mb-1">{{ t('taxReturn.unsupported_warning_badge') }}</div>
+          <div>{{ caseText(c, 'message') }}</div>
+          <div class="text-xs mt-1 opacity-90"><strong>{{ t('taxReturn.unsupported_action') }}:</strong> {{ caseText(c, 'action') }}</div>
+        </li>
+      </ul>
+    </div>
+
     <!-- E10 — předfinalizační kontrolní checklist („závěrková kontrola účetní") -->
     <div v-if="state && prefinalize" class="bg-surface border rounded-lg p-4 mb-4"
-      :class="prefinalize.summary.blocker > 0 ? 'border-danger-500/40' : (prefinalize.summary.warning > 0 ? 'border-warning-500/40' : 'border-neutral-200')">
+      :class="regularSummary.blocker > 0 ? 'border-danger-500/40' : (regularSummary.warning > 0 ? 'border-warning-500/40' : 'border-neutral-200')">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
         <span class="text-sm font-semibold">{{ t('taxReturn.prefinalize_title') }}</span>
         <span class="text-xs">
-          <span class="text-success-700">{{ prefinalize.summary.ok }} {{ t('taxReturn.check_ok') }}</span>
-          <span v-if="prefinalize.summary.warning" class="text-warning-700 ml-2">{{ prefinalize.summary.warning }} {{ t('taxReturn.check_warning') }}</span>
-          <span v-if="prefinalize.summary.blocker" class="text-danger-600 ml-2">{{ prefinalize.summary.blocker }} {{ t('taxReturn.check_blocker') }}</span>
+          <span class="text-success-700">{{ regularSummary.ok }} {{ t('taxReturn.check_ok') }}</span>
+          <span v-if="regularSummary.warning" class="text-warning-700 ml-2">{{ regularSummary.warning }} {{ t('taxReturn.check_warning') }}</span>
+          <span v-if="regularSummary.blocker" class="text-danger-600 ml-2">{{ regularSummary.blocker }} {{ t('taxReturn.check_blocker') }}</span>
         </span>
       </div>
       <ul class="space-y-2">
-        <li v-for="c in prefinalize.checks" :key="c.key" class="border rounded-md p-2.5 text-sm" :class="checkTone(c)">
+        <li v-for="c in regularChecks" :key="c.key" class="border rounded-md p-2.5 text-sm" :class="checkTone(c)">
           <div class="flex items-center justify-between gap-2">
             <span class="font-medium">{{ t('taxReturn.check_' + c.key) }}</span>
             <span class="text-xs font-semibold uppercase">{{ checkStatusLabel(c) }}</span>
@@ -875,6 +951,9 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                   <input type="number" step="0.01" v-model.number="inputs.disabled_employees_avg" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
                 <label class="text-sm">{{ t('taxReturn.disabled_severe_avg') }}
                   <input type="number" step="0.01" v-model.number="inputs.disabled_employees_severe_avg" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
+                <label class="text-sm">{{ t('taxReturn.stopped_execution_credit') }}
+                  <input type="number" v-model.number="inputs.stopped_execution_credit" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" />
+                  <span class="block text-[11px] text-neutral-400 mt-0.5">{{ t('taxReturn.stopped_execution_credit_hint') }}</span></label>
                 <label class="text-sm">{{ t('taxReturn.tax_paid_advances') }}
                   <input type="number" v-model.number="inputs.tax_paid_advances" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
                 <label class="text-sm">{{ t('taxReturn.filing_deadline') }}
@@ -957,10 +1036,6 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                   <option value="actual">{{ t('taxReturn.s9_expense_mode_actual') }}</option>
                   <option value="pausal">{{ t('taxReturn.s9_expense_mode_pausal') }}</option>
                 </select></label>
-              <label class="text-sm">{{ t('taxReturn.s10_income') }}
-                <input type="number" v-model.number="inputs.s10_other.income" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
-              <label class="text-sm">{{ t('taxReturn.s10_expenses') }}
-                <input type="number" v-model.number="inputs.s10_other.expenses" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
               <label class="text-sm">{{ t('taxReturn.s16a_separate_base') }}
                 <input type="number" v-model.number="inputs.s16a_separate_base" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" />
                 <span class="block text-[11px] text-neutral-400 mt-0.5">{{ t('taxReturn.s16a_separate_base_hint') }}</span></label>
@@ -976,6 +1051,14 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                 <input type="number" v-model.number="inputs.social_paid_advances" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
               <label class="text-sm">{{ t('taxReturn.health_paid_advances') }}
                 <input type="number" v-model.number="inputs.health_paid_advances" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
+              <label class="text-sm">{{ t('taxReturn.payroll_gross') }}
+                <input type="number" v-model.number="inputs.s7_payroll_gross" :placeholder="payrollGrossSuggested !== null ? String(payrollGrossSuggested) : ''"
+                  class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" />
+                <span class="block text-[11px] text-neutral-400 mt-0.5">
+                  {{ payrollGrossSuggested !== null
+                    ? t('taxReturn.payroll_gross_hint_prefilled', { amount: formatMoney(payrollGrossSuggested, 'CZK') })
+                    : t('taxReturn.payroll_gross_hint_empty') }}
+                </span></label>
             </div>
 
             <div class="bg-surface border border-neutral-200 rounded-lg p-4 space-y-3">
@@ -996,13 +1079,29 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
             </div>
 
             <div class="bg-surface border border-neutral-200 rounded-lg p-4 space-y-3">
-              <div class="flex flex-wrap items-center justify-between gap-2"><div class="text-sm font-semibold">{{ t('taxReturn.s10_items_title') }}</div>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div><div class="text-sm font-semibold">{{ t('taxReturn.s10_items_title') }}</div>
+                  <p class="text-xs text-neutral-500">{{ t('taxReturn.s10_items_hint') }}</p></div>
                 <button type="button" @click="addS10Item" class="h-9 px-3 rounded-md bg-primary-600 text-white text-sm whitespace-nowrap"><span aria-hidden="true">＋</span> {{ t('taxReturn.add_item') }}</button></div>
-              <div v-for="(item, index) in (inputs.s10_items || [])" :key="index" class="grid grid-cols-1 md:grid-cols-4 gap-2">
-                <input v-model="item.text" :placeholder="t('taxReturn.s10_kind')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-                <input type="number" v-model.number="item.income" :placeholder="t('taxReturn.s10_income')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-                <input type="number" v-model.number="item.expenses" :placeholder="t('taxReturn.s10_expenses')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-                <button type="button" @click="inputs.s10_items.splice(index, 1)" class="h-9 px-3 rounded-md border border-danger-500 text-danger-600 text-sm"><span aria-hidden="true">×</span> {{ t('common.delete') }}</button>
+              <div v-for="(item, index) in (inputs.s10_items || [])" :key="index" class="border border-neutral-200 rounded-md p-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                <label class="text-xs md:col-span-2">{{ t('taxReturn.s10_kind_code') }}
+                  <select v-model="item.kind_code" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+                    :class="item.kind_code ? '' : 'border-danger-500'">
+                    <option value="">{{ t('taxReturn.s10_kind_code_empty') }}</option>
+                    <option v-for="kind in section10Kinds" :key="kind.code" :value="kind.code">{{ kind.code }} — {{ kind.label }}</option>
+                  </select></label>
+                <label class="text-xs">{{ t('taxReturn.s10_code') }}
+                  <select v-model="item.code" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+                    <option value="">{{ t('taxReturn.s10_code_empty') }}</option>
+                    <option v-for="code in section10Codes" :key="code.code" :value="code.code">{{ code.code }} — {{ code.label }}</option>
+                  </select></label>
+                <label class="text-xs md:col-span-3">{{ t('taxReturn.s10_kind') }}
+                  <input v-model="item.text" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" /></label>
+                <label class="text-xs">{{ t('taxReturn.s10_income') }}
+                  <input type="number" v-model.number="item.income" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" /></label>
+                <label class="text-xs">{{ t('taxReturn.s10_expenses') }}
+                  <input type="number" v-model.number="item.expenses" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" /></label>
+                <button type="button" @click="inputs.s10_items.splice(index, 1)" class="self-end h-9 px-3 rounded-md border border-danger-500 text-danger-600 text-sm whitespace-nowrap"><span aria-hidden="true">×</span> {{ t('common.delete') }}</button>
               </div>
             </div>
 

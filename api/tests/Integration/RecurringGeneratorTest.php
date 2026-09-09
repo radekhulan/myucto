@@ -1160,6 +1160,67 @@ final class RecurringGeneratorTest extends TestCase
     }
 
     /**
+     * Ručně zvolená klasifikace DPH ze šablony se musí přenést na fakturu
+     * (audit VAT klasifikací 2026-08, nález M-8, migrace 1783).
+     *
+     * Šablona kód dosud nenesla, takže ho cron při každém běhu DERIVOVAL ze sazby
+     * a měrné jednotky. Rozhodnutí účetní se tím ztratilo měsíc co měsíc: dodání zboží
+     * do jiného členského státu (kód `20`, ř. 20 + souhrnné hlášení s kódem plnění 0)
+     * u jednotky „ks" skončilo jako `22` (služba, ř. 21 + kód plnění 3), prodej
+     * dlouhodobého majetku (`1m`, secondary ř. 51) jako běžné plnění `1` — a s ním
+     * i v čitateli koeficientu § 76, ze kterého ho § 76 odst. 4 vylučuje.
+     */
+    public function testVatClassificationOnTemplateItemIsCarriedToGeneratedInvoice(): void
+    {
+        if (!$this->db->hasColumn('recurring_invoice_template_items', 'vat_classification_code')) {
+            $this->markTestSkipped('Migrace 1783 na téhle DB neproběhla.');
+        }
+        $tplId = $this->createPeriodTemplate((new \DateTimeImmutable('today'))->format('Y-m-d'));
+        $this->repo->replaceItems($tplId, [
+            [
+                'description' => 'Prodej stroje',
+                'quantity' => 1.0,
+                'unit' => 'ks',
+                'unit_price_without_vat' => 1000.00,
+                'vat_rate_id' => $this->vatRateId,
+                'vat_classification_code' => '1m',
+                'order_index' => 0,
+            ],
+            [
+                // Druhý řádek bez kódu ověřuje, že derivace zůstala funkční — oprava
+                // nesmí ze „všechno derivovat" udělat „nic nederivovat".
+                'description' => 'Servis',
+                'quantity' => 1.0,
+                'unit' => 'hod',
+                'unit_price_without_vat' => 500.00,
+                'vat_rate_id' => $this->vatRateId,
+                'order_index' => 1,
+            ],
+        ]);
+
+        // Round-trip přes repozitář: bez čtecí strany by se rozhodnutí uložilo a zmizelo.
+        $tpl = $this->repo->find($tplId);
+        self::assertSame('1m', $tpl['items'][0]['vat_classification_code']);
+        self::assertNull($tpl['items'][1]['vat_classification_code']);
+
+        $res = $this->generator->generate($tplId, null, $this->userId, '127.0.0.1', 'phpunit');
+        $this->createdInvoiceIds[] = $res['invoice_id'];
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT description, vat_classification_code FROM invoice_items
+              WHERE invoice_id = ? ORDER BY order_index'
+        );
+        $stmt->execute([$res['invoice_id']]);
+        $codes = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $codes[(string) $row['description']] = $row['vat_classification_code'];
+        }
+
+        self::assertSame('1m', $codes['Prodej stroje'] ?? null, 'Klasifikace ze šablony se na fakturu nepřenesla.');
+        self::assertSame('1', $codes['Servis'] ?? null, 'Řádek bez kódu se má pořád derivovat ze SSOT.');
+    }
+
+    /**
      * Šablona se zakládá jednou a generuje roky — registrace do OSS mezitím může skončit.
      * Uložené rozhodnutí je pak rozhodnutím o JINÉM období a řádek s `oss_applicable = 1`
      * by nespadl do žádného přiznání: z OSS podání ho vyřadí platnost registrace,

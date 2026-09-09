@@ -160,13 +160,13 @@ final class DppoXmlBuilder
 
     /**
      * Úroveň 2 pod P.B. (Rezervy) — tabulka 24810, platnost=2026. `P.B.1.` (Rezerva na
-     * důchody a podobné závazky, ř. 26) v `statement_rows` nemáme (žádná mapa účtů na ni
-     * neukazuje — chybějící DATA, ne chybějící mapování, viz DANE-PLAN.md dodatek 11),
-     * posílají se tedy jen tři ze čtyř oficiálních podřádků; chybějící přispívá součtu
-     * nulou, ne chybou (stejný princip jako C.II.3. u aktiv/C.III. u pasiv výše).
+     * důchody a podobné závazky, ř. 26) doplnila do `statement_rows` migrace 1664. Žádná
+     * mapa účtů na něj zatím neukazuje, takže vychází nulový a `buildPasivaDetailElements`
+     * ho stejně vynechá — v mapě je proto, aby se dostal do XML ve chvíli, kdy firma
+     * začne rezervu na důchody účtovat, a nemuselo se na to znovu přijít přes výtku EPO.
      */
     private const PASIVA_B_C_RADKU = [
-        ['P.B.2.', 27], ['P.B.3.', 28], ['P.B.4.', 29],
+        ['P.B.1.', 26], ['P.B.2.', 27], ['P.B.3.', 28], ['P.B.4.', 29],
     ];
 
     /**
@@ -178,23 +178,42 @@ final class DppoXmlBuilder
      * row_code rodiče; `buildPasivaDetailElements` do téhle mapy rekurzivně nahlíží pro
      * KAŽDÝ řádek, který sama vypíše (stejný princip jako AKTIVA_DETAIL_C_RADKU), takže
      * pokrývá i úroveň 4 (A.II.2./C.II.8.) jedním mechanismem beze změny volajícího kódu.
-     * `A.IV.2.` (ř. 21, „Jiný výsledek hospodaření minulých let") a `C.I.4./C.I.5./C.I.7.`/
-     * `C.II.7.`/`P.B.1.` chybí ve `statement_rows` (skupina (b), viz DANE-PLAN.md
-     * dodatek 11) — u nich se posílá jen to, co v datech je; chybějící přispívá nulou.
+     * `A.IV.2.` (ř. 21, „Jiný výsledek hospodaření minulých let") tu BÝVALO uvedené jako
+     * chybějící ve `statement_rows`; řádek doplnila migrace 1780 (účet 426) a od té chvíle
+     * musí být i tady — jinak by A.IV. posílalo jen A.IV.1. a jeho vlastní součet by se
+     * o zůstatek 426 rozešel. Číslo řádku 21 je ověřené proti číselníku MF ČR (tabulka
+     * 24810, platnost=2026): číselník mezi 19 (A.IV.1.) a 22 (A.V.) číslo 20 NEPOUŽÍVÁ,
+     * takže je NELZE odvodit aritmeticky z pořadí.
+     *
+     * `C.I.4./C.I.5./C.I.7.`/`C.I.9.1.–9.3.`/`C.II.7.`/`P.B.1.` doplnila do `statement_rows`
+     * migrace 1664 — do téhle mapy se ale nedostaly a jejich zůstatek (478, 472, 362, 474,
+     * 479) se tak v součtu C.I./C.II. objevil, aniž by ho měl kdo vysvětlit. Doplněno spolu
+     * s A.IV.2., čísla ze stejného číselníku: C.I.4.=37, C.I.5.=38, C.I.7.=40,
+     * C.I.9.1.=43, C.I.9.2.=44, C.I.9.3.=45, C.II.7.=55, B.1.=26 (viz PASIVA_B_C_RADKU).
+     * Nové checky to nezavádí: rodiče C.I./C.II./B. se posílaly už předtím, EPO jejich
+     * součet kontrolovalo — jen mu chyběly složky.
+     *
+     * Naopak `C.II.1.` rozvahy-AKTIV (dlouhodobé pohledávky) své podřádky doplněné migrací
+     * 1664 (C.II.1.2./1.3./1.5.1.–5.4.) do AKTIVA_DETAIL_C_RADKU ZÁMĚRNĚ nedostalo:
+     * ten řádek se sice posílá, ale jeho podřádky se dnes neposílají vůbec, takže by je
+     * doplnění zavedlo jako NOVOU křížovou kontrolu EPO — a to je změna, kterou musí
+     * potvrdit zkušební podání, ne úsudek.
      */
     private const PASIVA_DETAIL_C_RADKU = [
         'P.A.I.'    => [['P.A.I.1.', 4], ['P.A.I.2.', 5], ['P.A.I.3.', 6]],
         'P.A.II.'   => [['P.A.II.1.', 8], ['P.A.II.2.', 9]],
         'P.A.II.2.' => [['P.A.II.2.1.', 10], ['P.A.II.2.2.', 11]],
         'P.A.III.'  => [['P.A.III.1.', 16], ['P.A.III.2.', 17]],
-        'P.A.IV.'   => [['P.A.IV.1.', 19]],
+        'P.A.IV.'   => [['P.A.IV.1.', 19], ['P.A.IV.2.', 21]],
         'P.C.I.'    => [
-            ['P.C.I.1.', 32], ['P.C.I.2.', 35], ['P.C.I.3.', 36],
-            ['P.C.I.6.', 39], ['P.C.I.8.', 41], ['P.C.I.9.', 42],
+            ['P.C.I.1.', 32], ['P.C.I.2.', 35], ['P.C.I.3.', 36], ['P.C.I.4.', 37],
+            ['P.C.I.5.', 38], ['P.C.I.6.', 39], ['P.C.I.7.', 40], ['P.C.I.8.', 41],
+            ['P.C.I.9.', 42],
         ],
+        'P.C.I.9.'  => [['P.C.I.9.1.', 43], ['P.C.I.9.2.', 44], ['P.C.I.9.3.', 45]],
         'P.C.II.'   => [
             ['P.C.II.1.', 47], ['P.C.II.2.', 50], ['P.C.II.3.', 51], ['P.C.II.4.', 52],
-            ['P.C.II.5.', 53], ['P.C.II.6.', 54], ['P.C.II.8.', 56],
+            ['P.C.II.5.', 53], ['P.C.II.6.', 54], ['P.C.II.7.', 55], ['P.C.II.8.', 56],
         ],
         'P.C.II.8.' => [
             ['P.C.II.8.1.', 57], ['P.C.II.8.2.', 58], ['P.C.II.8.3.', 59], ['P.C.II.8.4.', 60],
@@ -307,22 +326,29 @@ final class DppoXmlBuilder
         $vetaD->setAttribute('dokument', 'DP9');    // fixní
         $vetaD->setAttribute('typ_dapdpp', (string) ($meta['typ_dapdpp'] ?? 'A'));   // A = za zdaňovací období
         $vetaD->setAttribute('dapdpp_forma', (string) ($meta['dapdpp_forma'] ?? 'B')); // B = řádné
-        // Typ poplatníka (§ 17): 1 = ostatní, tedy běžná obchodní korporace. Ostatní kódy
-        // (veřejně prospěšný poplatník, daňový nerezident, investiční fond, penzijní
-        // společnost, nositel investiční pobídky) aplikace neeviduje a nepodporuje — viz
-        // private/DANE-PLAN.md, kategorie C. Kód je přebitelný z `$meta`, ale
-        // nikdo ho zatím nepředává, takže se u nestandardního poplatníka musí ověřit ručně.
-        $typPoplatnika = (string) ($meta['typ_popldpp'] ?? '1');
+        // Typ poplatníka (§ 17) z nastavení firmy; číselník a jeho význam drží
+        // {@see TaxpayerTypeCodebook} (kritická kontrola EPO: hodnota 0-9). Hodnotu mimo
+        // číselník do podání nepustíme — spadne zpět na „1" (ostatní) s varováním, protože
+        // prázdný povinný atribut by podání shodil na XSD. Které kódy aplikace neumí
+        // sestavit, řeší {@see UnsupportedCaseDetector} jako blokující nález před finalizací.
+        $typPoplatnika = (string) ($meta['typ_popldpp'] ?? TaxpayerTypeCodebook::DEFAULT_CODE);
+        if (!TaxpayerTypeCodebook::isValidTaxpayerType($typPoplatnika)) {
+            $warnings[] = 'Typ poplatníka „' . $typPoplatnika . '" není v číselníku atributu '
+                . 'typ_popldpp (0-9) — do přiznání se dosadil kód 1 (ostatní). Opravte typ '
+                . 'poplatníka v nastavení firmy.';
+            $typPoplatnika = TaxpayerTypeCodebook::DEFAULT_CODE;
+        }
         $vetaD->setAttribute('typ_popldpp', $typPoplatnika);
-        // Jediný signál, který z dat máme: sídlo mimo ČR. Nerezident má vlastní kód 2
-        // a přiznání se mu počítá jinak, takže tiše tvrdit „ostatní poplatník" by bylo
-        // nepravdivé. Nepřepisujeme to automaticky — sídlo v cizině samo o sobě
-        // nerezidenta nedělá (rozhoduje místo vedení podle § 17 odst. 3).
-        $seat = strtoupper(trim((string) ($supplier['country_iso2'] ?? 'CZ')));
-        if ($typPoplatnika === '1' && $seat !== '' && $seat !== 'CZ') {
-            $warnings[] = 'Sídlo poplatníka je mimo ČR (' . $seat . '), ale v přiznání je uvedený '
-                . 'typ poplatníka „ostatní" (kód 1). Daňový nerezident má kód 2 a jiný rozsah '
-                . 'zdanění (§ 17 odst. 4) — ověřte, zda je poplatník daňovým rezidentem ČR.';
+        // Sídlo mimo ČR — nerezident má vlastní kód 2 a přiznání se mu počítá jinak, takže
+        // tiše tvrdit „ostatní poplatník" by bylo nepravdivé. Nepřepisujeme to automaticky:
+        // sídlo v cizině samo o sobě nerezidenta nedělá (rozhoduje místo vedení podle
+        // § 17 odst. 3). Text věty je SSOT v detektoru, ať neexistuje dvakrát.
+        $seatWarning = UnsupportedCaseDetector::foreignSeatWarning(
+            (string) ($supplier['country_iso2'] ?? 'CZ'),
+            $typPoplatnika,
+        );
+        if ($seatWarning !== null) {
+            $warnings[] = $seatWarning;
         }
         // typ_zo dle §21a: A = kalendářní rok, B = hospodářský rok, D = období > 12 měsíců.
         // Velké písmeno dle reálně podaného přiznání (EPO konvence) — malé „a" bylo chybně.
@@ -409,12 +435,27 @@ final class DppoXmlBuilder
         $representation = (array) ($meta['representation'] ?? ['represented' => false]);
         $vetaD->setAttribute('dan_por', EpoSupplierBlockBuilder::representationFlag($representation));
 
-        // ── VetaE/VetaF — přílohy č. 1 II. oddílu (tabulka a) a b)) — musí být hotové
-        // dřív než se p_pr_2od zapíše na VetaD (počet příloh II. oddílu = kolik z
-        // VetaE/F/G se skutečně vygenerovalo; VetaG nestavíme).
+        // ── VetaE/VetaF/VetaG — přílohy č. 1 II. oddílu (tabulky a), B a C) — musí být
+        // hotové dřív než se p_pr_2od zapíše na VetaD (počet příloh II. oddílu = kolik
+        // z VetaE/F/G se skutečně vygenerovalo).
+        //
+        // POZN. k p_pr_2od: úřední popis struktury říká u tohohle pole jen „vyplňuje se
+        // automaticky" a algoritmus EPO zveřejněný není. Dva nezávisle dohledané EPO
+        // výstupy DPPDP s několika vyplněnými tabulkami přílohy č. 1 mají v hlavičce
+        // hodnotu 1 (tedy počet PŘÍLOH, ne dílčích tabulek). Sémantiku tady ale NEMĚNÍME
+        // na základě dvou vzorků — počítá se dál počet vygenerovaných tabulek, jak to
+        // builder dělal od začátku; VetaG se do počítadla jen přidává. Rozhodnout to má
+        // zkušební podání přes EPO (test=1), ne odhad.
         $vetaE = $this->buildVetaE($dom, $calc);
         $vetaF = $this->buildVetaF($dom, $calc, $warnings);
-        $vetaD->setAttribute('p_pr_2od', (string) (($vetaE !== null ? 1 : 0) + ($vetaF !== null ? 1 : 0)));
+        $vetaG = $this->buildVetaG(
+            $dom,
+            $calc,
+            $warnings,
+            (string) ($meta['zdobd_od'] ?? sprintf('01.01.%04d', $year)),
+            $zdobdDo,
+        );
+        $vetaD->setAttribute('p_pr_2od', (string) (($vetaE !== null ? 1 : 0) + ($vetaF !== null ? 1 : 0) + ($vetaG !== null ? 1 : 0)));
 
         // sam_pr — počet samostatných příloh. VetaA (přehled transakcí se spojenými osobami)
         // NENÍ ani „příloha II. oddílu" (p_pr_2od výše — to jsou tabulky a)-j) VetaE/F/G/…,
@@ -458,11 +499,33 @@ final class DppoXmlBuilder
             $root->appendChild($vetaF);
         }
 
+        // ── VetaG — tabulka C (zákonné OP a rezervy), viz buildVetaG; XSD sekvence ji
+        // chce hned za VetaF (dppdp9_epo2.xsd:1492), před VetaV/VetaM.
+        if ($vetaG !== null) {
+            $root->appendChild($vetaG);
+        }
+
+        // ── VetaM — příloha č. 1 II. oddílu, tabulka H (rozčlenění slev na dani, ř. 300).
+        // Mapování řádků tabulky H (XSD anotace `dppdp9_epo2.xsd` u atributů + Pokyny
+        // k tiskopisu 25 5404 MFin 5404 vzor 36, oddíl „K tabulce H"):
+        //   ř. 1 = kc_dpp_f1     — sleva §35/1/a (zaměstnanci se zdravotním postižením),
+        //   ř. 2 = kc_dpp_f2     — sleva §35/1/b (těžší zdravotní postižení),
+        //   ř. 3 = kc_dpp_f3     — sleva §35/4 za ZASTAVENOU EXEKUCI (výše odpovídá náhradě
+        //                          přiznané exekutorem v usnesení o zastavení exekuce),
+        //   ř. 4 = kc_dpp_f4     — úhrn §35 (ř. 1 + 2 + 3),
+        //   ř. 5 = kc_dpp_h1_35ab — sleva §35a/§35b (investiční pobídky; needevidujeme).
+        // Prefix `_f` je historický relikt, věta patří k tabulce H — potvrzuje to XSD
+        // vazba u `pr1j_sl_3_r7` („musí se rovnat částce na ř. 4 tabulky H") i anotace
+        // ř. 300 II. oddílu (kc_ii290_300: „specifikace se provede v tabulce H").
         $creditsEntitlement = max(0, (int) round((float) ($calc['summary']['credits_entitlement'] ?? 0)));
         if ($creditsEntitlement > 0) {
             $vetaM = $dom->createElement('VetaM');
             $vetaM->setAttribute('kc_dpp_f1', (string) max(0, (int) round((float) ($calc['summary']['disabled_employee_credit_amount'] ?? 0))));
             $vetaM->setAttribute('kc_dpp_f2', (string) max(0, (int) round((float) ($calc['summary']['disabled_employee_severe_credit_amount'] ?? 0))));
+            $stoppedExecution = max(0, (int) round((float) ($calc['summary']['stopped_execution_credit_amount'] ?? 0)));
+            if ($stoppedExecution > 0) {
+                $vetaM->setAttribute('kc_dpp_f3', (string) $stoppedExecution);
+            }
             $vetaM->setAttribute('kc_dpp_f4', (string) $creditsEntitlement);
             $root->appendChild($vetaM);
         }
@@ -1436,6 +1499,169 @@ final class DppoXmlBuilder
         }
 
         return $any ? $vetaF : null;
+    }
+
+    /**
+     * VetaG — příloha č. 1 II. oddílu, tabulka C: „Odpis pohledávek zahrnovaný do výdajů
+     * (nákladů) k dosažení, zajištění a udržení příjmů a zákonné rezervy a zákonné opravné
+     * položky vytvářené podle zákona č. 593/1992 Sb., o rezervách" (dále ZoR).
+     *
+     * MAPOVÁNÍ ATRIBUT → ŘÁDEK TABULKY C. V XSD (`dppdp9_epo2.xsd:1492`) nejsou u VetaG
+     * ŽÁDNÉ anotace, takže mapování se dohledávalo z úředního popisu struktury DPPDP9
+     * (ADIS EPO, verze 05.01.01 z 21. 10. 2025, sekce „Příloha č.1C II. oddílu",
+     * https://adisspr.mfcr.cz/dpr/adis/idpr_pub/epo2_info/popis_struktury_detail.faces?zkratka=DPPDP9)
+     * a z Pokynů k tiskopisu 25 5404/1 MFin 5404/1 vzor č. 36, oddíl „K tabulce C.".
+     * Zapsané tady, aby to nikdo nemusel zkoumat znovu:
+     *
+     *   dílčí tabulka a) — vyplňují VŠICHNI poplatníci
+     *     ř. 1, 2  neobsazeno (v XSD nemají protějšek)
+     *     ř. 3   kc_dpp_c3    OP k pohledávkám za dlužníky v insolvenčním řízení podle §8 — TVORBA v období
+     *     ř. 4   kc_dpp_c4    stav zákonných OP podle §8 ke konci období
+     *     ř. 5   kc_dpp_c5    stav nepromlčených pohledávek splatných po 31. 12. 1994, k nimž lze tvořit OP podle §8a
+     *     ř. 6   kc_dpp_c6    OP k nepromlčeným pohledávkám podle §8a — TVORBA v období
+     *     ř. 7   kc_dpp_c7    stav zákonných OP podle §8a ke konci období
+     *     ř. 8   kc_op8b      OP k pohledávkám z titulu ručení za celní dluh podle §8b — TVORBA v období
+     *     ř. 9   kc_sop8b     stav zákonných OP podle §8b ke konci období
+     *     ř. 10  kc_op8c      OP k nepromlčeným pohledávkám podle §8c — TVORBA v období
+     *     ř. 11  kc_sop8c     stav zákonných OP podle §8c ke konci období
+     *     ř. 12  kc_dpp_c8    úhrn hodnot pohledávek uplatněných jako výdaj podle §24/2/y ZDP
+     *   dílčí tabulka b) — jen BANKY (§5)
+     *     ř. 13  kc_dpp_c9  · ř. 14 kc_dpp_c10 · ř. 15 kc_dpp_c11 (§5/2/a)
+     *     ř. 16  kc_dpp_c12 · ř. 17 kc_dpp_c13 · ř. 18 kc_dpp_c14 (§5/2/b)
+     *   dílčí tabulka c) — jen SPOŘITELNÍ A ÚVĚRNÍ DRUŽSTVA a ostatní finanční instituce (§5a)
+     *     ř. 19  kc_dpp_c_5a1 · ř. 20 kc_dpp_c_5a2 · ř. 21 kc_dpp_c_5a3 · ř. 22 kc_dpp_c_5a4
+     *   dílčí tabulka d) — jen POJIŠŤOVNY (§6)
+     *     ř. 23  kc_dpp_c16 · ř. 24 kc_dpp_c17
+     *   dílčí tabulka e) — rezerva na opravy hmotného majetku (§7), vyplňují VŠICHNI
+     *     ř. 25  kc_dpp_c18   rezerva §7 vytvořená v období
+     *     ř. 26  kc_dpp_c19   stav rezerv §7 ke konci období
+     *   dílčí tabulka f) — ostatní zákonné rezervy
+     *     ř. 27  kc_dpp_c20   rezerva na pěstební činnost §9 — tvorba
+     *     ř. 28  kc_dpp_c21   stav rezervy §9 ke konci období
+     *     ř. 29  kc_dpp_c22   ostatní rezervy §10 — tvorba
+     *   dílčí tabulka g) — rezerva na elektroodpad ze solárních panelů (§11a–11c)
+     *     ř. 30  kc_dpp_c30   tvorba · ř. 31 kc_dpp_c31 stav
+     *
+     * PASTI:
+     *   - `kc_dpp_c8` NENÍ řádek 8 (je to ř. 12) a `kc_dpp_c15` v XSD neexistuje —
+     *     číslo v názvu atributu se od ř. 8 rozchází s číslem řádku, protože §8b/§8c
+     *     dostaly vlastní názvy (`kc_op8b`…).
+     *   - Řádky TVORBY (3, 6, 8, 10, 14, 17, 21, 25, 27, 29) NESMÍ být záporné: Pokyny
+     *     „Částky vytvořených opravných položek … se týkají pouze jejich tvorby, která se
+     *     účtuje na vrub příslušného účtu účtové třídy Náklady. Proto nemohou tyto částky
+     *     nabývat záporných hodnot." XSD zápor připouští, kontrola je na nás.
+     *   - Řádky 13–22 a 25, 26, 29 se vyplňují JEN v přiznání za zdaňovací období vymezené
+     *     v § 3 odst. 1 ZoR (nejméně 12 měsíců, nebo kratší začínající rozhodným dnem fúze).
+     *     Za část zdaňovacího období se nevyplňují — proto guard na `typ_zo`/délku období.
+     *
+     * CO SYSTÉM VYPLNIT NEUMÍ (a proto to nechává PRÁZDNÉ a varuje, místo odhadu):
+     *   - tabulky b), c), d) (banky, družstva, pojišťovny) — mimo záběr aplikace,
+     *   - ř. 5 (stav pohledávek, k nimž LZE tvořit §8a) — „lze" je právní posouzení
+     *     (promlčení, spřízněnost, titul), ne stav účtu,
+     *   - řádky §9/§10/§11a–11c — aplikace zná jedinou kontaci zákonné rezervy
+     *     (`reserve.repairs.*` = 552/451, ZoR §7), ostatní by musely přijít ručním
+     *     zápisem na 451 a systém je od §7 nerozliší.
+     *
+     * @param array<string,mixed> $calc     výstup DppoReturnCalculator::compute (nese legal_provisions)
+     * @param list<string>        $warnings
+     * @param string              $zdobdOd  začátek zdaňovacího období (dd.mm.rrrr) — guard §3/1 ZoR
+     * @param string              $zdobdDo  konec zdaňovacího období (dd.mm.rrrr)
+     */
+    private function buildVetaG(\DOMDocument $dom, array $calc, array &$warnings, string $zdobdOd = '', string $zdobdDo = ''): ?\DOMElement
+    {
+        $p = (array) ($calc['legal_provisions'] ?? []);
+        if (($p['has_activity'] ?? false) !== true) {
+            return null;
+        }
+
+        $vetaG = $dom->createElement('VetaG');
+        $any = false;
+        $set = static function (string $attr, float $value) use ($vetaG, &$any): void {
+            $rounded = max(0, (int) round($value));
+            if ($rounded === 0) {
+                return;
+            }
+            $vetaG->setAttribute($attr, (string) $rounded);
+            $any = true;
+        };
+
+        // ── tabulka a) — zákonné OP k pohledávkám podle paragrafu ────────────
+        $bySection = (array) ($p['allowance_by_section'] ?? []);
+        $createdAttr = ['8' => 'kc_dpp_c3', '8a' => 'kc_dpp_c6', '8b' => 'kc_op8b', '8c' => 'kc_op8c'];
+        $balanceAttr = ['8' => 'kc_dpp_c4', '8a' => 'kc_dpp_c7', '8b' => 'kc_sop8b', '8c' => 'kc_sop8c'];
+
+        if (($p['allowance_split_reliable'] ?? false) === true) {
+            foreach ($balanceAttr as $section => $attr) {
+                $set($attr, (float) ($bySection[$section] ?? 0.0));
+            }
+            if (($p['allowance_created_split_reliable'] ?? false) === true) {
+                foreach ($createdAttr as $section => $attr) {
+                    $set($attr, (float) ($bySection[$section] ?? 0.0));
+                }
+            } elseif ((float) ($p['legal_allowance_created'] ?? 0.0) > 0.0) {
+                $warnings[] = 'Zákonné opravné položky k pohledávkám se v období tvořily '
+                    . number_format((float) $p['legal_allowance_created'], 0, ',', ' ') . ' Kč, ale to neodpovídá '
+                    . 'evidenci uzávěrkového kroku „Opravné položky" (' . number_format((float) ($p['allowance_declared_legal'] ?? 0), 0, ',', ' ') . ' Kč) — '
+                    . 'řádky TVORBY tabulky C (ř. 3/6/8/10) zůstaly nevyplněné. Doplňte je v přiznání ručně.';
+            }
+        } elseif ((float) ($p['allowance_balance'] ?? 0.0) > 0.0 || (float) ($p['legal_allowance_created'] ?? 0.0) > 0.0) {
+            $unassigned = (float) ($p['allowance_unassigned'] ?? 0.0);
+            $warnings[] = $unassigned > 0.0
+                ? 'Zákonné opravné položky k pohledávkám za ' . number_format($unassigned, 0, ',', ' ') . ' Kč nemají '
+                    . 'určený paragraf zákona o rezervách — do tabulky C přílohy č. 1 II. oddílu (VetaG) se rozpad '
+                    . 'nedostal. Doplňte §8 / §8a / §8b / §8c u položek v uzávěrkovém kroku „Opravné položky".'
+                : 'Zůstatek opravných položek k pohledávkám (účet 391) je '
+                    . number_format((float) ($p['allowance_balance'] ?? 0), 0, ',', ' ') . ' Kč, ale evidence uzávěrkového '
+                    . 'kroku „Opravné položky" vysvětluje jen ' . number_format((float) ($p['allowance_declared_total'] ?? 0), 0, ',', ' ') . ' Kč — '
+                    . 'rozpad podle paragrafů do tabulky C přílohy č. 1 II. oddílu (VetaG) se nevygeneroval. '
+                    . 'Projděte opravné položky v uzávěrce, nebo tabulku C vyplňte ručně.';
+        }
+
+        // ř. 12 — odpis pohledávek uplatněný podle § 24 odst. 2 písm. y) ZDP (účet 546
+        // bez analytiky označené jako daňově neuznatelná).
+        $set('kc_dpp_c8', (float) ($p['receivable_writeoff_deductible'] ?? 0.0));
+
+        // ── tabulka e) — zákonná rezerva na opravy hmotného majetku (ZoR §7) ──
+        // Ř. 25 a 26 se podle Pokynů vyplňují JEN v přiznání za zdaňovací období vymezené
+        // v § 3 odst. 1 ZoR (nejméně 12 kalendářních měsíců). Za část zdaňovacího období
+        // (§ 38ma ZDP, § 240a a násl. DŘ) tam částka nepatří — proto guard, ne tichý zápis.
+        $reserveBalance = (float) ($p['legal_reserve_balance'] ?? 0.0);
+        $reserveCreated = (float) ($p['legal_reserve_created'] ?? 0.0);
+        if ($reserveBalance > 0.0 || $reserveCreated > 0.0) {
+            if (self::isZorTaxPeriod($zdobdOd, $zdobdDo)) {
+                $set('kc_dpp_c18', $reserveCreated);
+                $set('kc_dpp_c19', $reserveBalance);
+                $warnings[] = 'Zákonné rezervy (účet 451) se do tabulky C přílohy č. 1 II. oddílu vykázaly jako rezerva '
+                    . 'na opravy hmotného majetku podle § 7 zákona o rezervách (ř. 25/26) — jinou zákonnou rezervu systém '
+                    . 'neúčtuje. Jde-li o rezervu podle § 9, § 10 nebo § 11a–11c, přesuňte částku na ř. 27–31 ručně.';
+            } else {
+                $warnings[] = 'Zdaňovací období je kratší než 12 měsíců, takže ř. 25 a 26 tabulky C přílohy č. 1 '
+                    . 'II. oddílu (rezerva na opravy hmotného majetku, § 7 zákona o rezervách) se podle pokynů '
+                    . 'nevyplňují — zůstatek účtu 451 (' . number_format($reserveBalance, 0, ',', ' ') . ' Kč) '
+                    . 'se do přiznání nepromítl. Ověřte, zda období splňuje § 3 odst. 1 zákona o rezervách.';
+            }
+        }
+
+        return $any ? $vetaG : null;
+    }
+
+    /**
+     * Je zdaňovací období „vymezené v § 3 odst. 1 zákona o rezervách", tj. trvá nejméně
+     * 12 kalendářních měsíců? Rozhoduje o tom, zda se smí vyplnit ř. 25/26 tabulky C
+     * (viz {@see buildVetaG}). Nerozpoznatelný formát datumu se bere jako plné období —
+     * builder už na chybějící období varuje jinde a druhé varování by jen zašumělo.
+     */
+    private static function isZorTaxPeriod(string $zdobdOd, string $zdobdDo): bool
+    {
+        $from = \DateTimeImmutable::createFromFormat('!d.m.Y', $zdobdOd);
+        $to = \DateTimeImmutable::createFromFormat('!d.m.Y', $zdobdDo);
+        if ($from === false || $to === false || $to <= $from) {
+            return true;
+        }
+        // Kalendářní rok 01.01.–31.12. JE 12 kalendářních měsíců, přestože `diff` vrací
+        // 11 měsíců a 30 dnů — proto se porovnává proti poslednímu dni dvanáctého měsíce,
+        // ne přes počet celých měsíců.
+        return $to >= $from->modify('+12 months')->modify('-1 day');
     }
 
     /**

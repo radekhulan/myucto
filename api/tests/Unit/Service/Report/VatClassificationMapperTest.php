@@ -328,7 +328,8 @@ final class VatClassificationMapperTest extends TestCase
             vat_amount REAL NOT NULL,
             vat_classification_code TEXT NULL,
             vat_deduction TEXT NOT NULL DEFAULT 'full',
-            vat_deduction_percent REAL NOT NULL DEFAULT 100
+            vat_deduction_percent REAL NOT NULL DEFAULT 100,
+            is_fixed_asset INTEGER NOT NULL DEFAULT 0
         )");
     }
 

@@ -324,7 +324,9 @@ async function save() {
                   {{ t('tax.band_' + cmp.pausal.eff) }}
                   <span v-if="cmp.pausal.note" class="text-warning-600"> · {{ t('tax.surcharge') }} {{ formatMoney(cmp.pausal.surcharge, 'CZK') }}</span>
                 </template>
-                <template v-else>{{ cmp.pausal.reason === 'vat_payer' ? t('tax.vat_payer_note') : t('tax.over_2m_note') }}</template>
+                <template v-else>{{ cmp.pausal.reason === 'vat_payer'
+                  ? t('tax.vat_payer_note')
+                  : t('tax.over_2m_note', { limit: formatMoney(cmp.pausal.ceiling ?? vatLimitLow, 'CZK') }) }}</template>
               </div>
               <!-- Měsíční zálohy — při změně sazby uprostřed roku po obdobích, ne průměr -->
               <div v-if="cmp.pausal.ok && pausalMonths.length" class="mt-2 space-y-0.5">
@@ -450,7 +452,7 @@ async function save() {
             <!-- tip -->
             <div v-if="pred.deferMonth" class="flex gap-3 mt-4 bg-warning-50 border border-warning-500/40 rounded-lg px-4 py-3 text-sm text-warning-600">
               <span>💡</span>
-              <span>{{ t('tax.defer_tip', { month: monthLabel(pred.deferMonth) }) }}</span>
+              <span>{{ t('tax.defer_tip', { month: monthLabel(pred.deferMonth), limit: formatMoney(pred.deferLimit ?? vatLimitLow, 'CZK') }) }}</span>
             </div>
           </div>
         </template>
