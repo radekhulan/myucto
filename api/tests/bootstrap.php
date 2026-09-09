@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Support/ParallelRuntime.php';
+\MyInvoice\Tests\Support\ParallelRuntime::activate();
+
 // Composer autoloader (stejně jako vendor/autoload.php — sjednocuje vstupní bod)
 require __DIR__ . '/../vendor/autoload.php';
 

@@ -69,6 +69,9 @@ final class Connection
     private ?SchemaCache $sharedSchema = null;
     private bool $sharedSchemaResolved = false;
     private bool $schemaFlushRegistered = false;
+    private ?string $schemaGenerationSeen = null;
+    private ?string $schemaIdentitySeen = null;
+    private static array $schemaSnapshots = [];
 
     public function __construct(private readonly Config $config, ?LoggerInterface $logger = null)
     {
@@ -166,12 +169,15 @@ final class Connection
             return $this->pdo;
         }
 
+        $schemaConfig = $this->config;
         $pdo = new LoggingPdo($dsn, $user, $pass, [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES   => false,
             PDO::ATTR_STRINGIFY_FETCHES  => false,
-        ], $this->logger);
+        ], $this->logger, $this->schemaPersistenceEnabled()
+            ? static fn (string $database): ?string => self::schemaCachePathFor($schemaConfig, $database)
+            : null);
 
         // sql_mode se připíná EXPLICITNĚ, ať se dev, CI i produkce chovají stejně.
         // Bez toho rozhoduje konfigurace serveru: stroj s vypnutým STRICT_TRANS_TABLES
@@ -291,6 +297,7 @@ final class Connection
         if (!preg_match('/^[A-Za-z0-9_]+$/', $table) || !preg_match('/^[A-Za-z0-9_]+$/', $column)) {
             throw new \InvalidArgumentException('Neplatný identifikátor databázového schématu.');
         }
+        $this->synchronizeSchemaGeneration();
         $key = "column:{$table}.{$column}";
         if (array_key_exists($key, $this->schemaCache)) {
             return $this->schemaCache[$key];
@@ -323,6 +330,7 @@ final class Connection
         if (!preg_match('/^[A-Za-z0-9_]+$/', $table)) {
             throw new \InvalidArgumentException('Neplatný identifikátor databázového schématu.');
         }
+        $this->synchronizeSchemaGeneration();
         $key = "table:{$table}";
         if (array_key_exists($key, $this->schemaCache)) {
             return $this->schemaCache[$key];
@@ -351,6 +359,9 @@ final class Connection
      */
     private function rememberSchema(string $key, bool $value): bool
     {
+        if ($this->schemaGenerationSeen !== $this->schemaGeneration()) {
+            return $value;
+        }
         $this->schemaCache[$key] = $value;
         $shared = $this->sharedSchemaCache();
         if ($shared !== null) {
@@ -378,24 +389,23 @@ final class Connection
      */
     private function sharedSchemaCache(): ?SchemaCache
     {
+        $identity = $this->schemaIdentity();
+        if ($this->schemaIdentitySeen !== $identity) {
+            $this->sharedSchemaResolved = false;
+            $this->sharedSchema = null;
+            $this->schemaIdentitySeen = $identity;
+        }
         if ($this->sharedSchemaResolved) {
             return $this->sharedSchema;
         }
         $this->sharedSchemaResolved = true;
 
-        if (defined('PHPUNIT_COMPOSER_INSTALL')) {
-            return $this->sharedSchema = null;
-        }
-        $flag = getenv('MYINVOICE_SCHEMA_CACHE');
-        if ($flag !== false && trim((string) $flag) === '0') {
+        if (!$this->schemaPersistenceEnabled()) {
             return $this->sharedSchema = null;
         }
 
-        $database = (string) $this->config->get('db.name', '');
-        $path = SchemaCache::pathFor(
-            $this->config->dataDir() ?? \MyInvoice\Bootstrap::rootDir(),
-            $database,
-        );
+        $database = $this->schemaIdentity();
+        $path = $this->schemaCachePath();
         if ($path === null) {
             return $this->sharedSchema = null;
         }
@@ -410,6 +420,106 @@ final class Connection
             // endpointy, ne jen těmi z posledních pěti minut.
             (int) $this->config->get('cache.schema_ttl', 3600),
         );
+    }
+
+    public function schemaSnapshot(bool $fresh = false): array
+    {
+        if ($fresh) {
+            $this->invalidateSchemaCache();
+        }
+        $generation = $this->synchronizeSchemaGeneration();
+        $identity = $this->schemaIdentity();
+        $shared = $this->sharedSchemaCache();
+        $persistentGeneration = $shared?->generation();
+        $cacheable = !$this->schemaPersistenceEnabled() || $persistentGeneration !== null;
+        $cached = $cacheable ? (self::$schemaSnapshots[$identity] ?? null) : null;
+        $ttl = (int) $this->config->get('cache.schema_ttl', 3600);
+        if ($cached !== null && $cached['generation'] === $generation
+            && ($ttl <= 0 || time() - $cached['loaded_at'] <= $ttl)) {
+            return $cached['snapshot'];
+        }
+        $snapshot = $shared?->snapshot();
+        if ($snapshot !== null && !SchemaMetadataProvider::validSnapshot($snapshot)) {
+            $snapshot = null;
+        }
+        if ($snapshot === null) {
+            $snapshot = SchemaMetadataProvider::load($this->pdo());
+            if ($this->schemaGeneration() !== $generation) {
+                throw new \RuntimeException('Databázové schéma se během načítání změnilo.');
+            }
+            $shared?->putSnapshot($snapshot, $persistentGeneration);
+            $shared?->flush();
+        }
+        if ($this->schemaGeneration() !== $generation) {
+            throw new \RuntimeException('Databázové schéma se během načítání změnilo.');
+        }
+        if ($cacheable) {
+            self::$schemaSnapshots[$identity] = ['generation' => $generation, 'loaded_at' => time(), 'snapshot' => $snapshot];
+        }
+        return $snapshot;
+    }
+
+    public function schemaGeneration(): string
+    {
+        return $this->schemaIdentity() . ':' . SchemaMetadataProvider::generation() . ':' . ($this->sharedSchemaCache()?->generation() ?? 'process');
+    }
+
+    public function invalidateSchemaCache(): void
+    {
+        SchemaCache::invalidate($this->schemaPersistenceEnabled() ? $this->schemaCachePath() : null);
+        unset(self::$schemaSnapshots[$this->schemaIdentity()]);
+        $this->schemaCache = [];
+        $this->schemaGenerationSeen = null;
+    }
+
+    private function synchronizeSchemaGeneration(): string
+    {
+        $generation = $this->schemaGeneration();
+        if ($generation !== $this->schemaGenerationSeen) {
+            $this->schemaCache = [];
+            $this->schemaGenerationSeen = $generation;
+        }
+        return $generation;
+    }
+
+    private function schemaIdentity(?string $database = null): string
+    {
+        return self::schemaIdentityFor($this->config, $database ?? $this->schemaDatabaseName());
+    }
+
+    private static function schemaIdentityFor(Config $config, string $database): string
+    {
+        return hash('sha256', json_encode([
+            $config->get('db.host', '127.0.0.1'),
+            (int) $config->get('db.port', 3306),
+            $config->get('db.user'),
+            $database,
+            $config->dataDir(),
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    private function schemaCachePath(?string $database = null): ?string
+    {
+        return self::schemaCachePathFor($this->config, $database ?? $this->schemaDatabaseName());
+    }
+
+    private static function schemaCachePathFor(Config $config, string $database): ?string
+    {
+        return SchemaCache::pathFor(
+            $config->dataDir() ?? \MyInvoice\Bootstrap::rootDir(),
+            $database,
+            self::schemaIdentityFor($config, $database),
+        );
+    }
+
+    private function schemaDatabaseName(): string
+    {
+        return $this->pdo instanceof LoggingPdo ? $this->pdo->databaseName() : (string) $this->config->get('db.name', '');
+    }
+
+    private function schemaPersistenceEnabled(): bool
+    {
+        return !defined('PHPUNIT_COMPOSER_INSTALL') && trim((string) getenv('MYINVOICE_SCHEMA_CACHE')) !== '0';
     }
 
     public function ping(): bool

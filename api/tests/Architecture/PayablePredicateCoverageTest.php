@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Support\Sql\PayablePredicate;
 use MyInvoice\Tests\Support\PhpSourceRegions;
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -85,7 +86,7 @@ final class PayablePredicateCoverageTest extends TestCase
         $offenders = [];
 
         foreach ($this->phpFiles($srcDir) as $path) {
-            $code = (string) file_get_contents($path);
+            $code = SourceCorpus::read($path);
             if (!str_contains($code, 'purchase_invoices')) {
                 continue;
             }
@@ -127,7 +128,7 @@ final class PayablePredicateCoverageTest extends TestCase
         $srcDir = dirname(__DIR__, 2) . '/src';
         $found = 0;
         foreach ($this->phpFiles($srcDir) as $path) {
-            foreach (explode("\n", (string) file_get_contents($path)) as $line) {
+            foreach (explode("\n", SourceCorpus::read($path)) as $line) {
                 if ($this->isUnpaidStatusMarker($line)) {
                     $found++;
                 }
@@ -156,7 +157,7 @@ final class PayablePredicateCoverageTest extends TestCase
                 $stale[] = $rel . ' — soubor neexistuje';
                 continue;
             }
-            foreach (PhpSourceRegions::missingSymbols((string) file_get_contents($path), array_keys($symbols)) as $missing) {
+            foreach (PhpSourceRegions::missingSymbols(SourceCorpus::read($path), array_keys($symbols)) as $missing) {
                 $stale[] = $rel . '::' . $missing . ' — metoda neexistuje';
             }
         }
@@ -257,14 +258,6 @@ final class PayablePredicateCoverageTest extends TestCase
      */
     private function phpFiles(string $dir): array
     {
-        $out = [];
-        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
-        foreach ($it as $f) {
-            if ($f instanceof \SplFileInfo && $f->isFile() && $f->getExtension() === 'php') {
-                $out[] = $f->getPathname();
-            }
-        }
-        sort($out);
-        return $out;
+        return SourceCorpus::files($dir);
     }
 }

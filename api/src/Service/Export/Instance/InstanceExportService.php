@@ -837,16 +837,11 @@ final class InstanceExportService
      */
     private function exportableColumns(string $table): ?array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT COLUMN_NAME, COLUMN_KEY
-               FROM information_schema.COLUMNS
-              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-                AND (GENERATION_EXPRESSION IS NULL OR GENERATION_EXPRESSION = "")
-                AND (EXTRA IS NULL OR EXTRA NOT LIKE "%GENERATED%")
-              ORDER BY ORDINAL_POSITION'
+        $rows = array_filter(
+            $this->db->schemaSnapshot()['columns'][$table] ?? [],
+            static fn (array $column): bool => ($column['GENERATION_EXPRESSION'] ?? '') === ''
+                && !str_contains(strtoupper((string) ($column['EXTRA'] ?? '')), 'GENERATED'),
         );
-        $stmt->execute([$table]);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         if ($rows === []) {
             return null;
         }

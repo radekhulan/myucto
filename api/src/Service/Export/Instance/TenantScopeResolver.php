@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Export\Instance;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use PDO;
 
 /**
  * Odvodí pro KAŽDOU tabulku schématu, jak ji omezit na jednu firmu — a když to
@@ -132,13 +131,8 @@ final class TenantScopeResolver
         'payment_order_items' => ['payment_order_id', 'payment_orders', 'id'],
     ];
 
-    /** @var array<string, TenantTableScope>|null */
-    private ?array $resolved = null;
-
     /** @var array<string, string> tabulka => důvod vynechání */
     private array $skipped = [];
-
-    private ?int $resolvedFor = null;
 
     public function __construct(private readonly Connection $db) {}
 
@@ -150,13 +144,11 @@ final class TenantScopeResolver
      */
     public function resolveAll(int $supplierId): array
     {
-        if ($this->resolved !== null && $this->resolvedFor === $supplierId) {
-            return $this->resolved;
-        }
         $this->skipped = [];
-        $columns = $this->loadColumns();
-        $foreignKeys = $this->loadForeignKeys();
-        $primaryKeys = $this->loadPrimaryKeys();
+        $snapshot = $this->db->schemaSnapshot();
+        $columns = $this->loadColumns($snapshot);
+        $foreignKeys = $snapshot['foreignKeys'];
+        $primaryKeys = $snapshot['primaryKeys'];
 
         /** @var array<string, TenantTableScope> $scopes */
         $scopes = [];
@@ -230,8 +222,6 @@ final class TenantScopeResolver
                 => [$a->depth, $a->table] <=> [$b->depth, $b->table],
         );
 
-        $this->resolved = $scopes;
-        $this->resolvedFor = $supplierId;
         return $scopes;
     }
 
@@ -351,82 +341,34 @@ final class TenantScopeResolver
     }
 
     /** @return array<string, array<string, true>> tabulka => sloupce */
-    private function loadColumns(): array
+    private function loadColumns(?array $snapshot = null): array
     {
-        $sql = 'SELECT c.TABLE_NAME, c.COLUMN_NAME
-                  FROM information_schema.COLUMNS c
-                  JOIN information_schema.TABLES t
-                    ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
-                 WHERE c.TABLE_SCHEMA = DATABASE()
-                   -- "SYSTEM VERSIONED" tu MUSÍ být vedle "BASE TABLE": `journal_entries`
-                   -- a `journal_entry_lines` jsou temporální tabulky MariaDB a filtr jen
-                   -- na BASE TABLE by z archivu vynechal ÚČETNÍ DENÍK, tedy to nejcennější,
-                   -- co v něm má být. Období (row_start/row_end) jsou neviditelné sloupce,
-                   -- takže se sem nedostanou a běžný SELECT vrací jen aktuální verzi řádku.
-                   AND t.TABLE_TYPE IN ("BASE TABLE", "SYSTEM VERSIONED")
-                   -- Generované sloupce se do exportu nedávají: nejsou to data, dopočítají
-                   -- se ze zdrojových sloupců, a při obnově by je INSERT odmítl.
-                   AND (c.GENERATION_EXPRESSION IS NULL OR c.GENERATION_EXPRESSION = "")
-                   AND (c.EXTRA IS NULL OR c.EXTRA NOT LIKE "%GENERATED%")
-                 ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION';
+        $snapshot ??= $this->db->schemaSnapshot();
         $out = [];
-        foreach ($this->db->pdo()->query($sql)?->fetchAll(PDO::FETCH_NUM) ?: [] as [$table, $column]) {
-            $out[(string) $table][(string) $column] = true;
+        foreach ($snapshot['columns'] as $table => $columns) {
+            if (!in_array($snapshot['tables'][$table] ?? '', ['BASE TABLE', 'SYSTEM VERSIONED'], true)) {
+                continue;
+            }
+            foreach ($columns as $column => $metadata) {
+                if (($metadata['GENERATION_EXPRESSION'] ?? '') !== ''
+                    || str_contains(strtoupper((string) ($metadata['EXTRA'] ?? '')), 'GENERATED')) {
+                    continue;
+                }
+                $out[$table][$column] = true;
+            }
         }
         return $out;
     }
 
-    /**
-     * @return array<string, list<array{column:string, refTable:string, refColumn:string, nullable:bool}>>
-     */
+    /** @return array<string, list<array{column:string, refTable:string, refColumn:string, nullable:bool}>> */
     private function loadForeignKeys(): array
     {
-        // Jen jednosloupcové FK (ORDINAL_POSITION = 1 a zároveň jediný sloupec vazby) —
-        // složené FK by daly složený IN, který MariaDB neumí zindexovat rozumně a pro
-        // odvození scope ho nepotřebujeme.
-        $sql = 'SELECT k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME, c.IS_NULLABLE
-                  FROM information_schema.KEY_COLUMN_USAGE k
-                  JOIN information_schema.COLUMNS c
-                    ON c.TABLE_SCHEMA = k.TABLE_SCHEMA
-                   AND c.TABLE_NAME   = k.TABLE_NAME
-                   AND c.COLUMN_NAME  = k.COLUMN_NAME
-                 WHERE k.TABLE_SCHEMA = DATABASE()
-                   AND k.REFERENCED_TABLE_NAME IS NOT NULL
-                   AND k.CONSTRAINT_NAME IN (
-                       SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
-                        WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL
-                        GROUP BY CONSTRAINT_NAME, TABLE_NAME
-                       HAVING COUNT(*) = 1
-                   )';
-        $out = [];
-        foreach ($this->db->pdo()->query($sql)?->fetchAll(PDO::FETCH_NUM) ?: [] as $row) {
-            [$table, $column, $refTable, $refColumn, $nullable] = $row;
-            $out[(string) $table][] = [
-                'column' => (string) $column,
-                'refTable' => (string) $refTable,
-                'refColumn' => (string) $refColumn,
-                'nullable' => strtoupper((string) $nullable) === 'YES',
-            ];
-        }
-        return $out;
+        return $this->db->schemaSnapshot()['foreignKeys'];
     }
 
     /** @return array<string, array{cols:list<string>, autoInc:?string}> */
     private function loadPrimaryKeys(): array
     {
-        $sql = 'SELECT TABLE_NAME, COLUMN_NAME, EXTRA
-                  FROM information_schema.COLUMNS
-                 WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_KEY = "PRI"
-                 ORDER BY TABLE_NAME, ORDINAL_POSITION';
-        $out = [];
-        foreach ($this->db->pdo()->query($sql)?->fetchAll(PDO::FETCH_NUM) ?: [] as [$table, $column, $extra]) {
-            $table = (string) $table;
-            $out[$table] ??= ['cols' => [], 'autoInc' => null];
-            $out[$table]['cols'][] = (string) $column;
-            if (str_contains(strtolower((string) $extra), 'auto_increment')) {
-                $out[$table]['autoInc'] = (string) $column;
-            }
-        }
-        return $out;
+        return $this->db->schemaSnapshot()['primaryKeys'];
     }
 }

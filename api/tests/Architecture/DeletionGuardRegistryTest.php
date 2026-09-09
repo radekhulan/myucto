@@ -70,15 +70,12 @@ final class DeletionGuardRegistryTest extends TestCase
 
         $placeholders = implode(',', array_fill(0, count($parents), '?'));
         $stmt = $this->db->pdo()->prepare(
-            'SELECT DISTINCT kcu.TABLE_NAME
+            'SELECT DISTINCT rc.TABLE_NAME
                FROM information_schema.REFERENTIAL_CONSTRAINTS rc
-               JOIN information_schema.KEY_COLUMN_USAGE kcu
-                 ON kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
-                AND kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
               WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
                 AND rc.DELETE_RULE IN ("RESTRICT", "NO ACTION")
                 AND rc.REFERENCED_TABLE_NAME IN (' . $placeholders . ')
-                AND kcu.TABLE_NAME <> rc.REFERENCED_TABLE_NAME'
+                AND rc.TABLE_NAME <> rc.REFERENCED_TABLE_NAME'
         );
         $stmt->execute($parents);
         $blockingChildren = array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);

@@ -843,33 +843,23 @@ final class ArchiveRestoreService
     /** Načte FK graf, nullability a per-tenant příznak pro dané tabulky (+ jejich ref cíle). */
     private function loadSchema(array $tables): void
     {
-        $pdo = $this->db->pdo();
-
-        // FK: table → col → referenced_table
-        $stmt = $pdo->query(
-            'SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME
-               FROM information_schema.KEY_COLUMN_USAGE
-              WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL'
-        );
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $snapshot = $this->db->schemaSnapshot(true);
+        $this->fkGraph = [];
+        $this->nullable = [];
+        $this->generated = [];
+        foreach ($snapshot['foreignKeyRows'] as $r) {
             $this->fkGraph[(string) $r['TABLE_NAME']][(string) $r['COLUMN_NAME']] = (string) $r['REFERENCED_TABLE_NAME'];
         }
-
-        // nullability + generované sloupce
-        $stmt = $pdo->query(
-            "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE, EXTRA
-               FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()"
-        );
         $tenantCols = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $t = (string) $r['TABLE_NAME'];
-            $c = (string) $r['COLUMN_NAME'];
-            $this->nullable[$t][$c] = ((string) $r['IS_NULLABLE']) === 'YES';
-            if (str_contains((string) $r['EXTRA'], 'GENERATED')) {
-                $this->generated[$t][$c] = true;
-            }
-            if ($c === 'supplier_id') {
-                $tenantCols[$t] = true;
+        foreach ($snapshot['columns'] as $t => $columns) {
+            foreach ($columns as $c => $r) {
+                $this->nullable[$t][$c] = ((string) $r['IS_NULLABLE']) === 'YES';
+                if (str_contains((string) $r['EXTRA'], 'GENERATED')) {
+                    $this->generated[$t][$c] = true;
+                }
+                if ($c === 'supplier_id') {
+                    $tenantCols[$t] = true;
+                }
             }
         }
         $this->isTenant = $tenantCols;

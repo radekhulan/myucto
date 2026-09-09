@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Infrastructure\Cache\RedisKeyspace;
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -44,20 +45,7 @@ final class RedisTenantPrefixInvariantTest extends TestCase
     /** @return array<string,string> relativní cesta => obsah */
     private static function sources(): array
     {
-        $files = [];
-        $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator(self::srcDir(), \FilesystemIterator::SKIP_DOTS)
-        );
-        foreach ($it as $file) {
-            /** @var \SplFileInfo $file */
-            if ($file->getExtension() !== 'php') {
-                continue;
-            }
-            $rel = str_replace('\\', '/', substr($file->getPathname(), strlen(self::srcDir()) + 1));
-            $files[$rel] = (string) file_get_contents($file->getPathname());
-        }
-
-        return $files;
+        return SourceCorpus::sources(self::srcDir());
     }
 
     public function testEveryRedisClientIsBuiltWithTheInstancePrefix(): void

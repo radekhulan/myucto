@@ -503,14 +503,8 @@ final class ArchiveService
         if ($excluded === [] && !$filterSecrets) {
             return '*';
         }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT COLUMN_NAME FROM information_schema.COLUMNS
-              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-              ORDER BY ORDINAL_POSITION'
-        );
-        $stmt->execute([$table]);
         $cols = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $col) {
+        foreach (array_keys($this->db->schemaSnapshot()['columns'][$table] ?? []) as $col) {
             if (in_array($col, $excluded, true)) {
                 continue;
             }

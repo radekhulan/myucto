@@ -4,43 +4,16 @@ declare(strict_types=1);
 
 namespace MyInvoice\Infrastructure\Database;
 
-use Throwable;
-
-/**
- * Sdílená cache výsledků `Connection::hasTable()` / `hasColumn()` mezi requesty.
- *
- * PROČ: feature-detekce schématu se ptá `information_schema`, a ta je řádově dražší
- * než běžný indexovaný dotaz — naměřeno na dev DB:
- *
- *     information_schema.COLUMNS   2,449 ms   (2× na request)
- *     information_schema.TABLES    0,113 ms   (4× na request)
- *     běžný indexovaný SELECT      0,15  ms
- *
- * Dohromady ~5,35 ms na KAŽDÝ API request u dat, která se mezi migracemi nemůžou
- * změnit. `Connection` už si výsledky pamatuje v rámci jednoho requestu; tohle je
- * ta chybějící vrstva mezi requesty.
- *
- * PROČ SOUBOR A NE REDIS: schéma je pár set bajtů a mění se jen při migraci.
- * Načtení malého JSONu stojí 0,127 ms, což je méně než round-trip na Redis — a
- * hlavně to nezavádí závislost na komponentě, která je v aplikaci volitelná
- * (`redis.enabled` je default false). Redis by tady byl pomalejší i křehčí.
- *
- * INVALIDACE, dvě nezávislé cesty:
- *   1) explicitně — `bin/migrate.php` po aplikaci migrací zavolá {@see invalidate()},
- *      což je normální a spolehlivá cesta,
- *   2) TTL — pojistka pro případ, že někdo sáhne do schématu ručně mimo migrace.
- *      Bez ní by taková změna zůstala neviditelná navždy.
- *
- * Soubor je klíčovaný jménem databáze: testovací a ostrá DB si nesmí cache míchat.
- */
 final class SchemaCache
 {
-    private const FORMAT = 1;
-
-    /** @var array<string,bool>|null */
+    private const FORMAT = 2;
     private ?array $entries = null;
+    private ?array $snapshot = null;
+    private ?string $generation = null;
     private bool $dirty = false;
-    private bool $loadFailed = false;
+    private bool $snapshotDirty = false;
+    private int $snapshotLoadedAt = 0;
+    private int $loadedAt = 0;
 
     public function __construct(
         private readonly string $path,
@@ -48,178 +21,243 @@ final class SchemaCache
         private readonly int $ttlSeconds = 300,
     ) {}
 
-    /**
-     * Vrátí cestu k souboru cache pro danou databázi, nebo null když persistence
-     * není možná (není kam psát).
-     */
-    public static function pathFor(?string $baseDir, string $database): ?string
+    public static function pathFor(?string $baseDir, string $database, string $identity = ''): ?string
     {
         if ($baseDir === null || trim($baseDir) === '' || trim($database) === '') {
             return null;
         }
         $dir = rtrim($baseDir, "\\/") . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'cache';
-        // Jméno DB do názvu souboru — jen bezpečné znaky, ať se z něj nedá vyrobit cesta.
         $safe = preg_replace('/[^A-Za-z0-9_-]/', '_', $database) ?? 'db';
-
-        return $dir . DIRECTORY_SEPARATOR . 'schema-' . $safe . '.json';
+        $suffix = $identity === '' ? '' : '-' . hash('sha256', $identity);
+        return $dir . DIRECTORY_SEPARATOR . 'schema-' . $safe . $suffix . '.json';
     }
 
-    /**
-     * Známý výsledek pro klíč, nebo null když ho cache nemá.
-     */
+    public function generation(): ?string
+    {
+        $lock = self::lock($this->path);
+        if ($lock === null) {
+            return null;
+        }
+        try {
+            return self::readGeneration($lock);
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
     public function get(string $key): ?bool
     {
-        $entries = $this->entries();
-
-        return array_key_exists($key, $entries) ? $entries[$key] : null;
+        $this->load();
+        return $this->entries[$key] ?? null;
     }
 
     public function put(string $key, bool $value): void
     {
-        $entries = $this->entries();
-        if (array_key_exists($key, $entries) && $entries[$key] === $value) {
-            return;
+        if ($this->entries === null) {
+            $this->load();
         }
-        $this->entries[$key] = $value;
-        $this->dirty = true;
+        if (($this->entries[$key] ?? null) !== $value) {
+            $this->entries[$key] = $value;
+            $this->dirty = true;
+        }
     }
 
-    /**
-     * Zapíše cache na disk, pokud se od načtení něco změnilo.
-     *
-     * Volá se na konci requestu (shutdown handler v {@see Connection}), ne po každém
-     * zápisu — jinak by první request po invalidaci zapisoval šestkrát za sebou.
-     *
-     * ⚠️ SLUČUJE, nepřepisuje. Každý endpoint se ptá na jinou podmnožinu schématu:
-     * `/api/auth/me` na jednu, dashboard na jinou. Kdyby request zapsal jen to, co
-     * sám objevil, sebral by cache klíče, na které se zrovna neptal — a další
-     * request by je musel znovu vytáhnout z information_schema. Dvojice requestů
-     * s různými potřebami by si tak cache donekonečna přepisovala a celá
-     * optimalizace by se rozpadla. Slučování zároveň řeší souběh: dva requesty
-     * píšící naráz o sebe nepřijdou.
-     */
+    public function snapshot(): ?array
+    {
+        $this->load();
+        if ($this->snapshot !== null && ($this->ttlSeconds <= 0 || time() - $this->snapshotLoadedAt <= $this->ttlSeconds)) {
+            return $this->snapshot;
+        }
+        $lock = self::lock($this->path);
+        if ($lock === null) {
+            return null;
+        }
+        try {
+            if (self::readGeneration($lock) !== $this->generation) {
+                return null;
+            }
+            $data = $this->readPayload(true);
+            $this->snapshot = $data['snapshot'] ?? null;
+            $this->snapshotLoadedAt = $data['written_at'] ?? time();
+            return $this->snapshot;
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
+    public function putSnapshot(array $snapshot, ?string $generation): void
+    {
+        $this->load();
+        if ($generation === null || $generation !== $this->generation) {
+            return;
+        }
+        $this->snapshot = $snapshot;
+        $this->snapshotLoadedAt = time();
+        $this->snapshotDirty = true;
+    }
+
     public function flush(): void
     {
-        if (!$this->dirty || $this->entries === null || $this->loadFailed) {
+        if ((!$this->dirty && !$this->snapshotDirty) || $this->generation === null) {
             return;
         }
-
+        $lock = self::lock($this->path);
+        if ($lock === null) {
+            return;
+        }
         try {
-            $dir = dirname($this->path);
-            if (!is_dir($dir) && !@mkdir($dir, 0o775, true) && !is_dir($dir)) {
+            if (self::readGeneration($lock) !== $this->generation) {
+                $this->entries = null;
+                $this->snapshot = null;
+                $this->dirty = false;
+                $this->snapshotDirty = false;
                 return;
             }
-
-            // Znovu načti aktuální obsah — mezitím ho mohl doplnit jiný request.
-            // Naše hodnoty vyhrávají: pocházejí z právě proběhlého dotazu do DB.
-            //
-            // Čte se PŘES TTL, takže z prošlého souboru se nepřevezme nic. Jinak by
-            // se staré klíče při každém zápisu „omladily" na aktuální written_at a
-            // TTL by přestalo existovat jako pojistka — schéma změněné mimo migrace
-            // by se nikdy neprojevilo.
-            $merged = self::readEntries($this->path, $this->database, $this->ttlSeconds);
-            foreach ($this->entries as $key => $value) {
-                $merged[$key] = $value;
+            if ($this->dirty) {
+                $disk = $this->readPayload();
+                $entries = array_replace($disk['entries'] ?? [], $this->entries ?? []);
+                if ($this->writePayload($this->path, [
+                    'format' => self::FORMAT,
+                    'database' => $this->database,
+                    'generation' => $this->generation,
+                    'written_at' => $disk['written_at'] ?? time(),
+                    'entries' => $entries,
+                ])) {
+                    $this->dirty = false;
+                }
             }
-            $this->entries = $merged;
-
-            $payload = json_encode([
-                'format'     => self::FORMAT,
-                'database'   => $this->database,
-                'written_at' => time(),
-                'entries'    => $merged,
-            ], JSON_UNESCAPED_SLASHES);
-
-            if ($payload === false) {
-                return;
+            if ($this->snapshotDirty && $this->writePayload($this->path . '.snapshot.json', [
+                'format' => self::FORMAT,
+                'database' => $this->database,
+                'generation' => $this->generation,
+                'written_at' => $this->snapshotLoadedAt,
+                'snapshot' => $this->snapshot,
+                'snapshot_hash' => hash('sha256', serialize($this->snapshot)),
+            ])) {
+                $this->snapshotDirty = false;
             }
-
-            // Atomicky: zápis do dočasného souboru v témže adresáři + rename. Souběžný
-            // request tak nikdy nepřečte half-written JSON.
-            $tmp = $this->path . '.' . getmypid() . '.tmp';
-            if (@file_put_contents($tmp, $payload, LOCK_EX) === false) {
-                return;
-            }
-            if (!@rename($tmp, $this->path)) {
-                @unlink($tmp);
-                return;
-            }
-            $this->dirty = false;
-        } catch (Throwable) {
-            // Cache je optimalizace — její selhání nesmí shodit request.
+        } catch (\Throwable) {
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
         }
     }
 
-    /**
-     * Zahodí cache. Volá se po migracích.
-     */
     public static function invalidate(?string $path): bool
     {
-        if ($path === null || !is_file($path)) {
+        SchemaMetadataProvider::invalidate();
+        if ($path === null) {
             return false;
         }
-
-        return @unlink($path);
-    }
-
-    /** @return array<string,bool> */
-    private function entries(): array
-    {
-        if ($this->entries !== null) {
-            return $this->entries;
+        $lock = self::lock($path);
+        if ($lock === null) {
+            return false;
         }
-
         try {
-            $this->entries = self::readEntries($this->path, $this->database, $this->ttlSeconds);
-        } catch (Throwable) {
-            $this->entries = [];
-            $this->loadFailed = true;
+            $generation = bin2hex(random_bytes(16));
+            rewind($lock);
+            ftruncate($lock, 0);
+            fwrite($lock, $generation);
+            fflush($lock);
+            $removed = is_file($path) && @unlink($path);
+            $snapshotRemoved = is_file($path . '.snapshot.json') && @unlink($path . '.snapshot.json');
+            return $removed || $snapshotRemoved;
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
         }
-
-        return $this->entries;
     }
 
-    /**
-     * Přečte platné položky ze souboru. Neplatný formát, jiná databáze, prošlé TTL
-     * nebo poškozený JSON = prázdné pole, nikdy výjimka — cache je optimalizace.
-     *
-     * @return array<string,bool>
-     */
-    private static function readEntries(string $path, string $database, int $ttlSeconds): array
+    private function load(): void
     {
-        if (!is_file($path)) {
-            return [];
+        $lock = self::lock($this->path);
+        if ($lock === null) {
+            $this->entries = [];
+            $this->snapshot = null;
+            $this->generation = null;
+            return;
         }
-        $raw = @file_get_contents($path);
-        if ($raw === false || $raw === '') {
-            return [];
-        }
-        $data = json_decode($raw, true);
-        if (!is_array($data)) {
-            return [];
-        }
-        if ((int) ($data['format'] ?? 0) !== self::FORMAT) {
-            return [];
-        }
-        if ((string) ($data['database'] ?? '') !== $database) {
-            return [];
-        }
-        if ($ttlSeconds > 0 && time() - (int) ($data['written_at'] ?? 0) > $ttlSeconds) {
-            return [];
-        }
-
-        $entries = $data['entries'] ?? null;
-        if (!is_array($entries)) {
-            return [];
-        }
-
-        $out = [];
-        foreach ($entries as $key => $value) {
-            if (is_string($key) && is_bool($value)) {
-                $out[$key] = $value;
+        try {
+            $generation = self::readGeneration($lock);
+            if ($this->entries !== null && $this->generation === $generation
+                && ($this->ttlSeconds <= 0 || time() - $this->loadedAt <= $this->ttlSeconds)) {
+                return;
             }
+            $this->generation = $generation;
+            $data = $this->readPayload();
+            $this->entries = $data['entries'] ?? [];
+            $this->snapshot = null;
+            $this->snapshotDirty = false;
+            $this->loadedAt = $data['written_at'] ?? time();
+            $this->dirty = false;
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
         }
+    }
 
-        return $out;
+    private function readPayload(bool $snapshot = false): array
+    {
+        $raw = @file_get_contents($this->path . ($snapshot ? '.snapshot.json' : ''));
+        $data = $raw === false ? null : json_decode($raw, true);
+        if (!is_array($data) || ($data['format'] ?? null) !== self::FORMAT
+            || ($data['database'] ?? null) !== $this->database
+            || ($data['generation'] ?? null) !== $this->generation
+            || !is_int($data['written_at'] ?? null)
+            || ($this->ttlSeconds > 0 && time() - $data['written_at'] > $this->ttlSeconds)
+            || (!$snapshot && !is_array($data['entries'] ?? null))
+            || (isset($data['entries']) && !is_array($data['entries']))) {
+            return [];
+        }
+        $data['entries'] = array_filter($data['entries'] ?? [], static fn ($value, $key): bool => is_string($key) && is_bool($value), ARRAY_FILTER_USE_BOTH);
+        if (isset($data['snapshot']) && (!is_array($data['snapshot'])
+            || ($data['snapshot_hash'] ?? null) !== hash('sha256', serialize($data['snapshot'])))) {
+            $data['snapshot'] = null;
+        }
+        return $data;
+    }
+
+    private function writePayload(string $path, array $data): bool
+    {
+        $payload = json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $tmp = $path . '.' . bin2hex(random_bytes(8)) . '.tmp';
+        if (@file_put_contents($tmp, $payload) !== false && @rename($tmp, $path)) {
+            return true;
+        }
+        @unlink($tmp);
+        return false;
+    }
+
+    private static function lock(string $path): mixed
+    {
+        $dir = dirname($path);
+        if (!is_dir($dir) && !@mkdir($dir, 0o775, true) && !is_dir($dir)) {
+            return null;
+        }
+        $lock = @fopen($path . '.lock', 'c+');
+        if ($lock === false) {
+            return null;
+        }
+        if (!flock($lock, LOCK_EX)) {
+            fclose($lock);
+            return null;
+        }
+        return $lock;
+    }
+
+    private static function readGeneration(mixed $lock): string
+    {
+        rewind($lock);
+        $generation = stream_get_contents($lock);
+        if (!is_string($generation) || !preg_match('/^[a-f0-9]{32}$/D', $generation)) {
+            $generation = bin2hex(random_bytes(16));
+            rewind($lock);
+            ftruncate($lock, 0);
+            fwrite($lock, $generation);
+            fflush($lock);
+        }
+        return $generation;
     }
 }

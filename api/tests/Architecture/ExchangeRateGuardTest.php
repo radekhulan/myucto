@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Architecture;
 
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -52,7 +53,7 @@ final class ExchangeRateGuardTest extends TestCase
             if (isset(self::ALLOWED[$rel])) {
                 continue;
             }
-            $lines = explode("\n", (string) file_get_contents($path));
+            $lines = explode("\n", SourceCorpus::read($path));
             foreach ($lines as $i => $line) {
                 if (preg_match(self::BARE_RATE, $line) !== 1) {
                     continue;
@@ -98,7 +99,7 @@ final class ExchangeRateGuardTest extends TestCase
 
         foreach ($this->phpFiles($srcDir) as $path) {
             $rel = str_replace('\\', '/', substr($path, strlen($srcDir) + 1));
-            $lines = explode("\n", (string) file_get_contents($path));
+            $lines = explode("\n", SourceCorpus::read($path));
             foreach ($lines as $i => $line) {
                 if (preg_match(self::RATE_SOURCE_LITERAL, $line, $m) !== 1) {
                     continue;
@@ -140,7 +141,7 @@ final class ExchangeRateGuardTest extends TestCase
         );
         self::assertStringContainsString(
             "const DEFAULT = 'manual'",
-            (string) file_get_contents($ssot),
+            SourceCorpus::read($ssot),
             'SSOT už DEFAULT nedeklaruje jako manual — aktualizuj guard i migraci 1303.',
         );
     }
@@ -155,7 +156,7 @@ final class ExchangeRateGuardTest extends TestCase
         foreach ($this->phpFiles(dirname(__DIR__, 2) . '/src') as $path) {
             $found += preg_match_all(
                 "/IF\(\s*[a-z_]*\.?code\s*=\s*'CZK'/i",
-                (string) file_get_contents($path),
+                SourceCorpus::read($path),
             ) ?: 0;
         }
 
@@ -165,15 +166,6 @@ final class ExchangeRateGuardTest extends TestCase
     /** @return list<string> */
     private function phpFiles(string $dir): array
     {
-        $out = [];
-        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
-        foreach ($it as $f) {
-            if ($f instanceof \SplFileInfo && $f->isFile() && $f->getExtension() === 'php') {
-                $out[] = $f->getPathname();
-            }
-        }
-        sort($out);
-
-        return $out;
+        return SourceCorpus::files($dir);
     }
 }

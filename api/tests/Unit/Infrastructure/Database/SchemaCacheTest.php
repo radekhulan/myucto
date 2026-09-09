@@ -174,4 +174,164 @@ final class SchemaCacheTest extends TestCase
         self::assertStringNotContainsString('..', basename($p));
         self::assertSame($this->dir . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'cache', dirname($p));
     }
+    public function testInvalidationRejectsAnOldWriterAndRefreshesExistingReaders(): void
+    {
+        $old = new SchemaCache($this->path(), 'testdb');
+        $old->put('table:before', true);
+        $old->flush();
+        $reader = new SchemaCache($this->path(), 'testdb');
+        self::assertTrue($reader->get('table:before'));
+        $old->put('table:stale', true);
+        SchemaCache::invalidate($this->path());
+        $new = new SchemaCache($this->path(), 'testdb');
+        $new->put('table:after', true);
+        $new->flush();
+        $old->flush();
+        self::assertNull($reader->get('table:before'));
+        self::assertNull($reader->get('table:stale'));
+        self::assertTrue($reader->get('table:after'));
+    }
+
+    public function testSnapshotCannotBePublishedAcrossAnInvalidation(): void
+    {
+        $cache = new SchemaCache($this->path(), 'testdb');
+        $generation = $cache->generation();
+        SchemaCache::invalidate($this->path());
+        $cache->putSnapshot(['tables' => ['old' => 'BASE TABLE']], $generation);
+        $cache->flush();
+        self::assertNull((new SchemaCache($this->path(), 'testdb'))->snapshot());
+    }
+
+    public function testSnapshotCorruptionIsIgnored(): void
+    {
+        $cache = new SchemaCache($this->path(), 'testdb');
+        $snapshot = ['tables' => ['example' => 'BASE TABLE'], 'columns' => []];
+        $cache->putSnapshot($snapshot, $cache->generation());
+        $cache->flush();
+        self::assertSame($snapshot, (new SchemaCache($this->path(), 'testdb'))->snapshot());
+        $data = json_decode(file_get_contents($this->path() . '.snapshot.json'), true);
+        $data['snapshot']['tables'] = [];
+        file_put_contents($this->path() . '.snapshot.json', json_encode($data));
+        self::assertNull((new SchemaCache($this->path(), 'testdb'))->snapshot());
+        $data['snapshot'] = $snapshot;
+        $data['entries'] = 42;
+        file_put_contents($this->path() . '.snapshot.json', json_encode($data));
+        self::assertNull((new SchemaCache($this->path(), 'testdb'))->snapshot());
+    }
+
+    public function testConnectionIdentitiesHaveDifferentCachePaths(): void
+    {
+        self::assertNotSame(
+            SchemaCache::pathFor($this->dir, 'same_database', 'host_a:3306:user'),
+            SchemaCache::pathFor($this->dir, 'same_database', 'host_b:3306:user'),
+        );
+    }
+
+    public function testMissingPersistenceDoesNotPreventQueries(): void
+    {
+        $path = $this->path();
+        mkdir(dirname($path), 0o775, true);
+        mkdir($path . '.lock');
+        $cache = new SchemaCache($path, 'testdb');
+        self::assertNull($cache->generation());
+        self::assertNull($cache->snapshot());
+        $cache->put('table:example', true);
+        $cache->flush();
+        self::assertFileDoesNotExist($path);
+        rmdir($path . '.lock');
+    }
+
+    public function testConcurrentWritersMergeWithoutLosingEntries(): void
+    {
+        $this->runConcurrentWriters(false);
+    }
+
+    public function testConcurrentWritersCannotResurrectAnInvalidatedGeneration(): void
+    {
+        $this->runConcurrentWriters(true);
+    }
+
+    private function runConcurrentWriters(bool $invalidate): void
+    {
+        $path = $this->path();
+        $seed = new SchemaCache($path, 'testdb');
+        $seed->put('table:seed', true);
+        $seed->flush();
+        $code = <<<'PHP'
+require $argv[1];
+require $argv[2];
+$cache = new \MyInvoice\Infrastructure\Database\SchemaCache($argv[3], 'testdb');
+$cache->get('table:seed');
+file_put_contents($argv[4] . '.ready', '1');
+$deadline = microtime(true) + 10;
+while (!is_file($argv[4] . '.go')) {
+    if (microtime(true) > $deadline) exit(2);
+    usleep(1000);
+}
+$cache->put($argv[5], true);
+$cache->flush();
+PHP;
+        $processes = [];
+        $markers = [];
+        try {
+            for ($i = 0; $i < 2; ++$i) {
+                $marker = dirname($path) . '/writer-' . $i;
+                $markers[] = $marker;
+                $process = proc_open([
+                    PHP_BINARY, '-r', $code,
+                    (new \ReflectionClass(SchemaCache::class))->getFileName(),
+                    (new \ReflectionClass(\MyInvoice\Infrastructure\Database\SchemaMetadataProvider::class))->getFileName(),
+                    $path, $marker, 'table:writer_' . $i,
+                ], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+                self::assertIsResource($process);
+                $processes[] = [$process, $pipes];
+            }
+            $deadline = microtime(true) + 5;
+            do {
+                $ready = is_file($markers[0] . '.ready') && is_file($markers[1] . '.ready');
+                if (!$ready) {
+                    usleep(1000);
+                }
+            } while (!$ready && microtime(true) < $deadline);
+            self::assertTrue($ready, 'Oba procesy musí přečíst původní generaci před pokračováním.');
+            if ($invalidate) {
+                SchemaCache::invalidate($path);
+                $new = new SchemaCache($path, 'testdb');
+                $new->put('table:new_generation', true);
+                $new->flush();
+            }
+            foreach ($markers as $marker) {
+                file_put_contents($marker . '.go', '1');
+            }
+            foreach ($processes as [$process, $pipes]) {
+                $error = stream_get_contents($pipes[2]);
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                self::assertSame(0, proc_close($process), $error);
+            }
+            $processes = [];
+            $reader = new SchemaCache($path, 'testdb');
+            if ($invalidate) {
+                self::assertTrue($reader->get('table:new_generation'));
+                self::assertNull($reader->get('table:seed'));
+                self::assertNull($reader->get('table:writer_0'));
+                self::assertNull($reader->get('table:writer_1'));
+            } else {
+                self::assertTrue($reader->get('table:seed'));
+                self::assertTrue($reader->get('table:writer_0'));
+                self::assertTrue($reader->get('table:writer_1'));
+            }
+        } finally {
+            foreach ($processes as [$process, $pipes]) {
+                if (is_resource($process)) {
+                    proc_terminate($process);
+                    foreach ($pipes as $pipe) {
+                        if (is_resource($pipe)) fclose($pipe);
+                    }
+                    proc_close($process);
+                }
+            }
+        }
+    }
+
 }

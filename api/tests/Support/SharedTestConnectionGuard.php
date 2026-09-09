@@ -33,6 +33,7 @@ final class SharedTestConnectionGuard implements Extension
         $facade->registerSubscriber(new class implements FinishedSubscriber {
             public function notify(Finished $event): void
             {
+                ParallelRuntime::restore();
                 foreach (Connection::resetSharedTestSessions() as $dsn) {
                     EventFacade::emitter()->testTriggeredPhpunitError(
                         $event->test(),

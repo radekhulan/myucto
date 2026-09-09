@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Service\Tax\TaxConstants;
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -141,7 +142,7 @@ final class TaxConstantsUsageGuardTest extends TestCase
             if (in_array($rel, $differentMeaning, true)) {
                 continue;
             }
-            $lines = explode("\n", (string) file_get_contents($file->getPathname()));
+            $lines = explode("\n", SourceCorpus::read($file->getPathname()));
 
             foreach (array_keys($lines) as $i) {
                 if ($this->isHardcodedVatLimit($lines, $i)) {
@@ -321,15 +322,11 @@ final class TaxConstantsUsageGuardTest extends TestCase
         }
 
         $buffer = '';
-        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($srcDir, \FilesystemIterator::SKIP_DOTS));
-        foreach ($it as $file) {
-            if (!$file instanceof \SplFileInfo || !$file->isFile() || $file->getExtension() !== 'php') {
+        foreach (SourceCorpus::files($srcDir) as $path) {
+            if (isset($skip[$path])) {
                 continue;
             }
-            if (isset($skip[str_replace('\\', '/', $file->getPathname())])) {
-                continue;
-            }
-            $buffer .= file_get_contents($file->getPathname());
+            $buffer .= SourceCorpus::read($path);
         }
 
         self::assertNotSame('', $buffer, 'Zdrojový korpus je prázdný — guard by nekontroloval nic.');

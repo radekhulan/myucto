@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Architecture;
 
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -290,7 +291,7 @@ final class TenantPredicateTest extends TestCase
 
         $violations = [];
         foreach ($files as $file) {
-            $raw = file_get_contents($file);
+            $raw = SourceCorpus::read($file);
             self::assertIsString($raw);
             $code = $this->stripComments($raw);
             $base = basename($file);
@@ -440,12 +441,7 @@ final class TenantPredicateTest extends TestCase
         $root = dirname(__DIR__, 2) . '/src';
         $files = [];
         foreach (['/Service', '/Action'] as $sub) {
-            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root . $sub));
-            foreach ($iterator as $entry) {
-                if ($entry->getExtension() === 'php') {
-                    $files[] = $entry->getPathname();
-                }
-            }
+            array_push($files, ...SourceCorpus::files($root . $sub));
         }
         self::assertNotEmpty($files, 'Service/Action adresáře nenalezeny.');
         sort($files);
@@ -458,7 +454,7 @@ final class TenantPredicateTest extends TestCase
         $violations = [];
         foreach ($files as $file) {
             $base = basename($file);
-            foreach ($this->methodBodies((string) file_get_contents($file)) as $method) {
+            foreach ($this->methodBodies(SourceCorpus::read($file)) as $method) {
                 $body = $method['body'];
                 if (stripos($body, 'supplier_id') !== false) {
                     continue;

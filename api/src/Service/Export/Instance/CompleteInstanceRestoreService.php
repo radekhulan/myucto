@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Export\Instance;
 
+use MyInvoice\Infrastructure\Database\SchemaMetadataProvider;
 use PDO;
 use ZipArchive;
 
@@ -22,6 +23,8 @@ final class CompleteInstanceRestoreService
         'payroll_document_batch_items' => ['payroll_run_persons'],
     ];
 
+    private ?array $schema = null;
+
     public function __construct(
         private readonly PDO $pdo,
         private readonly string $storageRoot,
@@ -32,6 +35,7 @@ final class CompleteInstanceRestoreService
     /** @return array{manifest:array<string,mixed>,counts:array<string,int>,files:int,documents:int,blobs:int} */
     public function validate(string $archivePath): array
     {
+        $this->schema = null;
         $dir = $this->extract($archivePath);
         try {
             $manifest = $this->manifest($dir);
@@ -52,6 +56,7 @@ final class CompleteInstanceRestoreService
     /** @return array{manifest:array<string,mixed>,counts:array<string,int>,files:int,documents:int,blobs:int} */
     public function restore(string $archivePath): array
     {
+        $this->schema = null;
         $dir = $this->extract($archivePath);
         try {
             $manifest = $this->manifest($dir);
@@ -125,15 +130,7 @@ final class CompleteInstanceRestoreService
         $position = array_flip($orderedInput);
         $children = array_fill_keys($orderedInput, []);
         $edges = [];
-        $foreignKeyStatement = $this->pdo->query(
-            'SELECT TABLE_NAME, REFERENCED_TABLE_NAME
-               FROM information_schema.KEY_COLUMN_USAGE
-              WHERE TABLE_SCHEMA = DATABASE()
-                AND REFERENCED_TABLE_NAME IS NOT NULL',
-        );
-        $foreignKeys = $foreignKeyStatement === false
-            ? []
-            : ($foreignKeyStatement->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        $foreignKeys = $this->schema()['foreignKeyRows'];
         foreach ($foreignKeys as $foreignKey) {
             $child = (string) $foreignKey['TABLE_NAME'];
             $parent = (string) $foreignKey['REFERENCED_TABLE_NAME'];
@@ -570,9 +567,12 @@ final class CompleteInstanceRestoreService
         if (!$this->safeIdentifier($table)) {
             throw new InstanceExportException('restore_table_invalid', 'Neplatný název tabulky v archivu.');
         }
-        $stmt = $this->pdo->prepare('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND (GENERATION_EXPRESSION IS NULL OR GENERATION_EXPRESSION = "")');
-        $stmt->execute([$table]);
-        $columns = array_fill_keys(array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []), true);
+        $columns = [];
+        foreach ($this->schema()['columns'][$table] ?? [] as $column => $metadata) {
+            if (($metadata['GENERATION_EXPRESSION'] ?? '') === '') {
+                $columns[$column] = true;
+            }
+        }
         if ($columns === []) {
             throw new InstanceExportException('restore_schema_missing', 'Cílové schéma nemá tabulku ' . $table . '.');
         }
@@ -582,13 +582,9 @@ final class CompleteInstanceRestoreService
     /** @return list<string> */
     private function foreignKeyViolations(): array
     {
-        $sql = 'SELECT k.CONSTRAINT_NAME, k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME
-                  FROM information_schema.KEY_COLUMN_USAGE k
-                 WHERE k.TABLE_SCHEMA = DATABASE() AND k.REFERENCED_TABLE_NAME IS NOT NULL
-                 ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION';
         $violations = [];
         $constraints = [];
-        foreach ($this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [] as $fk) {
+        foreach ($this->schema()['foreignKeyRows'] as $fk) {
             $key = $fk['TABLE_NAME'] . ':' . $fk['CONSTRAINT_NAME'];
             $constraints[$key][] = $fk;
         }
@@ -619,28 +615,19 @@ final class CompleteInstanceRestoreService
         $included = array_fill_keys(array_keys((array) ($manifest['sections']['data']['tables'] ?? [])), true);
         $included += array_fill_keys(array_keys((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? [])), true);
         $included += array_fill_keys(['roles', 'role_permissions', 'users', 'user_suppliers'], true);
-        $sql = 'SELECT k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, c.IS_NULLABLE
-                  FROM information_schema.KEY_COLUMN_USAGE k
-                  JOIN information_schema.COLUMNS c
-                    ON c.TABLE_SCHEMA = k.TABLE_SCHEMA AND c.TABLE_NAME = k.TABLE_NAME AND c.COLUMN_NAME = k.COLUMN_NAME
-                 WHERE k.TABLE_SCHEMA = DATABASE() AND k.REFERENCED_TABLE_NAME IS NOT NULL
-                   AND k.CONSTRAINT_NAME IN (
-                       SELECT constraint_name FROM information_schema.KEY_COLUMN_USAGE
-                        WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL
-                        GROUP BY TABLE_NAME, constraint_name HAVING COUNT(*) = 1
-                   )';
-        foreach ($this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [] as $fk) {
-            $child = (string) $fk['TABLE_NAME'];
-            $column = (string) $fk['COLUMN_NAME'];
-            $parent = (string) $fk['REFERENCED_TABLE_NAME'];
-            if (isset($included[$parent]) || strtoupper((string) $fk['IS_NULLABLE']) !== 'YES'
-                || !$this->safeIdentifier($child) || !$this->safeIdentifier($column) || !$this->safeIdentifier($parent)) {
-                continue;
+        foreach ($this->schema()['foreignKeys'] as $child => $foreignKeys) {
+            foreach ($foreignKeys as $fk) {
+                $column = $fk['column'];
+                $parent = $fk['refTable'];
+                if (isset($included[$parent]) || !$fk['nullable']
+                    || !$this->safeIdentifier($child) || !$this->safeIdentifier($column) || !$this->safeIdentifier($parent)) {
+                    continue;
+                }
+                if ((int) $this->pdo->query("SELECT COUNT(*) FROM `{$parent}`")->fetchColumn() !== 0) {
+                    continue;
+                }
+                $this->pdo->exec("UPDATE `{$child}` SET `{$column}` = NULL WHERE `{$column}` IS NOT NULL");
             }
-            if ((int) $this->pdo->query("SELECT COUNT(*) FROM `{$parent}`")->fetchColumn() !== 0) {
-                continue;
-            }
-            $this->pdo->exec("UPDATE `{$child}` SET `{$column}` = NULL WHERE `{$column}` IS NOT NULL");
         }
     }
 
@@ -650,13 +637,12 @@ final class CompleteInstanceRestoreService
         if (!$this->safeIdentifier($table)) {
             return [];
         }
-        $stmt = $this->pdo->prepare(
-            'SELECT COLUMN_NAME FROM information_schema.COLUMNS
-              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_KEY = "PRI"
-              ORDER BY ORDINAL_POSITION'
-        );
-        $stmt->execute([$table]);
-        return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+        return $this->schema()['primaryKeys'][$table]['cols'] ?? [];
+    }
+
+    private function schema(): array
+    {
+        return $this->schema ??= SchemaMetadataProvider::load($this->pdo);
     }
 
     /** @param array<string,mixed> $left @param array<string,mixed> $right */

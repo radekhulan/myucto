@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Architecture;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -172,14 +173,9 @@ final class ManagedProxyHeaderInvariantTest extends TestCase
     private function phpSources(): array
     {
         $root = rtrim(str_replace('\\', '/', Bootstrap::rootDir()), '/') . '/api/src';
-        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root));
         $out = [];
-        foreach ($files as $file) {
-            if (!$file instanceof \SplFileInfo || $file->getExtension() !== 'php') {
-                continue;
-            }
-            $path = str_replace('\\', '/', $file->getPathname());
-            $out[$path] = (string) file_get_contents($path);
+        foreach (SourceCorpus::files($root) as $path) {
+            $out[$path] = SourceCorpus::read($path);
         }
         self::assertNotEmpty($out, 'Nenačetl se žádný zdroják — brána by tiše procházela.');
 
@@ -191,7 +187,7 @@ final class ManagedProxyHeaderInvariantTest extends TestCase
         $path = $this->path($relative);
         self::assertFileExists($path);
 
-        return (string) file_get_contents($path);
+        return SourceCorpus::read($path);
     }
 
     private function path(string $relative): string

@@ -9,6 +9,7 @@ use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\NodeFinder;
 use PhpParser\ParserFactory;
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -57,7 +58,11 @@ final class TestCaseFinalMethodCollisionTest extends TestCase
         $offenders = [];
 
         foreach ($this->testFiles() as $file) {
-            $ast = $parser->parse((string) file_get_contents($file));
+            $source = SourceCorpus::read($file);
+            if (!self::hasRiskyDeclaration($source, $risky)) {
+                continue;
+            }
+            $ast = $parser->parse($source);
             if ($ast === null) {
                 self::fail('nešlo rozparsovat ' . $this->relative($file));
             }
@@ -109,7 +114,8 @@ final class TestCaseFinalMethodCollisionTest extends TestCase
     private function extendsTestCase(Class_ $class): bool
     {
         $parent = $class->extends?->toString() ?? '';
-        $short  = substr($parent, (int) strrpos($parent, '\\') + 1);
+        $separator = strrpos($parent, '\\');
+        $short = $separator === false ? $parent : substr($parent, $separator + 1);
 
         return $short === 'TestCase' || str_ends_with($short, 'TestCase');
     }
@@ -118,18 +124,7 @@ final class TestCaseFinalMethodCollisionTest extends TestCase
     private function testFiles(): array
     {
         $root = dirname(__DIR__);
-        $out  = [];
-
-        $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS)
-        );
-        foreach ($it as $entry) {
-            /** @var \SplFileInfo $entry */
-            if ($entry->isFile() && str_ends_with($entry->getFilename(), 'Test.php')) {
-                $out[] = $entry->getPathname();
-            }
-        }
-        sort($out, SORT_STRING);
+        $out = SourceCorpus::files($root, 'Test.php');
 
         // Pojistka proti tichému projití: kdyby se změnil layout testů a sem
         // nedorazil žádný soubor, test by byl zelený a nekontroloval by nic.
@@ -138,9 +133,63 @@ final class TestCaseFinalMethodCollisionTest extends TestCase
         return $out;
     }
 
+    public function testPrefilterKeepsRiskyDeclarationsAndIgnoresText(): void
+    {
+        foreach ([
+            '<?php class A extends TestCase { function status() {} }',
+            '<?php class A extends TestCase { function /* gap */ & STATUS() {} }',
+            '<?php function & /* gap */ name() {}',
+            '<?php class A { function match() {} }',
+        ] as $source) {
+            self::assertTrue(self::hasRiskyDeclaration($source, ['status', 'name', 'match']));
+        }
+        foreach ([
+            '<?php // function status() {}',
+            '<?php $source = "function status() {}";',
+            '<?php $fn = function () {}; status();',
+        ] as $source) {
+            self::assertFalse(self::hasRiskyDeclaration($source, ['status', 'name']));
+        }
+    }
+
+    public function testUnqualifiedAndQualifiedTestCaseParentsAreDetected(): void
+    {
+        foreach (['TestCase', 'IntegrationTestCase', 'PHPUnit\\Framework\\TestCase'] as $parent) {
+            self::assertTrue($this->extendsTestCase(new Class_('Example', [
+                'extends' => new Node\Name($parent),
+            ])));
+        }
+        self::assertFalse($this->extendsTestCase(new Class_('Example', [
+            'extends' => new Node\Name('OtherBase'),
+        ])));
+    }
+
+    public static function hasRiskyDeclaration(string $source, array $risky): bool
+    {
+        $afterFunction = false;
+        foreach (token_get_all($source) as $token) {
+            if (is_array($token)) {
+                if ($token[0] === T_FUNCTION) {
+                    $afterFunction = true;
+                    continue;
+                }
+                if (in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT, T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG, T_AMPERSAND_FOLLOWED_BY_VAR_OR_VARARG], true)) {
+                    continue;
+                }
+                if ($afterFunction && in_array(strtolower($token[1]), $risky, true)) {
+                    return true;
+                }
+            } elseif ($token === '&') {
+                continue;
+            }
+            $afterFunction = false;
+        }
+        return false;
+    }
+
     private function relative(string $path): string
     {
         $root = dirname(__DIR__, 2);
-        return str_replace($root . DIRECTORY_SEPARATOR, '', $path);
+        return substr($path, strlen($root) + 1);
     }
 }

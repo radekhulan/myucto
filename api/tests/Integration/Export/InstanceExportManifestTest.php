@@ -23,46 +23,65 @@ use ZipArchive;
 #[Group('integration')]
 final class InstanceExportManifestTest extends TestCase
 {
-    private Connection $db;
-    private InstanceExportService $export;
+    private static ?Connection $db = null;
+    private static ?InstanceExportService $export = null;
 
-    private int $supplierId = 0;
-    private bool $inTx = false;
+    private static int $supplierId = 0;
+    private static bool $inTx = false;
 
     /** @var list<string> */
-    private array $tempPaths = [];
+    private static array $tempPaths = [];
+    private static array $archives = [];
+    private static ?string $exportDirectory = null;
+    private static ?string $lockPath = null;
 
     protected function setUp(): void
     {
-        $rootDir = dirname(__DIR__, 4);
-        if (!is_file($rootDir . '/cfg.php')) {
-            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
+        if (self::$db !== null) {
+            return;
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
-            $this->db = $container->get(Connection::class);
-            $this->export = $container->get(InstanceExportService::class);
+            self::initializeFixture();
         } catch (\Throwable $e) {
-            $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
+            self::cleanupFixture();
+            throw $e;
+        }
+    }
+
+    private static function initializeFixture(): void
+    {
+        $rootDir = dirname(__DIR__, 4);
+        if (!is_file($rootDir . '/cfg.php')) {
+            self::markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
+        }
+        try {
+            [self::$db, self::$export] = Connection::withoutSharedTestConnection(static function (): array {
+                $container = Bootstrap::buildApp()->getContainer();
+                return [$container->get(Connection::class), $container->get(InstanceExportService::class)];
+            });
+        } catch (\Throwable $e) {
+            self::markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
 
-        $pdo = $this->db->pdo();
+        $pdo = self::$db->pdo();
         $currencyId = (int) ($pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
         $vatRateId = (int) ($pdo->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
         $czId = (int) ($pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn() ?: 0);
         if ($currencyId === 0 || $vatRateId === 0 || $czId === 0) {
-            $this->markTestSkipped('Chybí základní data (currency/vat_rate/country) v DB.');
+            self::markTestSkipped('Chybí základní data (currency/vat_rate/country) v DB.');
         }
 
         $pdo->beginTransaction();
-        $this->inTx = true;
+        self::$inTx = true;
 
         $stmt = $pdo->prepare(
             'INSERT INTO supplier (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id)
              VALUES (?, "Testovaci 1", "Praha", "11000", ?, ?, ?, ?)'
         );
         $stmt->execute(['H14 manifest s.r.o.', $czId, 'h14-manifest@example.com', $currencyId, $vatRateId]);
-        $this->supplierId = (int) $pdo->lastInsertId();
+        self::$supplierId = (int) $pdo->lastInsertId();
+        self::$exportDirectory = RuntimePaths::storage('instance-exports') . DIRECTORY_SEPARATOR . 'sup-' . self::$supplierId;
+        self::$lockPath = RuntimePaths::storage('locks') . '/instance-export-sup' . self::$supplierId . '.lock';
 
         for ($i = 1; $i <= 3; $i++) {
             $c = $pdo->prepare(
@@ -70,7 +89,7 @@ final class InstanceExportManifestTest extends TestCase
                  VALUES (?, ?, "Testovaci 2", "Brno", "60200", ?, ?, ?)'
             );
             $c->execute([
-                $this->supplierId,
+                self::$supplierId,
                 'H14 odberatel ' . $i,
                 $czId,
                 $currencyId,
@@ -82,33 +101,51 @@ final class InstanceExportManifestTest extends TestCase
         // „checksumy sedí" znamenalo jen to, že archiv skoro nic neobsahuje.
         foreach (['document_folders', 'document_tags', 'cash_registers', 'journal_entry_templates'] as $table) {
             $pdo->prepare('INSERT INTO ' . $table . ' (supplier_id, name) VALUES (?, ?)')
-                ->execute([$this->supplierId, 'H14 manifest ' . $table]);
+                ->execute([self::$supplierId, 'H14 manifest ' . $table]);
         }
     }
 
-    protected function tearDown(): void
+    public static function tearDownAfterClass(): void
     {
-        foreach ($this->tempPaths as $path) {
+        self::cleanupFixture();
+    }
+
+    private static function cleanupFixture(): void
+    {
+        foreach (self::$tempPaths as $path) {
             if (is_file($path)) {
                 @unlink($path);
             }
         }
-        if ($this->supplierId !== 0) {
-            $dir = RuntimePaths::storage('instance-exports') . DIRECTORY_SEPARATOR . 'sup-' . $this->supplierId;
+        if (self::$exportDirectory !== null) {
+            $dir = self::$exportDirectory;
             if (is_dir($dir)) {
                 foreach (glob($dir . '/*') ?: [] as $file) {
                     is_dir($file) ? @rmdir($file) : @unlink($file);
                 }
                 @rmdir($dir);
             }
-            @unlink(RuntimePaths::storage('locks') . '/instance-export-sup' . $this->supplierId . '.lock');
-        }
-        if (isset($this->db) && $this->inTx) {
-            $pdo = $this->db->pdo();
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
+            if (self::$lockPath !== null) {
+                @unlink(self::$lockPath);
             }
-            $this->db->close();
+        }
+        try {
+            if (isset(self::$db) && self::$inTx) {
+                $pdo = self::$db->pdo();
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+            }
+        } finally {
+            self::$db?->close();
+            self::$db = null;
+            self::$export = null;
+            self::$supplierId = 0;
+            self::$inTx = false;
+            self::$tempPaths = [];
+            self::$archives = [];
+            self::$exportDirectory = null;
+            self::$lockPath = null;
         }
     }
 
@@ -121,15 +158,15 @@ final class InstanceExportManifestTest extends TestCase
         $manifest = json_decode((string) $zip->getFromName('manifest.json'), true);
         self::assertIsArray($manifest, 'manifest.json je parsovatelný JSON.');
         self::assertSame('myucto-instance-export', $manifest['format']);
-        self::assertSame($this->supplierId, (int) $manifest['supplier']['id'], 'Manifest jmenuje exportovanou firmu.');
+        self::assertSame(self::$supplierId, (int) $manifest['supplier']['id'], 'Manifest jmenuje exportovanou firmu.');
         self::assertNotSame('unknown', (string) $manifest['schema_version'], 'Manifest nese verzi schématu.');
         self::assertArrayHasKey('read_started_at', $manifest, 'Manifest nese okno, ve kterém se data četla.');
         self::assertArrayHasKey('read_finished_at', $manifest);
         self::assertSame('non-atomic', $manifest['data_snapshot'], 'Manifest přiznává, že snapshot není atomický.');
 
         // Počty v manifestu vs. COUNT(*) v DB — ne manifest proti sobě samému.
-        $clientsInDb = (int) $this->db->pdo()->query(
-            'SELECT COUNT(*) FROM clients WHERE supplier_id = ' . $this->supplierId
+        $clientsInDb = (int) self::$db->pdo()->query(
+            'SELECT COUNT(*) FROM clients WHERE supplier_id = ' . self::$supplierId
         )->fetchColumn();
         self::assertSame(
             $clientsInDb,
@@ -218,9 +255,7 @@ final class InstanceExportManifestTest extends TestCase
     /** Obnovitelný export je přímo tento ZIP, bez druhého vnořeného archivu. */
     public function testRestorePartMakesTheCompleteExportDirectlyRestorable(): void
     {
-        $result = $this->export->runForSupplier($this->supplierId, [InstanceExportService::PART_RESTORE]);
-        $this->tempPaths[] = (string) $result['abs_path'];
-        $this->tempPaths[] = (string) $result['abs_path'] . '.sha256';
+        $result = $this->exportPart(InstanceExportService::PART_RESTORE);
 
         $archive = new ZipArchive();
         self::assertTrue($archive->open((string) $result['abs_path']) === true);
@@ -255,15 +290,13 @@ final class InstanceExportManifestTest extends TestCase
         // ⚠️ PART_RESTORE, ne PART_DATA: samotný datový export obnovitelný
         // NENÍ a skript ho odmítne (`restore_incomplete`). Kontrolovat exit
         // kódy nad archivem, který se stejně obnovit nedá, by neověřilo nic.
-        $result = $this->export->runForSupplier($this->supplierId, [InstanceExportService::PART_RESTORE]);
+        $result = $this->exportPart(InstanceExportService::PART_RESTORE);
         $archive = (string) $result['abs_path'];
-        $this->tempPaths[] = $archive;
-        $this->tempPaths[] = $archive . '.sha256';
 
         $script = dirname(__DIR__, 3) . '/bin/archive-restore.php';
         self::assertFileExists($script);
 
-        $database = (string) $this->db->pdo()->query('SELECT DATABASE()')->fetchColumn();
+        $database = (string) self::$db->pdo()->query('SELECT DATABASE()')->fetchColumn();
         self::assertNotSame('', $database, 'Test potřebuje znát jméno testovací databáze.');
 
         // Platný archiv → 0
@@ -274,7 +307,7 @@ final class InstanceExportManifestTest extends TestCase
         // Poškozený obsah (sha256 nesedí) → 1
         $corrupt = $archive . '.corrupt.zip';
         copy($archive, $corrupt);
-        $this->tempPaths[] = $corrupt;
+        self::$tempPaths[] = $corrupt;
         $zip = new ZipArchive();
         self::assertTrue($zip->open($corrupt) === true);
         $zip->addFromString('manifest.json', '{"format":"myucto-instance-export","poskozeno":true}');
@@ -292,10 +325,26 @@ final class InstanceExportManifestTest extends TestCase
 
     private function exportData(): array
     {
-        $result = $this->export->runForSupplier($this->supplierId, [InstanceExportService::PART_DATA]);
-        $this->tempPaths[] = (string) $result['abs_path'];
-        $this->tempPaths[] = (string) $result['abs_path'] . '.sha256';
-        return $result;
+        return $this->exportPart(InstanceExportService::PART_DATA);
+    }
+
+    private function exportPart(string $part): array
+    {
+        if (isset(self::$archives[$part])) {
+            return self::$archives[$part];
+        }
+        $result = self::$export->runForSupplier(self::$supplierId, [$part]);
+        $source = (string) $result['abs_path'];
+        $immutable = $source . '.' . $part . '.fixture.zip';
+        self::$tempPaths[] = $source;
+        self::$tempPaths[] = $source . '.sha256';
+        self::$tempPaths[] = $immutable;
+        self::$tempPaths[] = $immutable . '.sha256';
+        if (!copy($source, $immutable) || !copy($source . '.sha256', $immutable . '.sha256')) {
+            throw new \RuntimeException('Nepodařilo se připravit neměnný testovací archiv.');
+        }
+        $result['abs_path'] = $immutable;
+        return self::$archives[$part] = $result;
     }
 
     /**

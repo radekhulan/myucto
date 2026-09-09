@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Tests\Support\PhpSourceRegions;
 use PHPUnit\Framework\Attributes\Group;
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -118,7 +119,7 @@ final class OssReplaceItemsSeamTest extends TestCase
                 $stale[] = $rel . ' — soubor neexistuje';
                 continue;
             }
-            $raw = (string) file_get_contents($path);
+            $raw = SourceCorpus::read($path);
             foreach (PhpSourceRegions::missingSymbols($raw, array_keys($symbols)) as $missing) {
                 $stale[] = $rel . '::' . $missing . ' — metoda neexistuje';
             }
@@ -165,7 +166,7 @@ final class OssReplaceItemsSeamTest extends TestCase
             if ($rel === 'Repository/InvoiceRepository.php') {
                 continue; // sám seam; jeho zápis hlídá OssItemInsertCoverageTest
             }
-            $raw = (string) file_get_contents($path);
+            $raw = SourceCorpus::read($path);
             if (!str_contains($raw, '->replaceItems(')) {
                 continue;
             }
@@ -253,15 +254,6 @@ final class OssReplaceItemsSeamTest extends TestCase
     /** @return list<string> */
     private static function phpFiles(string $dir): array
     {
-        $out = [];
-        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
-        foreach ($it as $f) {
-            if ($f instanceof \SplFileInfo && $f->isFile() && $f->getExtension() === 'php') {
-                $out[] = $f->getPathname();
-            }
-        }
-        sort($out);
-
-        return $out;
+        return SourceCorpus::files($dir);
     }
 }

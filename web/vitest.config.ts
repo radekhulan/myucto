@@ -1,6 +1,21 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
+import { availableParallelism } from 'node:os'
+
+const nodeTests = [
+  'src/utils/__tests__/{accountingSetupDependencies,bankConnectionAccount,bankConnectionError,chartAccountOptions,clientPlatform,date,dateInput,epoAttemptState,epoHandoffCache,healthInsurers,navigationLayout,periodDefaultYear,returnPath,safeUrl,slugifyCode,varsymbol}.spec.ts',
+  'src/pages/payroll/__tests__/{employmentLifecycleUi,enforcementEvidenceScope,payrollAgendaLinks,payrollComponentsUi,payrollEmployerAccounts,payrollTime,payrollTimeGrid,statutoryEvidenceForm}.spec.ts',
+  'src/api/__tests__/{hostingActions,instanceAlert,instanceHealth,instancePreview,payrollYearClosed,storageQuota,storageQuotaSticky}.spec.ts',
+  'src/components/layout/__tests__/{dataBoxNav,hostingNavGating,payrollNavOrder,permissionNav,quickCreateEmployee}.spec.ts',
+  'src/components/settings/__tests__/bankRuleTemplatePermissions.spec.ts',
+  'src/pages/admin/__tests__/{DataBoxAccessAndTheme,rolesFixedPresets}.spec.ts',
+  'src/pages/hosting/__tests__/HostingEnvironmentGuard.spec.ts',
+  'src/config/__tests__/manualChapters.spec.ts',
+  'src/workspace/__tests__/panelSizing.spec.ts',
+  'src/composables/__tests__/usePayrollLabels.spec.ts',
+  'src/components/bank/__tests__/bankTranslations.spec.ts',
+]
 
 // Časové pásmo se pinuje ještě před startem workerů: `formatUtcDateTime`
 // převádí UTC sloupce do pásma stroje, takže bez tohohle by tytéž testy prošly
@@ -19,9 +34,21 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'jsdom',
     env: { TZ: 'Europe/Prague' },
-    fileParallelism: false,
-    include: ['src/**/*.{test,spec}.ts'],
+    isolate: true,
+    fileParallelism: true,
+    maxWorkers: Math.min(20, Math.floor(availableParallelism() * 1.25)),
+    projects: [
+      { extends: true, test: { name: 'node', environment: 'node', include: nodeTests } },
+      {
+        extends: true,
+        test: {
+          name: 'dom',
+          environment: 'jsdom',
+          include: ['src/**/*.{test,spec}.ts'],
+          exclude: nodeTests,
+        },
+      },
+    ],
   },
 })

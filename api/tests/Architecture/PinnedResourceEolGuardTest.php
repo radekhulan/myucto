@@ -57,9 +57,14 @@ final class PinnedResourceEolGuardTest extends TestCase
 
     public function testEveryPinnedFileHasExplicitEolRule(): void
     {
+        $paths = [];
+        foreach ($this->manifests() as $manifest) {
+            array_push($paths, $manifest, ...array_keys($this->pinnedFiles($manifest)));
+        }
+        $attributes = $this->gitAttributes($paths);
         foreach ($this->manifests() as $manifest) {
             foreach ([$manifest, ...array_keys($this->pinnedFiles($manifest))] as $path) {
-                $attrs = $this->gitAttributes($path);
+                $attrs = $attributes[$this->relative($path)];
                 self::assertNotSame(
                     'unspecified',
                     $attrs['text'],
@@ -73,17 +78,22 @@ final class PinnedResourceEolGuardTest extends TestCase
     /** @return list<string> absolutní cesty k SHA256SUMS souborům v repozitáři */
     private function manifests(): array
     {
+        static $manifests = null;
+        if ($manifests !== null) {
+            return $manifests;
+        }
         $out = [];
-        $it = new \RecursiveIteratorIterator(
+        $it = new \RecursiveIteratorIterator(new \RecursiveCallbackFilterIterator(
             new \RecursiveDirectoryIterator($this->repoRoot() . '/api', \FilesystemIterator::SKIP_DOTS),
-        );
+            static fn (\SplFileInfo $file): bool => !str_contains($file->getPathname(), 'vendor'),
+        ));
         foreach ($it as $file) {
             if ($file->getFilename() === 'SHA256SUMS' && !str_contains($file->getPathname(), 'vendor')) {
                 $out[] = str_replace('\\', '/', $file->getPathname());
             }
         }
         sort($out);
-        return $out;
+        return $manifests = $out;
     }
 
     /**
@@ -102,16 +112,40 @@ final class PinnedResourceEolGuardTest extends TestCase
         return $out;
     }
 
-    /** @return array{text:string} */
-    private function gitAttributes(string $path): array
+    /** @return array<string,array{text:string}> */
+    private function gitAttributes(array $paths): array
     {
-        $cmd = 'git -C ' . escapeshellarg($this->repoRoot())
-            . ' check-attr text -- ' . escapeshellarg($this->relative($path)) . ' 2>&1';
-        $output = (string) shell_exec($cmd);
-        if (preg_match('/: text: (\S+)/', $output, $m) !== 1) {
-            self::markTestSkipped('git check-attr není dostupný: ' . trim($output));
+        $process = proc_open(
+            ['git', '-C', $this->repoRoot(), 'check-attr', '-z', '--stdin', 'text'],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+        );
+        if (!is_resource($process)) {
+            self::markTestSkipped('git check-attr není dostupný.');
         }
-        return ['text' => $m[1]];
+        $relative = array_map($this->relative(...), array_values(array_unique($paths)));
+        fwrite($pipes[0], implode("\0", $relative) . "\0");
+        fclose($pipes[0]);
+        $output = stream_get_contents($pipes[1]);
+        $error = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        if (proc_close($process) !== 0) {
+            self::markTestSkipped('git check-attr není dostupný: ' . trim($error));
+        }
+        $fields = explode("\0", rtrim($output, "\0"));
+        $attributes = [];
+        for ($i = 0; $i + 2 < count($fields); $i += 3) {
+            if ($fields[$i + 1] === 'text') {
+                $attributes[$fields[$i]] = ['text' => $fields[$i + 2]];
+            }
+        }
+        foreach ($relative as $path) {
+            if (!isset($attributes[$path])) {
+                self::fail('git check-attr nevrátil atribut pro ' . $path);
+            }
+        }
+        return $attributes;
     }
 
     private function relative(string $path): string

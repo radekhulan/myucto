@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Architecture;
 
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -38,18 +39,10 @@ final class SessionOnlyGuardContractTest extends TestCase
     private function phpFiles(string $dir): array
     {
         $root = dirname(__DIR__, 2);
-        $out = [];
-        $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($root . '/' . $dir, \FilesystemIterator::SKIP_DOTS),
+        return array_map(
+            static fn (string $path): string => $dir . '/' . $path,
+            array_keys(SourceCorpus::sources($root . '/' . $dir)),
         );
-        foreach ($it as $file) {
-            if ($file->getExtension() !== 'php') {
-                continue;
-            }
-            $out[] = str_replace('\\', '/', substr($file->getPathname(), strlen($root) + 1));
-        }
-        sort($out);
-        return $out;
     }
 
     public function testAuthMethodAttributeIsReadOnlyThroughTheHelper(): void
@@ -60,7 +53,7 @@ final class SessionOnlyGuardContractTest extends TestCase
             if (in_array($rel, self::ALLOWED_RAW_READS, true)) {
                 continue;
             }
-            $src = (string) file_get_contents($root . '/' . $rel);
+            $src = SourceCorpus::read($root . '/' . $rel);
             if (str_contains($src, 'ATTR_METHOD')) {
                 $offenders[] = $rel;
             }
@@ -83,7 +76,7 @@ final class SessionOnlyGuardContractTest extends TestCase
             if ($rel === 'src/Http/Json.php') {
                 continue;
             }
-            $src = (string) file_get_contents($root . '/' . $rel);
+            $src = SourceCorpus::read($root . '/' . $rel);
             // Kód smí padnout jen z helperu; ručně sestavená odpověď se stejným
             // kódem by obešla jednotný status i text.
             if (preg_match("/Json::error\([^;]*'session_required'/s", $src) === 1) {
@@ -109,7 +102,7 @@ final class SessionOnlyGuardContractTest extends TestCase
      */
     public function testPayrollEvidenceInDocumentsStaysSessionOnly(): void
     {
-        $src = (string) file_get_contents(
+        $src = SourceCorpus::read(
             dirname(__DIR__, 2) . '/src/Service/Document/DocumentViewerResolver.php',
         );
 
@@ -155,7 +148,7 @@ final class SessionOnlyGuardContractTest extends TestCase
      */
     public function testOnlySubmissionEvidenceCanBeUnlockedForTokens(): void
     {
-        $src = (string) file_get_contents(
+        $src = SourceCorpus::read(
             dirname(__DIR__, 2) . '/src/Service/Document/DocumentViewerResolver.php',
         );
 

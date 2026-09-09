@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Architecture;
 
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -182,21 +183,8 @@ final class PayrollSubmissionReachabilityTest extends TestCase
             if (!is_dir($directory)) {
                 continue;
             }
-            $iterator = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator(
-                    $directory,
-                    \FilesystemIterator::SKIP_DOTS,
-                ),
-            );
-            foreach ($iterator as $file) {
-                if (!$file instanceof \SplFileInfo
-                    || $file->getExtension() !== 'php'
-                ) {
-                    continue;
-                }
-                $source = (string) file_get_contents(
-                    (string) $file->getRealPath(),
-                );
+            foreach (SourceCorpus::files($directory) as $path) {
+                $source = SourceCorpus::read($path);
                 if (preg_match('/^namespace\s+/m', $source) === 1) {
                     continue;
                 }
@@ -255,7 +243,7 @@ final class PayrollSubmissionReachabilityTest extends TestCase
      */
     private function dependenciesOf(string $file, array $known): array
     {
-        $source = (string) file_get_contents($file);
+        $source = SourceCorpus::read($file);
         $found = [];
         if (preg_match_all(
             '/^use\s+(MyInvoice\\\\[A-Za-z0-9_\\\\]+)\s*(?:as\s+\w+\s*)?;/m',
@@ -308,20 +296,12 @@ final class PayrollSubmissionReachabilityTest extends TestCase
         if (!is_dir($directory)) {
             return [];
         }
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator(
-                $directory,
-                \FilesystemIterator::SKIP_DOTS,
-            ),
-        );
+        static $cache = [];
+        if (isset($cache[$directory])) {
+            return $cache[$directory];
+        }
         $classes = [];
-        foreach ($iterator as $file) {
-            if (!$file instanceof \SplFileInfo
-                || $file->getExtension() !== 'php'
-            ) {
-                continue;
-            }
-            $path = (string) $file->getRealPath();
+        foreach (SourceCorpus::files($directory) as $path) {
             $class = $this->classNameIn($path);
             if ($class !== null) {
                 $classes[$class] = $path;
@@ -329,7 +309,7 @@ final class PayrollSubmissionReachabilityTest extends TestCase
         }
         ksort($classes);
 
-        return $classes;
+        return $cache[$directory] = $classes;
     }
 
     /**
@@ -347,7 +327,7 @@ final class PayrollSubmissionReachabilityTest extends TestCase
      */
     private function classNameIn(string $file): ?string
     {
-        $source = (string) file_get_contents($file);
+        $source = SourceCorpus::read($file);
         if (preg_match('/^namespace\s+([^;]+);/m', $source, $namespace) !== 1) {
             return null;
         }

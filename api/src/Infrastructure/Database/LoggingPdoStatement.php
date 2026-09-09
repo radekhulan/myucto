@@ -15,7 +15,7 @@ use Psr\Log\LoggerInterface;
  */
 final class LoggingPdoStatement extends PDOStatement
 {
-    protected function __construct(private readonly LoggerInterface $logger) {}
+    protected function __construct(private readonly LoggerInterface $logger, private readonly ?\Closure $schemaChanged = null) {}
 
     public function execute(?array $params = null): bool
     {
@@ -31,6 +31,7 @@ final class LoggingPdoStatement extends PDOStatement
         // (drtivá většina volání) platí jen jedno porovnání.
         if ($ok) {
             WriteWatcher::noteStatement((string) $this->queryString);
+            ($this->schemaChanged)?->__invoke((string) $this->queryString);
         }
 
         return $ok;

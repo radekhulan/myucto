@@ -36,7 +36,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 
 $rootDir = Bootstrap::rootDir();
 $config  = Config::load($rootDir);
-$db      = (new Connection($config))->pdo();
+$connection = new Connection($config);
+$db      = $connection->pdo();
 
 if (in_array('--repair-definers', $argv, true)) {
     repairMissingTriggerDefiners($db, in_array('--apply', $argv, true));
@@ -215,13 +216,7 @@ echo "Hotovo.\n";
 // vypršení TTL tvrdila, že nový sloupec neexistuje, a tiše by běžela bez feature,
 // kterou migrace přinesla. Provádí se i když nebyly žádné pending migrace: cesta je
 // levná a stav po `migrate.php` má být vždy konzistentní.
-$__schemaCachePath = \MyInvoice\Infrastructure\Database\SchemaCache::pathFor(
-    $config->dataDir() ?? $rootDir,
-    (string) $config->get('db.name', ''),
-);
-if (\MyInvoice\Infrastructure\Database\SchemaCache::invalidate($__schemaCachePath)) {
-    echo "Cache schématu zneplatněna.\n";
-}
+$connection->invalidateSchemaCache();
 
 // Auto-backfill po migracích — detekuje stale data a spouští příslušné skripty
 // s --apply. Skip pokud user dal --no-backfills (CI / read-only deploy).

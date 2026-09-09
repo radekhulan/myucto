@@ -847,6 +847,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         $environment = getenv();
         $environment['MYINVOICE_DB_NAME'] = $this->targetDatabase;
         $environment['MYSQL_DATABASE'] = $this->targetDatabase;
+        $environment['MYINVOICE_SCHEMA_CACHE'] = '0';
         $process = proc_open(
             [PHP_BINARY, $this->rootDir . '/api/bin/migrate.php', '--no-backfills'],
             [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],

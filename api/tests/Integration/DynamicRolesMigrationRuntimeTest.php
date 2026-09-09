@@ -189,6 +189,7 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
         self::assertIsArray($env);
         $env['MYINVOICE_DB_NAME'] = $this->database;
         $env['MYSQL_DATABASE'] = $this->database;
+        $env['MYINVOICE_SCHEMA_CACHE'] = '0';
         $pipes = [];
         $process = proc_open(
             $command,

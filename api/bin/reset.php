@@ -67,7 +67,8 @@ $rootDir = Bootstrap::rootDir();
 
 try {
     $config = Config::load($rootDir);
-    $pdo    = (new Connection($config))->pdo();
+    $connection = new Connection($config);
+    $pdo    = $connection->pdo();
 } catch (\Throwable $e) {
     fwrite(STDERR, "[reset] Chyba: " . $e->getMessage() . "\n");
     fwrite(STDERR, "[reset] Pravděpodobně chybí cfg.php nebo DB. Spusť `php api/bin/setup.php`.\n");
@@ -334,12 +335,7 @@ if (!$dryRun) {
     if (!$keepUsersSupplier && \MyInvoice\Infrastructure\Config\InstallStateCache::invalidate()) {
         echo "\n[reset] Značka „setup hotový\" zrušena.\n";
     }
-    \MyInvoice\Infrastructure\Database\SchemaCache::invalidate(
-        \MyInvoice\Infrastructure\Database\SchemaCache::pathFor(
-            $config->dataDir() ?? $rootDir,
-            (string) $config->get('db.name', ''),
-        ),
-    );
+    $connection->invalidateSchemaCache();
 }
 
 // Zruš setup-time MFA přepínače v cfg.local.php (jinak by stará hodnota přežila nový setup).
