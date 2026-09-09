@@ -37,6 +37,10 @@ final class PreFinalizeCheckService
         private readonly AccountingPeriodRepository $periods,
         private readonly FinancialStatementService $statements,
         private readonly TaxConstantsRepository $constants,
+        // P-1 — jednotná brána na nepodporované případy pro OBĚ přiznání. Dřív
+        // existovala jen u DPFO, a to jen jako ruční volný text `unsupported_cases`
+        // v roční uzávěrce daňové evidence; u DPPO nebyla vůbec.
+        private readonly UnsupportedCaseDetector $unsupportedCases,
     ) {}
 
     /**
@@ -60,6 +64,9 @@ final class PreFinalizeCheckService
         $checks[] = $this->checkNonDeductibleAccounts($supplierId, $startsOn, $endsOn, $isDoubleEntry);
         $checks[] = $this->checkVatReturnsFiled($supplierId, $year);
         $checks[] = $this->checkExpenseModeTransition((array) ($computation['warnings'] ?? []));
+        array_push($checks, ...$this->unsupportedCaseChecks(
+            $supplierId, $type, $podklady, (array) ($computation['result'] ?? []), $inputs
+        ));
         if ($type === 'fo') {
             array_push($checks, ...$this->dpfoChecks($podklady, (array) ($computation['result'] ?? []), $year));
         }
@@ -82,6 +89,38 @@ final class PreFinalizeCheckService
             'summary' => $summary,
             'can_finalize' => $summary['blocker'] === 0,
         ];
+    }
+
+    /**
+     * P-1 — nepodporované/neúplné situace ({@see UnsupportedCaseDetector}) jako kontroly
+     * checklistu. Blokující nález sráží `can_finalize` na false, takže se přiznání
+     * nefinalizuje a nevydá; varovný jen svítí. Ruční `unsupported_cases` z roční
+     * uzávěrky daňové evidence detektor slévá do stejného seznamu, aby měla účetní
+     * jeden soupis nálezů, ne dva.
+     *
+     * @param array<string,mixed> $podklady
+     * @param array<string,mixed> $result
+     * @param array<string,mixed> $inputs
+     * @return list<array<string,mixed>>
+     */
+    private function unsupportedCaseChecks(int $supplierId, string $type, array $podklady, array $result, array $inputs): array
+    {
+        $checks = [];
+        foreach ($this->unsupportedCases->detect($supplierId, $type, $podklady, $result, $inputs) as $finding) {
+            $checks[] = [
+                'key' => 'unsupported_' . $finding['key'],
+                'severity' => $finding['severity'],
+                'ok' => false,
+                'overrideable' => false,
+                'value' => [
+                    'case' => $finding['key'],
+                    'message' => $finding['message'],
+                    'action' => $finding['action'],
+                ],
+            ];
+        }
+
+        return $checks;
     }
 
     /** @return list<array<string,mixed>> */

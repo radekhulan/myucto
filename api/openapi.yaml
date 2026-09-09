@@ -22180,6 +22180,20 @@ components:
         default_branding_profile_id: { type: [integer, "null"], readOnly: true }
         auto_send_reminders: { type: boolean }
         reminder_days_after_due: { type: integer, minimum: 1, maximum: 365 }
+        epo_taxpayer_code:
+          type: [string, "null"]
+          enum: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", null]
+          description: |
+            Typ poplatníka podle číselníku `typ_popldpp` formuláře DPPDP9. Prázdný
+            řetězec se uloží jako `null` (= účetní typ poplatníka nepotvrdila).
+        tax_entity_status: { type: string, enum: [normal, liquidation, insolvency, transformation], default: normal }
+        tax_entity_status_date: { type: [string, "null"], format: date }
+        tax_accounting_decree: { type: string, enum: ["500", "501", "502", "503", "504", "325", "410"], default: "500" }
+        tax_investment_incentive: { type: boolean }
+        tax_atad_cfc: { type: boolean }
+        tax_public_benefit: { type: boolean }
+        tax_cooperating_person: { type: boolean }
+        tax_foreign_income_credit: { type: boolean }
 
     SupplierFull:
       type: object
@@ -22268,6 +22282,32 @@ components:
         vat_period: { type: [string, "null"], enum: [monthly, quarterly, null] }
         financial_office_code: { type: [string, "null"], description: "Kód FÚ pro EPO (= CRPDPH cisloFu)" }
         flat_tax_band: { type: string, enum: [none, band1, band2, band3], description: "Pásmo paušální daně" }
+        epo_taxpayer_code:
+          type: [string, "null"]
+          enum: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", null]
+          description: |
+            Typ poplatníka podle číselníku `typ_popldpp` formuláře DPPDP9 (0 a 8/9
+            investiční pobídky, 1 ostatní, 2 daňový nerezident, 3 veřejně prospěšný
+            poplatník, 4 investiční fond, 5 investiční společnost, 6 penzijní
+            společnost, 7 část období základní investiční fond). `null` = účetní typ
+            poplatníka nepotvrdila; přiznání se pak staví jako pro typ 1. Aplikace
+            umí sestavit přiznání jen pro typ 1 — u ostatních se finalizace zastaví.
+        tax_entity_status:
+          type: string
+          enum: [normal, liquidation, insolvency, transformation]
+          default: normal
+          description: "Stav poplatníka. Jiný než `normal` mění typ přiznání (`typ_dapdpp`) a finalizaci zastaví."
+        tax_entity_status_date: { type: [string, "null"], format: date, description: "Rozhodný den stavu poplatníka" }
+        tax_accounting_decree:
+          type: string
+          enum: ["500", "501", "502", "503", "504", "325", "410"]
+          default: "500"
+          description: "Účetní vyhláška závěrky (`uv_vyhl`). Aplikace sestavuje výkazy jen podle 500/2002 Sb."
+        tax_investment_incentive: { type: boolean, default: false, description: "Nositel příslibu investiční pobídky (§ 35a/§ 35b ZDP)" }
+        tax_atad_cfc: { type: boolean, default: false, description: "Dotčen pravidly ATAD/CFC (§ 23e-23h, § 38fa ZDP)" }
+        tax_public_benefit: { type: boolean, default: false, description: "Veřejně prospěšný poplatník (§ 17a ZDP)" }
+        tax_cooperating_person: { type: boolean, default: false, description: "FO rozděluje příjmy na spolupracující osobu (§ 13 ZDP)" }
+        tax_foreign_income_credit: { type: boolean, default: false, description: "FO má zahraniční příjmy se zápočtem daně (§ 38f ZDP)" }
         email_branding_enabled: { type: boolean }
         email_accent_color: { type: string, example: "#3B2D83" }
         has_email_logo: { type: boolean }
