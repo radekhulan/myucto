@@ -230,7 +230,7 @@ final class InstanceExportIsolationTest extends TestCase
     public function testSystemAndCrossTenantTablesAreNotExported(): void
     {
         $scopes = $this->resolver->resolveAll($this->supplierId);
-        foreach (['users', 'user_suppliers', 'migrations', 'api_tokens', 'password_resets', 'login_attempts'] as $table) {
+        foreach (['users', 'user_suppliers', 'migrations', 'api_tokens', 'password_resets', 'login_attempts', 'instance_exports', 'instance_restore_trigger_recovery'] as $table) {
             self::assertArrayNotHasKey($table, $scopes, "Tabulka {$table} nepatří do exportu firmy.");
         }
         // A musí být VIDĚT, že chybí záměrně — jinak se po roce nedopočítáme.

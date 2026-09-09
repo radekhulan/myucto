@@ -22,18 +22,19 @@ final class ReadableDocumentArchiveLayout
     public function __construct(private readonly PDO $pdo) {}
 
     /**
+     * @param null|callable(array{table:string,id:?int,reason:string}):void $onWarning
      * @return list<array{source:string,entry:string,storage_path:string,sha256:?string,kind:string}>
      */
-    public function forSupplier(int $supplierId, string $documentsPrefix, string $journalPrefix): array
+    public function forSupplier(int $supplierId, string $documentsPrefix, string $journalPrefix, ?callable $onWarning = null): array
     {
         $usedEntries = [];
         $knownSources = [];
         $items = [];
 
-        foreach ($this->documentFiles($supplierId, $documentsPrefix, $usedEntries, $knownSources) as $item) {
+        foreach ($this->documentFiles($supplierId, $documentsPrefix, $usedEntries, $knownSources, $onWarning) as $item) {
             $items[] = $item;
         }
-        foreach ($this->journalFiles($supplierId, $journalPrefix, $usedEntries, $knownSources) as $item) {
+        foreach ($this->journalFiles($supplierId, $journalPrefix, $usedEntries, $knownSources, $onWarning) as $item) {
             $items[] = $item;
         }
         foreach ($this->orphanedFiles($supplierId, $documentsPrefix, $journalPrefix, $usedEntries, $knownSources) as $item) {
@@ -84,7 +85,7 @@ final class ReadableDocumentArchiveLayout
      * @param array<string, true> $knownSources
      * @return list<array{source:string,entry:string,storage_path:string,sha256:?string,kind:string}>
      */
-    private function documentFiles(int $supplierId, string $prefix, array &$usedEntries, array &$knownSources): array
+    private function documentFiles(int $supplierId, string $prefix, array &$usedEntries, array &$knownSources, ?callable $onWarning): array
     {
         try {
             $folders = $this->folders($supplierId);
@@ -100,15 +101,20 @@ final class ReadableDocumentArchiveLayout
             );
             $stmt->execute([$supplierId]);
         } catch (\Throwable) {
+            if ($onWarning !== null) {
+                $onWarning(['table' => 'documents', 'id' => null, 'reason' => 'source_query_failed']);
+            }
             return [];
         }
 
         $items = [];
         $primarySeen = [];
+        $reported = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $documentId = (int) $row['document_id'];
             $candidates = [[
                 'id' => $documentId,
+                'table' => 'documents',
                 'sha' => (string) ($row['sha256'] ?? ''),
                 'filename' => (string) ($row['filename'] ?? ''),
                 'name' => (string) (($row['original_name'] ?? '') ?: ($row['title'] ?? '')),
@@ -117,6 +123,7 @@ final class ReadableDocumentArchiveLayout
             if (($row['file_id'] ?? null) !== null) {
                 $candidates[] = [
                     'id' => (int) $row['file_id'],
+                    'table' => 'document_files',
                     'sha' => (string) ($row['file_sha256'] ?? ''),
                     'filename' => (string) ($row['file_filename'] ?? ''),
                     'name' => (string) (($row['file_original_name'] ?? '') ?: ($row['original_name'] ?? '') ?: ($row['title'] ?? '')),
@@ -128,6 +135,13 @@ final class ReadableDocumentArchiveLayout
                 $sha = $candidate['sha'];
                 $filename = $candidate['filename'];
                 if ($sha === '' || $filename === '') {
+                    $warningKey = $candidate['table'] . ':' . $candidate['id'];
+                    if (!isset($reported[$warningKey])) {
+                        if ($onWarning !== null) {
+                            $onWarning(['table' => $candidate['table'], 'id' => $candidate['id'], 'reason' => 'incomplete_source_metadata']);
+                        }
+                        $reported[$warningKey] = true;
+                    }
                     continue;
                 }
                 $key = $documentId . ':' . $sha;
@@ -138,6 +152,13 @@ final class ReadableDocumentArchiveLayout
 
                 $source = DocumentStorage::baseDir($supplierId) . '/' . substr($sha, 0, 2) . '/' . $filename;
                 if (!is_file($source)) {
+                    $warningKey = $candidate['table'] . ':' . $candidate['id'];
+                    if (!isset($reported[$warningKey])) {
+                        if ($onWarning !== null) {
+                            $onWarning(['table' => $candidate['table'], 'id' => $candidate['id'], 'reason' => 'missing_source_file']);
+                        }
+                        $reported[$warningKey] = true;
+                    }
                     continue;
                 }
                 $relative = $this->folderPath($folders, $row['folder_id'] === null ? null : (int) $row['folder_id']);
@@ -167,7 +188,7 @@ final class ReadableDocumentArchiveLayout
      * @param array<string, true> $knownSources
      * @return list<array{source:string,entry:string,storage_path:string,sha256:?string,kind:string}>
      */
-    private function journalFiles(int $supplierId, string $prefix, array &$usedEntries, array &$knownSources): array
+    private function journalFiles(int $supplierId, string $prefix, array &$usedEntries, array &$knownSources, ?callable $onWarning): array
     {
         try {
             $stmt = $this->pdo->prepare(
@@ -178,6 +199,9 @@ final class ReadableDocumentArchiveLayout
             );
             $stmt->execute([$supplierId]);
         } catch (\Throwable) {
+            if ($onWarning !== null) {
+                $onWarning(['table' => 'journal_entry_attachments', 'id' => null, 'reason' => 'source_query_failed']);
+            }
             return [];
         }
 
@@ -186,10 +210,16 @@ final class ReadableDocumentArchiveLayout
             $sha = (string) ($row['sha256'] ?? '');
             $filename = (string) ($row['filename'] ?? '');
             if ($sha === '' || $filename === '') {
+                if ($onWarning !== null) {
+                    $onWarning(['table' => 'journal_entry_attachments', 'id' => (int) $row['id'], 'reason' => 'incomplete_source_metadata']);
+                }
                 continue;
             }
             $source = JournalAttachmentStorage::baseDir($supplierId) . '/' . substr($sha, 0, 2) . '/' . $filename;
             if (!is_file($source)) {
+                if ($onWarning !== null) {
+                    $onWarning(['table' => 'journal_entry_attachments', 'id' => (int) $row['id'], 'reason' => 'missing_source_file']);
+                }
                 continue;
             }
             $id = (int) $row['id'];

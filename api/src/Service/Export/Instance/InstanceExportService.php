@@ -55,11 +55,10 @@ use Psr\Log\LoggerInterface;
  *   do pole se nenačítá nikdy; BLOBy bankovních výpisů se navíc tahají po jednom
  *   řádku a jdou rovnou do souboru.
  *
- * • **Data se NEčtou v jedné transakci.** Snapshot držený hodiny (export s PDF tak
- *   dlouho běží) by na sdílené instanci zapíchl undo log a poškodil všechny ostatní
- *   firmy víc, než kolik přinese atomicita archivu. Manifest proto nese
- *   `data_snapshot: "non-atomic"` a časy začátku a konce čtení, aby bylo poznat,
- *   v jakém okně archiv vznikl.
+ * • **Řádková data mají společný transakční snapshot.** Transakce končí před
+ *   generováním PDF a čtením souborů, které mohou trvat výrazně déle. Celý archiv
+ *   proto zůstává `data_snapshot: "non-atomic"`; `database_snapshot` popisuje
+ *   samostatnou konzistenci řádkových dat.
  */
 final class InstanceExportService
 {
@@ -84,7 +83,11 @@ final class InstanceExportService
     ];
 
     /** Verze formátu archivu — čtečky se podle ní mají rozhodovat. */
-    private const FORMAT_VERSION = 5;
+    private const FORMAT_VERSION = 6;
+
+    public const SHARED_TABLES = [
+        'countries', 'vat_rates', 'units', 'email_templates', 'tax_constants', 'exchange_rates',
+    ];
 
     /**
      * Globální mzdová konfigurace a připnuté legislativní podklady. Nejsou
@@ -421,26 +424,21 @@ final class InstanceExportService
         $archive = new InstanceExportArchive($absPath, $password, $this->maxBytes());
         $sections = [];
         $restoreAssets = ['files' => [], 'blobs' => [], 'documents' => []];
+        $databaseSnapshot = null;
 
         try {
-            if (in_array(self::PART_DATA, $parts, true)) {
-                $sections['data'] = $this->exportData($archive, $supplierId, $jobId, $progress, $workDir);
-            }
             if (in_array(self::PART_DOCUMENTS, $parts, true)) {
                 $sections['doklady'] = $this->exportDocuments(
                     $archive,
                     $supplierId,
-                    $dateFrom,
-                    $dateTo,
+                    in_array(self::PART_RESTORE, $parts, true) ? null : $dateFrom,
+                    in_array(self::PART_RESTORE, $parts, true) ? null : $dateTo,
                     $jobId,
                     $progress,
                     $workDir,
                     $restoreAssets['blobs'],
                     $restoreAssets['documents'],
                 );
-            }
-            if (in_array(self::PART_FILES, $parts, true)) {
-                $sections['prilohy'] = $this->exportFiles($archive, $supplierId, $jobId, $progress, $restoreAssets['files']);
             }
             if (in_array(self::PART_VAT_EXPORTS, $parts, true)) {
                 $sections['dph'] = $this->exportVatPackages(
@@ -453,6 +451,29 @@ final class InstanceExportService
                 );
             }
 
+            if (in_array(self::PART_FILES, $parts, true)) {
+                $sections['prilohy'] = $this->exportFiles($archive, $supplierId, $jobId, $progress, $restoreAssets['files']);
+            }
+            if (in_array(self::PART_DATA, $parts, true)) {
+                $pdo = $this->db->pdo();
+                $ownsTransaction = !$pdo->inTransaction();
+                if ($ownsTransaction) {
+                    $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+                    $pdo->beginTransaction();
+                }
+                try {
+                    $sections['data'] = $this->exportData($archive, $supplierId, $jobId, $progress, $workDir);
+                    $databaseSnapshot = $ownsTransaction ? 'transaction-consistent' : 'caller-transaction';
+                    if ($ownsTransaction) {
+                        $pdo->commit();
+                    }
+                } catch (\Throwable $e) {
+                    if ($ownsTransaction && $pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $e;
+                }
+            }
             $this->step($jobId, $progress, 'Manifest a kontrolní součty');
             $manifest = [
                 'format' => 'myucto-instance-export',
@@ -482,6 +503,7 @@ final class InstanceExportService
                 'parts' => $parts,
                 'encrypted' => $password !== '' ? 'AES-256' : false,
                 'data_snapshot' => 'non-atomic',
+                'database_snapshot' => $databaseSnapshot,
                 'read_started_at' => $startedAt,
                 'read_finished_at' => date('Y-m-d H:i:s'),
                 'sections' => $sections,
@@ -769,6 +791,7 @@ final class InstanceExportService
             ];
         }
         $sharedPayrollTables = $this->exportSharedPayrollTables($archive, $workDir);
+        $sharedTables = $this->exportSharedTables($archive, $workDir);
         $identity = $this->exportIdentity($archive, $supplierId, $workDir);
         // Dočasné soubory drží ZipArchive až do close — vynutíme zápis, ať se uvolní.
         $archive->flushNow();
@@ -776,17 +799,51 @@ final class InstanceExportService
         return [
             'format' => 'JSON Lines (UTF-8, jeden JSON objekt na řádek)',
             'tables' => $tables,
+            'shared_tables' => $sharedTables,
+            'shared_note' => 'Globální nastavení instance včetně vlastních šablon a historických kurzů. '
+                . 'Obnova nahrazuje pouze migrační baseline v prázdné cílové databázi; identity správců se nepřenášejí.',
             'shared_payroll_tables' => $sharedPayrollTables,
             'shared_payroll_note' => 'Globální legislativní podklady a výpočetní obsah správcovských '
                 . 'odchylek jsou součástí obnovy. Identita správců, jejich důvody ani globální audit se neexportují.',
             'identity' => $identity,
             'skipped_tables' => array_diff_key(
                 $this->scopes->skipped(),
-                array_fill_keys(self::SHARED_PAYROLL_TABLES, true),
+                array_fill_keys([...self::SHARED_PAYROLL_TABLES, ...self::SHARED_TABLES], true),
             ),
             'skipped_note' => 'Vynechané tabulky jsou systémové, globální číselníky, '
                 . 'nebo se je nepodařilo jednoznačně přiřadit této firmě. Data firmy v nich nejsou.',
         ];
+    }
+
+    private function exportSharedTables(InstanceExportArchive $archive, string $workDir): array
+    {
+        $tables = [];
+        foreach (self::SHARED_TABLES as $table) {
+            $columns = $this->exportableColumns($table);
+            if ($columns === null) {
+                continue;
+            }
+            if ($columns['unsafe_redacted'] !== []) {
+                throw new InstanceExportException('shared_secret_column', 'Globální tabulka obsahuje tajný sloupec: ' . $table . '.');
+            }
+            if ($table === 'email_templates') {
+                $columns['exported'] = array_values(array_diff($columns['exported'], ['updated_by']));
+                $columns['redacted'][] = 'updated_by (global_admin_user_id)';
+            }
+            $tmp = $workDir . DIRECTORY_SEPARATOR . 'shared-config-' . $table . '.jsonl';
+            $rows = $this->writeSharedTableJsonl($table, $columns['exported'], $columns['order_by'], $tmp);
+            $entry = $rows === 0 ? null : 'shared/config/' . $table . '.jsonl';
+            if ($entry === null) {
+                @unlink($tmp);
+            } else {
+                $archive->addFile($entry, $tmp, deleteAfterFlush: true);
+            }
+            $tables[$table] = [
+                'rows' => $rows, 'entry' => $entry, 'scope' => 'global_instance_configuration',
+                'redacted_columns' => $columns['redacted'],
+            ];
+        }
+        return $tables;
     }
 
     /** @return array<string,array<string,mixed>> */
@@ -1201,6 +1258,9 @@ final class InstanceExportService
                 $warnings[] = "Vydaná {$base}: PDF — " . $e->getMessage();
             }
             $imported = $this->archiveDocumentSource($this->invoiceImportArchiveRoot(), (string) ($row['imported_pdf_path'] ?? ''));
+            if ($imported === null && !empty($row['imported_pdf_path'])) {
+                $warnings[] = "Vydaná {$base}: importovaný originál chybí nebo má neplatnou cestu.";
+            }
             if ($imported !== null) {
                 try {
                     $entry = "doklady/{$year}/vydane-faktury-original/{$base}-original.pdf";
@@ -1249,6 +1309,22 @@ final class InstanceExportService
             $label = substr($label, 0, 100) . '-' . $id;
 
             $original = $archiveRootReal === false ? null : $this->archiveDocumentSource($archiveRoot, (string) ($row['pdf_path'] ?? ''));
+            $sourcePath = (string) ($row['source_path'] ?? '');
+            if ($sourcePath !== '') {
+                $source = $this->archiveDocumentSource($archiveRoot, $sourcePath);
+                if ($source === null) {
+                    $warnings[] = "Přijatá {$label}: původní zdrojový soubor chybí nebo má neplatnou cestu.";
+                } else {
+                    $entry = "doklady/{$year}/prijate-faktury/zdroje/{$id}-" . ExportFilename::sanitize(basename($sourcePath));
+                    $archive->addFile($entry, $source);
+                    $restoreDocuments[] = [
+                        'entry' => $entry,
+                        'storage_path' => 'purchase-invoices/' . $sourcePath,
+                        'sha256' => hash_file('sha256', $source) ?: null,
+                        'kind' => 'purchase_invoice_source',
+                    ];
+                }
+            }
             try {
                 if ($original !== null) {
                     $entry = "doklady/{$year}/prijate-faktury/Prijata-{$label}.pdf";
@@ -1260,10 +1336,18 @@ final class InstanceExportService
                         'kind' => 'purchase_invoice_original_pdf',
                     ];
                 } else {
-                    $archive->addString(
-                        "doklady/{$year}/prijate-faktury/Prijata-{$label}-rekonstrukce.pdf",
-                        $this->purchasePdf->render($id, $supplierId),
-                    );
+                    $warnings[] = "Přijatá {$label}: originální PDF není dostupné, archiv obsahuje rekonstrukci z dat.";
+                    $entry = "doklady/{$year}/prijate-faktury/Prijata-{$label}-rekonstrukce.pdf";
+                    $pdf = $this->purchasePdf->render($id, $supplierId);
+                    $archive->addString($entry, $pdf);
+                    $relativePath = 'sup-' . $supplierId . '/restored/purchase-' . $id . '.pdf';
+                    $restoreDocuments[] = [
+                        'entry' => $entry,
+                        'storage_path' => 'purchase-invoices/' . $relativePath,
+                        'sha256' => hash('sha256', $pdf),
+                        'kind' => 'purchase_invoice_reconstructed_pdf',
+                        'link' => ['table' => 'purchase_invoices', 'id' => $id, 'column' => 'pdf_path', 'value' => $relativePath],
+                    ];
                 }
                 $summary['prijate_pdf']++;
             } catch (\Throwable $e) {
@@ -1285,7 +1369,7 @@ final class InstanceExportService
                 $this->note($jobId, $progress, 'Upozornění: ' . $w);
             }
         }
-        return $summary + ['warnings' => count($warnings)];
+        return $summary + ['warnings' => count($warnings), 'warning_details' => $warnings];
     }
 
     /**
@@ -1388,17 +1472,21 @@ final class InstanceExportService
         ?callable $progress,
         array &$restoreFiles,
     ): array {
+        $warnings = [];
         $readableFiles = (new ReadableDocumentArchiveLayout($this->db->pdo()))->forSupplier(
             $supplierId,
             'prilohy/dokumenty',
             'prilohy/denik',
+            static function (array $warning) use (&$warnings): void { $warnings[] = $warning; },
         );
+        $readableFiles = [...$readableFiles, ...(new InstanceExportSupplementalFiles($this->db->pdo()))->forSupplier($supplierId)];
         $sources = [
             [RuntimePaths::storage('payroll-documents/sup-' . $supplierId), null, 'prilohy/mzdy'],
             [RuntimePaths::storage('payroll-payment-exports/sup-' . $supplierId), null, 'prilohy/mzdove-platebni-exporty'],
             [RuntimePaths::storage('payroll-period-exports/sup-' . $supplierId), null, 'prilohy/mzdove-obdobi'],
             [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/_archive', null, 'prilohy/vydane-faktury-archiv'],
             [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/attachments', null, 'prilohy/vydane-faktury-prilohy'],
+            [RuntimePaths::storage('archives/sup-' . $supplierId), null, 'prilohy/ucetni-archivy'],
         ];
         $skipped = [];
         $files = BackupFileCollector::collect(
@@ -1456,7 +1544,9 @@ final class InstanceExportService
         return [
             'files' => $done,
             'bytes' => $bytes,
-            'sources' => ['prilohy/dokumenty', 'prilohy/denik', ...array_map(static fn (array $s): string => $s[2], $sources)],
+            'warnings' => count($warnings),
+            'missing_sources' => $warnings,
+            'sources' => ['prilohy/dokumenty', 'prilohy/denik', 'prilohy/loga', 'prilohy/importy', ...array_map(static fn (array $s): string => $s[2], $sources)],
             'skipped_outside_root' => count($skipped),
         ];
     }
@@ -1483,7 +1573,7 @@ final class InstanceExportService
     {
         // Jméno dodavatele je na kontaktu, ne na dokladu. LEFT JOIN schválně: chybějící
         // kontakt smí zhoršit jen pojmenování souboru, nikdy vypustit doklad z archivu.
-        $sql = 'SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.issue_date, pi.pdf_path,
+        $sql = 'SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.issue_date, pi.pdf_path, pi.source_path,
                        c.company_name AS vendor_company_name
                   FROM purchase_invoices pi
              LEFT JOIN clients c ON c.id = pi.vendor_id
@@ -1648,6 +1738,8 @@ final class InstanceExportService
             '               s lines=True), jq i běžný textový editor. Tabulek: ' . $tableCount . '.',
             'shared/payroll Globální legislativní podklady mezd nutné k úplné obnově.',
             '               Tabulek: ' . $sharedPayrollTableCount . '; neobsahují data jiných firem.',
+            'shared/config  Globální číselníky, historické kurzy, vlastní daňové konstanty',
+            '               a sdílené e-mailové šablony instance bez identit správců.',
             'doklady/       PDF dokladů po LETECH a agendách (vydané faktury, přijaté faktury,',
             '               výpisy z účtu) a ISDOC vydaných faktur. Tohle je část, kterou',
             '               v praxi potřebuješ nejčastěji — otevře ji jakákoli čtečka PDF.',
@@ -1692,6 +1784,12 @@ final class InstanceExportService
         $lines[] = 'Mzdové osobní údaje a platební exporty zůstávají uvnitř kontextově zašifrované;';
         $lines[] = 'pro jejich čtení po obnově musí cílová instalace bezpečně převzít původní';
         $lines[] = 'app.secret_encryption_key (nebo jej ponechat mezi previous keys). Klíč v archivu není.';
+        $lines[] = 'Zachovej také původní app.payroll_hash_key; pokud nebyl nastavený, původní app.pepper.';
+        $lines[] = 'Bez tohoto hashovacího klíče nelze ověřovat a dohledávat původní mzdové osobní údaje.';
+        $lines[] = 'Tyto klíče přenes odděleně a bezpečně, nejsou součástí ZIPu.';
+        $lines[] = 'Chybějící zdrojové soubory nelze exportem opravit. Náhradní PDF jsou označena';
+        $lines[] = 'jako rekonstrukce a nenahrazují originál dodavatele. Varování jsou v manifestu';
+        $lines[] = 'v sections.doklady.warning_details. Před zrušením zdroje je zkontroluj.';
         $lines[] = '';
         $lines[] = 'OBNOVA';
         $lines[] = str_repeat('-', 60);
@@ -1700,8 +1798,11 @@ final class InstanceExportService
         $lines[] = '  php api/bin/archive-restore.php --file=export.zip --database=prazdna_db --dry-run';
         $lines[] = 'a po úspěšné kontrole stejný příkaz s `--restore --storage=cesta-k-novym-datum --documents`.';
         $lines[] = 'Přepínač --documents vrátí PDF přijatých i vydaných faktur do úložiště aplikace';
-        $lines[] = 'a vydané PDF znovu propojí s doklady. Obnova zachová interní ID a vazby;';
+        $lines[] = 'a PDF znovu propojí s doklady. Obnova zachová interní ID a vazby;';
         $lines[] = 'nepřepíše proto existující data.';
+        $lines[] = 'Sdílené tabulky nahradí migrační baseline v prázdné databázi hodnotami ze zálohy.';
+        $lines[] = 'Obnovitelný archiv vždy obsahuje všechny doklady a binární výpisy bez omezení datem.';
+        $lines[] = 'Zadané období omezuje jen dodatečně generované podklady DPH a uzávěrky.';
         $lines[] = '';
         $lines[] = 'Data se čtou průběžně, ne v jednom okamžiku (viz read_started_at /';
         $lines[] = 'read_finished_at v manifestu) — archiv vznikl v tomhle časovém okně.';

@@ -33,6 +33,7 @@ export interface InstanceExportJob {
   created_at: string
   finished_at: string | null
   downloadable: boolean
+  warning_count?: number
   log_text?: string | null
   summary?: {
     entries: number | null

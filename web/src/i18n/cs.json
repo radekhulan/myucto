@@ -21179,7 +21179,7 @@
       "step_extract": "Do exportu zahrňte část Obnovitelný účetní archiv a připravte prázdnou databázi migrovanou cílovou verzí MyÚčto.",
       "step_dry_run": "Nad hlavním staženým ZIPem nejdřív spusťte kontrolu bez zápisu.",
       "step_restore": "Teprve po úspěšné kontrole spusťte obnovení stejným příkazem s parametrem --restore. Parametr --documents navíc vrátí PDF přijatých i vydaných faktur do aplikace a znovu je s doklady propojí.",
-      "note": "Obnova zachová ID a všechny vazby; cílová databáze i datový adresář proto musí být prázdné. Bez --documents se obnoví data a přílohy, ale PDF doklady se do aplikace nezapíší. Uživatelé se obnoví zablokovaní, bez hesel a MFA — správce jim pošle pozvánku nebo reset hesla."
+      "note": "Obnova zachová ID a vazby; cílová databáze i datový adresář proto musí být prázdné. Bez --documents se obnoví data a přílohy, ale PDF doklady se do aplikace nezapíší. Uživatelé se obnoví zablokovaní, bez hesel a MFA. Pro mzdy bezpečně uchovejte i původní šifrovací a hashovací klíče z konfigurace; ZIP je neobsahuje. Podrobný postup je v manuálu."
     },
     "retention": {
       "title": "Retence účetních a daňových záznamů",
@@ -21205,7 +21205,8 @@
     },
     "date_from": "Doklady od",
     "date_to": "Doklady do",
-    "range_hint": "Nepovinné. Omezí doklady, měsíční/čtvrtletní DPH podklady a uzávěrky; data a obnovitelný archiv jsou vždy celé firmy.",
+    "range_hint": "Nepovinné. Omezí DPH podklady a uzávěrky. Při úplném obnovitelném archivu se doklady, výpisy a data zahrnou za celou firmu; jinak rozsah omezí i doklady a výpisy.",
+    "warnings": "Upozornění: {count}. Zkontrolujte detail a manifest; některé soubory mohou chybět nebo být nahrazené rekonstrukcí.",
     "start": "Spustit export",
     "starting": "Spouštím…",
     "started": "Export běží na pozadí. Až doběhne, objeví se v seznamu ke stažení.",

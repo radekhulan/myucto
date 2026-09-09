@@ -12,8 +12,8 @@ use ZipArchive;
 final class CompleteInstanceRestoreService
 {
     private const FORMAT = 'myucto-instance-export';
-    private const VERSION = 5;
-    private const SUPPORTED_VERSIONS = [3, 4, self::VERSION];
+    private const VERSION = 6;
+    private const SUPPORTED_VERSIONS = [3, 4, 5, self::VERSION];
     private const DISABLED_PASSWORD_HASH = '$2y$10$K6q6A1qORRMi5gzg1me.bO4w0NqJGb9jY36Tv1azcLYtKpIwZxjua';
     private const RESTORED_RULESET_REASON = 'Obnoveno z úplného exportu firmy bez globální správcovské provenance.';
 
@@ -24,6 +24,7 @@ final class CompleteInstanceRestoreService
     ];
 
     private ?array $schema = null;
+    private array $writtenFiles = [];
 
     public function __construct(
         private readonly PDO $pdo,
@@ -62,63 +63,79 @@ final class CompleteInstanceRestoreService
             $manifest = $this->manifest($dir);
             $counts = $this->validateContents($dir, $manifest);
             $this->assertTargetSchema($manifest);
-            $this->assertEmptyTarget();
-            $this->assertEmptyStorage();
-
-            $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-            $this->pdo->beginTransaction();
-            try {
-                foreach ((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? []) as $table => $info) {
-                    $this->restoreSharedEntry($dir, (string) $table, $info['entry'] ?? null, $counts);
+            return (new InstanceRestoreTriggers($this->pdo))->run(function () use ($dir, $manifest, $counts): array {
+                $foreignKeyChecks = (int) $this->pdo->query('SELECT @@SESSION.foreign_key_checks')->fetchColumn();
+                $this->writtenFiles = [];
+                $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+                try {
+                    $this->pdo->beginTransaction();
+                    foreach ((array) ($manifest['sections']['data']['shared_tables'] ?? []) as $table => $info) {
+                        if (!in_array($table, InstanceExportService::SHARED_TABLES, true)) {
+                            throw new InstanceExportException('restore_shared_table_invalid', 'Archiv obsahuje nepovolenou sdílenou tabulku.');
+                        }
+                        $this->pdo->exec('DELETE FROM `' . $table . '`');
+                        $this->restoreEntry($dir, $table, $info['entry'] ?? null, $counts);
+                    }
+                    foreach ((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? []) as $table => $info) {
+                        $this->restoreSharedEntry($dir, (string) $table, $info['entry'] ?? null, $counts);
+                    }
+                    $identity = (array) ($manifest['sections']['data']['identity']['entries'] ?? []);
+                    foreach (['roles', 'role_permissions', 'users'] as $table) {
+                        $this->restoreEntry($dir, $table, $identity[$table]['entry'] ?? null, $counts);
+                    }
+                    $tables = (array) ($manifest['sections']['data']['tables'] ?? []);
+                    foreach ($this->restoreTableOrder(array_keys($tables)) as $table) {
+                        $info = (array) ($tables[$table] ?? []);
+                        $this->restoreEntry($dir, (string) $table, $info['entry'] ?? null, $counts);
+                    }
+                    $this->restoreEntry($dir, 'user_suppliers', $identity['user_suppliers']['entry'] ?? null, $counts);
+                    $this->restoreBlobs($dir, (array) ($manifest['restore']['blobs'] ?? []));
+                    $this->nullReferencesToOmittedSecrets($manifest);
+                    $files = $this->restoreFiles($dir, (array) ($manifest['restore']['files'] ?? []));
+                    $documents = $this->restoreDocuments
+                        ? $this->restoreDocumentFiles($dir, (array) ($manifest['restore']['documents'] ?? []))
+                        : 0;
+                    $violations = $this->foreignKeyViolations();
+                    if ($violations !== []) {
+                        throw new InstanceExportException('restore_fk_invalid', 'Obnova vytvořila neplatné vazby: ' . implode('; ', $violations));
+                    }
+                    $this->pdo->commit();
+                    return [
+                        'manifest' => $manifest,
+                        'counts' => $counts,
+                        'files' => $files,
+                        'documents' => $documents,
+                        'blobs' => count($manifest['restore']['blobs'] ?? []),
+                    ];
+                } catch (\Throwable $e) {
+                    if ($this->pdo->inTransaction()) {
+                        $this->pdo->rollBack();
+                    }
+                    foreach (array_reverse($this->writtenFiles) as $file) {
+                        @unlink($file);
+                        $parent = dirname($file);
+                        $root = rtrim(str_replace('\\', '/', $this->storageRoot), '/');
+                        while (str_starts_with(strtolower(str_replace('\\', '/', $parent)), strtolower($root . '/')) && @rmdir($parent)) {
+                            $parent = dirname($parent);
+                        }
+                    }
+                    throw $e;
+                } finally {
+                    $this->pdo->exec('SET FOREIGN_KEY_CHECKS = ' . $foreignKeyChecks);
                 }
-                $identity = (array) ($manifest['sections']['data']['identity']['entries'] ?? []);
-                foreach (['roles', 'role_permissions', 'users'] as $table) {
-                    $this->restoreEntry($dir, $table, $identity[$table]['entry'] ?? null, $counts, $table === 'roles' || $table === 'role_permissions');
-                }
-                $tables = (array) ($manifest['sections']['data']['tables'] ?? []);
-                foreach ($this->restoreTableOrder(array_keys($tables)) as $table) {
-                    $info = (array) ($tables[$table] ?? []);
-                    $this->restoreEntry($dir, (string) $table, $info['entry'] ?? null, $counts);
-                }
-                $this->restoreEntry($dir, 'user_suppliers', $identity['user_suppliers']['entry'] ?? null, $counts);
-                $this->restoreBlobs($dir, (array) ($manifest['restore']['blobs'] ?? []));
-                $this->nullReferencesToOmittedSecrets($manifest);
-                $this->pdo->commit();
-            } catch (\Throwable $e) {
-                if ($this->pdo->inTransaction()) {
-                    $this->pdo->rollBack();
-                }
-                throw $e;
-            } finally {
-                $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
-            }
-
-            $violations = $this->foreignKeyViolations();
-            if ($violations !== []) {
-                throw new InstanceExportException('restore_fk_invalid', 'Obnova vytvořila neplatné vazby: ' . implode('; ', $violations));
-            }
-            $files = $this->restoreFiles($dir, (array) ($manifest['restore']['files'] ?? []));
-            $documents = $this->restoreDocuments
-                ? $this->restoreDocumentFiles($dir, (array) ($manifest['restore']['documents'] ?? []))
-                : 0;
-            return [
-                'manifest' => $manifest,
-                'counts' => $counts,
-                'files' => $files,
-                'documents' => $documents,
-                'blobs' => count($manifest['restore']['blobs'] ?? []),
-            ];
+            }, function () use ($manifest): void {
+                $this->schema = null;
+                $this->assertEmptyTarget($manifest);
+                $this->assertEmptyStorage();
+            });
         } finally {
             $this->removeDir($dir);
         }
     }
 
     /**
-     * FOREIGN_KEY_CHECKS dovolí vložit potomka před rodičem, databázové triggery
-     * ale běží dál. Pořadí JSONL v archivu proto nestačí: přímo tenantové tabulky
-     * mají v resolveru stejnou hloubku a starší archiv mohl uvést například
-     * payroll_generated_documents před payroll_run_revisions. Cílové schéma je
-     * autoritativní zdroj vazeb a rodiče řadí před potomky i pro archiv verze 3/4.
+     * Cílové schéma určuje pořadí rodičů a potomků i pro starší archivy.
+     * Vzájemné vazby se kontrolují po načtení celého snapshotu před commitem.
      *
      * @param list<int|string> $tables
      * @return list<string>
@@ -296,6 +313,12 @@ final class CompleteInstanceRestoreService
         foreach ((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? []) as $table => $info) {
             $counts[(string) $table] = $this->validateJsonl($dir, $info['entry'] ?? null, (int) ($info['rows'] ?? 0), (string) $table);
         }
+        foreach ((array) ($manifest['sections']['data']['shared_tables'] ?? []) as $table => $info) {
+            if (!in_array($table, InstanceExportService::SHARED_TABLES, true)) {
+                throw new InstanceExportException('restore_shared_table_invalid', 'Archiv obsahuje nepovolenou sdílenou tabulku.');
+            }
+            $counts[(string) $table] = $this->validateJsonl($dir, $info['entry'] ?? null, (int) ($info['rows'] ?? 0), (string) $table);
+        }
         foreach ((array) ($manifest['sections']['data']['identity']['entries'] ?? []) as $table => $info) {
             $counts[(string) $table] = $this->validateJsonl($dir, $info['entry'] ?? null, (int) ($info['rows'] ?? 0), (string) $table);
         }
@@ -326,8 +349,14 @@ final class CompleteInstanceRestoreService
             if (trim($line) === '') {
                 continue;
             }
-            if (!is_array(json_decode($line, true))) {
+            $row = json_decode($line, true);
+            if (!is_array($row)) {
                 throw new InstanceExportException('restore_jsonl_invalid', "Neplatný JSONL řádek: {$table}.");
+            }
+            $unknown = array_diff_key($row, $this->tableColumns($table));
+            if ($unknown !== []) {
+                fclose($fh);
+                throw new InstanceExportException('restore_schema_columns_missing', 'Cílové schéma nemá sloupce: ' . $table . '.' . implode(', ' . $table . '.', array_keys($unknown)));
             }
             $count++;
         }
@@ -341,11 +370,30 @@ final class CompleteInstanceRestoreService
     /** @param array<string,int> $counts */
     private function restoreEntry(string $dir, string $table, mixed $entry, array &$counts, bool $ignoreDuplicates = false): void
     {
+        if ($table === 'instance_exports') {
+            $counts[$table] = 0;
+            return;
+        }
         if ($entry === null || !isset($counts[$table])) {
             return;
         }
         $columns = $this->tableColumns($table);
         $fh = fopen($this->entryPath($dir, (string) $entry), 'rb');
+        if ($table === 'roles') {
+            while (($line = fgets($fh)) !== false) {
+                $row = json_decode($line, true);
+                if (!is_array($row)) {
+                    continue;
+                }
+                $conflicts = $this->pdo->prepare('SELECT id FROM roles WHERE id = ? OR (system_key = ? AND system_key <> \'\')');
+                $conflicts->execute([$row['id'], $row['system_key'] ?? null]);
+                foreach ($conflicts->fetchAll(PDO::FETCH_COLUMN) as $roleId) {
+                    $this->pdo->prepare('DELETE FROM role_permissions WHERE role_id = ?')->execute([$roleId]);
+                    $this->pdo->prepare('DELETE FROM roles WHERE id = ?')->execute([$roleId]);
+                }
+            }
+            rewind($fh);
+        }
         while (($line = fgets($fh)) !== false) {
             $row = json_decode($line, true);
             if (!is_array($row)) {
@@ -474,6 +522,7 @@ final class CompleteInstanceRestoreService
                 throw new InstanceExportException('restore_file_path_invalid', 'Neplatná cílová cesta přílohy.');
             }
             $target = $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+            $this->writtenFiles[] = $target;
             $targetDir = dirname($target);
             if (!is_dir($targetDir) && !mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
                 throw new InstanceExportException('restore_file_write_failed', 'Nelze vytvořit adresář přílohy.');
@@ -505,13 +554,14 @@ final class CompleteInstanceRestoreService
             $table = (string) ($link['table'] ?? '');
             $column = (string) ($link['column'] ?? '');
             $value = str_replace('\\', '/', (string) ($link['value'] ?? ''));
-            if (!in_array([$table, $column], [['invoices', 'pdf_path']], true)
+            if (!in_array([$table, $column], [['invoices', 'pdf_path'], ['purchase_invoices', 'pdf_path']], true)
                 || $value === '' || str_contains($value, '..') || str_starts_with($value, '/')) {
                 throw new InstanceExportException('restore_document_link_invalid', 'Neplatná vazba dokladu v archivu.');
             }
-            $stmt = $this->pdo->prepare('UPDATE `invoices` SET `pdf_path` = ? WHERE `id` = ?');
+            $preserveTimestamp = isset($this->tableColumns($table)['updated_at']) ? ', updated_at = updated_at' : '';
+            $stmt = $this->pdo->prepare('UPDATE `' . $table . '` SET `pdf_path` = ?' . $preserveTimestamp . ' WHERE `id` = ?');
             $stmt->execute([$value, (int) ($link['id'] ?? 0)]);
-            $target = $this->pdo->prepare('SELECT COUNT(*) FROM `invoices` WHERE `id` = ?');
+            $target = $this->pdo->prepare('SELECT COUNT(*) FROM `' . $table . '` WHERE `id` = ?');
             $target->execute([(int) ($link['id'] ?? 0)]);
             if ((int) $target->fetchColumn() !== 1) {
                 throw new InstanceExportException('restore_document_target_missing', 'Cíl vazby dokladu v databázi chybí.');
@@ -523,6 +573,9 @@ final class CompleteInstanceRestoreService
     /** @param array<string,mixed> $manifest */
     private function assertTargetSchema(array $manifest): void
     {
+        foreach ((array) ($manifest['sections']['data']['shared_tables'] ?? []) as $table => $info) {
+            $this->tableColumns((string) $table);
+        }
         foreach ((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? []) as $table => $info) {
             if ((int) ($info['rows'] ?? 0) > 0) {
                 $this->tableColumns((string) $table);
@@ -540,10 +593,18 @@ final class CompleteInstanceRestoreService
         }
     }
 
-    private function assertEmptyTarget(): void
+    private function assertEmptyTarget(array $manifest): void
     {
-        foreach (['supplier', 'users', 'user_suppliers'] as $table) {
-            if ((int) $this->pdo->query("SELECT COUNT(*) FROM `{$table}`")->fetchColumn() > 0) {
+        $tables = array_fill_keys(['supplier', 'users', 'user_suppliers'], '');
+        foreach ($this->schema()['columns'] as $table => $columns) {
+            if (isset($columns['supplier_id'])) {
+                $tables[$table] = ' WHERE supplier_id IS NOT NULL';
+            } elseif (isset($manifest['sections']['data']['tables'][$table])) {
+                $tables[$table] = '';
+            }
+        }
+        foreach ($tables as $table => $where) {
+            if ((int) $this->pdo->query("SELECT COUNT(*) FROM `{$table}`" . $where)->fetchColumn() > 0) {
                 throw new InstanceExportException('restore_target_not_empty', 'Cílová databáze není prázdná (tabulka ' . $table . ').');
             }
         }
@@ -614,6 +675,7 @@ final class CompleteInstanceRestoreService
     {
         $included = array_fill_keys(array_keys((array) ($manifest['sections']['data']['tables'] ?? [])), true);
         $included += array_fill_keys(array_keys((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? [])), true);
+        $included += array_fill_keys(array_keys((array) ($manifest['sections']['data']['shared_tables'] ?? [])), true);
         $included += array_fill_keys(['roles', 'role_permissions', 'users', 'user_suppliers'], true);
         foreach ($this->schema()['foreignKeys'] as $child => $foreignKeys) {
             foreach ($foreignKeys as $fk) {
@@ -626,7 +688,8 @@ final class CompleteInstanceRestoreService
                 if ((int) $this->pdo->query("SELECT COUNT(*) FROM `{$parent}`")->fetchColumn() !== 0) {
                     continue;
                 }
-                $this->pdo->exec("UPDATE `{$child}` SET `{$column}` = NULL WHERE `{$column}` IS NOT NULL");
+                $preserveTimestamp = isset($this->tableColumns($child)['updated_at']) ? ', updated_at = updated_at' : '';
+                $this->pdo->exec("UPDATE `{$child}` SET `{$column}` = NULL{$preserveTimestamp} WHERE `{$column}` IS NOT NULL");
             }
         }
     }

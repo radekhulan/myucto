@@ -325,6 +325,9 @@ function statusClass(status: string): string {
               <td class="px-3 py-2 font-mono text-xs break-all">
                 {{ job.result_name || '—' }}
                 <span v-if="job.last_error" class="block text-danger-600 font-sans">{{ job.last_error }}</span>
+                <span v-if="job.warning_count" class="block text-warning-700 font-sans">
+                  {{ t('instance_export.warnings', { count: job.warning_count }) }}
+                </span>
               </td>
               <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatBytes(job.size_bytes) }}</td>
               <td class="px-3 py-2 font-mono text-xs">

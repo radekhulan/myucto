@@ -21179,7 +21179,7 @@
       "step_extract": "Include the Restorable accounting archive part and prepare an empty database migrated by the target MyÚčto version.",
       "step_dry_run": "Run validation against the downloaded main ZIP before writing data.",
       "step_restore": "Only after validation succeeds, run the same command with the --restore parameter. The optional --documents parameter also restores received and issued invoice PDFs into the application and reconnects them to their records.",
-      "note": "Restoration preserves IDs and every relationship, so the target database and data directory must be empty. Without --documents, data and attachments are restored but invoice PDFs are not written into the application. Users are restored disabled, without passwords or MFA; an administrator sends an invitation or password reset."
+      "note": "Restoration preserves IDs and relationships, so the target database and data directory must be empty. Without --documents, data and attachments are restored but invoice PDFs are not written into the application. Users are restored disabled, without passwords or MFA. For payroll, also securely retain the original encryption and hashing keys from configuration; the ZIP does not contain them. See the manual for the full procedure."
     },
     "retention": {
       "title": "Retention of accounting and tax records",
@@ -21205,7 +21205,8 @@
     },
     "date_from": "Documents from",
     "date_to": "Documents to",
-    "range_hint": "Optional. It limits documents, monthly/quarterly VAT records and closing packages; data and the restorable archive always cover the whole company.",
+    "range_hint": "Optional. It limits VAT records and closing packages. A complete restorable archive includes all company documents, statements and data; otherwise the range also limits documents and statements.",
+    "warnings": "Warnings: {count}. Check the details and manifest; some files may be missing or replaced with reconstructions.",
     "start": "Start export",
     "starting": "Starting…",
     "started": "The export is running in the background. It will appear in the list once finished.",

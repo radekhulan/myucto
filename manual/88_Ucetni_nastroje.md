@@ -178,6 +178,11 @@ obsah správcovských odchylek mzdových pravidel, aby obnovené snapshoty neztr
 své podklady. Globální audit, identity správců a jimi zapsané důvody se do exportu
 jedné firmy nepřenášejí.
 
+Zahrnuty jsou také země, sazby DPH, vlastní jednotky, e-mailové šablony,
+daňové konstanty a historické kurzy. Do čisté cílové instalace se přenesou
+místo výchozích hodnot. Soubory zahrnují originální zdroje přijatých dokladů,
+loga firmy a brandingových profilů, uložené účetní archivy a výsledky importů.
+
 Manifest uvádí verzi schématu, počty řádků a SHA-256 každé datové části i
 přílohy. Hesla, API klíče, soukromé certifikáty, volba podpisového certifikátu,
 uložené osobní přístupy k ISDS a jiné provozní tajné hodnoty se neexportují;
@@ -196,19 +201,33 @@ php api/bin/archive-restore.php --file=<export.zip> --database=<prazdna_migrovan
 Databáze musí být předem migrovaná cílovou, stejnou nebo novější verzí MyÚčto a
 spolu s datovým adresářem prázdná. Dry-run ověří hash a počet každé části i
 přílohy bez zápisu. Ostrá obnova zachová interní ID, obnoví vše v jedné
-databázové transakci a nepřepíše proto žádná existující data.
+databázové transakci. Obnova odmítne databázi s existujícími firemními daty.
 
-Po importu se znovu ověří všechny cizí klíče. Přílohy se uloží do zadaného
-datového adresáře. Volitelný parametr `--documents` navíc uloží originály přijatých
+Cílová instalace během obnovy nesmí obsluhovat uživatele ani spouštět úlohy.
+Databázový účet potřebuje také oprávnění vytvářet a odstraňovat triggery.
+Obnova uloží jejich cílové definice do pomocné tabulky, dočasně je odpojí
+pro vložení historického stavu a následně obnoví včetně původního pořadí.
+To umožňuje obnovit i zaúčtované mzdové dávky a uzavřené revize, aniž by se
+měnily ochrany běžného provozu. Při přerušení procesu spusťte příkaz znovu;
+nejdříve obnoví uložené triggery. Pokud už byla data potvrzena, druhý import
+odmítne. Pomocnou tabulku `instance_restore_trigger_recovery` nemažte ručně.
+
+Před potvrzením transakce se ověří všechny cizí klíče a zápis souborů.
+Parametr `--storage` určuje cestu k cílové složce `storage`.
+Volitelný parametr `--documents` navíc uloží originály přijatých
 faktur, importované originály vydaných faktur i aktuální PDF vydaných faktur do
 jejich aplikačních úložišť; PDF vydané faktury přitom znovu propojí přes
-`invoices.pdf_path`. Bez tohoto parametru se obnoví databáze, výpisy a přílohy,
+`invoices.pdf_path`. Pokud původní přijaté PDF ve zdroji chybí, export to oznámí
+a přidá označenou rekonstrukci, kterou obnova propojí s přijatou fakturou.
+Rekonstrukce nenahrazuje ztracený originál. Bez tohoto parametru se obnoví databáze, výpisy a přílohy,
 ale PDF dokladů zůstávají jen v exportním ZIPu. Přihlašovací tajemství, tokeny a klíče se neobnovují;
 uživatelé jsou zablokovaní a správce jim pošle pozvánku nebo reset hesla.
 Mzdové osobní údaje a bankovní exporty zůstávají v archivu kontextově
 zašifrované. Cílová instalace proto musí bezpečně převzít původní
 `app.secret_encryption_key`, případně jej po rotaci dočasně ponechat mezi
-`app.secret_encryption_previous_keys`. Samotný klíč v exportu nikdy není.
+`app.secret_encryption_previous_keys`. Pro mzdové vyhledávací a kontrolní otisky
+zachovejte i `app.payroll_hash_key`, případně původní `app.pepper`, pokud se
+používá jako jeho náhrada. Tyto klíče v exportu nejsou.
 Automatický round-trip test hlídá počty, vazby a hashe souborů, ale archiv stále
 nenahrazuje celoinstanční zálohu databáze.
 
@@ -245,8 +264,12 @@ nadřazený ZIP. U jednotlivých částí si zvolí, co do něj patří:
   při čtvrtletní periodě také ZIP za každé čtvrtletí;
 - v podvojném účetnictví **uzávěrkové balíčky** za vybraná účetní období.
 
-Zadaný rozsah omezuje doklady a výkazy; obnovitelný archiv a JSONL data jsou vždy
-kompletní pro jednu firmu. Obnovu provádějte přímo z tohoto ZIPu příkazem
+Zadaný rozsah omezuje výkazy. Pokud není zvolen úplný obnovitelný archiv,
+omezuje také doklady a bankovní výpisy. Úplný obnovitelný archiv zahrnuje
+doklady, výpisy a data celé firmy bez ohledu na zadané období.
+Databázové tabulky se čtou v jednom konzistentním snapshotu; soubory a nově
+generované sestavy vznikají následně. Po dobu exportu proto neprovádějte
+změny evidence ani souborů. Obnovu provádějte přímo z tohoto ZIPu příkazem
 uvedeným v předchozí kapitole — jeho formát je kompatibilní se stejnou i novější
 verzí MyÚčto. Obecné soubory `data/*.jsonl` jsou kontrolní a přenosový export,
 nikoli vstup pro import.

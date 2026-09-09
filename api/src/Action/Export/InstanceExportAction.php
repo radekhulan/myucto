@@ -282,6 +282,7 @@ final class InstanceExportAction
         if ($job === null) {
             return null;
         }
+        $manifest = is_array($job['manifest'] ?? null) ? $job['manifest'] : null;
         $out = [
             'id' => $job['id'],
             'status' => $job['status'],
@@ -301,15 +302,19 @@ final class InstanceExportAction
             'created_at' => $job['created_at'],
             'finished_at' => $job['finished_at'],
             'downloadable' => $job['status'] === 'completed' && !empty($job['result_path']),
+            'warning_count' => (int) ($manifest['sections']['doklady']['warnings'] ?? 0)
+                + (int) ($manifest['sections']['prilohy']['warnings'] ?? 0),
         ];
         if ($withLog) {
             $out['log_text'] = $job['log_text'];
             // Manifest je pro UI zajímavý jen shrnutím — celý (se seznamem stovek
             // tabulek) by z pollingu udělal zbytečně tučný požadavek.
-            $manifest = is_array($job['manifest'] ?? null) ? $job['manifest'] : null;
             $out['summary'] = $manifest === null ? null : [
                 'entries' => $manifest['totals']['entries'] ?? null,
-                'tables' => count($manifest['sections']['data']['tables'] ?? []),
+                'tables' => count($manifest['sections']['data']['tables'] ?? [])
+                    + count($manifest['sections']['data']['shared_tables'] ?? [])
+                    + count($manifest['sections']['data']['shared_payroll_tables'] ?? [])
+                    + count($manifest['sections']['data']['identity']['entries'] ?? []),
                 'documents' => $manifest['sections']['doklady'] ?? null,
                 'files' => $manifest['sections']['prilohy']['files'] ?? null,
                 'restore' => $manifest['sections']['obnova'] ?? null,

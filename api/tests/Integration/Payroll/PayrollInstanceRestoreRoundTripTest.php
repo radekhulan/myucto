@@ -8,6 +8,9 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Export\Instance\CompleteInstanceRestoreService;
 use MyInvoice\Service\Export\Instance\InstanceExportService;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportStorage;
@@ -50,6 +53,11 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         'payroll_payment_allocations',
         'payroll_payment_matches',
         'bank_statements',
+        'accounting_periods',
+        'chart_of_accounts',
+        'journal_entries',
+        'journal_entry_lines',
+        'payroll_posting_batches',
     ];
 
     private string $rootDir;
@@ -203,6 +211,9 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         self::assertSame(1, $sourceCounts['payroll_document_batches'] ?? 0);
         self::assertSame(1, $sourceCounts['payroll_document_batch_items'] ?? 0);
         self::assertSame(1, $sourceCounts['payroll_document_batch_attempts'] ?? 0);
+        self::assertSame(1, $sourceCounts['payroll_posting_batches'] ?? 0);
+        self::assertSame(1, $sourceCounts['journal_entries'] ?? 0);
+        self::assertSame(2, $sourceCounts['journal_entry_lines'] ?? 0);
 
         $result = $this->export->runForSupplier(
             $this->supplierId,
@@ -250,6 +261,22 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
 
         $this->createAndMigrateTargetDatabase();
         self::assertNotNull($this->target);
+        $sourceRole = $source->query('SELECT r.id, r.system_key FROM roles r JOIN users u ON u.role_id = r.id ORDER BY u.id LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($sourceRole);
+        self::assertNotEmpty($sourceRole['system_key']);
+        $baselineRole = $this->target->prepare('SELECT id FROM roles WHERE system_key = ?');
+        $baselineRole->execute([$sourceRole['system_key']]);
+        $baselineRoleId = (int) $baselineRole->fetchColumn();
+        self::assertGreaterThan(0, $baselineRoleId);
+        $shiftedRoleId = 100 + max((int) $sourceRole['id'], (int) $this->target->query('SELECT MAX(id) FROM roles')->fetchColumn());
+        $this->target->exec('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $this->target->prepare('UPDATE roles SET id = ?, updated_at = updated_at WHERE id = ?')->execute([$shiftedRoleId, $baselineRoleId]);
+            $this->target->prepare('UPDATE role_permissions SET role_id = ? WHERE role_id = ?')->execute([$shiftedRoleId, $baselineRoleId]);
+        } finally {
+            $this->target->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
+        self::assertNotSame((int) $sourceRole['id'], $shiftedRoleId);
         $restore = new CompleteInstanceRestoreService(
             $this->target,
             $this->targetStorage,
@@ -266,6 +293,8 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         }
 
         $report = $restore->restore($archivePath);
+        self::assertSame(0, (int) $this->target->query('SELECT COUNT(*) FROM roles WHERE id = ' . $shiftedRoleId)->fetchColumn());
+        self::assertSame(0, (int) $this->target->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = ' . $shiftedRoleId)->fetchColumn());
         self::assertGreaterThanOrEqual(2, $report['files'], 'Obnova musí vrátit výplatní i DMS PDF.');
         self::assertGreaterThanOrEqual(1, $report['blobs'], 'Obnova musí vrátit bankovní důkaz platby.');
         self::assertSame([], $this->foreignKeyViolations($this->target));
@@ -278,6 +307,12 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             'Obnovené mzdové, podací a platební řádky musí být přesně shodné.',
         );
         self::assertSame($sourceFingerprint, $this->fingerprint($targetRows));
+        $roleId = (int) $source->query('SELECT role_id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+        foreach (['roles' => 'id', 'role_permissions' => 'role_id'] as $table => $column) {
+            $before = $source->query('SELECT * FROM `' . $table . '` WHERE `' . $column . '` = ' . $roleId . ' ORDER BY 1, 2')->fetchAll(PDO::FETCH_ASSOC);
+            $after = $this->target->query('SELECT * FROM `' . $table . '` WHERE `' . $column . '` = ' . $roleId . ' ORDER BY 1, 2')->fetchAll(PDO::FETCH_ASSOC);
+            self::assertSame($before, $after, 'Obnova musí zachovat vlastní roli a přesná oprávnění.');
+        }
 
         $restoredPdf = $this->targetStorage . DIRECTORY_SEPARATOR
             . str_replace('/', DIRECTORY_SEPARATOR, $fixture['pdf_storage_path']);
@@ -359,6 +394,8 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         $pdo = $this->sourceConnection->pdo();
         $actorId = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')?->fetchColumn() ?: 0);
         self::assertGreaterThan(0, $actorId, 'Testovací DB musí obsahovat uživatele pro auditní FK.');
+        $pdo->exec('UPDATE roles SET name = "Syntetická vlastní role" WHERE id = (SELECT role_id FROM users ORDER BY id LIMIT 1)');
+        $pdo->exec('DELETE FROM role_permissions WHERE role_id = (SELECT role_id FROM users ORDER BY id LIMIT 1)');
         $pdo->prepare(
             'INSERT INTO payroll_employees
                 (supplier_id, full_name, taxpayer_type, is_active)
@@ -395,6 +432,34 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             hash('sha256', "mz31-revision-{$this->supplierId}", true),
         ]);
         $revisionId = (int) $pdo->lastInsertId();
+
+        $container = Bootstrap::buildApp()->getContainer();
+        $pdo->prepare('UPDATE supplier SET accounting_mode = "double_entry" WHERE id = ?')
+            ->execute([$this->supplierId]);
+        $container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $container->get(AccountingPeriodRepository::class)->create(
+            $this->supplierId, 2099, '2099-01-01', '2099-12-31',
+        );
+        $pdo->prepare(
+            'INSERT INTO payroll_posting_batches
+                (supplier_id, run_id, revision_id, entry_date, status, target_hash, delta_hash, created_by)
+             VALUES (?, ?, ?, "2099-01-31", "prepared", ?, ?, ?)',
+        )->execute([$this->supplierId, $runId, $revisionId, hash('sha256', 'target'), hash('sha256', 'delta'), $actorId]);
+        $batchId = (int) $pdo->lastInsertId();
+        $journalId = $container->get(PostingService::class)->postDocument(
+            $this->supplierId,
+            'payroll',
+            $revisionId,
+            [
+                ['account_code' => '521', 'side' => 'debit', 'amount' => '42000.00'],
+                ['account_code' => '331', 'side' => 'credit', 'amount' => '42000.00'],
+            ],
+            ['entry_date' => '2099-01-31', 'document_no' => 'SYNTHETIC-RESTORE', 'posted_by' => $actorId, 'user_id' => $actorId],
+        );
+        $pdo->prepare(
+            'UPDATE payroll_posting_batches SET status = "posted", journal_entry_id = ?, posted_at = NOW()
+             WHERE supplier_id = ? AND id = ?',
+        )->execute([$journalId, $this->supplierId, $batchId]);
 
         $dmsBytes = "%PDF-1.7\n% synthetic MZ-31 evidence bundle\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n";
         $dmsHash = hash('sha256', $dmsBytes);

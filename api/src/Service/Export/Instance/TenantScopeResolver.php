@@ -53,6 +53,7 @@ final class TenantScopeResolver
      */
     private const DENY_TABLES = [
         'migrations', 'app_meta', 'license',
+        'instance_exports', 'instance_restore_trigger_recovery',
         'users', 'user_suppliers', 'roles', 'role_permissions',
         'password_resets', 'login_attempts', 'login_otps',
         'mfa_recovery_codes', 'mfa_step_up_proofs',
