@@ -24,8 +24,8 @@ final class TripRepository
         $sql = 'SELECT t.*, c.registration AS car_registration, c.name AS car_name,
                        tc.label AS category_label, tc.is_private AS category_is_private
                   FROM trips t
-                  JOIN cars c ON c.id = t.car_id
-             LEFT JOIN trip_categories tc ON tc.id = t.category_id
+                  JOIN cars c ON c.id = t.car_id AND c.supplier_id = t.supplier_id
+             LEFT JOIN trip_categories tc ON tc.id = t.category_id AND tc.supplier_id = t.supplier_id
                  WHERE ' . implode(' AND ', $where) . '
               ORDER BY t.trip_date DESC, t.id DESC';
         $stmt = $this->db->pdo()->prepare($sql);
@@ -53,8 +53,8 @@ final class TripRepository
         $sql = 'SELECT t.*, c.registration AS car_registration, c.name AS car_name,
                        tc.label AS category_label, tc.is_private AS category_is_private
                   FROM trips t
-                  JOIN cars c ON c.id = t.car_id
-             LEFT JOIN trip_categories tc ON tc.id = t.category_id
+                  JOIN cars c ON c.id = t.car_id AND c.supplier_id = t.supplier_id
+             LEFT JOIN trip_categories tc ON tc.id = t.category_id AND tc.supplier_id = t.supplier_id
                  WHERE ' . $whereSql . '
               ORDER BY t.trip_date DESC, t.id DESC
                  LIMIT ' . max(1, $perPage) . ' OFFSET ' . max(0, $offset);
@@ -110,8 +110,8 @@ final class TripRepository
             'SELECT t.*, c.registration AS car_registration, c.name AS car_name,
                     tc.label AS category_label, tc.is_private AS category_is_private
                FROM trips t
-               JOIN cars c ON c.id = t.car_id
-          LEFT JOIN trip_categories tc ON tc.id = t.category_id
+               JOIN cars c ON c.id = t.car_id AND c.supplier_id = t.supplier_id
+          LEFT JOIN trip_categories tc ON tc.id = t.category_id AND tc.supplier_id = t.supplier_id
               WHERE t.id = ? AND t.supplier_id = ?'
         );
         $stmt->execute([$id, $supplierId]);

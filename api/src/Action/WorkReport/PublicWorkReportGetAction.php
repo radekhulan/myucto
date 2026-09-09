@@ -7,9 +7,14 @@ namespace MyInvoice\Action\WorkReport;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\PermissionResolver;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
 use MyInvoice\Service\WorkReport\WorkReportLinkService;
 use MyInvoice\Service\Tenant\PublicTenantGuard;
+use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -28,6 +33,8 @@ final class PublicWorkReportGetAction
         private readonly WorkReportLinkService $service,
         private readonly Config $config,
         private readonly PublicTenantGuard $tenantGuard,
+        private readonly SupplierAccessResolver $supplierAccess,
+        private readonly PermissionResolver $permissions,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -46,11 +53,8 @@ final class PublicWorkReportGetAction
             return Json::error($response, 'not_found', 'Tento odkaz není platný.', 404);
         }
 
-        // Přihlášený interní uživatel (admin/účetní…) vidí náhled rovnou, bez
-        // e-mailové verifikace — session cookie se na /api/public/* posílá taky
-        // (AuthMiddleware ji načte a nastaví usera ještě před průchodem public path).
         $user = $request->getAttribute(AuthMiddleware::ATTR_USER);
-        if (is_array($user) && !empty($user['id'])) {
+        if (is_array($user) && !empty($user['id']) && $this->canPreviewAsStaff($request, (int) $link['supplier_id'])) {
             $this->service->touchViewed((int) $link['id']);
             return Json::ok($response, [
                 'requires_auth' => false,
@@ -78,5 +82,15 @@ final class PublicWorkReportGetAction
             'captcha_site_key' => (string) $this->config->get('captcha.site_key', ''),
             'captcha_provider' => (string) $this->config->get('captcha.provider', 'none'),
         ]);
+    }
+
+    private function canPreviewAsStaff(Request $request, int $supplierId): bool
+    {
+        if (!RequestAuthorization::isSessionAuth($request)) return false;
+        $scoped = $request->withHeader(SupplierScopeMiddleware::HEADER_NAME, (string) $supplierId);
+        $access = $this->supplierAccess->resolve($scoped);
+        if ($access->denied || $access->supplierId !== $supplierId) return false;
+        $role = $this->permissions->resolve($scoped);
+        return $role->isActive && !$role->isClientType() && $role->level('invoices')->allows(AccessLevel::READ);
     }
 }

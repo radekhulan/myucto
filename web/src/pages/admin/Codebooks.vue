@@ -853,7 +853,7 @@ watch(tab, (newTab) => {
     <!-- ====== VAT RATES ====== -->
     <section v-else-if="tab === 'vat'">
       <div class="flex justify-end mb-3">
-        <button @click="newVat" :class="btnFilled('primary')">
+        <button v-if="auth.isSuperadmin" @click="newVat" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('codebooks.new_vat') }}
         </button>
@@ -885,8 +885,8 @@ watch(tab, (newTab) => {
               <td class="px-3 py-2 text-xs text-neutral-500">{{ v.valid_from }}<span v-if="v.valid_to"> – {{ v.valid_to }}</span></td>
               <td class="px-3 py-2 text-right whitespace-nowrap">
                 <div class="flex items-center justify-end gap-1.5">
-                  <button @click="editVat(v)" :class="btnOutlineSm('primary')">{{ t('common.edit') }}</button>
-                  <button @click="deleteVat(v)" :disabled="(v.items_count ?? 0) > 0"
+                  <button v-if="auth.isSuperadmin" @click="editVat(v)" :class="btnOutlineSm('primary')">{{ t('common.edit') }}</button>
+                  <button v-if="auth.isSuperadmin" @click="deleteVat(v)" :disabled="(v.items_count ?? 0) > 0"
                     :class="btnOutlineSm('danger')"
                     :title="(v.items_count ?? 0) > 0 ? t('codebooks.in_use_vat', { n: v.items_count }) : t('common.delete')">
                     {{ t('common.delete') }}
@@ -918,10 +918,10 @@ watch(tab, (newTab) => {
               <span class="text-neutral-500">{{ v.valid_from }}<span v-if="v.valid_to"> – {{ v.valid_to }}</span></span>
             </div>
             <div class="flex justify-end gap-2">
-              <button @click="editVat(v)" :class="btnOutline('primary')">
+              <button v-if="auth.isSuperadmin" @click="editVat(v)" :class="btnOutline('primary')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                 {{ t('common.edit') }}</button>
-              <button @click="deleteVat(v)" :disabled="(v.items_count ?? 0) > 0"
+              <button v-if="auth.isSuperadmin" @click="deleteVat(v)" :disabled="(v.items_count ?? 0) > 0"
                 :class="btnOutline('danger')"
                 :title="(v.items_count ?? 0) > 0 ? t('codebooks.in_use_vat', { n: v.items_count }) : t('common.delete')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
@@ -936,7 +936,7 @@ watch(tab, (newTab) => {
     <!-- ====== COUNTRIES ====== -->
     <section v-else-if="tab === 'countries'">
       <div class="flex justify-end mb-3">
-        <button @click="newCountry" :class="btnFilled('primary')">
+        <button v-if="auth.isSuperadmin" @click="newCountry" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('codebooks.new_country') }}
         </button>
@@ -964,8 +964,8 @@ watch(tab, (newTab) => {
               <td class="px-3 py-2 text-center"><span v-if="c.is_eu" class="text-primary-600">EU</span></td>
               <td class="px-3 py-2 text-right whitespace-nowrap">
                 <div class="flex items-center justify-end gap-1.5">
-                  <button @click="editCountry(c)" :class="btnOutlineSm('primary')">{{ t('common.edit') }}</button>
-                  <button @click="deleteCountry(c)" :disabled="(c.uses_count ?? 0) > 0"
+                  <button v-if="auth.isSuperadmin" @click="editCountry(c)" :class="btnOutlineSm('primary')">{{ t('common.edit') }}</button>
+                  <button v-if="auth.isSuperadmin" @click="deleteCountry(c)" :disabled="(c.uses_count ?? 0) > 0"
                     :class="btnOutlineSm('danger')"
                     :title="(c.uses_count ?? 0) > 0 ? t('codebooks.in_use_country', { n: c.uses_count }) : t('common.delete')">
                     {{ t('common.delete') }}
@@ -991,10 +991,10 @@ watch(tab, (newTab) => {
             <div class="flex items-center justify-between gap-2">
               <span class="text-xs text-neutral-500 truncate">{{ c.name_en }}</span>
               <div class="flex gap-2">
-                <button @click="editCountry(c)" :class="btnOutline('primary')">
+                <button v-if="auth.isSuperadmin" @click="editCountry(c)" :class="btnOutline('primary')">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                   {{ t('common.edit') }}</button>
-                <button @click="deleteCountry(c)" :disabled="(c.uses_count ?? 0) > 0"
+                <button v-if="auth.isSuperadmin" @click="deleteCountry(c)" :disabled="(c.uses_count ?? 0) > 0"
                   :class="btnOutline('danger')"
                   :title="(c.uses_count ?? 0) > 0 ? t('codebooks.in_use_country', { n: c.uses_count }) : t('common.delete')">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
@@ -1010,7 +1010,7 @@ watch(tab, (newTab) => {
     <!-- ====== UNITS ====== -->
     <section v-else-if="tab === 'units'">
       <div class="flex justify-end mb-3">
-        <button @click="newUnit" :class="btnFilled('primary')">
+        <button v-if="auth.isSuperadmin" @click="newUnit" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('codebooks.new_unit') }}
         </button>
@@ -1038,8 +1038,8 @@ watch(tab, (newTab) => {
               <td class="px-3 py-2 text-center font-mono text-xs">{{ u.display_order }}</td>
               <td class="px-3 py-2 text-right whitespace-nowrap">
                 <div class="flex items-center justify-end gap-1.5">
-                  <button @click="editUnit(u)" :class="btnOutlineSm('primary')">{{ t('common.edit') }}</button>
-                  <button @click="deleteUnit(u)" :disabled="(u.items_count ?? 0) > 0"
+                  <button v-if="auth.isSuperadmin" @click="editUnit(u)" :class="btnOutlineSm('primary')">{{ t('common.edit') }}</button>
+                  <button v-if="auth.isSuperadmin" @click="deleteUnit(u)" :disabled="(u.items_count ?? 0) > 0"
                     :class="btnOutlineSm('danger')"
                     :title="(u.items_count ?? 0) > 0 ? t('codebooks.in_use_unit', { n: u.items_count }) : t('common.delete')">
                     {{ t('common.delete') }}
@@ -1063,10 +1063,10 @@ watch(tab, (newTab) => {
               <span v-if="u.is_default" class="text-primary-600 text-xs">✓ {{ t('codebooks.is_default') }}</span>
             </div>
             <div class="flex justify-end gap-2">
-              <button @click="editUnit(u)" :class="btnOutline('primary')">
+              <button v-if="auth.isSuperadmin" @click="editUnit(u)" :class="btnOutline('primary')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                 {{ t('common.edit') }}</button>
-              <button @click="deleteUnit(u)" :disabled="(u.items_count ?? 0) > 0"
+              <button v-if="auth.isSuperadmin" @click="deleteUnit(u)" :disabled="(u.items_count ?? 0) > 0"
                 :class="btnOutline('danger')"
                 :title="(u.items_count ?? 0) > 0 ? t('codebooks.in_use_unit', { n: u.items_count }) : t('common.delete')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
@@ -1804,7 +1804,7 @@ watch(tab, (newTab) => {
       </div>
     </div>
 
-    <div v-if="vatOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+    <div v-if="auth.isSuperadmin && vatOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
         <h3 class="text-lg font-semibold mb-3">{{ vatDraft._new ? t('codebooks.new_vat') : vatDraft.code }}</h3>
         <div class="space-y-3">
@@ -1846,7 +1846,7 @@ watch(tab, (newTab) => {
       </div>
     </div>
 
-    <div v-if="unitOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+    <div v-if="auth.isSuperadmin && unitOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
         <h3 class="text-lg font-semibold mb-3">{{ unitDraft._new ? t('codebooks.new_unit') : unitDraft.code }}</h3>
         <div class="space-y-3">
@@ -1881,7 +1881,7 @@ watch(tab, (newTab) => {
       </div>
     </div>
 
-    <div v-if="countryOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+    <div v-if="auth.isSuperadmin && countryOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
         <h3 class="text-lg font-semibold mb-3">{{ countryDraft._new ? t('codebooks.new_country') : countryDraft.iso2 }}</h3>
         <div class="space-y-3">

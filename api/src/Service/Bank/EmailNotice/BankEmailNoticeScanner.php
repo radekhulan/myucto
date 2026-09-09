@@ -229,9 +229,8 @@ final class BankEmailNoticeScanner
 
         // Možnost A: ověření autenticity z hlavičky Authentication-Results (DKIM/DMARC).
         // FAIL-CLOSED: kontrola je u nových účtů zapnutá defaultně (`require_email_auth`
-        // = 1) a CHYBĚJÍCÍ hlavička Authentication-Results je ODMÍTNUTÍ, ne přeskočení —
-        // `EmailAuthenticationVerifier::verify()` na prázdný vstup vrací pass=false
-        // (`no_authentication_results`). Vypnout kontrolu jde jen vědomě u konkrétního
+        // = 1). Chybějící hlavička, chybějící přesný pin authserv-id nebo neúspěšný
+        // verdikt znamená odmítnutí. Vypnout kontrolu jde jen vědomě u konkrétního
         // účtu, když přijímací server hlavičku nepřidává.
         if (!empty($settings['require_email_auth'])) {
             $auth = $this->authVerifier->verify(

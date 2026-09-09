@@ -18,6 +18,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Export\CsvWriter;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Log\LoggerInterface;
@@ -343,7 +344,7 @@ final class ClosingAction
             ? ['account_code', 'name', 'amount', 'note']
             : ['doc_type', 'doc_id', 'doc_no', 'doc_date', 'partner_name', 'amount', 'currency', 'entry_id', 'note'];
 
-        $out = "\xEF\xBB\xBF" . implode(';', $cols) . "\r\n";
+        $rows = [];
         foreach ($findings as $f) {
             $row = [];
             foreach ($cols as $c) {
@@ -352,15 +353,12 @@ final class ClosingAction
                 $v = $c === 'note' && !empty($f['issues']) && is_array($f['issues'])
                     ? implode(', ', array_map('strval', $f['issues']))
                     : ($f[$c] ?? '');
-                // Středník a uvozovky uvnitř hodnoty by rozbily sloupce.
-                $row[] = str_contains((string) $v, ';') || str_contains((string) $v, '"')
-                    ? '"' . str_replace('"', '""', (string) $v) . '"'
-                    : (string) $v;
+                $row[] = $c === 'amount' && is_numeric($v) ? (string) $v : CsvWriter::safe($v);
             }
-            $out .= implode(';', $row) . "\r\n";
+            $rows[] = $row;
         }
 
-        return $out;
+        return CsvWriter::build($cols, $rows);
     }
 
     /**

@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Pdf\MpdfFontConfig;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
@@ -48,7 +49,7 @@ final class LogbookSummaryExportService
         $sheet = $ss->getActiveSheet();
         $sheet->setTitle('Souhrn ' . $year);
         $sheet->setCellValue('A1', 'Kniha jízd — roční souhrn ' . $year);
-        $sheet->setCellValue('A2', $supplier);
+        $sheet->setCellValueExplicit('A2', $supplier, DataType::TYPE_STRING);
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
 
         $head = 4;
@@ -63,7 +64,7 @@ final class LogbookSummaryExportService
         }
         // Totals
         $t = $data['totals'];
-        $sheet->setCellValue("A{$r}", 'CELKEM');
+        $sheet->setCellValueExplicit("A{$r}", 'CELKEM', DataType::TYPE_STRING);
         $sheet->setCellValue("B{$r}", (int) $t['trips_count']);
         $sheet->setCellValue("C{$r}", (float) $t['km']);
         $sheet->setCellValue("D{$r}", (float) $t['business_km'] + (float) $t['uncategorized_km']);
@@ -96,7 +97,7 @@ final class LogbookSummaryExportService
 
     private function xlsxRow($sheet, int $r, string $car, array $v): void
     {
-        $sheet->setCellValue("A{$r}", $car);
+        $sheet->setCellValueExplicit("A{$r}", $car, DataType::TYPE_STRING);
         $sheet->setCellValue("B{$r}", (int) $v['trips_count']);
         $sheet->setCellValue("C{$r}", (float) $v['km']);
         $sheet->setCellValue("D{$r}", (float) $v['business_km'] + (float) $v['uncategorized_km']);

@@ -218,7 +218,7 @@ final class RelatedPartyService
         $stmt = $this->db->pdo()->prepare(
             'SELECT a.id, a.client_id, c.company_name, a.movement, a.amount, a.reason
                FROM tax_related_party_adjustments a
-          LEFT JOIN clients c ON c.id = a.client_id
+          LEFT JOIN clients c ON c.id = a.client_id AND c.supplier_id = a.supplier_id
               WHERE a.supplier_id = ? AND a.fiscal_year = ?
            ORDER BY a.id'
         );

@@ -24,6 +24,8 @@ final class SenderDomainTest extends TestCase
         self::assertFalse(SenderDomain::matches('attacker@csob.cz.evil.com', 'csob.cz'));
         self::assertFalse(SenderDomain::matches('Banka <attacker@notcsob.cz>', 'csob.cz'));
         self::assertFalse(SenderDomain::matches('noreply@csob.cz@evil.com', 'csob.cz'));
+        self::assertFalse(SenderDomain::matches('"CSOB <noreply@csob.cz>" <attacker@evil.com>', 'csob.cz'));
+        self::assertFalse(SenderDomain::matches('CSOB <noreply@csob.cz> trailing', 'csob.cz'));
         self::assertFalse(SenderDomain::matches('csob.cz', 'csob.cz')); // bez @
         self::assertFalse(SenderDomain::matches('', 'csob.cz'));
     }

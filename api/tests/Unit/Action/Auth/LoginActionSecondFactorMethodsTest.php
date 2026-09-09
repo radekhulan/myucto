@@ -74,7 +74,7 @@ final class LoginActionSecondFactorMethodsTest extends TestCase
     public function testInvalidCodeRepeatsTheSameServerSideMethodList(): void
     {
         $totp = $this->createMock(TotpService::class);
-        $totp->method('verify')->willReturn(false);
+        $totp->method('verifyAndConsume')->willReturn(false);
 
         $error = $this->error($this->login(
             activePasskeys: 0,

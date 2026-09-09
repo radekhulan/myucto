@@ -157,6 +157,10 @@ TOTP = time-based one-time password (RFC 6238).
 Po zadání e-mailu a hesla nabídne aplikace passkey, pokud ji účet má. Je-li
 aktivní také TOTP, lze explicitně přepnout na šestimístný kód z autentikátoru.
 
+TOTP kód lze použít jen jednou pro přihlášení nebo potvrzení citlivé operace.
+Pokud hned po přihlášení vytváříš API token nebo přidáváš další passkey,
+počkej na nový kód v autentikátoru.
+
 ![2FA výzva](img/04_2fa.webp)
 
 Správce může navíc explicitně povolit přihlášení pouze pomocí passkey:

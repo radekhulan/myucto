@@ -122,7 +122,8 @@ final class RecurringTemplateRepository
             . $this->ossItemSelect('i') . '
                FROM recurring_invoice_template_items i
                JOIN vat_rates vr ON vr.id = i.vat_rate_id
-          LEFT JOIN price_list_items pli ON pli.id = i.price_list_item_id
+               JOIN recurring_invoice_templates t ON t.id = i.template_id
+          LEFT JOIN price_list_items pli ON pli.id = i.price_list_item_id AND pli.supplier_id = t.supplier_id
               WHERE i.template_id IN (' . $placeholders . ')
               ORDER BY i.order_index, i.id'
         );
@@ -716,6 +717,14 @@ final class RecurringTemplateRepository
     public function replaceItems(int $templateId, array $items): void
     {
         $pdo = $this->db->pdo();
+        $owner = $pdo->prepare('SELECT supplier_id FROM recurring_invoice_templates WHERE id = ?');
+        $owner->execute([$templateId]);
+        $bad = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->itemViolations(
+            (int) $owner->fetchColumn(), $items, ['price_list_item_id'],
+        );
+        if ($bad !== []) {
+            throw new \MyInvoice\Service\Invoice\PriceListResolutionException('invalid_reference', \MyInvoice\Http\TenantReferenceGuard::message($bad));
+        }
         $pdo->prepare('DELETE FROM recurring_invoice_template_items WHERE template_id = ?')
             ->execute([$templateId]);
 

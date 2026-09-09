@@ -149,6 +149,11 @@ final class Section43Service
         if (!in_array($sourceType, ['invoice', 'purchase_invoice'], true)) {
             throw new \InvalidArgumentException('Zdrojem opravy je vydaná nebo přijatá faktura.');
         }
+        $column = $sourceType === 'invoice' ? 'invoice_id' : 'purchase_invoice_id';
+        $bad = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->violations($supplierId, [$column => $sourceId], [$column]);
+        if ($sourceId <= 0 || $bad !== []) {
+            throw new \InvalidArgumentException('Zdroj opravy nenalezen.');
+        }
         if (!in_array($rateKind, ['basic', 'reduced'], true)) {
             throw new \InvalidArgumentException('Sazbová skupina je basic (ř. 1) nebo reduced (ř. 2).');
         }

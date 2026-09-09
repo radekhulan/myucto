@@ -396,7 +396,7 @@ Každý dodavatel může mít více IMAP účtů, typicky jeden pro každou bank
 | Max. zpráv na běh | Kolik nejnovějších e-mailů cron načte při jednom běhu |
 | Zpracovat od data | Starší e-maily se ignorují i když spadnou do limitu |
 | Vyžadovat ověření autenticity | Zpracují se jen e-maily, u kterých přijímací server potvrdil DKIM/DMARC; **zapnuto** |
-| Důvěryhodné authserv-id | Volitelné připnutí serveru, jehož verdiktu se věří (např. `mx.mojedomena.cz`) |
+| Důvěryhodné authserv-id | Povinné při zapnutém ověření autenticity; přesný identifikátor přijímacího serveru z jeho hlavičky `Authentication-Results` (např. `mx.mojedomena.cz`) |
 | Přijímat přeposlaná (FW) avíza | Rozpozná banku i z těla e-mailu, když avíza chodí do schránky přeposlaná (odesílatel je tvoje adresa, ne banka) |
 | E-mail přeposílatele | Volitelné omezení, od koho smí přeposlaná avíza chodit — adresa (`jan@firma.cz`) nebo doména (`firma.cz`); prázdné = libovolný |
 | Načítat PDF faktury z příloh | Vedle avíz se z každé zprávy posoudí i PDF přílohy a doklady adresované tvé firmě se založí do Nákup → Příchozí doklady; **vypnuto** |
@@ -407,21 +407,27 @@ Každý dodavatel může mít více IMAP účtů, typicky jeden pro každou bank
 Odesílatel e-mailu se dá podvrhnout, takže samotná adresa v poli *Od* nic
 negarantuje. **Vyžadovat ověření autenticity** je proto u nových účtů zapnuté:
 systém sám podpisy nepřepočítává, ale věří verdiktu, který k doručené zprávě
-připsal tvůj přijímací server do hlavičky `Authentication-Results`. Zpracuje se
-jen e-mail s `dmarc=pass`, nebo s `dkim=pass` a doménou zarovnanou na odesílatele.
+připsal tvůj přijímací server do hlavičky `Authentication-Results`. Proto musíš
+zároveň vyplnit jeho přesné **Důvěryhodné authserv-id**. Zpracuje se jen e-mail,
+jehož první hlavička má právě toto authserv-id a obsahuje `dmarc=pass` s doménou
+`header.from` zarovnanou na odesílatele, nebo `dkim=pass` se stejně zarovnanou
+doménou `header.d`.
 
-**Chybějící hlavička je odmítnutí, ne výjimka.** Když zprávě hlavička chybí nebo
-verdikt nesedí, avízo se nezpracuje a v přehledu zpracovaných zpráv skončí ve
-stavu `security_rejected` s uvedeným důvodem. Pokud tvůj poštovní server
-hlavičku `Authentication-Results` vůbec nepřidává, kontrolu u daného účtu vypni —
-je to ale vědomé snížení ochrany, po kterém stačí k označení faktury za zaplacenou
+**Chybějící hlavička nebo authserv-id je odmítnutí, ne výjimka.** Když zprávě
+hlavička chybí, první hlavičku nepřidal připnutý server nebo verdikt nesedí,
+avízo se nezpracuje a v přehledu zpracovaných zpráv skončí ve stavu
+`security_rejected` s uvedeným důvodem. Pokud tvůj poštovní server hlavičku
+`Authentication-Results` vůbec nepřidává, kontrolu u daného účtu vypni. Je to
+ale vědomé snížení ochrany, po kterém stačí k označení faktury za zaplacenou
 jediný podvržený e-mail.
 
 Hlavičku `Authentication-Results` si umí do těla zprávy vložit kdokoli. Důvěryhodná
-je jen ta, kterou přidal tvůj server. Když jich v cestě je víc, připni v poli
-**Důvěryhodné authserv-id** název svého serveru — pak se hodnotí právě jeho řádek.
-U přeposlaných avíz platí, že přeposláním původní podpis banky zaniká, takže se
-ověření vztahuje na přeposílatele, ne na banku.
+je jen první, kterou přidal tvůj server. Server musí při přijetí zvenčí odstranit
+podvržené hlavičky se svým authserv-id a vlastní výsledek vložit navrch. Hodnota
+v poli **Důvěryhodné authserv-id** se porovnává celá, bez částečné shody, a systém
+při neúspěchu nehledá jiný výsledek v nižších hlavičkách. U přeposlaných avíz
+platí, že přeposláním původní podpis banky zaniká, takže se ověření vztahuje na
+přeposílatele, ne na banku.
 
 Pokud do schránky chodí avíza **přeposlaná** (např. z firemní schránky na sběrnou
 adresu), zapni **Přijímat přeposlaná (FW) avíza**. U přímého avíza poznává banku

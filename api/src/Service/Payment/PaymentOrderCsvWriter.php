@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payment;
 
+use MyInvoice\Service\Export\CsvWriter;
+
 /**
  * CSV export platebního příkazu (UTF-8 BOM, `;` oddělovač) — pro ruční zadání do
  * banky nebo archiv. Sloupce kryjí vše potřebné k platbě i ověření účtu příjemce.
@@ -18,22 +20,17 @@ final class PaymentOrderCsvWriter
      */
     public function build(array $order): string
     {
-        $fp = fopen('php://temp', 'w+');
-        fwrite($fp, "\xEF\xBB\xBF"); // UTF-8 BOM (Excel)
-
-        fputcsv($fp, [
+        $header = [
             'Příjemce', 'Účet', 'Kód banky', 'IBAN', 'BIC',
             'Částka', 'Měna', 'VS', 'KS', 'SS', 'Splatnost', 'Zpráva', 'Ověření účtu',
-        ], ';', '"', '\\');
+        ];
 
-        $safe = static function ($v): string {
-            $s = (string) ($v ?? '');
-            return preg_replace('/^([=+\-@\t\r])/u', "'\\1", $s) ?? $s;
-        };
+        $safe = CsvWriter::safe(...);
+        $rows = [];
 
         $dueDate = $this->czDate((string) ($order['payment_date'] ?? ''));
         foreach ((array) ($order['items'] ?? []) as $it) {
-            fputcsv($fp, [
+            $rows[] = [
                 $safe($it['payee_name'] ?? ''),
                 $safe($it['account_number'] ?? ''),
                 $safe($it['bank_code'] ?? ''),
@@ -44,16 +41,13 @@ final class PaymentOrderCsvWriter
                 $safe($it['variable_symbol'] ?? ''),
                 $safe($it['constant_symbol'] ?? ''),
                 $safe($it['specific_symbol'] ?? ''),
-                $dueDate,
+                $safe($dueDate),
                 $safe($it['message'] ?? ''),
                 $this->verificationLabel((string) ($it['account_verified'] ?? 'na')),
-            ], ';', '"', '\\');
+            ];
         }
 
-        rewind($fp);
-        $csv = (string) stream_get_contents($fp);
-        fclose($fp);
-        return $csv;
+        return CsvWriter::build($header, $rows);
     }
 
     private function verificationLabel(string $v): string

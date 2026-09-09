@@ -30,6 +30,10 @@ final class RecurringPriceListService
         DateTimeImmutable $referenceDate,
         bool $newTemplate,
     ): array {
+        $bad = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->itemViolations($supplierId, $items, ['price_list_item_id']);
+        if ($bad !== []) {
+            throw new PriceListResolutionException('invalid_reference', \MyInvoice\Http\TenantReferenceGuard::message($bad));
+        }
         $normalized = [];
         $idsToResolve = [];
         foreach (array_values($items) as $index => $item) {

@@ -50,6 +50,23 @@ final class MailerSandboxRenderTest extends TestCase
         self::assertStringContainsString('<!doctype html>', $html);
     }
 
+    public function testSupplierWebsiteCannotExecuteScriptInPreview(): void
+    {
+        foreach (['javascript:alert(1)', "java\tscript:alert(1)", 'data:text/html,test', 'https://example.test'] as $url) {
+            $html = $this->sandbox->createTemplate("{% extends '_layout.html.twig' %}{% block content %}Test{% endblock %}")->render([
+                'locale' => 'cs', 'subject' => 'Test',
+                'supplier' => ['company_name' => 'Synthetic', 'web' => $url, 'email_branding_enabled' => true],
+            ]);
+            $dom = new \DOMDocument();
+            @$dom->loadHTML($html);
+            $found = false;
+            foreach ($dom->getElementsByTagName('a') as $anchor) {
+                if ($anchor->getAttribute('href') === $url) $found = true;
+            }
+            self::assertSame(str_starts_with($url, 'https://'), $found, $url);
+        }
+    }
+
     public function testDbTextTemplateExtendsLayout(): void
     {
         $body = "{% extends '_layout.txt.twig' %}\n"

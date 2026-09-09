@@ -101,7 +101,7 @@
                       </td>
                       <td style="vertical-align:top;text-align:right;">
                         {% if supplier.phone %}<a href="tel:{{ supplier.phone|replace({' ': ''}) }}" style="color:#5A5470;text-decoration:none;font-variant-numeric:tabular-nums;">{{ supplier.phone }}</a><br>{% endif %}
-                        {% if supplier.web %}<a href="{{ supplier.web }}" style="color:#7A748C;text-decoration:none;">{{ supplier.web|replace({'https://': '', 'http://': ''}) }}</a>{% endif %}
+                        {% if supplier.web %}{% if supplier.web|lower starts with 'https://' or supplier.web|lower starts with 'http://' %}<a href="{{ supplier.web }}" style="color:#7A748C;text-decoration:none;">{{ supplier.web|replace({'https://': '', 'http://': ''}) }}</a>{% else %}{{ supplier.web }}{% endif %}{% endif %}
                       </td>
                     </tr>
                   </table>

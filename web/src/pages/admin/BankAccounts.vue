@@ -506,6 +506,10 @@ function closeImapForm() {
 }
 
 async function saveImapAccount() {
+  if (imapDraft.require_email_auth && !imapDraft.email_auth_serv_id?.trim()) {
+    toast.error(t('bank_accounts.email_auth_serv_id_hint'))
+    return
+  }
   saving.value = true
   try {
     if (editingImapId.value !== null) {
@@ -1269,7 +1273,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             </label>
             <div v-if="imapDraft.require_email_auth" class="md:col-span-3">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.email_auth_serv_id') }}</label>
-              <input v-model="imapDraft.email_auth_serv_id" type="text" placeholder="mx.mojefirma.cz"
+              <input v-model="imapDraft.email_auth_serv_id" type="text" placeholder="mx.mojefirma.cz" required
                 class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm font-mono" />
               <p class="text-xs text-neutral-500 mt-1">{{ t('bank_accounts.email_auth_serv_id_hint') }}</p>
             </div>

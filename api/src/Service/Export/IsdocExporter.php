@@ -116,7 +116,7 @@ final class IsdocExporter
 
         if (count($invoices) === 1) {
             $inv = $invoices[0];
-            $vs = $inv['varsymbol'] ?? ('draft-' . $inv['id']);
+            $vs = ExportFilename::sanitize((string) ($inv['varsymbol'] ?? ('draft-' . $inv['id'])));
             return [
                 'filename' => "Faktura-{$vs}.isdoc",
                 'content'  => $this->buildXml($inv),
@@ -131,7 +131,7 @@ final class IsdocExporter
             throw new \RuntimeException('Nelze vytvořit ZIP.');
         }
         foreach ($invoices as $inv) {
-            $vs = $inv['varsymbol'] ?? ('draft-' . $inv['id']);
+            $vs = ExportFilename::sanitize((string) ($inv['varsymbol'] ?? ('draft-' . $inv['id'])));
             $type = match ($inv['invoice_type']) {
                 'proforma'     => 'Proforma',
                 'credit_note'  => 'Dobropis',

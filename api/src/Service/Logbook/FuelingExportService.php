@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\FuelingRepository;
 use MyInvoice\Service\Pdf\MpdfFontConfig;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
@@ -59,7 +60,7 @@ final class FuelingExportService
         $sheet = $ss->getActiveSheet();
         $sheet->setTitle('Tankování');
         $sheet->setCellValue('A1', 'Tankování');
-        $sheet->setCellValue('A2', $supplier);
+        $sheet->setCellValueExplicit('A2', $supplier, DataType::TYPE_STRING);
         $sheet->setCellValue('A3', $period !== '' ? 'Období: ' . $period : '');
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
 
@@ -73,14 +74,14 @@ final class FuelingExportService
         foreach ($rows as $t) {
             $base = $t['amount_without_vat'] !== null ? (float) $t['amount_without_vat'] : null;
             $sheet->setCellValue("A{$r}", $this->dateCell($t));
-            $sheet->setCellValue("B{$r}", (string) ($t['car_registration'] ?? ''));
-            $sheet->setCellValue("C{$r}", (string) ($t['fuel_type'] ?? ''));
+            $sheet->setCellValueExplicit("B{$r}", (string) ($t['car_registration'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("C{$r}", (string) ($t['fuel_type'] ?? ''), DataType::TYPE_STRING);
             $sheet->setCellValue("D{$r}", $t['quantity'] !== null ? (float) $t['quantity'] : '');
             $sheet->setCellValue("E{$r}", $t['unit_price'] !== null ? (float) $t['unit_price'] : '');
             $sheet->setCellValue("F{$r}", $base !== null ? $base : '');
             $sheet->setCellValue("G{$r}", (float) $t['amount_with_vat']);
             $sheet->setCellValue("H{$r}", $this->odo($t));
-            $sheet->setCellValue("I{$r}", (string) ($t['station'] ?? $t['vendor_name'] ?? ''));
+            $sheet->setCellValueExplicit("I{$r}", (string) ($t['station'] ?? $t['vendor_name'] ?? ''), DataType::TYPE_STRING);
             $total += (float) $t['amount_with_vat'];
             if ($base !== null) $totalBase += $base;
             $r++;

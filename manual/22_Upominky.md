@@ -254,8 +254,9 @@ vytvoření nové faktury **odmítne** — není co nově vyúčtovat.
 
 V **Nástroje → Účetní nastavení → Repo sazba ČNB** je tabulka historických repo sazeb. Každý
 řádek má **Platnost od** (typicky 1. den pololetí) a **sazbu v % p.a.**. Systém
-při výpočtu vezme poslední sazbu s datem platnosti ≤ rozhodný den. Admin může
-řádky doplňovat a opravovat, jak přibývají nová pololetí.
+při výpočtu vezme poslední sazbu s datem platnosti ≤ rozhodný den. Číselník je
+společný pro celou instalaci. Řádky může doplňovat, opravovat a mazat pouze
+superadministrátor.
 
 ## 22.9 Kontrola, co se opravdu odeslalo (a co ne)
 

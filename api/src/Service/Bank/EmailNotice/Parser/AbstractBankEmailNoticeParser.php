@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Bank\EmailNotice\Parser;
 
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeMessage;
 use MyInvoice\Service\Bank\EmailNotice\EmailNoticeTextNormalizer;
+use MyInvoice\Service\Bank\EmailNotice\SenderAddress;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 
 /**
@@ -232,7 +233,7 @@ abstract class AbstractBankEmailNoticeParser implements BankEmailNoticeParserInt
         }
         if (preg_match_all('/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+/', $message->text, $m) >= 1) {
             foreach ($m[0] as $address) {
-                if (SenderDomain::matches($address, ...$domains)) {
+                if (SenderDomain::matches(rtrim($address, '.,;:'), ...$domains)) {
                     return true;
                 }
             }
@@ -254,11 +255,11 @@ abstract class AbstractBankEmailNoticeParser implements BankEmailNoticeParserInt
         if (!str_contains($forwardedFrom, '@')) {
             return SenderDomain::matches($sender, $forwardedFrom);
         }
-        $address = strtolower(trim($sender));
-        if (preg_match('/<([^<>]+)>\s*$/', $address, $m) === 1) {
-            $address = trim($m[1]);
-        }
-        return $address === $forwardedFrom;
+        $senderAddress = SenderAddress::parse($sender);
+        $allowedAddress = SenderAddress::parse($forwardedFrom);
+        return $senderAddress !== null
+            && $allowedAddress !== null
+            && $senderAddress->address === $allowedAddress->address;
     }
 
     /**
@@ -282,7 +283,10 @@ abstract class AbstractBankEmailNoticeParser implements BankEmailNoticeParserInt
         if ($entries === []) {
             return false;
         }
-        $sender = strtolower(trim($sender));
+        $senderAddress = SenderAddress::parse($sender);
+        if ($senderAddress === null) {
+            return false;
+        }
         foreach ($entries as $allowed) {
             if (!str_contains($allowed, '@')) {
                 if (SenderDomain::matches($sender, $allowed)) {
@@ -290,7 +294,8 @@ abstract class AbstractBankEmailNoticeParser implements BankEmailNoticeParserInt
                 }
                 continue;
             }
-            if ($sender === $allowed || str_contains($sender, '<' . $allowed . '>')) {
+            $allowedAddress = SenderAddress::parse($allowed);
+            if ($allowedAddress !== null && $senderAddress->address === $allowedAddress->address) {
                 return true;
             }
         }
@@ -352,7 +357,7 @@ abstract class AbstractBankEmailNoticeParser implements BankEmailNoticeParserInt
         }
         if (preg_match_all('/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+/', $message->text, $m) >= 1) {
             foreach ($m[0] as $address) {
-                if (SenderDomain::matches($address, ...$domains)) {
+                if (SenderDomain::matches(rtrim($address, '.,;:'), ...$domains)) {
                     return true;
                 }
             }

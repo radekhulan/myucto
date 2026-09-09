@@ -68,6 +68,15 @@ final class AccountNumberNormalizerTest extends TestCase
         self::assertFalse(AccountNumberNormalizer::equals('1000000005', '1000000006'));
     }
 
+    public function testMaskRequiresVisibleDigitsAndNeverMatchesAnotherMask(): void
+    {
+        self::assertFalse(AccountNumberNormalizer::equals('**********', '1000000005'));
+        self::assertFalse(AccountNumberNormalizer::equals('1000000005', '**********'));
+        self::assertFalse(AccountNumberNormalizer::equals('**********', '**********'));
+        self::assertFalse(AccountNumberNormalizer::equals('100***0005', '100***0005'));
+        self::assertFalse(AccountNumberNormalizer::equals('100***0005', '1000005'));
+    }
+
     public function testEqualsPrefixVsBase(): void
     {
         // Note: prefixed account `19-1000000005` normalizes to `191000000005`,

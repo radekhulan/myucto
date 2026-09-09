@@ -321,7 +321,7 @@ final class LoginAction
                 return Json::error($response, 'too_many_attempts', 'Příliš mnoho TOTP pokusů. Zkus to později.', 429);
             }
             $totpSecret = $this->crypto->decrypt((string) $user['totp_secret']);
-            if (!$this->totp->verify($totpSecret, $totpCode)) {
+            if (!$this->totp->verifyAndConsume($this->db, $totpSecret, $totpCode)) {
                 $this->bf->recordTotpFailure((int) $user['id']);
                 $this->bf->recordFailure($email, $ip);
                 $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [

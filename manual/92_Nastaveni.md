@@ -17,6 +17,10 @@ vystavování dokladů v menu **Prodej → Ceník**.
 
 **Systém → Číselníky**.
 
+Sazby DPH, země a měrné jednotky jsou společné pro celou instalaci. Přidávat,
+měnit a mazat je může pouze superadministrátor. Firemní kategorie nákladů a
+tržeb se spravují samostatně podle oprávnění k nastavení firmy.
+
 ![Číselníky — Měny](img/15_ciselniky_meny.webp)
 
 4 záložky:

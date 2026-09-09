@@ -1443,6 +1443,14 @@ final class InvoiceRepository
         // Vazby na karty majetku (1177) se ověřují PŘED smazáním starých řádků — chybná vazba
         // tak nechá fakturu netknutou, místo aby ji nechala bez položek.
         $this->assertItemAssetLinks($invoiceId, $items);
+        $owner = $pdo->prepare('SELECT supplier_id FROM invoices WHERE id = ?');
+        $owner->execute([$invoiceId]);
+        $bad = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->itemViolations(
+            (int) $owner->fetchColumn(), $items, ['stock_item_id', 'warehouse_id'],
+        );
+        if ($bad !== []) {
+            throw new \InvalidArgumentException(\MyInvoice\Http\TenantReferenceGuard::message($bad));
+        }
 
         $pdo->prepare('DELETE FROM invoice_items WHERE invoice_id = ?')->execute([$invoiceId]);
 

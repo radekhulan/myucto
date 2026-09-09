@@ -33,4 +33,15 @@ final class CsvWriterTest extends TestCase
         $this->assertSame('ACME s.r.o.', CsvWriter::safe('ACME s.r.o.'));
         $this->assertSame('', CsvWriter::safe(null));
     }
+
+    public function testBackslashBeforeQuoteCannotCreateAnExtraCell(): void
+    {
+        $value = 'text\\";=1+1';
+        $stream = fopen('php://temp', 'w+');
+        fwrite($stream, CsvWriter::build(['Label'], [[$value]]));
+        rewind($stream);
+        fgetcsv($stream, separator: ';', escape: '');
+        self::assertSame([$value], fgetcsv($stream, separator: ';', escape: ''));
+        fclose($stream);
+    }
 }

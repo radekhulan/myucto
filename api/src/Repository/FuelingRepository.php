@@ -28,9 +28,9 @@ final class FuelingRepository
                        cl.company_name AS vendor_name,
                        pi.vendor_invoice_number AS source_invoice_number
                   FROM fuelings f
-             LEFT JOIN cars c     ON c.id  = f.car_id
-             LEFT JOIN clients cl ON cl.id = f.vendor_id
-             LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id
+             LEFT JOIN cars c     ON c.id  = f.car_id AND c.supplier_id = f.supplier_id
+             LEFT JOIN clients cl ON cl.id = f.vendor_id AND cl.supplier_id = f.supplier_id
+             LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id AND pi.supplier_id = f.supplier_id
                  WHERE ' . implode(' AND ', $where) . '
               ORDER BY f.fueled_date DESC, f.fueled_time DESC, f.id DESC';
         $stmt = $this->db->pdo()->prepare($sql);
@@ -59,9 +59,9 @@ final class FuelingRepository
                        cl.company_name AS vendor_name,
                        pi.vendor_invoice_number AS source_invoice_number
                   FROM fuelings f
-             LEFT JOIN cars c     ON c.id  = f.car_id
-             LEFT JOIN clients cl ON cl.id = f.vendor_id
-             LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id
+             LEFT JOIN cars c     ON c.id  = f.car_id AND c.supplier_id = f.supplier_id
+             LEFT JOIN clients cl ON cl.id = f.vendor_id AND cl.supplier_id = f.supplier_id
+             LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id AND pi.supplier_id = f.supplier_id
                  WHERE ' . $whereSql . '
               ORDER BY f.fueled_date DESC, f.fueled_time DESC, f.id DESC
                  LIMIT ' . max(1, $perPage) . ' OFFSET ' . max(0, $offset);
@@ -114,9 +114,9 @@ final class FuelingRepository
             'SELECT f.*, c.registration AS car_registration, c.name AS car_name, cl.company_name AS vendor_name,
                     pi.vendor_invoice_number AS source_invoice_number
                FROM fuelings f
-          LEFT JOIN cars c     ON c.id  = f.car_id
-          LEFT JOIN clients cl ON cl.id = f.vendor_id
-          LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id
+          LEFT JOIN cars c     ON c.id  = f.car_id AND c.supplier_id = f.supplier_id
+          LEFT JOIN clients cl ON cl.id = f.vendor_id AND cl.supplier_id = f.supplier_id
+          LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id AND pi.supplier_id = f.supplier_id
               WHERE f.id = ? AND f.supplier_id = ?'
         );
         $stmt->execute([$id, $supplierId]);

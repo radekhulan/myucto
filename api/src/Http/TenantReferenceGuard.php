@@ -117,8 +117,8 @@ final class TenantReferenceGuard
     /**
      * Vrátí sloupce z $columns, jejichž hodnota v $body ukazuje mimo tenanta.
      *
-     * Prázdné pole = vše v pořádku. Chybějící / prázdná / nečíselná / nekladná
-     * hodnota se přeskakuje (to řeší validace, ne tenant guard). Jeden SELECT
+     * Prázdné pole = vše v pořádku. Chybějící / prázdná / nulová
+     * hodnota se přeskakuje. Neplatné ID se odmítá. Jeden SELECT
      * na cílovou tabulku — `currency_id` + `payment_currency_id` se ptají jednou.
      *
      * @param array<string,mixed> $body    tělo requestu
@@ -127,34 +127,60 @@ final class TenantReferenceGuard
      */
     public function violations(int $supplierId, array $body, array $columns): array
     {
+        return $this->check($supplierId, $body, $columns, self::SCOPES);
+    }
+
+    public function itemViolations(int $supplierId, array $items, array $columns): array
+    {
+        $scopes = [
+            'price_list_item_id' => ['price_list_items', self::VIA_SUPPLIER],
+            'stock_item_id' => ['stock_items', self::VIA_SUPPLIER],
+            'warehouse_id' => ['warehouses', self::VIA_SUPPLIER],
+        ];
+        $body = [];
+        $itemScopes = [];
+        foreach ($items as $index => $item) {
+            if (!is_array($item)) {
+                return ['items.' . $index];
+            }
+            foreach ($columns as $column) {
+                if (!isset($scopes[$column])) {
+                    throw new \InvalidArgumentException('Neznámý sloupec vazby položky.');
+                }
+                $key = 'items.' . $index . '.' . $column;
+                $body[$key] = $item[$column] ?? null;
+                $itemScopes[$key] = $scopes[$column];
+            }
+        }
+        return $this->check($supplierId, $body, array_keys($body), $itemScopes);
+    }
+
+    private function check(int $supplierId, array $body, array $columns, array $scopes): array
+    {
         /** @var array<string, array<string, array<int, list<string>>>> $byScope */
         $byScope = [];
         $present = [];
         $bad     = [];
 
         foreach ($columns as $column) {
-            if (!isset(self::SCOPES[$column])) {
+            if (!isset($scopes[$column])) {
                 throw new \InvalidArgumentException(
                     "TenantReferenceGuard: neznámý sloupec '{$column}' — doplň ho do SCOPES."
                 );
             }
             $raw = $body[$column] ?? null;
-            // Zlomkové ID odmítáme rovnou: PHP `(int)` ořezává (5.7 → 5), ale MySQL
-            // při zápisu do INT sloupce ZAOKROUHLUJE (5.7 → 6). Guard by tedy ověřil
-            // vlastnictví jiného řádku, než jaký se reálně uloží — o jedno ID vedle,
-            // a to je přesně cizí záznam. Zápisové cesty dnes castují `(int)` samy,
-            // takže rozpor nikde nevzniká; nespoléháme ale na to, že to tak zůstane.
-            if (self::isFractional($raw)) {
+            try {
+                $id = ReferenceId::optional($raw);
+            } catch (\InvalidArgumentException) {
                 $present[] = $column;
                 $bad[]     = $column;
                 continue;
             }
-            $id = self::idOrNull($raw);
             if ($id === null) {
                 continue;
             }
             $present[] = $column;
-            [$table, $via] = self::SCOPES[$column];
+            [$table, $via] = $scopes[$column];
             $byScope[$via][$table][$id][] = $column;
         }
 
@@ -229,39 +255,6 @@ final class TenantReferenceGuard
         $stmt->execute([...$ids, $supplierId]);
 
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
-    }
-
-    /**
-     * Číselná hodnota s desetinnou částí (`5.7`, `"5.7"`) — viz `violations()`.
-     *
-     * `0`, `''`, `null` ani nečíselné hodnoty sem nespadají: znamenají „nevyplněno"
-     * (u nepovinných vazeb jako `project_id` je `0` legitimní „bez projektu")
-     * a řeší je validace. Zaokrouhlením se z nich cizí ID stát nemůže.
-     */
-    private static function isFractional(mixed $value): bool
-    {
-        if (is_bool($value) || is_array($value) || $value === null || $value === '') {
-            return false;
-        }
-        if (!is_numeric($value)) {
-            return false;
-        }
-
-        return (float) $value !== floor((float) $value);
-    }
-
-    /** Kladné celé číslo, nebo null (prázdné / nečíselné / ≤ 0 se neověřuje). */
-    private static function idOrNull(mixed $value): ?int
-    {
-        if ($value === null || $value === '' || is_array($value) || is_bool($value)) {
-            return null;
-        }
-        if (!is_numeric($value)) {
-            return null;
-        }
-        $id = (int) $value;
-
-        return $id > 0 ? $id : null;
     }
 
     /**

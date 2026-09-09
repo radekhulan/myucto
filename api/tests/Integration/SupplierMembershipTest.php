@@ -183,6 +183,25 @@ final class SupplierMembershipTest extends TestCase
             'Fallback bez headeru musí zvolit přiřazený supplier, ne globální MIN');
     }
 
+    public function testHistoricalForeignDefaultCurrencyDoesNotHideSupplierOrExposeCurrency(): void
+    {
+        $pdo = $this->db->pdo();
+        $query = $pdo->prepare('SELECT id FROM currencies WHERE supplier_id = ? ORDER BY id LIMIT 1');
+        $query->execute([$this->supplierA]);
+        $currencyId = (int) $query->fetchColumn();
+        self::assertGreaterThan(0, $currencyId);
+        $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([$currencyId, $this->supplierB]);
+        $userId = $this->mkUser('accountant');
+        $this->assign($userId, [[$this->supplierB, null]]);
+        $token = $this->mkToken($userId);
+        $response = $this->request('GET', '/api/settings/supplier', $token, $this->supplierB);
+        self::assertSame(200, $response->getStatusCode());
+        $body = $this->json($response);
+        self::assertSame($this->supplierB, $body['id']);
+        self::assertArrayHasKey('default_currency', $body);
+        self::assertNull($body['default_currency']);
+    }
+
     public function testUserWithoutMembershipHasNoSupplierAccess(): void
     {
         $userId = $this->mkUser('accountant');

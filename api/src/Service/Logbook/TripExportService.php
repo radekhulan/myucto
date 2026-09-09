@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TripRepository;
 use MyInvoice\Service\Pdf\MpdfFontConfig;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
@@ -64,7 +65,7 @@ final class TripExportService
         $sheet->setTitle('Kniha jízd');
 
         $sheet->setCellValue('A1', 'Kniha jízd');
-        $sheet->setCellValue('A2', $supplier);
+        $sheet->setCellValueExplicit('A2', $supplier, DataType::TYPE_STRING);
         $sheet->setCellValue('A3', $period !== '' ? 'Období: ' . $period : '');
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
 
@@ -86,11 +87,11 @@ final class TripExportService
             }
             $currentCar = $car;
             $sheet->setCellValue("A{$r}", $this->dateCell($t));
-            $sheet->setCellValue("B{$r}", $car);
-            $sheet->setCellValue("C{$r}", (string) ($t['origin'] ?? ''));
-            $sheet->setCellValue("D{$r}", (string) ($t['destination'] ?? ''));
-            $sheet->setCellValue("E{$r}", (string) ($t['purpose'] ?? ''));
-            $sheet->setCellValue("F{$r}", (string) ($t['category_label'] ?? ''));
+            $sheet->setCellValueExplicit("B{$r}", $car, DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("C{$r}", (string) ($t['origin'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("D{$r}", (string) ($t['destination'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("E{$r}", (string) ($t['purpose'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("F{$r}", (string) ($t['category_label'] ?? ''), DataType::TYPE_STRING);
             $sheet->setCellValue("G{$r}", $t['odometer_start'] !== null ? (int) $t['odometer_start'] : '');
             $sheet->setCellValue("H{$r}", $t['odometer_end'] !== null ? (int) $t['odometer_end'] : '');
             $sheet->setCellValue("I{$r}", (float) $t['distance_km']);
@@ -122,7 +123,7 @@ final class TripExportService
 
     private function xlsxSubtotal($sheet, int $r, string $car, float $sum): void
     {
-        $sheet->setCellValue("F{$r}", 'Σ ' . $car);
+        $sheet->setCellValueExplicit("F{$r}", 'Σ ' . $car, DataType::TYPE_STRING);
         $sheet->setCellValue("I{$r}", $sum);
         $sheet->getStyle("F{$r}:I{$r}")->getFont()->setItalic(true)->setBold(true);
         $sheet->getStyle("A{$r}:I{$r}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F6F6F6');

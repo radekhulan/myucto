@@ -87,7 +87,7 @@ final class LoginActionMfaPolicyTest extends TestCase
             }
         );
         $totp = $this->createMock(TotpService::class);
-        $totp->method('verify')->willReturn(true);
+        $totp->method('verifyAndConsume')->willReturn(true);
 
         $this->login(
             issuer: $issuer,
@@ -120,7 +120,7 @@ final class LoginActionMfaPolicyTest extends TestCase
             }
         );
         $totp = $this->createMock(TotpService::class);
-        $totp->method('verify')->willReturn(true);
+        $totp->method('verifyAndConsume')->willReturn(true);
 
         $this->login(
             issuer: $issuer,

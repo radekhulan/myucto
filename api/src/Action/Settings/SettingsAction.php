@@ -515,6 +515,13 @@ final class SettingsAction
             return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
         }
 
+        $badReferences = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->violations(
+            $id, ['currency_id' => $body['default_currency_id'] ?? null], ['currency_id'],
+        );
+        if ($badReferences !== []) {
+            return Json::error($response, 'invalid_reference', 'Neplatná výchozí měna.', 400);
+        }
+
         $activatesPayroll = false;
         if (array_key_exists('payroll_enabled', $body) && (bool) $body['payroll_enabled']) {
             $currentPayroll = $this->db->pdo()->prepare('SELECT payroll_enabled FROM supplier WHERE id = ?');
@@ -1166,7 +1173,7 @@ final class SettingsAction
                     cur.code AS default_currency
                FROM supplier s
                JOIN countries c ON c.id = s.country_id
-               JOIN currencies cur ON cur.id = s.default_currency_id
+          LEFT JOIN currencies cur ON cur.id = s.default_currency_id AND cur.supplier_id = s.id
               WHERE s.id = ?'
         );
         $stmt->execute([$id]);
@@ -1491,7 +1498,7 @@ final class SettingsAction
 
     public function createVatRate(Request $request, Response $response): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->globalCodebookGuard($request, $response, $err)) return $err;
         $b = (array) ($request->getParsedBody() ?? []);
         $code = trim((string) ($b['code'] ?? ''));
         $rate = (float) ($b['rate_percent'] ?? -1);
@@ -1521,7 +1528,7 @@ final class SettingsAction
 
     public function updateVatRate(Request $request, Response $response, array $args): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->globalCodebookGuard($request, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
         $b = (array) ($request->getParsedBody() ?? []);
         $allowed = ['code', 'rate_percent', 'country', 'label_cs', 'label_en',
@@ -1545,7 +1552,7 @@ final class SettingsAction
 
     public function deleteVatRate(Request $request, Response $response, array $args): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->globalCodebookGuard($request, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
         $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM invoice_items WHERE vat_rate_id = ?');
         $stmt->execute([$id]);
@@ -1588,7 +1595,7 @@ final class SettingsAction
 
     public function createCountry(Request $request, Response $response): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->globalCodebookGuard($request, $response, $err)) return $err;
         $b = (array) ($request->getParsedBody() ?? []);
         $iso2 = strtoupper(trim((string) ($b['iso2'] ?? '')));
         if (!preg_match('/^[A-Z]{2}$/', $iso2)) {
@@ -1614,7 +1621,7 @@ final class SettingsAction
 
     public function updateCountry(Request $request, Response $response, array $args): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->globalCodebookGuard($request, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
         $b = (array) ($request->getParsedBody() ?? []);
         $allowed = ['iso3', 'name_cs', 'name_en', 'is_eu'];
@@ -1634,7 +1641,7 @@ final class SettingsAction
 
     public function deleteCountry(Request $request, Response $response, array $args): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->globalCodebookGuard($request, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
         $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM clients WHERE country_id = ?');
         $stmt->execute([$id]);
@@ -1773,7 +1780,7 @@ final class SettingsAction
 
     public function createUnit(Request $request, Response $response): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->globalCodebookGuard($request, $response, $err)) return $err;
         $b = (array) ($request->getParsedBody() ?? []);
         $code = trim((string) ($b['code'] ?? ''));
         if ($code === '' || mb_strlen($code) > 20) {
@@ -1801,7 +1808,7 @@ final class SettingsAction
 
     public function updateUnit(Request $request, Response $response, array $args): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->globalCodebookGuard($request, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
         if ($id <= 0) return Json::error($response, 'validation_failed', 'Neplatné id.', 400);
         $b = (array) ($request->getParsedBody() ?? []);
@@ -1829,7 +1836,7 @@ final class SettingsAction
 
     public function deleteUnit(Request $request, Response $response, array $args): Response
     {
-        if (!$this->guard($request, $response, $err)) return $err;
+        if (!$this->globalCodebookGuard($request, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare('SELECT code FROM units WHERE id = ?');
@@ -1852,6 +1859,16 @@ final class SettingsAction
     private function makeOnlyDefaultUnit(int $id): void
     {
         $this->db->pdo()->prepare('UPDATE units SET is_default = 0 WHERE id <> ?')->execute([$id]);
+    }
+
+    private function globalCodebookGuard(Request $request, Response $response, ?Response &$err): bool
+    {
+        if (!RequestAuthorization::isSuperadmin($request)) {
+            $err = Json::error($response, 'forbidden', 'Pouze správce instalace.', 403);
+            return false;
+        }
+        $err = null;
+        return true;
     }
 
     private function guard(Request $request, Response $response, ?Response &$err): bool

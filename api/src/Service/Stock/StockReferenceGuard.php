@@ -37,7 +37,7 @@ use PDO;
  *      že by do centrální mapy nepatřily.
  *
  * Sémantika je záměrně shodná s `TenantReferenceGuard`: prázdné pole = vše v
- * pořádku, `null` / `0` / nekladná hodnota = „nevyplněno" a neověřuje se
+ * pořádku, `null` / `0` / prázdný řetězec = „nevyplněno" a neověřuje se
  * (to řeší validace), `supplierId <= 0` je fail-closed.
  */
 final class StockReferenceGuard
@@ -83,7 +83,12 @@ final class StockReferenceGuard
         $bad = [];
 
         foreach ($refs as $column => $value) {
-            $ids = self::ids($value);
+            try {
+                $ids = self::ids($value);
+            } catch (\InvalidArgumentException) {
+                $bad[] = ['column' => (string) $column, 'id' => 0];
+                continue;
+            }
             if ($ids === []) {
                 continue;
             }
@@ -132,14 +137,7 @@ final class StockReferenceGuard
     }
 
     /**
-     * Kladná celá id z jedné hodnoty nebo seznamu; ostatní se zahazují.
-     *
-     * `TenantReferenceGuard` musí zlomkové id odmítat, protože ho posílá do SQL syrové
-     * a MySQL při zápisu do INT ZAOKROUHLUJE (5.7 → 6), zatímco PHP `(int)` ořezává —
-     * ověřilo by se tak vlastnictví jiného řádku, než jaký se uloží. Tady ten rozpor
-     * vzniknout nemůže: obě zápisové cesty (`StockDocumentService::validateBody()`,
-     * `StockReceiptService::applyLandedCosts()`) hodnotu castují `(int)` PŘED zápisem,
-     * takže guard ověřuje přesně to id, které do DB půjde.
+     * Kladná celá id z jedné hodnoty nebo seznamu; neplatné hodnoty se odmítají.
      *
      * @param list<int|string|null>|int|string|null $value
      * @return list<int>
@@ -149,10 +147,7 @@ final class StockReferenceGuard
         $raw = is_array($value) ? $value : [$value];
         $out = [];
         foreach ($raw as $item) {
-            if ($item === null || $item === '' || is_array($item) || is_bool($item) || !is_numeric($item)) {
-                continue;
-            }
-            $id = (int) $item;
+            $id = \MyInvoice\Http\ReferenceId::optional($item);
             if ($id > 0 && !in_array($id, $out, true)) {
                 $out[] = $id;
             }

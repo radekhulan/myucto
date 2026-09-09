@@ -124,7 +124,7 @@ final class TotpAction
         } catch (\RuntimeException) {
             return Json::error($response, 'server_error', 'Chyba konfigurace serveru.', 500);
         }
-        if (!$this->totp->verify($secret, $code)) {
+        if (!$this->totp->verifyAndConsume($this->db, $secret, $code)) {
             return Json::error($response, 'invalid_code', 'Neplatný TOTP kód.', 400);
         }
 

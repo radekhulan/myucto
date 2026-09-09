@@ -281,6 +281,47 @@ final class ActionTenantReferenceTest extends TestCase
         return $out;
     }
 
+    public function testGuardScannerExcludesRemappedBodyAliasesAndStockReferences(): void
+    {
+        $code = <<<'PHP'
+<?php
+$tenant->violations(
+    SupplierGuard::currentId($request),
+    ['currency_id' => $body['default_currency_id'], 'note' => '), [ignored_id]'],
+    ['currency_id'],
+);
+$stock->violations($supplierId, ['purchase_invoice_item_id' => [$body['source_item_id']]]);
+PHP;
+        self::assertSame(["['currency_id']"], self::guardCallArguments($code));
+        self::assertSame(['currency_id'], self::guardedColumns($code));
+    }
+
+    public function testGuardScannerKeepsUnknownColumnsInThirdArgument(): void
+    {
+        $code = <<<'PHP'
+<?php
+$guard -> violations (
+    currentSupplier($request, [1, 2]),
+    (static function () use ($body) { return array_merge($body, ['ignored_id' => '),{}']); })(),
+    array_merge(['client_id'], ['clinet_id']),
+);
+PHP;
+        $columns = self::guardedColumns($code);
+        self::assertSame(['client_id', 'clinet_id'], $columns);
+        self::assertSame(['clinet_id'], array_values(array_diff($columns, array_keys(TenantReferenceGuard::SCOPES))));
+    }
+
+    public function testGuardScannerIgnoresCallsInsideStringsAndComments(): void
+    {
+        $code = <<<'PHP'
+<?php
+$text = '$guard->violations(1, [], ["ignored_id"])';
+// $guard->violations(1, [], ['comment_id']);
+$guard->violations($id, ["note" => "literal ), [ ] { }, {$body['note']}"], ['vendor_id']);
+PHP;
+        self::assertSame(["['vendor_id']"], self::guardCallArguments($code));
+    }
+
     /**
      * Jména proměnných, do kterých se v souboru přiřazuje tělo requestu.
      *
@@ -325,32 +366,73 @@ final class ActionTenantReferenceTest extends TestCase
     }
 
     /**
-     * Argumentové bloky všech volání `->violations(...)` v souboru (vyvážené závorky —
-     * regex by na vnořeném poli sloupců selhal).
+     * Třetí argument volání `->violations(...)`; dvouargumentový StockReferenceGuard
+     * má jiný kontrakt. Tokeny oddělují syntaxi od závorek uvnitř řetězců.
      *
      * @return list<string>
      */
     private static function guardCallArguments(string $code): array
     {
         $out = [];
-        $offset = 0;
-        while (($pos = strpos($code, '->violations(', $offset)) !== false) {
-            $start = $pos + strlen('->violations(');
-            $depth = 1;
-            $i = $start;
-            $len = strlen($code);
-            while ($i < $len && $depth > 0) {
-                if ($code[$i] === '(') {
-                    $depth++;
-                } elseif ($code[$i] === ')') {
-                    $depth--;
-                }
-                $i++;
+        $tokens = array_values(array_filter(
+            token_get_all($code),
+            static fn (array|string $token): bool => !is_array($token)
+                || !in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true),
+        ));
+        $count = count($tokens);
+        for ($i = 0; $i < $count - 2; $i++) {
+            if (!is_array($tokens[$i])
+                || !in_array($tokens[$i][0], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], true)
+                || !is_array($tokens[$i + 1])
+                || $tokens[$i + 1][0] !== T_STRING
+                || strtolower($tokens[$i + 1][1]) !== 'violations'
+                || $tokens[$i + 2] !== '('
+            ) {
+                continue;
             }
-            $out[] = substr($code, $start, $i - $start - 1);
-            $offset = $i;
+            $stack = ['('];
+            $arguments = [];
+            $argument = '';
+            $quote = null;
+            $heredoc = false;
+            for ($j = $i + 3; $j < $count; $j++) {
+                $token = $tokens[$j];
+                $text = is_array($token) ? $token[1] : $token;
+                if ($heredoc) {
+                    $argument .= $text;
+                    if (is_array($token) && $token[0] === T_END_HEREDOC) $heredoc = false;
+                    continue;
+                }
+                if ($quote !== null) {
+                    $argument .= $text;
+                    if ($token === $quote) $quote = null;
+                    continue;
+                }
+                if (is_array($token)) {
+                    if ($token[0] === T_START_HEREDOC) $heredoc = true;
+                    $argument .= $text;
+                    continue;
+                }
+                if ($token === '"' || $token === '`') {
+                    $quote = $token;
+                } elseif (in_array($token, ['(', '[', '{'], true)) {
+                    $stack[] = $token;
+                } elseif (in_array($token, [')', ']', '}'], true)) {
+                    $opening = array_pop($stack);
+                    if ($opening !== [')' => '(', ']' => '[', '}' => '{'][$token]) break;
+                    if ($stack === []) {
+                        if ($argument !== '') $arguments[] = $argument;
+                        if (count($arguments) === 3) $out[] = $arguments[2];
+                        break;
+                    }
+                } elseif ($token === ',' && count($stack) === 1) {
+                    $arguments[] = $argument;
+                    $argument = '';
+                    continue;
+                }
+                $argument .= $text;
+            }
         }
-
         return $out;
     }
 

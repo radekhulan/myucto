@@ -13,7 +13,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
  * Číselník 2týdenní repo sazby ČNB (rozhodná pro úrok z prodlení, NV 351/2013).
- * Globální (napříč firmami), editace jen účetní|admin.
+ * Globální (napříč firmami), editace jen správce instalace.
  *
  *   GET    /api/accounting/repo-rates            — seznam sazeb
  *   PUT    /api/accounting/repo-rates            — upsert sazby (valid_from, rate)
@@ -36,7 +36,9 @@ final class CnbRepoRateAction
 
     public function upsert(Request $request, Response $response): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) return $err;
+        if (!\MyInvoice\Security\RequestAuthorization::isSuperadmin($request)) {
+            return Json::error($response, 'forbidden', 'Pouze správce instalace.', 403);
+        }
 
         $body = (array) ($request->getParsedBody() ?? []);
         $validFrom = trim((string) ($body['valid_from'] ?? ''));
@@ -66,7 +68,9 @@ final class CnbRepoRateAction
 
     public function delete(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) return $err;
+        if (!\MyInvoice\Security\RequestAuthorization::isSuperadmin($request)) {
+            return Json::error($response, 'forbidden', 'Pouze správce instalace.', 403);
+        }
 
         $date = (string) ($args['date'] ?? '');
         if (!$this->rates->delete($date)) {

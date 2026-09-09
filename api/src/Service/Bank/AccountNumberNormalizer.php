@@ -35,6 +35,9 @@ final class AccountNumberNormalizer
      */
     public static function equals(string $a, string $b): bool
     {
+        if (str_contains($a, '*') || str_contains($b, '*')) {
+            return self::matchesMasked($a, $b) || self::matchesMasked($b, $a);
+        }
         $ibanA = self::czechSlovakIbanAccountPart($a);
         $ibanB = self::czechSlovakIbanAccountPart($b);
         if ($ibanA !== null || $ibanB !== null) {
@@ -50,7 +53,7 @@ final class AccountNumberNormalizer
         if (self::normalize($a) === self::normalize($b)) {
             return true;
         }
-        return self::matchesMasked($a, $b) || self::matchesMasked($b, $a);
+        return false;
     }
 
     /**
@@ -74,7 +77,7 @@ final class AccountNumberNormalizer
 
         $maskPattern = preg_replace('/[^0-9*]/', '', $maskPart) ?? '';
         $fullDigits = preg_replace('/\D/', '', explode('/', trim($full), 2)[0]) ?? '';
-        if ($maskPattern === '' || $fullDigits === '' || strlen($maskPattern) !== strlen($fullDigits)) {
+        if ($maskPattern === '' || preg_match('/[0-9]/', $maskPattern) !== 1 || $fullDigits === '' || strlen($maskPattern) !== strlen($fullDigits)) {
             return false;
         }
 

@@ -129,7 +129,7 @@ final class EpoStepUpService
                 500,
             );
         }
-        if (!$this->totp->verify($secret, $code)) {
+        if (!$this->totp->verifyAndConsume($this->db, $secret, $code)) {
             $this->bruteForce->recordTotpFailure($userId);
             $this->logFailure($userId, $purpose, 'totp', $ip, $userAgent);
             throw new EpoSubmissionException('invalid_code', 'Neplatný TOTP kód.', 401);

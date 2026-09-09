@@ -134,17 +134,18 @@ final class EmailOtpService
         }
 
         if (hash_equals((string) $active['code_hash'], hash('sha256', $code))) {
-            $this->db->pdo()->prepare('UPDATE login_otps SET used_at = NOW() WHERE id = ?')
-                ->execute([(int) $active['id']]);
-            return true;
+            $stmt = $this->db->pdo()->prepare(
+                'UPDATE login_otps SET used_at = NOW()
+                  WHERE id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?'
+            );
+            $stmt->execute([(int) $active['id'], $this->maxAttempts()]);
+            return $stmt->rowCount() === 1;
         }
 
-        $newAttempts = (int) $active['attempts'] + 1;
-        $this->db->pdo()->prepare('UPDATE login_otps SET attempts = ? WHERE id = ?')
-            ->execute([$newAttempts, (int) $active['id']]);
-        if ($newAttempts >= $this->maxAttempts()) {
-            $this->invalidate((int) $active['id']);
-        }
+        $this->db->pdo()->prepare(
+            'UPDATE login_otps SET attempts = attempts + 1
+              WHERE id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?'
+        )->execute([(int) $active['id'], $this->maxAttempts()]);
         return false;
     }
 
@@ -164,10 +165,10 @@ final class EmailOtpService
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, code_hash, attempts, UNIX_TIMESTAMP(created_at) AS created_ts
                FROM login_otps
-              WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW()
+              WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?
               ORDER BY id DESC LIMIT 1'
         );
-        $stmt->execute([$userId]);
+        $stmt->execute([$userId, $this->maxAttempts()]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $row ?: null;
     }

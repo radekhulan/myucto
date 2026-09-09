@@ -49,6 +49,31 @@ final class IsdocExporterSchemaTest extends TestCase
         $this->assertValidIsdoc($this->exporter->buildXml($this->invoice()));
     }
 
+    public function testExportFilenamesCannotEscapeArchiveDirectory(): void
+    {
+        $repo = $this->createStub(InvoiceRepository::class);
+        $repo->method('find')->willReturnCallback(fn (int $id): array => $this->invoice([
+            'id' => $id, 'varsymbol' => "/../../synthetic-{$id}\\name\r\n",
+        ]));
+        $exporter = new IsdocExporter($repo, $this->createStub(Connection::class));
+        $single = $exporter->export([1]);
+        self::assertDoesNotMatchRegularExpression('~[/\\\\\r\n]~', $single['filename']);
+        $output = $exporter->export([1, 2]);
+        $path = tempnam(sys_get_temp_dir(), 'isdoc-security-');
+        try {
+            file_put_contents($path, $output['content']);
+            $zip = new \ZipArchive();
+            self::assertTrue($zip->open($path));
+            self::assertSame(2, $zip->numFiles);
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                self::assertDoesNotMatchRegularExpression('~[/\\\\\r\n]~', $zip->getNameIndex($i));
+            }
+            $zip->close();
+        } finally {
+            unlink($path);
+        }
+    }
+
     public function testForeignCurrencyInvoiceIsSchemaValid(): void
     {
         $xml = $this->exporter->buildXml($this->invoice([

@@ -139,10 +139,22 @@ final class WorkReportLinkRepository
             ->execute([$codeId]);
     }
 
-    public function bumpCodeAttempts(int $codeId, int $attempts): void
+    public function consumeCode(int $codeId, int $maxAttempts): bool
     {
-        $this->db->pdo()->prepare('UPDATE work_report_link_codes SET attempts = ? WHERE id = ?')
-            ->execute([$attempts, $codeId]);
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE work_report_link_codes SET used_at = NOW()
+              WHERE id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?'
+        );
+        $stmt->execute([$codeId, $maxAttempts]);
+        return $stmt->rowCount() === 1;
+    }
+
+    public function bumpCodeAttempts(int $codeId, int $maxAttempts): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE work_report_link_codes SET attempts = attempts + 1
+              WHERE id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?'
+        )->execute([$codeId, $maxAttempts]);
     }
 
     // -- sessions ----------------------------------------------------------

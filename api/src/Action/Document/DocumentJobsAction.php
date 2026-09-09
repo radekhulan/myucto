@@ -168,6 +168,9 @@ final class DocumentJobsAction
         $sid = $this->supplierId($request);
         $jobId = (int) ($request->getQueryParams()['job_id'] ?? 0);
         $job = $this->jobs->find($jobId, $sid);
+        if ($job !== null && !$this->canAccessJob($job, $request)) {
+            return Json::error($response, 'not_found', 'Job nenalezen.', 404);
+        }
         if ($job === null || ($job['status'] ?? '') !== 'queued' || !in_array($job['source'], self::SOURCES, true)) {
             return Json::error($response, 'bad_job', 'Neplatný nebo již dokončený job.', 409);
         }
@@ -194,6 +197,9 @@ final class DocumentJobsAction
         $sid = $this->supplierId($request);
         $jobId = (int) ($request->getQueryParams()['job_id'] ?? 0);
         $job = $this->jobs->find($jobId, $sid);
+        if ($job !== null && !$this->canAccessJob($job, $request)) {
+            return Json::error($response, 'not_found', 'Job nenalezen.', 404);
+        }
         if ($job === null || ($job['status'] ?? '') !== 'queued' || $job['source'] !== 'document_folder_import') {
             return Json::error($response, 'bad_job', 'Neplatný nebo již dokončený job.', 409);
         }
@@ -231,6 +237,9 @@ final class DocumentJobsAction
         $body = (array) $request->getParsedBody();
         $jobId = (int) ($body['job_id'] ?? $request->getQueryParams()['job_id'] ?? 0);
         $job = $this->jobs->find($jobId, $sid);
+        if ($job !== null && !$this->canAccessJob($job, $request)) {
+            return Json::error($response, 'not_found', 'Job nenalezen.', 404);
+        }
         if ($job === null || ($job['status'] ?? '') !== 'queued' || !in_array($job['source'], self::SOURCES, true)) {
             return Json::error($response, 'bad_job', 'Neplatný nebo již dokončený job.', 409);
         }

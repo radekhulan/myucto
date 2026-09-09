@@ -500,10 +500,10 @@ final class RoutePermissionMap
 
         ['GET', '#^/api/document-requests(/|$)#', 'documents.requests', AccessLevel::READ],
         ['*', '#^/api/document-requests(/|$)#', 'documents.requests', AccessLevel::WRITE],
-        ['POST', '#^/api/(documents|document-folders)(/|$)#', 'documents.upload', AccessLevel::WRITE],
         ['*', '#^/api/documents/[0-9]+/(move|links)(/|$)#', 'documents.move', AccessLevel::WRITE],
         ['DELETE', '#^/api/(documents|document-folders)(/|$)#', 'documents.delete', AccessLevel::WRITE],
         ['POST', '#^/api/documents/[0-9]+/restore$#', 'documents.restore', AccessLevel::WRITE],
+        ['POST', '#^/api/(documents|document-folders)(/|$)#', 'documents.upload', AccessLevel::WRITE],
         ['GET', '#^/api/(documents|document-folders)(/|$)#', 'documents', AccessLevel::READ],
         ['*', '#^/api/(documents|document-folders)(/|$)#', 'documents', AccessLevel::WRITE],
 
@@ -710,6 +710,11 @@ final class RoutePermissionMap
     public function match(string $method, string $path): ?RoutePermission
     {
         $method = strtoupper($method);
+        if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)
+            && preg_match('#^/api/(settings/(vat-rates|units|countries)|accounting/repo-rates)(/|$)#', $path) === 1
+        ) {
+            return new RoutePermission(self::SUPERADMIN);
+        }
         if (in_array($path, self::PUBLIC_PATHS, true) || str_starts_with($path, '/api/public/')) {
             return new RoutePermission(self::PUBLIC);
         }

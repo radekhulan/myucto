@@ -20,7 +20,7 @@ final class CsvWriter
     public static function safe(mixed $v): string
     {
         $s = (string) ($v ?? '');
-        return preg_replace('/^([=+\-@\t\r])/u', "'\\1", $s) ?? $s;
+        return $s !== '' && str_contains("=+-@\t\r\n", $s[0]) ? "'" . $s : $s;
     }
 
     /**
@@ -31,9 +31,9 @@ final class CsvWriter
     {
         $fp = fopen('php://temp', 'w+');
         fwrite($fp, "\xEF\xBB\xBF"); // UTF-8 BOM (Excel)
-        fputcsv($fp, $header, ';', '"', '\\');
+        fputcsv($fp, $header, ';', '"', '');
         foreach ($rows as $row) {
-            fputcsv($fp, $row, ';', '"', '\\');
+            fputcsv($fp, $row, ';', '"', '');
         }
         rewind($fp);
         $csv = (string) stream_get_contents($fp);

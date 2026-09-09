@@ -36,6 +36,46 @@ final class EpoStepUpServiceTest extends TestCase
     private const USER_ID = 17;
     private const SESSION_TOKEN = 'session-token';
 
+    public function testUsedLoginTotpCannotAuthorizeEpoCertificateAccess(): void
+    {
+        [$service, $totp, $db, $secret] = $this->realTotpService();
+        $code = $totp->currentCode($secret);
+        self::assertTrue($totp->verifyAndConsume($db, $secret, $code));
+        try {
+            $service->verify($this->request(), self::USER_ID, ['password' => 'Synthetic-Password-2026', 'totp_code' => $code], 'certificate.store');
+            self::fail('Použitý přihlašovací kód nesmí potvrdit přístup k podpisovému certifikátu.');
+        } catch (EpoSubmissionException $e) {
+            self::assertSame('invalid_code', $e->errorCode);
+            self::assertSame(401, $e->httpStatus);
+        }
+    }
+
+    public function testFreshEpoTotpIsConsumedForOtherOperations(): void
+    {
+        [$service, $totp, $db, $secret] = $this->realTotpService();
+        $code = $totp->currentCode($secret);
+        $service->verify($this->request(), self::USER_ID, ['password' => 'Synthetic-Password-2026', 'totp_code' => $code], 'certificate.store');
+        self::assertFalse($totp->verifyAndConsume($db, $secret, $code));
+    }
+
+    private function realTotpService(): array
+    {
+        $pdo = \PDO::connect('sqlite::memory:');
+        $pdo->exec('CREATE TABLE totp_used_steps (secret_fingerprint TEXT, time_step INTEGER, PRIMARY KEY (secret_fingerprint, time_step))');
+        $pdo->exec('CREATE TABLE users (id INTEGER, email TEXT, password_hash TEXT, totp_secret TEXT, totp_enabled INTEGER)');
+        $pdo->exec("INSERT INTO users VALUES (17, 'synthetic@example.test', 'synthetic-hash', 'synthetic-encrypted-secret', 1)");
+        $db = $this->createStub(Connection::class);
+        $db->method('pdo')->willReturn($pdo);
+        $secret = TotpService::generateSecret();
+        $totp = new TotpService();
+        $crypto = $this->createStub(SecretEncryption::class);
+        $crypto->method('decrypt')->willReturn($secret);
+        $hasher = $this->createStub(PasswordHasher::class);
+        $hasher->method('verify')->willReturn(true);
+        $service = new EpoStepUpService($db, $totp, $crypto, $this->createStub(ActivityLogger::class), new IpMatcher(), $hasher, $this->createStub(BruteForceGuard::class), $this->createStub(MfaStepUpService::class));
+        return [$service, $totp, $db, $secret];
+    }
+
     public function testPasskeyProofIsAcceptedWithoutPassword(): void
     {
         $stepUp = $this->createMock(MfaStepUpService::class);

@@ -199,6 +199,7 @@ final class WorkReportLinkService
         }
 
         $active = $this->links->activeCode($linkId, $email);
+        if ($active !== null && (int) $active['attempts'] >= $this->maxAttempts()) $active = null;
         if ($active !== null) {
             $age = time() - (int) $active['created_ts'];
             $cooldownRemaining = max(0, $this->resendCooldownSeconds() - $age);
@@ -260,17 +261,13 @@ final class WorkReportLinkService
         }
 
         if (hash_equals((string) $active['code_hash'], hash('sha256', $code))) {
-            $this->links->markCodeUsed((int) $active['id']);
+            if (!$this->links->consumeCode((int) $active['id'], $this->maxAttempts())) return null;
             $sessionToken = bin2hex(random_bytes(32)); // 64 hex znaků
             $this->links->createSession($linkId, $email, hash('sha256', $sessionToken), @inet_pton($ip) ?: null);
             return $sessionToken;
         }
 
-        $newAttempts = (int) $active['attempts'] + 1;
-        $this->links->bumpCodeAttempts((int) $active['id'], $newAttempts);
-        if ($newAttempts >= $this->maxAttempts()) {
-            $this->links->markCodeUsed((int) $active['id']);
-        }
+        $this->links->bumpCodeAttempts((int) $active['id'], $this->maxAttempts());
         return null;
     }
 

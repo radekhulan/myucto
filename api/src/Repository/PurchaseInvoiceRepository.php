@@ -62,7 +62,7 @@ final class PurchaseInvoiceRepository
                JOIN clients c        ON c.id   = pi.vendor_id
                JOIN currencies cur   ON cur.id = pi.currency_id
           LEFT JOIN currencies pcur  ON pcur.id = pi.payment_currency_id
-          LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
+          LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id AND ec.supplier_id = pi.supplier_id
           LEFT JOIN projects prj     ON prj.id = pi.project_id
               WHERE pi.id = ? AND pi.supplier_id = ?'
         );
@@ -990,7 +990,7 @@ final class PurchaseInvoiceRepository
                   FROM purchase_invoices pi
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
-             LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
+             LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id AND ec.supplier_id = pi.supplier_id
              LEFT JOIN projects prj ON prj.id = pi.project_id
                  WHERE $whereSql
                  ORDER BY pi.issue_date DESC, pi.id DESC";

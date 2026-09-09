@@ -34,6 +34,7 @@ final class FuelingsAction
         private readonly IpMatcher $ipMatcher,
         private readonly FuelingOdometerEstimator $odometer,
         private readonly TenantReferenceGuard $tenantRefs,
+        private readonly \MyInvoice\Service\Stock\StockReferenceGuard $stockRefs,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -132,6 +133,12 @@ final class FuelingsAction
             ['vendor_id', 'source_purchase_invoice_id'],
         );
 
+        $itemRefs = $this->stockRefs->violations(
+            $supplierId, ['purchase_invoice_item_id' => [$body['source_item_id'] ?? null]],
+        );
+        if ($itemRefs !== []) {
+            $badRefs[] = 'source_item_id';
+        }
         return $badRefs !== [] ? TenantReferenceGuard::message($badRefs) : null;
     }
 

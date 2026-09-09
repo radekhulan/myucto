@@ -38,6 +38,8 @@ final class Section43Test extends TestCase
     private \MyInvoice\Service\Report\DphPriznaniBuilder $builder;
     private \MyInvoice\Service\Report\TaxSubmissionArchiver $archiver;
     private int $supplierId = 0;
+    private array $invoiceIds = [];
+    private int $purchaseInvoiceId = 0;
     private bool $inTx = false;
 
     protected function setUp(): void
@@ -71,6 +73,7 @@ final class Section43Test extends TestCase
         $this->inTx = true;
         $this->supplierId = $this->createIsolatedSupplier($pdo, $source);
         $pdo->prepare('UPDATE supplier SET is_vat_payer = 1 WHERE id = ?')->execute([$this->supplierId]);
+        [$this->invoiceIds, $this->purchaseInvoiceId] = $this->sourceDocuments($this->supplierId);
     }
 
     protected function tearDown(): void
@@ -83,6 +86,61 @@ final class Section43Test extends TestCase
         }
     }
 
+    private function sourceDocuments(int $supplierId): array
+    {
+        $pdo = $this->db->pdo();
+        $countryId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ'")->fetchColumn();
+        $userId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+        $pdo->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en)
+             VALUES (?, 'CZK', 'Syntetická měna', 'Kč', 'Koruna', 'Czech crown')"
+        )->execute([$supplierId]);
+        $currencyId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id, is_customer, is_vendor)
+             VALUES (?, 'Syntetická protistrana §43', 'Testovací 1', 'Praha', '11000', ?, ?, 1, 1)"
+        )->execute([$supplierId, $countryId, $currencyId]);
+        $clientId = (int) $pdo->lastInsertId();
+        $invoiceIds = [];
+        for ($i = 0; $i < 3; $i++) {
+            $pdo->prepare(
+                "INSERT INTO invoices (supplier_id, client_id, invoice_type, issue_date, tax_date, due_date, currency_id, status, created_by)
+                 VALUES (?, ?, 'invoice', '2025-03-01', '2025-03-01', '2025-03-15', ?, 'issued', ?)"
+            )->execute([$supplierId, $clientId, $currencyId, $userId]);
+            $invoiceIds[] = (int) $pdo->lastInsertId();
+        }
+        $pdo->prepare(
+            "INSERT INTO purchase_invoices (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date, due_date, received_at, currency_id, vendor_snapshot, status, created_by)
+             VALUES (?, ?, 'SYNTHETIC-S43-1', 'invoice', '2025-03-01', '2025-03-01', '2025-03-15', '2025-03-01', ?, '{}', 'received', ?)"
+        )->execute([$supplierId, $clientId, $currencyId, $userId]);
+        return [$invoiceIds, (int) $pdo->lastInsertId()];
+    }
+
+    public function testForeignSourcesAreRejectedForBothDocumentTypes(): void
+    {
+        $otherSupplier = $this->createIsolatedSupplier($this->db->pdo(), $this->supplierId);
+        [$invoices, $purchaseInvoice] = $this->sourceDocuments($otherSupplier);
+        foreach (['invoice' => $invoices[0], 'purchase_invoice' => $purchaseInvoice] as $type => $sourceId) {
+            try {
+                $this->service->register($this->supplierId, $type, $sourceId, 2025, 3, 'basic', 0, 21, '2025-04-10', 'Syntetická oprava');
+                self::fail('Cizí zdroj opravy musí být odmítnut.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame('Zdroj opravy nenalezen.', $e->getMessage());
+            }
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM vat_s43_corrections WHERE supplier_id = ?');
+        $stmt->execute([$this->supplierId]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+    }
+
+    public function testOwnPurchaseInvoiceSourceIsAccepted(): void
+    {
+        $id = $this->service->register($this->supplierId, 'purchase_invoice', $this->purchaseInvoiceId, 2025, 3, 'basic', 0, 21, '2025-04-10', 'Syntetická oprava');
+        $stmt = $this->db->pdo()->prepare('SELECT source_id FROM vat_s43_corrections WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$id, $this->supplierId]);
+        self::assertSame($this->purchaseInvoiceId, (int) $stmt->fetchColumn());
+    }
+
     /**
      * Oprava se objeví v období PŮVODNÍHO plnění, ne v období doručení opravného dokladu.
      * Tohle je rozdíl proti § 42 a jediná věc, kterou tu jde splést se skutečným dopadem.
@@ -91,7 +149,7 @@ final class Section43Test extends TestCase
     {
         // Původní plnění 03/2025, opravný doklad doručen až 09/2025.
         $this->service->register(
-            $this->supplierId, 'invoice', 1, 2025, 3, 'basic',
+            $this->supplierId, 'invoice', $this->invoiceIds[0], 2025, 3, 'basic',
             0.0, -2100.0, '2025-09-10', 'Použita 21 % místo 12 %',
         );
 
@@ -105,8 +163,8 @@ final class Section43Test extends TestCase
     /** Sazbová skupina rozhoduje o řádku: základní → ř. 1, snížená → ř. 2 (§ 43 odst. 2). */
     public function testRateKindRoutesToTheCorrectLine(): void
     {
-        $this->service->register($this->supplierId, 'invoice', 1, 2025, 3, 'basic', 1000.0, 210.0, '2025-04-10', 'Doúčtování');
-        $this->service->register($this->supplierId, 'invoice', 2, 2025, 3, 'reduced', 500.0, 60.0, '2025-04-10', 'Doúčtování');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[0], 2025, 3, 'basic', 1000.0, 210.0, '2025-04-10', 'Doúčtování');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[1], 2025, 3, 'reduced', 500.0, 60.0, '2025-04-10', 'Doúčtování');
 
         $lines = $this->service->periodCorrectionLines($this->supplierId, 2025, 3);
 
@@ -117,8 +175,8 @@ final class Section43Test extends TestCase
     /** Opravy téhož období se SČÍTAJÍ — za měsíc jich může být víc. */
     public function testMultipleCorrectionsInPeriodAreSummed(): void
     {
-        $this->service->register($this->supplierId, 'invoice', 1, 2025, 3, 'basic', 0.0, -500.0, '2025-04-10', 'A');
-        $this->service->register($this->supplierId, 'invoice', 2, 2025, 3, 'basic', 0.0, 300.0, '2025-04-10', 'B');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[0], 2025, 3, 'basic', 0.0, -500.0, '2025-04-10', 'A');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[1], 2025, 3, 'basic', 0.0, 300.0, '2025-04-10', 'B');
 
         self::assertEqualsWithDelta(
             -200.0,
@@ -130,9 +188,9 @@ final class Section43Test extends TestCase
     /** U čtvrtletního plátce se sečte celý kvartál. */
     public function testQuarterlyPeriodSumsWholeQuarter(): void
     {
-        $this->service->register($this->supplierId, 'invoice', 1, 2025, 1, 'basic', 0.0, -100.0, '2025-05-10', 'leden');
-        $this->service->register($this->supplierId, 'invoice', 2, 2025, 3, 'basic', 0.0, -200.0, '2025-05-10', 'březen');
-        $this->service->register($this->supplierId, 'invoice', 3, 2025, 4, 'basic', 0.0, -400.0, '2025-08-10', 'duben — jiný kvartál');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[0], 2025, 1, 'basic', 0.0, -100.0, '2025-05-10', 'leden');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[1], 2025, 3, 'basic', 0.0, -200.0, '2025-05-10', 'březen');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[2], 2025, 4, 'basic', 0.0, -400.0, '2025-08-10', 'duben — jiný kvartál');
 
         $q1 = $this->service->periodCorrectionLines($this->supplierId, 2025, 2, 'quarterly');
 
@@ -152,7 +210,7 @@ final class Section43Test extends TestCase
 
         // Plnění 2021, opravný doklad doručen 2025 → přes 3 roky od konce roku 2021.
         $this->service->register(
-            $this->supplierId, 'invoice', 1, 2021, 3, 'basic',
+            $this->supplierId, 'invoice', $this->invoiceIds[0], 2021, 3, 'basic',
             0.0, -1000.0, '2025-06-01', 'Pozdě',
         );
     }
@@ -193,7 +251,7 @@ final class Section43Test extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageMatches('/nesmí být nulová/');
 
-        $this->service->register($this->supplierId, 'invoice', 1, 2025, 3, 'basic', 0.0, 0.0, '2025-04-10', 'Nic');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[0], 2025, 3, 'basic', 0.0, 0.0, '2025-04-10', 'Nic');
     }
 
     /** Bez důvodu se oprava neuloží — při kontrole se neobhájí. */
@@ -202,7 +260,7 @@ final class Section43Test extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageMatches('/[Dd]ůvod/');
 
-        $this->service->register($this->supplierId, 'invoice', 1, 2025, 3, 'basic', 0.0, -100.0, '2025-04-10', '  ');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[0], 2025, 3, 'basic', 0.0, -100.0, '2025-04-10', '  ');
     }
 
     // ── promítnutí do přiznání ───────────────────────────────────────────────
@@ -216,7 +274,7 @@ final class Section43Test extends TestCase
     public function testCorrectionAppearsInReturnForOriginalPeriod(): void
     {
         $this->service->register(
-            $this->supplierId, 'invoice', 1, 2026, 3, 'basic',
+            $this->supplierId, 'invoice', $this->invoiceIds[0], 2026, 3, 'basic',
             10000.0, 2100.0, '2026-05-10', 'Doúčtování nesprávně nízké daně',
         );
 
@@ -243,7 +301,7 @@ final class Section43Test extends TestCase
     public function testRegularReturnWarnsThatAmendmentIsRequired(): void
     {
         $this->service->register(
-            $this->supplierId, 'invoice', 1, 2026, 4, 'basic',
+            $this->supplierId, 'invoice', $this->invoiceIds[0], 2026, 4, 'basic',
             0.0, -1000.0, '2026-06-10', 'Chybná sazba',
         );
 
@@ -276,7 +334,7 @@ final class Section43Test extends TestCase
 
         // 2) Teprve teď vyjde najevo chybná sazba.
         $this->service->register(
-            $this->supplierId, 'invoice', 1, 2026, 4, 'basic',
+            $this->supplierId, 'invoice', $this->invoiceIds[0], 2026, 4, 'basic',
             0.0, -1000.0, '2026-06-10', 'Chybná sazba',
         );
 

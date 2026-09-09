@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Auth;
 
+use MyInvoice\Infrastructure\Database\Connection;
+
 /**
  * RFC 6238 TOTP (Time-based One-Time Password) implementace.
  * Kompatibilní s Google Authenticator, Authy, 1Password, Bitwarden, Microsoft Authenticator.
@@ -37,16 +39,39 @@ final class TotpService
      */
     public function verify(string $base32Secret, string $code, int $window = 1): bool
     {
+        return $this->matchingStep($base32Secret, $code, $window) !== null;
+    }
+
+    public function verifyAndConsume(Connection $db, string $base32Secret, string $code): bool
+    {
+        $step = $this->matchingStep($base32Secret, $code, 1);
+        if ($step === null) return false;
+
+        $pdo = $db->pdo();
+        $pdo->prepare('DELETE FROM totp_used_steps WHERE time_step < ?')
+            ->execute([(int) floor(time() / self::PERIOD) - 2880]);
+        try {
+            $pdo->prepare('INSERT INTO totp_used_steps (secret_fingerprint, time_step) VALUES (?, ?)')
+                ->execute([hash('sha256', strtoupper(rtrim($base32Secret, '='))), $step]);
+        } catch (\PDOException $e) {
+            if ((string) $e->getCode() === '23000') return false;
+            throw $e;
+        }
+        return true;
+    }
+
+    private function matchingStep(string $base32Secret, string $code, int $window): ?int
+    {
         $code = trim($code);
-        if (!preg_match('/^\d{6}$/', $code)) return false;
+        if (!preg_match('/^\d{6}$/', $code)) return null;
 
         $now = (int) floor(time() / self::PERIOD);
         for ($offset = -$window; $offset <= $window; $offset++) {
             if (hash_equals($this->generateAt($base32Secret, $now + $offset), $code)) {
-                return true;
+                return $now + $offset;
             }
         }
-        return false;
+        return null;
     }
 
     /**

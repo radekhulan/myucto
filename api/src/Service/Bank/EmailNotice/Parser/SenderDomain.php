@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Bank\EmailNotice\Parser;
 
+use MyInvoice\Service\Bank\EmailNotice\SenderAddress;
+
 /**
  * End-anchored match domény odesílatele pro systémové parsery.
  *
@@ -16,22 +18,13 @@ final class SenderDomain
 {
     public static function matches(string $sender, string ...$domains): bool
     {
-        $address = strtolower(trim($sender));
-        // "Display Name <addr@domain>" → vezmi adresu z posledních <>
-        if (preg_match('/<([^<>]+)>\s*$/', $address, $m) === 1) {
-            $address = trim($m[1]);
-        }
-        $at = strrpos($address, '@');
-        if ($at === false) {
-            return false;
-        }
-        $host = rtrim(substr($address, $at + 1), '.');
-        if ($host === '') {
+        $address = SenderAddress::parse($sender);
+        if ($address === null) {
             return false;
         }
         foreach ($domains as $domain) {
-            $domain = strtolower(trim($domain));
-            if ($domain !== '' && ($host === $domain || str_ends_with($host, '.' . $domain))) {
+            $domain = strtolower(rtrim(trim($domain), '.'));
+            if ($domain !== '' && ($address->domain === $domain || str_ends_with($address->domain, '.' . $domain))) {
                 return true;
             }
         }

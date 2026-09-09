@@ -7,12 +7,14 @@ import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import { useAuthStore } from '@/stores/auth'
 
 // embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
 defineProps<{ embedded?: boolean }>()
 
 const { t } = useI18n()
 const toast = useToast()
+const auth = useAuthStore()
 
 const rates = ref<RepoRate[]>([])
 const loading = ref(false)
@@ -82,7 +84,7 @@ onMounted(load)
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
         <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.repo_rates.hint') }}</p>
 
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end mb-4">
+        <div v-if="auth.isSuperadmin" class="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end mb-4">
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.repo_rates.valid_from') }}</label>
             <DateInput v-model="form.valid_from"
@@ -123,7 +125,7 @@ onMounted(load)
               <td class="px-3 py-2 text-neutral-500">{{ r.note }}</td>
               <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(r.updated_at) }}</td>
               <td class="px-3 py-2 text-right">
-                <button :disabled="busy" @click="removeRate(r)" :class="btnOutline('danger')">
+                <button v-if="auth.isSuperadmin" :disabled="busy" @click="removeRate(r)" :class="btnOutline('danger')">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                 </button>
               </td>

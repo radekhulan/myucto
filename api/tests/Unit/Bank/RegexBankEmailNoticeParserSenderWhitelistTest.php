@@ -124,6 +124,17 @@ final class RegexBankEmailNoticeParserSenderWhitelistTest extends TestCase
         self::assertFalse($parser->supports($this->message('automat@csas.cz.evil.example'), $provider));
     }
 
+    public function testExactAddressWhitelistRejectsAddressHiddenInDisplayName(): void
+    {
+        $parser = new RegexBankEmailNoticeParser();
+        $provider = $this->provider('noreply@csob.cz');
+
+        self::assertFalse($parser->supports(
+            $this->message('"noreply@csob.cz <noreply@csob.cz>" <attacker@evil.example>'),
+            $provider,
+        ));
+    }
+
     /**
      * Bez domén by fail-closed whitelist nešel u bank rozesílajících z více adres
      * rozumně vyplnit. Položka bez „@" proto matchuje doménu včetně subdomén —
