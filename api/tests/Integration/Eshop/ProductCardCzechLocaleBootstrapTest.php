@@ -52,6 +52,34 @@ final class ProductCardCzechLocaleBootstrapTest extends StockTestCase
         self::assertSame('Český popis', $saved['i18n'][0]['description']);
     }
 
+    public function testEnsureCzechIsIdempotentAndDoesNotOverwriteExistingLocale(): void
+    {
+        $supplierId = $this->createSupplier();
+
+        $this->locales->ensureCzech($supplierId);
+        $created = $this->locales->findByCode($supplierId, 'cs');
+        self::assertNotNull($created);
+
+        $this->locales->ensureCzech($supplierId);
+        self::assertCount(1, $this->locales->listForSupplier($supplierId));
+        self::assertSame($created['id'], $this->locales->findByCode($supplierId, 'cs')['id']);
+
+        $this->locales->update($supplierId, $created['id'], [
+            'code' => 'cs',
+            'name' => 'Vlastní čeština',
+            'display_order' => 40,
+            'is_default' => false,
+            'archived' => true,
+        ]);
+        $this->locales->ensureCzech($supplierId);
+
+        $preserved = $this->locales->findByCode($supplierId, 'cs');
+        self::assertSame('Vlastní čeština', $preserved['name']);
+        self::assertSame(40, $preserved['display_order']);
+        self::assertFalse($preserved['is_default']);
+        self::assertTrue($preserved['archived']);
+    }
+
     public function testUnknownNonCzechLocaleRemainsRejected(): void
     {
         $supplierId = $this->createSupplier();

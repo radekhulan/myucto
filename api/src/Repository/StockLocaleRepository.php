@@ -91,6 +91,21 @@ final class StockLocaleRepository
     }
 
     /**
+     * Založí výchozí češtinu, jen pokud ještě neexistuje. INSERT IGNORE drží
+     * operaci idempotentní i při souběžném prvním uložení na různých kartách.
+     */
+    public function ensureCzech(int $supplierId): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT IGNORE INTO stock_locales
+                (supplier_id, code, name, display_order, is_default, archived)
+             SELECT ?, ?, ?, 0,
+                    NOT EXISTS (SELECT 1 FROM stock_locales WHERE supplier_id = ?),
+                    0'
+        )->execute([$supplierId, 'cs', 'Čeština', $supplierId]);
+    }
+
+    /**
      * @param array{code:string, name:string, display_order?:int, is_default?:bool, archived?:bool} $data
      */
     public function update(int $supplierId, int $id, array $data): bool

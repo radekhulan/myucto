@@ -338,13 +338,7 @@ final class ProductCardService
                 if ($locale !== 'cs') {
                     throw new EshopException('unknown_locale', "Jazyk „{$locale}\" není v číselníku jazyků.", 400);
                 }
-                $this->locales->insert($supplierId, [
-                    'code' => 'cs',
-                    'name' => 'Čeština',
-                    'display_order' => 0,
-                    'is_default' => $known === [],
-                    'archived' => false,
-                ]);
+                $this->locales->ensureCzech($supplierId);
                 $known[] = 'cs';
             }
             $keep[$locale] = true;
