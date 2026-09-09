@@ -112,6 +112,12 @@ final class DpfoXmlBuilder
         $representation = (array) ($meta['representation'] ?? ['represented' => false]);
         $vetaD->setAttribute('pln_moc', (string) ($meta['pln_moc'] ?? EpoSupplierBlockBuilder::representationFlag($representation)));
         $vetaD->setAttribute('audit', (string) ($meta['audit'] ?? 'N'));
+        // Bydliště mimo ČR — DPPO na to varovalo, DPFO ne, přestože nerezident (§ 2 odst. 3
+        // ZDP) má jiný rozsah zdanění i jiný nárok na slevy. Text je SSOT v detektoru.
+        $seatWarning = UnsupportedCaseDetector::foreignSeatWarning((string) ($supplier['country_iso2'] ?? 'CZ'));
+        if ($seatWarning !== null) {
+            $warnings[] = $seatWarning;
+        }
         $vetaD->setAttribute('zdobd_od', sprintf('1.1.%04d', $year));
         $vetaD->setAttribute('zdobd_do', sprintf('31.12.%04d', $year));
         foreach (self::VETA_D_FIELDS as $f) {

@@ -266,6 +266,44 @@ neúplné osoby, činnosti nebo měsíce OSVČ. Výsledek kontrol se ukládá do
 snapshotu. Informativní kontroly a upozornění, která neovlivňují zákonnou úplnost,
 zůstávají poradní.
 
+### 38.5.1 Situace, které aplikace v přiznání neumí
+
+Nad předfinalizační kontrolou se u obou přiznání zobrazuje panel **Situace, které
+aplikace v přiznání neumí**. Vzniká z povahy poplatníka a z účetních dat a dělí nálezy
+na dvě skupiny:
+
+- **Přiznání se nevydá** (červeně) — dokud nález trvá, přiznání nejde finalizovat ani
+  vygenerovat. Aplikace by o poplatníkovi tvrdila nepravdu, a to je horší než chybějící
+  podání: špatně vyplněný údaj projde tiše, kdežto chybějící úřad vytkne.
+- **Jen na vědomí** (žlutě) — přiznání se vydá, ale údaj si před podáním ověř.
+
+Ke každému nálezu je napsané, **co s tím** — typicky „podejte přiznání za toto období
+v portálu EPO ručně" nebo „opravte údaj v nastavení firmy".
+
+Část povahy poplatníka aplikace z účetnictví poznat nemůže, proto se zadává
+v **Nastavení → Daně a účetnictví → Přiznání k dani z příjmů — povaha poplatníka**:
+
+| Pole | K čemu je |
+|---|---|
+| Typ poplatníka (§ 17 ZDP) | Kód z tiskopisu DPPO. Aplikace umí sestavit přiznání jen pro typ **1 (ostatní)**. Dokud typ nepotvrdíš, staví se přiznání jako pro typ 1. |
+| Účetní vyhláška závěrky | Podle které vyhlášky sestavuješ rozvahu a výsledovku. Aplikace umí jen **500/2002 Sb.** pro podnikatele. |
+| Stav poplatníka + rozhodný den | Běžný / v likvidaci / v insolvenci / po fúzi nebo přeměně. |
+| Veřejně prospěšný poplatník (§ 17a) | Spolek, nadace, ústav, církev, veřejná vysoká škola. |
+| Investiční pobídka (§ 35a/§ 35b) | Nositel příslibu investiční pobídky. |
+| ATAD / CFC (§ 23e–23h, § 38fa) | Omezení nadměrných výpůjčních výdajů, příjmy ovládané zahraniční společnosti. |
+| Spolupracující osoba (§ 13) — OSVČ | Rozdělení příjmů a výdajů na spolupracující osobu. |
+| Zahraniční příjmy se zápočtem (§ 38f) — OSVČ | Zápočet daně zaplacené v zahraničí, Příloha č. 3. |
+
+Výchozí hodnoty odpovídají běžné firmě a OSVČ, takže je nechej být, pokud se tě netýkají.
+Vypnutý příznak ale **není tichý předpoklad**: kde jde podezření poznat z dat, aplikace se
+ozve sama — u firmy s převažující činností z **finančního sektoru** (banky, investiční
+fondy, pojišťovny, penzijní společnosti) se přiznání zastaví, dokud typ poplatníka
+nepotvrdíš, u **organizací sdružujících osoby** varuje na veřejně prospěšného poplatníka
+a u **výroby elektřiny** upozorní na odpisy fotovoltaiky podle § 30b.
+
+Ruční seznam nepodporovaných situací z [roční uzávěrky daňové evidence](90_Danova_evidence.md)
+se do stejného panelu slévá — nálezy jsou na jednom místě, ne ve dvou seznamech.
+
 ## 38.6 Daňová (ne)uznatelnost nákladů (§ 25) — DPPO
 
 Nedaňové náklady se u DPPO poznají podle příznaku **Daňová uznatelnost** na účtu v
@@ -477,8 +515,27 @@ Přehled pro **zdravotní pojišťovny** je pouze PDF pomůcka, protože pojiš�
 nemají jednotné veřejné schéma. Přímé odeslání na EPO ani ePortál ČSSZ tato
 obrazovka neprovádí: XML stáhni a nahraj na mojedane.gov.cz, resp. ePortál ČSSZ.
 
-Generátor nepokrývá všechny zahraniční příjmy a zápočty zahraniční daně, spolupracující
-osoby, všechny zvláštní přílohy ani neobvyklé režimy. Pokud náhled nebo XSD projde,
-znamená to strukturální a implementovanou obsahovou kontrolu, nikoli potvrzení věcné
-správnosti každého daňového případu. Chybějící případ dokonči v EPO a archivuj právě
-finální odeslanou verzi.
+Pokud náhled nebo XSD projde, znamená to strukturální a implementovanou obsahovou
+kontrolu, nikoli potvrzení věcné správnosti každého daňového případu. Chybějící případ
+dokonči v EPO a archivuj právě finální odeslanou verzi.
+
+### 38.13.1 Co aplikace vědomě nepodporuje
+
+Následující případy nejsou „zatím", ale rozhodnutí. Žádný z nich neprojde tiše — aplikace
+je pozná a nález ukáže v panelu [Situace, které aplikace v přiznání neumí](#3851-situace-ktere-aplikace-v-priznani-neumi)
+ještě před podáním.
+
+| Případ | Jak se projeví |
+|---|---|
+| Investiční fond, investiční nebo penzijní společnost, banka, pojišťovna | Přiznání se nevydá. Mají vlastní typ poplatníka a účtují podle vyhlášky 501/502/503, kdežto aplikace umí jen vyhlášku 500. |
+| Veřejně prospěšný poplatník (§ 17a) | Přiznání se nevydá. Jiné dělení činností, jiný základ daně a vyhláška 504. |
+| Daňový nerezident, stálá provozovna | Přiznání se nevydá při typu poplatníka 2. Sídlo mimo ČR samo o sobě nerezidenta nedělá (rozhoduje místo vedení podle § 17 odst. 3 ZDP), proto je samotné zahraniční sídlo jen upozorněním. |
+| Likvidace, insolvence, fúze nebo přeměna | Přiznání se nevydá. Mění typ přiznání i zdaňovací období; hláška ti řekne, který typ přiznání úřad čeká. |
+| Investiční pobídky (§ 35a/§ 35b) | Přiznání se nevydá. Podmínky se sledují roky zpětně mimo účetnictví. |
+| ATAD, CFC (§ 23e–23h, § 38fa) | Přiznání se nevydá. Úpravy základu daně se nepočítají, základ by byl podhodnocený. |
+| Atypické zdaňovací období | Přiznání se nevydá, pokud období neodpovídá kalendářnímu ani hospodářskému roku, nebo je delší než dvanáct měsíců. **Hospodářský rok podporovaný je** — jen na něj upozorní, protože lhůty, zálohy a roční sazby se odvozují od kalendářního roku. |
+| Fyzická osoba v podvojném účetnictví | Přiznání se nevydá. Účetní výkazy fyzické osoby (věty přílohy DPFDP7) aplikace nesestavuje, podání by odešlo bez povinné přílohy. |
+| Spolupracující osoba (§ 13) — OSVČ | Přiznání se nevydá. Vazba mezi poplatníky se nevede, dílčí základ § 7 by vyšel vyšší, než jaký ti náleží. |
+| Zahraniční příjmy se zápočtem (§ 38f, Příloha č. 3) — OSVČ | Přiznání se nevydá. Evidence příjmů a daní po státech se nevede. Samostatný základ daně podle § 16a bez zapnutého příznaku vyvolá aspoň upozornění. |
+| Fotovoltaika (§ 30b) a účetní odpisy majetku mimo zákonnou definici (§ 24 odst. 2 písm. v) | Upozornění u výroby elektřiny. Evidence majetku ty režimy nerozlišuje, příslušné řádky tabulky B zůstanou prázdné — doplň je v EPO. |
+| Zvláštní příloha k ř. 62, Příloha A k ř. 40 | Slovní popis, ne dopočet. Aplikace na ně upozorňuje, text napíšeš v EPO. |

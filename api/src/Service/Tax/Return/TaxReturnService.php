@@ -8,7 +8,6 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxReturnRepository;
-use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Codebook\HealthInsurers;
@@ -770,8 +769,12 @@ final class TaxReturnService
         $meta = ['verze_sw' => $this->loadAppVersion() ?? '0']
             + $this->amendmentXmlMeta($type, $variant, $computation['result'])
             + $this->representationMeta($supplierId, null);
-        $built = $this->dpfoXml->build($this->loadSupplier($supplierId), $year, $computation['result'], $meta);
+        $supplier = $this->loadSupplier($supplierId);
+        $built = $this->dpfoXml->build($supplier, $year, $computation['result'], $meta);
         $businessErrors = $this->dpfoBusinessValidator->validate($computation['result'], $computation['podklady']);
+        $unsupported = UnsupportedCaseDetector::detectForSupplier(
+            $supplier, 'fo', $computation['podklady'], $computation['result'], $inputs
+        );
         $xsd = $this->xmlValidator->validate($built['xml'], 'dpfdp7');
         $xsdErrors = $xsd['status'] === 'failed' ? $xsd['errors'] : [];
         return [
@@ -779,8 +782,15 @@ final class TaxReturnService
             'form_code' => 'dpfdp7-preview',
             'filename' => sprintf('dpfdp7-%04d-pracovni.xml', $year),
             'summary' => (array) ($computation['result']['summary'] ?? []),
-            'warnings' => array_merge($computation['warnings'], $built['warnings'], $businessErrors, $xsdErrors),
+            'warnings' => array_merge(
+                $computation['warnings'],
+                $built['warnings'],
+                self::unsupportedCaseWarnings($unsupported),
+                $businessErrors,
+                $xsdErrors,
+            ),
             'business_errors' => $businessErrors,
+            'unsupported_cases' => $unsupported,
             'xsd_status' => $xsd['status'],
             'variant' => $variant,
             'variant_seq' => $seq,
@@ -840,7 +850,12 @@ final class TaxReturnService
                 // Žádost o předání Přílohy do sbírky listin (pr11_puz) — výchozí ANO, viz
                 // sanitizeInputs()/DppoXmlBuilder::buildVetaUZ. Nikdy neuložený draft ($inputs
                 // == []) čte klíč jako chybějící → default true stejně jako po sanitizaci.
-                + ['puz_to_registry' => (bool) ($inputs['puz_to_registry'] ?? true)];
+                + ['puz_to_registry' => (bool) ($inputs['puz_to_registry'] ?? true)]
+                // Typ poplatníka (typ_popldpp) z nastavení firmy místo dřívější natvrdo
+                // zapsané „1". Nepotvrzený typ zůstává „1" jako dřív, ale detektor
+                // nepodporovaných případů na to u rizikové firmy upozorní.
+                + ['typ_popldpp' => TaxpayerTypeCodebook::normalize($supplier['epo_taxpayer_code'] ?? null)
+                    ?? TaxpayerTypeCodebook::DEFAULT_CODE];
             $appendix = $this->buildDppoAppendix($supplierId, (array) ($computation['podklady']['period'] ?? []), $year);
             $appendixWarnings = (array) ($appendix['warnings'] ?? []);
             unset($appendix['warnings']);
@@ -848,9 +863,18 @@ final class TaxReturnService
             $formCode = 'dppdp9';
         }
 
+        $unsupported = UnsupportedCaseDetector::detectForSupplier(
+            $supplier, $type, $computation['podklady'], $computation['result'], $inputs
+        );
+
         $summary = $computation['result']['summary'] ?? [];
         $summary['variant'] = $variant;
-        $summary['warnings'] = array_merge($computation['warnings'], $built['warnings'], $appendixWarnings);
+        $summary['warnings'] = array_merge(
+            $computation['warnings'],
+            $built['warnings'],
+            $appendixWarnings,
+            self::unsupportedCaseWarnings($unsupported),
+        );
 
         $variantSuffix = $variant === 'radne'
             ? ''
@@ -862,9 +886,32 @@ final class TaxReturnService
             'filename' => sprintf('%s-%04d%s.xml', $formCode, $year, $variantSuffix),
             'summary' => $summary,
             'warnings' => $summary['warnings'],
+            'unsupported_cases' => $unsupported,
             'variant' => $variant,
             'variant_seq' => $seq,
         ];
+    }
+
+    /**
+     * Nálezy detektoru jako věty do `warnings`. Blokující se označí předponou,
+     * protože `warnings` je plochý seznam řetězců a bez ní by v UI splynuly
+     * s nezávaznými poznámkami — stejná konvence jako u blokující kontroly
+     * § 23 odst. 8 ({@see PreFinalizeCheckService::checkExpenseModeTransition()}).
+     *
+     * @param list<array{key:string,severity:string,message:string,action:string}> $findings
+     * @return list<string>
+     */
+    private static function unsupportedCaseWarnings(array $findings): array
+    {
+        $out = [];
+        foreach ($findings as $finding) {
+            $prefix = ($finding['severity'] ?? '') === UnsupportedCaseDetector::SEVERITY_BLOCKER
+                ? 'BLOKUJÍCÍ NEPODPOROVANÝ PŘÍPAD: '
+                : 'Nepodporovaný případ: ';
+            $out[] = $prefix . $finding['message'] . ' ' . $finding['action'];
+        }
+
+        return $out;
     }
 
     /**
@@ -876,6 +923,22 @@ final class TaxReturnService
     public function generateXml(int $supplierId, int $year, string $type, ?int $userId, string $variant = 'radne', int $variantSeq = 1): array
     {
         $built = $this->buildXml($supplierId, $year, $type, $variant, $variantSeq);
+        // P-1 — ostré XML je „vydání" podání. Blokující nepodporovaný případ ho zastaví:
+        // finalizace stojí na téže bráně ({@see PreFinalizeCheckService}), ale DPPO se
+        // dá exportovat i z draftu, takže by tudy nepodporovaný poplatník prošel.
+        // Náhled ani uzávěrkový balíček ({@see buildXml()}) blokované nejsou — tam nález
+        // jen svítí ve `warnings`, aby si účetní mohla podklad prohlédnout.
+        $blocking = array_values(array_filter(
+            (array) ($built['unsupported_cases'] ?? []),
+            static fn (array $f): bool => ($f['severity'] ?? '') === UnsupportedCaseDetector::SEVERITY_BLOCKER,
+        ));
+        if ($blocking !== []) {
+            throw new TaxReturnException(
+                'unsupported_case_blocked',
+                'Přiznání nelze vydat: ' . implode(' ', self::unsupportedCaseWarnings($blocking)),
+                422,
+            );
+        }
         $seq = (int) $built['variant_seq'];
         $row = $this->returns->find($supplierId, $year, $type, $variant, $seq);
 
@@ -970,23 +1033,13 @@ final class TaxReturnService
         if ($start === false || $end === false) {
             return [];
         }
-        // typ_zo §21a: období končící 31. 12. je kalendářní režim (i zkrácený první
-        // rok) → 'A'; skutečný hospodářský rok → 'B'; delší než 12 měsíců (přechodné)
-        // → 'D'; jiné atypické zkrácené období → bezpečná 'A'.
-        $daysDiff = (int) $start->diff($end)->format('%a');
-        if (substr($endsOn, 5) === '12-31') {
-            $typZo = 'A';
-        } elseif (FiscalCalendar::isFiscalYearShape($startsOn, $endsOn)) {
-            $typZo = 'B';
-        } elseif ($daysDiff > 380) {
-            $typZo = 'D';
-        } else {
-            $typZo = 'A';
-        }
+        // typ_zo §21a odvozuje {@see TaxPeriodShape} — společné místo pro metu do
+        // builderu i pro blokující nález u atypického období (dřív tu byl tichý
+        // fallback na „A", takže se přiznání s nerozpoznaným obdobím vydalo bez hlesu).
         return [
             'zdobd_od' => $start->format('d.m.Y'),
             'zdobd_do' => $end->format('d.m.Y'),
-            'typ_zo' => $typZo,
+            'typ_zo' => TaxPeriodShape::typZo(TaxPeriodShape::classify($startsOn, $endsOn)),
         ];
     }
 
@@ -1897,7 +1950,12 @@ final class TaxReturnService
                     s.ic, s.dic, s.taxpayer_type, s.financial_office_code,
                     s.workplace_code, s.cz_nace_code, s.phone, s.email,
                     s.street_number_pop, s.street_number_orient,
-                    s.opr_jmeno, s.opr_prijmeni, s.opr_postaveni
+                    s.opr_jmeno, s.opr_prijmeni, s.opr_postaveni,
+                    -- Vědomé příznaky poplatníka (migrace 1785) — čte je
+                    -- {@see UnsupportedCaseDetector} i typ poplatníka do XML.
+                    s.epo_taxpayer_code, s.tax_entity_status, s.tax_entity_status_date,
+                    s.tax_accounting_decree, s.tax_investment_incentive, s.tax_atad_cfc,
+                    s.tax_public_benefit, s.tax_cooperating_person, s.tax_foreign_income_credit
                FROM supplier s
           LEFT JOIN countries c ON c.id = s.country_id
               WHERE s.id = ?"
