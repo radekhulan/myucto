@@ -16,7 +16,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * Správa číselníku státních a ostatních svátků (z. č. 245/2000 Sb., migrace 1783):
+ * Správa číselníku státních a ostatních svátků (z. č. 245/2000 Sb., migrace 1780):
  *   GET    /api/codebooks/public-holidays        — čtení včetně náhledu na rok
  *   POST   /api/codebooks/public-holidays        — nový svátek
  *   PUT    /api/codebooks/public-holidays/{id}   — oprava / omezení platnosti

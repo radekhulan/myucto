@@ -179,7 +179,7 @@ final class DppoXmlBuilder
      * KAŽDÝ řádek, který sama vypíše (stejný princip jako AKTIVA_DETAIL_C_RADKU), takže
      * pokrývá i úroveň 4 (A.II.2./C.II.8.) jedním mechanismem beze změny volajícího kódu.
      * `A.IV.2.` (ř. 21, „Jiný výsledek hospodaření minulých let") tu BÝVALO uvedené jako
-     * chybějící ve `statement_rows`; řádek doplnila migrace 1782 (účet 426) a od té chvíle
+     * chybějící ve `statement_rows`; řádek doplnila migrace 1779 (účet 426) a od té chvíle
      * musí být i tady — jinak by A.IV. posílalo jen A.IV.1. a jeho vlastní součet by se
      * o zůstatek 426 rozešel. Číslo řádku 21 je ověřené proti číselníku MF ČR (tabulka
      * 24810, platnost=2026): číselník mezi 19 (A.IV.1.) a 22 (A.V.) číslo 20 NEPOUŽÍVÁ,

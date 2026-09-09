@@ -627,7 +627,7 @@ final class RecurringTemplateAction
             foreach (array_values($items) as $i => $item) {
                 if (!is_array($item)) { $err["items.{$i}"][] = 'Neplatná položka'; continue; }
                 $err = array_merge($err, InvoiceAmountPolicy::validateItem($item, $i));
-                // Klasifikace DPH na řádku šablony (migrace 1788) se přenáší na každou
+                // Klasifikace DPH na řádku šablony (migrace 1782) se přenáší na každou
                 // vygenerovanou fakturu, takže překlep by tiše posílal roky plnění na
                 // špatný řádek přiznání. Číselník se načte jen když ho někdo použil.
                 $code = trim((string) ($item['vat_classification_code'] ?? ''));

@@ -103,7 +103,7 @@ final class PurchaseInvoiceValidation
             $err['received_at'][] = 'Neplatné datum přijetí';
         }
 
-        // Datum dodání (§ 25 vstup, migrace 1790) — evidenční, ale nesmí být nesmysl:
+        // Datum dodání (§ 25 vstup, migrace 1784) — evidenční, ale nesmí být nesmysl:
         // z něj se počítá zákonné DUZP pořízení zboží z JČS.
         if (!empty($data['delivery_date']) && !self::isValidDate((string) $data['delivery_date'])) {
             $err['delivery_date'][] = 'Neplatné datum dodání';

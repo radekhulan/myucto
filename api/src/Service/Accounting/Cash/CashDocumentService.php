@@ -1659,7 +1659,7 @@ final class CashDocumentService
                 'base_amount' => $baseCents / 100.0,
                 'vat_amount'  => $vatCents / 100.0,
                 // Klasifikace odpočtu / uznatelnosti přepočtem měny neprochází změnou (M-7).
-                // Totéž platí o příznaku majetku pro ř. 47 (migrace 1789).
+                // Totéž platí o příznaku majetku pro ř. 47 (migrace 1783).
                 'vat_deduction'         => $l['vat_deduction'] ?? 'full',
                 'vat_deduction_percent' => $l['vat_deduction_percent'] ?? 100.0,
                 'tax_treatment'         => $l['tax_treatment'] ?? 'deductible',
@@ -1741,7 +1741,7 @@ final class CashDocumentService
                     ),
                     // L-4: hotovostní pořízení dlouhodobého majetku (ř. 47 přiznání,
                     // doplňující údaj k odpočtu). Příznak dává smysl jen u výdajového
-                    // dokladu — u příjmového je to tržba, ne pořízení (migrace 1789).
+                    // dokladu — u příjmového je to tržba, ne pořízení (migrace 1783).
                     'is_fixed_asset'        => $docType === 'out' && !empty($vl['is_fixed_asset']),
                 ];
             }

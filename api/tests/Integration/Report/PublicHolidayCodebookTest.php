@@ -12,7 +12,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 /**
- * P-7 — celý řetěz od tabulky `public_holidays` (migrace 1783) až k lhůtě podání.
+ * P-7 — celý řetěz od tabulky `public_holidays` (migrace 1780) až k lhůtě podání.
  *
  * Unit testy ({@see \MyInvoice\Tests\Unit\Service\Report\CzechWorkingDaysCodebookTest})
  * ověřují chování helperu proti podstrčenému číselníku. Tenhle test ověřuje to,
@@ -44,7 +44,7 @@ final class PublicHolidayCodebookTest extends TestCase
 
         $seeded = (int) $this->db->pdo()->query('SELECT COUNT(*) FROM public_holidays')->fetchColumn();
         if ($seeded === 0) {
-            $this->markTestSkipped('Číselník svátků není naseedovaný (migrace 1783).');
+            $this->markTestSkipped('Číselník svátků není naseedovaný (migrace 1780).');
         }
 
         $this->db->pdo()->beginTransaction();
@@ -76,7 +76,7 @@ final class PublicHolidayCodebookTest extends TestCase
     }
 
     /**
-     * Seed migrace 1783 dává TÝŽ výsledek jako dosavadní konstanta: 25. 7. 2026
+     * Seed migrace 1780 dává TÝŽ výsledek jako dosavadní konstanta: 25. 7. 2026
      * je sobota, lhůta KH za 06/2026 tedy padá na pondělí 27. 7. (§ 33 odst. 4 DŘ).
      */
     public function testSeededCodebookReproducesStatutoryDeadlines(): void

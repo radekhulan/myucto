@@ -51,7 +51,7 @@ const supplier = ref<Supplier | null>(null)
 const loading = ref(true)
 
 // Přiznání k dani z příjmů — číselníky odpovídají PHP SSOT
-// (MyInvoice\Service\Tax\Return\TaxpayerTypeCodebook, migrace 1785). Popisky
+// (MyInvoice\Service\Tax\Return\TaxpayerTypeCodebook, migrace 1781). Popisky
 // jednotlivých kódů jsou v i18n pod `settings.income_tax_profile.*`.
 const TAXPAYER_CODES = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
 const ACCOUNTING_DECREES = ['500', '501', '502', '503', '504', '325', '410'] as const
@@ -495,7 +495,7 @@ async function saveSupplier() {
       cssz_vsdp: (supplier.value as any).cssz_vsdp ?? null,
       cssz_ossz_code: (supplier.value as any).cssz_ossz_code ?? null,
       health_insurance_number: (supplier.value as any).health_insurance_number ?? null,
-      // Vědomé příznaky poplatníka pro přiznání k dani z příjmů (migrace 1785).
+      // Vědomé příznaky poplatníka pro přiznání k dani z příjmů (migrace 1781).
       // Prázdný typ poplatníka se posílá jako '' → backend uloží NULL (= neurčeno),
       // což je jiný stav než výslovně potvrzená „1".
       epo_taxpayer_code: (supplier.value as any).epo_taxpayer_code ?? '',
@@ -1555,7 +1555,7 @@ async function confirmTaxRepDelete() {
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             </div>
             <!-- Přiznání k dani z příjmů — údaje, které aplikace z účetnictví odvodit
-                 neumí (migrace 1785). Blokují přiznání, které by o poplatníkovi tvrdilo
+                 neumí (migrace 1781). Blokují přiznání, které by o poplatníkovi tvrdilo
                  nepravdu; nálezy se ukazují u přiznání (UnsupportedCaseDetector). -->
             <div class="md:col-span-2 border border-neutral-200 rounded-md p-3">
               <p class="text-sm font-medium text-neutral-700">{{ t('settings.income_tax_profile.title') }}</p>

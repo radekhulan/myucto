@@ -23,7 +23,7 @@ use MyInvoice\Infrastructure\Database\Connection;
  *   sčítá blokující kontroly do `can_finalize`).
  * - `warning` — přiznání se vydá, ale nález je vidět v UI i ve výstupu exportu.
  *
- * Vědomý příznak na firmě s výchozí hodnotou „ne" (migrace 1785) NENÍ tichý
+ * Vědomý příznak na firmě s výchozí hodnotou „ne" (migrace 1781) NENÍ tichý
  * předpoklad: kde jde podezření poznat z dat (NACE finančního sektoru, právní
  * povaha veřejně prospěšného poplatníka, zahraniční sídlo, tvar účetního období),
  * vzniká nález i tehdy, když je příznak vypnutý.

@@ -232,7 +232,7 @@ final class DppoXmlBuilderAppendixLevel3Test extends TestCase
 
     /**
      * P-6 — A.IV.2. „Jiný výsledek hospodaření minulých let" (ř. 21) se do přílohy DPPO
-     * DOSTANE, jakmile firma má zůstatek na účtu 426 (řádek výkazu doplnila migrace 1782).
+     * DOSTANE, jakmile firma má zůstatek na účtu 426 (řádek výkazu doplnila migrace 1779).
      *
      * Bez doplnění `P.A.IV.` mapy v PASIVA_DETAIL_C_RADKU tenhle test padá na chybějícím
      * `c_radku="21"` — a hlavně na křížové kontrole EPO „Hodnota řádku A.IV. rozvahy-pasiv

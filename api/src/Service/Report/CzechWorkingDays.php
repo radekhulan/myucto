@@ -31,7 +31,7 @@ final class CzechWorkingDays
      * Poslední ověřený stav zákona zapečený v kódu — POJISTKA, ne zdroj pravdy.
      *
      * Používá se jen tehdy, když číselník `public_holidays` není k dispozici nebo
-     * je prázdný. Musí zůstat shodný se seedem migrace 1783: odpověď aplikace
+     * je prázdný. Musí zůstat shodný se seedem migrace 1780: odpověď aplikace
      * nesmí záviset na tom, jestli je instalace naseedovaná.
      *
      * @var array<string,array{code:string,name:string}>
@@ -50,7 +50,7 @@ final class CzechWorkingDays
         '12-26' => ['code' => 'boxing_day', 'name' => '2. svátek vánoční'],
     ];
 
-    /** Pohyblivá část pojistky — tytéž posuny, jaké seeduje migrace 1783. */
+    /** Pohyblivá část pojistky — tytéž posuny, jaké seeduje migrace 1780. */
     private const FALLBACK_EASTER_HOLIDAYS = [
         ['code' => 'good_friday', 'name' => 'Velký pátek', 'offset' => -2],
         ['code' => 'easter_monday', 'name' => 'Velikonoční pondělí', 'offset' => 1],

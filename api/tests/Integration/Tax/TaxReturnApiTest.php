@@ -225,7 +225,7 @@ final class TaxReturnApiTest extends TestCase
     {
         $pdo = $this->db->pdo();
         if ($pdo->query("SHOW COLUMNS FROM supplier LIKE 'epo_taxpayer_code'")->fetch() === false) {
-            self::markTestSkipped('Migrace 1785 (příznaky nepodporovaných případů) neproběhla.');
+            self::markTestSkipped('Migrace 1781 (příznaky nepodporovaných případů) neproběhla.');
         }
         $args = ['type' => 'po', 'year' => (string) self::YEAR];
 

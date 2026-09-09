@@ -560,7 +560,7 @@ final class RecurringInvoiceGenerator
                     'unit_price_without_vat' => (float) $item['unit_price_without_vat'],
                     'vat_rate_id'            => (int) $item['vat_rate_id'],
                     'order_index'            => (int) $item['order_index'],
-                    // Ručně zvolená klasifikace DPH (migrace 1788). Bez ní derivace
+                    // Ručně zvolená klasifikace DPH (migrace 1782). Bez ní derivace
                     // v replaceItems() rozhodovala podle sazby a měrné jednotky, takže
                     // dodání zboží do JČS ('20', ř. 20 + SH kód 0) u jednotky „ks"
                     // každý měsíc spadlo na '22' (služba, ř. 21 + SH kód 3).

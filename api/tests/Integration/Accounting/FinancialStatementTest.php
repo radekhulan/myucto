@@ -163,7 +163,7 @@ final class FinancialStatementTest extends TestCase
 
     /**
      * P-6 — účet 426 „Jiný výsledek hospodaření minulých let" plní VLASTNÍ řádek
-     * A.IV.2. (migrace 1782), ne nadřazený A.IV.1.
+     * A.IV.2. (migrace 1779), ne nadřazený A.IV.1.
      *
      * Před opravou 426 v osnově vůbec nebyl a žádný řádek na něj neukazoval: firma,
      * která si ho založila ručně, měla jeho zůstatek v `unmapped_accounts` a rozvaha
@@ -188,7 +188,7 @@ final class FinancialStatementTest extends TestCase
         $prior = $this->rowByCode($bs['liabilities'], 'P.A.IV.1.');
         $other = $this->rowByCode($bs['liabilities'], 'P.A.IV.2.');
 
-        self::assertNotNull($other, 'Řádek A.IV.2. musí ve výkazu existovat (migrace 1782).');
+        self::assertNotNull($other, 'Řádek A.IV.2. musí ve výkazu existovat (migrace 1779).');
         self::assertSame('A.IV.2.', $other['display_code']);
         self::assertSame(self::cents(300.00), self::cents($other['amount']), 'A.IV.2. = zůstatek 426.');
         self::assertSame('426', $other['accounts'][0]['account_code']);

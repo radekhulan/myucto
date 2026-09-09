@@ -264,7 +264,7 @@ export interface Supplier {
   financial_office_code?: string | null
   workplace_code?: string | null
   cz_nace_code?: string | null
-  // Vědomé příznaky poplatníka pro přiznání k dani z příjmů (migrace 1785). Aplikace
+  // Vědomé příznaky poplatníka pro přiznání k dani z příjmů (migrace 1781). Aplikace
   // je z účetních dat odvodit neumí; blokují přiznání, které by o poplatníkovi tvrdilo
   // nepravdu (UnsupportedCaseDetector). `epo_taxpayer_code` = číselník typ_popldpp
   // formuláře DPPDP9; null/'' = účetní typ poplatníka nepotvrdila.

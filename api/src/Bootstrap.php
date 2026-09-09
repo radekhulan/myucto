@@ -1020,7 +1020,7 @@ final class Bootstrap
         // otevírá až při prvním použití.
         $container->get(\MyInvoice\Infrastructure\Cache\EntityCache::class);
 
-        // Číselník státních svátků (migrace 1783). Lhůty podání se posouvají podle
+        // Číselník státních svátků (migrace 1780). Lhůty podání se posouvají podle
         // § 33 odst. 4 daňového řádu a `CzechWorkingDays` je jejich jediný zdroj —
         // jenže je to statický helper volaný z desítek míst bez DI, takže mu zdroj
         // musí předat kontejner. Továrna je LÍNÁ: helper se používá i tam, kde by
