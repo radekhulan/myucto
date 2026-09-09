@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -23,6 +23,7 @@ const perPage = ref(50)
 const total = ref(0)
 const loading = ref(false)
 let silentPageChange = false
+let loadGeneration = 0
 const years = ref<number[]>([])
 const year = ref<number | null>(null)
 const search = ref('')
@@ -43,10 +44,11 @@ const colspan = computed(() => props.scope === 'all' ? 8 : 7)
 // agreguje víc výpisů, takže návrhy dotáhneme dávkově (1 request na distinct
 // statement_id z aktuální stránky) a sloučíme do jedné mapy. Best-effort — selhání
 // jednoho výpisu jen připraví o badge, ne o zbytek stránky.
-async function loadMatchSuggestions(txs: UnpostedBankTransaction[]) {
+async function loadMatchSuggestions(txs: UnpostedBankTransaction[], generation: number) {
   const statementIds = [...new Set(txs.map(tx => tx.statement_id))]
   if (statementIds.length === 0) { bankActions.setSuggestions(new Map()); return }
   const results = await Promise.allSettled(statementIds.map(id => bankApi.matchSuggestions(id)))
+  if (generation !== loadGeneration) return
   const map = new Map<number, MatchSuggestion>()
   for (const r of results) {
     if (r.status !== 'fulfilled') continue
@@ -58,6 +60,7 @@ async function loadMatchSuggestions(txs: UnpostedBankTransaction[]) {
 }
 
 async function load(silent = false) {
+  const generation = ++loadGeneration
   if (!silent) loading.value = true
   try {
     const result = await bankPostingApi.listUnposted({
@@ -68,6 +71,7 @@ async function load(silent = false) {
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
       ...(accountFilter.value ? { account: accountFilter.value } : {}),
     })
+    if (generation !== loadGeneration) return
     if (result.items.length === 0 && result.total > 0 && page.value > 1) {
       silentPageChange = silent
       page.value = Math.max(1, Math.ceil(result.total / result.per_page))
@@ -78,9 +82,9 @@ async function load(silent = false) {
     perPage.value = result.per_page
     years.value = result.years ?? []
     accounts.value = result.accounts ?? []
-    void loadMatchSuggestions(result.items)
+    void loadMatchSuggestions(result.items, generation)
   } finally {
-    loading.value = false
+    if (generation === loadGeneration) loading.value = false
   }
 }
 
@@ -91,6 +95,7 @@ async function changed(silent = false) {
 
 // Změna filtru vždy zpět na první stranu — jinak by uživatel skončil na prázdné stránce.
 let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch([search, year, accountFilter, page, () => props.scope], () => { loadGeneration++ }, { flush: 'sync' })
 function resetAndLoad() {
   if (page.value !== 1) { page.value = 1; return } // watch(page) načte sám
   void load()
@@ -101,8 +106,13 @@ watch(search, () => {
 })
 watch(year, resetAndLoad)
 watch(accountFilter, resetAndLoad)
+watch(() => props.scope, resetAndLoad)
 
 onMounted(load)
+onUnmounted(() => {
+  clearTimeout(searchTimer)
+  loadGeneration++
+})
 watch(page, () => {
   const silent = silentPageChange
   silentPageChange = false

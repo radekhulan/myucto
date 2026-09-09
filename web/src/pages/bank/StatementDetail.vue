@@ -67,6 +67,9 @@ const route = useRoute()
 const statement = ref<BankStatementDetail | null>(null)
 const loading = ref(true)
 const loadingMore = ref(false)
+const refreshing = ref(false)
+let loadGeneration = 0
+let pendingLoadMore: { generation: number; promise: Promise<void> } | null = null
 const isVirtual = computed(() =>
   statement.value?.source === 'email_notice' || statement.value?.source === 'idoklad'
 )
@@ -102,6 +105,20 @@ const noticeSummary = computed(() => {
 })
 
 async function load(reset = true) {
+  if (reset) return loadPage(true)
+  if (refreshing.value) return
+  if (pendingLoadMore?.generation === loadGeneration) return pendingLoadMore.promise
+  const promise = loadPage(false)
+  pendingLoadMore = { generation: loadGeneration, promise }
+  try {
+    await promise
+  } finally {
+    if (pendingLoadMore?.promise === promise) pendingLoadMore = null
+  }
+}
+async function loadPage(reset: boolean) {
+  const generation = ++loadGeneration
+  refreshing.value = false
   if (reset) {
     loading.value = true
     txPage.value = 1
@@ -111,6 +128,8 @@ async function load(reset = true) {
   }
   try {
     const statementId = Number(route.params.id)
+    const status = statusFilter.value
+    const posting = postingFilter.value
     const [res, suggestionsResult] = await Promise.all([
       bankApi.get(statementId, {
         page: txPage.value,
@@ -121,6 +140,7 @@ async function load(reset = true) {
         ? bankApi.matchSuggestions(statementId)
         : Promise.resolve(null),
     ])
+    if (generation !== loadGeneration || statementId !== Number(route.params.id) || status !== statusFilter.value || posting !== postingFilter.value) return
     const transactions = reset || !statement.value
       ? res.transactions
       : [...statement.value.transactions, ...res.transactions]
@@ -134,27 +154,41 @@ async function load(reset = true) {
     txTotal.value = res.transactions_meta.total
     txPages.value = res.transactions_meta.pages
   } finally {
-    loading.value = false
-    loadingMore.value = false
+    if (generation === loadGeneration) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
 }
 async function refreshTransactions() {
+  const generation = ++loadGeneration
+  refreshing.value = true
   const statementId = Number(route.params.id)
   const status = statusFilter.value
   const posting = postingFilter.value
+  const requestedPage = txPage.value
   const params = { status: status ? status as MatchStatus : undefined, posting_status: posting || undefined }
-  const [first, suggestions] = await Promise.all([
-    bankApi.get(statementId, { ...params, page: 1 }), bankApi.matchSuggestions(statementId),
-  ])
-  const lastPage = Math.max(1, Math.min(txPage.value, first.transactions_meta.pages))
-  const remaining = await Promise.all(Array.from({ length: lastPage - 1 }, (_, index) =>
-    bankApi.get(statementId, { ...params, page: index + 2 })))
-  if (statementId !== Number(route.params.id) || status !== statusFilter.value || posting !== postingFilter.value) return
-  statement.value = { ...first, transactions: [first, ...remaining].flatMap(result => result.transactions) }
-  txPage.value = lastPage
-  txTotal.value = first.transactions_meta.total
-  txPages.value = first.transactions_meta.pages
-  bankActions.setSuggestions(new Map(suggestions.suggestions.filter(s => s.status === 'pending').map(s => [s.bank_transaction_id, s])))
+  try {
+    const [first, suggestions] = await Promise.all([
+      bankApi.get(statementId, { ...params, page: 1 }), bankApi.matchSuggestions(statementId),
+    ])
+    if (generation !== loadGeneration) return
+    const lastPage = Math.max(1, Math.min(requestedPage, first.transactions_meta.pages))
+    const remaining = await Promise.all(Array.from({ length: lastPage - 1 }, (_, index) =>
+      bankApi.get(statementId, { ...params, page: index + 2 })))
+    if (generation !== loadGeneration || statementId !== Number(route.params.id) || status !== statusFilter.value || posting !== postingFilter.value) return
+    statement.value = { ...first, transactions: [first, ...remaining].flatMap(result => result.transactions) }
+    txPage.value = lastPage
+    txTotal.value = first.transactions_meta.total
+    txPages.value = first.transactions_meta.pages
+    bankActions.setSuggestions(new Map(suggestions.suggestions.filter(s => s.status === 'pending').map(s => [s.bank_transaction_id, s])))
+  } finally {
+    if (generation === loadGeneration) {
+      refreshing.value = false
+      loading.value = false
+      loadingMore.value = false
+    }
+  }
 }
 
 onMounted(() => { void load(true).then(highlightLinkedTx) })
@@ -184,6 +218,7 @@ async function highlightLinkedTx(): Promise<void> {
   const id = Number(route.query.tx)
   if (!Number.isInteger(id) || id <= 0) return
   while (!paneDom.querySelector<HTMLElement>(`[data-tx-id="${id}"]`) && txPage.value < txPages.value) {
+    if (refreshing.value) return
     if (Number(route.query.tx) !== id) return
     await load(false)
     await nextTick()
@@ -515,7 +550,7 @@ const statementActions = computed<ActionItem[]>(() => {
       </div>
 
       <div v-if="txPage < txPages" class="text-center py-3 border-t border-neutral-200">
-        <button @click="load(false)" :disabled="loadingMore"
+        <button @click="load(false)" :disabled="loadingMore || refreshing"
           class="cursor-pointer h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50">
           {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
         </button>
