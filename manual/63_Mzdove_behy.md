@@ -40,6 +40,13 @@ Kontrolujte hrubou a čistou mzdu, daň, pojistné, náhrady, srážky a náklad
 
 ## 63.6 Časté chyby
 
+Kontrola před zahájením i blokace výpočtu uvádějí jednotlivé důvody a odkazy
+k nápravě. U skupiny osob může každý odkaz vést jinam; použij odkaz u
+konkrétního člověka. Karta vztahu se otevře přímo na příslušné sekci nebo
+poli, měsíční agenda ve správném období. Pokud podklady již patří schválené
+revizi, jejich oprava vyžaduje navazující opravnou revizi. Podrobný přehled
+řešení je v [kontrolách mzdové agendy](999_Reseni_problemu.md#99911-kontroly-mzdove-agendy).
+
 - Uzavření před dodáním absence nebo srážky.
 - Oprava vstupu bez přepočtu.
 - Záměna výpočtu za automatické zaúčtování či odeslání plateb.

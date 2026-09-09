@@ -80,16 +80,21 @@ final class JmhzOrdinaryEvidenceApplicability
         }
 
         $specification = $this->object($payload['specification'] ?? null, 'ordinary_evidence.specification');
-        if (($specification['package_key'] ?? null) !== JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY
-            || ($specification['spec_manifest_sha256'] ?? null) !== JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256
-            || ($specification['scenario_catalog_key'] ?? null) !== JmhzScenarioRequirementSourceCatalog::CATALOG_KEY
-            || ($specification['scenario_manifest_sha256'] ?? null) !== JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256
-            || ($specification['control_catalog_key'] ?? null) !== JmhzControlSourceCatalog::CATALOG_KEY
-            || ($specification['control_manifest_sha256'] ?? null) !== JmhzControlSourceCatalog::MANIFEST_SHA256
-        ) {
+        $catalog = JmhzScenarioRequirementSourceCatalog::load();
+        $requirementIds = $expectedScenarioKey === 'scenario_1' ? ['10116', '10546'] : ['10546'];
+        $requirements = [];
+        foreach ($catalog->requirementsForMatrix($expectedScenarioKey) as $requirement) {
+            if (in_array($requirement->attributeId, $requirementIds, true)) {
+                $requirements[$requirement->attributeId] = $requirement->rowHash;
+            }
+        }
+        if (!JmhzOrdinaryEvidenceCompatibility::acceptsSpecification($specification)
+            || count($requirements) !== count($requirementIds)
+            || CanonicalJson::encode($specification['attribute_requirement_row_sha256'] ?? null) !== CanonicalJson::encode($requirements)) {
             $this->invalid(
                 'jmhz_ordinary_evidence_specification_mismatch',
-                'Ordinary evidence neodpovida pripnute specifikaci JMHZ.',
+                'Uložené podklady byly připraveny podle jiné verze pravidel JMHZ. Zkontrolujte jejich použitelnost pro novou přípravu; již přijaté hlášení kvůli změně verze znovu neodesílejte.',
+                $this->specificationVersions($specification),
             );
         }
         $sourceRevision = $this->object($payload['source_revision'] ?? null, 'ordinary_evidence.source_revision');
@@ -121,7 +126,6 @@ final class JmhzOrdinaryEvidenceApplicability
                 'Ordinary evidence obsahuje nepodporovanou pravni skutecnost.',
             );
         }
-        $catalog = JmhzScenarioRequirementSourceCatalog::load();
         $expectedInteractions = [];
         foreach (['IN13', 'IN28', 'IN30'] as $interactionId) {
             $expectedInteractions[] = [
@@ -210,8 +214,20 @@ final class JmhzOrdinaryEvidenceApplicability
         return $value;
     }
 
-    private function invalid(string $code, string $message): never
+    private function specificationVersions(array $specification): array
     {
-        throw new JmhzOrdinaryEvidenceApplicabilityException($code, $message);
+        $context = [];
+        foreach (['stored' => $specification['package_key'] ?? '', 'current' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY] as $prefix => $key) {
+            if (is_string($key) && preg_match('/^jmhz-xsd-([0-9.]+)_dictionary-[0-9.]+_controls-source-([0-9.]+)_manifest-v[0-9]+$/D', $key, $matches) === 1) {
+                $context[$prefix . '_xsd'] = $matches[1];
+                $context[$prefix . '_controls'] = $matches[2];
+            }
+        }
+        return $context;
+    }
+
+    private function invalid(string $code, string $message, array $context = []): never
+    {
+        throw new JmhzOrdinaryEvidenceApplicabilityException($code, $message, $context);
     }
 }

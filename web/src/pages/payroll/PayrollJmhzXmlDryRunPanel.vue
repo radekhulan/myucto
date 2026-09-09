@@ -19,6 +19,7 @@ import {
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatPeriod } from '@/composables/useFormat'
+import { averageEarningsTarget } from './payrollRemediation'
 
 const props = defineProps<{ runs: PayrollRun[] }>()
 
@@ -29,7 +30,7 @@ interface DryRunState {
   showXml: boolean
 }
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const auth = useAuthStore()
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const states = ref<Record<number, DryRunState>>({})
@@ -250,9 +251,18 @@ function identityTarget(
 function blockerTarget(
   blocker: PayrollJmhzXmlDryRunBlocker,
   entityId: number | null = blocker.entity_id,
+  payrollRun?: PayrollRun,
 ): RouteLocationRaw | null {
+  const periodQuery = payrollRun ? { period: payrollRun.period_start.slice(0, 7) } : {}
+  if (!te(`payroll.submissions.overview.jmhz_dry_run_blockers.${blocker.code}`)) return '/admin/support'
   const identity = identityTarget(blocker, entityId)
   if (identity !== null) return identity
+  if (['effective_term_missing', 'jmhz_scenario_activity_code_missing', 'jmhz_employer_part_time_discount_reason_missing', 'jmhz_employer_part_time_discount_working_time_missing'].includes(blocker.code)) {
+    const field = blocker.code === 'jmhz_scenario_activity_code_missing' ? 'activity_code'
+      : blocker.code === 'jmhz_employer_part_time_discount_reason_missing' ? 'social_part_time_discount_reason'
+        : blocker.code === 'jmhz_employer_part_time_discount_working_time_missing' ? 'weekly_hours' : undefined
+    return { name: 'payroll-people', query: { ...(entityId === null ? {} : { employment: String(entityId) }), panel: 'employment_terms', ...(field ? { field } : {}) } }
+  }
   if ([
     'jmhz_attribute_10116_unresolved',
     'jmhz_attribute_10546_unresolved',
@@ -261,9 +271,10 @@ function blockerTarget(
     'jmhz_interaction_in30_unresolved',
     'jmhz_ordinary_evidence_missing',
   ].includes(blocker.code)) {
-    return { name: 'payroll-submissions', hash: '#jmhz-ordinary-evidence' }
+    return { name: 'payroll-submissions', query: periodQuery, hash: '#jmhz-ordinary-evidence' }
   }
   if (blocker.code === 'jmhz_average_hourly_earning_missing') {
+    if (entityId !== null && payrollRun) return averageEarningsTarget(entityId, Number(payrollRun.period_start.slice(0, 4)), Math.ceil(Number(payrollRun.period_start.slice(5, 7)) / 3))
     return entityId === null
       ? { name: 'payroll-absences', query: { tab: 'averages' } }
       : {
@@ -273,8 +284,8 @@ function blockerTarget(
   }
   if (blocker.code === 'jmhz_work_month_not_approved') {
     return entityId === null
-      ? { name: 'payroll-time' }
-      : { name: 'payroll-time', query: { employment: String(entityId) } }
+      ? { name: 'payroll-time', query: periodQuery }
+      : { name: 'payroll-time', query: { employment: String(entityId), ...periodQuery } }
   }
   if (blocker.code === 'jmhz_scenario1_earnings_vector_incomplete') {
     return { name: 'payroll-components' }
@@ -292,17 +303,18 @@ function blockerTarget(
     case 'component':
       return { name: 'payroll-components' }
     case 'office':
-      return { name: 'payroll-settings', query: { tab: 'offices' } }
+      return { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' }
     case 'run':
     case 'revision':
     case 'preparation':
-      return { name: 'payroll-runs' }
+      return { name: 'payroll-runs', query: periodQuery }
     default:
       return null
   }
 }
 
 function blockerActionLabel(blocker: PayrollJmhzXmlDryRunBlocker): string {
+  if (!te(`payroll.submissions.overview.jmhz_dry_run_blockers.${blocker.code}`)) return t('nav.support')
   const codeKey = `payroll.submissions.overview.jmhz_dry_run_action_codes.${blocker.code}`
   const codeTranslated = t(codeKey)
   if (codeTranslated !== codeKey) return codeTranslated
@@ -329,10 +341,10 @@ function blockerUsesAgendaTarget(group: BlockerGroup): boolean {
   return blockerUsesSharedTarget(group.blocker.code) || group.entityIds.length > 10
 }
 
-function blockerGroupTarget(group: BlockerGroup): RouteLocationRaw | null {
+function blockerGroupTarget(group: BlockerGroup, payrollRun: PayrollRun): RouteLocationRaw | null {
   return blockerUsesAgendaTarget(group)
-    ? blockerTarget(group.blocker, null)
-    : blockerTarget(group.blocker)
+    ? blockerTarget(group.blocker, null, payrollRun)
+    : blockerTarget(group.blocker, group.blocker.entity_id, payrollRun)
 }
 
 /**
@@ -730,10 +742,10 @@ async function copyXml(payrollRun: PayrollRun) {
                     </p>
                   </div>
                   <RouterLink
-                    v-if="blockerGroupTarget(group)
+                    v-if="blockerGroupTarget(group, payrollRun)
                       && (group.entityIds.length <= 1
                         || blockerUsesAgendaTarget(group))"
-                    :to="blockerGroupTarget(group)!"
+                    :to="blockerGroupTarget(group, payrollRun)!"
                     :class="btnOutline('warning')"
                     data-test="jmhz-dry-run-remediation"
                   >
@@ -759,7 +771,7 @@ async function copyXml(payrollRun: PayrollRun) {
                     <RouterLink
                       v-for="(entityId, index) in group.entityIds"
                       :key="entityId"
-                      :to="blockerTarget(group.blocker, entityId)!"
+                      :to="blockerTarget(group.blocker, entityId, payrollRun)!"
                       :class="btnOutline('warning')"
                     >
                       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">

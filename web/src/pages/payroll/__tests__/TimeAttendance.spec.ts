@@ -13,7 +13,10 @@ const m = vi.hoisted(() => ({
   reopenTimeMonth: vi.fn(),
   canWrite: vi.fn(),
   toastError: vi.fn(),
+  revealField: vi.fn(),
 }))
+
+vi.mock('@/utils/revealField', () => ({ revealField: m.revealField }))
 
 // Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
 // router. Originál se rozprostře, ať zůstanou i ostatní exporty (RouterLink).
@@ -529,6 +532,43 @@ describe('TimeAttendance', () => {
     expect(m.reopenTimeMonth).toHaveBeenCalledTimes(2)
     expect(wrapper.find('[data-test="reopen-modal"]').exists()).toBe(false)
     prompt.mockRestore()
+  })
+
+  it('vede problém pracovní doby přímo na účinné podmínky správného vztahu', async () => {
+    const item = row(12, 'Syntetická osoba')
+    item.jmhz_work_summary.preview.issues = [{ code: 'employment_terms_not_unique_for_month', message: 'Měsíc nemá jedinou konzistentní verzi týdenní pracovní doby.' }] as never[]
+    m.timeMonth.mockResolvedValue({ items: [item] })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true, RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'payroll.time.approve')!.trigger('click')
+    expect(wrapper.get('[data-test="work-summary-guidance"] a').attributes('href'))
+      .toBe('/payroll/people?employment=12&panel=employment_terms&field=weekly_hours')
+    expect(wrapper.get('[data-test="work-summary-guidance"]').text()).toContain('payroll.remediation.work.steps.terms')
+  })
+
+  it('na mobilu zvýrazní viditelnou akci docházky místo skryté mřížky', async () => {
+    const item = row(12, 'Syntetická osoba')
+    item.jmhz_work_summary.preview.issues = [{ code: 'worked_intervals_overlap', message: 'Synthetic overlap' }] as never[]
+    m.timeMonth.mockResolvedValue({ items: [item] })
+    const rects = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (this: HTMLElement) {
+      return (this.closest('.hidden') ? [] : [{}]) as unknown as DOMRectList
+    })
+    const wrapper = mount(TimeAttendance, { attachTo: document.body, global: { stubs: { teleport: true } } })
+    try {
+      await flushPromises()
+      await wrapper.findAll('button').find(button => button.text() === 'payroll.time.approve')!.trigger('click')
+      await wrapper.get('[data-test="work-summary-guidance"] button').trigger('click')
+      await flushPromises()
+      const [selector, root] = m.revealField.mock.calls.at(-1) as [string, HTMLElement]
+      const target = root.querySelector(selector)
+      expect(target?.tagName).toBe('BUTTON')
+      expect(target?.textContent).toBe('payroll.time.add')
+      expect(target?.closest('.hidden')).toBeNull()
+      expect(m.saveTimeEntry).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      rects.mockRestore()
+    }
   })
 
   it('freezes exact JMHZ core values together with month approval', async () => {

@@ -1,13 +1,17 @@
+import { reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
+  routeQuery: {} as Record<string, string>,
   riskySavings: vi.fn(),
   institutionAccounts: vi.fn(),
   saveEvidence: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }))
+
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: m.routeQuery }) }))
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
@@ -44,6 +48,8 @@ const employments = [{
 describe('PayrollRiskySavingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = reactive({})
+    HTMLElement.prototype.scrollIntoView = vi.fn()
     m.riskySavings.mockResolvedValue({
       items: [],
       minimum_shift_eighths: 24,
@@ -59,6 +65,86 @@ describe('PayrollRiskySavingsPanel', () => {
       variable_symbol: '123456',
       specific_symbol: null,
     }])
+  })
+
+  it('pozdě načtený vztah z odkazu otevře existující měsíční evidenci místo duplicity', async () => {
+    m.routeQuery.employment = '84'
+    m.routeQuery.person = '42'
+    m.riskySavings.mockResolvedValue({ items: [{
+      id: 9, employment_id: 84, period_start: '2026-08-01', revision_no: 2, row_version: 3,
+      risk_factor: 'cold', qualifying_shift_eighths: 32, right_claimed_on: '2026-07-01',
+      institution_account_id: 55, pension_company: 'Syntetická penzijní', product_reference: 'EXISTING',
+      status: 'draft', contribution_minor: null,
+    }], minimum_shift_eighths: 24, rate_basis_points: 400 })
+    const wrapper = mount(PayrollRiskySavingsPanel, { props: { period: '2026-08', employments: [] } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="risky-new"]').exists()).toBe(false)
+    await wrapper.setProps({ employments })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="risky-new"]').exists()).toBe(true)
+    expect((wrapper.get('[data-testid="risky-product"]').element as HTMLInputElement).value).toBe('EXISTING')
+    await wrapper.get('[data-testid="risky-approve"]').trigger('click')
+    await flushPromises()
+    expect(m.saveEvidence).toHaveBeenCalledWith(expect.objectContaining({ employment_id: 84, source_evidence_id: 9, row_version: 3 }))
+    wrapper.unmount()
+  })
+
+  it('nové evidenci předvybere pouze jednoznačný vztah a respektuje změnu odkazu', async () => {
+    m.routeQuery.person = '42'
+    const wrapper = mount(PayrollRiskySavingsPanel, { props: { period: '2026-08', employments } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="risky-missing-fields"]').text()).not.toContain('payroll.risky_savings.employment')
+    expect(m.saveEvidence).not.toHaveBeenCalled()
+    m.routeQuery.employment = '85'
+    await wrapper.setProps({ employments: [...employments, { ...employments[0], employment_id: 85 }] })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'PayrollPersonSearchSelect' }).props('modelValue')).toBe(42)
+    expect(wrapper.get('[data-testid="risky-query-target"]').findComponent({ name: 'SearchableSelect' }).props('modelValue')).toBe(85)
+    wrapper.unmount()
+  })
+
+  it('nevybere náhodný vztah osoby s více pracovními vztahy', async () => {
+    m.routeQuery.person = '42'
+    const wrapper = mount(PayrollRiskySavingsPanel, { props: { period: '2026-08', employments: [...employments, { ...employments[0], employment_id: 85 }] } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="risky-missing-fields"]').text()).toContain('payroll.risky_savings.employment')
+    expect(wrapper.findComponent({ name: 'PayrollPersonSearchSelect' }).props('modelValue')).toBe(42)
+    expect(m.saveEvidence).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('opožděná odpověď starého měsíce nepřepne editaci zpět', async () => {
+    m.routeQuery.employment = '84'
+    let august!: (value: unknown) => void
+    let september!: (value: unknown) => void
+    m.riskySavings.mockImplementation((period: string) => new Promise(resolve => {
+      if (period === '2026-08') august = resolve
+      else september = resolve
+    }))
+    const result = (id: number, period: string) => ({ items: [{
+      id, employment_id: 84, period_start: `${period}-01`, revision_no: 1, row_version: 1,
+      risk_factor: 'cold', qualifying_shift_eighths: 32, right_claimed_on: '2026-07-01',
+      institution_account_id: 55, pension_company: 'Syntetická penzijní', product_reference: period,
+      status: 'draft', contribution_minor: null,
+    }], minimum_shift_eighths: 24, rate_basis_points: 400 })
+    const wrapper = mount(PayrollRiskySavingsPanel, { props: { period: '2026-08', employments } })
+    await wrapper.setProps({ period: '2026-09' })
+    september(result(10, '2026-09'))
+    await flushPromises()
+    august(result(9, '2026-08'))
+    await flushPromises()
+    expect((wrapper.get('[data-testid="risky-product"]').element as HTMLInputElement).value).toBe('2026-09')
+    expect(wrapper.find('[data-testid="risky-new"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it.each([{ person: '43', employment: '84' }, { employment: '999' }, { employment: 'NaN' }])('nepřevezme neplatný nebo cizí rozsah %j', async query => {
+    Object.assign(m.routeQuery, query)
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="risky-missing-fields"]').text()).toContain('payroll.risky_savings.employment')
+    expect(m.saveEvidence).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('schválí přesně osminy směn a doložené platební údaje', async () => {

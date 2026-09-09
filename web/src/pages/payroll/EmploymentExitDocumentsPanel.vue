@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
+import { averageEarningsTarget } from './payrollRemediation'
 import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
@@ -680,6 +682,13 @@ onMounted(() => void load())
               { year: averageReadiness?.decisive_year, quarter: averageReadiness?.decisive_quarter },
             ) }}
           </p>
+          <template v-if="averageReadiness?.readiness_code === 'average_earnings_snapshot_missing'">
+            <p class="mt-2 text-sm">{{ t('payroll.remediation.average.step', { year: averageReadiness?.decisive_year, quarter: averageReadiness?.decisive_quarter }) }}</p>
+            <RouterLink :to="averageEarningsTarget(employment.id, averageReadiness?.decisive_year, averageReadiness?.decisive_quarter)" :class="[btnOutlineSm('warning'), 'mt-2 whitespace-nowrap']">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
+              {{ t('payroll.remediation.actions.average') }}
+            </RouterLink>
+          </template>
         </div>
 
         <form
@@ -823,6 +832,13 @@ onMounted(() => void load())
               { year: statementReadiness?.decisive_year, quarter: statementReadiness?.decisive_quarter },
             ) }}
           </p>
+          <template v-if="statementReadiness?.readiness_code === 'average_earnings_snapshot_missing'">
+            <p class="mt-2 text-sm">{{ t('payroll.remediation.average.step', { year: statementReadiness?.decisive_year, quarter: statementReadiness?.decisive_quarter }) }}</p>
+            <RouterLink :to="averageEarningsTarget(employment.id, statementReadiness?.decisive_year, statementReadiness?.decisive_quarter)" :class="[btnOutlineSm('warning'), 'mt-2 whitespace-nowrap']">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
+              {{ t('payroll.remediation.actions.average') }}
+            </RouterLink>
+          </template>
         </div>
 
         <form

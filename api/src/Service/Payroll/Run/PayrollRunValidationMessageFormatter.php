@@ -9,6 +9,60 @@ final class PayrollRunValidationMessageFormatter
     private const MAX_MESSAGE_LENGTH = 500;
     private const NET_PAY_ISSUE = 'income:net_pay_result_missing_or_unverified';
 
+    public static function statutoryDetails(array $statutory): array
+    {
+        $details = [];
+        self::collectDetails($statutory, $details);
+        return array_values($details === []
+            ? [PayrollRunIssueGuidance::describe('statutory_input_incomplete')]
+            : $details);
+    }
+
+    public static function enforcementDetails(array $issues, int $employeeId): array
+    {
+        $details = [];
+        foreach ($issues as $issue) {
+            if (is_string($issue) && $issue !== '') {
+                $details[$issue] = PayrollRunIssueGuidance::describe($issue, $employeeId);
+            }
+        }
+        return array_values($details === []
+            ? [PayrollRunIssueGuidance::describe('enforcement_input_incomplete', $employeeId)]
+            : $details);
+    }
+
+    private static function collectDetails(
+        array $node,
+        array &$details,
+        ?int $employeeId = null,
+        ?int $employmentId = null,
+    ): void {
+        foreach (['person_reference', 'person_id', 'employee_reference'] as $field) {
+            if (is_string($node[$field] ?? null)) {
+                $employeeId = PayrollRunIssueGuidance::reference($node[$field], 'employee') ?? $employeeId;
+            }
+        }
+        foreach (['relationship_reference', 'relationship_id'] as $field) {
+            if (is_string($node[$field] ?? null)) {
+                $employmentId = PayrollRunIssueGuidance::reference($node[$field], 'employment') ?? $employmentId;
+            }
+        }
+        if (is_int($node['employee_id'] ?? null) && $node['employee_id'] > 0) $employeeId = $node['employee_id'];
+        if (is_int($node['employment_id'] ?? null) && $node['employment_id'] > 0) $employmentId = $node['employment_id'];
+        foreach (is_array($node['issues'] ?? null) ? $node['issues'] : [] as $issue) {
+            if (is_string($issue) && $issue !== '') {
+                $detail = PayrollRunIssueGuidance::describe($issue, $employeeId, $employmentId);
+                $key = $issue . ':' . $detail['entity_type'] . ':' . $detail['entity_id'] . ':' . $detail['remediation_path'];
+                $details[$key] = $detail;
+            }
+        }
+        foreach ($node as $field => $value) {
+            if ($field !== 'issues' && is_array($value)) {
+                self::collectDetails($value, $details, $employeeId, $employmentId);
+            }
+        }
+    }
+
     /** @param list<string> $issues */
     public static function enforcement(array $issues): string
     {

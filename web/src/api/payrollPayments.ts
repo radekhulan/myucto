@@ -65,8 +65,11 @@ export interface PayrollPaymentLiabilityList {
 
 export interface PayrollPaymentPreparationIssue {
   liability_kind: string
-  reason: 'blocked'
+  reason: string
   message: string
+  remediation_path?: string | null
+  remediation_action?: 'open_institution_accounts' | 'open_person_accounts' | 'open_runs' | 'contact_support'
+  technical_detail?: string | null
 }
 
 export interface PayrollPaymentPreparationResult {

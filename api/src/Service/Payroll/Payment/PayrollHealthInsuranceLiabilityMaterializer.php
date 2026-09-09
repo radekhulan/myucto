@@ -52,7 +52,7 @@ final class PayrollHealthInsuranceLiabilityMaterializer
                 $revisionId,
             );
             if ($revision === null) {
-                throw new \DomainException('Mzdová revize neexistuje.');
+                throw new PayrollPaymentPreparationException('revision_missing', 'Mzdová revize neexistuje.');
             }
             $this->assertRevision($revision);
 
@@ -252,7 +252,7 @@ final class PayrollHealthInsuranceLiabilityMaterializer
             || ($revision['revision_no'] ?? null)
                 !== ($revision['current_revision_no'] ?? null)
         ) {
-            throw new \DomainException(
+            throw new PayrollPaymentPreparationException('revision_not_ready',
                 'Závazky lze vytvořit jen z aktuální schválené revize.',
             );
         }

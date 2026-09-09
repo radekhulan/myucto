@@ -489,7 +489,7 @@ final class PayrollSubmissionTransportAttemptRepository
     }
 
     /**
-     * Podání, která opustila aplikaci DATOVOU SCHRÁNKOU a nemají tu žádný pokus.
+     * Podání, která opustila aplikaci DATOVOU SCHRÁNKOU.
      *
      * ── Proč to musí existovat ──────────────────────────────────────────────
      * Přehled „Stav odeslání" se skládal výhradně z pokusů kanálu VREP a z
@@ -582,16 +582,6 @@ final class PayrollSubmissionTransportAttemptRepository
                 AND submission.environment = ?
                 AND obligation.agenda_code IN (' . $placeholders . ')
                 AND outbox.dispatch_state IN ("sent", "delivered")
-                -- Podání s pokusem se ukazuje z ledgeru pokusů; kdyby se
-                -- vrátilo i tudy, měla by účetní na obrazovce dvě karty
-                -- k jednomu podání.
-                AND NOT EXISTS (
-                    SELECT 1
-                      FROM ' . self::TABLE . ' attempt
-                     WHERE attempt.supplier_id = submission.supplier_id
-                       AND attempt.environment = submission.environment
-                       AND attempt.submission_id = submission.id
-                )
                 ' . $filter['sql'] . '
               ORDER BY outbox.sent_at DESC, submission.id DESC
               LIMIT ' . $limit,
@@ -1008,6 +998,17 @@ final class PayrollSubmissionTransportAttemptRepository
         return $statement === false || $statement->fetchColumn() !== false;
     }
 
+    public static function hasUnfinishedJmhzTransport(PDO $pdo): bool
+    {
+        $statement = $pdo->query(
+            'SELECT 1 FROM ' . self::TABLE . ' WHERE '
+            . self::dueCondition('status = "awaiting_protocol" OR (status = "completed" AND closed_at IS NULL)', false)
+            . ' LIMIT 1',
+        );
+
+        return $statement === false || $statement->fetchColumn() !== false;
+    }
+
     private static function dueCloseCondition(int $maxCloseAttempts): string
     {
         return 'status = "completed" AND closed_at IS NULL
@@ -1040,7 +1041,7 @@ final class PayrollSubmissionTransportAttemptRepository
         return $rows;
     }
 
-    private static function dueCondition(string $condition): string
+    private static function dueCondition(string $condition, bool $respectSchedule = true): string
     {
         return '(' . $condition . ') AND EXISTS (
                     SELECT 1
@@ -1056,8 +1057,9 @@ final class PayrollSubmissionTransportAttemptRepository
                        AND due_submission.id = '
                         . self::TABLE . '.submission_id
                        AND due_obligation.agenda_code IN ("JMHZ", "JMHZ25")
-                )
-                AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())';
+                )' . ($respectSchedule
+                    ? ' AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())'
+                    : '');
     }
 
     /**

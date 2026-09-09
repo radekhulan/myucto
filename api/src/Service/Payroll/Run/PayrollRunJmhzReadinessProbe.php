@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Run;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerExplainer;
 use PDO;
 
 /**
@@ -86,10 +87,10 @@ final class PayrollRunJmhzReadinessProbe
                 'impact' => PayrollRunReadinessImpact::IMPACT_ANYTIME,
                 'scope' => PayrollRunReadinessImpact::SCOPE_MONTHLY,
                 'message' => 'Předběžnou kontrolu podkladů měsíčního hlášení '
-                    . 'se nepodařilo dokončit: ' . $e->getMessage()
-                    . ' Mzdový běh tím není nijak omezený; kontrola se spustí '
-                    . 'znovu při přípravě hlášení.',
-                'remediation_path' => null,
+                    . 'se nepodařilo dokončit. Obnovte stránku. Pokud se hláška opakuje, '
+                    . 'požádejte správce aplikace o kontrolu. Mzdový běh tím není omezený; '
+                    . 'před odesláním spusťte test JMHZ v Mzdových podáních.',
+                'remediation_path' => '/payroll/submissions/jmhz',
                 'count' => 1,
                 'entities' => [],
             ]];
@@ -131,6 +132,8 @@ final class PayrollRunJmhzReadinessProbe
                     'entity_type' => $issue['entity_type'],
                     'entity_id' => $issue['entity_id'],
                     'label' => $label,
+                    'message' => self::message($issue['code'], $label === null ? [] : [$label], 1),
+                    'remediation_path' => self::remediationPath($issue['code'], $issue['entity_id']),
                 ];
                 if ($label !== null && !in_array($label, $groups[$code]['labels'], true)) {
                     $groups[$code]['labels'][] = $label;
@@ -254,22 +257,33 @@ final class PayrollRunJmhzReadinessProbe
                 . 'mzdový běh ale běží dál.',
                 $named !== '' ? $named : $count . '× pracovní vztah',
             ),
-            default => sprintf(
-                'Podklad měsíčního hlášení (%s) není úplný u: %s. Doplní se '
-                . 'kdykoli před podáním; mzdový běh tím omezený není.',
-                $code,
-                $named !== '' ? $named : (string) $count,
-            ),
+            default => JmhzBlockerExplainer::guidance($code)
+                . ($named === '' ? '' : ' Týká se: ' . $named . '.')
+                . ' Otevřete Mzdová podání → JMHZ a spusťte test hlášení. Mzdový běh tím není omezený.',
         };
     }
 
-    private static function remediationPath(string $code): ?string
+    private static function remediationPath(string $code, ?int $entityId = null): ?string
     {
+        if (in_array($code, [
+            'jmhz_identity_missing',
+            'jmhz_identity_oic_missing',
+            'jmhz_identity_id_ppv_missing',
+            'jmhz_identity_incomplete',
+            'jmhz_identity_unresolved',
+        ], true)) {
+            $query = $entityId === null ? [] : ['employment' => $entityId];
+            $query['panel'] = 'jmhz_identity';
+            $query['field'] = $code === 'jmhz_identity_id_ppv_missing'
+                ? 'jmhz.employment_external_identifier'
+                : 'jmhz.person_external_identifier';
+            return '/payroll/people?' . http_build_query($query);
+        }
         return match ($code) {
             'component_jmhz_mapping_missing',
             'component_jmhz_manual_review',
             'component_jmhz_treatment_invalid' => '/payroll/components',
-            default => '/payroll/people',
+            default => '/payroll/submissions/jmhz',
         };
     }
 

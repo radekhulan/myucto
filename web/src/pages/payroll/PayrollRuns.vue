@@ -143,6 +143,7 @@ type DisplayValidation = PayrollRunValidation & {
   group_key: string
   display_message: string
   entity_labels: string[]
+  remediation_links: { path: string, label: string }[]
 }
 
 const GROUPED_VALIDATION_CODES = new Set([
@@ -203,7 +204,7 @@ function validationDisplayMessage(validation: PayrollRunValidation, count = 1): 
     : validation.message
 }
 
-function validationGroups(validations: PayrollRunValidation[]): DisplayValidation[] {
+function validationGroups(validations: PayrollRunValidation[], runPeriod: string): DisplayValidation[] {
   const groups: Array<{ primary: PayrollRunValidation, items: PayrollRunValidation[] }> = []
   const grouped = new Map<string, { primary: PayrollRunValidation, items: PayrollRunValidation[] }>()
 
@@ -230,6 +231,20 @@ function validationGroups(validations: PayrollRunValidation[]): DisplayValidatio
     })))
 
     const displayMessage = validationDisplayMessage(primary, items.length)
+    const links = new Map<string, string[]>()
+    for (const item of items) {
+      if (!item.remediation_path) continue
+      let path = item.remediation_path
+      if ((/^\/payroll\/(runs|time|quick-inputs|insolvency)(?:\?|$)/.test(path) || path.startsWith('/payroll/components?tab=risky_savings')) && !/[?&]period=/.test(path)) {
+        path += `${path.includes('?') ? '&' : '?'}period=${encodeURIComponent(runPeriod.slice(0, 7))}`
+      }
+      const labels = links.get(path) ?? []
+      const label = item.entity_type === 'employee' && item.entity_id !== null
+        ? personNames.value[item.entity_id]
+        : undefined
+      if (label && !labels.includes(label)) labels.push(label)
+      links.set(path, labels)
+    }
 
     return {
       ...primary,
@@ -238,6 +253,7 @@ function validationGroups(validations: PayrollRunValidation[]): DisplayValidatio
         : `validation-${primary.id}`,
       display_message: displayMessage,
       entity_labels: entityLabels,
+      remediation_links: Array.from(links, ([path, labels]) => ({ path, label: labels.join(', ') })),
     }
   })
 }
@@ -1217,8 +1233,17 @@ onMounted(load)
                 <p class="mt-1 text-xs opacity-70">
                   {{ t(`payroll.runs.readiness.scope.${finding.scope}`) }}
                 </p>
+                <ul v-if="finding.entities.some(entity => entity.message || entity.remediation_path)" class="mt-2 space-y-2">
+                  <li v-for="(entity, index) in finding.entities" :key="`${entity.entity_type}-${entity.entity_id}-${index}`">
+                    <p v-if="entity.message && entity.message !== finding.message" class="text-sm">{{ entity.message }}</p>
+                    <a v-if="entity.remediation_path" :href="entity.remediation_path" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                      {{ t('payroll.runs.validation.open_remediation') }}<span v-if="entity.label">: {{ entity.label }}</span>
+                    </a>
+                  </li>
+                </ul>
                 <a
-                  v-if="finding.remediation_path"
+                  v-if="finding.remediation_path && !finding.entities.some(entity => entity.remediation_path)"
                   :href="finding.remediation_path"
                   :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
                 >
@@ -1636,7 +1661,7 @@ onMounted(load)
         <div v-if="run.validations.length" class="mt-4 space-y-2">
           <p class="text-sm font-medium text-warning-700">{{ t('payroll.runs.validations') }}</p>
           <div
-            v-for="validation in validationGroups(run.validations)"
+            v-for="validation in validationGroups(run.validations, run.period_start)"
             :key="validation.id"
             :data-testid="`payroll-validation-${validation.id}`"
             :data-test="`payroll-validation-group-${validation.group_key}`"
@@ -1651,15 +1676,17 @@ onMounted(load)
               {{ entityLabelSummary(validation.entity_labels) }}
             </p>
             <a
-              v-if="validation.remediation_path"
-              :href="validation.remediation_path"
+              v-for="link in validation.remediation_links"
+              :key="link.path"
+              :href="link.path"
               data-test="payroll-validation-remediation"
-              :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+              :class="[btnOutlineSm('neutral'), 'mt-2 mr-2 inline-flex']"
             >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path :d="ICONS.link" />
               </svg>
               {{ t('payroll.runs.validation.open_remediation') }}
+              <span v-if="validation.remediation_links.length > 1 && link.label">: {{ link.label }}</span>
             </a>
             <!--
               Zkratka přímo z běhu: odkaz výš vede tam, kde se koncepty
@@ -1835,6 +1862,19 @@ onMounted(load)
                   names: entityLabelSummary(findingEntityLabels(finding)),
                 }) }}
               </p>
+              <ul v-if="finding.entities.some(entity => entity.message || entity.remediation_path)" class="mt-2 space-y-2">
+                <li v-for="(entity, index) in finding.entities" :key="`${entity.entity_type}-${entity.entity_id}-${index}`">
+                  <p v-if="entity.message && entity.message !== finding.message">{{ entity.message }}</p>
+                  <a v-if="entity.remediation_path" :href="entity.remediation_path" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                    {{ t('payroll.runs.validation.open_remediation') }}<span v-if="entity.label">: {{ entity.label }}</span>
+                  </a>
+                </li>
+              </ul>
+              <a v-if="finding.remediation_path && !finding.entities.some(entity => entity.remediation_path)" :href="finding.remediation_path" :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                {{ t('payroll.runs.validation.open_remediation') }}
+              </a>
             </li>
           </ul>
         </div>

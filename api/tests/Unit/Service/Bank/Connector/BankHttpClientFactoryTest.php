@@ -59,6 +59,27 @@ final class BankHttpClientFactoryTest extends TestCase
         yield 'promise' => [false];
     }
 
+    public function testRbErrorDiagnosticsPreserveResponseAndExcludeSensitiveContent(): void
+    {
+        $log = new TestHandler();
+        $factory = new BankHttpClientFactory(new Config(['app' => ['env' => 'development']]), new Logger('test', [$log]));
+        $body = '{"errorCode":"ERR_PAY_172","error_description":"private-account","token":"private-token"}';
+        $response = new Response(500, ['X-Correlation-Id' => 'private-secret'], $body);
+        $response->getBody()->seek(3);
+        $client = $factory->create('raiffeisenbank', new MockHandler([$response]));
+        $result = $client->request('POST', 'https://bank.example/payments/batches', [
+            'http_errors' => false,
+            'headers' => ['X-Request-Id' => 'myucto-' . str_repeat('a', 32)],
+        ]);
+        self::assertSame(3, $result->getBody()->tell());
+        self::assertSame($body, (string) $result->getBody());
+        $context = $log->getRecords()[0]->context;
+        self::assertSame('ERR_PAY_172', $context['bank_error_code']);
+        self::assertSame('myucto-' . str_repeat('a', 32), $context['bank_request_id']);
+        self::assertSame('json', $context['error_body_format']);
+        self::assertStringNotContainsString('private-', json_encode($context, JSON_THROW_ON_ERROR));
+    }
+
     #[DataProvider('failures')]
     public function testTransportDiagnosticsPreserveCallbackAndNeverLogSecrets(bool $synchronous): void
     {

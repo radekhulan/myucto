@@ -587,6 +587,38 @@ describe('PayrollRuns', () => {
       .toBe('/payroll/enforcement')
   })
 
+  it('zachová odlišné cíle opravy každé osoby ve sloučené kontrole', async () => {
+    m.peopleOptions.mockResolvedValue([{ id: 2, full_name: 'Jana Syntetická' }, { id: 3, full_name: 'Petr Syntetický' }])
+    m.runs.mockResolvedValue([run({ status: 'calculated', validations: [2, 3].map(id => validation({
+      id, code: 'enforcement_manual_review', entity_type: 'employee', entity_id: id,
+      message: 'Ověřte evidenci pohledávek.', remediation_path: `/payroll/enforcement?person=${id}`, requires_override: false,
+    })) })])
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    const links = wrapper.findAll('[data-test="payroll-validation-remediation"]')
+    expect(links.map(link => link.attributes('href'))).toEqual(['/payroll/enforcement?person=2', '/payroll/enforcement?person=3'])
+    expect(links[0]?.text()).toContain('Jana Syntetická')
+    expect(links[1]?.text()).toContain('Petr Syntetický')
+  })
+
+  it('předběžná kontrola ukáže jednotlivé příčiny a cíle všech dotčených vztahů', async () => {
+    m.runs.mockResolvedValue([run({ status: 'draft' })])
+    m.readiness.mockReturnValue({ period_start: '2026-08-01', payment_date: '2026-09-15', office_id: null, ready: false, has_findings: true, findings: [{
+      code: 'time_month_not_approved', severity: 'warning', impact: 'revision', scope: 'monthly',
+      message: 'Docházka vyžaduje kontrolu.', remediation_path: null, count: 2,
+      entities: [
+        { entity_type: 'employment', entity_id: 3, label: 'Jana Syntetická', message: 'Chybí uzavření docházky Jany.', remediation_path: '/payroll/time?employment=3&period=2026-08' },
+        { entity_type: 'employment', entity_id: 4, label: 'Petr Syntetický', message: 'Chybí schválení docházky Petra.', remediation_path: '/payroll/time?employment=4&period=2026-08' },
+      ],
+    }] })
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    const finding = wrapper.get('[data-testid="run-readiness-time_month_not_approved"]')
+    expect(finding.text()).toContain('Chybí uzavření docházky Jany.')
+    expect(finding.text()).toContain('Chybí schválení docházky Petra.')
+    expect(finding.findAll('a').map(link => link.attributes('href'))).toEqual(['/payroll/time?employment=3&period=2026-08', '/payroll/time?employment=4&period=2026-08'])
+  })
+
   it('keeps a grouped validation readable for hundreds of employees', async () => {
     m.peopleOptions.mockResolvedValue(Array.from({ length: 6 }, (_, index) => ({
       id: index + 1,

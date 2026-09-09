@@ -737,6 +737,29 @@ describe('PayrollPayments', () => {
    * „abo" ve sloupci formátu nutí účetní vědět, co ta zkratka znamená —
    * zakládací formulář jí přitom nabízí tentýž formát už pojmenovaný.
    */
+  it('keeps payment kinds, specific remediation and collapsed support details', async () => {
+    m.materialize.mockResolvedValue({
+      liability_ids: [], created_count: 0,
+      preparation_issues: [
+        { liability_kind: 'health_insurance', reason: 'institution_account_missing', message: 'Účet pojišťovny není ověřený.', remediation_path: '/payroll/settings?tab=institutions', remediation_action: 'open_institution_accounts', technical_detail: null },
+        { liability_kind: 'net_wage', reason: 'support_required', message: 'Požádejte správce o kontrolu.', remediation_path: null, remediation_action: 'contact_support', technical_detail: 'snapshot_hash_mismatch' },
+      ],
+    })
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.get('[data-test="materialize"]').trigger('click')
+    await flushPromises()
+    const rows = wrapper.findAll('[data-test="materialize-error-row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].get('[data-test="materialize-remediation"]').attributes('data-to')).toContain('/payroll/settings?tab=institutions')
+    expect(rows[1].get('[data-test="materialize-remediation"]').attributes('data-to')).toContain('/admin/support')
+    const details = rows[1].get('details')
+    expect(details.attributes('open')).toBeUndefined()
+    expect(details.text()).toContain('net_wage')
+    expect(details.text()).toContain('snapshot_hash_mismatch')
+    expect(rows[1].findAll('p').filter(node => !node.element.closest('details')).map(node => node.text()).join(' ')).not.toContain('snapshot_hash_mismatch')
+  })
+
   it('names the batch format instead of printing its code', async () => {
     const wrapper = mount(PayrollPayments)
     await flushPromises()

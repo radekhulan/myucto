@@ -15,6 +15,8 @@
  * rozhraní ČSSZ a tady následně uloží jen doložený výsledek z firemního DMS.
  */
 import { computed, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
+import { eldpRemediation, type EldpBlocker } from './payrollRemediation'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import { documentsApi, type DocItem } from '@/api/documents'
@@ -66,7 +68,7 @@ const note = ref('')
 const statement = ref<PayrollEldpStatement | null>(null)
 const eligibility = ref<PayrollEldpEligibility | null>(null)
 const prepared = ref<PayrollEldpPrepared | null>(null)
-const blockers = ref<Array<{ code: string, message: string }>>([])
+const blockers = ref<EldpBlocker[]>([])
 const error = ref('')
 const success = ref('')
 const downloadError = ref('')
@@ -354,10 +356,10 @@ async function prepare(): Promise<void> {
   } catch (exception) {
     if (isAxiosError(exception)) {
       const payload = exception.response?.data?.error
-      error.value = typeof payload?.message === 'string'
-        ? payload.message
-        : t('payroll.eldp.errors.prepareFailed')
-      blockers.value = Array.isArray(payload?.blockers) ? payload.blockers : []
+      error.value = t('payroll.eldp.errors.prepareFailed')
+      blockers.value = Array.isArray(payload?.blockers) && payload.blockers.length
+        ? payload.blockers
+        : [{ code: typeof payload?.code === 'string' ? payload.code : 'unknown', message: typeof payload?.message === 'string' ? payload.message : '' }]
     } else {
       error.value = t('payroll.eldp.errors.prepareFailed')
     }
@@ -469,7 +471,16 @@ watch(requestedByAuthority, value => {
       {{ error }}
       <ul v-if="blockers.length" class="mt-2 list-disc space-y-1 pl-5">
         <li v-for="blocker in blockers" :key="blocker.code" data-test="eldp-blocker">
-          {{ blocker.message }}
+          <div data-test="eldp-guidance">
+            <p class="font-medium">{{ t(eldpRemediation(blocker, employmentId, year).problemKey) }}</p>
+            <p class="mt-1">{{ t(eldpRemediation(blocker, employmentId, year).stepKey) }}</p>
+            <p class="mt-1 text-xs">{{ t('payroll.remediation.eldp.period', { period: eldpRemediation(blocker, employmentId, year).period ?? String(year) }) }}</p>
+            <RouterLink :to="eldpRemediation(blocker, employmentId, year).path" :class="[btnOutline('warning'), 'mt-2 whitespace-nowrap']">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
+              {{ t(eldpRemediation(blocker, employmentId, year).actionKey) }}
+            </RouterLink>
+          </div>
+          <details class="mt-2 text-xs"><summary>{{ t('payroll.remediation.technical') }}</summary><p>{{ blocker.code }}</p><p>{{ blocker.message }}</p></details>
         </li>
       </ul>
     </div>

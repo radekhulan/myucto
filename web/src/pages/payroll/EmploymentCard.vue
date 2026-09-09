@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { fieldSelector, revealField } from '@/utils/revealField'
 import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import {
@@ -234,6 +235,23 @@ const accentClass = computed(() => {
 })
 
 const expanded = ref(!isClosed.value)
+const cardRoot = ref<HTMLElement | null>(null)
+
+async function focusSection(panel: string, field?: string): Promise<void> {
+  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist'].includes(panel)) return
+  expanded.value = true
+  await nextTick()
+  const root = cardRoot.value
+  if (!root) return
+  if (field && revealField(fieldSelector(field), root)) return
+  const selector = panel === 'employment_checklist' ? '[data-test="employment-checklist"]'
+    : panel === 'employment_terms' ? '[data-test="terms-office"]'
+    : panel === 'jmhz_profile' ? '[data-test="jmhz-ordinary-profile"]'
+      : '[data-panel-anchor="jmhz_identity"]'
+  revealField(selector, root)
+}
+
+defineExpose({ focusSection, employmentId: computed(() => props.employment.id) })
 
 /**
  * Je karta rozložená do dvou sloupců (postranní pruh vlevo)?
@@ -906,7 +924,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
 </script>
 
 <template>
-  <article class="rounded-lg border border-l-4 border-neutral-200 bg-surface p-3 sm:p-4" :class="accentClass">
+  <article ref="cardRoot" :data-employment-id="employment.id" class="rounded-lg border border-l-4 border-neutral-200 bg-surface p-3 sm:p-4" :class="accentClass">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
@@ -1076,6 +1094,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               :disabled="!canEditTerms || busy"
               :class="INPUT"
               data-test="terms-weekly-hours"
+              data-a1-field="weekly_hours"
             >
           </label>
 
@@ -1167,6 +1186,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               accent="payroll"
               class="mt-1"
               data-test="terms-office"
+              data-a1-field="office_id"
               @update:model-value="termsForm.office_id = $event === null ? null : Number($event)"
             />
             <span v-if="officeOptions.length === 0" :class="HINT">{{ t('payroll.people.office_empty') }}</span>
@@ -1184,6 +1204,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               :disabled="!canEditTerms || busy"
               :class="INPUT"
               data-test="jmhz-activity-code"
+              data-a1-field="activity_code"
               @change="onActivityCodeChange"
             >
               <option :value="null">—</option>
@@ -1202,6 +1223,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               :disabled="!canEditTerms || busy || selectedRelationshipDetailMode === 'fixed_none'"
               :class="INPUT"
               data-test="jmhz-relationship-detail"
+              data-a1-field="jmhz_relationship_detail_code"
             >
               <option :value="null">—</option>
               <option v-for="option in jmhzOptions?.relationship_detail_codes ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option>
@@ -1402,7 +1424,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               </label>
               <label v-if="needsOtherWithholdingStatement" :class="FIELD">
                 {{ t('payroll.people.other_withholding_eligibility_label') }}
-                <select v-model="termsForm.other_withholding_eligibility" :disabled="!canEditTerms || busy" :class="INPUT" data-test="other-withholding-eligibility">
+                <select v-model="termsForm.other_withholding_eligibility" :disabled="!canEditTerms || busy" :class="INPUT" data-test="other-withholding-eligibility" data-a1-field="other_withholding_eligibility">
                   <option v-for="state in ['unverified','eligible','ineligible']" :key="state" :value="state">{{ t(`payroll.people.other_withholding_eligibility.${state}`) }}</option>
                 </select>
                 <span :class="HINT">{{ t('payroll.people.other_withholding_eligibility_hint') }}</span>
@@ -1431,7 +1453,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <div :class="GRID">
               <label :class="FIELD">
                 {{ t('payroll.people.social_employer_rate_category_label') }}
-                <select v-model="termsForm.social_employer_rate_category" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-employer-rate-category">
+                <select v-model="termsForm.social_employer_rate_category" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-employer-rate-category" data-a1-field="social_employer_rate_category">
                   <option v-for="category in ['ordinary','rescue_and_company_fire_service','risk_employment']" :key="category" :value="category">{{ t(`payroll.people.social_employer_rate_category.${category}`) }}</option>
                 </select>
               </label>
@@ -1445,7 +1467,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <div :class="GRID">
               <label :class="FIELD">
                 {{ t('payroll.people.social_part_time_discount_label') }}
-                <select v-model="termsForm.social_part_time_discount_reason" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-part-time-discount-reason">
+                <select v-model="termsForm.social_part_time_discount_reason" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-part-time-discount-reason" data-a1-field="social_part_time_discount_reason">
                   <option v-for="reason in ['none','age_55_plus','child_care_under_10','dependent_close_person_care','study_under_26','retraining_jobseeker','disabled_person','under_21']" :key="reason" :value="reason">{{ t(`payroll.people.social_part_time_discount_reason.${reason}`) }}</option>
                 </select>
               </label>
@@ -1466,7 +1488,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.people.jmhz_ordinary_profile.hint') }}</p>
               <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <label v-for="field in ordinaryProfileFields" :key="field.key" class="flex items-start gap-2 text-sm text-neutral-700">
-                  <input v-model="termsForm[field.key]" type="checkbox" :disabled="!canEditTerms || busy" class="mt-0.5 rounded border-neutral-300 text-warning-600 focus:ring-warning-500">
+                  <input v-model="termsForm[field.key]" :data-a1-field="field.key" type="checkbox" :disabled="!canEditTerms || busy" class="mt-0.5 rounded border-neutral-300 text-warning-600 focus:ring-warning-500">
                   <span class="min-w-0">{{ t(`payroll.people.jmhz_ordinary_profile.${field.label}`) }}</span>
                 </label>
               </div>
@@ -1625,7 +1647,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             : t('payroll.people.checklist_all_done') }}</span>
         </summary>
         <div class="space-y-2 border-t border-neutral-200 p-3">
-          <div v-for="item in sortedChecklist" :key="item.id" class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-neutral-50 px-3 py-2 text-xs">
+          <div v-for="item in sortedChecklist" :key="item.id" :data-a1-field="item.item_key" class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-neutral-50 px-3 py-2 text-xs">
             <div class="min-w-0">
               <p class="font-medium text-neutral-800">{{ t(`payroll.people.checklist.${item.item_key}`) }}</p>
               <!-- Povinnost bez zákonné lhůty (interní kontrola, potvrzení na

@@ -18,6 +18,25 @@ use PHPUnit\Framework\TestCase;
  */
 final class EldpAnnualStatementBuilderTest extends TestCase
 {
+    public function testExcludedPeriodBlockerCarriesMachineReadableMonthAndEmployment(): void
+    {
+        $revisions = $this->wholeYear(2025);
+        $revisions[2] = $this->revision(2025, 3, absences: [[
+            'id' => 9001, 'absence_type' => 'ppm',
+            'date_from' => '2025-03-05', 'date_to' => '2025-03-09',
+        ]]);
+        try {
+            $this->build($revisions);
+            self::fail('Unsupported absence must remain blocked.');
+        } catch (EldpValidationException $exception) {
+            $blockers = array_values(array_filter($exception->blockers, static fn (array $blocker): bool => $blocker['code'] === 'eldp_absence_kind_unsupported'));
+            self::assertCount(1, $blockers);
+            self::assertSame('2025-03-01', $blockers[0]['detail']['period_start']);
+            self::assertSame(self::EMPLOYMENT_ID, $blockers[0]['detail']['employment_id']);
+            self::assertSame(9001, $blockers[0]['detail']['absence_id']);
+        }
+    }
+
     private const SUPPLIER_ID = 7;
     private const EMPLOYEE_ID = 11;
     private const EMPLOYMENT_ID = 101;

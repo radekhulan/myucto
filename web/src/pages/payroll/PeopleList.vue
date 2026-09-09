@@ -1032,7 +1032,12 @@ async function openFromQuery() {
  * scroll na panel vzápětí zase smázl skokem na začátek stránky. Proto ho
  * `scrollBehavior` u odebrání povelu `?panel=` vynechává (viz router).
  */
+const employmentCards = ref<InstanceType<typeof EmploymentCard>[]>([])
+
 const FOCUSABLE_PANELS = [
+  'jmhz_profile',
+  'employment_terms',
+  'employment_checklist',
   'statutory_evidence',
   'dependants',
   'registration_identity',
@@ -1070,12 +1075,22 @@ async function focusPanel(panel: string) {
   // v desítkách polí hledal očima.
   const fieldRaw = Array.isArray(route.query.field) ? route.query.field[0] : route.query.field
   const field = typeof fieldRaw === 'string' && fieldRaw !== '' ? fieldRaw : undefined
+  const employmentId = Number(Array.isArray(route.query.employment) ? route.query.employment[0] : route.query.employment)
   // Všechno kromě zákonné evidence sedí pod sbaleným „Další údaje".
   if (panel !== 'statutory_evidence') advancedProfileOpen.value = true
   const query = { ...route.query }
   delete query.panel
   delete query.field
   await router.replace({ query })
+  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist'].includes(panel)) {
+    await nextTick()
+    const cards = employmentCards.value
+    const target = Number.isInteger(employmentId) && employmentId > 0
+      ? cards.find(card => card.employmentId === employmentId)
+      : cards.length === 1 ? cards[0] : undefined
+    await target?.focusSection(panel, field)
+    return
+  }
   // Historie jména i adres jsou na záložce Identita karty osoby; bez přepnutí
   // by povel doskočil na prázdno, protože jiná záložka je nevykresluje.
   // Panel si doskok i vysvícení řídí sám — zná svoje pole i to, kdy je seznam
@@ -1183,10 +1198,15 @@ async function openFromCreateCommand() {
  * a na obrazovce by se nestalo nic. Totéž platí pro „+ → Nový zaměstnanec",
  * když už na seznamu stojím.
  */
-watch(() => [route.query.person, route.query.panel, route.query.new] as const, async ([person, panel, isNew]) => {
+watch(() => [route.query.person, route.query.panel, route.query.new, route.query.employment, route.query.field] as const, async ([person, panel, isNew, employment]) => {
   const raw = Array.isArray(person) ? person[0] : person
   const id = typeof raw === 'string' && raw !== '' ? Number(raw) : null
-  if (id !== null && Number.isInteger(id) && id > 0 && id !== expandedId.value) {
+  const employmentRaw = Array.isArray(employment) ? employment[0] : employment
+  const employmentId = typeof employmentRaw === 'string' ? Number(employmentRaw) : null
+  const hasEmployment = employmentId !== null && Number.isInteger(employmentId) && employmentId > 0
+  const currentHasEmployment = hasEmployment && selectedDetail.value?.employments.some(item => item.id === employmentId)
+  if ((id !== null && Number.isInteger(id) && id > 0 && id !== expandedId.value)
+    || (hasEmployment && !currentHasEmployment)) {
     await openFromQuery()
   }
   const requested = Array.isArray(panel) ? panel[0] : panel
@@ -1637,6 +1657,7 @@ onMounted(async () => {
         <EmploymentCard
           v-for="employment in details[expandedId].employments"
           :key="employment.id"
+          ref="employmentCards"
           :employment="employment"
           :can-write="auth.canWrite('payroll.employment.write')"
           :can-write-person="auth.canWrite('payroll.person.write')"

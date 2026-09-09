@@ -1068,7 +1068,7 @@
       "reason_label": "Reason for the change",
       "reason_placeholder": "E.g. amendment No. …/2027 Coll. effective 1 January",
       "read_only_hint": "The rules are shared by every company, so only a superadmin may change them. You have read-only access.",
-      "storage_unavailable": "The override storage is unavailable — the database migration is missing. The verified built-in set applies.",
+      "storage_unavailable": "Saved payroll rule changes could not be loaded. An administrator or support must check database availability and whether the application update completed. Do not change rates or effective dates to work around this error.",
       "degraded": "The stored rules override is inconsistent. The calculation therefore uses the verified rules supplied with the application.",
       "degraded_technical": "Technical details for support",
       "outlook": {
@@ -1223,7 +1223,8 @@
         "submissions": "Submission versions"
       },
       "reason_why": "The reason is stored in the audit trail — for an overridden statutory rate it is the only record of why the company departed from the shipped value.",
-      "action_blocked": "{action}: {reason}"
+      "action_blocked": "{action}: {reason}",
+      "checksum_invalid_hint": "The integrity of a payroll rule set could not be verified. Contact support to check the installation and restore a trusted rule set. Do not edit the rates yourself."
     },
     "title": "Payroll",
     "subtitle": "HR and payroll records, monthly runs, documents, payments, automatic posting and statutory submissions.",
@@ -1554,7 +1555,17 @@
         "recognized_none": "No further levy payment was found in the bank movements.",
         "recognize_failed": "Reading payments from the bank failed."
       },
-      "load_failed_hint": "The liabilities for this period did not load, so the list below may be incomplete or stale. Please try again."
+      "load_failed_hint": "The liabilities for this period did not load, so the list below may be incomplete or stale. Please try again.",
+      "preparation": {
+        "unknown_kind": "Payment type not specified",
+        "open_runs": "Open payroll runs",
+        "contact_support": "Ask your administrator to investigate",
+        "technical_details": "Technical details for your administrator",
+        "support_required": "The payment could not be prepared. Refresh the overview and try again. If the problem persists, share the payment type, revision and technical details below with your administrator. Do not change approved payroll because of this message.",
+        "open_institution_accounts": "Open institution accounts",
+        "open_person_accounts": "Open employee payout accounts",
+        "unknown_posting_reason": "The application cannot explain why this payment was not posted. Ask your administrator to investigate and share the technical details below."
+      }
     },
     "posting_reconciliation": {
       "title": "Payroll posting reconciliation",
@@ -2764,7 +2775,9 @@
           "recipient_email_ambiguous": "The employee has more than one possible e-mail and it is not clear which to use.",
           "document_not_personal": "This document is not a personal employee document."
         }
-      }
+      },
+      "worker_failure": "The document or archive could not be completed. The exact cause has not been identified. You can retry; if the error persists, contact support and include the technical details below.",
+      "worker_failure_technical": "Technical details for support"
     },
     "annual_settlement": {
       "title": "Annual tax settlement",
@@ -3834,7 +3847,7 @@
         "specific_legal_fact_applies": "A specific legal event reportable in JMHZ may occur",
         "ozp_employment_support_applies": "The employer may claim supported employment funding for a person with a disability",
         "deep_mining_work_applies": "The work is performed in deep mining",
-        "monthly_hint": "The ordinary monthly flow does not ask these questions again. Monthly details are requested only for a marked exception. Enforcement, insolvency and deduction agreements are taken from their own registers."
+        "monthly_hint": "Automatic JMHZ preparation cannot yet handle these flagged exceptions. If one actually applies, contact support; do not disable correct information to submit a report. Enforcement, insolvency and deduction agreements are taken from their respective records."
       },
       "cz_isco_code": "CZ-ISCO code",
       "cz_isco": {
@@ -4419,7 +4432,7 @@
           "deduction_priority_missing": "A continuing deduction is missing its priority.",
           "deduction_result_not_supported": "A deduction result cannot be safely included in the certificate.",
           "average_earnings_ruleset_not_ready": "The § 313(2) average-earnings rules are not approved yet. The system therefore does not offer manual entry of a net amount.",
-          "average_earnings_snapshot_missing": "The decisive period {year}/Q{quarter} has no approved average-earnings snapshot yet. Create and approve one in the Absences & averages module first.",
+          "average_earnings_snapshot_missing": "Approved average earnings for {year}/Q{quarter} are missing. Create and approve them in Absences and averages.",
           "average_earnings_net_conversion_not_verified": "An approved gross hourly average exists for the decisive period {year}/Q{quarter}, but the conversion to a net monthly amount under the Employment Act is not yet implemented in the application. Please issue this certificate outside the application for now.",
           "dpp_sickness_evidence_not_ready": "For a DPP without a continuing deduction, sickness-insurance participation cannot yet be evidenced safely.",
           "dpp_wage_deduction_missing": "No continuing deduction establishing the DPP certificate obligation was found.",
@@ -5391,7 +5404,7 @@
         "jmhz_preview_status": "Output status",
         "jmhz_preview_only": "Control preview only",
         "jmhz_evidence_title": "JMHZ legal facts",
-        "jmhz_evidence_description": "Ordinary employments are evidenced automatically from the frozen payroll and effective terms. The payroll accountant handles only recorded exceptions or incomplete sources.",
+        "jmhz_evidence_description": "Ordinary employments are evidenced automatically from saved payroll and effective terms. The payroll accountant handles only recorded exceptions or incomplete sources.",
         "jmhz_evidence_empty": "There is no approved revision to confirm for the selected period.",
         "jmhz_evidence_card": "Period {period}, revision {revision}",
         "jmhz_evidence_confirm_each": "I explicitly confirm that none of the following occurred in the period:",
@@ -5400,8 +5413,8 @@
         "jmhz_evidence_load_failed": "The legal-fact confirmation could not be loaded.",
         "jmhz_evidence_save_failed": "The legal-fact confirmation could not be saved.",
         "jmhz_evidence_automatic_count": "no employment will be evidenced automatically | 1 employment will be evidenced automatically | {n} employments will be evidenced automatically",
-        "jmhz_evidence_confirmed_count": "no employment is frozen | 1 employment is already frozen | {n} employments are already frozen",
-        "jmhz_evidence_all_resolved": "There is no need to review employees individually. Preparation freezes the ordinary state with its source.",
+        "jmhz_evidence_confirmed_count": "no employment has saved evidence | 1 employment already has saved evidence | {n} employments already have saved evidence",
+        "jmhz_evidence_all_resolved": "No additional information is needed for these employments. Evidence is saved or will be established automatically when the report is prepared.",
         "jmhz_evidence_attention_default": "This employment requires monthly exception details.",
         "jmhz_evidence_attention_action": "Open the place to fix",
         "jmhz_evidence_attention_run_action": "Open payroll runs",
@@ -5515,7 +5528,7 @@
         "jmhz_dry_run_blockers": {
           "jmhz_identity_id_ppv_missing": "The employment identifier (ID PPV) is missing. It is assigned by the social security administration when the employee is registered — copy it from the registration receipt or the portal. It is filled in on the employment card, section \"Identifiers assigned by the social security administration\".",
           "jmhz_identity_unresolved": "The employment has an unresolved identity task towards the social security administration. Finish it on the employment card; the report cannot be built until then.",
-          "unknown": "Some statutory data required for JMHZ is missing. Open the employment record and complete the highlighted fields.",
+          "unknown": "The report check could not be completed and the application cannot yet identify a specific remedy. Contact support with the period, employment and technical check details. Do not guess replacement values.",
           "effective_term_missing": "The effective employment terms for this month are missing.",
           "component_jmhz_mapping_missing": "A payroll component used in this period has no monthly report mapping. Add it in Payroll → Components. Components not used in the period do not block the report.",
           "component_jmhz_manual_review": "A payroll component's JMHZ classification requires manual review.",
@@ -5732,7 +5745,96 @@
         "jmhz_evidence_scope_unnamed": "Employment no. {employment}",
         "jmhz_evidence_pending": "no employment requires attention | 1 employment requires attention | {n} employments require attention",
         "jmhz_evidence_no_scopes": "The revision contains no employment.",
-        "health_insurer_code": "Code {code}"
+        "health_insurer_code": "Code {code}",
+        "jmhz_guidance": {
+          "problems": {
+            "specification": "The saved evidence was created using a different version of the JMHZ rules than the application currently uses. This is not an error in the employee’s details.",
+            "interactions": "The saved assessment of legal facts does not match the current rules for reporting them together.",
+            "selector": "The saved confirmation uses a different employment classification from the report being prepared.",
+            "scope": "The saved confirmation does not match this payroll revision or employment.",
+            "source": "The legal facts and payroll calculation do not come from the same saved version of the data.",
+            "values": "The saved legal facts contain a value this report preparation process cannot handle.",
+            "confirmation": "The saved confirmation or its link to the employment terms cannot be verified.",
+            "catalog": "The application does not have a complete set of rules for this part of JMHZ.",
+            "profile_missing": "The approved payroll was calculated before the required JMHZ evidence was saved.",
+            "profile_incomplete": "The approved payroll does not contain all answers concerning unusual JMHZ circumstances.",
+            "exception": "The employment terms flag an unusual circumstance that automatic JMHZ preparation cannot yet handle.",
+            "unsupported": "This employment type cannot yet be handled by this JMHZ preparation process.",
+            "deductions": "The employee’s wage deductions are not fully documented or calculated.",
+            "deduction_title": "The calculated payroll contains a deduction without a recorded deduction agreement, enforcement claim or other documented basis.",
+            "deduction_register": "Verification of the employee’s enforcement claim register is not documented.",
+            "deduction_calculation": "The deduction calculation requires review or its inputs differ from the saved records.",
+            "revision": "The current approved payroll revision is not selected for JMHZ preparation.",
+            "period": "The saved payroll period does not start on the first day of a month.",
+            "result": "The employee cannot be uniquely identified in the calculation result.",
+            "invalid_source": "The saved payroll or legal fact evidence is incomplete or has an invalid format.",
+            "integrity": "The integrity of the saved payroll evidence cannot be verified. Report preparation has stopped.",
+            "request": "The confirmation request does not contain all valid Yes or No answers.",
+            "positive": "A confirmed legal fact requires processing that this JMHZ preparation process does not yet support.",
+            "not_found": "The payroll revision for this evidence is no longer available in the selected company.",
+            "frozen": "This employment already has a different immutable confirmation of legal facts.",
+            "repeat": "The repeated operation differs from the original request and cannot be safely completed.",
+            "incomplete_operation": "The previous attempt to save the legal facts was not completed.",
+            "unknown": "The JMHZ evidence could not be verified. An administrator or support must investigate this error.",
+            "activity_missing": "The activity type required to classify the employment for JMHZ is missing.",
+            "activity_invalid": "The activity type in the saved payroll revision is not valid in the JMHZ code list.",
+            "detail_missing": "The selected activity type requires a more detailed employment classification.",
+            "detail_invalid": "The detailed employment classification is not valid in the JMHZ code list.",
+            "detail_not_applicable": "The detailed employment classification cannot be used with the selected activity type."
+          },
+          "steps": {
+            "specification": "Open payroll for this period. For a new preparation or an actually required correction, create and approve a new correction revision and prepare the report from it. Do not resend accepted reports solely because of this warning. Contact support if a new revision has the same problem.",
+            "interactions": "Open payroll for this period. For a new preparation or an actually required correction, create and approve a new correction revision and prepare the report from it. Do not resend accepted reports solely because of this warning. Contact support if a new revision has the same problem.",
+            "selector": "Open payroll for this period. For a new preparation or an actually required correction, create and approve a new correction revision and prepare the report from it. Do not resend accepted reports solely because of this warning. Contact support if a new revision has the same problem.",
+            "scope": "Open payroll for this period. For a new preparation or an actually required correction, create and approve a new correction revision and prepare the report from it. Do not resend accepted reports solely because of this warning. Contact support if a new revision has the same problem.",
+            "source": "Contact your administrator or support with the period, revision number and technical details below. Do not change employee data just to pass validation.",
+            "values": "Contact your administrator or support with the period, revision number and technical details below. Do not change employee data just to pass validation.",
+            "confirmation": "Open payroll for this period. For a new preparation or an actually required correction, create and approve a new correction revision and prepare the report from it. Do not resend accepted reports solely because of this warning. Contact support if a new revision has the same problem.",
+            "catalog": "Contact your administrator or support with the period, revision number and technical details below. Do not change employee data just to pass validation.",
+            "profile_missing": "Open payroll for this period, recalculate it and approve a new revision. Editing the employee card does not change already approved evidence. Contact support if the problem remains after recalculation.",
+            "profile_incomplete": "Open payroll for this period, recalculate it and approve a new revision. Editing the employee card does not change already approved evidence. Contact support if the problem remains after recalculation.",
+            "exception": "Open this employment and its effective terms, More details → Exceptional situations → JMHZ unusual circumstances. Check the flagged option for the reporting month. If it was entered by mistake, correct the terms with the appropriate effective date, recalculate payroll and approve it. If the information is correct, do not change it to No; contact support about handling this case. A monthly editor for this exception is not yet available.",
+            "unsupported": "Contact your administrator or support with the period, revision number and technical details below. Do not change employee data just to pass validation.",
+            "deductions": "Open Enforcement and deductions for this person and review unresolved warnings, claims and insolvency. For contractual deductions, also check Deduction agreements. After correcting the evidence, recalculate and approve payroll for this month.",
+            "deduction_title": "Compare the calculated deduction with this person’s Deduction agreements and Enforcement and deductions records. Record the actual basis effective for the month, or correct an incorrectly entered deduction. Recalculate and approve payroll. Do not create a fictitious claim.",
+            "deduction_register": "In Enforcement and deductions, check this person’s claim register completeness. Record the verification; mark it not applicable only if that is accurate. Then recalculate and approve payroll for this month.",
+            "deduction_calculation": "In Enforcement and deductions, check this person’s unresolved warnings, claim priorities and any concurrent insolvency. Resolve the reported issues, then recalculate and approve payroll. Contact support if the evidence is correct but the mismatch remains.",
+            "revision": "Open payroll for this month, select the current revision and complete its calculation and approval. Then return to JMHZ and refresh the evidence.",
+            "period": "Contact your administrator or support with the period, revision number and technical details below. Do not change employee data just to pass validation.",
+            "result": "Open payroll for this period, recalculate it and approve a new revision. Editing the employee card does not change already approved evidence. Contact support if the problem remains after recalculation.",
+            "invalid_source": "Contact your administrator or support with the period, revision number and technical details below. Do not change employee data just to pass validation.",
+            "integrity": "Contact your administrator or support with the period, revision number and technical details below. Do not change employee data just to pass validation.",
+            "request": "Refresh the page and check whether the operation has already completed. If the error repeats, contact support with the technical details below; do not change employee data because of this error.",
+            "positive": "Contact your administrator or support with the period, revision number and technical details below. Do not change employee data just to pass validation.",
+            "not_found": "Open payroll for this month and check the selected company and current revision. Refresh the list. If the revision should exist but is still missing, contact support.",
+            "frozen": "Open payroll for this period. For a new preparation or an actually required correction, create and approve a new correction revision and prepare the report from it. Do not resend accepted reports solely because of this warning. Contact support if a new revision has the same problem.",
+            "repeat": "Refresh the page and check whether the operation has already completed. If the error repeats, contact support with the technical details below; do not change employee data because of this error.",
+            "incomplete_operation": "Refresh the page and check whether the operation has already completed. If the error repeats, contact support with the technical details below; do not change employee data because of this error.",
+            "unknown": "Contact your administrator or support with the period, revision number and technical details below. Do not change employee data just to pass validation.",
+            "activity_missing": "Open this employment and its effective terms. In the basic details check Activity type and Detailed employment classification against the actual contract. Save the correct terms effective for the reporting month, then recalculate payroll and approve a new revision. Do not substitute incorrect values just to pass validation.",
+            "activity_invalid": "Open this employment and its effective terms. In the basic details check Activity type and Detailed employment classification against the actual contract. Save the correct terms effective for the reporting month, then recalculate payroll and approve a new revision. Do not substitute incorrect values just to pass validation.",
+            "detail_missing": "Open this employment and its effective terms. In the basic details check Activity type and Detailed employment classification against the actual contract. Save the correct terms effective for the reporting month, then recalculate payroll and approve a new revision. Do not substitute incorrect values just to pass validation.",
+            "detail_invalid": "Open this employment and its effective terms. In the basic details check Activity type and Detailed employment classification against the actual contract. Save the correct terms effective for the reporting month, then recalculate payroll and approve a new revision. Do not substitute incorrect values just to pass validation.",
+            "detail_not_applicable": "Open this employment and its effective terms. In the basic details check Activity type and Detailed employment classification against the actual contract. Save the correct terms effective for the reporting month, then recalculate payroll and approve a new revision. Do not substitute incorrect values just to pass validation."
+          },
+          "actions": {
+            "run": "Open payroll for this month",
+            "revision": "Open revisions for this month",
+            "employment": "Check employment terms",
+            "deductions": "Open person’s enforcement and deductions",
+            "agreements": "Open person’s deduction agreements",
+            "support": "Open support"
+          },
+          "fields": {
+            "orchard_discount_eligible": "Insurance discount for fruit or vegetable growing",
+            "specific_legal_fact_applies": "Specific legal fact reported in JMHZ",
+            "ozp_employment_support_applies": "Support for employing people with disabilities",
+            "deep_mining_work_applies": "Underground mining work"
+          },
+          "technical_details": "Technical details for support",
+          "xsd_versions": "Report format: saved version {old}, current version {current}.",
+          "control_versions": "Validation rules: saved version {old}, current version {current}."
+        }
       },
       "queue": {
         "title": "To send",
@@ -7969,6 +8071,74 @@
       "multiple": "You dropped {count} files — the first one, \"{name}\", was used. The rest were not loaded.",
       "no_file": "Nothing you dropped could be read as a file. Folders and content from other pages will not work; please pick a file from disk.",
       "pick_another": "Pick another file"
+    },
+    "remediation": {
+      "actions": {
+        "support": "Open support",
+        "runs": "Open payroll for the period",
+        "terms": "Open employment terms",
+        "absences": "Open absences for this employment",
+        "calendar": "Find the employment calendar",
+        "entries": "Review attendance for this employment",
+        "average": "Complete this employment’s average earnings"
+      },
+      "eldp": {
+        "period": "Reporting period: {period}.",
+        "problems": {
+          "no_revisions": "No approved payroll is available for the reporting year.",
+          "missing_month": "An approved payroll month needed to document insurance duration and earnings is missing.",
+          "revision": "The evidence includes a payroll revision that is not current and approved.",
+          "missing_employment": "The employment is missing from saved payroll evidence for a reporting month.",
+          "dates": "Employment start or end dates are missing or differ between saved payroll months.",
+          "ambiguous": "More than one approved source exists for a month; the correct source cannot be safely selected.",
+          "integrity": "Saved evidence does not match or has an invalid format. A pension insurance record cannot safely be prepared.",
+          "unsupported": "Automatic pension insurance record preparation does not yet support this case.",
+          "activity": "The activity type or detailed classification is outside the cases this pension insurance preparation supports.",
+          "social": "Saved payroll lacks a complete social insurance calculation, insurance participation or assessment base.",
+          "absence_dates": "An absence has an invalid start or end date.",
+          "absence_overlap": "Excluded periods overlap or exceed the employment duration.",
+          "unknown": "A preparation error must be investigated by support."
+        },
+        "steps": {
+          "no_revisions": "In Payroll, select the reporting year and check the months during which the employment existed. Complete genuinely missing calculations and approvals. If payroll was processed elsewhere, do not create fictitious calculations; contact support about historical evidence.",
+          "missing_month": "Open payroll for the indicated month. Verify that it includes the correct employment and complete contributions, make any necessary correction and approve the current revision. Prepare the record again. Do not correct already accurate payroll or accepted submissions solely because of this warning.",
+          "revision": "Open payroll for the indicated month. Verify that it includes the correct employment and complete contributions, make any necessary correction and approve the current revision. Prepare the record again. Do not correct already accurate payroll or accepted submissions solely because of this warning.",
+          "missing_employment": "Open payroll for the indicated month. Verify that it includes the correct employment and complete contributions, make any necessary correction and approve the current revision. Prepare the record again. Do not correct already accurate payroll or accepted submissions solely because of this warning.",
+          "dates": "Compare the actual start and end dates on the employment card with the affected payroll months. An error confined to old approved payroll requires a correction revision for that month. Do not alter accurate employment dates to make them agree; ask support to investigate an unclear mismatch.",
+          "ambiguous": "Contact support with the reporting year, employment and technical details below. Do not change employee data or approved payroll blindly because of this error.",
+          "integrity": "Contact support with the reporting year, employment and technical details below. Do not change employee data or approved payroll blindly because of this error.",
+          "unsupported": "Contact support with the reporting year, employment and technical details below. Do not change employee data or approved payroll blindly because of this error.",
+          "activity": "On the employment card, verify Activity type and Detailed employment classification against the actual contract and their effective dates. Correct erroneous data and recalculate the affected payroll. If the data is correct, do not change the employment type; contact support for this case.",
+          "social": "Open payroll for the indicated month. Verify that it includes the correct employment and complete contributions, make any necessary correction and approve the current revision. Prepare the record again. Do not correct already accurate payroll or accepted submissions solely because of this warning.",
+          "absence_dates": "Open this employment’s absences and check dates and overlaps for the reporting period. Correct only erroneous records, then recalculate and approve affected payroll. If overlapping absences are accurate, do not remove them just to pass validation; contact support.",
+          "absence_overlap": "Open this employment’s absences and check dates and overlaps for the reporting period. Correct only erroneous records, then recalculate and approve affected payroll. If overlapping absences are accurate, do not remove them just to pass validation; contact support.",
+          "unknown": "Contact support with the reporting year, employment and technical details below. Do not change employee data or approved payroll blindly because of this error."
+        }
+      },
+      "work": {
+        "problems": {
+          "terms": "Weekly working time is not uniquely defined throughout the month or changes during it.",
+          "absence": "This month contains an absence request or correction that is not yet approved or closed.",
+          "calendar": "A day in the month has no work calendar or is covered by multiple calendar versions.",
+          "month_boundary": "A recorded work interval starts and ends in different calendar months.",
+          "overlap": "Regular or overtime work intervals overlap.",
+          "break": "A break is longer than the entire recorded work interval.",
+          "unknown": "The working time summary could not be verified. Support must investigate."
+        },
+        "steps": {
+          "terms": "Open Weekly working time in this employment’s terms. Compare the effective versions for the month with the contract. Correct missing or wrongly effective terms and refresh attendance. Do not erase a real change of working hours; contact support if the summary cannot handle it.",
+          "absence": "The link opens this employment’s absences for the same month. Complete approval or rejection of pending requests and corrections according to the facts. Return to attendance, refresh and reopen month approval.",
+          "calendar": "Check the calendar for this employment. Create calendar / New calendar version currently sets Monday to Friday at 8 hours per day from the month’s start. Use it only if this matches the actual schedule. Ask an administrator to resolve other schedules or overlapping versions; do not change the calendar merely to pass validation.",
+          "month_boundary": "Check the work interval’s start and end. Split work crossing a month boundary into the actual portions worked in each month without changing the total duration. Contact support if the editor cannot correct it. Refresh the summary afterwards.",
+          "overlap": "Compare this employment’s records by date and work category. Remove only an incorrect duplicate or correct the actual time; do not record regular work and overtime twice for the same interval. Contact support if the editor cannot correct it. Refresh the summary afterwards.",
+          "break": "Check the start, end and break duration in this employment’s records. Correct the wrongly entered time using actual attendance. Contact support if the editor cannot correct it. Refresh the summary afterwards.",
+          "unknown": "Contact support with the month, employment and technical details below. Do not confirm substitute values just to complete the report."
+        }
+      },
+      "average": {
+        "step": "Open Average earnings for this employment. Year {year} and quarter {quarter} are selected as the period in which the average applies; the calculation reference period is the previous quarter. Check the source data, create and approve the average, then refresh the exit documents."
+      },
+      "technical": "Technical details for support"
     }
   },
   "foreign_income": {
@@ -16525,7 +16695,9 @@
       "title": "Run payroll",
       "label": "Run payroll",
       "hint": "Enables the standalone payroll module for this company in either accounting mode. It is disabled by default.",
-      "beta_warning": "The payroll module has been through testing, but we still consider it a beta. You can start using it in production, just please keep an eye on the pay, contribution and filing figures for social security, health insurers and the tax office and check them.","beta_report":"Please report any problems at","beta_report_thanks":"Thank you for them, we will fix them promptly.",
+      "beta_warning": "The payroll module has been through testing, but we still consider it a beta. You can start using it in production, just please keep an eye on the pay, contribution and filing figures for social security, health insurers and the tax office and check them.",
+      "beta_report": "Please report any problems at",
+      "beta_report_thanks": "Thank you for them, we will fix them promptly.",
       "off_note": "Payroll disappears from the menu after saving. Payroll data is not deleted and remains available when enabled again.",
       "buy": "Activate payroll add-on"
     },
@@ -20628,14 +20800,14 @@
         "policies": {
           "unknown": "Not verified yet",
           "role_required": "Select a role.",
-    "password_invite_placeholder": "leave empty and we will send a link",
-    "password_invite_hint": "Leave empty and we will email the user a single-use link so they set the password themselves. You will not know it.",
-    "password_link_cta": "Send password setup link",
-    "password_link_sending": "Sending…",
-    "password_link_sent": "Link sent to the user’s e-mail.",
-    "invite_sent": "User created. We have emailed them a link to set their password.",
-    "invite_failed": "The user was created, but the password link could NOT be sent. Check outgoing mail and resend the link from the user detail.",
-    "password_required": "Username and password always",
+          "password_invite_placeholder": "leave empty and we will send a link",
+          "password_invite_hint": "Leave empty and we will email the user a single-use link so they set the password themselves. You will not know it.",
+          "password_link_cta": "Send password setup link",
+          "password_link_sending": "Sending…",
+          "password_link_sent": "Link sent to the user’s e-mail.",
+          "invite_sent": "User created. We have emailed them a link to set their password.",
+          "invite_failed": "The user was created, but the password link could NOT be sent. Check outgoing mail and resend the link from the user detail.",
+          "password_required": "Username and password always",
           "portal_sso_or_password": "An active portal session is enough"
         },
         "policyUnknownHint": "The behaviour of the gateway sign-in page has not been verified by a live attempt yet. We therefore tell users to expect a username and password, while noting that an active portal session may let them through without one.",

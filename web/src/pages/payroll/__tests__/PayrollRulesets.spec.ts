@@ -164,7 +164,7 @@ async function mountPage(
     ...outlook,
   }
   m.overview.mockResolvedValue(overview)
-  const wrapper = mount(PayrollRulesets, { global: { stubs: { Modal: { template: '<div><slot /></div>' } } } })
+  const wrapper = mount(PayrollRulesets, { global: { stubs: { RouterLink: { props: ['to'], template: '<a :to="to"><slot /></a>' }, Modal: { template: '<div><slot /></div>' } } } })
   await flushPromises()
   return wrapper
 }
@@ -216,6 +216,16 @@ describe('PayrollRulesets', () => {
     expect(message.text()).not.toContain(technical)
     expect(alert.get('[data-test="ruleset-degraded-technical"]').text())
       .toContain(technical)
+  })
+
+  it('directs unavailable storage and invalid checksum to support without editing rates', async () => {
+    const wrapper = await mountPage([group({ versions: [summary({ checksum_valid: false })] })], null, {
+      override_storage_available: false,
+    })
+    expect(wrapper.get('[data-test="ruleset-storage-unavailable"]').text()).toContain('payroll.rulesets.storage_unavailable')
+    expect(wrapper.get('[data-test="ruleset-storage-support"]').attributes('to')).toBe('/admin/support')
+    expect(wrapper.get('[data-test="ruleset-checksum-guidance"]').text()).toContain('payroll.rulesets.checksum_invalid_hint')
+    expect(wrapper.get('[data-test="ruleset-checksum-support"]').attributes('to')).toBe('/admin/support')
   })
 
   it('shows how many parameters manual judgement actually affects', async () => {
@@ -515,7 +525,7 @@ describe('PayrollRulesets', () => {
   it('z nenačteného přehledu vede tlačítko, ne jen mizící toast', async () => {
     m.overview.mockRejectedValueOnce(new Error('500'))
     const wrapper = mount(PayrollRulesets, {
-      global: { stubs: { Modal: { template: '<div><slot /></div>' } } },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :to="to"><slot /></a>' }, Modal: { template: '<div><slot /></div>' } } },
     })
     await flushPromises()
 

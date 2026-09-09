@@ -1,3 +1,4 @@
+import { reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { ref } from 'vue'
@@ -670,6 +671,76 @@ describe('AbsenceManagement', () => {
     const leaveYearInput = wrapper.find('[data-test="leave-year"]')
     expect(Number(leaveYearInput.attributes('min'))).toBeLessThanOrEqual(currentYear - 5)
     expect(Number(leaveYearInput.attributes('max'))).toBeGreaterThanOrEqual(currentYear + 1)
+    wrapper.unmount()
+  })
+
+  it('předvyplní období a vztah průměru z výstupního dokumentu', async () => {
+    m.routeQuery = reactive({ employment: '13', tab: 'averages' })
+    m.routeQuery.year = '2025'
+    m.routeQuery.quarter = '2'
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    expect((wrapper.get('[data-test="average-year"]').element as HTMLInputElement).value).toBe('2025')
+    expect((wrapper.get('[data-test="average-quarter"]').element as HTMLInputElement).value).toBe('2')
+    expect(m.absencesPage.mock.calls[0][2]).toBe(13)
+    m.routeQuery.quarter = '4'
+    await flushPromises()
+    expect((wrapper.get('[data-test="average-quarter"]').element as HTMLInputElement).value).toBe('4')
+    wrapper.unmount()
+  })
+
+  it('při změně odkazu ihned přepne identitu formulářů i před dokončením načítání', async () => {
+    m.routeQuery = reactive({ employment: '12', tab: 'absences' })
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    let complete!: (value: ReturnType<typeof absencesPage>) => void
+    m.absencesPage.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+    m.routeQuery.employment = '13'
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { absenceForm: { employment_id: number }, averageForm: { employment_id: number } }
+    try {
+      expect(vm.absenceForm.employment_id).toBe(13)
+      expect(vm.averageForm.employment_id).toBe(13)
+      expect(wrapper.find('[data-test="absence-form"]').exists()).toBe(false)
+      expect(m.createAbsence).not.toHaveBeenCalled()
+    } finally {
+      complete(absencesPage([]))
+      await flushPromises()
+      wrapper.unmount()
+    }
+  })
+
+  it('při změně měsíce odkazem načte první stránku i z rozstránkovaného seznamu', async () => {
+    m.routeQuery = reactive({ employment: '12', tab: 'absences' })
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { absenceOffset: number }
+    vm.absenceOffset = 12
+    m.routeQuery.period = '2026-08'
+    await flushPromises()
+    expect(lastPageArgs().offset).toBe(0)
+    wrapper.unmount()
+  })
+
+  it('po změně vztahu ignoruje starou odpověď a vytvoří absenci pro zobrazenou osobu', async () => {
+    m.routeQuery = reactive({ employment: '12', tab: 'absences' })
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    let completeOld!: (value: ReturnType<typeof absencesPage>) => void
+    m.absencesPage.mockImplementationOnce(() => new Promise(resolve => { completeOld = resolve }))
+    m.routeQuery.period = '2026-08'
+    await flushPromises()
+    m.absencesPage.mockResolvedValue(absencesPage([absence({ employment_id: 13, id: 55 })]))
+    m.routeQuery.employment = '13'
+    await flushPromises()
+    completeOld(absencesPage([absence()]))
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { absenceForm: { employment_id: number }, absences: { id: number }[] }
+    expect(vm.absenceForm.employment_id).toBe(13)
+    expect(vm.absences[0]?.id).toBe(55)
+    await wrapper.get('[data-test="absence-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAbsence).toHaveBeenCalledWith(expect.objectContaining({ employment_id: 13 }))
     wrapper.unmount()
   })
 

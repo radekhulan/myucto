@@ -38,6 +38,8 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   }),
 }))
 
+vi.mock('vue-router', () => ({ RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } }))
+
 import EmploymentExitDocumentsPanel from '@/pages/payroll/EmploymentExitDocumentsPanel.vue'
 
 function employment(relationType: PayrollEmployment['relation_type'] = 'employment'): PayrollEmployment {
@@ -141,6 +143,8 @@ describe('EmploymentExitDocumentsPanel', () => {
 
     expect(wrapper.get('[data-test="average-certificate-unavailable"]').text())
       .toContain('average_earnings_snapshot_missing')
+    expect(wrapper.get('[data-test="average-certificate-unavailable"] a').attributes('href'))
+      .toBe('/payroll/absences?employment=12&tab=averages&year=2026&quarter=3')
     expect(wrapper.find('input[type="number"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('payroll.people.exit_documents.generate')
   })

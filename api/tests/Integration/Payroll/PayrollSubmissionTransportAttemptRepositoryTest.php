@@ -661,7 +661,7 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
      * z obrazovky úplně a s ním storno i oprava. Přesně na tohle narazilo
      * srpnové hlášení 2026, které se opravovalo po chybě 40244.
      */
-    public function testDispatchedByDataBoxStaysVisibleWithoutAnyAttempt(): void
+    public function testDispatchedByDataBoxStaysVisibleAlongsideAnyEarlierAttempt(): void
     {
         $pdo = $this->db->pdo();
         $obligationId = (int) $pdo->query(
@@ -746,8 +746,6 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         self::assertSame('1752953999', $dispatched[0]['outbox_external_message_id']);
         self::assertSame('9tsaf6s', $dispatched[0]['outbox_recipient_box_id']);
 
-        // Jakmile pokus existuje, kartu ukazuje ledger pokusů. Kdyby se podání
-        // vrátilo i tudy, měla by účetní na obrazovce dvě karty k jednomu podání.
         $this->repository->open(
             $this->supplierId,
             self::ENVIRONMENT,
@@ -759,7 +757,7 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
             null,
         );
         self::assertSame(
-            [],
+            $dispatched,
             $this->repository->listDispatchedSubmissions(
                 $this->supplierId,
                 self::ENVIRONMENT,

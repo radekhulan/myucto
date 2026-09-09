@@ -67,6 +67,8 @@ vi.mock('@/components/payroll/PayrollPersonSearchSelect.vue', () => ({
   },
 }))
 
+vi.mock('vue-router', () => ({ RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } }))
+
 import PayrollEldpPanel from '../PayrollEldpPanel.vue'
 
 function setup(): void {
@@ -305,6 +307,7 @@ describe('PayrollEldpPanel', () => {
             blockers: [{
               code: 'eldp_month_source_missing',
               message: 'Chybí schválená mzdová revize za březen 2025.',
+              detail: { period_start: '2025-03-01', employment_id: 101 },
             }],
           },
         },
@@ -319,6 +322,7 @@ describe('PayrollEldpPanel', () => {
 
     expect(wrapper.get('[data-test="eldp-blocker"]').text())
       .toContain('březen 2025')
+    expect(wrapper.get('[data-test="eldp-blocker"] a').attributes('href')).toBe('/payroll/runs?period=2025-03')
   })
 
   it('po přípravě hlásí připravené podání, ne odeslané', async () => {

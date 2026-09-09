@@ -342,6 +342,11 @@ final class PayrollPaymentApiTest extends TestCase
             ],
             array_column($payload['preparation_issues'] ?? [], 'liability_kind'),
         );
+        foreach ($payload['preparation_issues'] as $issue) {
+            self::assertSame('revision_missing', $issue['reason']);
+            self::assertSame('/payroll/runs', $issue['remediation_path']);
+            self::assertSame('open_runs', $issue['remediation_action']);
+        }
         self::assertStringNotContainsString(
             'ciphertext',
             json_encode($payload, JSON_THROW_ON_ERROR),

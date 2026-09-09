@@ -1650,11 +1650,10 @@ final class PayrollPaymentAction
                 ];
                 $createdCount += $result['created_count'];
             } catch (\InvalidArgumentException|\DomainException $exception) {
-                $issues[] = [
-                    'liability_kind' => $liabilityKind,
-                    'reason' => 'blocked',
-                    'message' => $exception->getMessage(),
-                ];
+                $issues[] = \MyInvoice\Service\Payroll\Payment\PayrollPaymentPreparationException::issue(
+                    $liabilityKind,
+                    $exception,
+                );
             }
         }
 

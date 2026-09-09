@@ -265,8 +265,8 @@ const batchFailures = computed(() =>
     .map(item => ({
       id: item.id,
       name: item.employee_name,
-      reason: item.last_error_message
-        ?? t('payroll.documents.batch_annual.item_failed'),
+      reason: t('payroll.documents.worker_failure'),
+      technical: [item.last_error_code, item.last_error_message].filter(Boolean).join(': '),
       retriable: true,
     })))
 
@@ -644,7 +644,7 @@ async function settlePeriodExport(job: PayrollPeriodExportJob): Promise<void> {
     clearExportPoll()
     exportingScope.value = null
     toast.error(
-      job.last_error_message ?? t('payroll.documents.period_export.failed'),
+      t('payroll.documents.worker_failure'),
     )
     return
   }
@@ -1105,7 +1105,17 @@ onBeforeUnmount(() => {
             <p class="text-xs text-neutral-500">
               {{ t(`payroll.documents.batch_item_status.${item.status}`) }} · {{ t('payroll.documents.batch_attempts', { count: item.attempt_count }) }}
             </p>
-            <p v-if="item.last_error_message" class="mt-1 break-words text-xs text-danger-700">{{ item.last_error_message }}</p>
+            <template v-if="item.status === 'failed' || item.status === 'retry_wait'">
+              <p class="mt-1 text-xs text-danger-700" data-test="document-worker-failure-message">{{ t('payroll.documents.worker_failure') }}</p>
+              <RouterLink to="/admin/support" :class="[btnOutlineSm('neutral'), 'mt-2']" data-test="document-worker-support">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.help" /></svg>
+                {{ t('nav.support') }}
+              </RouterLink>
+              <details v-if="item.last_error_message || item.last_error_code" class="mt-2 text-xs" data-test="document-worker-failure-technical">
+                <summary class="cursor-pointer">{{ t('payroll.documents.worker_failure_technical') }}</summary>
+                <p class="mt-1 break-words font-mono">{{ item.last_error_code }} {{ item.last_error_message }}</p>
+              </details>
+            </template>
           </div>
           <button
             v-if="item.status === 'failed' || item.status === 'retry_wait'"
@@ -1281,12 +1291,17 @@ onBeforeUnmount(() => {
         <p class="mt-1 text-xs text-neutral-500">
           {{ exportProgressLabel }}
         </p>
-        <p
-          v-if="exportJob.status === 'failed' && exportJob.last_error_message"
-          class="mt-1 text-xs text-danger-600"
-        >
-          {{ exportJob.last_error_message }}
-        </p>
+        <div v-if="exportJob.status === 'failed'" class="mt-2 text-xs text-danger-600">
+          <p>{{ t('payroll.documents.worker_failure') }}</p>
+          <RouterLink to="/admin/support" :class="[btnOutlineSm('neutral'), 'mt-2']" data-test="period-export-support">
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.help" /></svg>
+            {{ t('nav.support') }}
+          </RouterLink>
+          <details v-if="exportJob.last_error_message || exportJob.last_error_code" class="mt-2" data-test="period-export-failure-technical">
+            <summary class="cursor-pointer">{{ t('payroll.documents.worker_failure_technical') }}</summary>
+            <p class="mt-1 break-words font-mono">{{ exportJob.last_error_code }} {{ exportJob.last_error_message }}</p>
+          </details>
+        </div>
       </div>
 
       <p
@@ -1402,9 +1417,18 @@ onBeforeUnmount(() => {
           <p class="font-medium">{{ t('payroll.documents.batch_annual.failed_title', { count: batchFailures.length }) }}</p>
           <ul class="mt-1 space-y-1">
             <li v-for="row in batchFailures" :key="row.id" class="flex flex-wrap items-center justify-between gap-2">
-              <span>
-                <span class="font-medium">{{ row.name }}</span> - {{ row.reason }}
-              </span>
+              <div class="min-w-0">
+                <p class="font-medium">{{ row.name }}</p>
+                <p data-test="annual-worker-failure-message">{{ row.reason }}</p>
+                <RouterLink to="/admin/support" :class="[btnOutlineSm('neutral'), 'mt-2']" data-test="annual-worker-support">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.help" /></svg>
+                  {{ t('nav.support') }}
+                </RouterLink>
+                <details v-if="row.technical" class="mt-2 text-xs" data-test="annual-worker-failure-technical">
+                  <summary class="cursor-pointer">{{ t('payroll.documents.worker_failure_technical') }}</summary>
+                  <p class="mt-1 break-words font-mono">{{ row.technical }}</p>
+                </details>
+              </div>
               <button
                 type="button"
                 data-test="retry-annual-batch-item"

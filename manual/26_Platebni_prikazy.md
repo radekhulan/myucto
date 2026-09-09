@@ -127,6 +127,7 @@ plátce v hlavičce, položky pro jednotlivé příjemce, jedno datum splatnosti
 - Částky jsou v **haléřích**, konstantní symbol se kóduje spolu se směrovým kódem banky
   příjemce (specifikum formátu — řeší to systém za tebe).
 - Soubor je v ASCII (diakritika ve zprávě se převede), zakódovaný pro přímý import.
+- Pro účet plátce u Raiffeisenbank (5500) systém automaticky použije hlavičku podle požadavků RB, a to při stažení souboru i předání přes API.
 
 Vygenerovaný `.kpc` soubor jednoduše nahraješ v internetovém bankovnictví do importu
 hromadných příkazů.

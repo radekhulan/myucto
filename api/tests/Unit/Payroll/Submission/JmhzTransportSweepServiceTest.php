@@ -204,6 +204,25 @@ final class JmhzTransportSweepServiceTest extends TestCase
         self::assertStringContainsString('ePortálu ČSSZ', $expiry['message']);
     }
 
+    public function testExhaustedAttemptDoesNotReopenFulfilledObligation(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('listDuePolls')->willReturn([
+            self::sentRow(['poll_count' => JmhzPollSchedule::MAX_ATTEMPTS]),
+        ]);
+        $attempts->method('listDueCloses')->willReturn([]);
+        $attempts->expects(self::once())->method('markExpired')
+            ->willReturn(self::sentRow(['status' => 'expired', 'row_version' => 2]));
+        $submissionRepository = $this->submissionRepository('fulfilled');
+        $submissionRepository->expects(self::never())->method('updateObligationStatus');
+
+        $result = $this->sweep($attempts, [], $submissionRepository)->run();
+
+        self::assertSame(1, $result['expired']);
+        self::assertSame(0, $result['polled']);
+        self::assertSame([], $this->history);
+    }
+
     /**
      * Druhý běh nad týmž ledgerem nesmí založit druhý pokus ani druhé uzavření.
      * Fronta bere jen řádky, kterým dozrál termín — po prvním průchodu tam
@@ -322,13 +341,13 @@ final class JmhzTransportSweepServiceTest extends TestCase
     }
 
     /** @return MockObject&PayrollSubmissionRepository */
-    private function submissionRepository(): MockObject
+    private function submissionRepository(string $status = 'submitted'): MockObject
     {
         $repository = $this->createMock(PayrollSubmissionRepository::class);
         $repository->method('findOutboundXmlArtifactId')->willReturn(501);
         $repository->method('findObligationOfSubmission')->willReturn([
             'id' => self::OBLIGATION,
-            'status' => 'submitted',
+            'status' => $status,
             'row_version' => 4,
             'agenda_code' => 'JMHZ25',
             'subject_type' => 'payroll_run',

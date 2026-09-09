@@ -165,6 +165,7 @@ final class JmhzOrdinaryEvidenceBuilder
             $this->invalid(
                 'jmhz_ordinary_evidence_scenario_unsupported',
                 'Revize nepatří do podporovaného běžného profilu JMHZ.',
+                ['reason' => $selection['issue_code'] ?? 'unsupported_profile'],
             );
         }
 
@@ -292,12 +293,14 @@ final class JmhzOrdinaryEvidenceBuilder
                 $this->invalid(
                     'jmhz_ordinary_evidence_profile_incomplete',
                     'Zmrazené nastavení neobvyklých situací JMHZ není úplné.',
+                    ['field' => $key],
                 );
             }
             if ($profile[$key] === true) {
                 $this->invalid(
                     'jmhz_ordinary_evidence_monthly_exception_required',
-                    'Pracovní vztah má evidovanou neobvyklou situaci. Doplňte její měsíční údaje.',
+                    'Pracovní vztah má evidovanou neobvyklou situaci, kterou automatická příprava zatím nepodporuje. Ověřte nastavení vztahu; pravdivý údaj neměňte jen kvůli přípravě hlášení.',
+                    ['field' => $key],
                 );
             }
         }
@@ -426,6 +429,7 @@ final class JmhzOrdinaryEvidenceBuilder
             $this->invalid(
                 'jmhz_ordinary_evidence_deduction_conflict',
                 'Výsledek obsahuje srážku bez evidovaného titulu.',
+                ['reason' => 'missing_title'],
             );
         }
         $deductionsRecorded = $deductionsRecorded || $resultHasDeductions;
@@ -469,6 +473,7 @@ final class JmhzOrdinaryEvidenceBuilder
                 $this->invalid(
                     'jmhz_ordinary_evidence_deduction_conflict',
                     'Kontrola evidence pohledávek není doložená ani označená jako nepoužitelná.',
+                    ['reason' => 'register_unverified'],
                 );
             }
         }
@@ -482,7 +487,7 @@ final class JmhzOrdinaryEvidenceBuilder
             || ($enforcementResult['issues'] ?? null) !== []
             || CanonicalJson::encode($calculationEvidence->toCanonicalArray()) !== CanonicalJson::encode($enforcement)
         ) {
-            $this->invalid('jmhz_ordinary_evidence_deduction_conflict', 'Výpočet srážek není dokončený a doložený.');
+            $this->invalid('jmhz_ordinary_evidence_deduction_conflict', 'Výpočet srážek není dokončený a doložený.', ['reason' => 'calculation_incomplete']);
         }
         $withheld = $enforcementResult['total_withheld_minor_units'] ?? null;
         if (!is_int($withheld)
@@ -542,8 +547,8 @@ final class JmhzOrdinaryEvidenceBuilder
         return $value;
     }
 
-    private function invalid(string $code, string $message): never
+    private function invalid(string $code, string $message, array $context = []): never
     {
-        throw new JmhzOrdinaryEvidenceException($code, $message);
+        throw new JmhzOrdinaryEvidenceException($code, $message, $context);
     }
 }

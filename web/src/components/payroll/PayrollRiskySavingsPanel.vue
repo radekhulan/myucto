@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
+import { revealField } from '@/utils/revealField'
 import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
@@ -31,6 +34,11 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const route = useRoute()
+const panelRoot = ref<HTMLElement | null>(null)
+let loadedPeriod: string | null = null
+let selectedQuery = ''
+let loadSequence = 0
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(false)
@@ -193,23 +201,60 @@ function payload(approve: boolean): PayrollRiskySavingsEvidencePayload | null {
   }
 }
 
+async function applyQuerySelection(): Promise<void> {
+  if (loading.value || failed.value || loadedPeriod !== props.period) return
+  const requestedEmployment = payrollQueryId(route.query, 'employment')
+  const requestedPerson = payrollQueryId(route.query, 'person')
+  if (route.query.employment !== undefined && requestedEmployment === null) return
+  if (route.query.person !== undefined && requestedPerson === null) return
+  if (requestedEmployment === null && requestedPerson === null) return
+  const signature = `${props.period}:${requestedPerson}:${requestedEmployment}`
+  if (signature === selectedQuery) return
+  const matches = props.employments.filter(option =>
+    (requestedEmployment === null || option.employment_id === requestedEmployment)
+    && (requestedPerson === null || option.employee_id === requestedPerson))
+  if (matches.length === 0) return
+  const option = matches.length === 1 ? matches[0] : null
+  const existing = option === null ? [] : items.value.filter(item => item.employment_id === option.employment_id)
+  if (existing.length > 1) return
+  startNew()
+  if (existing.length === 1) {
+    edit(existing[0])
+  } else {
+    employeeId.value = matches[0].employee_id
+    employmentId.value = option?.employment_id ?? null
+  }
+  selectedQuery = signature
+  await nextTick()
+  const root = panelRoot.value
+  if (root?.isConnected) revealField('[data-testid="risky-query-target"]', root)
+}
+
 async function load(): Promise<void> {
+  const sequence = ++loadSequence
+  const period = props.period
   loading.value = true
   failed.value = false
   try {
     const [result, accounts] = await Promise.all([
-      payrollApi.riskySavings(props.period),
+      payrollApi.riskySavings(period),
       payrollApi.institutionAccounts(paymentTargetEffectiveOn()),
     ])
+    if (sequence !== loadSequence || period !== props.period) return
     items.value = result.items
+    loadedPeriod = period
     institutionAccounts.value = accounts
     minimumEighths.value = result.minimum_shift_eighths
     rateBasisPoints.value = result.rate_basis_points
   } catch (error: unknown) {
+    if (sequence !== loadSequence) return
     failed.value = true
     toast.error(apiErrorMessage(error, t('payroll.risky_savings.load_failed')))
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) {
+      loading.value = false
+      await applyQuerySelection()
+    }
   }
 }
 
@@ -263,12 +308,19 @@ async function save(approve: boolean): Promise<void> {
   }
 }
 
-watch(() => props.period, load)
+watch(() => props.period, () => {
+  loadedPeriod = null
+  selectedQuery = ''
+  startNew()
+  void load()
+})
+watch(() => [route.query.person, route.query.employment], () => { void applyQuerySelection() })
+watch(() => props.employments, () => { void applyQuerySelection() }, { deep: true })
 onMounted(load)
 </script>
 
 <template>
-  <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6" data-testid="risky-savings-panel">
+  <section ref="panelRoot" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6" data-testid="risky-savings-panel">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="max-w-3xl">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.risky_savings.title') }}</h2>
@@ -305,7 +357,7 @@ onMounted(load)
           @update:model-value="selectRiskFactor"
         />
       </label>
-      <label class="block">
+      <label class="block" data-testid="risky-query-target">
         <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.risky_savings.employment') }}</span>
         <SearchableSelect
           :model-value="employmentId"

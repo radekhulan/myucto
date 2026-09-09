@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import {
   crownsToMinor,
   minorToCrowns,
@@ -527,12 +528,30 @@ onMounted(load)
       {{ t('payroll.rulesets.read_only_hint') }}
     </p>
 
-    <p
+    <div
       v-if="overview && !overview.override_storage_available"
       class="rounded-lg border border-warning-500/40 bg-warning-50 px-4 py-3 text-sm text-warning-600"
+      data-test="ruleset-storage-unavailable"
     >
-      {{ t('payroll.rulesets.storage_unavailable') }}
-    </p>
+      <p>{{ t('payroll.rulesets.storage_unavailable') }}</p>
+      <RouterLink to="/admin/support" :class="[btnOutlineSm('neutral'), 'mt-2']" data-test="ruleset-storage-support">
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.help" /></svg>
+        {{ t('nav.support') }}
+      </RouterLink>
+    </div>
+
+    <div
+      v-if="overview?.domains.some(domain => domain.versions.some(version => !version.checksum_valid))"
+      class="rounded-lg border border-danger-500/40 bg-danger-50 px-4 py-3 text-sm text-danger-700"
+      data-test="ruleset-checksum-guidance"
+      role="alert"
+    >
+      <p>{{ t('payroll.rulesets.checksum_invalid_hint') }}</p>
+      <RouterLink to="/admin/support" :class="[btnOutlineSm('neutral'), 'mt-2']" data-test="ruleset-checksum-support">
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.help" /></svg>
+        {{ t('nav.support') }}
+      </RouterLink>
+    </div>
 
     <div
       v-if="overview?.degraded_reason"
@@ -540,6 +559,10 @@ onMounted(load)
       data-test="ruleset-degraded"
     >
       <p data-test="ruleset-degraded-message">{{ t('payroll.rulesets.degraded') }}</p>
+      <RouterLink to="/admin/support" :class="[btnOutlineSm('neutral'), 'mt-2']" data-test="ruleset-degraded-support">
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.help" /></svg>
+        {{ t('nav.support') }}
+      </RouterLink>
       <details class="mt-2 text-xs" data-test="ruleset-degraded-technical">
         <summary class="cursor-pointer">{{ t('payroll.rulesets.degraded_technical') }}</summary>
         <p class="mt-1 break-words font-mono">{{ overview.degraded_reason }}</p>

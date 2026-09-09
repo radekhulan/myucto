@@ -136,8 +136,8 @@ describe('PayrollJmhzOrdinaryEvidencePanel', () => {
     expect(wrapper.get('[data-test="jmhz-ordinary-evidence-pending"]').text())
       .toContain('jmhz_evidence_pending')
     expect(wrapper.text()).toContain('Doplňte měsíční údaje výjimky.')
-    expect(wrapper.text()).toContain('jmhz_evidence_attention_employment_action')
-    expect(wrapper.text()).not.toContain('jmhz_ordinary_evidence_monthly_exception_required')
+    expect(wrapper.text()).toContain('jmhz_guidance.actions.employment')
+    expect(wrapper.get('[data-test="jmhz-evidence-guidance"]').text()).not.toContain('jmhz_ordinary_evidence_monthly_exception_required')
     expect(m.confirm).not.toHaveBeenCalled()
   })
 
@@ -160,8 +160,8 @@ describe('PayrollJmhzOrdinaryEvidencePanel', () => {
     await flushPromises()
 
     expect(wrapper.get('a').attributes('href')).toBe('/payroll/enforcement?person=11')
-    expect(wrapper.text()).toContain('jmhz_evidence_attention_deductions_action')
-    expect(wrapper.text()).not.toContain('jmhz_ordinary_evidence_deduction_conflict')
+    expect(wrapper.text()).toContain('jmhz_guidance.actions.deductions')
+    expect(wrapper.get('[data-test="jmhz-evidence-guidance"]').text()).not.toContain('jmhz_ordinary_evidence_deduction_conflict')
   })
 
   it('vede starou revizi k novému přepočtu místo na neexistující detail vztahu', async () => {
@@ -182,9 +182,9 @@ describe('PayrollJmhzOrdinaryEvidencePanel', () => {
     })
     await flushPromises()
 
-    expect(wrapper.get('a').attributes('href')).toBe('/payroll/runs')
-    expect(wrapper.text()).toContain('jmhz_evidence_attention_run_action')
-    expect(wrapper.text()).not.toContain('jmhz_ordinary_evidence_profile_missing')
+    expect(wrapper.get('a').attributes('href')).toBe('/payroll/runs?period=2026-08')
+    expect(wrapper.text()).toContain('jmhz_guidance.actions.run')
+    expect(wrapper.get('[data-test="jmhz-evidence-guidance"]').text()).not.toContain('jmhz_ordinary_evidence_profile_missing')
   })
 
   /**

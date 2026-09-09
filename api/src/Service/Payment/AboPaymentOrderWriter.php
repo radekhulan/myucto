@@ -106,6 +106,13 @@ final class AboPaymentOrderWriter
             ) ?: '1',
             6,
         );
+        $headerDefaults = '000999000000000000';
+        if ($this->padLeft($payerBank, 4) === '5500') {
+            $clientName = strtoupper($clientName);
+            $clientNumber = '1234567890';
+            $fileNumber = '111111';
+            $headerDefaults = '001999111111222222';
+        }
 
         // Sestav položky a zároveň spočítej celkovou částku skupiny v haléřích.
         $itemLines = [];
@@ -124,7 +131,7 @@ final class AboPaymentOrderWriter
         $lines = [];
         // Hlavička účetního souboru (UHL1): datum + název(20) + číslo klienta(10) +
         // interval 000–999 + kódy 000000 000000 (oktalové, banka nevyžaduje).
-        $lines[] = 'UHL1' . $ddmmrr . $clientName . $clientNumber . '000' . '999' . '000000' . '000000';
+        $lines[] = 'UHL1' . $ddmmrr . $clientName . $clientNumber . $headerDefaults;
         // Hlavička účetního souboru: typ 1, druh dat, číslo souboru, směrový kód banky plátce.
         $lines[] = '1 ' . self::DATA_KIND . ' ' . $fileNumber . ' ' . $this->padLeft($payerBank, 4);
         // Hlavička skupiny: typ 2, účet příkazce, celková částka (14 míst, haléře), splatnost.

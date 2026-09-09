@@ -530,3 +530,31 @@ Užitečné pro hlášení:
 - Browser / OS
 - Krok-po-kroku, jak chybu reprodukovat
 - Screenshot
+
+## 999.11 Kontroly mzdové agendy
+
+U mzdové kontroly nejprve přečti, koho a kterého období se týká. Tlačítko
+u konkrétní osoby otevře příslušný pracovní vztah, sekci nebo pole. Má-li
+stejný problém více osob, každá může mít vlastní odkaz. Po opravě podkladů
+se vrať a obnov kontrolu. Schválené mzdy se opravují navazující revizí,
+nikoli přepsáním původního výsledku.
+
+| Kontrola | Kam pokračovat a co ověřit |
+|---|---|
+| Podmínky vztahu, účtárna, pracovní doba nebo sleva | Tlačítkem otevři zvýrazněné pole daného vztahu a ověř jeho skutečnou hodnotu i platnost pro měsíc mzdy. |
+| Registrace vztahu | Otevři příslušnou registrační povinnost. Dokládej skutečné přihlášení; potvrzení nevyplňuj jen pro odstranění varování. |
+| Daň, pojištění a srážky | Projdi jednotlivé důvody u osoby. Odkaz směřuje do zákonné evidence, vyživovaných osob, exekucí, insolvence či příslušných vstupů. |
+| Docházka | Ověř vybraný vztah a měsíc. Odkaz na kalendář pouze najde ovládání; nevytváří automaticky rozvrh. |
+| ELDP | Doplň schválenou mzdu konkrétního měsíce nebo oprav uvedenou absenci či podmínky. Nepodporované případy předej správci. |
+| Průměr pro výstupní dokument | Otevři průměry vztahu. Předvolený rok a čtvrtletí označují období použití průměru; rozhodné období je předchozí čtvrtletí. |
+| Příprava plateb | Rozliš druh platby. Otevři účet instituce, výplatní účet zaměstnance nebo aktuální schválenou revizi podle konkrétní zprávy. |
+| Generování dokumentu nebo technická chyba pravidel | Rozbal podrobnosti pro podporu. U dokumentu lze zkusit opakování; přetrvávající problém předej podpoře. Kvůli chybě instalace neměň sazby ani údaje zaměstnanců. |
+
+U známé kompatibilní aktualizace specifikace JMHZ aplikace posoudí původní
+podklady automaticky. Přijaté hlášení se kvůli samotné změně verze znovu
+neodesílá. Certifikátový pokus a podání datovou schránkou jsou samostatné
+přenosy, proto jejich stavy mohou být různé. Historie odeslání ukazuje oba.
+
+Pokud zpráva uvádí, že konkrétní náprava není známá, použij odkaz na podporu
+a předej období, číslo běhu či revize a technické podrobnosti. Aplikace v tom
+případě nemá dost informací pro spolehlivou automatickou opravu.

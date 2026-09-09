@@ -1435,8 +1435,8 @@ final class PayrollRunRepository
             'INSERT INTO payroll_run_validations
                 (supplier_id, revision_id, severity, code, entity_type,
                  entity_id, message, remediation_path, requires_override)
-             VALUES (?, ?, "blocker", "enforcement_manual_review", "employee",
-                     ?, ?, "/payroll/enforcement", 0)'
+             VALUES (?, ?, "blocker", "enforcement_manual_review", ?,
+                     ?, ?, ?, 0)'
         );
         foreach ($result['people'] ?? [] as $person) {
             if (!is_array($person) || array_is_list($person)) {
@@ -1452,20 +1452,19 @@ final class PayrollRunRepository
                 continue;
             }
             $issues = $enforcementResult['issues'] ?? [];
-            $message = PayrollRunValidationMessageFormatter::enforcement(
-                is_array($issues)
-                    ? array_values(array_filter(
-                        $issues,
-                        static fn (mixed $issue): bool => is_string($issue),
-                    ))
-                    : [],
-            );
-            $insert->execute([
-                $supplierId,
-                $revisionId,
+            foreach (PayrollRunValidationMessageFormatter::enforcementDetails(
+                is_array($issues) ? $issues : [],
                 (int) ($person['employee_id'] ?? 0),
-                mb_substr($message, 0, 500),
-            ]);
+            ) as $detail) {
+                $insert->execute([
+                    $supplierId,
+                    $revisionId,
+                    $detail['entity_type'],
+                    $detail['entity_id'],
+                    $detail['message'],
+                    $detail['remediation_path'],
+                ]);
+            }
         }
     }
 
@@ -1487,23 +1486,23 @@ final class PayrollRunRepository
         ) {
             return;
         }
-        $issues = $statutory['issues'] ?? [];
-        $message = PayrollRunValidationMessageFormatter::statutory(
-            is_array($issues)
-                ? array_values(array_filter(
-                    $issues,
-                    static fn (mixed $issue): bool => is_string($issue),
-                ))
-                : [],
-        );
         $insert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_validations
                 (supplier_id, revision_id, severity, code, entity_type,
                  entity_id, message, remediation_path, requires_override)
              VALUES (?, ?, "blocker", "statutory_calculation_manual_review",
-                     "run", NULL, ?, "/payroll/runs", 0)'
+                     ?, ?, ?, ?, 0)'
         );
-        $insert->execute([$supplierId, $revisionId, mb_substr($message, 0, 500)]);
+        foreach (PayrollRunValidationMessageFormatter::statutoryDetails($statutory) as $detail) {
+            $insert->execute([
+                $supplierId,
+                $revisionId,
+                $detail['entity_type'],
+                $detail['entity_id'],
+                $detail['message'],
+                $detail['remediation_path'],
+            ]);
+        }
     }
 
     /** @return array<string,mixed>|null */

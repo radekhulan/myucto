@@ -47,7 +47,7 @@ final class PayrollNetWageLiabilityMaterializer
                 $revisionId,
             );
             if ($context === null) {
-                throw new \DomainException(
+                throw new PayrollPaymentPreparationException('revision_missing',
                     'Mzdová revize pro platební závazky neexistuje.',
                 );
             }
@@ -276,12 +276,12 @@ final class PayrollNetWageLiabilityMaterializer
     private function assertRevisionContext(array $context): void
     {
         if ($context['revision_status'] !== 'approved') {
-            throw new \DomainException(
+            throw new PayrollPaymentPreparationException('revision_not_approved',
                 'Platební závazky lze vytvořit pouze ze schválené revize.',
             );
         }
         if ($context['revision_no'] !== $context['current_revision_no']) {
-            throw new \DomainException(
+            throw new PayrollPaymentPreparationException('revision_not_current',
                 'Platební závazky lze vytvořit pouze z aktuální revize běhu.',
             );
         }
@@ -745,8 +745,9 @@ final class PayrollNetWageLiabilityMaterializer
             if ($effectiveFrom > $paymentDate
                 || ($effectiveTo !== null && $effectiveTo < $paymentDate)
             ) {
-                throw new \DomainException(
+                throw new PayrollPaymentPreparationException('person_account_not_effective',
                     "Zmrazený účet {$id} není účinný k datu výplaty.",
+                    $employeeId,
                 );
             }
             $rowVersion = $this->positiveInteger(
@@ -766,8 +767,9 @@ final class PayrollNetWageLiabilityMaterializer
                 || !is_int($verifiedBy)
                 || $verifiedBy <= 0
             ) {
-                throw new \DomainException(
+                throw new PayrollPaymentPreparationException('person_account_unverified',
                     "Zmrazený účet {$id} nemá úplné ověření.",
+                    $employeeId,
                 );
             }
             $verifiedDate = $this->date(

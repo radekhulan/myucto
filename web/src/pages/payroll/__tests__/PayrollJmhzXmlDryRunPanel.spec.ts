@@ -34,7 +34,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, parameters?: Record<string, string | number>) =>
       parameters ? `${key} ${Object.values(parameters).join(' ')}` : key,
-    te: () => true,
+    te: (key: string) => !key.includes('some_internal_code_not_translated_yet'),
     locale: { value: 'cs' },
   }),
 }))
@@ -52,6 +52,21 @@ const run = {
 const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<jmhz verze="1.4.3"/>'
 
 describe('PayrollJmhzXmlDryRunPanel', () => {
+  it('vede z kontroly do správného měsíce docházky a platné záložky účtáren', async () => {
+    m.dryRun.mockResolvedValue({ status: 'blocked', preparation_id: 77, official_submission: { supported: false, reason: 'Lokální test.' }, blockers: [
+      { code: 'jmhz_work_month_not_approved', entity_type: 'employment', entity_id: 12, attribute_ids: [] },
+      { code: 'jmhz_workplace_codebooks_unverified', entity_type: 'office', entity_id: 4, attribute_ids: [] },
+    ] })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [run] as never[] },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+    const targets = wrapper.findAll('a[data-to]').map(link => JSON.parse(link.attributes('data-to')!))
+    expect(targets).toContainEqual({ name: 'payroll-time', query: { employment: '12', period: '2026-08' } })
+    expect(targets).toContainEqual({ name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' })
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)

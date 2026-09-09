@@ -104,9 +104,9 @@ final class PayrollRunReadinessService
             if ($policyFinding === null) {
                 $findings[] = self::finding(
                     'readiness_check_failed',
-                    'Předběžnou kontrolu se nepodařilo dokončit: '
-                    . $e->getMessage()
-                    . ' Mzdový běh tím není zablokovaný — po zahájení se '
+                    'Předběžnou kontrolu se nepodařilo dokončit. Obnovte stránku. '
+                    . 'Pokud se hláška opakuje, požádejte správce aplikace o kontrolu. '
+                    . 'Výsledek připravenosti zatím není úplný; po zahájení běhu se '
                     . 'kontroly spustí znovu nad zmrazenými vstupy.',
                     null,
                     1,
@@ -284,13 +284,15 @@ final class PayrollRunReadinessService
         } catch (\Throwable $e) {
             // Překryv dvou politik má vlastní výjimku — je to taky nález, jen
             // s jinou příčinou. Text výjimky říká, co je přesně špatně.
-            $message = $e->getMessage();
+            $message = $e instanceof \MyInvoice\Repository\Payroll\PayrollEmployerPolicyOverlapException
+                ? $e->getMessage() . ' Otevřete Mzdové politiky a upravte jejich období účinnosti tak, aby se nepřekrývala.'
+                : 'Mzdovou politiku pro období se nepodařilo ověřit. Obnovte stránku. Pokud se hláška opakuje, požádejte správce aplikace o kontrolu.';
         }
 
         return self::finding(
             'employer_policy_missing',
             $message,
-            '/payroll/settings',
+            '/payroll/settings?tab=policies',
             1,
             [],
         );
@@ -336,12 +338,20 @@ final class PayrollRunReadinessService
                     'entities' => [],
                 ];
             }
+            if ($groups[$code]['remediation_path'] !== $validation->remediationPath) {
+                $groups[$code]['remediation_path'] = null;
+            }
+            if ($groups[$code]['message'] !== $validation->message) {
+                $groups[$code]['message'] = 'U uvedených osob nebo pracovních vztahů je třeba doplnit podklady. Konkrétní důvod a odkaz k opravě najdete u každého záznamu.';
+            }
             ++$groups[$code]['count'];
             if (count($groups[$code]['entities']) < self::MAX_ENTITIES) {
                 $groups[$code]['entities'][] = [
                     'entity_type' => $validation->entityType,
                     'entity_id' => $validation->entityId,
                     'label' => null,
+                    'message' => $validation->message,
+                    'remediation_path' => $validation->remediationPath,
                 ];
             }
         }
@@ -409,7 +419,7 @@ final class PayrollRunReadinessService
                 . 'institucí a označte ho jako ověřený.',
                 implode(', ', $missing),
             ),
-            '/payroll/settings',
+            '/payroll/settings?tab=institutions',
             count($missing),
             array_map(
                 static fn (string $name): array => [

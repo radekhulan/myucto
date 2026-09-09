@@ -440,7 +440,9 @@ describe('PayrollDocuments', () => {
     expect(report.text()).toContain('Testovací Zaměstnanec')
     expect(report.text()).toContain('Chybí povinný podklad výplatní pásky.')
     expect(report.text()).toContain('payroll.documents.batch_progress')
-    expect(report.text()).not.toContain('render_domain_exception')
+    expect(report.get('[data-test="document-worker-failure-message"]').text()).toBe('payroll.documents.worker_failure')
+    expect(report.get('[data-test="document-worker-failure-technical"]').attributes('open')).toBeUndefined()
+    expect(report.get('[data-test="document-worker-support"]').attributes('data-to')).toBe(JSON.stringify('/admin/support'))
 
     await wrapper.get('[data-test="retry-document-batch-item"]').trigger('click')
     await flushPromises()
@@ -535,7 +537,10 @@ describe('PayrollDocuments', () => {
       .trigger('click')
     await flushPromises()
 
-    expect(m.toastError).toHaveBeenCalledWith('Podklad archivu už není k dispozici.')
+    expect(m.toastError).toHaveBeenCalledWith('payroll.documents.worker_failure')
+    expect(wrapper.get('[data-test="period-export-failure-technical"]').text()).toContain('Podklad archivu už není k dispozici.')
+    expect(wrapper.get('[data-test="period-export-failure-technical"]').attributes('open')).toBeUndefined()
+    expect(wrapper.get('[data-test="period-export-support"]').attributes('data-to')).toBe(JSON.stringify('/admin/support'))
     expect(m.downloadPeriodExportFile).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -834,7 +839,10 @@ describe('PayrollDocuments', () => {
 
     const failures = wrapper.get('[data-test="annual-batch-failures"]')
     expect(failures.text()).toContain('Druhá Osoba')
-    expect(failures.text()).toContain('Chybí schválená revize.')
+    expect(failures.get('[data-test="annual-worker-failure-message"]').text()).toBe('payroll.documents.worker_failure')
+    expect(failures.get('[data-test="annual-worker-failure-technical"]').text()).toContain('Chybí schválená revize.')
+    expect(failures.get('[data-test="annual-worker-failure-technical"]').attributes('open')).toBeUndefined()
+    expect(failures.get('[data-test="annual-worker-support"]').attributes('data-to')).toBe(JSON.stringify('/admin/support'))
     expect(failures.text()).not.toContain('Třetí Osoba')
 
     await wrapper.get('[data-test="retry-annual-batch-item"]').trigger('click')

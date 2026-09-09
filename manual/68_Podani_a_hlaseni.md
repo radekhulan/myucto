@@ -228,6 +228,14 @@ možnému účinku doručení a spuštění lhůt.
 
 ## 68.6 Časté chyby
 
+U právních skutečností JMHZ je u každé výjimky vysvětlení a cesta k nápravě.
+Známou kompatibilní změnu specifikace aplikace posoudí automaticky bez
+přepisu uložených podkladů. Přijaté hlášení kvůli změně specifikace znovu
+neodesílej. V historii odeslání rozlišuj certifikátový pokus VREP/APEP a
+podání datovou schránkou; chyba jednoho pokusu sama neruší splněnou povinnost.
+ELDP při neúplném podkladu odkazuje na konkrétní měsíc, vztah nebo absenci.
+Další postupy jsou v [kontrolách mzdové agendy](999_Reseni_problemu.md#99911-kontroly-mzdove-agendy).
+
 - Považování XML, PDF nebo záznamu outboxu za odeslané podání.
 - Záměna testovacího certifikátu či adresáta za produkční.
 - Odeslání řádného JMHZ bez schválené běžné revize nebo založení opravy či storna bez vazby na způsobilé předchozí podání.

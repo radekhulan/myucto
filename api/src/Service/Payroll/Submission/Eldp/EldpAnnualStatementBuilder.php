@@ -628,6 +628,8 @@ final class EldpAnnualStatementBuilder
             $label,
         );
         foreach ($excluded['blockers'] as $blocker) {
+            $blocker['detail']['period_start'] = $periodStart;
+            $blocker['detail']['employment_id'] = $employmentId;
             $blockers[] = $blocker;
         }
         if ($excluded['blockers'] !== []) {

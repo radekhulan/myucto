@@ -3326,6 +3326,14 @@ export interface PayrollJmhzOrdinaryEvidenceScope {
   resolution: 'confirmed' | 'automatic_on_preparation' | 'attention_required'
   attention_code: string | null
   attention_message: string | null
+  attention_context?: {
+    reason?: string
+    field?: string
+    stored_xsd?: string
+    current_xsd?: string
+    stored_controls?: string
+    current_controls?: string
+  }
 }
 
 export interface PayrollJmhzOrdinaryEvidenceState {
@@ -5400,7 +5408,7 @@ export interface PayrollRunReadinessFinding {
   /** Kolika vztahů/položek se nález týká. */
   count: number
   /** `label` je lidský název konkrétní věci — nález MUSÍ jmenovat, čeho se týká. */
-  entities: { entity_type: string, entity_id: number | null, label: string | null }[]
+  entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null }[]
 }
 
 /**

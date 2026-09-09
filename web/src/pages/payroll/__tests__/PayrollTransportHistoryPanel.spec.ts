@@ -1284,7 +1284,8 @@ describe('PayrollTransportHistoryPanel', () => {
     await flushPromises()
 
     expect(wrapper.findAll('[data-test="transport-group-70"]')).toHaveLength(1)
-    expect(wrapper.find('[data-test="transport-dispatched-70"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="transport-dispatched-70"]').text()).toContain('1752953337')
+    expect(wrapper.find('[data-test="transport-attempt-1"]').exists()).toBe(true)
   })
 
   /**

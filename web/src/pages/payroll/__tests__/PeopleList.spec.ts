@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { computed, defineComponent, nextTick } from 'vue'
 import type { PayrollPeopleFilter, PayrollPersonListItem } from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
@@ -171,7 +171,7 @@ async function settleSearch() {
   await flushPromises()
 }
 
-function mountPage() {
+function mountPage(employmentCardStub: unknown = true) {
   return mount(PeopleList, {
     global: {
       stubs: {
@@ -184,7 +184,7 @@ function mountPage() {
           props: ['to'],
           template: '<a data-test="router-link"><slot /></a>',
         },
-        EmploymentCard: true,
+        EmploymentCard: employmentCardStub as never,
         PayrollPersonQuickEdit: {
           props: ['personId', 'canWrite'],
           template: '<div data-test="quick-edit-stub">{{ personId }}</div>',
@@ -851,6 +851,28 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(m.person).toHaveBeenCalledWith(4)
     expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('Delta Nová')
+  })
+
+  it('směruje pole do přesně vybraného vztahu, nikoli do první karty osoby', async () => {
+    m.routeQuery.employment = '44'
+    m.routeQuery.panel = 'jmhz_profile'
+    m.routeQuery.field = 'jmhz_deep_mining_work_applies'
+    const focus = vi.fn()
+    m.person.mockResolvedValue({
+      ...person(4, 'Delta Nová', true, true),
+      employments: [{ id: 43 }, { id: 44 }],
+    })
+    const wrapper = mountPage(defineComponent({
+      props: ['employment'],
+      setup(props, { expose }) {
+        expose({ employmentId: computed(() => props.employment.id), focusSection: (panel: string, field: string) => focus(props.employment.id, panel, field) })
+        return () => null
+      },
+    }))
+    await flushPromises()
+    expect(focus).toHaveBeenCalledExactlyOnceWith(44, 'jmhz_profile', 'jmhz_deep_mining_work_applies')
+    expect(m.routerReplace).toHaveBeenCalledWith({ query: { employment: '44' } })
+    wrapper.unmount()
   })
 
   it('prefers an explicit person deep-link over an accompanying employment id', async () => {

@@ -83,6 +83,7 @@ final readonly class JmhzOrdinaryEvidenceService
                             'resolution' => 'attention_required',
                             'attention_code' => $exception->validationCode,
                             'attention_message' => $exception->getMessage(),
+                            'attention_context' => (object) $exception->context,
                         ];
                     }
                     continue;
@@ -109,6 +110,7 @@ final readonly class JmhzOrdinaryEvidenceService
                         'resolution' => 'attention_required',
                         'attention_code' => $exception->validationCode,
                         'attention_message' => $exception->getMessage(),
+                        'attention_context' => (object) $exception->context,
                     ];
                 }
             }

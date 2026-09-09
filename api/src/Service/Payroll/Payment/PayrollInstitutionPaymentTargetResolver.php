@@ -132,7 +132,7 @@ final class PayrollInstitutionPaymentTargetResolver
 
         if (count($exact) > 1) {
             // Přesná shoda kódu, ale účtů je víc — tady se opravdu nedá vybrat.
-            throw new \DomainException(sprintf(
+            throw new PayrollPaymentPreparationException('institution_account_ambiguous', sprintf(
                 '%s má k %s pod kódem „%s" víc než jeden účinný účet (%s).'
                 . ' Ukončete v Nastavení mezd → Účty institucí platnost těch,'
                 . ' na které se už neplatí, ať zůstane jediný.',
@@ -170,7 +170,7 @@ final class PayrollInstitutionPaymentTargetResolver
                 // Jediný ověřený účet by se dal použít, jenže jeho kód by se
                 // nevešel do reference platby (např. lomítko) a závazek by
                 // spadl až u sestavení dávky, dávno po zaúčtování.
-                throw new \DomainException(sprintf(
+                throw new PayrollPaymentPreparationException('institution_code_invalid', sprintf(
                     '%s má k %s jediný ověřený účet %s, jeho kód instituce ale'
                     . ' nelze použít v referenci platby (povolena jsou velká'
                     . ' písmena, číslice, tečka, podtržítko a pomlčka).'
@@ -184,7 +184,7 @@ final class PayrollInstitutionPaymentTargetResolver
                 ));
             }
 
-            throw new \DomainException(sprintf(
+            throw new PayrollPaymentPreparationException($candidates === [] ? 'institution_account_missing' : 'institution_account_ambiguous', sprintf(
                 '%s nemá k %s ověřený účinný účet pod kódem „%s" (%s)%s %s',
                 $institutionLabel,
                 $effectiveOn,
@@ -206,7 +206,7 @@ final class PayrollInstitutionPaymentTargetResolver
             ));
         }
 
-        throw new \DomainException(sprintf(
+        throw new PayrollPaymentPreparationException('institution_account_missing', sprintf(
             '%s nemá k %s ověřený účinný účet pod kódem „%s" (%s)%s'
             . ' Zadejte a ověřte v Nastavení mezd → Účty institucí účet'
             . ' s kódem instituce „%s", nebo tento kód opravte u účtu, který'

@@ -229,6 +229,46 @@ function employment(): PayrollEmployment {
   }
 }
 
+describe('doskok na podklady JMHZ', () => {
+  it.each(['office_id', 'weekly_hours', 'other_withholding_eligibility', 'social_employer_rate_category', 'social_part_time_discount_reason'])('zvýrazní konkrétní podmínku %s v uzavřeném vztahu', async field => {
+    HTMLElement.prototype.scrollIntoView = vi.fn()
+    const wrapper = await mountCard({ ...employment(), status: 'ended', relation_type: 'dpc' }, { attachTo: document.body })
+    await (wrapper.vm as unknown as { focusSection: (panel: string, field: string) => Promise<void> }).focusSection('employment_terms', field)
+    await flushPromises()
+    expect(wrapper.get(`[data-a1-field="${field}"]`).classes()).toContain('field-flash')
+    wrapper.unmount()
+  })
+
+  it('otevře seznam povinností přímo na registraci zdravotního pojištění', async () => {
+    HTMLElement.prototype.scrollIntoView = vi.fn()
+    const item = employment()
+    item.status = 'ended'
+    item.checklist[0]!.item_key = 'health_insurance_registration'
+    item.checklist[0]!.status = 'completed'
+    const wrapper = await mountCard(item, { attachTo: document.body })
+    await (wrapper.vm as unknown as { focusSection: (panel: string, field: string) => Promise<void> }).focusSection('employment_checklist', 'health_insurance_registration')
+    await flushPromises()
+    expect(wrapper.get('[data-a1-field="health_insurance_registration"]').classes()).toContain('field-flash')
+    expect(wrapper.get('[data-test="employment-checklist"]').attributes('open')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('otevře ukončený vztah a přesnou výjimku pouze v cílové kartě', async () => {
+    HTMLElement.prototype.scrollIntoView = vi.fn()
+    const first = await mountCard({ ...employment(), id: 41 }, { attachTo: document.body })
+    const second = await mountCard({ ...employment(), id: 42, status: 'ended' }, { attachTo: document.body })
+    expect(second.find('[data-test="jmhz-ordinary-profile"]').exists()).toBe(false)
+    await (second.vm as unknown as { focusSection: (panel: string, field: string) => Promise<void> })
+      .focusSection('jmhz_profile', 'jmhz_deep_mining_work_applies')
+    await flushPromises()
+    expect(second.get('[data-a1-field="jmhz_deep_mining_work_applies"]').classes()).toContain('field-flash')
+    expect(second.get('[data-test="terms-advanced"]').attributes('open')).toBeDefined()
+    expect(first.get('[data-a1-field="jmhz_deep_mining_work_applies"]').classes()).not.toContain('field-flash')
+    first.unmount()
+    second.unmount()
+  })
+})
+
 describe('EmploymentCard', () => {
   // Nabídky se drží v paměti modulu na celý běh aplikace; mezi případy se
   // musí vyprázdnit, jinak by druhý test dostal seznam z prvního.

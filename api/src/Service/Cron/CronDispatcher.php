@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Cron;
 
 use DateTimeImmutable;
+use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\System\MaintenanceLock;
 use PDO;
 use Throwable;
@@ -164,6 +165,9 @@ final class CronDispatcher
 
             if (!$this->hasWork($script)) {
                 $report['skipped'][$script] = 'no_work';
+                if (!$dryRun) {
+                    $this->recoverIdleFailure($script, $minuteBucket);
+                }
                 continue;
             }
 
@@ -193,6 +197,30 @@ final class CronDispatcher
         }
 
         return $report;
+    }
+
+    private function recoverIdleFailure(string $script, string $minuteBucket): void
+    {
+        if ($script !== 'cron-jmhz-poll') {
+            return;
+        }
+        try {
+            $statement = $this->pdo->prepare('SELECT last_status FROM cron_heartbeat WHERE script = ?');
+            $statement->execute([$script]);
+            if ($statement->fetchColumn() !== 'error'
+                || PayrollSubmissionTransportAttemptRepository::hasUnfinishedJmhzTransport($this->pdo)
+                || $this->claimMinute($script, $minuteBucket) !== self::CLAIM_OK
+            ) {
+                return;
+            }
+            CronRun::start($this->pdo, $script)->finish(
+                'ok',
+                ['skipped' => 'no_work', 'mode' => 'dispatcher'],
+                didWork: false,
+            );
+        } catch (Throwable) {
+            return;
+        }
     }
 
     private function hasWork(string $script): bool

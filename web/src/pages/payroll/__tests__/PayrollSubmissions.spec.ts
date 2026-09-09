@@ -792,7 +792,7 @@ describe('PayrollSubmissions', () => {
     const evidence = wrapper.get('[data-test="jmhz-ordinary-evidence"]')
     expect(evidence.text()).toContain('Zmrazené potvrzení už neodpovídá aktuální specifikaci.')
     expect(evidence.text())
-      .toContain('payroll.submissions.overview.jmhz_evidence_attention_revision_action')
+      .toContain('payroll.submissions.overview.jmhz_guidance.actions.revision')
     expect(evidence.text())
       .not.toContain('payroll.submissions.overview.jmhz_evidence_attention_employment_action')
   })

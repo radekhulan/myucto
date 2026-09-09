@@ -264,7 +264,7 @@ interface AttemptGroup {
   attempts: PayrollJmhzTransportAttempt[]
   /**
    * Odchozí zpráva datové schránky, pokud podání odešlo tudy. Skupina pak
-   * nemá žádný pokus — protokol chodí do schránky a VREP se na nic neptá.
+   * může obsahovat i dřívější pokusy o odeslání přes VREP.
    */
   dispatched: PayrollJmhzDispatchedSubmission | null
 }
@@ -276,7 +276,7 @@ interface AttemptGroup {
  * Za pokusy se přidávají hlášení odeslaná DATOVKOU. Ta žádný pokus nemají,
  * takže by se do přehledu jinak nedostala vůbec — a s nimi ani storno a oprava.
  * Podání, které má obojí (zkusilo se VREP a odešlo datovkou), zůstává jednou
- * kartou z ledgeru pokusů; server ho v druhém seznamu už nevrací.
+ * kartou s historií obou přenosových kanálů.
  */
 const groups = computed<AttemptGroup[]>(() => {
   const byId = new Map<number, AttemptGroup>()
@@ -300,7 +300,12 @@ const groups = computed<AttemptGroup[]>(() => {
     group.attempts.push(attempt)
   }
   for (const sent of dispatchedSubmissions.value) {
-    if (byId.has(sent.submission_id)) continue
+    const existing = byId.get(sent.submission_id)
+    if (existing) {
+      existing.dispatched = sent
+      existing.submissionStatus = sent.submission_status
+      continue
+    }
     const group: AttemptGroup = {
       submissionId: sent.submission_id,
       periodStart: sent.period_start,

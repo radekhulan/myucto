@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { jmhzEvidenceGuidance } from './jmhzEvidenceGuidance'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
   type PayrollJmhzOrdinaryEvidenceScope,
@@ -17,6 +18,7 @@ const { t } = useI18n()
 interface EvidenceState {
   loading: boolean
   error: string
+  failure?: { code: string, technical: string }
   scopes: PayrollJmhzOrdinaryEvidenceScope[]
 }
 
@@ -56,31 +58,16 @@ function scopeLabel(scope: PayrollJmhzOrdinaryEvidenceScope): string {
       })
 }
 
-function attentionPath(scope: PayrollJmhzOrdinaryEvidenceScope): string {
-  if (scope.attention_code === 'jmhz_ordinary_evidence_profile_missing'
-    || scope.attention_code === 'jmhz_ordinary_evidence_selector_mismatch'
-    || scope.attention_code === 'jmhz_ordinary_evidence_scope_mismatch'
-  ) {
-    return '/payroll/runs'
+function loadFailureGuidance(code: string, run: PayrollRun) {
+  const guidance = jmhzEvidenceGuidance({
+    employee_id: 0, employment_id: 0, employee_name: '', confirmed: false,
+    resolution: 'attention_required', attention_code: code, attention_message: null,
+  }, run.period_start)
+  if (!guidance.path.startsWith('/payroll/runs')) {
+    guidance.path = '/admin/support'
+    guidance.actionKey = 'payroll.submissions.overview.jmhz_guidance.actions.support'
   }
-  if (scope.attention_code === 'jmhz_ordinary_evidence_deduction_conflict') {
-    return `/payroll/enforcement?person=${scope.employee_id}`
-  }
-  return `/payroll/people?employment=${scope.employment_id}`
-}
-
-function attentionActionKey(scope: PayrollJmhzOrdinaryEvidenceScope): string {
-  if (scope.attention_code === 'jmhz_ordinary_evidence_selector_mismatch'
-    || scope.attention_code === 'jmhz_ordinary_evidence_scope_mismatch'
-  ) {
-    return 'payroll.submissions.overview.jmhz_evidence_attention_revision_action'
-  }
-  if (scope.attention_code === 'jmhz_ordinary_evidence_profile_missing') {
-    return 'payroll.submissions.overview.jmhz_evidence_attention_run_action'
-  }
-  return scope.attention_code === 'jmhz_ordinary_evidence_deduction_conflict'
-    ? 'payroll.submissions.overview.jmhz_evidence_attention_deductions_action'
-    : 'payroll.submissions.overview.jmhz_evidence_attention_employment_action'
+  return guidance
 }
 
 async function loadRun(run: PayrollRun) {
@@ -90,10 +77,11 @@ async function loadRun(run: PayrollRun) {
   try {
     states.value[id].scopes = (await payrollApi.jmhzOrdinaryEvidence(id)).scopes
   } catch (exception) {
-    states.value[id].error = apiErrorMessage(
-      exception,
-      t('payroll.submissions.overview.jmhz_evidence_load_failed'),
-    )
+    const code = apiErrorCode(exception)
+    states.value[id].failure = { code, technical: apiErrorMessage(exception) }
+    states.value[id].error = code
+      ? t(loadFailureGuidance(code, run).problemKey)
+      : t('payroll.submissions.overview.jmhz_evidence_load_failed')
   } finally {
     states.value[id].loading = false
   }
@@ -174,17 +162,31 @@ watch(() => props.runs, load, { immediate: true, deep: true })
             data-test="jmhz-ordinary-evidence-scope"
           >
             <p class="text-sm font-semibold text-neutral-900">{{ scopeLabel(scope) }}</p>
-            <p class="mt-1 text-sm text-neutral-700">
-              {{ scope.attention_message ?? t('payroll.submissions.overview.jmhz_evidence_attention_default') }}
-            </p>
-            <div class="mt-3 flex flex-wrap items-center gap-3">
-              <RouterLink :to="attentionPath(scope)" :class="btnOutlineSm('warning')">
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path :d="ICONS.edit" />
-                </svg>
-                {{ t(attentionActionKey(scope)) }}
-              </RouterLink>
+            <div data-test="jmhz-evidence-guidance">
+              <p class="mt-1 text-sm font-medium text-neutral-700">{{ t(jmhzEvidenceGuidance(scope, run.period_start).problemKey) }}</p>
+              <p v-if="jmhzEvidenceGuidance(scope, run.period_start).fieldKey" class="mt-1 text-sm text-neutral-700">
+                {{ t(jmhzEvidenceGuidance(scope, run.period_start).fieldKey!) }}
+              </p>
+              <p v-for="version in jmhzEvidenceGuidance(scope, run.period_start).versions" :key="version.key" class="mt-1 text-sm text-neutral-600">
+                {{ t(version.key, { old: version.old, current: version.current }) }}
+              </p>
+              <p class="mt-2 text-sm text-neutral-700">{{ t(jmhzEvidenceGuidance(scope, run.period_start).stepKey) }}</p>
+              <div class="mt-3 flex flex-wrap items-center gap-3">
+                <RouterLink :to="jmhzEvidenceGuidance(scope, run.period_start).path" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']">
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                  {{ t(jmhzEvidenceGuidance(scope, run.period_start).actionKey) }}
+                </RouterLink>
+                <RouterLink v-if="jmhzEvidenceGuidance(scope, run.period_start).agreementsPath" :to="jmhzEvidenceGuidance(scope, run.period_start).agreementsPath!" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']">
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                  {{ t('payroll.submissions.overview.jmhz_guidance.actions.agreements') }}
+                </RouterLink>
+              </div>
             </div>
+            <details class="mt-3 text-xs text-neutral-500">
+              <summary class="cursor-pointer">{{ t('payroll.submissions.overview.jmhz_guidance.technical_details') }}</summary>
+              <p class="mt-2 break-words">{{ scope.attention_code }}</p>
+              <p class="mt-1 break-words">{{ scope.attention_message }}</p>
+            </details>
           </div>
           <p
             v-if="state(run)?.scopes.length === 0"
@@ -210,6 +212,18 @@ watch(() => props.runs, load, { immediate: true, deep: true })
           role="alert"
         >
           <p>{{ state(run)?.error }}</p>
+          <template v-if="state(run)?.failure?.code">
+            <p class="mt-2">{{ t(loadFailureGuidance(state(run)!.failure!.code, run).stepKey) }}</p>
+            <RouterLink :to="loadFailureGuidance(state(run)!.failure!.code, run).path" :class="[btnOutlineSm('danger'), 'mt-3 whitespace-nowrap']">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+              {{ t(loadFailureGuidance(state(run)!.failure!.code, run).actionKey) }}
+            </RouterLink>
+          </template>
+          <details v-if="state(run)?.failure" class="mt-3 text-xs">
+            <summary class="cursor-pointer">{{ t('payroll.submissions.overview.jmhz_guidance.technical_details') }}</summary>
+            <p class="mt-2 break-words">{{ state(run)?.failure?.code }}</p>
+            <p class="mt-1 break-words">{{ state(run)?.failure?.technical }}</p>
+          </details>
           <button
             type="button"
             :class="[btnOutline('danger'), 'mt-3']"

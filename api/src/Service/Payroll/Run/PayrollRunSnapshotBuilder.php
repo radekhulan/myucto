@@ -115,7 +115,7 @@ final class PayrollRunSnapshotBuilder
                 'run',
                 null,
                 'Pro období nebyl nalezen žádný zpracovatelný pracovní vztah.',
-                '/payroll/employees',
+                '/payroll/people',
             );
         }
 
@@ -221,7 +221,7 @@ final class PayrollRunSnapshotBuilder
                     'employment',
                     $employmentId,
                     'Pracovní vztah nemá pro mzdové období účinné smluvní podmínky.',
-                    "/payroll/employees/{$employeeId}",
+                    "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms",
                 );
             }
             // Mzdová účtárna je u vztahu POVINNÁ. Variabilní symbol
@@ -241,7 +241,7 @@ final class PayrollRunSnapshotBuilder
                     $employmentId,
                     'Pracovní vztah nemá mzdovou účtárnu. Bez ní nelze vykázat'
                     . ' odvod sociálního pojistného.',
-                    "/payroll/employees/{$employeeId}",
+                    "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms&field=office_id",
                 );
             }
             $officeId = $row['office_id'] === null ? null : (int) $row['office_id'];
@@ -260,7 +260,7 @@ final class PayrollRunSnapshotBuilder
                     'office',
                     (int) $row['office_id'],
                     'Mzdová účtárna nemá pro období doloženou účinnou registraci ČSSZ.',
-                    '/payroll/settings',
+                    '/payroll/settings?tab=employer#payroll-employer-registration',
                 );
             }
             // Registrace ÚČTÁRNY (výše) není registrace OSOBY. Doteď se
@@ -306,7 +306,7 @@ final class PayrollRunSnapshotBuilder
                     'Pracovní vztah nemá za období založenou a schválenou pracovní dobu. '
                     . 'Zamknutím vstupů se stav zmrazí a měsíční hlášení ČSSZ by ji '
                     . 'už nevidělo — schvalte ji nejdřív.',
-                    '/payroll/time',
+                    "/payroll/time?employment={$employmentId}&period=" . substr($periodStart, 0, 7),
                 );
             } elseif ($timeMonth['status'] !== 'approved') {
                 $validations[] = new PayrollRunValidation(
@@ -316,7 +316,7 @@ final class PayrollRunSnapshotBuilder
                     $employmentId,
                     'Docházka pracovního vztahu není schválena. Zamknutím vstupů se '
                     . 'stav zmrazí a měsíční hlášení ČSSZ by ji už nevidělo.',
-                    '/payroll/time',
+                    "/payroll/time?employment={$employmentId}&period=" . substr($periodStart, 0, 7),
                 );
             }
             $draftCount = $draftInputCounts[$employmentId] ?? 0;
@@ -1274,7 +1274,7 @@ final class PayrollRunSnapshotBuilder
                     . '„Registrace ČSSZ / JMHZ".',
                     (string) $row['full_name'],
                 ),
-                "/payroll/employees/{$employeeId}",
+                "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_checklist&field=social_jmhz_registration",
                 true,
             );
         }
@@ -1295,7 +1295,7 @@ final class PayrollRunSnapshotBuilder
                     . 'zdravotní pojišťovny".',
                     (string) $row['full_name'],
                 ),
-                "/payroll/employees/{$employeeId}",
+                "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_checklist&field=health_insurance_registration",
                 true,
             );
         }
@@ -1395,7 +1395,7 @@ final class PayrollRunSnapshotBuilder
                 'employment',
                 $employmentId,
                 'Slevu na pojistném za leden až březen 2026 bylo nutné vykázat v měsíčním hlášení do 30. 6. 2026. Po tomhle dni ji ČSSZ neuzná (kontrola 333) a odečtené pojistné se stane dluhem podle § 7c odst. 3.',
-                "/payroll/employees/{$employeeId}",
+                "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms&field=social_part_time_discount_reason",
                 true,
             );
         }

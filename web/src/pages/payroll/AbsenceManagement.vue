@@ -68,6 +68,7 @@ const decisiveFrom = localDate(new Date(periodYear, applicationQuarterStartMonth
 const decisiveTo = localDate(new Date(periodYear, applicationQuarterStartMonth, 0))
 
 const loading = ref(true)
+let dataLoadSequence = 0
 /*
  * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
  * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
@@ -384,12 +385,28 @@ function preselectedTab(): (typeof absenceTabs)[number] | null {
     : null
 }
 
-async function loadContext() {
-  employments.value = await payrollAbsenceApi.context()
+function applyQuerySelection() {
   const requestedTab = preselectedTab()
   if (requestedTab !== null) tab.value = requestedTab
-  if (employments.value.length === 0 || selectedEmploymentId.value !== null) return
+  if (requestedTab === 'averages') {
+    const selectedYear = Number(queryParam('year'))
+    const selectedQuarter = Number(queryParam('quarter'))
+    if (Number.isInteger(selectedYear) && selectedYear >= minimumFormYear && selectedYear <= maximumFormYear
+      && Number.isInteger(selectedQuarter) && selectedQuarter >= 1 && selectedQuarter <= 4) {
+      averageForm.applicable_year = selectedYear
+      averageForm.applicable_quarter = selectedQuarter
+    }
+  }
+  const requestedPeriod = queryParam('period')
+  if (requestedTab === 'absences' && requestedPeriod && /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedPeriod)) {
+    absenceOffset.value = 0
+    filterFrom.value = `${requestedPeriod}-01`
+    const [requestedYear, requestedMonth] = requestedPeriod.split('-').map(Number)
+    filterTo.value = localDate(new Date(requestedYear!, requestedMonth!, 0))
+  }
+  if (employments.value.length === 0) return
   const requestedEmploymentId = preselectedEmploymentId()
+  if (requestedEmploymentId === null && selectedEmploymentId.value !== null) return
   const selectedEmployment = employments.value.find(
     item => item.id === requestedEmploymentId,
   ) ?? employments.value[0]
@@ -402,7 +419,20 @@ async function loadContext() {
   }
 }
 
+async function loadContext() {
+  employments.value = await payrollAbsenceApi.context()
+  applyQuerySelection()
+}
+
+watch(() => [route.query.employment, route.query.tab, route.query.year, route.query.quarter, route.query.period], () => {
+  if (employments.value.length === 0) return
+  const previousEmployment = selectedEmploymentId.value
+  applyQuerySelection()
+  if (selectedEmploymentId.value === previousEmployment) void loadData()
+})
+
 async function loadData() {
+  const sequence = ++dataLoadSequence
   if (employments.value.length === 0) {
     // Bez pracovního vztahu není co načítat — ale `loading` se musí shodit,
     // jinak na stránce natrvalo zůstanou skeletony a vypadá to jako zaseknuté
@@ -428,6 +458,7 @@ async function loadData() {
         ? Promise.resolve(null)
         : payrollAbsenceApi.leaveLedger(employmentId, leaveYear.value),
     ])
+    if (sequence !== dataLoadSequence || employmentId !== selectedEmploymentId.value) return
     absences.value = absencePage.absences
     absenceTotal.value = absencePage.total
     selectedAbsenceIds.value = selectedAbsenceIds.value.filter(id =>
@@ -444,19 +475,14 @@ async function loadData() {
     averages.value = averageData
     leaveEntries.value = leaveData?.entries ?? []
     leaveBalance.value = leaveData?.balance_minutes ?? 0
-    if (employmentId !== null) {
-      absenceForm.employment_id = employmentId
-      averageForm.employment_id = employmentId
-      entitlementForm.employment_id = employmentId
-      entryForm.employment_id = employmentId
-    }
   } catch (error: any) {
+    if (sequence !== dataLoadSequence) return
     // Nepřítomnosti, průměry ani nárok se nemažou. Prázdný seznam by tu byl
     // obzvlášť zrádný: „žádná dovolená" a „nevíme" vedou k opačnému jednání.
     loadFailed.value = true
     toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.load_failed'))
   } finally {
-    loading.value = false
+    if (sequence === dataLoadSequence) loading.value = false
   }
 }
 
@@ -918,6 +944,17 @@ watch(selectedEmployeeId, employeeId => {
     selectedEmploymentId.value = available[0]?.id ?? null
   }
 })
+watch(selectedEmploymentId, employmentId => {
+  dataLoadSequence++
+  absenceForm.employment_id = employmentId ?? 0
+  averageForm.employment_id = employmentId ?? 0
+  entitlementForm.employment_id = employmentId ?? 0
+  entryForm.employment_id = employmentId ?? 0
+  absenceForm.average_snapshot_id = null
+  averages.value = []
+  leaveEntries.value = []
+  leaveBalance.value = 0
+}, { flush: 'sync' })
 watch(selectedEmploymentId, () => {
   absenceForm.average_snapshot_id = null
   absenceError.value = ''
@@ -957,9 +994,6 @@ watch(
     void loadAverageSuggestion()
   },
 )
-// Vztah se do formuláře dosazuje až v `loadData()`, takže se hlídá pole
-// formuláře, ne výběr v hlavičce — jinak by návrh odešel dřív, než se ví,
-// pro koho je.
 watch(() => averageForm.employment_id, () => {
   void loadAverageSuggestion()
 })
@@ -1450,7 +1484,7 @@ onMounted(async () => {
         </div>
         <form data-test="average-form" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createAverage">
           <label><span class="form-label">{{ t('payroll_absence.averages.year') }}</span><input v-model.number="averageForm.applicable_year" data-test="average-year" :min="minimumFormYear" :max="maximumFormYear" type="number" :class="fieldClass"></label>
-          <label><span class="form-label">{{ t('payroll_absence.averages.quarter') }}</span><input v-model.number="averageForm.applicable_quarter" min="1" max="4" type="number" :class="fieldClass"></label>
+          <label><span class="form-label">{{ t('payroll_absence.averages.quarter') }}</span><input v-model.number="averageForm.applicable_quarter" data-test="average-quarter" min="1" max="4" type="number" :class="fieldClass"></label>
           <label><span class="form-label">{{ t('payroll_absence.averages.decisive_from') }}</span><DateInput v-model="averageForm.decisive_from" :class="fieldClass" /></label>
           <label><span class="form-label">{{ t('payroll_absence.averages.decisive_to') }}</span><DateInput v-model="averageForm.decisive_to" :class="fieldClass" /></label>
           <label>

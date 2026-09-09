@@ -37,6 +37,9 @@ final class BankHttpClientFactory
                         'method' => $request->getMethod(),
                         'host' => $request->getUri()->getHost(),
                     ];
+                    if ($provider === 'raiffeisenbank' && preg_match('/^myucto-[a-f0-9]{32}$/D', $request->getHeaderLine('X-Request-Id')) === 1) {
+                        $context['bank_request_id'] = $request->getHeaderLine('X-Request-Id');
+                    }
                     $onStats = $options['on_stats'] ?? null;
                     $options['on_stats'] = static function (TransferStats $stats) use (&$transport, $onStats): void {
                         $transport = $stats->getHandlerStats();
@@ -64,13 +67,46 @@ final class BankHttpClientFactory
                         $this->logger->log($status >= 200 && $status < 300 ? 'info' : 'warning', 'bank_http_completed', $context + [
                             'http_status' => $status,
                             'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
-                        ] + $this->transportDiagnostic($transport));
+                        ] + $this->transportDiagnostic($transport) + ($context['provider'] === 'raiffeisenbank' && $status >= 400 ? $this->rbErrorDiagnostic($response) : []));
                         return $response;
                     }, $failed);
                 };
             }, 'bank_diagnostics');
         }
         return new Client(['handler' => $stack]);
+    }
+
+    private function rbErrorDiagnostic(ResponseInterface $response): array
+    {
+        $result = [];
+        foreach (['X-Request-Id', 'X-Correlation-Id', 'X-Global-Transaction-ID'] as $header) {
+            $value = $response->getHeaderLine($header);
+            if (preg_match('/^(?:myucto-[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/Di', $value) === 1) {
+                $result['response_' . strtolower($header)] = $value;
+            }
+        }
+        $body = $response->getBody();
+        if (!$body->isSeekable()) return $result;
+        $position = $body->tell();
+        try {
+            $body->rewind();
+            $content = $body->read(65537);
+        } finally {
+            $body->seek($position);
+        }
+        $result['error_body_truncated'] = strlen($content) > 65536;
+        $result['error_body_sha256'] = hash('sha256', $content);
+        $data = json_decode($content, true);
+        $result['error_body_format'] = is_array($data) ? 'json' : 'other';
+        if (!is_array($data)) return $result;
+        foreach (['error', 'errorCode', 'code'] as $key) {
+            $code = $data[$key] ?? null;
+            if (is_string($code) && (in_array($code, ['DT01', 'UNAUTHORISED', 'INVALID_REQUEST', 'INSUFFICIENT_RIGHTS', 'ID_NOT_FOUND', 'TOO_MANY_REQUESTS', 'INTERNAL_SERVER_ERROR'], true) || preg_match('/^ERR_PAY_[0-9]{1,5}$/D', $code) === 1)) {
+                $result['bank_error_code'] = $code;
+                break;
+            }
+        }
+        return $result;
     }
 
     private function transportDiagnostic(#[\SensitiveParameter] array $context): array

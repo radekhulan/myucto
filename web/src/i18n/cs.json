@@ -1068,7 +1068,7 @@
       "reason_label": "Důvod změny",
       "reason_placeholder": "Např. novela zákona č. …/2027 Sb. účinná od 1. 1.",
       "read_only_hint": "Pravidla jsou společná pro všechny firmy, takže je smí měnit jen superadmin. Vidíte je jen ke čtení.",
-      "storage_unavailable": "Úložiště úprav není dostupné — chybí migrace databáze. Platí ověřená sada z aplikace.",
+      "storage_unavailable": "Uložené změny mzdových pravidel nelze načíst. Správce nebo podpora musí ověřit dostupnost databáze a dokončení aktualizace aplikace. Sazby ani jejich platnost kvůli této chybě neupravujte.",
       "degraded": "Uložená úprava pravidel je nekonzistentní. Výpočet proto používá ověřená pravidla dodaná aplikací.",
       "degraded_technical": "Technické údaje pro podporu",
       "outlook": {
@@ -1223,7 +1223,8 @@
         "submissions": "Verze podání"
       },
       "reason_why": "Důvod se ukládá do auditní stopy — u přepsané legislativní sazby je to jediný záznam o tom, proč se firma od dodané hodnoty odchýlila.",
-      "action_blocked": "{action}: {reason}"
+      "action_blocked": "{action}: {reason}",
+      "checksum_invalid_hint": "Systém nedokáže ověřit neporušenost některé sady mzdových pravidel. Obraťte se na podporu, která prověří instalaci a obnoví důvěryhodnou sadu. Hodnoty sazeb sami neupravujte."
     },
     "title": "Mzdy",
     "subtitle": "Personální a mzdová agenda, měsíční běhy, dokumenty, platby, automatické účtování a zákonná podání.",
@@ -1554,7 +1555,17 @@
         "recognized_none": "Žádnou další úhradu odvodu se v bankovních pohybech najít nepodařilo.",
         "recognize_failed": "Načtení plateb z banky se nepodařilo."
       },
-      "load_failed_hint": "Závazky za toto období se nenačetly, takže seznam níže může být neúplný nebo zastaralý. Zkuste to prosím znovu."
+      "load_failed_hint": "Závazky za toto období se nenačetly, takže seznam níže může být neúplný nebo zastaralý. Zkuste to prosím znovu.",
+      "preparation": {
+        "unknown_kind": "Druh platby nebyl určen",
+        "open_runs": "Otevřít mzdové běhy",
+        "contact_support": "Požádat správce o kontrolu",
+        "technical_details": "Technické podrobnosti pro správce",
+        "support_required": "Přípravu platby se nepodařilo dokončit. Obnovte přehled a zkuste ji znovu. Pokud se problém opakuje, předejte správci druh platby, revizi a technické podrobnosti níže. Schválenou mzdu kvůli této hlášce neměňte.",
+        "open_institution_accounts": "Otevřít účty institucí",
+        "open_person_accounts": "Otevřít výplatní účty zaměstnance",
+        "unknown_posting_reason": "Důvod nezaúčtování aplikace neumí vysvětlit. Požádejte správce o kontrolu a předejte mu technické podrobnosti níže."
+      }
     },
     "posting_reconciliation": {
       "title": "Shoda účtování mezd",
@@ -2764,7 +2775,9 @@
           "recipient_email_ambiguous": "U zaměstnance je víc možných e-mailů a není jasné, který použít.",
           "document_not_personal": "Tenhle dokument není osobní dokument zaměstnance."
         }
-      }
+      },
+      "worker_failure": "Dokument nebo archiv se nepodařilo dokončit. Přesný důvod zatím není určen. Můžete zkusit opakování; pokud chyba přetrvává, obraťte se na podporu a přiložte technické podrobnosti níže.",
+      "worker_failure_technical": "Technické podrobnosti pro podporu"
     },
     "annual_settlement": {
       "title": "Roční zúčtování záloh",
@@ -3834,7 +3847,7 @@
         "specific_legal_fact_applies": "Může nastat specifická právní skutečnost vykazovaná v JMHZ",
         "ozp_employment_support_applies": "Zaměstnavatel může čerpat příspěvek na podporu zaměstnávání osob se zdravotním postižením",
         "deep_mining_work_applies": "Práce probíhá v hlubinném hornictví",
-        "monthly_hint": "Běžný měsíční běh tyto otázky znovu nepokládá. Jen u označené výjimky si vyžádá údaje konkrétního měsíce. Exekuce, insolvence a dohody o srážkách přebírá z jejich agend."
+        "monthly_hint": "Označené výjimky automatická příprava JMHZ zatím neumí zpracovat. Pokud se vás některá skutečně týká, kontaktujte podporu; správný údaj nevypínejte kvůli odeslání. Exekuce, insolvence a dohody o srážkách se přebírají z příslušných agend."
       },
       "cz_isco_code": "Kód CZ-ISCO",
       "cz_isco": {
@@ -4419,7 +4432,7 @@
           "deduction_priority_missing": "U pokračující srážky chybí pořadí.",
           "deduction_result_not_supported": "Výsledek některé srážky nelze bezpečně převzít do potvrzení.",
           "average_earnings_ruleset_not_ready": "Pravidla pro průměrný výdělek podle § 313 odst. 2 ještě nejsou schválená. Systém proto nenabízí ruční zadání čisté částky.",
-          "average_earnings_snapshot_missing": "Pro rozhodné období {year}/Q{quarter} chybí schválený snapshot průměrného výdělku. Nejprve ho založte a schvalte v modulu Absence a průměry.",
+          "average_earnings_snapshot_missing": "Pro období {year}/Q{quarter} chybí schválený průměrný výdělek. Doplňte a schvalte jej v agendě Absence a průměry.",
           "average_earnings_net_conversion_not_verified": "Za rozhodné období {year}/Q{quarter} existuje schválený hrubý hodinový průměr, ale ověřený přepočet na čistý měsíční výdělek podle zákona o zaměstnanosti zatím není v aplikaci implementován. Potvrzení prosím vystavte mimo aplikaci.",
           "dpp_sickness_evidence_not_ready": "U DPP bez pokračující srážky zatím nelze bezpečně doložit vznik účasti na nemocenském pojištění.",
           "dpp_wage_deduction_missing": "U DPP nebyla nalezena pokračující srážka, která by zakládala vydání potvrzení.",
@@ -5391,7 +5404,7 @@
         "jmhz_preview_status": "Stav výstupu",
         "jmhz_preview_only": "Pouze kontrolní náhled",
         "jmhz_evidence_title": "Právní skutečnosti JMHZ",
-        "jmhz_evidence_description": "Běžné vztahy se doloží automaticky ze zmrazené mzdy a účinných podmínek. Účetní řeší jen zaměstnance s evidovanou výjimkou nebo neúplným podkladem.",
+        "jmhz_evidence_description": "Běžné vztahy se doloží automaticky z uložené mzdy a účinných podmínek. Účetní řeší jen zaměstnance s evidovanou výjimkou nebo neúplným podkladem.",
         "jmhz_evidence_empty": "Pro zvolené období není žádná schválená revize k potvrzení.",
         "jmhz_evidence_card": "Období {period}, revize {revision}",
         "jmhz_evidence_confirm_each": "Výslovně potvrzuji, že v období nenastala žádná z těchto skutečností:",
@@ -5400,8 +5413,8 @@
         "jmhz_evidence_load_failed": "Potvrzení právních skutečností se nepodařilo načíst.",
         "jmhz_evidence_save_failed": "Potvrzení právních skutečností se nepodařilo uložit.",
         "jmhz_evidence_automatic_count": "žádný vztah se nedoloží automaticky | 1 vztah se doloží automaticky | {n} vztahy se doloží automaticky | {n} vztahů se doloží automaticky",
-        "jmhz_evidence_confirmed_count": "žádný vztah není zmrazený | 1 vztah už je zmrazený | {n} vztahy už jsou zmrazené | {n} vztahů už je zmrazených",
-        "jmhz_evidence_all_resolved": "Není potřeba procházet jednotlivé zaměstnance. Při přípravě se běžný stav neměnně uloží se zdrojem.",
+        "jmhz_evidence_confirmed_count": "žádný vztah nemá uložené podklady | 1 vztah už má uložené podklady | {n} vztahy už mají uložené podklady | {n} vztahů už má uložené podklady",
+        "jmhz_evidence_all_resolved": "U těchto vztahů není potřeba nic doplňovat. Podklady jsou uložené, nebo se automaticky doloží při přípravě hlášení.",
         "jmhz_evidence_attention_default": "Tento pracovní vztah vyžaduje doplnění měsíční výjimky.",
         "jmhz_evidence_attention_action": "Otevřít místo opravy",
         "jmhz_evidence_attention_run_action": "Otevřít mzdové běhy",
@@ -5515,7 +5528,7 @@
         "jmhz_dry_run_blockers": {
           "jmhz_identity_id_ppv_missing": "Chybí „ID PPV pracovního vztahu\" — identifikátor zaměstnání, který přiděluje ČSSZ při registraci. Opište ho z protokolu o přijetí přihlášky nebo z ePortálu ČSSZ; vyplňuje se na kartě pracovního vztahu v části „Identifikátory přidělené ČSSZ pro JMHZ\".",
           "jmhz_identity_unresolved": "Pracovní vztah má nedokončený úkol identity vůči ČSSZ. Dokončete ho na kartě pracovního vztahu; do té doby se hlášení nesestaví.",
-          "unknown": "Chybí některý zákonný údaj potřebný pro JMHZ. Otevřete kartu pracovního vztahu a doplňte zvýrazněné údaje.",
+          "unknown": "Kontrolu hlášení nelze dokončit a aplikace zatím neumí určit konkrétní nápravu. Otevřete podporu a předejte jí období, pracovní vztah a technické podrobnosti kontroly. Údaje neměňte odhadem.",
           "effective_term_missing": "Pro daný měsíc chybí účinné podmínky pracovního vztahu.",
           "component_jmhz_mapping_missing": "Mzdová složka použitá v tomhle období nemá určené zařazení do měsíčního hlášení. Doplňte ho v Mzdy → Mzdové složky. Složky, které se v období nepoužily, hlášení nijak nebrání.",
           "component_jmhz_manual_review": "Zařazení mzdové složky do JMHZ vyžaduje ruční kontrolu.",
@@ -5732,7 +5745,96 @@
         "jmhz_evidence_scope_unnamed": "Pracovní vztah č. {employment}",
         "jmhz_evidence_pending": "žádný vztah nevyžaduje pozornost | 1 vztah vyžaduje pozornost | {n} vztahy vyžadují pozornost | {n} vztahů vyžaduje pozornost",
         "jmhz_evidence_no_scopes": "Revize neobsahuje žádný pracovní vztah.",
-        "health_insurer_code": "Kód {code}"
+        "health_insurer_code": "Kód {code}",
+        "jmhz_guidance": {
+          "problems": {
+            "specification": "Uložené podklady byly vytvořeny podle jiné verze pravidel JMHZ než ta, kterou aplikace nyní používá. Nejde o chybu v údajích zaměstnance.",
+            "interactions": "Uložené posouzení právních skutečností neodpovídá aktuálním pravidlům pro jejich společné vykazování.",
+            "selector": "Uložené potvrzení právních skutečností používá jiné zařazení pracovního vztahu než připravované hlášení.",
+            "scope": "Uložené potvrzení právních skutečností neodpovídá této mzdové revizi nebo pracovnímu vztahu.",
+            "source": "Podklady právních skutečností a výpočet mzdy nevycházejí ze stejné uložené verze dat.",
+            "values": "Uložené právní skutečnosti obsahují hodnotu, kterou tento postup přípravy hlášení neumí zpracovat.",
+            "confirmation": "U uložených právních skutečností nelze ověřit platnost potvrzení nebo jeho vazbu na podmínky pracovního vztahu.",
+            "catalog": "V aplikaci chybí úplná pravidla pro sestavení této části JMHZ.",
+            "profile_missing": "Schválená mzda pochází ze staršího výpočtu, který ještě neukládal potřebné podklady JMHZ.",
+            "profile_incomplete": "Schválená mzda nemá úplné uložené odpovědi na neobvyklé situace JMHZ.",
+            "exception": "V podmínkách pracovního vztahu je označena neobvyklá situace, kterou automatická příprava JMHZ zatím neumí zpracovat.",
+            "unsupported": "Druh tohoto pracovního vztahu zatím nelze zpracovat tímto postupem přípravy JMHZ.",
+            "deductions": "U tohoto zaměstnance nejsou srážky ze mzdy úplně doložené nebo dokončené.",
+            "deduction_title": "Ve vypočtené mzdě je srážka, pro kterou chybí dohoda o srážkách, exekuční pohledávka nebo jiný doložený titul.",
+            "deduction_register": "Není doloženo ověření evidence exekučních pohledávek zaměstnance.",
+            "deduction_calculation": "Výpočet srážek vyžaduje kontrolu nebo jeho podklady nesouhlasí s uloženou evidencí.",
+            "revision": "Pro přípravu JMHZ není vybrána aktuální schválená mzdová revize.",
+            "period": "Uložené mzdové období nezačíná prvním dnem měsíce.",
+            "result": "Ve výsledku výpočtu nelze jednoznačně najít tohoto zaměstnance.",
+            "invalid_source": "Uložené podklady mzdy nebo právních skutečností jsou neúplné nebo mají neplatný formát.",
+            "integrity": "Nelze ověřit neporušenost uložených mzdových podkladů. Příprava hlášení byla zastavena.",
+            "request": "Požadavek na potvrzení právních skutečností neobsahuje všechny platné odpovědi Ano nebo Ne.",
+            "positive": "Potvrzená právní skutečnost vyžaduje zpracování, které tento postup přípravy JMHZ zatím nepodporuje.",
+            "not_found": "Mzdová revize pro tyto podklady již není dostupná v právě vybrané firmě.",
+            "frozen": "Pro tento vztah již existuje jiné neměnné potvrzení právních skutečností.",
+            "repeat": "Opakovaná operace se liší od původního požadavku. Uložení nelze bezpečně dokončit.",
+            "incomplete_operation": "Dřívější uložení právních skutečností nebylo úplně dokončeno.",
+            "unknown": "Podklady JMHZ se nepodařilo ověřit. Tuto chybu musí posoudit správce nebo podpora.",
+            "activity_missing": "Chybí druh činnosti potřebný pro zařazení pracovního vztahu do JMHZ.",
+            "activity_invalid": "Druh činnosti uložený ve mzdové revizi není platnou hodnotou číselníku JMHZ.",
+            "detail_missing": "Chybí bližší určení pracovněprávního vztahu, které vybraný druh činnosti vyžaduje.",
+            "detail_invalid": "Bližší určení pracovněprávního vztahu není platnou hodnotou číselníku JMHZ.",
+            "detail_not_applicable": "Vyplněné bližší určení pracovněprávního vztahu se nesmí používat s vybraným druhem činnosti."
+          },
+          "steps": {
+            "specification": "Otevřete mzdy pro uvedené období. Pro další přípravu nebo skutečně potřebnou opravu vytvořte a schvalte novou opravnou revizi a z ní připravte hlášení. Již přijatá hlášení kvůli tomuto upozornění znovu neodesílejte. Pokud potíž trvá i v nové revizi, kontaktujte podporu.",
+            "interactions": "Otevřete mzdy pro uvedené období. Pro další přípravu nebo skutečně potřebnou opravu vytvořte a schvalte novou opravnou revizi a z ní připravte hlášení. Již přijatá hlášení kvůli tomuto upozornění znovu neodesílejte. Pokud potíž trvá i v nové revizi, kontaktujte podporu.",
+            "selector": "Otevřete mzdy pro uvedené období. Pro další přípravu nebo skutečně potřebnou opravu vytvořte a schvalte novou opravnou revizi a z ní připravte hlášení. Již přijatá hlášení kvůli tomuto upozornění znovu neodesílejte. Pokud potíž trvá i v nové revizi, kontaktujte podporu.",
+            "scope": "Otevřete mzdy pro uvedené období. Pro další přípravu nebo skutečně potřebnou opravu vytvořte a schvalte novou opravnou revizi a z ní připravte hlášení. Již přijatá hlášení kvůli tomuto upozornění znovu neodesílejte. Pokud potíž trvá i v nové revizi, kontaktujte podporu.",
+            "source": "Kontaktujte správce nebo podporu a přiložte období, číslo revize a technické podrobnosti níže. Neměňte údaje zaměstnance jen proto, aby kontrola prošla.",
+            "values": "Kontaktujte správce nebo podporu a přiložte období, číslo revize a technické podrobnosti níže. Neměňte údaje zaměstnance jen proto, aby kontrola prošla.",
+            "confirmation": "Otevřete mzdy pro uvedené období. Pro další přípravu nebo skutečně potřebnou opravu vytvořte a schvalte novou opravnou revizi a z ní připravte hlášení. Již přijatá hlášení kvůli tomuto upozornění znovu neodesílejte. Pokud potíž trvá i v nové revizi, kontaktujte podporu.",
+            "catalog": "Kontaktujte správce nebo podporu a přiložte období, číslo revize a technické podrobnosti níže. Neměňte údaje zaměstnance jen proto, aby kontrola prošla.",
+            "profile_missing": "Otevřete mzdy pro uvedené období, přepočítejte je a schvalte novou revizi. Již schválené podklady se úpravou karty zaměstnance nezmění. Pokud potíž trvá po novém výpočtu, kontaktujte podporu.",
+            "profile_incomplete": "Otevřete mzdy pro uvedené období, přepočítejte je a schvalte novou revizi. Již schválené podklady se úpravou karty zaměstnance nezmění. Pokud potíž trvá po novém výpočtu, kontaktujte podporu.",
+            "exception": "Otevřete uvedený pracovní vztah a jeho účinné podmínky, část Další údaje → Výjimečné situace → JMHZ – neobvyklé situace. Ověřte označenou volbu pro vykazovaný měsíc. Pokud byla zadána omylem, opravte podmínky s odpovídající účinností a mzdu znovu přepočítejte a schvalte. Pokud údaj odpovídá skutečnosti, neměňte jej na Ne; kontaktujte podporu ohledně zpracování tohoto případu. Měsíční editor této výjimky zatím není dostupný.",
+            "unsupported": "Kontaktujte správce nebo podporu a přiložte období, číslo revize a technické podrobnosti níže. Neměňte údaje zaměstnance jen proto, aby kontrola prošla.",
+            "deductions": "Otevřete u této osoby Exekuce a srážky a zkontrolujte nevyřešená upozornění, evidenci pohledávek a insolvenci. U smluvních srážek zkontrolujte také Dohody o srážkách. Po opravě podkladů mzdu pro uvedený měsíc přepočítejte a schvalte.",
+            "deduction_title": "Porovnejte srážku ve výpočtu mzdy s Dohodami o srážkách a s evidencí Exekucí a srážek této osoby. Doplňte skutečně existující titul s účinností pro uvedený měsíc, nebo opravte chybně zadanou srážku. Poté mzdu přepočítejte a schvalte. Nevytvářejte fiktivní pohledávku.",
+            "deduction_register": "V agendě Exekuce a srážky vyberte tuto osobu a zkontrolujte úplnost evidence pohledávek. Doložte provedenou kontrolu; nepoužitelnost označte pouze tehdy, pokud odpovídá skutečnosti. Poté mzdu za uvedený měsíc přepočítejte a schvalte.",
+            "deduction_calculation": "V agendě Exekuce a srážky zkontrolujte u této osoby otevřená upozornění, pořadí pohledávek a případný souběh s insolvencí. Vyřešte hlášené nedostatky a potom mzdu přepočítejte a schvalte. Pokud jsou podklady v pořádku a nesoulad trvá, kontaktujte podporu.",
+            "revision": "Otevřete mzdy pro uvedený měsíc, vyberte aktuální revizi a dokončete její výpočet a schválení. Potom se vraťte do JMHZ a obnovte podklady.",
+            "period": "Kontaktujte správce nebo podporu a přiložte období, číslo revize a technické podrobnosti níže. Neměňte údaje zaměstnance jen proto, aby kontrola prošla.",
+            "result": "Otevřete mzdy pro uvedené období, přepočítejte je a schvalte novou revizi. Již schválené podklady se úpravou karty zaměstnance nezmění. Pokud potíž trvá po novém výpočtu, kontaktujte podporu.",
+            "invalid_source": "Kontaktujte správce nebo podporu a přiložte období, číslo revize a technické podrobnosti níže. Neměňte údaje zaměstnance jen proto, aby kontrola prošla.",
+            "integrity": "Kontaktujte správce nebo podporu a přiložte období, číslo revize a technické podrobnosti níže. Neměňte údaje zaměstnance jen proto, aby kontrola prošla.",
+            "request": "Obnovte stránku a zkontrolujte, zda operace již byla dokončena. Pokud se chyba opakuje, kontaktujte podporu s technickými podrobnostmi níže; údaje zaměstnance kvůli ní neupravujte.",
+            "positive": "Kontaktujte správce nebo podporu a přiložte období, číslo revize a technické podrobnosti níže. Neměňte údaje zaměstnance jen proto, aby kontrola prošla.",
+            "not_found": "Otevřete mzdy pro uvedený měsíc a ověřte vybranou firmu i aktuální revizi. Obnovte seznam. Pokud revize má existovat a stále chybí, kontaktujte podporu.",
+            "frozen": "Otevřete mzdy pro uvedené období. Pro další přípravu nebo skutečně potřebnou opravu vytvořte a schvalte novou opravnou revizi a z ní připravte hlášení. Již přijatá hlášení kvůli tomuto upozornění znovu neodesílejte. Pokud potíž trvá i v nové revizi, kontaktujte podporu.",
+            "repeat": "Obnovte stránku a zkontrolujte, zda operace již byla dokončena. Pokud se chyba opakuje, kontaktujte podporu s technickými podrobnostmi níže; údaje zaměstnance kvůli ní neupravujte.",
+            "incomplete_operation": "Obnovte stránku a zkontrolujte, zda operace již byla dokončena. Pokud se chyba opakuje, kontaktujte podporu s technickými podrobnostmi níže; údaje zaměstnance kvůli ní neupravujte.",
+            "unknown": "Kontaktujte správce nebo podporu a přiložte období, číslo revize a technické podrobnosti níže. Neměňte údaje zaměstnance jen proto, aby kontrola prošla.",
+            "activity_missing": "Otevřete uvedený pracovní vztah a jeho účinné podmínky. V základních údajích zkontrolujte pole Druh činnosti a Bližší určení pracovněprávního vztahu a jejich kombinaci podle skutečné smlouvy. Uložte správnou verzi podmínek s účinností pro vykazovaný měsíc, poté mzdu přepočítejte a schvalte novou revizi. Správné údaje neměňte na jiné jen kvůli průchodu kontroly.",
+            "activity_invalid": "Otevřete uvedený pracovní vztah a jeho účinné podmínky. V základních údajích zkontrolujte pole Druh činnosti a Bližší určení pracovněprávního vztahu a jejich kombinaci podle skutečné smlouvy. Uložte správnou verzi podmínek s účinností pro vykazovaný měsíc, poté mzdu přepočítejte a schvalte novou revizi. Správné údaje neměňte na jiné jen kvůli průchodu kontroly.",
+            "detail_missing": "Otevřete uvedený pracovní vztah a jeho účinné podmínky. V základních údajích zkontrolujte pole Druh činnosti a Bližší určení pracovněprávního vztahu a jejich kombinaci podle skutečné smlouvy. Uložte správnou verzi podmínek s účinností pro vykazovaný měsíc, poté mzdu přepočítejte a schvalte novou revizi. Správné údaje neměňte na jiné jen kvůli průchodu kontroly.",
+            "detail_invalid": "Otevřete uvedený pracovní vztah a jeho účinné podmínky. V základních údajích zkontrolujte pole Druh činnosti a Bližší určení pracovněprávního vztahu a jejich kombinaci podle skutečné smlouvy. Uložte správnou verzi podmínek s účinností pro vykazovaný měsíc, poté mzdu přepočítejte a schvalte novou revizi. Správné údaje neměňte na jiné jen kvůli průchodu kontroly.",
+            "detail_not_applicable": "Otevřete uvedený pracovní vztah a jeho účinné podmínky. V základních údajích zkontrolujte pole Druh činnosti a Bližší určení pracovněprávního vztahu a jejich kombinaci podle skutečné smlouvy. Uložte správnou verzi podmínek s účinností pro vykazovaný měsíc, poté mzdu přepočítejte a schvalte novou revizi. Správné údaje neměňte na jiné jen kvůli průchodu kontroly."
+          },
+          "actions": {
+            "run": "Otevřít mzdy tohoto měsíce",
+            "revision": "Otevřít revize tohoto měsíce",
+            "employment": "Zkontrolovat podmínky vztahu",
+            "deductions": "Otevřít exekuce a srážky osoby",
+            "agreements": "Otevřít dohody o srážkách osoby",
+            "support": "Otevřít podporu"
+          },
+          "fields": {
+            "orchard_discount_eligible": "Sleva na pojistném v ovocnářství nebo při pěstování zeleniny",
+            "specific_legal_fact_applies": "Specifická právní skutečnost vykazovaná v JMHZ",
+            "ozp_employment_support_applies": "Příspěvek na podporu zaměstnávání osob se zdravotním postižením",
+            "deep_mining_work_applies": "Práce v hlubinném hornictví"
+          },
+          "technical_details": "Technické podrobnosti pro podporu",
+          "xsd_versions": "Formát hlášení: uložená verze {old}, aktuální verze {current}.",
+          "control_versions": "Kontrolní pravidla: uložená verze {old}, aktuální verze {current}."
+        }
       },
       "queue": {
         "title": "K odeslání",
@@ -7969,6 +8071,74 @@
       "multiple": "Přetáhli jste {count} souborů — použil se první, „{name}\". Ostatní se nenačetly.",
       "no_file": "Z toho, co jste přetáhli, nešel přečíst žádný soubor. Složky ani obsah z jiné stránky bohužel nejdou; vyberte prosím soubor z disku.",
       "pick_another": "Vybrat jiný soubor"
+    },
+    "remediation": {
+      "actions": {
+        "support": "Otevřít podporu",
+        "runs": "Otevřít mzdy daného období",
+        "terms": "Otevřít podmínky vztahu",
+        "absences": "Otevřít absence tohoto vztahu",
+        "calendar": "Najít pracovní kalendář vztahu",
+        "entries": "Zkontrolovat docházku vztahu",
+        "average": "Doplnit průměr tohoto vztahu"
+      },
+      "eldp": {
+        "period": "Vykazované období: {period}.",
+        "problems": {
+          "no_revisions": "Pro evidenční list nejsou dostupné schválené mzdy za uvedený rok.",
+          "missing_month": "Chybí schválená mzda za konkrétní měsíc, ze které lze doložit dobu pojištění a příjem.",
+          "revision": "Podklady obsahují mzdovou revizi, která není aktuální a schválená.",
+          "missing_employment": "Pracovní vztah chybí v uložených podkladech mzdy pro některý vykazovaný měsíc.",
+          "dates": "Údaje o začátku nebo skončení vztahu chybí nebo se v uložených mzdách liší.",
+          "ambiguous": "Pro jeden měsíc existuje více schválených podkladů a nelze bezpečně vybrat správné.",
+          "integrity": "Uložené podklady se neshodují nebo nemají platný formát. Evidenční list z nich nelze bezpečně sestavit.",
+          "unsupported": "Tento případ automatická příprava evidenčního listu zatím nepodporuje.",
+          "activity": "Druh činnosti nebo bližší určení vztahu neodpovídá případu, který umí tato příprava evidenčního listu zpracovat.",
+          "social": "V uložené mzdě chybí úplný výpočet sociálního pojištění, účast na pojištění nebo vyměřovací základ.",
+          "absence_dates": "V podkladech je absence s neplatným začátkem nebo koncem.",
+          "absence_overlap": "Vyloučené doby se překrývají nebo jejich počet překračuje dobu pracovního vztahu.",
+          "unknown": "Přípravu evidenčního listu zastavila chyba, kterou musí posoudit podpora."
+        },
+        "steps": {
+          "no_revisions": "V agendě Mzdy vyberte vykazovaný rok a zkontrolujte měsíce trvání vztahu. Doplňte skutečně chybějící výpočty a jejich schválení. Pokud mzdy vznikly mimo aplikaci, nevytvářejte fiktivní výpočty; zpracování historických podkladů dohodněte s podporou.",
+          "missing_month": "Otevřete mzdy označeného měsíce. Ověřte, že zahrnují správný vztah a úplné odvody, proveďte potřebnou opravu a schvalte aktuální revizi. Potom evidenční list připravte znovu. Již správné mzdy ani přijatá podání neopravujte jen kvůli varování.",
+          "revision": "Otevřete mzdy označeného měsíce. Ověřte, že zahrnují správný vztah a úplné odvody, proveďte potřebnou opravu a schvalte aktuální revizi. Potom evidenční list připravte znovu. Již správné mzdy ani přijatá podání neopravujte jen kvůli varování.",
+          "missing_employment": "Otevřete mzdy označeného měsíce. Ověřte, že zahrnují správný vztah a úplné odvody, proveďte potřebnou opravu a schvalte aktuální revizi. Potom evidenční list připravte znovu. Již správné mzdy ani přijatá podání neopravujte jen kvůli varování.",
+          "dates": "Na kartě vztahu porovnejte skutečný nástup a skončení s podklady dotčených mzdových měsíců. Je-li chyba jen ve staré schválené mzdě, potřebuje příslušný měsíc novou opravnou revizi. Správná data vztahu neměňte kvůli sjednocení; nejasný nesoulad předejte podpoře.",
+          "ambiguous": "Kontaktujte podporu a přiložte vykazovaný rok, pracovní vztah a technické podrobnosti níže. Údaje zaměstnance ani schválené mzdy kvůli této chybě neměňte naslepo.",
+          "integrity": "Kontaktujte podporu a přiložte vykazovaný rok, pracovní vztah a technické podrobnosti níže. Údaje zaměstnance ani schválené mzdy kvůli této chybě neměňte naslepo.",
+          "unsupported": "Kontaktujte podporu a přiložte vykazovaný rok, pracovní vztah a technické podrobnosti níže. Údaje zaměstnance ani schválené mzdy kvůli této chybě neměňte naslepo.",
+          "activity": "Na kartě vztahu ověřte Druh činnosti a Bližší určení podle skutečné smlouvy a jejich účinnost ve vykazovaném období. Chybný údaj opravte a přepočítejte příslušné mzdy. Pokud jsou údaje správné, neměňte je na jiný druh vztahu; tento případ zpracujte s podporou.",
+          "social": "Otevřete mzdy označeného měsíce. Ověřte, že zahrnují správný vztah a úplné odvody, proveďte potřebnou opravu a schvalte aktuální revizi. Potom evidenční list připravte znovu. Již správné mzdy ani přijatá podání neopravujte jen kvůli varování.",
+          "absence_dates": "Otevřete Absence tohoto vztahu a zkontrolujte data a překryvy ve vykazovaném období. Opravte pouze chybně evidované záznamy, následně přepočítejte a schvalte dotčené mzdy. Pokud souběh absencí odpovídá skutečnosti, nemažte jej kvůli kontrole a kontaktujte podporu.",
+          "absence_overlap": "Otevřete Absence tohoto vztahu a zkontrolujte data a překryvy ve vykazovaném období. Opravte pouze chybně evidované záznamy, následně přepočítejte a schvalte dotčené mzdy. Pokud souběh absencí odpovídá skutečnosti, nemažte jej kvůli kontrole a kontaktujte podporu.",
+          "unknown": "Kontaktujte podporu a přiložte vykazovaný rok, pracovní vztah a technické podrobnosti níže. Údaje zaměstnance ani schválené mzdy kvůli této chybě neměňte naslepo."
+        }
+      },
+      "work": {
+        "problems": {
+          "terms": "V průběhu měsíce chybí jednoznačné nastavení týdenní pracovní doby nebo se jeho hodnoty mění.",
+          "absence": "V tomto měsíci je žádost o nepřítomnost nebo její oprava, která ještě není schválená či uzavřená.",
+          "calendar": "Některý den měsíce nemá pracovní kalendář nebo do něj zasahuje více verzí kalendáře.",
+          "month_boundary": "Začátek a konec evidované práce leží v různých kalendářních měsících.",
+          "overlap": "Ve stejnou dobu je evidováno více základních nebo přesčasových pracovních intervalů.",
+          "break": "U některého záznamu je přestávka delší než celý interval práce.",
+          "unknown": "Souhrn pracovní doby nelze ověřit. Příčinu musí posoudit podpora."
+        },
+        "steps": {
+          "terms": "Otevřete pole Týdenní pracovní doba v podmínkách tohoto vztahu. Porovnejte účinné verze pro uvedený měsíc se smlouvou. Opravte chybějící či chybně účinné podmínky a obnovte souhrn docházky. Skutečnou změnu úvazku nesjednocujte uměle; pokud kontrola změnu neumí zpracovat, kontaktujte podporu.",
+          "absence": "Odkaz otevře Absence tohoto vztahu pro stejný měsíc. Dokončete schválení nebo zamítnutí čekajících žádostí a jejich oprav podle skutečnosti. Poté se vraťte do docházky, obnovte ji a znovu otevřete schválení měsíce.",
+          "calendar": "Zkontrolujte kalendář pro uvedený vztah. Tlačítko Vytvořit kalendář / Nová verze kalendáře nyní nastavuje pondělí až pátek po 8 hodinách od začátku měsíce. Použijte je pouze při shodě se skutečným rozvrhem. Jiný rozvrh nebo překryv platných verzí řešte se správcem; kalendář neměňte jen kvůli průchodu kontroly.",
+          "month_boundary": "Zkontrolujte začátek a konec práce u tohoto vztahu. Práci přes hranici měsíců rozdělte na skutečně odpracované části příslušných měsíců, aniž byste změnili celkovou dobu. Pokud ji editor neumí opravit, kontaktujte podporu. Poté obnovte souhrn.",
+          "overlap": "Porovnejte záznamy tohoto vztahu po dnech a druzích práce. Odstraňte pouze chybnou duplicitu nebo opravte skutečný čas; běžnou práci a přesčas nezapisujte dvakrát do stejného intervalu. Pokud opravu editor nenabízí, kontaktujte podporu. Poté obnovte souhrn.",
+          "break": "Zkontrolujte začátek, konec a délku přestávky u záznamů tohoto vztahu. Opravte nesprávně zadaný čas podle skutečné docházky. Pokud opravu editor nenabízí, kontaktujte podporu. Poté obnovte souhrn.",
+          "unknown": "Kontaktujte podporu s uvedeným měsícem, pracovním vztahem a technickými podrobnostmi níže. Nepotvrzujte náhradní hodnoty jen kvůli dokončení hlášení."
+        }
+      },
+      "average": {
+        "step": "Otevřete Průměrné výdělky pro tento vztah. Je předvybrán rok {year} a čtvrtletí {quarter}, ve kterém se průměr použije; rozhodné období výpočtu je předchozí čtvrtletí. Zkontrolujte podklady, vytvořte průměr a schvalte jej. Poté obnovte výstupní dokumenty."
+      },
+      "technical": "Technické podrobnosti pro podporu"
     }
   },
   "foreign_income": {
@@ -16525,7 +16695,9 @@
       "title": "Vést mzdy",
       "label": "Vést mzdy",
       "hint": "Zpřístupní samostatný mzdový modul pro tuto firmu v obou účetních režimech. Ve výchozím stavu je vypnutý.",
-      "beta_warning": "Mzdový modul prošel testováním, ale považujeme jej stále za beta verzi. V produkci ho už používat můžete, jen prosím pečlivě sledujte a kontrolujte výpočty mezd, odvodů a podání pro ČSSZ, zdravotní pojišťovny a finanční úřad.","beta_report":"Případné problémy prosím nahlaste na","beta_report_thanks":"Děkujeme za ně, obratem je opravíme.",
+      "beta_warning": "Mzdový modul prošel testováním, ale považujeme jej stále za beta verzi. V produkci ho už používat můžete, jen prosím pečlivě sledujte a kontrolujte výpočty mezd, odvodů a podání pro ČSSZ, zdravotní pojišťovny a finanční úřad.",
+      "beta_report": "Případné problémy prosím nahlaste na",
+      "beta_report_thanks": "Děkujeme za ně, obratem je opravíme.",
       "off_note": "Mzdy zmizí z menu po uložení. Mzdová data se nemažou a po opětovném zapnutí zůstanou dostupná.",
       "buy": "Aktivovat mzdový doplněk"
     },
@@ -20628,14 +20800,14 @@
         "policies": {
           "unknown": "Zatím neověřeno",
           "role_required": "Vyberte roli.",
-    "password_invite_placeholder": "nechte prázdné a pošleme odkaz",
-    "password_invite_hint": "Necháte-li prázdné, pošleme uživateli e-mailem jednorázový odkaz a heslo si nastaví sám. Vy ho pak neznáte.",
-    "password_link_cta": "Poslat odkaz na nastavení hesla",
-    "password_link_sending": "Odesílám…",
-    "password_link_sent": "Odkaz odeslán na e-mail uživatele.",
-    "invite_sent": "Uživatel založen. Odkaz na nastavení hesla jsme mu poslali e-mailem.",
-    "invite_failed": "Uživatel je založený, ale odkaz na nastavení hesla se NEPODAŘILO odeslat. Zkontrolujte odchozí poštu a pošlete odkaz znovu z detailu uživatele.",
-    "password_required": "Vždy jméno a heslo",
+          "password_invite_placeholder": "nechte prázdné a pošleme odkaz",
+          "password_invite_hint": "Necháte-li prázdné, pošleme uživateli e-mailem jednorázový odkaz a heslo si nastaví sám. Vy ho pak neznáte.",
+          "password_link_cta": "Poslat odkaz na nastavení hesla",
+          "password_link_sending": "Odesílám…",
+          "password_link_sent": "Odkaz odeslán na e-mail uživatele.",
+          "invite_sent": "Uživatel založen. Odkaz na nastavení hesla jsme mu poslali e-mailem.",
+          "invite_failed": "Uživatel je založený, ale odkaz na nastavení hesla se NEPODAŘILO odeslat. Zkontrolujte odchozí poštu a pošlete odkaz znovu z detailu uživatele.",
+          "password_required": "Vždy jméno a heslo",
           "portal_sso_or_password": "Přihlášení do portálu stačí"
         },
         "policyUnknownHint": "Chování přihlašovací stránky brány zatím není ověřené pokusem. Uživateli proto říkáme, ať počítá se jménem a heslem, a zároveň že s aktivní relací portálu může projít bez nich.",

@@ -80,7 +80,12 @@ const materializing = ref(false)
 interface MaterializeFailure {
   key: string
   revisionNo: number | null
+  liabilityKind: string | null
+  reason: string
   message: string
+  remediationPath: string | null
+  remediationAction: string
+  technicalDetail: string | null
 }
 const materializeFailures = ref<MaterializeFailure[]>([])
 const creatingBatch = ref(false)
@@ -822,9 +827,9 @@ function reconciliationKey(scope: string): string {
 }
 
 function kindLabel(kind: string): string {
-  const key = `payroll.payments.kind.${kind}`
-  const translated = t(key)
-  return translated === key ? kind : translated
+  return ['net_wage', 'health_insurance', 'social_insurance', 'income_tax', 'insolvency', 'enforcement', 'risky_savings', 'statutory_insurance'].includes(kind)
+    ? t(`payroll.payments.kind.${kind}`)
+    : t('payroll.payments.preparation.unknown_kind')
 }
 
 /**
@@ -842,11 +847,15 @@ function postingChipClass(status: PayrollPaymentMatch['posting_status']): string
   return 'bg-neutral-100 text-neutral-600'
 }
 
-/** Neznámý kód se ukáže tak, jak přišel — mlčet o něm by skrylo nový stav. */
 function postingReasonLabel(reason: string): string {
   const key = `payroll.payments.settlements.posting_reason.${reason}`
   const translated = t(key)
-  return translated === key ? reason : translated
+  return translated === key ? t('payroll.payments.preparation.unknown_posting_reason') : translated
+}
+
+function postingReasonUnknown(reason: string): boolean {
+  const key = `payroll.payments.settlements.posting_reason.${reason}`
+  return t(key) === key
 }
 
 function recipientName(item: PayrollPaymentLiability): string {
@@ -1258,13 +1267,25 @@ async function materialize(): Promise<void> {
       failures.push(...result.preparation_issues.map((issue, index) => ({
         key: `${run.revision_id}-issue-${index}`,
         revisionNo: run.revision_no,
-        message: issue.message,
+        liabilityKind: issue.liability_kind ?? null,
+        reason: issue.reason ?? 'support_required',
+        message: issue.remediation_action ? issue.message : t('payroll.payments.preparation.support_required'),
+        remediationPath: issue.remediation_path === '/payroll/runs'
+          ? `/payroll/runs?period=${period.value}`
+          : issue.remediation_path ?? '/admin/support',
+        remediationAction: issue.remediation_action ?? 'contact_support',
+        technicalDetail: issue.technical_detail ?? (issue.remediation_action ? null : issue.message),
       })))
     } catch (error) {
       failures.push({
         key: `${run.revision_id}-error`,
         revisionNo: run.revision_no,
-        message: apiErrorMessage(error, t('payroll.payments.materialize_failed')),
+        liabilityKind: null,
+        reason: 'support_required',
+        message: t('payroll.payments.preparation.support_required'),
+        remediationPath: '/admin/support',
+        remediationAction: 'contact_support',
+        technicalDetail: apiErrorMessage(error, t('payroll.payments.materialize_failed')),
       })
     }
   }
@@ -1656,7 +1677,22 @@ onMounted(load)
           <p v-if="failure.revisionNo !== null" class="font-medium">
             {{ t('payroll.payments.batch.revision', { revision: failure.revisionNo }) }}
           </p>
+          <p class="font-medium">{{ kindLabel(failure.liabilityKind ?? '') }}</p>
           <p class="mt-0.5 max-w-prose leading-snug">{{ failure.message }}</p>
+          <RouterLink
+            v-if="failure.remediationPath"
+            :to="failure.remediationPath"
+            :class="[btnOutline('warning'), 'mt-2 whitespace-nowrap']"
+            data-test="materialize-remediation"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+            {{ t(`payroll.payments.preparation.${failure.remediationAction}`) }}
+          </RouterLink>
+          <details v-if="failure.technicalDetail" class="mt-2" data-test="materialize-technical-details">
+            <summary class="cursor-pointer">{{ t('payroll.payments.preparation.technical_details') }}</summary>
+            <p class="mt-1 break-words">{{ failure.technicalDetail }}</p>
+            <p class="mt-1 font-mono text-xs">{{ failure.liabilityKind }} · {{ failure.reason }}</p>
+          </details>
         </li>
       </ul>
     </section>
@@ -2685,12 +2721,20 @@ onMounted(load)
                     >
                       {{ postingLabel(event.posting_status) }}
                     </span>
-                    <span
+                    <div
                       v-if="event.posting_status === 'skipped' && event.posting_skipped_reason"
                       class="text-xs text-neutral-600"
                     >
                       {{ postingReasonLabel(event.posting_skipped_reason) }}
-                    </span>
+                      <RouterLink v-if="postingReasonUnknown(event.posting_skipped_reason)" to="/admin/support" :class="[btnOutline('neutral'), 'mt-1']">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.help" /></svg>
+                        {{ t('nav.support') }}
+                      </RouterLink>
+                      <details v-if="postingReasonUnknown(event.posting_skipped_reason)" class="mt-1">
+                        <summary class="cursor-pointer">{{ t('payroll.payments.preparation.technical_details') }}</summary>
+                        <span class="break-words font-mono">{{ event.posting_skipped_reason }}</span>
+                      </details>
+                    </div>
                   </dd>
                 </div>
               </dl>

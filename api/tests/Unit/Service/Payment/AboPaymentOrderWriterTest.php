@@ -64,6 +64,27 @@ final class AboPaymentOrderWriterTest extends TestCase
         self::assertSame($expected, $this->writer->build($order));
     }
 
+    public function testRaiffeisenbankUsesRequiredHeaderDefaultsAndUppercaseName(): void
+    {
+        $order = [
+            'client_name' => 'Test Client sro',
+            'client_number' => '9876543210',
+            'file_number' => '29',
+            'payer_account_number' => '1000000005',
+            'payer_bank_code' => '5500',
+            'payment_date' => '2026-09-09',
+            'items' => [[
+                'account_number' => '1000000005', 'bank_code' => '0100',
+                'amount_minor' => 10000, 'variable_symbol' => '123',
+            ]],
+        ];
+        $lines = explode("\r\n", $this->writer->build($order));
+        self::assertSame('UHL1090926TEST CLIENT SRO     1234567890001999111111222222', $lines[0]);
+        self::assertSame('1 1501 111111 5500', $lines[1]);
+        self::assertSame('2 000000-1000000005 00000000010000 090926', $lines[2]);
+        self::assertSame('000000-1000000005 000000010000 123 01000000 0000000000 AV:123', $lines[3]);
+    }
+
     /** KS pole = směrový kód banky příjemce (4) + konstantní symbol (4). */
     public function testConstantSymbolFieldEncodesRecipientBankCode(): void
     {

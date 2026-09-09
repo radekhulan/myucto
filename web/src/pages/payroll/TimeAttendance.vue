@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { workSummaryRemediation } from './payrollRemediation'
+import { revealField } from '@/utils/revealField'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import {
@@ -56,6 +58,7 @@ const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
+const pageRoot = ref<HTMLElement | null>(null)
 const primaryModifierLabel = isApplePlatform() ? 'Cmd' : 'Ctrl'
 // Období z odkazu má přednost: kdo sem přijde z přípravy mzdového běhu za
 // srpen, musí vidět srpen. Stránka, která období zahodí a otevře se na
@@ -1043,6 +1046,15 @@ async function saveAveraging() {
   }
 }
 
+async function showWorkSource(item: PayrollTimeOverviewItem, target: string): Promise<void> {
+  closeApproval()
+  await nextTick()
+  const selector = `[data-work-${target}="${item.employment.id}"]`
+  const candidates = [...(pageRoot.value?.querySelectorAll<HTMLElement>(selector) ?? [])]
+  const visible = candidates.find(element => element.getClientRects().length > 0)
+  if (visible?.parentElement) revealField(selector, visible.parentElement)
+}
+
 function closeApproval() {
   approvalItem.value = null
   approvalStandardFund.value = ''
@@ -1924,7 +1936,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div ref="pageRoot" class="space-y-6">
     <header class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 class="text-2xl font-semibold text-neutral-900">{{ t('payroll.time.title') }}</h1>
@@ -2307,6 +2319,7 @@ onMounted(() => {
                 <input
                   :data-grid-pos="`${rowIndex}-${dayIndex}`"
                   :data-test="`grid-cell-${row.item.employment.id}-${day.date}`"
+                  :data-work-entries="day.date === gridDays[0]?.date ? row.item.employment.id : undefined"
                   :value="gridValue(row, day.date)"
                   :disabled="!canWrite || row.item.month.status !== 'open' || gridCellLocked(row, day.date) || gridSaving"
                   :title="gridCellTitle(row, day.date)"
@@ -2420,8 +2433,8 @@ onMounted(() => {
               <td v-if="tbl.isVisible('difference')" class="px-4 py-3" :class="item.summary.difference_minutes === 0 ? 'text-success-600' : 'text-warning-700'">{{ formatPayrollMinutes(item.summary.difference_minutes) }}</td>
               <td v-if="tbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.month.status === 'approved' ? 'bg-success-50 text-success-600' : item.summary.incomplete ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'">{{ t(`payroll.time.status.${item.month.status === 'approved' ? 'approved' : item.summary.incomplete ? 'incomplete' : 'open'}`) }}</span></td>
               <td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2">
-                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
-                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
+                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :data-work-entries="item.employment.id" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
+                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
                 <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" :disabled="saving" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
                 <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openConsent(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('payroll.time.overtime.consent_action') }}</button>
                 <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" :disabled="saving" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
@@ -2503,8 +2516,8 @@ onMounted(() => {
             <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openConsent(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('payroll.time.overtime.consent_action') }}</button>
             <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openProtection(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.lock" /></svg>{{ t('payroll.time.overtime.protection_action') }}</button>
             <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openCompensation(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('payroll.time.overtime.compensation_action') }}</button>
-            <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
-            <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
+            <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :data-work-entries="item.employment.id" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
+            <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
             <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
             <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
           </div>
@@ -2537,7 +2550,19 @@ onMounted(() => {
           class="space-y-1 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700"
         >
           <li v-for="issue in approvalItem.jmhz_work_summary.preview.issues" :key="issue.code">
-            {{ issue.message }}
+            <div data-test="work-summary-guidance">
+              <p class="font-medium">{{ t(workSummaryRemediation(issue.code, approvalItem.employment.id, period).problemKey) }}</p>
+              <p class="mt-1">{{ t(workSummaryRemediation(issue.code, approvalItem.employment.id, period).stepKey) }}</p>
+              <RouterLink v-if="workSummaryRemediation(issue.code, approvalItem.employment.id, period).path" :to="workSummaryRemediation(issue.code, approvalItem.employment.id, period).path!" :class="[btnOutline('warning'), 'mt-2 whitespace-nowrap']" @click="closeApproval">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
+                {{ t(workSummaryRemediation(issue.code, approvalItem.employment.id, period).actionKey) }}
+              </RouterLink>
+              <button v-else type="button" :class="[btnOutline('warning'), 'mt-2 whitespace-nowrap']" @click="showWorkSource(approvalItem, workSummaryRemediation(issue.code, approvalItem.employment.id, period).localTarget)">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
+                {{ t(workSummaryRemediation(issue.code, approvalItem.employment.id, period).actionKey) }}
+              </button>
+            </div>
+            <details class="mt-2 text-xs"><summary>{{ t('payroll.remediation.technical') }}</summary><p>{{ issue.code }}</p><p>{{ issue.message }}</p></details>
           </li>
         </ul>
         <p

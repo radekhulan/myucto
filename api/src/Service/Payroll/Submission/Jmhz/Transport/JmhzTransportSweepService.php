@@ -256,7 +256,9 @@ final readonly class JmhzTransportSweepService
                 (string) $attempt['environment'],
                 (int) $attempt['submission_id'],
             );
-            if ($obligation === null || $obligation['status'] === 'manual_review') {
+            if ($obligation === null
+                || in_array($obligation['status'], ['manual_review', 'fulfilled'], true)
+            ) {
                 return;
             }
             $this->submissionRepository->updateObligationStatus(

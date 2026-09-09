@@ -94,13 +94,13 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
         ): array {
             $revision = $this->liabilities->lockRevision($supplierId, $revisionId);
             if ($revision === null) {
-                throw new \DomainException('Mzdová revize neexistuje.');
+                throw new PayrollPaymentPreparationException('revision_missing', 'Mzdová revize neexistuje.');
             }
             if (($revision['revision_status'] ?? null) !== 'approved'
                 || ($revision['revision_no'] ?? null)
                     !== ($revision['current_revision_no'] ?? null)
             ) {
-                throw new \DomainException(
+                throw new PayrollPaymentPreparationException('revision_not_ready',
                     'Závazek lze vytvořit jen z aktuální schválené revize.',
                 );
             }

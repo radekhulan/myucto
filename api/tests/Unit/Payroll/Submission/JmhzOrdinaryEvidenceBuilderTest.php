@@ -7,10 +7,40 @@ namespace MyInvoice\Tests\Unit\Payroll\Submission;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOrdinaryEvidenceBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOrdinaryEvidenceException;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOrdinaryEvidenceApplicability;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOrdinaryEvidenceApplicabilityException;
 use PHPUnit\Framework\TestCase;
 
 final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
 {
+    public function testAuditedSpecificationUpdateNeedsNoNewPayrollRevision(): void
+    {
+        $source = $this->source();
+        $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(7, $source, 101, $this->facts(), 12, '2026-08-13T12:00:00Z');
+        $payload = $snapshot->payload;
+        $payload['specification'] = array_replace($payload['specification'], [
+            'package_key' => 'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1',
+            'spec_manifest_sha256' => '429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205',
+            'scenario_catalog_key' => 'jmhz-scenario-requirements-1.4.0.2-source-v1',
+            'scenario_manifest_sha256' => 'bb43e8621c713729d534c026379c87e761711c53c42ce7e97377b68b0868b4e0',
+            'control_catalog_key' => 'jmhz-controls-1.4.2.8-source-v4',
+            'control_manifest_sha256' => '83ec6a985cf1c6d6e2429657d4ba6d12b09bfb849a32b504fff882383fb03800',
+        ]);
+        $evidence = ['id' => 1, 'source_manifest_sha256' => str_repeat('a', 64), 'snapshot_fingerprint' => str_repeat('b', 64), 'payload' => $payload];
+        $before = $evidence;
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $applicability = new JmhzOrdinaryEvidenceApplicability();
+        $applicability->assertApplicable($evidence, 7, $source['revision'], 11, 101, $input['people'][0]['employments'][0]['term']);
+        self::assertSame($before, $evidence);
+        $evidence['payload']['specification']['attribute_requirement_row_sha256']['10546'] = str_repeat('c', 64);
+        try {
+            $applicability->assertApplicable($evidence, 7, $source['revision'], 11, 101, $input['people'][0]['employments'][0]['term']);
+            self::fail('Změněný požadavek nesmí projít jako kompatibilní aktualizace.');
+        } catch (JmhzOrdinaryEvidenceApplicabilityException $exception) {
+            self::assertSame('jmhz_ordinary_evidence_specification_mismatch', $exception->validationCode);
+        }
+    }
+
     public function testBuildsExplicitFalseEvidenceFromConsistentApprovedRevision(): void
     {
         $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(
@@ -118,6 +148,7 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
                 'jmhz_ordinary_evidence_monthly_exception_required',
                 $exception->validationCode,
             );
+            self::assertSame(['field' => 'deep_mining_work_applies'], $exception->context);
         }
     }
 
