@@ -161,6 +161,47 @@ final class FinancialStatementTest extends TestCase
         self::assertSame('431', $prior['accounts'][0]['account_code']);
     }
 
+    /**
+     * P-6 — účet 426 „Jiný výsledek hospodaření minulých let" plní VLASTNÍ řádek
+     * A.IV.2. (migrace 1782), ne nadřazený A.IV.1.
+     *
+     * Před opravou 426 v osnově vůbec nebyl a žádný řádek na něj neukazoval: firma,
+     * která si ho založila ručně, měla jeho zůstatek v `unmapped_accounts` a rozvaha
+     * se jí o tu částku NEVYROVNALA. Test proto kontroluje trojici najednou —
+     * bilanční rovnici, prázdné `unmapped_accounts` a křížovou kontrolu
+     * A.IV. = A.IV.1. + A.IV.2.
+     */
+    public function testOtherRetainedEarningsHasOwnRow(): void
+    {
+        // Oprava nesprávnosti minulého období (§ 15a vyhl. 500/2002 Sb.) vedle
+        // běžného nerozděleného zisku — obojí je „výsledek hospodaření minulých let",
+        // ale vyhláška je vykazuje na dvou různých řádcích.
+        $this->manual([
+            self::l('221', 'debit', 700.00),
+            self::l('428', 'credit', 400.00),
+            self::l('426', 'credit', 300.00),
+        ], self::YEAR . '-01-01');
+
+        $bs = $this->statements->balanceSheet($this->supplierId, $this->periodId, self::AS_OF, 'full');
+
+        $group = $this->rowByCode($bs['liabilities'], 'P.A.IV.');
+        $prior = $this->rowByCode($bs['liabilities'], 'P.A.IV.1.');
+        $other = $this->rowByCode($bs['liabilities'], 'P.A.IV.2.');
+
+        self::assertNotNull($other, 'Řádek A.IV.2. musí ve výkazu existovat (migrace 1782).');
+        self::assertSame('A.IV.2.', $other['display_code']);
+        self::assertSame(self::cents(300.00), self::cents($other['amount']), 'A.IV.2. = zůstatek 426.');
+        self::assertSame('426', $other['accounts'][0]['account_code']);
+        self::assertSame(self::cents(400.00), self::cents($prior['amount']), '428 zůstává na A.IV.1.');
+        self::assertSame(
+            self::cents($group['amount']),
+            self::cents($prior['amount']) + self::cents($other['amount']),
+            'Křížová kontrola: A.IV. = A.IV.1. + A.IV.2.',
+        );
+        self::assertSame([], $bs['checks']['unmapped_accounts'], '426 už nesmí zůstat nenamapovaný.');
+        self::assertTrue($bs['checks']['balanced'], 'Rozvaha se se zůstatkem na 426 musí vyrovnat.');
+    }
+
     // ── T10 ───────────────────────────────────────────────────────────────
 
     public function testCorrectionColumnGrossMinusCorrection(): void

@@ -86,6 +86,7 @@
     "price_list",
     "profile_signing",
     "project",
+    "public_holidays",
     "purchase_invoice",
     "purchase_submissions",
     "recovery_codes",
@@ -171,6 +172,7 @@
       "price_list",
       "profile_signing",
       "project",
+      "public_holidays",
       "purchase_invoice",
       "purchase_submissions",
       "recovery_codes",
@@ -709,12 +711,14 @@
     "admin-codebooks": [
       "expense_categories",
       "oss_rates",
+      "public_holidays",
       "revenue_categories",
       "vat_classifications"
     ],
     "admin-tax-constants": [
       "expense_categories",
       "oss_rates",
+      "public_holidays",
       "revenue_categories",
       "vat_classifications"
     ],

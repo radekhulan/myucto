@@ -207,6 +207,7 @@ final class ChartOfAccountsTemplate
         ['code' => '419', 'name' => 'Změny základního kapitálu', 'type' => 'equity', 'normal_side' => null],
         ['code' => '421', 'name' => 'Rezervní fond', 'type' => 'equity', 'normal_side' => 'credit'],
         ['code' => '423', 'name' => 'Statutární fondy', 'type' => 'equity', 'normal_side' => 'credit'],
+        ['code' => '426', 'name' => 'Jiný výsledek hospodaření minulých let', 'type' => 'equity', 'normal_side' => null],
         ['code' => '427', 'name' => 'Ostatní fondy', 'type' => 'equity', 'normal_side' => 'credit'],
         ['code' => '428', 'name' => 'Nerozdělený zisk minulých let', 'type' => 'equity', 'normal_side' => 'credit'],
         ['code' => '429', 'name' => 'Neuhrazená ztráta minulých let', 'type' => 'equity', 'normal_side' => 'debit'],

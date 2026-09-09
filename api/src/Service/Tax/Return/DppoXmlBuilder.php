@@ -160,13 +160,13 @@ final class DppoXmlBuilder
 
     /**
      * Úroveň 2 pod P.B. (Rezervy) — tabulka 24810, platnost=2026. `P.B.1.` (Rezerva na
-     * důchody a podobné závazky, ř. 26) v `statement_rows` nemáme (žádná mapa účtů na ni
-     * neukazuje — chybějící DATA, ne chybějící mapování, viz DANE-PLAN.md dodatek 11),
-     * posílají se tedy jen tři ze čtyř oficiálních podřádků; chybějící přispívá součtu
-     * nulou, ne chybou (stejný princip jako C.II.3. u aktiv/C.III. u pasiv výše).
+     * důchody a podobné závazky, ř. 26) doplnila do `statement_rows` migrace 1664. Žádná
+     * mapa účtů na něj zatím neukazuje, takže vychází nulový a `buildPasivaDetailElements`
+     * ho stejně vynechá — v mapě je proto, aby se dostal do XML ve chvíli, kdy firma
+     * začne rezervu na důchody účtovat, a nemuselo se na to znovu přijít přes výtku EPO.
      */
     private const PASIVA_B_C_RADKU = [
-        ['P.B.2.', 27], ['P.B.3.', 28], ['P.B.4.', 29],
+        ['P.B.1.', 26], ['P.B.2.', 27], ['P.B.3.', 28], ['P.B.4.', 29],
     ];
 
     /**
@@ -178,23 +178,42 @@ final class DppoXmlBuilder
      * row_code rodiče; `buildPasivaDetailElements` do téhle mapy rekurzivně nahlíží pro
      * KAŽDÝ řádek, který sama vypíše (stejný princip jako AKTIVA_DETAIL_C_RADKU), takže
      * pokrývá i úroveň 4 (A.II.2./C.II.8.) jedním mechanismem beze změny volajícího kódu.
-     * `A.IV.2.` (ř. 21, „Jiný výsledek hospodaření minulých let") a `C.I.4./C.I.5./C.I.7.`/
-     * `C.II.7.`/`P.B.1.` chybí ve `statement_rows` (skupina (b), viz DANE-PLAN.md
-     * dodatek 11) — u nich se posílá jen to, co v datech je; chybějící přispívá nulou.
+     * `A.IV.2.` (ř. 21, „Jiný výsledek hospodaření minulých let") tu BÝVALO uvedené jako
+     * chybějící ve `statement_rows`; řádek doplnila migrace 1782 (účet 426) a od té chvíle
+     * musí být i tady — jinak by A.IV. posílalo jen A.IV.1. a jeho vlastní součet by se
+     * o zůstatek 426 rozešel. Číslo řádku 21 je ověřené proti číselníku MF ČR (tabulka
+     * 24810, platnost=2026): číselník mezi 19 (A.IV.1.) a 22 (A.V.) číslo 20 NEPOUŽÍVÁ,
+     * takže je NELZE odvodit aritmeticky z pořadí.
+     *
+     * `C.I.4./C.I.5./C.I.7.`/`C.I.9.1.–9.3.`/`C.II.7.`/`P.B.1.` doplnila do `statement_rows`
+     * migrace 1664 — do téhle mapy se ale nedostaly a jejich zůstatek (478, 472, 362, 474,
+     * 479) se tak v součtu C.I./C.II. objevil, aniž by ho měl kdo vysvětlit. Doplněno spolu
+     * s A.IV.2., čísla ze stejného číselníku: C.I.4.=37, C.I.5.=38, C.I.7.=40,
+     * C.I.9.1.=43, C.I.9.2.=44, C.I.9.3.=45, C.II.7.=55, B.1.=26 (viz PASIVA_B_C_RADKU).
+     * Nové checky to nezavádí: rodiče C.I./C.II./B. se posílaly už předtím, EPO jejich
+     * součet kontrolovalo — jen mu chyběly složky.
+     *
+     * Naopak `C.II.1.` rozvahy-AKTIV (dlouhodobé pohledávky) své podřádky doplněné migrací
+     * 1664 (C.II.1.2./1.3./1.5.1.–5.4.) do AKTIVA_DETAIL_C_RADKU ZÁMĚRNĚ nedostalo:
+     * ten řádek se sice posílá, ale jeho podřádky se dnes neposílají vůbec, takže by je
+     * doplnění zavedlo jako NOVOU křížovou kontrolu EPO — a to je změna, kterou musí
+     * potvrdit zkušební podání, ne úsudek.
      */
     private const PASIVA_DETAIL_C_RADKU = [
         'P.A.I.'    => [['P.A.I.1.', 4], ['P.A.I.2.', 5], ['P.A.I.3.', 6]],
         'P.A.II.'   => [['P.A.II.1.', 8], ['P.A.II.2.', 9]],
         'P.A.II.2.' => [['P.A.II.2.1.', 10], ['P.A.II.2.2.', 11]],
         'P.A.III.'  => [['P.A.III.1.', 16], ['P.A.III.2.', 17]],
-        'P.A.IV.'   => [['P.A.IV.1.', 19]],
+        'P.A.IV.'   => [['P.A.IV.1.', 19], ['P.A.IV.2.', 21]],
         'P.C.I.'    => [
-            ['P.C.I.1.', 32], ['P.C.I.2.', 35], ['P.C.I.3.', 36],
-            ['P.C.I.6.', 39], ['P.C.I.8.', 41], ['P.C.I.9.', 42],
+            ['P.C.I.1.', 32], ['P.C.I.2.', 35], ['P.C.I.3.', 36], ['P.C.I.4.', 37],
+            ['P.C.I.5.', 38], ['P.C.I.6.', 39], ['P.C.I.7.', 40], ['P.C.I.8.', 41],
+            ['P.C.I.9.', 42],
         ],
+        'P.C.I.9.'  => [['P.C.I.9.1.', 43], ['P.C.I.9.2.', 44], ['P.C.I.9.3.', 45]],
         'P.C.II.'   => [
             ['P.C.II.1.', 47], ['P.C.II.2.', 50], ['P.C.II.3.', 51], ['P.C.II.4.', 52],
-            ['P.C.II.5.', 53], ['P.C.II.6.', 54], ['P.C.II.8.', 56],
+            ['P.C.II.5.', 53], ['P.C.II.6.', 54], ['P.C.II.7.', 55], ['P.C.II.8.', 56],
         ],
         'P.C.II.8.' => [
             ['P.C.II.8.1.', 57], ['P.C.II.8.2.', 58], ['P.C.II.8.3.', 59], ['P.C.II.8.4.', 60],
