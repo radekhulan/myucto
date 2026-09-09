@@ -169,6 +169,8 @@ function blankInputs(): Record<string, any> {
       // § 34/4 — odečty na VaV (ř. 242) a odborné vzdělávání (ř. 243).
       rnd_deduction: 0, education_deduction: 0,
       disabled_employees_avg: 0, disabled_employees_severe_avg: 0,
+      // § 35/4 — sleva za zastavenou exekuci (ř. 3 tabulky H přílohy č. 1 II. oddílu).
+      stopped_execution_credit: 0,
       tax_paid_advances: 0, filing_deadline: '', notes: '',
       // Volba účtu pro vrácení přeplatku (null = automaticky, viz bankAccountOptions)
       // a žádost o předání Přílohy do sbírky listin (výchozí ANO, lze vypnout).
@@ -893,6 +895,9 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                   <input type="number" step="0.01" v-model.number="inputs.disabled_employees_avg" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
                 <label class="text-sm">{{ t('taxReturn.disabled_severe_avg') }}
                   <input type="number" step="0.01" v-model.number="inputs.disabled_employees_severe_avg" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
+                <label class="text-sm">{{ t('taxReturn.stopped_execution_credit') }}
+                  <input type="number" v-model.number="inputs.stopped_execution_credit" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" />
+                  <span class="block text-[11px] text-neutral-400 mt-0.5">{{ t('taxReturn.stopped_execution_credit_hint') }}</span></label>
                 <label class="text-sm">{{ t('taxReturn.tax_paid_advances') }}
                   <input type="number" v-model.number="inputs.tax_paid_advances" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
                 <label class="text-sm">{{ t('taxReturn.filing_deadline') }}

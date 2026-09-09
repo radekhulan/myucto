@@ -1590,6 +1590,9 @@ final class TaxReturnService
             $out['education_deduction'] = $this->money($inputs['education_deduction'] ?? 0);
             $out['disabled_employees_avg'] = max(0.0, (float) ($inputs['disabled_employees_avg'] ?? 0));
             $out['disabled_employees_severe_avg'] = max(0.0, (float) ($inputs['disabled_employees_severe_avg'] ?? 0));
+            // § 35 odst. 4 — sleva za zastavenou exekuci (ř. 3 tabulky H, `kc_dpp_f3`).
+            // Z účetnictví se odvodit nedá (nárok zakládá usnesení exekutora), proto vstup.
+            $out['stopped_execution_credit'] = $this->money($inputs['stopped_execution_credit'] ?? 0);
             $out['filing_deadline'] = $this->date($inputs['filing_deadline'] ?? '');
             $out['nace_code'] = $this->text($inputs['nace_code'] ?? '', 10);
             // Účet pro vrácení přeplatku (VetaNP) — volba poplatníka místo tichého výběru

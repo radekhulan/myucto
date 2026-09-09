@@ -427,6 +427,9 @@ final class Bootstrap
                 // takže bez tohohle bindu by podklad ke spojeným osobám zůstal v produkci
                 // navždy prázdný a nikdo by se to nedozvěděl.
                 $c->get(\MyInvoice\Service\Tax\RelatedPartyService::class),
+                // Tabulka C přílohy č. 1 II. oddílu (VetaG) — bez bindu by rozpad zákonných
+                // OP a rezerv zůstal v produkci prázdný a přiznání by k ř. 62/162 přílohu nemělo.
+                $c->get(\MyInvoice\Service\Tax\Return\LegalProvisionLedgerService::class),
             ),
             // JMHZ transport — poslední dva argumenty jsou volitelné kvůli
             // testovacím dvojníkům (falešný VREP, mockovaný ledger), ale

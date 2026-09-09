@@ -48,8 +48,9 @@ Ruční položky, které systém nezná a které **přežijí mezi sezeními**:
 - **DPPO:** odečet ztráty minulých let (§ 34), dary (§ 20/8) — buď souhrnně, nebo **položkově**
   (dary v hodnotě pod **2 000 Kč** se dle § 20/8 neodečtou a systém je vyloučí), **odečet na
   podporu výzkumu a vývoje** (§ 34/4, ř. 242) a **na podporu odborného vzdělávání** (§ 34/4,
-  ř. 243), přepočtený počet zaměstnanců se zdravotním postižením (sleva § 35), zaplacené zálohy
-  na daň a volné položky § 23 zvyšující/snižující základ.
+  ř. 243), přepočtený počet zaměstnanců se zdravotním postižením (sleva § 35), **sleva za
+  zastavené exekuce (§ 35 odst. 4)**, zaplacené zálohy na daň a volné položky § 23
+  zvyšující/snižující základ.
 - **DPFO:** příjmy a sražené zálohy ze **závislé činnosti (§ 6)**, dílčí základy **§ 8/§ 9**
   a položkové druhy příjmů **§ 10** (výdaj se u každého druhu omezí jeho příjmem),
   (kapitál, nájem, ostatní), **samostatný základ daně (§ 16a)**, **odečet daňové ztráty minulých
@@ -64,6 +65,36 @@ poplatník a systém hlídá **pořadí a strop**: odborné vzdělávání se od
 sníženého o ztrátu a o odečet na výzkum a vývoj, limit darů § 20/8 se počítá až ze základu
 sníženého podle § 34. Nevyužitý zbytek odečtu na výzkum a vývoj lze podle § 34 odst. 5 uplatnit
 v následujících **3 obdobích** — tenhle přenos systém neeviduje a upozorní na něj.
+
+#### Sleva za zastavené exekuce (§ 35 odst. 4, DPPO)
+
+Odpovídá výši náhrady, kterou přiznal exekutor v usnesení o zastavení exekuce. Z účetnictví
+ji odvodit nelze — nárok zakládá usnesení, ne doklad — proto se zadává ručně. Vstupuje do
+ř. 3 tabulky H přílohy č. 1 II. oddílu a spolu se slevami za zaměstnance se zdravotním
+postižením do úhrnu na ř. 4 a dál na **ř. 300** přiznání, nejvýše však do výše daně na ř. 290.
+
+#### Opravné položky a rezervy — tabulka C přílohy č. 1 II. oddílu (DPPO)
+
+Účtuje-li firma o zákonných opravných položkách k pohledávkám nebo o zákonné rezervě na
+opravy hmotného majetku, přiznání dostane **tabulku C přílohy č. 1 II. oddílu**. Systém ji
+staví z účetnictví a z uzávěrkového kroku **Opravné položky**:
+
+- **stav** opravných položek a rezerv ke konci období z účtů **391** a **451**,
+- **tvorbu** za období z účtů **558** (zákonné OP) a **552** (zákonná rezerva § 7),
+- **odpis pohledávky** podle § 24 odst. 2 písm. y) z účtu **546** (ř. 12 tabulky),
+- **rozpad podle paragrafu** (§ 8 insolvence, § 8a nepromlčené pohledávky, § 8b ručení
+  za celní dluh, § 8c drobné pohledávky) z volby účetní v kroku Opravné položky.
+
+Paragraf z hlavní knihy odvodit nejde — kontace 558/391 je pro všechny stejná. Proto u každé
+zákonné opravné položky vyberte v uzávěrce sloupec **Paragraf ZoR**. Chybí-li volba, nebo
+zůstatek účtu 391 neodpovídá evidenci kroku, systém rozpad **nevyplní** a přiznání na to
+upozorní varováním — tabulku C pak doplňte ručně v EPO.
+
+Systém eviduje jedinou zákonnou rezervu, a to na opravy hmotného majetku podle § 7 zákona
+o rezervách (kontace 552/451, ř. 25 a 26 tabulky). Rezervu podle § 9, § 10 nebo § 11a–11c
+přesuňte na ř. 27–31 ručně. U zdaňovacího období kratšího než 12 měsíců se ř. 25 a 26 podle
+pokynů nevyplňují a systém na to upozorní. Účetní (daňově neuznatelné) opravné položky na
+účtu 559 a ostatní rezervy na 554/459 do tabulky C nepatří — vykazují se na ř. 40.
 
 #### Samostatný základ daně (§ 16a, DPFO)
 

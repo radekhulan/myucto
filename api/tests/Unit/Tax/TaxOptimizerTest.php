@@ -263,6 +263,23 @@ final class TaxOptimizerTest extends TestCase
         self::assertStringContainsString('3,54 M', $vatHigh['label']);
     }
 
+    /**
+     * Rada „odlož fakturu" musí uvádět AKTUÁLNÍ limit z konstant. Text měl hranici
+     * zapsanou natvrdo jako „2 M", takže po změně `vat_limit_low` radil proti číslu,
+     * se kterým sám nepočítal.
+     */
+    public function testDeferAdviceQuotesLimitFromConstants(): void
+    {
+        $c = $this->c;
+        $c['vat_limit_low'] = 3_000_000.0;
+
+        // Run-rate 250k/měsíc → projekce 3 M, práh se protne v prosinci.
+        $pred = $this->opt->predict($this->profile(), 1_500_000, 6, $c);
+        self::assertNotNull($pred['defer_advice']);
+        self::assertStringContainsString('3 M', $pred['defer_advice']['message']);
+        self::assertStringNotContainsString('2 M', $pred['defer_advice']['message']);
+    }
+
     /** Vedlejší limit jen při is_secondary; měří se proti ZISKU (60 % paušál → zisk 40 %). */
     public function testPredictSecondarySocialThreshold(): void
     {

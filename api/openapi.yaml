@@ -11201,6 +11201,8 @@ paths:
         §8a (18 měs. 50 %, 30 měs. 100 %) a §8c (do 30 000 Kč nad 12 měs. 100 %).
         Od 36 měsíců se automatický návrh vynuluje a položka nese upozornění na možné promlčení.
         Systém návrh jen nabízí — účetní ho per pohledávka potvrdí/upraví v /steps/provisions/run.
+        U již zaúčtované OP nese `existing.legal_section` paragraf zvolený účetní (podklad
+        rozpadu tabulky C přílohy č. 1 II. oddílu DPPO); `null` = nezařazeno.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -11278,6 +11280,11 @@ paths:
                       invoice_id: { type: integer }
                       legal_amount: { type: number, description: "Zákonná OP (558)" }
                       acct_amount: { type: number, description: "Účetní OP nad rámec (559)" }
+                      legal_section:
+                        type: string
+                        nullable: true
+                        enum: ['8', 8a, 8b, 8c]
+                        description: "Paragraf zákona o rezervách u zákonné OP — podklad rozpadu tabulky C přílohy č. 1 II. oddílu DPPO (§8 → ř. 3/4, §8a → ř. 6/7, §8b → ř. 8/9, §8c → ř. 10/11). Neznámá hodnota se uloží jako nezařazeno."
                       note: { type: string }
                 bank_rows:
                   type: array

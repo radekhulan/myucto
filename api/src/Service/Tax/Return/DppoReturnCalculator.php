@@ -98,6 +98,10 @@ final class DppoReturnCalculator
         $warnings = array_merge($warnings, $donationWarnings);
         $disabledAvg = max(0.0, (float) ($inputs['disabled_employees_avg'] ?? 0));
         $disabledSevereAvg = max(0.0, (float) ($inputs['disabled_employees_severe_avg'] ?? 0));
+        // § 35 odst. 4 ZDP — sleva za zastavenou exekuci (ř. 3 tabulky H, `kc_dpp_f3`).
+        // Odvodit z účetnictví nelze: nárok vzniká usnesením exekutora o zastavení exekuce,
+        // ne účetním dokladem. Proto ruční vstup.
+        $stoppedExecutionCredit = max(0.0, round((float) ($inputs['stopped_execution_credit'] ?? 0), 2));
         $advancesPaid = max(0.0, round((float) ($inputs['tax_paid_advances'] ?? 0), 2));
 
         // ── Konstanty ───────────────────────────────────────────────────────
@@ -216,10 +220,11 @@ final class DppoReturnCalculator
         // ř.290 daň
         $taxGross = round($roundedBase * $rate, 2);
 
-        // ř.300 slevy §35 (zaměstnanci se ZP)
+        // ř.300 slevy §35 = úhrn ř. 4 tabulky H (ř.1 zaměstnanci se ZP + ř.2 TZP + ř.3
+        // zastavené exekuce §35/4), omezený výší daně na ř. 290.
         $disabledCredit = round($disabledAvg * $creditPerDisabled, 2);
         $severeDisabledCredit = round($disabledSevereAvg * $creditPerSevere, 2);
-        $creditsEntitlement = round($disabledCredit + $severeDisabledCredit, 2);
+        $creditsEntitlement = round($disabledCredit + $severeDisabledCredit + $stoppedExecutionCredit, 2);
         $credits = min($creditsEntitlement, $taxGross);
         if ($creditsEntitlement > $credits) {
             $warnings[] = 'Sleva §35 byla omezena výší daně na ř. 290; neuplatněný nárok činí '
@@ -306,7 +311,7 @@ final class DppoReturnCalculator
             $this->line(260, '260', 'Odečet darů (§20/8)', $donationApplied, 'ruční vstup, cap ' . (int) round($donationCapPct * 100) . ' %'),
             $this->line(270, '270', 'Základ daně zaokrouhlený (dolů na tis. Kč)', (float) $roundedBase, 'zaokrouhlení'),
             $this->line(290, '290', 'Daň (' . $this->pct($rate) . ' §21)', $taxGross, 'základ × sazba'),
-            $this->line(300, '300', 'Slevy na dani (§35 — zaměstnanci se ZP)', $credits, 'ruční vstup'),
+            $this->line(300, '300', 'Slevy na dani (§35 — zaměstnanci se ZP, zastavené exekuce)', $credits, 'ruční vstup'),
             $this->line(310, '310', 'Daň po slevách', $taxAfterCredits, 'mezisoučet'),
             $this->line(340, '340', 'Celková daňová povinnost', $totalTax, 'výsledná daň'),
             $this->line(360, '360', 'Poslední známá daň pro stanovení záloh (§38a)', $totalTax, 'ř. 340'),
@@ -324,6 +329,7 @@ final class DppoReturnCalculator
             'depreciation_by_group' => (array) ($data['depreciation_by_group'] ?? ['tangible' => [], 'intangible' => 0.0, 'unclassified' => 0.0]),
             'related_party_country_flag' => (string) ($data['related_party_country_flag'] ?? 'N'),
             'related_party_appendix' => (array) ($data['related_party_appendix'] ?? []),
+            'legal_provisions' => (array) ($data['legal_provisions'] ?? LegalProvisionLedgerService::empty()),
             'bank_account' => $data['bank_account'] ?? null,
             'manual_increase_items_line62' => $line62Items,
             'summary' => [
@@ -338,6 +344,7 @@ final class DppoReturnCalculator
                 'disabled_employee_severe_credit_amount' => $severeDisabledCredit,
                 'disabled_employees_avg' => $disabledAvg,
                 'disabled_employees_severe_avg' => $disabledSevereAvg,
+                'stopped_execution_credit_amount' => $stoppedExecutionCredit,
                 'total_tax' => $totalTax,
                 'balance_due' => $balanceDue,
                 'loss_applied' => $lossApplied,

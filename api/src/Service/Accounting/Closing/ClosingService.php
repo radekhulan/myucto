@@ -1926,6 +1926,11 @@ final class ClosingService
                     'entry_id' => (int) ($existing['entry_id'] ?? 0),
                     'legal_amount' => round((float) ($existing['legal_amount'] ?? 0), 2),
                     'acct_amount' => round((float) ($existing['acct_amount'] ?? 0), 2),
+                    // Paragraf, pod kterým účetní zákonnou OP uplatnila — jediný podklad
+                    // pro rozpad tabulky C přílohy č. 1 II. oddílu DPPO (VetaG, ř. 6/7 §8a
+                    // vs ř. 10/11 §8c). Z hlavní knihy ho odvodit nelze: 558/391 je pro
+                    // všechny paragrafy stejná kontace.
+                    'legal_section' => $existing['legal_section'] ?? null,
                 ],
             ];
         }
@@ -2017,6 +2022,10 @@ final class ClosingService
                 $legal = round(max(0.0, (float) ($raw['legal_amount'] ?? 0)), 2);
                 $acct = round(max(0.0, (float) ($raw['acct_amount'] ?? 0)), 2);
                 $total = round($legal + $acct, 2);
+                // Paragraf ZoR, pod kterým se zákonná OP uplatňuje. Bez něj je částka
+                // v tabulce C DPPO nezařaditelná (§8 / §8a / §8b / §8c mají vlastní řádky)
+                // a builder VetaG na to upozorní — proto se ukládá, ne dopočítává.
+                $legalSection = self::normalizeLegalSection($raw['legal_section'] ?? null);
 
                 if ((int) round($total * 100) === 0) {
                     $dump = $this->closing->deleteClosingEntry($supplierId, 'provision', $invoiceId);
@@ -2080,6 +2089,7 @@ final class ClosingService
                     'receivable_no' => $receivableNo,
                     'legal_amount' => $legal,
                     'acct_amount' => $acct,
+                    'legal_section' => $legalSection,
                     'total' => $total,
                     'note' => $note !== '' ? $note : null,
                     'created_at' => date('Y-m-d H:i:s'),
@@ -2191,6 +2201,21 @@ final class ClosingService
             return ['8a', 0.5];
         }
         return [null, 0.0];
+    }
+
+    /**
+     * Paragraf zákona o rezervách, pod kterým se zákonná OP k pohledávce uplatňuje.
+     * Whitelist odpovídá řádkům tabulky C přílohy č. 1 II. oddílu DPPO ({@see
+     * \MyInvoice\Service\Tax\Return\DppoXmlBuilder} buildVetaG): §8 (insolvence),
+     * §8a (nepromlčené pohledávky), §8b (ručení za celní dluh), §8c (drobné pohledávky).
+     * Cokoli jiného = nezařazeno (null), builder na to upozorní.
+     */
+    private static function normalizeLegalSection(mixed $value): ?string
+    {
+        $section = strtolower(trim((string) ($value ?? '')));
+        $section = ltrim($section, "§ \t");
+
+        return in_array($section, ['8', '8a', '8b', '8c'], true) ? $section : null;
     }
 
     // ── krok „daň z příjmů" (D11, 591/341) ────────────────────────────────────
