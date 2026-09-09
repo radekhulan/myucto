@@ -127,6 +127,14 @@ final class StockCatalogListTest extends StockTestCase
         self::assertSame(1, $total);
         self::assertSame([$matching], array_column($rows, 'id'));
         self::assertNotContains($other, array_column($rows, 'id'));
+        $facets = $this->itemsRepo->facets($sid, ['category_id' => $rootId], 1);
+        self::assertSame(1, $facets['total']);
+        self::assertSame($manufacturerId, $facets['manufacturers']['items'][0]['id']);
+        self::assertSame($vendorId, $facets['vendors']['items'][0]['id']);
+        self::assertSame($tagId, $facets['tags']['items'][0]['id']);
+        self::assertSame(1, $facets['categories']['items'][0]['count']);
+        self::assertTrue($facets['categories']['truncated']);
+        self::assertSame(1, $facets['availability'][1]['count']);
     }
 
     public function testMissingDataAndAvailabilityFiltersAreAppliedOnServer(): void

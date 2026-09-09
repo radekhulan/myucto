@@ -111,6 +111,37 @@ final class StockItemRepository
         return [$rows, $total];
     }
 
+    public function neighbors(int $supplierId, int $itemId, array $filters, ?array $ids = null, array $excludedIds = []): array
+    {
+        $parts = $this->buildListQueryParts($supplierId, $filters);
+        $where = $parts['where'];
+        $params = $parts['params'];
+        foreach ([[$ids, false], [$excludedIds, true]] as [$selection, $exclude]) {
+            if ($selection === null || ($exclude && $selection === [])) {
+                continue;
+            }
+            $where .= ' AND si.id ' . ($exclude ? 'NOT IN' : 'IN')
+                . " (SELECT selected.id FROM JSON_TABLE(?, '$[*]' COLUMNS(id BIGINT PATH '$')) selected)";
+            $params[] = json_encode($selection, JSON_THROW_ON_ERROR);
+        }
+        $order = $this->orderBy($filters);
+        $statement = $this->db->pdo()->prepare(
+            'WITH ordered AS (
+                SELECT si.id, LAG(si.id) OVER (ORDER BY ' . $order . ') AS previous_id,
+                       LEAD(si.id) OVER (ORDER BY ' . $order . ') AS next_id,
+                       ROW_NUMBER() OVER (ORDER BY ' . $order . ') AS position,
+                       COUNT(*) OVER () AS total
+                  FROM stock_items si' . $parts['join'] . ' WHERE ' . $where . '
+            )
+            SELECT current.previous_id, current.next_id, current.position, COALESCE(summary.total, 0) AS total
+              FROM (SELECT MAX(total) AS total FROM ordered) summary
+              LEFT JOIN ordered current ON current.id = ?'
+        );
+        $statement->execute([...$params, $itemId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        return array_map(static fn ($value): ?int => $value === null ? null : (int) $value, $row);
+    }
+
     public function snapshotCatalogSelection(int $supplierId, int $jobId, array $filters, array $excludedIds = [], int $maximum = 30000): int
     {
         $pdo = $this->db->pdo();
@@ -147,6 +178,45 @@ final class StockItemRepository
             . implode(',', array_fill(0, count($ids), '?')) . ')');
         $stmt->execute([$supplierId, ...$ids]);
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+    }
+
+    public function facets(int $supplierId, array $filters, int $limit = 100): array
+    {
+        $limit = max(1, min(500, $limit));
+        $parts = $this->buildListQueryParts($supplierId, $filters);
+        $base = ' FROM stock_items si' . $parts['join'];
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) AS total,
+            COALESCE(SUM(COALESCE(stock.qty, 0) > 0), 0) AS in_stock,
+            COALESCE(SUM(COALESCE(stock.qty, 0) <= 0), 0) AS out_of_stock,
+            COALESCE(SUM(si.min_qty IS NOT NULL AND COALESCE(stock.qty, 0) < si.min_qty), 0) AS below_min'
+            . $base . ' WHERE ' . $parts['where']);
+        $stmt->execute($parts['params']);
+        $counts = $stmt->fetch(PDO::FETCH_ASSOC);
+        $result = ['total' => (int) $counts['total'], 'availability' => []];
+        foreach (self::AVAILABILITY_FILTERS as $value) {
+            $result['availability'][] = ['value' => $value, 'count' => (int) $counts[$value]];
+        }
+        $definitions = [
+            'manufacturers' => ['JOIN manufacturers f ON f.supplier_id = si.supplier_id AND f.id = si.manufacturer_id', 'f.name'],
+            'vendors' => ['JOIN stock_item_vendors v ON v.supplier_id = si.supplier_id AND v.stock_item_id = si.id AND v.is_active = 1
+                JOIN clients f ON f.supplier_id = v.supplier_id AND f.id = v.client_id', 'f.company_name'],
+            'categories' => ['JOIN stock_item_categories ic ON ic.supplier_id = si.supplier_id AND ic.stock_item_id = si.id
+                JOIN stock_categories c ON c.supplier_id = ic.supplier_id AND c.id = ic.category_id
+                JOIN stock_categories f ON f.supplier_id = c.supplier_id AND c.path LIKE CONCAT(f.path, \'%\')', 'f.name'],
+            'tags' => ['JOIN stock_item_tags it ON it.supplier_id = si.supplier_id AND it.stock_item_id = si.id
+                JOIN stock_tags f ON f.supplier_id = it.supplier_id AND f.id = it.tag_id', 'f.name'],
+        ];
+        foreach ($definitions as $name => [$join, $label]) {
+            $stmt = $this->db->pdo()->prepare('SELECT f.id, ' . $label . ' AS name, COUNT(DISTINCT si.id) AS count'
+                . $base . ' ' . $join . ' WHERE ' . $parts['where']
+                . ' GROUP BY f.id, ' . $label . ' ORDER BY count DESC, f.id LIMIT ' . ($limit + 1));
+            $stmt->execute($parts['params']);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $result[$name] = ['truncated' => count($rows) > $limit, 'items' => array_map(static fn (array $row): array => [
+                'id' => (int) $row['id'], 'name' => $row['name'], 'count' => (int) $row['count'],
+            ], array_slice($rows, 0, $limit))];
+        }
+        return $result;
     }
 
     /**

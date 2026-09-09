@@ -909,6 +909,9 @@ const orderedNav = computed(() => nav.orderedSections(navSections.value))
 const isDesktop = ref(false)
 const compactNavigationFits = ref(false)
 let desktopResizeObserver: ResizeObserver | null = null
+const appFooter = ref<HTMLElement | null>(null)
+const appFooterHeight = ref(48)
+let footerResizeObserver: ResizeObserver | null = null
 const desktopNavHost = ref<HTMLElement | null>(null)
 const sideSupplierHost = ref<HTMLElement | null>(null)
 const autoSideNavigation = ref(false)
@@ -1397,6 +1400,10 @@ onMounted(async () => {
   void keyboardShortcuts.load()
   window.addEventListener('keydown', onGlobalShortcut)
   window.addEventListener('resize', scheduleDesktopStateUpdate)
+  footerResizeObserver = new ResizeObserver(() => {
+    appFooterHeight.value = appFooter.value?.getBoundingClientRect().height ?? 0
+  })
+  if (appFooter.value) footerResizeObserver.observe(appFooter.value)
   desktopResizeObserver = new ResizeObserver(updateDesktopState)
   desktopResizeObserver.observe(document.body)
   desktopResizeObserver.observe(document.documentElement)
@@ -1417,6 +1424,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalShortcut)
   window.removeEventListener('resize', scheduleDesktopStateUpdate)
+  footerResizeObserver?.disconnect()
   desktopResizeObserver?.disconnect()
   navResizeObserver?.disconnect()
   if (desktopStateFrame !== null) cancelAnimationFrame(desktopStateFrame)
@@ -1425,7 +1433,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col overflow-x-clip bg-neutral-50" @keydown.esc="userMenuOpen = false; navigationLayoutOpen = false">
+  <div :style="{ '--app-footer-height': `${appFooterHeight}px` }" class="min-h-screen flex flex-col overflow-x-clip bg-neutral-50" @keydown.esc="userMenuOpen = false; navigationLayoutOpen = false">
 
     <!-- ═════════════════════ TOPBAR ═════════════════════ -->
     <header class="nav-inverted sticky top-0 z-30 bg-surface border-b border-neutral-200 shadow-md">
@@ -1889,7 +1897,7 @@ onBeforeUnmount(() => {
         <!-- Patička je stejné „chrome" jako topbar (globální hledání, jazyk, motiv),
              takže nosí i stejnou tmavou plochu. Světlá patička pod tmavou lištou
              působila jako nedodělaná půlka — takhle obsah rámují z obou stran. -->
-        <footer class="nav-inverted sticky bottom-0 z-20 border-t border-neutral-200 bg-surface shadow-[0_-2px_10px_rgba(21,19,29,0.10)]">
+        <footer ref="appFooter" class="nav-inverted sticky bottom-0 z-20 border-t border-neutral-200 bg-surface shadow-[0_-2px_10px_rgba(21,19,29,0.10)]">
           <div class="hidden lg:grid h-11 grid-cols-[minmax(14rem,1fr)_auto_minmax(14rem,1fr)] 2xl:grid-cols-[minmax(14rem,1fr)_auto_minmax(23rem,1fr)] items-center gap-4 px-3">
             <div class="flex w-full max-w-lg items-center gap-2">
               <div class="min-w-0 flex-1">

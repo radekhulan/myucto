@@ -14,6 +14,10 @@ final class CatalogJobDispatcher
     public const HANDLERS = [
         'price_recompute' => CatalogPriceJobService::class,
         'stock_valuation' => StockValuationJobService::class,
+        'catalog_bulk_preview' => CatalogBulkWorker::class,
+        'catalog_bulk_apply' => CatalogBulkWorker::class,
+        'catalog_bulk_restore' => CatalogBulkWorker::class,
+        'catalog_export' => CatalogExportWorker::class,
     ];
 
     public function __construct(private readonly Connection $db, private readonly ContainerInterface $container) {}
@@ -27,7 +31,10 @@ final class CatalogJobDispatcher
         $stats = ['processed' => 0, 'failed' => 0];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $lane) {
             try {
-                $result = $this->container->get(self::HANDLERS[$lane['kind']])->tick((int) $lane['supplier_id'], $maxBatches);
+                $handler = $this->container->get(self::HANDLERS[$lane['kind']]);
+                $result = method_exists($handler, 'tickKind')
+                    ? $handler->tickKind((int) $lane['supplier_id'], $lane['kind'], $maxBatches)
+                    : $handler->tick((int) $lane['supplier_id'], $maxBatches);
                 if ($result !== null) {
                     $stats['processed']++;
                 }

@@ -63,25 +63,31 @@ final class PriceWriteService
             }
             $mode = (string) ($row['price_mode'] ?? 'markup');
             $rounding = (string) ($row['rounding'] ?? 'none');
-            if (!in_array($mode, ['fixed', 'markup'], true)
+            $useRules = (bool) ($row['use_pricing_rules'] ?? false);
+            if (!in_array($mode, ['fixed', 'markup', 'target_margin'], true)
                 || !in_array($rounding, ['none', '0.01', '0.10', '0.50', '1', '9_ending'], true)) {
                 throw new \InvalidArgumentException('Neplatné cenové pravidlo.');
             }
             $markup = $this->decimal($row['markup_pct'] ?? null, 4, 3);
             $fixed = $this->decimal($row['fixed_price'] ?? null, 10, 2);
-            if ($mode === 'fixed' && $fixed === null) {
+            if (!$useRules && $mode === 'fixed' && $fixed === null) {
                 throw new \InvalidArgumentException('Pevná cena musí být zadaná.');
             }
             if (($fixed !== null && bccomp($fixed, '0', 2) < 0)
                 || ($markup !== null && bccomp($markup, '-100', 4) < 0)) {
                 throw new \InvalidArgumentException('Cena ani přirážka nesmí vytvářet zápornou cenu.');
             }
+            if ($mode === 'target_margin'
+                && ($markup !== null && (bccomp($markup, '0', 4) < 0 || bccomp($markup, '100', 4) >= 0))) {
+                throw new \InvalidArgumentException('Cílová marže musí být od 0 včetně do 100 procent bez 100.');
+            }
             $prepared[$currency] = [
                 'price_mode' => $mode,
-                'markup_pct' => $mode === 'markup' ? ($markup ?? '0.0000') : $markup,
+                'markup_pct' => in_array($mode, ['markup', 'target_margin'], true) ? ($markup ?? '0.0000') : $markup,
                 'fixed_price' => $fixed,
                 'rounding' => $rounding,
                 'is_manual_override' => (bool) ($row['is_manual_override'] ?? false),
+                'use_pricing_rules' => $useRules,
             ];
         }
         return $prepared;

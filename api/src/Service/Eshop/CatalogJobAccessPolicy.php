@@ -25,6 +25,9 @@ final class CatalogJobAccessPolicy
             return RequestAuthorization::allows($request, 'stock', $write ? AccessLevel::WRITE : AccessLevel::READ);
         }
         if (str_starts_with($kind, 'catalog_bulk_') || str_starts_with($kind, 'catalog_import_')) {
+            if ($write && !RequestAuthorization::isSessionAuth($request)) {
+                return false;
+            }
             return RequestAuthorization::allows($request, 'eshop.write', AccessLevel::WRITE)
                 && RequestAuthorization::allows($request, 'stock.items.write', AccessLevel::WRITE);
         }

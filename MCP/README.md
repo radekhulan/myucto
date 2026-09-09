@@ -162,6 +162,16 @@ Ploché číselníky (výrobci, štítky, poplatky, parametry) generuje `codeboo
 pětice seznam/detail/založit/upravit/smazat z jedné konfigurace. Další číselník
 stejného tvaru je tedy jeden objekt, ne pět nástrojů psaných ručně.
 
+Pro čtení většího výběru katalogu slouží `get_products_batch` (nejvýš 500
+karet) a `get_product_prices_batch` (nejvýš 500 kombinací karty a množství).
+Oba používají čtecí POST, aby se vešel strukturovaný vstup, ale klient je při
+přechodném výpadku opakuje stejně bezpečně jako GET. Běžné POST zápisy se
+neopakují.
+
+`list_products` podporuje výrobce, dodavatele, kategorii, štítky a chybějící
+údaje. `get_catalog_facets` vrací počty hodnot filtrů nad celou množinou;
+`get_catalog_job` načte průběh a souhrnný výsledek dostupné katalogové úlohy.
+
 ## Logování
 
 Každý požadavek nese `X-MyUcto-Client: mcp`, `X-MyUcto-Client-Version` a

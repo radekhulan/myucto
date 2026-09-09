@@ -15,6 +15,16 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 
 final class ApiScopeMiddlewareTest extends TestCase
 {
+    public function testCatalogReadPostHasExactReadScopeException(): void
+    {
+        foreach (['/api/catalog/products/batch', '/api/catalog/prices/batch', '/api/catalog/exports', '/api/stock/items/42/neighbors'] as $path) {
+            self::assertSame(204, $this->middleware()->process($this->bearer('POST', $path, 'read'), $this->okHandler())->getStatusCode());
+            self::assertSame(403, $this->middleware()->process($this->bearer('DELETE', $path, 'read'), $this->okHandler())->getStatusCode());
+        }
+        self::assertSame(403, $this->middleware()->process($this->bearer('POST', '/api/catalog/products/batch/apply', 'read'), $this->okHandler())->getStatusCode());
+        self::assertSame(403, $this->middleware()->process($this->bearer('POST', '/api/stock/items/42/neighbors/apply', 'read'), $this->okHandler())->getStatusCode());
+    }
+
     public function testSessionRequestPassesThroughEvenOnAdminPath(): void
     {
         // Non-bearer (session) request — ApiScope ho neřeší vůbec.

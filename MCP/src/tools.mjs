@@ -425,6 +425,22 @@ const PRODUCT_I18N_ROWS = arrayOf(
   ['locale', 'name'],
 );
 
+const CATALOG_BATCH_FIELDS = [
+  'sku', 'name', 'item_type', 'unit', 'ean', 'manufacturer_id', 'vat_rate_id',
+  'is_active', 'is_stocked', 'export_eshop', 'min_qty', 'weight_g',
+  'warranty_months', 'delivery_days', 'i18n', 'categories', 'tag_ids',
+  'attributes', 'fees', 'media', 'prices', 'availability', 'costs',
+];
+
+const CATALOG_BATCH_IDS = {
+  type: 'array',
+  description: 'ID skladových karet v požadovaném pořadí, nejvýš 500.',
+  items: { type: 'integer', minimum: 1 },
+  minItems: 1,
+  maxItems: 500,
+  uniqueItems: true,
+};
+
 const STOCK_DOC_LINES = arrayOf(
   'Řádky dokladu. Při úpravě dokladu se stávající řádky NAHRAZUJÍ tímto seznamem.',
   {
@@ -2607,6 +2623,13 @@ export const TOOLS = [
       type: str('Typ karty.', { enum: ['goods', 'material', 'product'] }),
       active: bool('Jen aktivní (true) nebo jen neaktivní (false) karty.'),
       only_below_min: bool('Jen položky pod minimální zásobou.'),
+      manufacturer_id: int('ID výrobce.', { minimum: 1 }),
+      vendor_id: int('ID dodavatele.', { minimum: 1 }),
+      category_id: int('ID kategorie včetně podkategorií.', { minimum: 1 }),
+      warehouse_id: int('Sklad pro dostupnost.', { minimum: 1 }),
+      tag_ids: { type: 'array', items: { type: 'integer', minimum: 1 }, maxItems: 100, description: 'Požadované štítky.' },
+      availability: str('Dostupnost.', { enum: ['in_stock', 'out_of_stock', 'below_min'] }),
+      missing: { type: 'array', items: { type: 'string', enum: ['manufacturer', 'category', 'image', 'price', 'ean'] }, maxItems: 5 },
       ...PAGING,
     }),
     write: false,
@@ -2615,6 +2638,13 @@ export const TOOLS = [
       type: a.type,
       active: a.active === undefined ? undefined : (a.active ? 1 : 0),
       only_below_min: a.only_below_min,
+      manufacturer_id: a.manufacturer_id,
+      vendor_id: a.vendor_id,
+      category_id: a.category_id,
+      warehouse_id: a.warehouse_id,
+      tag_ids: a.tag_ids?.join(','),
+      availability: a.availability,
+      missing: a.missing?.join(','),
       page: a.page,
       per_page: a.per_page,
     }, tool),
@@ -2629,6 +2659,84 @@ export const TOOLS = [
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/eshop/products/${a.id}`, null, tool),
+  },
+  {
+    name: 'get_catalog_facets',
+    title: 'Počty hodnot katalogových filtrů',
+    description: 'Vrací počty výrobců, dodavatelů, kategorií, štítků a dostupnosti v celé filtrované množině. Každá faseta uvádí případné omezení počtu hodnot příznakem truncated.',
+    inputSchema: schema({
+      query: str('Název, SKU nebo EAN.'),
+      manufacturer_id: int('ID výrobce.', { minimum: 1 }),
+      vendor_id: int('ID dodavatele.', { minimum: 1 }),
+      category_id: int('ID kategorie včetně podkategorií.', { minimum: 1 }),
+      warehouse_id: int('ID skladu.', { minimum: 1 }),
+      active: bool('Jen aktivní nebo jen neaktivní karty.'),
+      limit: int('Nejvýše hodnot v každé fasetě.', { minimum: 1, maximum: 500 }),
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/catalog/facets', {
+      q: a.query, manufacturer_id: a.manufacturer_id, vendor_id: a.vendor_id,
+      category_id: a.category_id, warehouse_id: a.warehouse_id,
+      active: a.active === undefined ? undefined : Number(a.active), limit: a.limit,
+    }, tool),
+  },
+  {
+    name: 'get_catalog_job',
+    title: 'Průběh katalogové úlohy',
+    description: 'Načte průběh a souhrnný výsledek katalogové úlohy v aktuální firmě. Dostupnost závisí na oprávnění pro konkrétní druh úlohy.',
+    inputSchema: schema({ id: int('ID úlohy.', { minimum: 1 }) }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/eshop/jobs/${a.id}`, null, tool),
+  },
+  {
+    name: 'get_products_batch',
+    title: 'Dávkový detail zboží',
+    description:
+      'Načte vybraná pole až 500 karet v jednom čtecím požadavku. Položky odpovědi '
+      + 'zůstávají ve stejném pořadí jako `ids`; cizí nebo chybějící karta je označena '
+      + 'jako `unavailable`, bez rozlišení důvodu. Bez `fields` vrací SKU, název, EAN a aktivitu.',
+    inputSchema: schema({
+      ids: CATALOG_BATCH_IDS,
+      fields: {
+        type: 'array',
+        description: 'Sekce karty k načtení. `costs` vyžaduje interní oprávnění pro zápis.',
+        items: { type: 'string', enum: CATALOG_BATCH_FIELDS },
+        minItems: 1,
+        maxItems: CATALOG_BATCH_FIELDS.length,
+        uniqueItems: true,
+      },
+      locales: {
+        type: 'array',
+        description: 'Omezí překlady na uvedené kódy jazyků.',
+        items: {
+          type: 'string',
+          pattern: '^[a-z]{2}(?:-[A-Z]{2})?$',
+        },
+        minItems: 1,
+        maxItems: 20,
+        uniqueItems: true,
+      },
+      currencies: {
+        type: 'array',
+        description: 'Omezí ceny na uvedené ISO kódy měn.',
+        items: { type: 'string', pattern: '^[A-Za-z]{3}$' },
+        minItems: 1,
+        maxItems: 10,
+        uniqueItems: true,
+      },
+      warehouse_ids: {
+        type: 'array',
+        description: 'Sklady pro výpočet dostupnosti.',
+        items: { type: 'integer', minimum: 1 },
+        minItems: 1,
+        maxItems: 50,
+        uniqueItems: true,
+      },
+    }, ['ids']),
+    write: false,
+    run: (c, a, tool) => c.postRead('/catalog/products/batch', changed(a, [
+      'ids', 'fields', 'locales', 'currencies', 'warehouse_ids',
+    ]), tool),
   },
   {
     name: 'create_product',
@@ -2824,6 +2932,38 @@ export const TOOLS = [
     inputSchema: schema({ id: int('ID zboží.') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/eshop/products/${a.id}/prices`, null, tool),
+  },
+  {
+    name: 'get_product_prices_batch',
+    title: 'Dávkové efektivní ceny zboží',
+    description:
+      'Vrátí efektivní prodejní cenu až 500 položek pro požadované množství. '
+      + 'Měna je výchozí CZK; položky odpovědi zachovávají pořadí vstupu.',
+    inputSchema: schema({
+      items: arrayOf(
+        'Položky s ID zboží a množstvím jako desetinný řetězec.',
+        {
+          id: int('ID skladové karty.', { minimum: 1 }),
+          qty: str('Kladné množství jako desetinný řetězec, například `2.5`.', {
+            pattern: '^[0-9]{1,11}(?:\\.[0-9]{1,3})?$',
+          }),
+        },
+        ['id', 'qty'],
+        { minItems: 1, maxItems: 500 },
+      ),
+      currency: str('ISO kód měny. Výchozí CZK.', {
+        minLength: 3,
+        maxLength: 3,
+        default: 'CZK',
+      }),
+      on_date: date('Datum účinnosti ceny (RRRR-MM-DD).'),
+    }, ['items']),
+    write: false,
+    run: (c, a, tool) => c.postRead('/catalog/prices/batch', {
+      items: a.items,
+      currency: a.currency ?? 'CZK',
+      ...(a.on_date === undefined ? {} : { on_date: a.on_date }),
+    }, tool),
   },
   {
     name: 'set_product_prices',

@@ -20,7 +20,7 @@ info:
     nový.
 
     Token má:
-    - **scope** — `read` (pouze GET) nebo `read_write` (všechny operace).
+    - **scope** — `read` (GET a výslovně čtecí POST katalogových dávek) nebo `read_write` (všechny povolené operace).
     - **supplier** — pokud je token bound na konkrétního supplier-a, všechny operace
       se odehrávají v jeho kontextu. Pokud je `supplier` `null`, klient může
       přepínat přes hlavičku `X-Supplier-Id: <id>`.
@@ -13087,20 +13087,25 @@ paths:
       summary: Seznam cen karty zboží (per měna)
       responses:
         '200':
-          description: OK
+          description: Ceny včetně původu posledního výpočtu
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EshopPrice' }
         '404':
           $ref: '#/components/responses/NotFound'
     put:
       tags:
       - Eshop
       summary: Uloží ceny karty zboží (bulk) a přepočte je
-      description: 'Nahradí ceny (`prices`) — měny, které v payloadu nejsou, se smažou.
+      description: 'Doplní nebo upraví ceny (`prices`). Neuvedené měny zůstanou zachovány.
 
-        Každý řádek: `currency_code` (ISO 4217), `price_mode` (markup/fixed),
+        Každý řádek: `currency_code` (ISO 4217), `price_mode` (markup/target_margin/fixed),
 
         `markup_pct`, `fixed_price` (povinná u `fixed`), `rounding`,
 
-        `is_manual_override`. Po zápisu se vždy spustí přepočet ceny.
+        `is_manual_override`, `use_pricing_rules`. Po zápisu se vždy spustí přepočet ceny.
 
         '
       requestBody:
@@ -13113,41 +13118,7 @@ paths:
                 prices:
                   type: array
                   items:
-                    type: object
-                    required:
-                    - currency_code
-                    properties:
-                      currency_code:
-                        type: string
-                        minLength: 3
-                        maxLength: 3
-                      price_mode:
-                        type: string
-                        enum:
-                        - markup
-                        - fixed
-                        default: markup
-                      markup_pct:
-                        type:
-                        - number
-                        - 'null'
-                      fixed_price:
-                        type:
-                        - number
-                        - 'null'
-                      rounding:
-                        type: string
-                        enum:
-                        - none
-                        - '0.01'
-                        - '0.10'
-                        - '0.50'
-                        - '1'
-                        - 9_ending
-                        default: none
-                      is_manual_override:
-                        type: boolean
-                        default: false
+                    $ref: '#/components/schemas/EshopPriceInput'
                 row_version:
                   type: integer
                   minimum: 1
@@ -13165,7 +13136,7 @@ paths:
                 oneOf:
                 - type: array
                   items:
-                    type: object
+                    $ref: '#/components/schemas/EshopPrice'
                 - type: object
                   required:
                   - prices
@@ -13174,7 +13145,7 @@ paths:
                     prices:
                       type: array
                       items:
-                        type: object
+                        $ref: '#/components/schemas/EshopPrice'
                     row_version:
                       type: integer
                       minimum: 1
@@ -13183,7 +13154,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: version_conflict
+          description: version_conflict nebo stale_price_input
+        '422':
+          description: missing_pricing_rule, missing_pricing_exchange_rate, stale_pricing_exchange_rate nebo missing_purchase_cost
     patch:
       tags:
       - Eshop
@@ -13218,7 +13191,7 @@ paths:
                 oneOf:
                 - type: array
                   items:
-                    type: object
+                    $ref: '#/components/schemas/EshopPrice'
                 - type: object
                   required:
                   - prices
@@ -13227,7 +13200,7 @@ paths:
                     prices:
                       type: array
                       items:
-                        type: object
+                        $ref: '#/components/schemas/EshopPrice'
                     row_version:
                       type: integer
                       minimum: 1
@@ -13236,7 +13209,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: version_conflict
+          description: version_conflict nebo stale_price_input
+        '422':
+          description: missing_pricing_rule, missing_pricing_exchange_rate, stale_pricing_exchange_rate nebo missing_purchase_cost
   /api/v1/eshop/products/{id}/prices/{currency}:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -13917,6 +13892,29 @@ paths:
         '200': { description: OK }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Karta má skladové pohyby — nelze smazat.' }
+  /api/v1/stock/items/{id}/neighbors:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags: [Stock]
+      summary: Sousední karty v celém filtrovaném výběru
+      description: Čistě čtecí POST dostupný i tokenu read. Řazení shodných hodnot rozhoduje ID vzestupně. Nedostupná nebo vyfiltrovaná karta vrátí null pozici a sousedy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CatalogNeighborsRequest' }
+      responses:
+        '200':
+          description: Pozice v aktuálním filtrovaném katalogu firmy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogNeighbors' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/stock/items/{id}/movements:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -18513,6 +18511,179 @@ paths:
         '422':
           description: Neplatná vazba
 
+  /api/v1/catalog/products/batch:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Eshop]
+      summary: Selektivní dávkové čtení produktů
+      description: Čtecí POST dostupný se scope read. Každé ID má výsledek ve vstupním pořadí, cizí a neexistující ID mají shodný stav unavailable. Všechny projekce se čtou z jednoho databázového snapshotu. Náklady vyžadují oprávnění stock.items.write a u tokenu scope read_write; nejsou součástí cen ani dostupnosti. Prázdné nebo nadlimitní seznamy a neznámé projekce vracejí 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductBatchRequest'
+      responses:
+        '200':
+          description: Výsledek všech požadovaných ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogBatchResponse'
+        '400': { description: Neplatná dávka }
+        '403': { description: Chybějící oprávnění nebo vypnutý sklad }
+  /api/v1/catalog/facets:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Eshop]
+      summary: Počty hodnot filtrů nad celým katalogem
+      description: Přijímá stejné filtry jako seznam skladových karet. Počty platí uvnitř celé filtrované množiny bez stránkování; kategorie zahrnují svůj podstrom. Každá faseta vrací nejčetnější hodnoty a příznak truncated, pokud překročila limit. Dostupnost respektuje warehouse_id. Počty nejsou cenovým oceněním.
+      parameters:
+      - in: query
+        name: limit
+        schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      - in: query
+        name: q
+        schema: { type: string }
+      - in: query
+        name: manufacturer_id
+        schema: { type: integer }
+      - in: query
+        name: category_id
+        schema: { type: integer }
+      - in: query
+        name: vendor_id
+        schema: { type: integer }
+      - in: query
+        name: warehouse_id
+        schema: { type: integer }
+      - in: query
+        name: active
+        schema: { type: boolean }
+      - in: query
+        name: type
+        schema: { type: string, enum: [material, goods, product] }
+      - in: query
+        name: tag_ids
+        schema: { type: string, description: ID oddělená čárkou }
+      - in: query
+        name: attribute_filters
+        schema: { type: string, description: JSON pole typovaných atributových podmínek jako u seznamu karet }
+      - in: query
+        name: missing
+        schema: { type: string, description: manufacturer/category/image/price/ean oddělené čárkou }
+      - in: query
+        name: availability
+        schema: { type: string, enum: [in_stock, out_of_stock, below_min] }
+      - in: query
+        name: only_below_min
+        schema: { type: boolean }
+      - in: query
+        name: qty_min
+        schema: { type: string }
+      - in: query
+        name: qty_max
+        schema: { type: string }
+      - in: query
+        name: export_eshop
+        schema: { type: boolean }
+      responses:
+        '200':
+          description: Počty odpovídajících karet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogFacets'
+        '400': { description: Neplatný filtr nebo limit }
+        '403': { description: Chybějící oprávnění nebo vypnutý sklad }
+  /api/v1/catalog/prices/batch:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Eshop]
+      summary: Dávkové platné ceny s množstvím po položkách
+      description: Čtecí POST dostupný se scope read. Cena bez DPH a případná akce jsou vyhodnoceny pro požadované množství každé položky. ID se nesmí opakovat. Chybějící cena je null, nikdy náhradní nula.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogPriceBatchRequest'
+      responses:
+        '200':
+          description: Výsledek všech požadovaných ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogBatchResponse'
+        '400': { description: Neplatná dávka }
+        '403': { description: Chybějící oprávnění nebo vypnutý sklad }
+  /api/v1/catalog/exports:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Eshop]
+      summary: Založí asynchronní JSONL export katalogu
+      description: |
+        Čtecí POST dostupný i PAT tokenu se scope `read`; POST pouze nese
+        strukturovaný výběr a projekci, data nemění. Při založení se zmrazí ID
+        a `row_version` každé karty. Worker čte hodnoty po dávkách v konzistentním
+        snapshotu a ke každému záznamu ukládá `captured_at`. Změní-li se karta
+        mezi zařazením a zachycením, její řádek JSONL má stav `conflict`, nikdy
+        směs starých a nových dat. Projekce `costs` je pro export vždy zakázaná
+        (`403 forbidden_projection`), i uživateli s oprávněním náklady číst.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogExportRequest'
+      responses:
+        '202':
+          description: Založená katalogová úloha typu `catalog_export`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogJob' }
+        '400': { description: Neplatný výběr nebo projekce }
+        '403': { description: Chybějící oprávnění, vypnutý sklad nebo zakázaná projekce costs }
+  /api/v1/catalog/exports/{id}/download:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Eshop]
+      summary: Stáhne dokončený konzistentní export katalogu ve formátu JSONL
+      description: |
+        Čtecí endpoint dostupný i PAT tokenu se scope `read`. Vrací
+        `application/x-ndjson`: první řádek je manifest (`type=manifest`,
+        `format_version`, `job_id`, `total`, projekce, čas založení a dokončení,
+        `consistency=selection_versions_with_per_batch_snapshot`), další řádky
+        jsou produkty ve zmrazeném pořadí. Každý produkt má `ordinal`, `id`,
+        `status`, `expected_version`, `error_code`, `captured_at` a `data`.
+        Nedostupná karta má `status=failed`, `error_code=unavailable` a `data=null`;
+        konflikt má `status=conflict`. Cizí nebo neexistující export se nerozlišuje.
+      responses:
+        '200':
+          description: JSONL manifest a výsledek každé karty
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+              description: Attachment `catalog-{id}.jsonl`.
+            Cache-Control:
+              schema: { type: string, example: 'private, no-store' }
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                format: binary
+        '403': { description: Chybějící oprávnění nebo vypnutý sklad }
+        '404': { description: Export nenalezen nebo nepatří aktuální firmě }
+        '409': { description: Export ještě není dokončen (`export_not_ready`) }
   /api/v1/eshop/jobs:
     parameters:
     - $ref: '#/components/parameters/SupplierIdHeader'
@@ -18980,6 +19151,241 @@ components:
           type: object
           additionalProperties:
             type: integer
+    CatalogFacetValues:
+      type: object
+      required: [truncated, items]
+      properties:
+        truncated: { type: boolean }
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, name, count]
+            properties:
+              id: { type: integer }
+              name: { type: [string, 'null'] }
+              count: { type: integer }
+    CatalogFacets:
+      type: object
+      properties:
+        total: { type: integer }
+        manufacturers: { $ref: '#/components/schemas/CatalogFacetValues' }
+        vendors: { $ref: '#/components/schemas/CatalogFacetValues' }
+        categories: { $ref: '#/components/schemas/CatalogFacetValues' }
+        tags: { $ref: '#/components/schemas/CatalogFacetValues' }
+        availability:
+          type: array
+          items:
+            type: object
+            properties:
+              value: { type: string, enum: [in_stock, out_of_stock, below_min] }
+              count: { type: integer }
+    CatalogProductBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+        fields:
+          type: array
+          minItems: 1
+          maxItems: 23
+          default: [sku, name, ean, is_active]
+          items:
+            type: string
+            enum: [sku, name, item_type, unit, ean, manufacturer_id, vat_rate_id, is_active, is_stocked, export_eshop, min_qty, weight_g, warranty_months, delivery_days, i18n, categories, tag_ids, attributes, fees, media, prices, availability, costs]
+        locales:
+          type: array
+          minItems: 1
+          maxItems: 20
+          default: [cs]
+          items: { type: string, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }
+        currencies:
+          type: array
+          minItems: 1
+          maxItems: 10
+          default: [CZK]
+          items: { type: string, pattern: '^[A-Za-z]{3}$' }
+        warehouse_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          description: Vynechání zahrne všechny sklady firmy.
+          items: { type: integer, minimum: 1 }
+    CatalogPriceBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        currency: { type: string, default: CZK, pattern: '^[A-Za-z]{3}$' }
+        on_date: { type: string, format: date }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [id]
+            properties:
+              id: { type: integer, minimum: 1 }
+              qty: { type: string, default: '1', pattern: '^\d{1,11}(\.\d{1,3})?$' }
+    CatalogExportRequest:
+      type: object
+      additionalProperties: false
+      required: [selection, projection]
+      properties:
+        selection:
+          oneOf:
+          - type: object
+            additionalProperties: false
+            required: [all_matching, ids]
+            properties:
+              all_matching: { const: false }
+              ids:
+                type: array
+                minItems: 1
+                maxItems: 30000
+                items: { type: integer, minimum: 1 }
+          - type: object
+            additionalProperties: false
+            required: [all_matching, filters]
+            properties:
+              all_matching: { const: true }
+              filters:
+                $ref: '#/components/schemas/CatalogExportFilters'
+              excluded_ids:
+                type: array
+                maxItems: 30000
+                items: { type: integer, minimum: 1 }
+        projection:
+          $ref: '#/components/schemas/CatalogExportProjection'
+    CatalogNeighborsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        filters: { $ref: '#/components/schemas/CatalogExportFilters' }
+        ids:
+          type: array
+          maxItems: 30000
+          description: Volitelné omezení na explicitní výběr. Prázdné pole znamená prázdný výběr.
+          items: { type: integer, minimum: 1 }
+        excluded_ids:
+          type: array
+          maxItems: 30000
+          items: { type: integer, minimum: 1 }
+    CatalogNeighbors:
+      type: object
+      required: [previous_id, next_id, position, total]
+      properties:
+        previous_id: { type: [integer, "null"] }
+        next_id: { type: [integer, "null"] }
+        position: { type: [integer, "null"], minimum: 1 }
+        total: { type: integer, minimum: 0 }
+    CatalogExportFilters:
+      type: object
+      additionalProperties: false
+      description: Filtry seznamu skladových karet. Transportní page, per_page, limit a offset se ignorují.
+      properties:
+        type: { type: string, enum: [material, goods, product] }
+        active: { type: boolean }
+        export_eshop: { type: boolean }
+        q: { type: string }
+        only_below_min: { type: boolean }
+        warehouse_id: { type: integer, minimum: 1 }
+        manufacturer_id: { type: integer, minimum: 1 }
+        category_id: { type: integer, minimum: 1 }
+        vendor_id: { type: integer, minimum: 1 }
+        tag_ids:
+          type: array
+          maxItems: 100
+          items: { type: integer, minimum: 1 }
+        missing:
+          type: array
+          items: { type: string, enum: [manufacturer, category, image, price, ean] }
+        availability: { type: string, enum: [in_stock, out_of_stock, below_min] }
+        qty_min: { type: [string, number] }
+        qty_max: { type: [string, number] }
+        attribute_filters:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [attribute_id]
+            properties:
+              attribute_id: { type: integer, minimum: 1 }
+              option_id: { type: integer, minimum: 1 }
+              value_text: { type: [string, number, boolean] }
+              value_bool: { type: boolean }
+              value_num_min: { type: [string, number] }
+              value_num_max: { type: [string, number] }
+        sort: { type: string, enum: [sku, name, type, qty, value] }
+        direction: { type: string, enum: [asc, desc] }
+        page: { type: integer, minimum: 1, description: Transportní klíč, při výběru se ignoruje. }
+        per_page: { type: integer, minimum: 1, description: Transportní klíč, při výběru se ignoruje. }
+        limit: { type: integer, minimum: 1, description: Transportní klíč, při výběru se ignoruje. }
+        offset: { type: integer, minimum: 0, description: Transportní klíč, při výběru se ignoruje. }
+        supplier_id: { type: integer, minimum: 1, description: Transportní klíč, při výběru se ignoruje. }
+    CatalogExportProjection:
+      type: object
+      additionalProperties: false
+      properties:
+        fields:
+          type: array
+          minItems: 1
+          maxItems: 22
+          default: [sku, name, ean, is_active]
+          items:
+            type: string
+            enum: [sku, name, item_type, unit, ean, manufacturer_id, vat_rate_id, is_active, is_stocked, export_eshop, min_qty, weight_g, warranty_months, delivery_days, i18n, categories, tag_ids, attributes, fees, media, prices, availability]
+        locales:
+          type: array
+          minItems: 1
+          maxItems: 20
+          default: [cs]
+          items: { type: string, pattern: '^[a-z]{2}(?:-[A-Z]{2})?$' }
+        currencies:
+          type: array
+          minItems: 1
+          maxItems: 10
+          default: [CZK]
+          items: { type: string, pattern: '^[A-Za-z]{3}$' }
+        warehouse_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          description: Vynechání zahrne dostupnost ze všech skladů firmy.
+          items: { type: integer, minimum: 1 }
+    CatalogBatchResponse:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, status, data]
+            properties:
+              id: { type: integer }
+              status: { type: string, enum: [ok, unavailable] }
+              data:
+                type: [object, 'null']
+                description: Produkt obsahuje vždy id a row_version a vyžádané projekce. i18n, categories, tag_ids, attributes, fees a media jsou pole; media obsahují autorizovanou URL souboru. availability obsahuje qty a warehouses s warehouse_id/qty bez nákladů. costs obsahují value_total a warehouses s value_total/avg_unit_cost. prices je pole platných cen podle měn. Cenový dotaz vrací stock_item_id, row_version, currency_code, base_price, unit_price, promo_applied, promo_reason, promo_qty_available, promo, prices_include_vat=false a on_date.
+                additionalProperties: true
+        meta:
+          type: object
+          required: [requested, found]
+          properties:
+            requested: { type: integer }
+            found: { type: integer }
     CatalogJobItem:
       type: object
       properties:
@@ -19106,11 +19512,32 @@ components:
       required: [currency_code]
       properties:
         currency_code: { type: string, pattern: '^[A-Za-z]{3}$' }
-        price_mode: { type: string, enum: [markup, fixed], default: markup }
-        markup_pct: { type: [number, string, 'null'], description: Přirážka od -100 do 9999.999 }
+        price_mode: { type: string, enum: [markup, target_margin, fixed], default: markup }
+        markup_pct: { type: [number, string, 'null'], description: Přirážka od -100 do 9999.999; v režimu target_margin marže od 0 včetně do 100 bez 100 }
         fixed_price: { type: [number, string, 'null'], description: Nezáporná cena do 9999999999.99; povinná pro fixed }
         rounding: { type: string, enum: [none, '0.01', '0.10', '0.50', '1', '9_ending'], default: none }
         is_manual_override: { type: boolean, default: false }
+        use_pricing_rules: { type: boolean, default: false, description: Použít odpovídající cenový profil a pravidlo firmy místo lokálního výpočtu. }
+    EshopPrice:
+      allOf:
+      - $ref: '#/components/schemas/EshopPriceInput'
+      - type: object
+        properties:
+          id: { type: integer }
+          supplier_id: { type: integer }
+          stock_item_id: { type: integer }
+          computed_price: { type: [string, 'null'] }
+          computed_base: { type: [string, 'null'], description: Nákladová báze v CZK }
+          computed_rate: { type: [string, 'null'] }
+          computed_at: { type: [string, 'null'] }
+          computed_profile_id: { type: [integer, 'null'] }
+          computed_rule_id: { type: [integer, 'null'] }
+          computed_rate_date: { type: [string, 'null'], format: date }
+          computed_rate_source: { type: [string, 'null'] }
+          computed_cost_source: { type: [string, 'null'] }
+          computed_calculation_mode: { type: [string, 'null'], enum: [fixed, markup, target_margin, null] }
+          computed_percentage: { type: [string, 'null'] }
+          computed_context: { type: [object, 'null'], additionalProperties: true, description: Snapshot pravidla a použitých nákladových a kurzových vstupů. }
     CrmActionItem:
       type: object
       required: [type, severity, title, hint, link]

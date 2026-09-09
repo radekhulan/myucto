@@ -63,6 +63,27 @@ Filtry si můžeš uložit jako výchozí přes uložené filtry, sloupce si zap
 přes výběr sloupců a hustotu řádků přes přepínač hustoty (viz
 [§ 92.9 Uložené filtry a předvolby zobrazení](92_Nastaveni.md#929-ulozene-filtry-a-predvolby-zobrazeni)).
 
+Ikona **Otevřít rychlý detail** vedle SKU zobrazí kartu v postranním panelu.
+Tlačítka **Předchozí** a **Další** procházejí celý filtrovaný seznam, případně
+aktuální výběr včetně odškrtnutých výjimek. Panel ukazuje pořadí a nabízí otevření
+plného detailu nebo editoru. **Import zboží** v liště vede na import katalogu.
+
+### Hromadná úprava filtrovaných karet
+
+Zaškrtávátkem u řádku vybereš jednu kartu nebo aktuální stránku. Pokud je výsledků
+víc, nabídka **Vybrat všech N výsledků** výslovně přepne výběr na celý aktuálně
+filtrovaný katalog. Změna filtru výběr zruší, aby se hromadná akce nikdy
+neaplikovala na neviditelně rozšířený jiný výsledek. Po výběru všech výsledků lze
+jednotlivé karty opět odškrtnout.
+
+**Hromadná úprava** nejprve vytvoří náhled změn po jednotlivých kartách. V náhledu
+vidíš původní a zamýšlené hodnoty výrobce, kategorií, štítků, aktivity, exportu do
+e-shopu a minimální zásoby. Náhled se také zpracuje jako úloha na pozadí, ale až
+tlačítko **Použít změny na N kartách** založí úlohu, která změny zapíše. Její průběh,
+případné konflikty verzí a chybové řádky jsou v dialogu i v
+historii úloh. Dokončenou hromadnou úpravu lze jednou vrátit akcí **Obnovit**;
+obnova sama vytváří novou úlohu a nejde znovu obnovovat.
+
 Sloupce: **SKU**, **Název**, **Typ**, **MJ** (měrná jednotka), **Stav** (aktuální
 množství — červeně a tučně, pokud je pod nastaveným minimem), **Hodnota** (ocenění
 stavu v Kč), **Prům. cena** (dopočtená průměrná pořizovací cena za jednotku),
@@ -99,6 +120,12 @@ Po založení karty (jen v režimu úpravy) se zpřístupní i **e-shopové taby
 mutace popisu, kategorie a štítky, parametry, ceny v jednotlivých měnách, dodavatelé
 a přílohy/obrázky. Skladová karta je totiž zároveň produktovou kartou pro e-shop;
 tyto taby popisuje kapitola o e-shopu.
+
+Editor při odchodu ze stránky upozorní na neuložené změny. Prázdná připravená
+čeština ani prázdné řádky aktivních prodejních měn se za změnu nepovažují. Lišta
+**Uložit / Zrušit** zůstává při posouvání stránky dostupná. Taby editoru lze ovládat
+klávesami šipka vlevo a šipka vpravo; aktivní tab se na úzké obrazovce posune do
+viditelné části lišty.
 
 ### 33.2.1 Detail karty a skladová kniha
 

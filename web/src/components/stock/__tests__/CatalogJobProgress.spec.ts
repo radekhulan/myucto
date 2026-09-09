@@ -7,7 +7,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 import CatalogJobProgress from '../CatalogJobProgress.vue'
 
 describe('CatalogJobProgress', () => {
-  it('maps catalog checkpoints to the shared progress component and preserves cancellation state', () => {
+  it('maps catalog checkpoints to the shared progress component and preserves cancellation state', async () => {
     const wrapper = shallowMount(CatalogJobProgress, {
       props: {
         job: {
@@ -45,5 +45,7 @@ describe('CatalogJobProgress', () => {
     })
     expect(wrapper.text()).toContain('eshop.jobs.cancel_requested')
     expect(wrapper.text()).toContain('eshop.jobs.cancel_boundary')
+    await wrapper.setProps({ job: { ...wrapper.props('job')!, report: { counts: { ready: 2, applied: 3, unchanged: 1, skipped: 2, failed: 1, conflict: 2 } } } })
+    expect(progress.props('job')).toMatchObject({ created_count: 5, skipped_count: 3, failed_count: 3 })
   })
 })

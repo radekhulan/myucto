@@ -250,7 +250,7 @@ export interface Product {
 }
 
 // ── Ceny karty (Prices) ──────────────────────────────────────────────────
-export type PriceMode = 'markup' | 'fixed'
+export type PriceMode = 'markup' | 'target_margin' | 'fixed'
 export type PriceRounding = 'none' | '0.01' | '0.10' | '0.50' | '1' | '9_ending'
 
 /** Řádek ceny per měna. Money/decimal pole jsou string. */
@@ -266,6 +266,7 @@ export interface ProductPrice {
   computed_rate: string | null
   computed_at: string | null
   is_manual_override: boolean
+  use_pricing_rules?: boolean
 }
 
 /** PUT /eshop/products/{id}/prices — vstupní řádek ceny. */
@@ -276,6 +277,7 @@ export interface ProductPricePayload {
   fixed_price: string | null
   rounding: PriceRounding
   is_manual_override: boolean
+  use_pricing_rules?: boolean
 }
 
 export interface ProductPriceWriteResult {

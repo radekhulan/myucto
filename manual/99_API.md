@@ -39,7 +39,7 @@ K dispozici jsou **tři varianty** stejné dokumentace nad jedním OpenAPI spece
    - **Dodavatel** — když má účet víc firem, vyber, do které firmy token patří.
      Doporučeno; token bound na konkrétního dodavatele nemůže přistupovat
      k datům jiných firem.
-   - **Rozsah** — `read` (jen GET) nebo `read & write` (plné API).
+   - **Rozsah** — `read` (GET a výslovně čtecí POSTy katalogu) nebo `read & write` (plné API).
    - **Evidence mzdových podání v Dokumentech** — volitelné, výchozí vypnuto.
      Dokumenty navázané na mzdová podání (doručenky datové schránky, protokoly
      ČSSZ, odpovědi zdravotních pojišťoven) jsou pro tokeny normálně neviditelné;
@@ -159,10 +159,12 @@ Pokud má účet **víc firem (dodavatelů)**, máš dvě možnosti:
 
 | Scope | Povolené metody |
 |---|---|
-| `read` | `GET`, `HEAD` |
+| `read` | `GET`, `HEAD` a čtecí dávkové POSTy katalogu |
 | `read_write` | všechny (POST, PUT, PATCH, DELETE) |
 
-Volání s nedostatečným scopem vrátí `403 insufficient_scope`.
+Volání s nedostatečným scopem vrátí `403 insufficient_scope`. Čtecí POSTy
+katalogu jsou výjimka: pouze nesou strukturovaný výběr nebo projekci, data
+nemění, proto fungují i s rozsahem `read`.
 
 ### 99.7.1 Účetnictví a daně jen ke čtení
 
@@ -378,3 +380,121 @@ curl -H "Authorization: Bearer $TOKEN" -OJ \
 - **OAuth2** nepodporujeme — PAT je vědomé zjednodušení pro tenhle typ produktu.
 - **Idempotency-Key** není podporován; pokud Make po retry vytváří
   duplicitní záznam, otevři issue.
+
+## 99.16 Dávkové čtení katalogu
+
+### Navigace ve filtrovaném výběru
+
+`POST /api/v1/stock/items/{id}/neighbors` přijímá `filters` stejného tvaru jako
+seznam karet a volitelná pole `ids` a `excluded_ids`, každé nejvýše 30 000 ID.
+Vrátí `previous_id`, `next_id`, `position` a `total` pro celý filtrovaný výběr.
+Prázdné `ids` znamená prázdný výběr, vynechané `ids` všechny vyhovující karty.
+Nedostupná karta má nulové sousedy a `position: null`, bez prozrazení cizí firmy.
+Endpoint je čtecí a povoluje token se scope `read`.
+
+
+Pro synchronizaci e-shopu použij čtecí POSTy `POST /api/v1/catalog/products/batch`
+a `POST /api/v1/catalog/prices/batch`. Jsou dostupné i tokenu se scope `read`:
+POST je zde jen způsob, jak předat větší strukturovaný dotaz, data nemění.
+
+Oba endpointy přijmou nejvýš 500 **unikátních** ID. Výsledek obsahuje položku
+pro každé vstupní ID ve stejném pořadí. Karta, která neexistuje nebo nepatří
+aktuální firmě, vrátí shodně `{ "status": "unavailable", "data": null }`;
+API tak neprozrazuje existenci cizích karet.
+
+### Produkty
+
+`POST /api/v1/catalog/products/batch` očekává alespoň `ids`. Bez `fields`
+vrací `sku`, `name`, `ean` a `is_active`; každá dostupná karta má vždy také
+`id` a `row_version`. Pole `fields` slouží pro selektivní načtení dalších
+sekcí, například `i18n`, `prices` nebo `availability`. Překlady lze omezit
+polem `locales` (nejvýš 20 jazyků), ceny polem `currencies` (nejvýš 10 měn) a
+dostupnost polem `warehouse_ids` (nejvýš 50 skladů). Vynechané `warehouse_ids`
+zahrnou všechny sklady firmy.
+
+Projekce `costs` obsahuje nákladové ocenění a vyžaduje oprávnění
+`stock.items.write`; token pouze pro čtení ji nedostane, i když samotný dávkový
+endpoint je čtecí.
+
+```json
+{
+  "ids": [41, 42],
+  "fields": ["sku", "name", "i18n", "availability"],
+  "locales": ["cs", "en"],
+  "warehouse_ids": [3]
+}
+```
+
+### Efektivní ceny
+
+`POST /api/v1/catalog/prices/batch` přijímá seznam `items` s `id` a volitelným
+`qty`. Množství je kladný desetinný **řetězec** s nejvýš 11 číslicemi před a
+třemi za desetinnou tečkou, aby integrace neztratila přesnost převodem na
+JavaScriptové číslo. Když `qty` vynecháš, API použije `"1"`; `currency` je
+výchozí `CZK` a `on_date` dnešní datum. Cena se vyhodnocuje zvlášť pro množství
+každé položky. Pokud pro kartu a měnu platná cena není, je cena `null`, nikdy
+náhradní nula.
+
+```json
+{
+  "currency": "EUR",
+  "on_date": "2026-09-09",
+  "items": [
+    { "id": 41, "qty": "2.500" },
+    { "id": 42 }
+  ]
+}
+```
+
+## 99.17 Asynchronní export katalogu
+
+`POST /api/v1/catalog/exports` založí JSONL export a vrátí katalogovou úlohu
+se stavem `queued` nebo `running`. Jde o třetí čtecí POST katalogu, takže je
+dostupný i tokenu se scope `read`. Stav úlohy průběžně načítej přes
+`GET /api/v1/eshop/jobs/{id}` a hotový soubor stáhni z
+`GET /api/v1/catalog/exports/{id}/download`.
+
+Tělo má `selection` a `projection`. Výběr je buď konkrétní seznam `ids`, nebo
+`all_matching: true` s filtry stejného tvaru jako seznam skladových karet a
+volitelným `excluded_ids`. Výběr konkrétních ID i vyloučení má strop 30 000
+položek. Projekce přijímá stejná pole jako dávkové čtení produktů, kromě
+`costs`; náklady export vždy odmítne `403 forbidden_projection`, bez ohledu na
+oprávnění tokenu. Výchozí pole jsou `sku`, `name`, `ean`, `is_active`, jazyky
+`cs` a měny `CZK`. `locales`, `currencies` a `warehouse_ids` mají stejné limity
+20, 10 a 50 jako dávkové čtení.
+
+```json
+{
+  "selection": {
+    "all_matching": true,
+    "filters": { "active": true, "availability": "in_stock" },
+    "excluded_ids": [42]
+  },
+  "projection": {
+    "fields": ["sku", "name", "i18n", "prices", "availability"],
+    "locales": ["cs", "en"],
+    "currencies": ["CZK", "EUR"],
+    "warehouse_ids": [3]
+  }
+}
+```
+
+Při založení exportu se zmrazí ID a `row_version` každé vybrané karty. Worker
+čte obsah po dávkách v konzistentním snapshotu a ke každé hotové kartě zapíše
+`captured_at`. Změní-li se karta mezi zařazením a jejím zachycením, výsledný
+řádek má `status: "conflict"` a `error_code: "version_conflict"`; export tak
+nemíchá starou identitu a nová data. Karta neexistující, cizí nebo nedostupná
+při čtení zůstává v souboru se `status: "failed"`, `error_code: "unavailable"`
+a `data: null`.
+
+Hotový soubor je `application/x-ndjson` a začíná jedním manifestem:
+
+```json
+{"type":"manifest","format_version":1,"job_id":81,"total":2,"consistency":"selection_versions_with_per_batch_snapshot"}
+```
+
+Následuje jeden řádek pro každou požadovanou kartu ve zmrazeném pořadí. Každý
+má `type: "product"`, `ordinal`, `id`, `status`, `expected_version`,
+`error_code`, `captured_at` a `data`. Dokud úloha není `completed`, download
+vrací `409 export_not_ready`. ID cizí firmy, neexistující export a jiný typ
+úlohy vracejí shodně `404`.

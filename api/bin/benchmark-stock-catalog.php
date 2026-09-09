@@ -19,6 +19,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Service\Eshop\Pricing\CatalogPriceJobService;
+use MyInvoice\Service\Eshop\CatalogReadService;
 use MyInvoice\Service\Stock\StockDocumentService;
 
 const BENCH_PREFIX = 'BENCH-CATALOG-';
@@ -79,6 +80,20 @@ function measureList(PDO $pdo, StockItemRepository $items, int $sid, array $filt
     return percentile($samples) + ['payload_bytes' => $payload, 'rows' => $rows, 'total' => $total, 'sql_questions' => sessionQuestions($pdo) - $questionsBefore];
 }
 
+/** @return array{p50:float,p95:float,min:float,max:float,payload_bytes:int,rows:int,sql_questions:int} */
+function measureRead(PDO $pdo, CatalogReadService $read, int $sid, array $body, int $iterations): array
+{
+    $samples = []; $payload = 0; $rows = 0; $before = sessionQuestions($pdo);
+    for ($i = 0; $i < $iterations; $i++) {
+        $started = hrtime(true);
+        $response = $read->products($sid, $body);
+        $samples[] = (hrtime(true) - $started) / 1_000_000;
+        $rows = count($response['items']);
+        $payload = strlen(json_encode($response, JSON_THROW_ON_ERROR));
+    }
+    return percentile($samples) + ['payload_bytes' => $payload, 'rows' => $rows, 'sql_questions' => sessionQuestions($pdo) - $before];
+}
+
 function insertRows(PDO $pdo, string $sql, array $rows, int $chunk = 500): void
 {
     foreach (array_chunk($rows, $chunk) as $batch) {
@@ -100,7 +115,7 @@ try {
     if (!str_ends_with($database, '_test')) {
         throw new RuntimeException("Benchmark odmítnut: databáze '{$database}' nekončí na _test.");
     }
-    foreach (['stock_items', 'stock_levels', 'stock_item_prices', 'catalog_jobs', 'stock_locales', 'stock_currencies'] as $table) {
+    foreach (['stock_items', 'stock_levels', 'stock_item_prices', 'stock_item_promo_prices', 'catalog_jobs', 'stock_locales', 'stock_currencies'] as $table) {
         if ($pdo->query("SHOW TABLES LIKE '{$table}'")->fetchColumn() === false) {
             throw new RuntimeException("Benchmark vyžaduje migrovanou tabulku {$table}.");
         }
@@ -123,6 +138,7 @@ try {
         static fn (int $n): array => [$sid, 'W' . $n, 'Benchmark sklad ' . $n, $n === 1 ? 1 : 0, 1], range(1, 5)
     ));
     $whStmt = $pdo->prepare('SELECT id FROM warehouses WHERE supplier_id = ? ORDER BY id'); $whStmt->execute([$sid]); $warehouses = array_map('intval', $whStmt->fetchAll(PDO::FETCH_COLUMN));
+    if (count($warehouses) !== 5) { throw new RuntimeException('Benchmark nevytvořil pět skladů.'); }
     insertRows($pdo, 'INSERT INTO stock_locales (supplier_id, code, name, display_order, is_default) VALUES ', [[$sid, 'cs', 'Čeština', 1, 1], [$sid, 'en', 'English', 2, 0], [$sid, 'de', 'Deutsch', 3, 0]]);
     insertRows($pdo, 'INSERT INTO stock_currencies (supplier_id, code, name, symbol, display_order, is_default) VALUES ', [[$sid, 'CZK', 'Česká koruna', 'Kč', 1, 1], [$sid, 'EUR', 'Euro', '€', 2, 0], [$sid, 'USD', 'Americký dolar', '$', 3, 0]]);
     $attributes = [];
@@ -136,6 +152,11 @@ try {
     }
     insertRows($pdo, 'INSERT INTO stock_items (supplier_id, sku, name, item_type, unit, ean, vat_rate_id, is_active, export_eshop, is_stocked, pricing_base) VALUES ', $items, 250);
     $idStmt = $pdo->prepare('SELECT id FROM stock_items WHERE supplier_id = ? ORDER BY id'); $idStmt->execute([$sid]); $itemIds = array_map('intval', $idStmt->fetchAll(PDO::FETCH_COLUMN));
+    $promoRows = [];
+    foreach (array_slice($itemIds, 0, min(10, count($itemIds))) as $id) {
+        $promoRows[] = [$sid, $id, 'CZK', '79.00', 'Benchmark promo', 'limited', '100.000', 1];
+    }
+    insertRows($pdo, 'INSERT INTO stock_item_promo_prices (supplier_id, stock_item_id, currency_code, promo_price, label, qty_mode, qty_limit, is_active) VALUES ', $promoRows);
     // Drž jen malý segment pomocných řádků. 30k × (3 i18n + 3 ceny + 20 atributů)
     // by jinak v PHP vzniklo 780 tisíc polí a zkreslilo benchmark limitem paměti.
     foreach (array_chunk($itemIds, 250, true) as $chunk) {
@@ -173,6 +194,30 @@ try {
     ];
     if ($lists['name_sort']['total'] !== $opt['size'] || $lists['qty_sort']['total'] !== $opt['size'] || $lists['attribute_filter']['total'] <= 0) { throw new RuntimeException('Kontrola count/selection benchmarku selhala.'); }
 
+    $read = $container->get(CatalogReadService::class);
+    $readSets = [];
+    foreach ([50, 500] as $batch) {
+        if ($batch > count($itemIds)) { continue; }
+        $ids = array_slice($itemIds, 0, $batch);
+        $readSets['batch_' . $batch . '_selective'] = measureRead($pdo, $read, $sid, [
+            'ids' => $ids, 'fields' => ['sku', 'name', 'is_active'], 'locales' => ['cs'], 'currencies' => ['CZK'],
+        ], $opt['iterations']);
+        $readSets['batch_' . $batch . '_full'] = measureRead($pdo, $read, $sid, [
+            'ids' => $ids, 'fields' => ['sku', 'name', 'item_type', 'unit', 'ean', 'manufacturer_id', 'vat_rate_id', 'is_active', 'is_stocked', 'export_eshop', 'min_qty', 'weight_g', 'warranty_months', 'delivery_days', 'i18n', 'categories', 'tag_ids', 'attributes', 'fees', 'media', 'prices', 'availability'],
+            'locales' => ['cs', 'en', 'de'], 'currencies' => ['CZK', 'EUR', 'USD'], 'warehouse_ids' => [$warehouses[0], $warehouses[1], $warehouses[2], $warehouses[3], $warehouses[4]],
+        ], $opt['iterations']);
+    }
+    $priceRequests = [];
+    foreach (array_slice($itemIds, 0, min(50, count($itemIds))) as $index => $id) { $priceRequests[] = ['id' => $id, 'qty' => $index % 3 === 0 ? '2.500' : '1.000']; }
+    $priceSamples = [];
+    $priceQuestions = sessionQuestions($pdo);
+    foreach (['CZK', 'EUR', 'USD'] as $currencyCode) {
+        $samples = [];
+        for ($i = 0; $i < $opt['iterations']; $i++) { $at = hrtime(true); $priceResponse = $read->prices($sid, ['items' => $priceRequests, 'currency' => $currencyCode, 'on_date' => '2099-01-15']); $samples[] = (hrtime(true) - $at) / 1_000_000; }
+        $priceSamples[$currencyCode] = percentile($samples) + ['payload_bytes' => strlen(json_encode($priceResponse, JSON_THROW_ON_ERROR)), 'rows' => count($priceResponse['items'])];
+    }
+    $priceSamples['sql_questions'] = sessionQuestions($pdo) - $priceQuestions;
+
     // Příjemky v seed fázi korektně frontují vlastní price_recompute úlohy. Pro
     // měření explicitně vytvořené dávky je odstraníme jako přípravu throwaway
     // tenanta, jinak tick() vezme nejstarší seed job a checkpoint patří jiné úloze.
@@ -201,7 +246,7 @@ try {
         throw new RuntimeException('Přepočet benchmarku obsahuje neúspěšné položky.');
     }
 
-    $result = ['status' => 'ok', 'database' => $database, 'hardware' => ['php' => PHP_VERSION, 'os' => PHP_OS_FAMILY, 'memory_limit' => ini_get('memory_limit')], 'config' => ['sku' => $opt['size'], 'warehouses' => 5, 'locales' => 3, 'attributes' => 20, 'currencies' => 3, 'iterations' => $opt['iterations'], 'price_job_max_batches' => $opt['max_batches'], 'sql_observer' => 'MariaDB SESSION STATUS Questions delta per measured block'], 'seed_ms' => round($seedMs, 3), 'list_filter_sort' => $lists, 'price_job' => ['job_id' => $jobId, 'ticks' => $ticks, 'duration_ms' => round($jobMs, 3), 'sql_questions' => sessionQuestions($pdo) - $jobQuestionsBefore, 'status' => $job['status'], 'checkpoint' => (int) $job['checkpoint'], 'total' => (int) $job['total']], 'max_memory_bytes' => memory_get_peak_usage(true), 'correctness' => ['count' => $opt['size'], 'selection' => 'name/qty=' . $opt['size'] . ', attribute>0']];
+    $result = ['status' => 'ok', 'database' => $database, 'hardware' => ['php' => PHP_VERSION, 'os' => PHP_OS_FAMILY, 'memory_limit' => ini_get('memory_limit')], 'config' => ['sku' => $opt['size'], 'warehouses' => 5, 'locales' => 3, 'attributes' => 20, 'currencies' => 3, 'iterations' => $opt['iterations'], 'price_job_max_batches' => $opt['max_batches'], 'sql_observer' => 'MariaDB SESSION STATUS Questions delta per measured block'], 'seed_ms' => round($seedMs, 3), 'list_filter_sort' => $lists, 'catalog_read' => ['products' => $readSets, 'prices_with_quantities' => $priceSamples, 'promo_sample_items' => count($promoRows)], 'price_job' => ['job_id' => $jobId, 'ticks' => $ticks, 'duration_ms' => round($jobMs, 3), 'sql_questions' => sessionQuestions($pdo) - $jobQuestionsBefore, 'status' => $job['status'], 'checkpoint' => (int) $job['checkpoint'], 'total' => (int) $job['total']], 'max_memory_bytes' => memory_get_peak_usage(true), 'correctness' => ['count' => $opt['size'], 'selection' => 'name/qty=' . $opt['size'] . ', attribute>0']];
 } catch (Throwable $e) {
     $result = ['status' => 'failed', 'error' => $e->getMessage(), 'max_memory_bytes' => memory_get_peak_usage(true)];
 } finally {

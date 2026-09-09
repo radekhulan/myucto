@@ -17,7 +17,9 @@ final class StockItemPriceRepository
     private const COLUMNS =
         'id, supplier_id, stock_item_id, currency_code, price_mode, markup_pct,
          fixed_price, rounding, computed_price, computed_base, computed_rate,
-         computed_at, is_manual_override, updated_at';
+         computed_profile_id, computed_rule_id, computed_rate_date, computed_rate_source,
+         computed_cost_source, computed_calculation_mode, computed_percentage,
+         computed_context, computed_at, is_manual_override, use_pricing_rules, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -79,19 +81,20 @@ final class StockItemPriceRepository
      * Upsert definice ceny (mode/markup/fixed/rounding/override) — NEpřepisuje
      * computed_* (ty nastavuje updateComputed po přepočtu).
      * @param array{price_mode:string, markup_pct:?string, fixed_price:?string,
-     *              rounding:string, is_manual_override:bool} $data
+     *              rounding:string, is_manual_override:bool, use_pricing_rules?:bool} $data
      */
     public function upsert(int $supplierId, int $stockItemId, string $currency, array $data): void
     {
         $this->db->pdo()->prepare(
             'INSERT INTO stock_item_prices
                 (supplier_id, stock_item_id, currency_code, price_mode, markup_pct,
-                 fixed_price, rounding, is_manual_override)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 fixed_price, rounding, is_manual_override, use_pricing_rules)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 price_mode = VALUES(price_mode), markup_pct = VALUES(markup_pct),
                 fixed_price = VALUES(fixed_price), rounding = VALUES(rounding),
-                is_manual_override = VALUES(is_manual_override)'
+                is_manual_override = VALUES(is_manual_override),
+                use_pricing_rules = VALUES(use_pricing_rules)'
         )->execute([
             $supplierId,
             $stockItemId,
@@ -101,6 +104,7 @@ final class StockItemPriceRepository
             $data['fixed_price'] !== null ? (string) $data['fixed_price'] : null,
             (string) $data['rounding'],
             (int) $data['is_manual_override'],
+            (int) ($data['use_pricing_rules'] ?? false),
         ]);
     }
 
@@ -112,16 +116,28 @@ final class StockItemPriceRepository
         ?string $computedBase,
         ?string $computedRate,
         string $computedAt,
+        ?array $details = null,
     ): void {
         $this->db->pdo()->prepare(
             'UPDATE stock_item_prices
-                SET computed_price = ?, computed_base = ?, computed_rate = ?, computed_at = ?
+                SET computed_price = ?, computed_base = ?, computed_rate = ?, computed_at = ?,
+                    computed_profile_id = ?, computed_rule_id = ?, computed_rate_date = ?,
+                    computed_rate_source = ?, computed_cost_source = ?,
+                    computed_calculation_mode = ?, computed_percentage = ?, computed_context = ?
               WHERE id = ? AND supplier_id = ?'
         )->execute([
             $computedPrice,
             $computedBase,
             $computedRate,
             $computedAt,
+            $details['profile_id'] ?? null,
+            $details['rule_id'] ?? null,
+            $details['rate_date'] ?? null,
+            $details['rate_source'] ?? null,
+            $details['cost_source'] ?? null,
+            $details['calculation_mode'] ?? null,
+            $details['percentage'] ?? null,
+            $details === null ? null : json_encode($details['context'] ?? [], JSON_THROW_ON_ERROR),
             $id,
             $supplierId,
         ]);
@@ -154,6 +170,11 @@ final class StockItemPriceRepository
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['stock_item_id'] = (int) $r['stock_item_id'];
         $r['is_manual_override'] = (bool) $r['is_manual_override'];
+        $r['use_pricing_rules'] = (bool) $r['use_pricing_rules'];
+        $r['computed_profile_id'] = $r['computed_profile_id'] === null ? null : (int) $r['computed_profile_id'];
+        $r['computed_rule_id'] = $r['computed_rule_id'] === null ? null : (int) $r['computed_rule_id'];
+        $r['computed_context'] = $r['computed_context'] === null
+            ? null : json_decode((string) $r['computed_context'], true, 512, JSON_THROW_ON_ERROR);
         // markup_pct, fixed_price, computed_* zůstávají string (money-safe).
         return $r;
     }

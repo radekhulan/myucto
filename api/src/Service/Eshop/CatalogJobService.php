@@ -87,13 +87,13 @@ final class CatalogJobService
         }
     }
 
-    public function batch(int $supplierId, int $id, string $token, callable $handler): array
+    public function batch(int $supplierId, int $id, string $token, callable $handler, bool $consistentSnapshot = false): array
     {
         $pdo = $this->db->pdo();
         if ($pdo->inTransaction()) {
             throw new \LogicException('Dávka úlohy vyžaduje samostatnou transakci.');
         }
-        $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+        $pdo->exec('SET TRANSACTION ISOLATION LEVEL ' . ($consistentSnapshot ? 'REPEATABLE READ' : 'READ COMMITTED'));
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare("SELECT * FROM catalog_jobs WHERE supplier_id = ? AND id = ? AND status = 'running' AND lease_token = ? AND lease_until > NOW(6) FOR UPDATE");

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Eshop\Pricing;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\CatalogPricingExchangeRateRepository;
 
 /**
  * Čtení kurzu z exchange_rates pro eshopovou cenotvorbu (Epic ESHOP).
@@ -16,7 +17,10 @@ use MyInvoice\Infrastructure\Database\Connection;
  */
 final class FxRateProvider
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly CatalogPricingExchangeRateRepository $pricingRates,
+    ) {}
 
     /** CZK za 1 jednotku měny k datu (nebo null, když kurz není). CZK → '1'. */
     public function rateFor(string $currencyCode, string $onDate, ?PricingSnapshot $snapshot = null): ?string
@@ -47,5 +51,29 @@ final class FxRateProvider
             return null;
         }
         return bcmul($amount, $rate, 6);
+    }
+
+    public function businessRateFor(
+        int $supplierId,
+        string $currencyCode,
+        string $onDate,
+        string $source,
+        int $maxAgeDays,
+        ?PricingSnapshot $snapshot = null,
+    ): array {
+        $currencyCode = strtoupper(trim($currencyCode));
+        if ($snapshot !== null) {
+            return $snapshot->businessRateFor($currencyCode, $source, $maxAgeDays);
+        }
+        if ($currencyCode === 'CZK') {
+            return ['rate' => '1', 'rate_date' => $onDate, 'source' => 'identity'];
+        }
+        return PricingSnapshot::validateBusinessRate(
+            $this->pricingRates->latest($supplierId, $currencyCode, $source, $onDate),
+            $currencyCode,
+            $source,
+            $onDate,
+            $maxAgeDays,
+        );
     }
 }

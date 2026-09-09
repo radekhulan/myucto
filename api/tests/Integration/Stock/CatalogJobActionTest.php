@@ -16,6 +16,24 @@ use Slim\Psr7\Response;
 
 final class CatalogJobActionTest extends StockTestCase
 {
+    public function testBearerCannotRestartSessionOnlyBulkMutations(): void
+    {
+        $sid = $this->createSupplier();
+        $jobs = $this->container->get(CatalogJobService::class);
+        $action = $this->container->get(CatalogJobAction::class);
+        foreach (['catalog_bulk_preview', 'catalog_bulk_apply', 'catalog_bulk_restore'] as $kind) {
+            $id = $jobs->enqueue($sid, $kind, []);
+            $jobs->cancel($sid, $id);
+            $anonymous = $this->request($sid, 'admin')->withoutAttribute(AuthMiddleware::ATTR_METHOD);
+            self::assertSame(403, $action->change($anonymous, new Response(), ['id' => $id, 'operation' => 'retry'])->getStatusCode());
+            $bearer = $this->request($sid, 'admin')->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer')
+                ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => 'read_write']);
+            self::assertSame(403, $action->change($bearer, new Response(), ['id' => $id, 'operation' => 'retry'])->getStatusCode());
+            self::assertSame('cancelled', $jobs->find($sid, $id)['status']);
+            self::assertSame(200, $action->change($this->request($sid, 'admin'), new Response(), ['id' => $id, 'operation' => 'retry'])->getStatusCode());
+        }
+    }
+
     public function testEshopWriterCannotCancelStockValuation(): void
     {
         $sid = $this->createSupplier();
@@ -74,6 +92,7 @@ final class CatalogJobActionTest extends StockTestCase
     private function request(int $supplierId, string $role = 'accountant'): \Psr\Http\Message\ServerRequestInterface
     {
         return (new ServerRequestFactory())->createServerRequest('POST', '/api/stock/reports/valuation-jobs')
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role]);
     }

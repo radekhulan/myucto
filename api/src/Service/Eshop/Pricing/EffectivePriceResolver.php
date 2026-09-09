@@ -95,7 +95,7 @@ final class EffectivePriceResolver
         int $supplierId,
         array $stockItemIds,
         string $currency = 'CZK',
-        string $qty = '1',
+        string|array $qty = '1',
         ?string $onDate = null,
     ): array {
         $ids = array_values(array_unique(array_filter(
@@ -107,10 +107,30 @@ final class EffectivePriceResolver
         }
         $currency = strtoupper(trim($currency)) !== '' ? strtoupper(trim($currency)) : 'CZK';
         $onDate = $onDate ?? date('Y-m-d');
-        $qty = $this->normalizeQty($qty);
+        $qty = is_array($qty) ? array_map($this->normalizeQty(...), $qty) : $this->normalizeQty($qty);
 
         $base = $this->basePrices($supplierId, $ids, $currency);
         $candidates = $this->promos->activeForItems($supplierId, $ids, $currency, $onDate);
+        $limited = [];
+        foreach ($candidates as $rows) {
+            foreach ($rows as $promo) {
+                if ($promo['qty_mode'] === 'limited') {
+                    $limited[] = $promo;
+                }
+            }
+        }
+        $consumed = $this->promos->consumedMany($supplierId, $limited);
+        $consumedById = [];
+        foreach ($limited as $index => $promo) {
+            $consumedById[$promo['id']] = $consumed[$index];
+        }
+        foreach ($candidates as &$rows) {
+            foreach ($rows as &$promo) {
+                $promo['_consumed_qty'] = $consumedById[$promo['id']] ?? '0.000';
+            }
+            unset($promo);
+        }
+        unset($rows);
 
         // Živý stav skladu jen pro karty, které nějakou akci v režimu 'stock' mají.
         $needStock = [];
@@ -130,7 +150,7 @@ final class EffectivePriceResolver
                 $supplierId,
                 $itemId,
                 $currency,
-                $qty,
+                is_array($qty) ? ($qty[$itemId] ?? '1') : $qty,
                 $base[$itemId] ?? null,
                 $candidates[$itemId] ?? [],
                 $stockQty[$itemId] ?? '0.000',
@@ -268,7 +288,7 @@ final class EffectivePriceResolver
             // Pevný rozpočet mínus dopočítané čerpání z vystavených faktur.
             'limited' => $this->clampToZero(bcsub(
                 (string) ($promo['qty_limit'] ?? '0'),
-                $this->promos->consumedQty($supplierId, $promo),
+                $promo['_consumed_qty'] ?? $this->promos->consumedQty($supplierId, $promo),
                 self::QTY_SCALE,
             )),
             default => null, // unlimited

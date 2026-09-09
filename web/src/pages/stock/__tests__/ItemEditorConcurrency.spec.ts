@@ -67,6 +67,7 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: '42' }, query: {} }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   RouterLink: { template: '<a><slot /></a>' },
+  onBeforeRouteLeave: vi.fn(),
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -137,6 +138,14 @@ const locale = (id: number, code: string, name: string) => ({
   archived: false,
 })
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(resolvePromise => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 describe('ItemEditor versionovaný přepočet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -185,6 +194,30 @@ describe('ItemEditor versionovaný přepočet', () => {
     expect(m.saveProductEditor).toHaveBeenCalledWith(42, expect.objectContaining({
       row_version: 7,
       item: expect.objectContaining({ name: 'Rozpracovaný název' }),
+    }))
+  })
+
+  it('ponechá editaci provedenou během ukládání jako neuloženou', async () => {
+    const save = deferred<typeof product>()
+    m.saveProductEditor.mockReturnValueOnce(save.promise)
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+
+    await wrapper.find('input[required]').setValue('Odeslaný název')
+    await wrapper.find('form').trigger('submit')
+    expect(m.saveProductEditor).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('fieldset').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('input[required]').setValue('Novější název')
+    save.resolve({ ...product, row_version: 8 })
+    await flushPromises()
+
+    expect((wrapper.find('input[required]').element as HTMLInputElement).value).toBe('Novější název')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(m.saveProductEditor).toHaveBeenLastCalledWith(42, expect.objectContaining({
+      item: expect.objectContaining({ name: 'Novější název' }),
+      row_version: 8,
     }))
   })
 })
@@ -303,7 +336,7 @@ describe('ItemEditor připravené jazyky a měny', () => {
     const wrapper = shallowMount(ItemEditor)
     await flushPromises()
 
-    await wrapper.find('[data-currency="USD"] input').setValue('15')
+    await wrapper.find('[data-currency="USD"] input[type="number"]').setValue('15')
     await wrapper.find('[data-currency="CZK"] button').trigger('click')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -318,6 +351,19 @@ describe('ItemEditor připravené jazyky a měny', () => {
     ]))
   })
 
+  it('zachová cenová pravidla a marži při uložení karty', async () => {
+    m.listCurrencies.mockResolvedValue([currency(1, 'CZK', true), currency(2, 'USD')])
+    m.getPrices.mockResolvedValue([{ ...price, price_mode: 'target_margin', markup_pct: '25.000', use_pricing_rules: true }])
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+    await wrapper.find('[data-currency="USD"] input[type="checkbox"]').setValue(true)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(m.saveProductEditor.mock.calls[0][1].prices).toEqual(expect.arrayContaining([
+      expect.objectContaining({ currency_code: 'CZK', price_mode: 'target_margin', markup_pct: '25.000', use_pricing_rules: true }),
+      expect.objectContaining({ currency_code: 'USD', use_pricing_rules: true }),
+    ]))
+  })
   it('po CAS přepočtu znovu připraví zatím prázdné aktivní měny', async () => {
     m.listCurrencies.mockResolvedValue([
       currency(1, 'CZK', true),
@@ -332,5 +378,17 @@ describe('ItemEditor připravené jazyky a měny', () => {
 
     expect(m.updatePricesVersioned).toHaveBeenCalledWith(42, 5, [expect.objectContaining({ currency_code: 'CZK' })])
     expect(wrapper.find('[data-currency="USD"]').exists()).toBe(true)
+  })
+
+  it('publishes keyboard-accessible editor tabs and keeps placeholders out of the saved payload', async () => {
+    m.listCurrencies.mockResolvedValue([currency(1, 'CZK', true), currency(2, 'USD')])
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+    const tabs = wrapper.findAll('button[role="tab"]')
+    expect(tabs[0]!.attributes('aria-selected')).toBe('true')
+    expect(tabs[0]!.attributes('aria-controls')).toContain('panel-general')
+    await tabs[0]!.trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.findAll('button[role="tab"]')[1]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[role="tabpanel"]').attributes('id')).toContain('panel-general')
   })
 })

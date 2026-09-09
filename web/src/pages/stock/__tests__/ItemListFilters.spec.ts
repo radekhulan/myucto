@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   listAttributes: vi.fn(),
   listAttributeOptions: vi.fn(),
   listClients: vi.fn(),
+  canWrite: vi.fn(),
   savedConfig: undefined as any,
 }))
 
@@ -27,7 +28,7 @@ vi.mock('@/api/eshop', () => ({
   },
 }))
 vi.mock('@/api/clients', () => ({ clientsApi: { list: m.listClients } }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => false }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: () => true, canWrite: m.canWrite }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatMoney: (value: string) => value }))
 vi.mock('@/composables/useRowLink', () => ({ useRowLink: () => vi.fn() }))
@@ -54,6 +55,7 @@ const filterBar = { template: '<div><slot name="primary" /><slot /><slot name="a
 describe('ItemList catalog filters', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.canWrite.mockReturnValue(false)
     m.listItems.mockResolvedValue({ data: [], meta: { total: 0, pages: 1 } })
     m.listWarehouses.mockResolvedValue([])
     m.listManufacturers.mockResolvedValue([{ id: 11, name: 'Acme', archived: false }])
@@ -117,5 +119,38 @@ describe('ItemList catalog filters', () => {
     expect(m.listItems).toHaveBeenLastCalledWith(expect.objectContaining({
       attribute_filters: [{ attribute_id: 14, option_id: 15 }],
     }), expect.anything())
+  })
+
+  it('uses explicit all-matching selection with the current filters and resets it when a filter changes', async () => {
+    m.canWrite.mockReturnValue(true)
+    m.listItems.mockResolvedValue({ data: [{ id: 31, sku: 'TEST-31', name: 'Test item', item_type: 'goods', unit: 'ks', is_active: true, min_qty: null }], meta: { total: 125, pages: 3 } })
+    const dialog = { props: ['selection', 'selectedCount'], template: '<div data-test="bulk-dialog" />' }
+    const wrapper = mount(ItemList, { global: { stubs: { FilterBar: filterBar, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, SortableTh: true, EmptyState: true, RouterLink: true, CatalogBulkDialog: dialog } } })
+    await flushPromises()
+
+    const buttons = wrapper.findAll('button')
+    await buttons[0]!.trigger('click')
+    await buttons[1]!.trigger('click')
+    await buttons[2]!.trigger('click')
+    const selection = wrapper.findComponent(dialog).props('selection') as any
+    expect(selection).toEqual(expect.objectContaining({ all_matching: true, excluded_ids: [], filters: expect.objectContaining({ active: true }) }))
+
+    await wrapper.get('select[title="stock.items.filter_manufacturer"]').setValue('11')
+    await flushPromises()
+    expect(wrapper.findComponent(dialog).props('selectedCount')).toBe(0)
+  })
+
+  it('opens quick detail with a frozen explicit selection only when the opened item is selected', async () => {
+    m.canWrite.mockReturnValue(true)
+    m.listItems.mockResolvedValue({ data: [{ id: 31, sku: 'TEST-31', name: 'Test item', item_type: 'goods', unit: 'ks', is_active: true, min_qty: null }], meta: { total: 125, pages: 3 } })
+    const quickDrawer = { props: ['itemId', 'neighbors'], template: '<div data-test="quick-drawer" />' }
+    const wrapper = mount(ItemList, { global: { stubs: { FilterBar: filterBar, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, SortableTh: true, EmptyState: true, RouterLink: { template: '<a><slot /></a>' }, ItemQuickDetailDrawer: quickDrawer } } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('stock.items.bulk.select_page'))!.trigger('click')
+    await wrapper.get('button[title="stock.items.quick_detail.open"]').trigger('click')
+
+    expect(wrapper.findComponent(quickDrawer).props('itemId')).toBe(31)
+    expect(wrapper.findComponent(quickDrawer).props('neighbors')).toEqual(expect.objectContaining({ ids: [31], active: true }))
   })
 })

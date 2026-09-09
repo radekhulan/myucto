@@ -604,6 +604,7 @@ final class RoutePermissionMap
         // „zavřít nedodaný zbytek objednávky" spadlo pod skladovou uzávěrku
         // (`stock.close`), což je úplně jiné oprávnění — i před catch-all `^/api/stock`.
         ['*', '#^/api/stock/purchase-orders(/|$)#', 'stock.orders.write', AccessLevel::WRITE],
+        ['POST', '#^/api/stock/items/[0-9]+/neighbors$#', 'stock', AccessLevel::READ],
         ['*', '#^/api/stock/items(/|$)#', 'stock.items.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/documents(/|$)#', 'stock.documents.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/.*/close$#', 'stock.close', AccessLevel::WRITE],
@@ -613,6 +614,10 @@ final class RoutePermissionMap
         ['*', '#^/api/stock/vendor-offers(/|$)#', 'stock.vendors.write', AccessLevel::WRITE],
         ['*', '#^/api/stock(/|$)#', 'stock', AccessLevel::WRITE],
         ['GET', '#^/api/eshop(/|$)#', 'eshop', AccessLevel::READ],
+        ['POST', '#^/api/catalog/(products|prices)/batch$#', 'eshop', AccessLevel::READ],
+        ['GET', '#^/api/catalog/facets$#', 'eshop', AccessLevel::READ],
+        ['POST', '#^/api/catalog/exports$#', 'eshop', AccessLevel::READ],
+        ['GET', '#^/api/catalog/exports/[0-9]+/download$#', 'eshop', AccessLevel::READ],
         ['*', '#^/api/eshop(/|$)#', 'eshop.write', AccessLevel::WRITE],
         ['POST', '#^/api/logbook/.*/import#', 'logbook.import', AccessLevel::WRITE],
         ['DELETE', '#^/api/logbook(/|$)#', 'logbook.delete', AccessLevel::WRITE],

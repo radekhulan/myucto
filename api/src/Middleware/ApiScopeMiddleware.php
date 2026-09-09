@@ -78,6 +78,10 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // nad `^/api/(stock|eshop)` platí dál, takže se tím nic neotevírá plošně.
         '#^/api/stock(/|$)#',
         '#^/api/eshop(/|$)#',
+        '#^/api/catalog/(products|prices)/batch$#',
+        '#^/api/catalog/facets$#',
+        '#^/api/catalog/exports$#',
+        '#^/api/catalog/exports/[0-9]+/download$#',
         '#^/api/price-list-items(/|$)#',
         // Mzdy - pouze úzký personální a vstupní kontrakt. Uzávěrky, schválení
         // běhů, platby, dokumenty a podání nemají v allowlistu žádnou cestu.
@@ -142,6 +146,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      * @var list<string>
      */
     private const BEARER_SESSION_ONLY = [
+        '#^/api/eshop/bulk(/|$)#',
         '#^/api/accounting/payroll(/|$)#',
         '#^/api/accounting/reports/payroll-sheet$#',
     ];
@@ -220,7 +225,9 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         }
 
         // 2) Scope
-        if (in_array($method, self::READ_METHODS, true)) {
+        if (in_array($method, self::READ_METHODS, true)
+            || ($method === 'POST' && (in_array($path, ['/api/catalog/products/batch', '/api/catalog/prices/batch', '/api/catalog/exports'], true)
+                || preg_match('#^/api/stock/items/[0-9]+/neighbors$#', $path) === 1))) {
             return $handler->handle($request);
         }
 

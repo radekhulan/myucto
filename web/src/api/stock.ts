@@ -91,6 +91,18 @@ export interface StockItemListFilters {
   per_page?: number
 }
 
+export interface StockItemNeighbors {
+  previous_id: number | null
+  next_id: number | null
+  position: number | null
+  total: number
+}
+
+export interface StockItemNeighborsOptions extends Omit<StockItemListFilters, 'page' | 'per_page'> {
+  ids?: number[]
+  excluded_ids?: number[]
+}
+
 export interface StockItemAttributeFilter {
   attribute_id: number
   option_id?: number
@@ -525,9 +537,13 @@ export const stockApi = {
       signal: options.signal,
     }).then(r => r.data)
   },
+  itemNeighbors: (id: number, options: StockItemNeighborsOptions = {}, request: { signal?: AbortSignal } = {}) => {
+    const { ids, excluded_ids, ...filters } = options
+    return api.post<StockItemNeighbors>(`/stock/items/${id}/neighbors`, { filters, ids, excluded_ids }, { signal: request.signal }).then(r => r.data)
+  },
   searchItems: (q: string, limit = 50) =>
     api.get<StockItemSearchResult[]>('/stock/items/search', { params: { q, limit } }).then(r => r.data),
-  getItem: (id: number) => api.get<StockItem>(`/stock/items/${id}`).then(r => r.data),
+  getItem: (id: number, options: { signal?: AbortSignal } = {}) => api.get<StockItem>(`/stock/items/${id}`, { signal: options.signal }).then(r => r.data),
   createItem: (payload: StockItemPayload) => api.post<StockItem>('/stock/items', payload).then(r => r.data),
   updateItem: (id: number, payload: StockItemPayload) => api.put<StockItem>(`/stock/items/${id}`, payload).then(r => r.data),
   deleteItem: (id: number) => api.delete<{ deleted: true }>(`/stock/items/${id}`).then(r => r.data),

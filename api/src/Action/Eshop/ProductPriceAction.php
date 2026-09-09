@@ -13,6 +13,7 @@ use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\EshopException;
+use MyInvoice\Service\Eshop\Pricing\PricingInputException;
 use MyInvoice\Service\Eshop\Pricing\PriceRecomputeDispatcher;
 use MyInvoice\Service\Eshop\Pricing\PriceWriteService;
 use MyInvoice\Service\IpMatcher;
@@ -85,6 +86,8 @@ final class ProductPriceAction
                 : $this->writer->save($supplierId, $itemId, $rows, $request->getMethod() === 'PUT');
         } catch (EshopException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        } catch (PricingInputException $e) {
+            return $this->pricingError($response, $e);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
@@ -105,7 +108,11 @@ final class ProductPriceAction
         if ($this->items->find($supplierId, $itemId) === null) {
             return Json::error($response, 'not_found', 'Karta zboží nenalezena.', 404);
         }
-        $result = $this->dispatcher->recomputeItem($supplierId, $itemId);
+        try {
+            $result = $this->dispatcher->recomputeItem($supplierId, $itemId);
+        } catch (PricingInputException $e) {
+            return $this->pricingError($response, $e);
+        }
         $this->log($request, 'eshop.prices_recomputed', $itemId, []);
         return Json::ok($response, $result);
     }
@@ -123,7 +130,13 @@ final class ProductPriceAction
         if ($this->items->find($supplierId, $itemId) === null) {
             return Json::error($response, 'not_found', 'Karta zboží nenalezena.', 404);
         }
-        $result = $this->writer->delete($supplierId, $itemId, (string) $args['currency']);
+        try {
+            $result = $this->writer->delete($supplierId, $itemId, (string) $args['currency']);
+        } catch (PricingInputException $e) {
+            return $this->pricingError($response, $e);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
         $this->log($request, 'eshop.price_deleted', $itemId, ['currency' => strtoupper((string) $args['currency'])]);
         return Json::ok($response, $result);
     }
@@ -139,6 +152,17 @@ final class ProductPriceAction
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'),
             $this->currentSupplierId($request),
+        );
+    }
+
+    private function pricingError(Response $response, PricingInputException $error): Response
+    {
+        return Json::error(
+            $response,
+            $error->errorCode,
+            $error->getMessage(),
+            $error->httpStatus(),
+            $error->details,
         );
     }
 }

@@ -169,6 +169,11 @@ final class StorageQuotaReadOnlyMiddleware implements MiddlewareInterface
             return true;
         }
 
+        if ($method === 'POST' && (in_array($path, ['/api/catalog/products/batch', '/api/catalog/prices/batch'], true)
+            || preg_match('#^/api/stock/items/[0-9]+/neighbors$#', $path) === 1)) {
+            return true;
+        }
+
         // Hosting musí poznat, v jakém je instance stavu.
         if ($path === '/api/health') {
             return true;

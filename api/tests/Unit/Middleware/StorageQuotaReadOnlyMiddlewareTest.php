@@ -31,6 +31,15 @@ final class StorageQuotaReadOnlyMiddlewareTest extends TestCase
 {
     private const MB = 1024 * 1024;
 
+    public function testCatalogReadPostsRemainAvailableAtQuotaLimit(): void
+    {
+        $middleware = $this->middleware(StorageQuotaState::EXHAUSTED, 100);
+        foreach (['/api/catalog/products/batch', '/api/catalog/prices/batch', '/api/stock/items/42/neighbors'] as $path) {
+            self::assertSame(204, $middleware->process($this->request('POST', $path), $this->okHandler())->getStatusCode());
+        }
+        self::assertSame(StorageQuotaPolicy::HTTP_STATUS, $middleware->process($this->request('POST', '/api/catalog/exports'), $this->okHandler())->getStatusCode());
+    }
+
     // ⚠️ Nesmí se jmenovat `status()`: `PHPUnit\Framework\TestCase::status()`
     // je final a překrytí shodí načtení CELÉ testové sady fatální chybou —
     // ne jenom tenhle soubor. Cílený běh přes --filter to nechytí, protože

@@ -3026,6 +3026,7 @@ final class Routes
             $g->get   ('/items',                        [\MyInvoice\Action\Stock\StockItemAction::class, 'list']);
             $g->post  ('/items',                        [\MyInvoice\Action\Stock\StockItemAction::class, 'create']);
             $g->get   ('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'get']);
+            $g->post  ('/items/{id:[0-9]+}/neighbors',  \MyInvoice\Action\Stock\StockItemNeighborsAction::class);
             $g->put   ('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'update']);
             $g->delete('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'delete']);
             $g->get   ('/items/{id:[0-9]+}/movements',        [\MyInvoice\Action\Stock\StockItemAction::class, 'movements']);
@@ -3105,7 +3106,25 @@ final class Routes
         // číselníky (výrobci, kategorie strom, atributy, tagy, poplatky) + média.
         // Vlastní top-level skupina; opt-in přes stock_enabled (GuardsStockEnabled),
         // PermissionMiddleware pravidla pro ^/api/eshop. Specifické cesty PŘED generickými /{id}.
+        $app->post('/api/catalog/products/batch', [\MyInvoice\Action\Eshop\CatalogReadAction::class, 'products']);
+        $app->get('/api/catalog/facets', [\MyInvoice\Action\Eshop\CatalogReadAction::class, 'facets']);
+        $app->post('/api/catalog/exports', [\MyInvoice\Action\Eshop\CatalogExportAction::class, 'create']);
+        $app->get('/api/catalog/exports/{id:[0-9]+}/download', [\MyInvoice\Action\Eshop\CatalogExportAction::class, 'download']);
+        $app->post('/api/catalog/prices/batch', [\MyInvoice\Action\Eshop\CatalogReadAction::class, 'prices']);
         $app->group('/api/eshop', function ($g) {
+            $g->post('/bulk/preview', [\MyInvoice\Action\Eshop\CatalogBulkAction::class, 'preview']);
+            $g->post('/bulk/{id:[0-9]+}/apply', [\MyInvoice\Action\Eshop\CatalogBulkAction::class, 'apply']);
+            $g->post('/bulk/{id:[0-9]+}/restore', [\MyInvoice\Action\Eshop\CatalogBulkAction::class, 'restore']);
+            $g->get('/pricing/profiles', [\MyInvoice\Action\Eshop\CatalogPricingProfileAction::class, 'list']);
+            $g->post('/pricing/profiles', [\MyInvoice\Action\Eshop\CatalogPricingProfileAction::class, 'create']);
+            $g->put('/pricing/profiles/{id:[0-9]+}', [\MyInvoice\Action\Eshop\CatalogPricingProfileAction::class, 'update']);
+            $g->delete('/pricing/profiles/{id:[0-9]+}', [\MyInvoice\Action\Eshop\CatalogPricingProfileAction::class, 'delete']);
+            $g->get('/pricing/rules', [\MyInvoice\Action\Eshop\CatalogPricingRuleAction::class, 'list']);
+            $g->post('/pricing/rules', [\MyInvoice\Action\Eshop\CatalogPricingRuleAction::class, 'create']);
+            $g->put('/pricing/rules/{id:[0-9]+}', [\MyInvoice\Action\Eshop\CatalogPricingRuleAction::class, 'update']);
+            $g->delete('/pricing/rules/{id:[0-9]+}', [\MyInvoice\Action\Eshop\CatalogPricingRuleAction::class, 'delete']);
+            $g->get('/pricing/exchange-rates', [\MyInvoice\Action\Eshop\CatalogPricingExchangeRateAction::class, 'list']);
+            $g->put('/pricing/exchange-rates', [\MyInvoice\Action\Eshop\CatalogPricingExchangeRateAction::class, 'save']);
             // Výrobci
             $g->get   ('/manufacturers',                 [\MyInvoice\Action\Eshop\ManufacturerAction::class, 'list']);
             $g->post  ('/manufacturers',                 [\MyInvoice\Action\Eshop\ManufacturerAction::class, 'create']);

@@ -102,7 +102,7 @@ final class CatalogPriceJobTest extends StockTestCase
         $this->db->pdo()->prepare("UPDATE exchange_rates SET rate = 20 WHERE currency_code = 'XTS' AND rate_date = ?")->execute([date('Y-m-d')]);
         $job = $worker->tick($sid);
         self::assertSame('4.00', $this->container->get(StockItemPriceRepository::class)->findByCurrency($sid, $item, 'XTS')['computed_price']);
-        self::assertSame(2, $job['input_version']);
+        self::assertSame(3, $job['input_version']);
         self::assertArrayHasKey($item, $job['input']['item_versions']);
         self::assertSame('25.000000', $job['input']['rates']['XTS']['rate']);
     }

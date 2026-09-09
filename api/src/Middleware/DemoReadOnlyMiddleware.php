@@ -60,6 +60,7 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
 
         $route = $this->routes->match($method, $path);
         if ($route !== null
+            && $path !== '/api/catalog/exports'
             && $route->kind === RoutePermissionMap::PERMISSION
             && $route->minimum === AccessLevel::READ
         ) {

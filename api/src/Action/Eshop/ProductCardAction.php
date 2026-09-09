@@ -13,6 +13,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\EshopException;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
+use MyInvoice\Service\Eshop\Pricing\PricingInputException;
 use MyInvoice\Service\Eshop\ProductCardService;
 use MyInvoice\Service\Eshop\ProductEditorService;
 use MyInvoice\Service\IpMatcher;
@@ -74,6 +75,8 @@ final class ProductCardAction
             $card = $this->cards->update($supplierId, (int) $args['id'], $body);
         } catch (EshopException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        } catch (PricingInputException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus(), $e->details);
         }
         $this->log($request, 'eshop.product_updated', (int) $args['id'], []);
         return Json::ok($response, $card);
@@ -97,6 +100,8 @@ final class ProductCardAction
             $card = $this->editor->save($supplierId, $itemId, $body);
         } catch (EshopException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        } catch (PricingInputException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus(), $e->details);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }

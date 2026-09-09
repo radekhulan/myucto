@@ -13,6 +13,7 @@ final class CatalogPriceJobService
         private readonly Connection $db,
         private readonly CatalogJobService $jobs,
         private readonly PriceCalculationService $calculation,
+        private readonly PricingRuleResolver $rules,
     ) {}
 
     public function enqueue(int $supplierId, ?array $itemIds = null): int
@@ -49,7 +50,13 @@ final class CatalogPriceJobService
         if ($ids === []) {
             return 0;
         }
-        return $this->jobs->enqueue($supplierId, 'price_recompute', ['item_ids' => $ids, 'item_versions' => $versions, 'on_date' => $onDate, 'rates' => $rates], count($ids), 2);
+        return $this->jobs->enqueue($supplierId, 'price_recompute', [
+            'item_ids' => $ids,
+            'item_versions' => $versions,
+            'on_date' => $onDate,
+            'rates' => $rates,
+            'pricing_policy' => $this->rules->snapshot($supplierId, $onDate),
+        ], count($ids), 3);
     }
 
     public function tick(int $supplierId, int $maxBatches = 10): ?array
@@ -62,15 +69,19 @@ final class CatalogPriceJobService
         try {
             for ($batch = 0; $batch < max(1, min(100, $maxBatches)); $batch++) {
                 $job = $this->jobs->batch($supplierId, $job['id'], $token, function (array $current) use ($supplierId): array {
-                    if (!in_array($current['input_version'], [1, 2], true)) {
+                    if (!in_array($current['input_version'], [1, 2, 3], true)) {
                         throw new \RuntimeException('unsupported_input_version');
                     }
                     $ids = $current['input']['item_ids'];
-                    if ($current['input_version'] === 1) {
+                    if ($current['input_version'] < 3) {
                         $replacement = $this->enqueue($supplierId, array_slice($ids, $current['checkpoint']));
                         return ['checkpoint' => count($ids), 'done' => true, 'report' => ['replacement_job_id' => $replacement, 'reason' => 'input_snapshot_upgrade']];
                     }
-                    $snapshot = new PricingSnapshot($current['input']['on_date'], $current['input']['rates']);
+                    $snapshot = new PricingSnapshot(
+                        $current['input']['on_date'],
+                        $current['input']['rates'],
+                        $current['input']['pricing_policy'],
+                    );
                     $selection = array_slice($ids, $current['checkpoint'], 100);
                     $report = $current['report'] + ['processed' => 0, 'succeeded' => 0, 'failed_items' => [], 'stale_items' => [], 'replacement_job_ids' => []];
                     $stale = [];
@@ -97,7 +108,7 @@ final class CatalogPriceJobService
                     $checkpoint = $current['checkpoint'] + count($selection);
                     $report['processed'] = $checkpoint;
                     return ['checkpoint' => $checkpoint, 'done' => $checkpoint === count($ids), 'report' => $report];
-                });
+                }, consistentSnapshot: true);
                 if ($job['status'] !== 'running') {
                     return $job;
                 }

@@ -29,9 +29,15 @@ final class PurchaseCostResolver
 
     /**
      * @param array<string,mixed> $item řádek stock_items (potřebuje id, pricing_base)
-     * @return array{base_czk:string, source:string}|null
+     * @return array{base_czk:string, source:string, rate:?array, source_currency?:string, source_amount?:string}|null
      */
-    public function resolve(int $supplierId, array $item, string $onDate, ?PricingSnapshot $snapshot = null): ?array
+    public function resolve(
+        int $supplierId,
+        array $item,
+        string $onDate,
+        ?PricingSnapshot $snapshot = null,
+        ?array $fxPolicy = null,
+    ): ?array
     {
         $itemId = (int) $item['id'];
         $base = (string) ($item['pricing_base'] ?? 'weighted_avg');
@@ -42,7 +48,7 @@ final class PurchaseCostResolver
             $primary = match ($base) {
                 'weighted_avg'  => $this->pair($this->levels->weightedAvgCost($supplierId, $itemId), 'weighted_avg'),
                 'last_purchase' => $this->pair($this->levels->lastPurchaseCost($supplierId, $itemId), 'last_purchase'),
-                'manual'        => $this->vendorCzk($supplierId, $itemId, $onDate, $snapshot),
+                'manual'        => $this->vendorCzk($supplierId, $itemId, $onDate, $snapshot, $fxPolicy),
                 default         => null,
             };
         } catch (PricingInputException $e) {
@@ -61,10 +67,10 @@ final class PurchaseCostResolver
         if ($missingRate !== null) {
             throw $missingRate;
         }
-        return $this->vendorCzk($supplierId, $itemId, $onDate, $snapshot);
+        return $this->vendorCzk($supplierId, $itemId, $onDate, $snapshot, $fxPolicy);
     }
 
-    /** @return array{base_czk:string, source:string}|null */
+    /** @return array{base_czk:string, source:string, rate:null}|null */
     private function pair(?string $value, string $source): ?array
     {
         if ($value === null) {
@@ -74,11 +80,17 @@ final class PurchaseCostResolver
         if (bccomp($value, '0', 6) <= 0) {
             return null;
         }
-        return ['base_czk' => $value, 'source' => $source];
+        return ['base_czk' => $value, 'source' => $source, 'rate' => null];
     }
 
     /** Preferovaný dodavatel → CZK (přes FX, když je v cizí měně). */
-    private function vendorCzk(int $supplierId, int $itemId, string $onDate, ?PricingSnapshot $snapshot = null): ?array
+    private function vendorCzk(
+        int $supplierId,
+        int $itemId,
+        string $onDate,
+        ?PricingSnapshot $snapshot = null,
+        ?array $fxPolicy = null,
+    ): ?array
     {
         $vendor = $this->vendors->preferredPurchase($supplierId, $itemId);
         if ($vendor === null) {
@@ -88,6 +100,26 @@ final class PurchaseCostResolver
         $currency = strtoupper($vendor['currency_code']);
         if ($currency === 'CZK') {
             return $this->pair($price, 'vendor');
+        }
+        if (bccomp($price, '0', 6) <= 0) {
+            return null;
+        }
+        if ($fxPolicy !== null) {
+            $rate = $this->fx->businessRateFor(
+                $supplierId,
+                $currency,
+                $onDate,
+                (string) $fxPolicy['source'],
+                (int) $fxPolicy['max_age_days'],
+                $snapshot,
+            );
+            return [
+                'base_czk' => bcmul($price, $rate['rate'], 6),
+                'source' => 'vendor',
+                'source_currency' => $currency,
+                'source_amount' => $price,
+                'rate' => $rate,
+            ];
         }
         $czk = $this->fx->toCzk($price, $currency, $onDate, $snapshot);
         if ($czk === null) {

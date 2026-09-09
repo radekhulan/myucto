@@ -567,6 +567,7 @@
     ],
     "stock-items": [
       "eshop",
+      "imports",
       "stock"
     ],
     "stock-item-new": [
@@ -632,10 +633,12 @@
     ],
     "eshop-jobs": [
       "eshop",
-      "imports"
+      "imports",
+      "stock"
     ],
     "eshop": [
       "eshop",
+      "imports",
       "stock"
     ],
     "logbook": [

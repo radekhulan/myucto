@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, useId } from 'vue'
-import { useRoute, useRouter, RouterLink } from 'vue-router'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
+import { useRoute, useRouter, RouterLink, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { stockApi, type StockItemPayload } from '@/api/stock'
 import {
@@ -44,6 +44,7 @@ const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
 const pageId = useId()
+const tabList = ref<HTMLElement | null>(null)
 
 const isEdit = computed(() => route.params.id !== undefined && route.params.id !== 'new')
 const itemId = computed(() => (isEdit.value ? Number(route.params.id) : null))
@@ -55,8 +56,44 @@ type Tab = 'general' | 'languages' | 'categories' | 'parameters' | 'prices' | 'v
 const tabs: Tab[] = ['general', 'languages', 'categories', 'parameters', 'prices', 'vendors', 'attachments']
 const tab = ref<Tab>((tabs as string[]).includes(String(route.query.tab)) ? (route.query.tab as Tab) : 'general')
 watch(tab, (v) => {
-  if (route.query.tab !== v) router.replace({ query: { ...route.query, tab: v } })
+  if (route.query.tab !== v) {
+    router.replace({ query: { ...route.query, tab: v } })
+  }
+
+  void nextTick(showActiveTab)
 })
+function showActiveTab() {
+  const list = tabList.value
+  const active = list?.querySelector<HTMLElement>('[aria-selected="true"]')
+  if (!list || !active) return
+  const relativeLeft = active.getBoundingClientRect().left - list.getBoundingClientRect().left
+  if (relativeLeft < 0) list.scrollLeft += relativeLeft
+  else if (relativeLeft + active.offsetWidth > list.clientWidth) {
+    list.scrollLeft += relativeLeft + active.offsetWidth - list.clientWidth
+  }
+}
+
+function onTabKey(event: KeyboardEvent, current: Tab) {
+  const index = tabs.indexOf(current)
+  let next = -1
+  if (event.key === 'ArrowRight') {
+    next = (index + 1) % tabs.length
+  } else if (event.key === 'ArrowLeft') {
+    next = (index + tabs.length - 1) % tabs.length
+  } else if (event.key === 'Home') {
+    next = 0
+  } else if (event.key === 'End') {
+    next = tabs.length - 1
+  }
+
+  if (next < 0) return
+
+  event.preventDefault()
+  tab.value = tabs[next]!
+  void nextTick(() => {
+    tabList.value?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus()
+  })
+}
 
 // ── Číselníky ───────────────────────────────────────────────────────────
 const vatRates = ref<VatRate[]>([])
@@ -75,6 +112,7 @@ const errors = ref<Record<string, string[]>>({})
 const skuTouched = ref(false)
 const rowVersion = ref(0)
 const editorLoaded = ref(false)
+const savedSnapshot = ref('')
 
 // ── Základní pole (skladová karta) ──────────────────────────────────────
 const form = ref<StockItemPayload>({
@@ -195,6 +233,7 @@ interface PriceRow {
   computed_rate: string | null
   computed_at: string | null
   is_manual_override: boolean
+  use_pricing_rules: boolean
 }
 const ROUNDING_MODES: PriceRounding[] = ['none', '0.01', '0.10', '0.50', '1', '9_ending']
 const prices = ref<PriceRow[]>([])
@@ -232,6 +271,7 @@ function priceRowFrom(p: ProductPrice): PriceRow {
     computed_rate: p.computed_rate,
     computed_at: p.computed_at,
     is_manual_override: p.is_manual_override,
+    use_pricing_rules: p.use_pricing_rules ?? false,
   }
 }
 function emptyPriceRow(currencyCode: string): PriceRow {
@@ -247,6 +287,7 @@ function emptyPriceRow(currencyCode: string): PriceRow {
     computed_rate: null,
     computed_at: null,
     is_manual_override: false,
+    use_pricing_rules: false,
   }
 }
 function withConfiguredCurrencyRows(rows: PriceRow[]): PriceRow[] {
@@ -288,6 +329,7 @@ function meaningfulPriceRows(): PriceRow[] {
   return prices.value.filter(r =>
     r.id !== null
     || r.is_manual_override
+    || r.use_pricing_rules
     || String(r.markup_pct ?? '').trim() !== ''
     || String(r.fixed_price ?? '').trim() !== '')
 }
@@ -305,10 +347,11 @@ function pricePayloadFrom(r: PriceRow) {
   return {
     currency_code: r.currency_code.trim().toUpperCase(),
     price_mode: r.price_mode,
-    markup_pct: r.price_mode === 'markup' ? (r.markup_pct === '' ? null : r.markup_pct) : null,
-    fixed_price: r.price_mode === 'fixed' ? (r.fixed_price === '' ? null : r.fixed_price) : null,
+    markup_pct: r.price_mode !== 'fixed' ? (r.markup_pct === '' ? null : r.markup_pct) : null,
+    fixed_price: r.price_mode === 'fixed' || r.is_manual_override ? (r.fixed_price === '' ? null : r.fixed_price) : null,
     rounding: r.rounding,
     is_manual_override: r.is_manual_override,
+    use_pricing_rules: r.use_pricing_rules,
   }
 }
 
@@ -606,6 +649,9 @@ onMounted(async () => {
     await loadCodebooks()
     if (isEdit.value && itemId.value) await loadProduct(itemId.value)
     prepareEditorRows()
+    markSaved()
+    await nextTick()
+    showActiveTab()
   } catch (e: any) {
     error.value = mapError(e)
   }
@@ -651,6 +697,37 @@ function buildProductPayload(): Omit<ProductUpdatePayload, 'row_version'> {
   }
 }
 
+function snapshot(): string {
+  return JSON.stringify({
+    item: form.value,
+    product: buildProductPayload(),
+    prices: meaningfulPriceRows().map(pricePayloadFrom),
+    promos: promos.value.map(promoPayloadFrom),
+    vendors: vendors.value.map(vendorPayloadFrom),
+  })
+}
+function markSaved(snapshotValue = snapshot()) {
+  savedSnapshot.value = snapshotValue
+}
+const isDirty = computed(() => savedSnapshot.value !== '' && snapshot() !== savedSnapshot.value)
+function confirmDiscard(): boolean {
+  return !isDirty.value || window.confirm(t('stock.items.editor_ux.discard_changes'))
+}
+function onBeforeUnload(event: BeforeUnloadEvent) {
+  if (!isDirty.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+onBeforeRouteLeave(() => confirmDiscard())
+onMounted(() => {
+  window.addEventListener('beforeunload', onBeforeUnload)
+  window.addEventListener('resize', showActiveTab)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  window.removeEventListener('resize', showActiveTab)
+})
+
 /**
  * Řádek bez měny by backend odmítl 400 za celý PUT — tedy včetně už vyplněných
  * jazyků a kategorií. Chytáme to dřív a rovnou přepneme na tab, kde chyba je.
@@ -677,13 +754,14 @@ function validateBeforeSubmit(): boolean {
 }
 
 async function submit() {
-  if (!canSaveEditor.value || (isEdit.value && !editorLoaded.value)) return
+  if (submitting.value || !canSaveEditor.value || (isEdit.value && !editorLoaded.value)) return
   error.value = ''
   errors.value = {}
   if (isEdit.value && !validateBeforeSubmit()) return
   submitting.value = true
   try {
     if (isEdit.value && itemId.value) {
+      const submittedSnapshot = snapshot()
       const payload: ProductEditorPayload = {
         row_version: rowVersion.value,
         item: form.value,
@@ -695,11 +773,22 @@ async function submit() {
       const saved = await eshopApi.saveProductEditor(itemId.value, payload)
       rowVersion.value = saved.row_version
       toast.success(t('common.saved'))
-      await loadProduct(itemId.value)
+      if (snapshot() === submittedSnapshot) {
+        await loadProduct(itemId.value)
+        markSaved()
+      } else {
+        markSaved(submittedSnapshot)
+      }
     } else {
+      const submittedSnapshot = snapshot()
       const created = await stockApi.createItem(form.value)
       // Po založení přejdi na editaci, kde jsou dostupné e-shopové taby.
-      router.push(`/stock/items/${created.id}/edit`)
+      if (snapshot() === submittedSnapshot) {
+        markSaved(submittedSnapshot)
+        router.push(`/stock/items/${created.id}/edit`)
+      } else {
+        markSaved(submittedSnapshot)
+      }
     }
   } catch (e: any) {
     const data = e?.response?.data?.error
@@ -797,11 +886,13 @@ function onImgError(e: Event) {
       <RouterLink to="/stock/items" class="text-sm text-neutral-600 hover:text-neutral-900">{{ t('stock.item_detail.back_to_list') }}</RouterLink>
     </div>
 
+    <form @submit.prevent="submit" autocomplete="off">
+      <fieldset :disabled="submitting" class="min-w-0 m-0 border-0 p-0">
     <!-- Tab strip (e-shopové taby jen v editaci) -->
-    <div v-if="isEdit" role="tablist" class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
+    <div v-if="isEdit" ref="tabList" role="tablist" :aria-label="t('stock.items.editor_ux.tabs_label')" class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
       <button v-for="tt in tabs" :key="tt"
-        type="button" role="tab" :aria-selected="tab === tt"
-        @click="tab = tt"
+        type="button" role="tab" :id="`${pageId}-tab-${tt}`" :aria-controls="`${pageId}-panel-${tt}`" :tabindex="tab === tt ? 0 : -1" :aria-selected="tab === tt"
+        @click="tab = tt" @keydown="onTabKey($event, tt)"
         class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap"
         :class="tab === tt
           ? 'border-primary-600 text-primary-700 font-medium'
@@ -817,9 +908,8 @@ function onImgError(e: Event) {
     </div>
     <p v-else class="text-xs text-neutral-500 mb-4">{{ t('eshop.item.eshop_hint') }}</p>
 
-    <form @submit.prevent="submit" autocomplete="off">
       <!-- ═══════════ TAB: OBECNÉ ═══════════ -->
-      <div v-show="tab === 'general'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+      <div v-show="tab === 'general'" role="tabpanel" :id="`${pageId}-panel-general`" :aria-labelledby="`${pageId}-tab-general`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.field_name') }} *</label>
@@ -942,7 +1032,7 @@ function onImgError(e: Event) {
       </div>
 
       <!-- ═══════════ TAB: JAZYKY ═══════════ -->
-      <div v-if="isEdit" v-show="tab === 'languages'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+      <div v-if="isEdit" v-show="tab === 'languages'" role="tabpanel" :id="`${pageId}-panel-languages`" :aria-labelledby="`${pageId}-tab-languages`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
           <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -1016,7 +1106,7 @@ function onImgError(e: Event) {
       </div>
 
       <!-- ═══════════ TAB: KATEGORIE & ŠTÍTKY ═══════════ -->
-      <div v-if="isEdit" v-show="tab === 'categories'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+      <div v-if="isEdit" v-show="tab === 'categories'" role="tabpanel" :id="`${pageId}-panel-categories`" :aria-labelledby="`${pageId}-tab-categories`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <h3 class="text-sm font-semibold text-neutral-700 mb-2">{{ t('eshop.product_categories.categories_title') }}</h3>
@@ -1048,7 +1138,7 @@ function onImgError(e: Event) {
       </div>
 
       <!-- ═══════════ TAB: PARAMETRY ═══════════ -->
-      <div v-if="isEdit" v-show="tab === 'parameters'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+      <div v-if="isEdit" v-show="tab === 'parameters'" role="tabpanel" :id="`${pageId}-panel-parameters`" :aria-labelledby="`${pageId}-tab-parameters`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
           <EmptyState v-if="attributes.filter(a => !a.archived).length === 0" dense accent="neutral" icon="tag"
             :title="t('eshop.parameters.empty')" />
@@ -1093,7 +1183,7 @@ function onImgError(e: Event) {
       </div>
 
       <!-- ═══════════ TAB: CENY ═══════════ -->
-      <div v-if="isEdit" v-show="tab === 'prices'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+      <div v-if="isEdit" v-show="tab === 'prices'" role="tabpanel" :id="`${pageId}-panel-prices`" :aria-labelledby="`${pageId}-tab-prices`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
           <div class="flex flex-wrap items-center gap-2">
             <button type="button" @click="recomputePrices" :disabled="recomputing || meaningfulPriceRows().length === 0 || !editorLoaded || !canWriteEshop" :class="btnOutline('neutral')">
@@ -1132,13 +1222,19 @@ function onImgError(e: Event) {
                     </div>
                   </td>
                   <td class="py-2 pr-3">
-                    <select v-model="p.price_mode" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+                    <select v-model="p.price_mode" :disabled="p.use_pricing_rules" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
                       <option value="markup">{{ t('eshop.prices.mode_markup') }}</option>
+                      <option value="target_margin">{{ t('eshop.prices.mode_target_margin') }}</option>
                       <option value="fixed">{{ t('eshop.prices.mode_fixed') }}</option>
                     </select>
+                    <label class="mt-2 flex items-center gap-2 text-xs text-neutral-600">
+                      <input v-model="p.use_pricing_rules" type="checkbox" class="rounded border-neutral-300 text-primary-600">
+                      {{ t('eshop.prices.use_pricing_rules') }}
+                    </label>
                   </td>
                   <td class="py-2 pr-3">
-                    <input v-if="p.price_mode === 'markup'" v-model="p.markup_pct" type="number" step="0.01" min="0"
+                    <span v-if="p.use_pricing_rules && !p.is_manual_override" class="text-xs text-neutral-500">{{ t('eshop.prices.from_profile') }}</span>
+                    <input v-else-if="p.price_mode !== 'fixed' && !p.is_manual_override" v-model="p.markup_pct" type="number" step="0.001" :min="p.price_mode === 'target_margin' ? 0 : -100" :max="p.price_mode === 'target_margin' ? 99.999 : 9999.999"
                       :placeholder="t('eshop.prices.markup_ph')"
                       class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
                     <input v-else v-model="p.fixed_price" type="text" inputmode="decimal"
@@ -1146,7 +1242,7 @@ function onImgError(e: Event) {
                       class="w-28 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
                   </td>
                   <td class="py-2 pr-3">
-                    <select v-model="p.rounding" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+                    <select v-model="p.rounding" :disabled="p.use_pricing_rules && !p.is_manual_override" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
                       <option v-for="rm in ROUNDING_MODES" :key="rm" :value="rm">{{ t('eshop.prices.rounding_' + (rm === '9_ending' ? '9_ending' : rm.replace('.', '_'))) }}</option>
                     </select>
                   </td>
@@ -1256,7 +1352,7 @@ function onImgError(e: Event) {
       </div>
 
       <!-- ═══════════ TAB: DODAVATELÉ ═══════════ -->
-      <div v-if="isEdit" v-show="tab === 'vendors'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+      <div v-if="isEdit" v-show="tab === 'vendors'" role="tabpanel" :id="`${pageId}-panel-vendors`" :aria-labelledby="`${pageId}-tab-vendors`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
           <button type="button" @click="addVendorRow" :class="btnOutline('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
@@ -1323,7 +1419,7 @@ function onImgError(e: Event) {
       </div>
 
       <!-- ═══════════ TAB: PŘÍLOHY ═══════════ -->
-      <div v-if="isEdit" v-show="tab === 'attachments'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+      <div v-if="isEdit" v-show="tab === 'attachments'" role="tabpanel" :id="`${pageId}-panel-attachments`" :aria-labelledby="`${pageId}-tab-attachments`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
           <div v-if="canWriteEshop" class="flex flex-wrap items-center gap-3">
             <input ref="fileInput" type="file" multiple class="hidden" @change="onFilesPicked" />
@@ -1389,13 +1485,17 @@ function onImgError(e: Event) {
       <!-- Chyba + akční lišta -->
       <div v-if="error" class="mt-3 rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
 
-      <div class="mt-4 flex justify-end gap-3">
-        <RouterLink to="/stock/items" :class="btnOutline('neutral')">{{ t('common.cancel') }}</RouterLink>
+      <div class="sticky bottom-[var(--app-footer-height,0px)] z-10 mt-4 -mx-2 px-2 py-3 bg-surface/95 border-t border-neutral-200 backdrop-blur flex flex-wrap justify-end gap-3">
+        <RouterLink to="/stock/items" :class="btnOutline('neutral')" class="whitespace-nowrap">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </RouterLink>
         <button v-if="tab !== 'attachments' && canSaveEditor" type="submit" :disabled="submitting || (isEdit && !editorLoaded)" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
         </button>
       </div>
+      </fieldset>
     </form>
   </div>
 </template>

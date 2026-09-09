@@ -2,7 +2,7 @@
 import { ref, reactive, computed, onMounted, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { stockApi, type StockItem, type StockItemType, type Warehouse, type StockItemAttributeFilter } from '@/api/stock'
+import { stockApi, type StockItem, type StockItemType, type Warehouse, type StockItemAttributeFilter, type StockItemListFilters, type StockItemNeighborsOptions } from '@/api/stock'
 import { eshopApi, type Manufacturer, type Category, type Tag, type Attribute, type AttributeOption } from '@/api/eshop'
 import { clientsApi, type Client } from '@/api/clients'
 import { useAuthStore } from '@/stores/auth'
@@ -19,8 +19,13 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import CatalogBulkDialog from '@/components/stock/CatalogBulkDialog.vue'
+import CatalogExportDialog from '@/components/stock/CatalogExportDialog.vue'
+import ItemQuickDetailDrawer from '@/components/stock/ItemQuickDetailDrawer.vue'
+import type { CatalogBulkFilters, CatalogBulkSelection } from '@/api/catalogBulk'
 
 const { t } = useI18n()
+const bulkT = (key: string, params?: Record<string, unknown>) => t(`stock.items.bulk.${key}`, params ?? {})
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
@@ -41,6 +46,14 @@ const tags = ref<Tag[]>([])
 const attributes = ref<Attribute[]>([])
 const attributeOptions = ref<Record<number, AttributeOption[]>>({})
 const vendors = ref<Client[]>([])
+const selectedIds = ref(new Set<number>())
+const excludedIds = ref(new Set<number>())
+const allMatching = ref(false)
+const bulkDialogOpen = ref(false)
+const exportDialogOpen = ref(false)
+const quickDetailId = ref<number | null>(null)
+const quickDetailInitialItem = ref<StockItem | null>(null)
+const quickDetailNeighbors = ref<StockItemNeighborsOptions>({})
 const filters = reactive({
   type: '' as StockItemType | '',
   warehouse_id: '' as number | '',
@@ -106,6 +119,86 @@ const activeFilterCount = computed(() => {
 // Hledání se do `activeFilterCount` schválně nepočítá (viz výše), pro prázdný
 // stav ale rozhoduje stejně — i ono může být důvod, proč seznam nic nevrátil.
 const hasActiveFilters = computed(() => activeFilterCount.value > 0 || !!filters.q)
+const selectedCount = computed(() => allMatching.value ? Math.max(0, total.value - excludedIds.value.size) : selectedIds.value.size)
+const hasSelection = computed(() => selectedCount.value > 0)
+const allCurrentPageSelected = computed(() => items.value.length > 0 && items.value.every(item => isSelected(item.id)))
+
+const bulkFilters = computed<CatalogBulkFilters>(() => ({
+  type: filters.type || undefined,
+  active: filters.active || undefined,
+  q: filters.q || undefined,
+  only_below_min: filters.only_below_min || undefined,
+  warehouse_id: filters.warehouse_id || undefined,
+  manufacturer_id: filters.manufacturer_id || undefined,
+  category_id: filters.category_id || undefined,
+  vendor_id: filters.vendor_id || undefined,
+  tag_ids: filters.tag_ids.length ? filters.tag_ids : undefined,
+  missing: filters.missing ? [filters.missing] : undefined,
+  availability: filters.availability || undefined,
+  qty_min: filters.qty_min || undefined,
+  qty_max: filters.qty_max || undefined,
+  attribute_filters: attributeFilters.value.length ? attributeFilters.value : undefined,
+}))
+const bulkSelection = computed<CatalogBulkSelection>(() => allMatching.value
+  ? { all_matching: true, filters: bulkFilters.value, excluded_ids: [...excludedIds.value] }
+  : { all_matching: false, ids: [...selectedIds.value] })
+
+function currentListFilters(): StockItemListFilters {
+  return {
+    type: filters.type || undefined,
+    active: filters.active,
+    q: filters.q || undefined,
+    only_below_min: filters.only_below_min || undefined,
+    warehouse_id: filters.warehouse_id || undefined,
+    manufacturer_id: filters.manufacturer_id || undefined,
+    category_id: filters.category_id || undefined,
+    vendor_id: filters.vendor_id || undefined,
+    tag_ids: [...filters.tag_ids],
+    missing: filters.missing ? [filters.missing] : undefined,
+    availability: filters.availability || undefined,
+    qty_min: filters.qty_min || undefined,
+    qty_max: filters.qty_max || undefined,
+    attribute_filters: [...attributeFilters.value],
+    sort: tbl.sort.value?.key as StockItemListFilters['sort'],
+    direction: tbl.sort.value?.dir,
+  }
+}
+
+function clearSelection() {
+  selectedIds.value = new Set<number>()
+  excludedIds.value = new Set<number>()
+  allMatching.value = false
+}
+function isSelected(id: number) { return allMatching.value ? !excludedIds.value.has(id) : selectedIds.value.has(id) }
+function toggleItem(id: number) {
+  if (allMatching.value) {
+    const next = new Set(excludedIds.value)
+    next.has(id) ? next.delete(id) : next.add(id)
+    excludedIds.value = next
+  } else {
+    const next = new Set(selectedIds.value)
+    next.has(id) ? next.delete(id) : next.add(id)
+    selectedIds.value = next
+  }
+}
+function selectPage() {
+  if (allMatching.value) {
+    const next = new Set(excludedIds.value)
+    items.value.forEach(item => next.delete(item.id))
+    excludedIds.value = next
+  } else selectedIds.value = new Set([...selectedIds.value, ...items.value.map(item => item.id)])
+}
+function togglePage() {
+  if (allCurrentPageSelected.value) {
+    if (allMatching.value) excludedIds.value = new Set([...excludedIds.value, ...items.value.map(item => item.id)])
+    else selectedIds.value = new Set([...selectedIds.value].filter(id => !items.value.some(item => item.id === id)))
+  } else selectPage()
+}
+function selectAllMatching() {
+  allMatching.value = true
+  selectedIds.value = new Set<number>()
+  excludedIds.value = new Set<number>()
+}
 
 const filterChips = computed<FilterChip[]>(() => {
   const chips: FilterChip[] = []
@@ -165,26 +258,7 @@ async function load(reset = true) {
     loadingMore.value = true
   }
   try {
-    const res = await stockApi.listItems({
-      type: filters.type || undefined,
-      active: filters.active || undefined,
-      q: filters.q || undefined,
-      only_below_min: filters.only_below_min || undefined,
-      warehouse_id: filters.warehouse_id || undefined,
-      manufacturer_id: filters.manufacturer_id || undefined,
-      category_id: filters.category_id || undefined,
-      vendor_id: filters.vendor_id || undefined,
-      tag_ids: filters.tag_ids,
-      missing: filters.missing ? [filters.missing] : undefined,
-      availability: filters.availability || undefined,
-      qty_min: filters.qty_min || undefined,
-      qty_max: filters.qty_max || undefined,
-      attribute_filters: attributeFilters.value,
-      sort: tbl.sort.value?.key as 'sku' | 'name' | 'type' | 'qty' | 'value' | undefined,
-      direction: tbl.sort.value?.dir,
-      page: targetPage,
-      per_page: PER_PAGE,
-    }, { signal: requestController.signal })
+    const res = await stockApi.listItems({ ...currentListFilters(), page: targetPage, per_page: PER_PAGE }, { signal: requestController.signal })
     if (version !== requestVersion) return
     page.value = targetPage
     items.value = reset ? res.data : items.value.concat(res.data)
@@ -205,6 +279,7 @@ async function load(reset = true) {
 function applyFilters() {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = undefined
+  clearSelection()
   void load(true)
 }
 function scheduleSearch() {
@@ -329,6 +404,24 @@ const TYPE_BADGE: Record<StockItemType, string> = {
 
 function openDetail(i: StockItem, e?: MouseEvent) {
   navigate(`/stock/items/${i.id}`, e)
+}
+
+function openQuickDetail(item: StockItem) {
+  const neighbors: StockItemNeighborsOptions = { ...currentListFilters() }
+  if (allMatching.value && !excludedIds.value.has(item.id)) {
+    neighbors.excluded_ids = [...excludedIds.value]
+  } else if (selectedIds.value.has(item.id)) {
+    neighbors.ids = [...selectedIds.value]
+  }
+  quickDetailNeighbors.value = neighbors
+  quickDetailId.value = item.id
+  quickDetailInitialItem.value = item
+}
+
+function navigateQuickDetail(id: number) {
+  const listItem = items.value.find(item => item.id === id)
+  quickDetailId.value = id
+  quickDetailInitialItem.value = listItem ?? null
 }
 
 onMounted(async () => {
@@ -522,11 +615,25 @@ onBeforeUnmount(() => {
       </div>
 
       <template #actions>
+        <RouterLink v-if="auth.canWrite('eshop.write') && auth.canWrite('stock.items.write')" to="/eshop?tab=import" :class="btnOutline('primary')" class="whitespace-nowrap">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+          {{ t('stock.items.quick_detail.import') }}
+        </RouterLink>
         <SavedFiltersMenu :ctrl="saved" />
         <ColumnPicker class="hidden md:block" :ctrl="tbl" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
       </template>
     </FilterBar>
+
+    <div v-if="items.length && auth.canRead('eshop')" class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary-200 bg-primary-50/60 px-3 py-2 text-sm">
+      <span class="font-medium text-primary-800">{{ bulkT('selected_count', { count: selectedCount }) }}</span>
+      <button type="button" :class="btnOutline('primary')" @click="selectPage"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6" /></svg>{{ bulkT('select_page') }}</button>
+      <button v-if="total > items.length && !allMatching" type="button" :class="btnOutline('primary')" @click="selectAllMatching"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 12s3-6 9-6 9 6 9 6-3 6-9 6" /></svg>{{ bulkT('select_all_results', { count: total }) }}</button>
+      <span v-if="allMatching" class="text-primary-700">{{ bulkT('all_results_selected', { count: selectedCount }) }}</span>
+      <button v-if="hasSelection" type="button" :class="btnOutline('neutral')" @click="clearSelection"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18" /></svg>{{ bulkT('clear_selection') }}</button>
+      <button v-if="auth.canWrite('eshop.write') && auth.canWrite('stock.items.write')" type="button" :disabled="!hasSelection" :class="btnFilled('primary')" @click="bulkDialogOpen = true"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 5v14m-7-7h14" /></svg>{{ bulkT('action') }}</button>
+      <button type="button" :disabled="!hasSelection" :class="btnOutline('neutral')" @click="exportDialogOpen = true"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.download" /></svg>{{ t('stock.items.export.title') }}</button>
+    </div>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
     <!-- Prázdný seznam po filtrování není prázdný modul — nabízet tu „založ kartu"
@@ -545,6 +652,7 @@ onBeforeUnmount(() => {
         <table class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
+              <th class="w-10 px-3 py-2"><input type="checkbox" :checked="allCurrentPageSelected" :aria-label="bulkT('select_page')" @click.stop @change="togglePage" /></th>
               <SortableTh v-if="tbl.isVisible('sku')" :label="t('stock.items.col_sku')" sort-key="sku" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
               <SortableTh v-if="tbl.isVisible('name')" :label="t('stock.items.col_name')" sort-key="name" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
               <SortableTh v-if="tbl.isVisible('type')" :label="t('stock.items.col_type')" sort-key="type" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
@@ -560,8 +668,14 @@ onBeforeUnmount(() => {
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="i in items" :key="i.id" class="cursor-pointer hover:bg-neutral-50" :class="{ 'opacity-50': !i.is_active }"
               @click="openDetail(i, $event)" @auxclick.prevent="openDetail(i, $event)">
+              <td class="px-3 py-2" @click.stop><input type="checkbox" :checked="isSelected(i.id)" :aria-label="bulkT('select_item', { sku: i.sku })" @change="toggleItem(i.id)" /></td>
               <td v-if="tbl.isVisible('sku')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">
-                <RouterLink class="row-link" :to="`/stock/items/${i.id}`" @click.stop @auxclick.stop>{{ i.sku }}</RouterLink>
+                <div class="flex items-center gap-1">
+                  <RouterLink class="row-link" :to="`/stock/items/${i.id}`" @click.stop @auxclick.stop>{{ i.sku }}</RouterLink>
+                  <button type="button" :title="t('stock.items.quick_detail.open')" :aria-label="t('stock.items.quick_detail.open')" class="cursor-pointer rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-primary-700" @click.stop="openQuickDetail(i)">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+                  </button>
+                </div>
               </td>
               <td v-if="tbl.isVisible('name')" class="px-3 py-2">{{ i.name }}</td>
               <td v-if="tbl.isVisible('type')" class="px-3 py-2">
@@ -598,7 +712,10 @@ onBeforeUnmount(() => {
       <div v-for="i in items" :key="`m-${i.id}`" @click="openDetail(i, $event)"
         class="cursor-pointer bg-surface border border-neutral-200 rounded-lg shadow-sm p-3" :class="{ 'opacity-50': !i.is_active }">
         <div class="flex items-center justify-between gap-2">
-          <RouterLink class="row-link font-mono text-xs text-neutral-500" :to="`/stock/items/${i.id}`" @click.stop @auxclick.stop>{{ i.sku }}</RouterLink>
+          <div class="flex min-w-0 items-center gap-2"><input type="checkbox" :checked="isSelected(i.id)" :aria-label="bulkT('select_item', { sku: i.sku })" @click.stop @change="toggleItem(i.id)" /><RouterLink class="row-link font-mono text-xs text-neutral-500" :to="`/stock/items/${i.id}`" @click.stop @auxclick.stop>{{ i.sku }}</RouterLink></div>
+          <button type="button" :title="t('stock.items.quick_detail.open')" :aria-label="t('stock.items.quick_detail.open')" class="cursor-pointer rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-primary-700" @click.stop="openQuickDetail(i)">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+          </button>
           <span class="text-xs px-2 py-0.5 rounded font-medium" :class="TYPE_BADGE[i.item_type]">{{ t(`stock.item_type.${i.item_type}`) }}</span>
         </div>
         <div class="font-medium mt-0.5">{{ i.name }}</div>
@@ -615,5 +732,8 @@ onBeforeUnmount(() => {
         {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
       </button>
     </div>
+    <CatalogBulkDialog v-if="bulkDialogOpen" :selection="bulkSelection" :selected-count="selectedCount" :manufacturers="manufacturers" :categories="categories" :tags="tags" @close="bulkDialogOpen = false" @completed="void load(true)" @open-history="navigate('/eshop/jobs')" />
+    <CatalogExportDialog v-if="exportDialogOpen" :selection="bulkSelection" :selected-count="selectedCount" :warehouse-options="warehouses" :can-manage-jobs="auth.canWrite('eshop.write')" @close="exportDialogOpen = false" />
+    <ItemQuickDetailDrawer v-if="quickDetailId != null" :item-id="quickDetailId" :initial-item="quickDetailInitialItem" :manufacturers="manufacturers" :neighbors="quickDetailNeighbors" :can-edit="auth.canWrite('stock.items.write') && auth.canWrite('eshop.write')" @close="quickDetailId = null" @navigate="navigateQuickDetail" @open="navigate(`/stock/items/${$event}`)" @edit="navigate(`/stock/items/${$event}/edit`)" />
   </div>
 </template>

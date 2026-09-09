@@ -382,6 +382,32 @@ vzniká až v účetní vrstvě, která zůstává jen ke čtení.
 | **Příjemky, výdejky, převodky** | seznam, detail s řádky | založit koncept, upravit, zaúčtovat, stornovat, smazat koncept |
 | **Inventury** | seznam, detail s rozdíly | založit, spustit, zapsat napočítané množství, uzavřít |
 
+### 101.9.1.1 Dávkové čtení katalogu
+
+Když asistent potřebuje více karet najednou, použije `get_products_batch`
+nebo `get_product_prices_batch` místo stovek jednotlivých dotazů. Oba nástroje
+jsou čtecí a fungují s tokenem v režimu `read` i při
+`MYUCTO_READ_ONLY=1`.
+
+`get_products_batch` přijme až 500 unikátních ID. Odpověď zachová jejich
+pořadí; cizí nebo chybějící karta je vždy `unavailable` s `data: null`, takže
+asistent nerozliší chybějící kartu od karty jiné firmy. Bez výběru polí dostane
+SKU, název, EAN a aktivitu. Může si vyžádat jen potřebné části, například
+překlady, ceny nebo dostupnost, a omezit je na konkrétní jazyky, měny a sklady.
+Nákladové ocenění (`costs`) není dostupné tokenu jen pro čtení: vyžaduje
+oprávnění `stock.items.write`.
+
+`get_product_prices_batch` vrací platnou cenu pro každou kombinaci karty a
+množství. Množství MCP vyžaduje jako kladný desetinný řetězec, aby se
+nezaokrouhlilo při předání; API sice při přímém volání dovoluje jeho vynechání
+a použije `"1"`, MCP ho vyžaduje záměrně. Měna je výchozí CZK a cena, která pro
+kartu a měnu neexistuje, je `null`, ne nula.
+
+`list_products` umožňuje výběr podle výrobce, dodavatele, kategorie,
+štítků, dostupnosti a chybějících údajů. `get_catalog_facets` vrací počty
+hodnot filtrů nad celou odpovídající množinou. `get_catalog_job` ukáže
+průběh a souhrnný výsledek úlohy, ke které má uživatel oprávnění.
+
 ### 101.9.2 Potvrzování nevratných kroků
 
 Mazání, storno dokladu a uzavření inventury vyžadují **výslovné potvrzení**.

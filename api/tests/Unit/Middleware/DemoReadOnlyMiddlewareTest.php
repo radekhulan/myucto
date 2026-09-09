@@ -45,6 +45,9 @@ final class DemoReadOnlyMiddlewareTest extends TestCase
             ['POST', '/api/auth/logout'],
             ['POST', '/api/accounting/payroll/preview'],
             ['POST', '/api/tax-return/dpfo/reconcile'],
+            ['POST', '/api/catalog/products/batch'],
+            ['POST', '/api/catalog/prices/batch'],
+            ['POST', '/api/stock/items/42/neighbors'],
         ];
     }
 
@@ -61,6 +64,7 @@ final class DemoReadOnlyMiddlewareTest extends TestCase
     {
         return [
             ['POST', '/api/invoices'],
+            ['POST', '/api/catalog/exports'],
             ['PUT', '/api/purchase-invoices/1'],
             ['PATCH', '/api/accounting/journal/1/description'],
             ['DELETE', '/api/clients/1'],

@@ -23,6 +23,11 @@ class FakeClient {
     return this.response('POST', path);
   }
 
+  async postRead(path, body, tool) {
+    this.calls.push({ method: 'POST_READ', path, body, tool });
+    return this.response('POST_READ', path);
+  }
+
   async put(path, body, tool) {
     this.calls.push({ method: 'PUT', path, body, tool });
     return this.response('PUT', path);
@@ -280,4 +285,86 @@ test('filtry dodavatele a nepřiřazeného vozidla patří k tankování', async
   assert.equal(client.calls[0].query.vendor_id, 18);
   assert.equal(client.calls[0].query.unassigned, 1);
   assert.equal(tool('list_logbook_trips').inputSchema.properties.vendor_id, undefined);
+});
+
+test('dávkový detail zboží používá čtecí POST a omezené schéma', async () => {
+  const client = new FakeClient();
+  const batch = tool('get_products_batch');
+
+  await batch.run(client, {
+    ids: [11, 12],
+    fields: ['sku', 'availability'],
+    locales: ['cs', 'en'],
+    currencies: ['CZK'],
+    warehouse_ids: [3],
+  }, 'get_products_batch');
+
+  assert.equal(batch.write, false);
+  assert.equal(batch.inputSchema.properties.ids.maxItems, 500);
+  assert.equal(batch.inputSchema.properties.ids.uniqueItems, true);
+  assert.equal(batch.inputSchema.properties.fields.minItems, 1);
+  assert.equal(batch.inputSchema.properties.locales.maxItems, 20);
+  assert.equal(batch.inputSchema.properties.locales.minItems, 1);
+  assert.equal(batch.inputSchema.properties.locales.items.pattern, '^[a-z]{2}(?:-[A-Z]{2})?$');
+  assert.equal(batch.inputSchema.properties.currencies.maxItems, 10);
+  assert.equal(batch.inputSchema.properties.currencies.minItems, 1);
+  assert.equal(batch.inputSchema.properties.currencies.items.pattern, '^[A-Za-z]{3}$');
+  assert.equal(batch.inputSchema.properties.warehouse_ids.maxItems, 50);
+  assert.equal(batch.inputSchema.properties.warehouse_ids.minItems, 1);
+  assert.deepEqual(client.calls, [{
+    method: 'POST_READ',
+    path: '/catalog/products/batch',
+    body: {
+      ids: [11, 12],
+      fields: ['sku', 'availability'],
+      locales: ['cs', 'en'],
+      currencies: ['CZK'],
+      warehouse_ids: [3],
+    },
+    tool: 'get_products_batch',
+  }]);
+});
+
+test('dávkové ceny posílají výchozí měnu CZK čtecím POSTem', async () => {
+  const client = new FakeClient();
+
+  await tool('get_product_prices_batch').run(client, {
+    items: [{ id: 11, qty: '2.5' }, { id: 12, qty: '1' }],
+    on_date: '2026-09-09',
+  }, 'get_product_prices_batch');
+
+  assert.equal(tool('get_product_prices_batch').write, false);
+  assert.equal(tool('get_product_prices_batch').inputSchema.properties.items.maxItems, 500);
+  assert.equal(
+    tool('get_product_prices_batch').inputSchema.properties.items.items.properties.qty.pattern,
+    '^[0-9]{1,11}(?:\\.[0-9]{1,3})?$',
+  );
+  assert.deepEqual(client.calls, [{
+    method: 'POST_READ',
+    path: '/catalog/prices/batch',
+    body: {
+      items: [{ id: 11, qty: '2.5' }, { id: 12, qty: '1' }],
+      currency: 'CZK',
+      on_date: '2026-09-09',
+    },
+    tool: 'get_product_prices_batch',
+  }]);
+});
+
+test('katalogové filtry a průběh úlohy používají čtecí API', async () => {
+  const client = new FakeClient();
+  await tool('list_products').run(client, { manufacturer_id: 2, vendor_id: 3, category_id: 4, tag_ids: [5, 6], missing: ['image'], active: false }, 'list_products');
+  assert.equal(client.calls[0].query.manufacturer_id, 2);
+  assert.equal(client.calls[0].query.vendor_id, 3);
+  assert.equal(client.calls[0].query.category_id, 4);
+  assert.equal(client.calls[0].query.tag_ids, '5,6');
+  assert.equal(client.calls[0].query.missing, 'image');
+  assert.equal(client.calls[0].query.active, 0);
+  await tool('get_catalog_facets').run(client, { manufacturer_id: 2, limit: 50 }, 'get_catalog_facets');
+  assert.equal(client.calls[1].path, '/catalog/facets');
+  assert.equal(client.calls[1].query.limit, 50);
+  await tool('get_catalog_job').run(client, { id: 7 }, 'get_catalog_job');
+  assert.equal(client.calls[2].path, '/eshop/jobs/7');
+  assert.equal(tool('get_catalog_facets').write, false);
+  assert.equal(tool('get_catalog_job').write, false);
 });

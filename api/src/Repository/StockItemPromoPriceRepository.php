@@ -131,39 +131,47 @@ final class StockItemPromoPriceRepository
      */
     public function consumedQty(int $supplierId, array $promo): string
     {
-        $from = $promo['valid_from'] !== null
-            ? (string) $promo['valid_from']
-            : substr((string) $promo['created_at'], 0, 10);
-        $to = $promo['valid_to'] !== null ? (string) $promo['valid_to'] : null;
+        return $this->consumedMany($supplierId, [$promo])[0];
+    }
 
-        $sql = 'SELECT COALESCE(SUM(CASE WHEN i.invoice_type = \'credit_note\'
-                                         THEN -ii.quantity ELSE ii.quantity END), 0) AS used
-                  FROM invoice_items ii
-                  JOIN invoices i   ON i.id = ii.invoice_id
-                  JOIN currencies c ON c.id = i.currency_id
-                 WHERE i.supplier_id = ?
-                   AND ii.stock_item_id = ?
-                   AND i.invoice_type IN (\'invoice\', \'credit_note\')
-                   AND i.status NOT IN (\'draft\', \'cancelled\')
-                   AND c.code = ?
-                   AND COALESCE(i.tax_date, i.issue_date) >= ?
-                   AND ii.unit_price_without_vat <= ?';
-        $params = [
-            $supplierId,
-            (int) $promo['stock_item_id'],
-            strtoupper((string) $promo['currency_code']),
-            $from,
-            (string) $promo['promo_price'],
-        ];
-        if ($to !== null) {
-            $sql .= ' AND COALESCE(i.tax_date, i.issue_date) <= ?';
-            $params[] = $to;
+    public function consumedMany(int $supplierId, array $promos): array
+    {
+        if ($promos === []) {
+            return [];
         }
-
-        $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute($params);
-        $used = (string) ($stmt->fetchColumn() ?: '0');
-        return bccomp($used, '0', 3) < 0 ? '0.000' : bcadd($used, '0', 3);
+        $input = array_map(static fn (array $promo): array => [
+            'stock_item_id' => (int) $promo['stock_item_id'],
+            'currency' => strtoupper((string) $promo['currency_code']),
+            'from_date' => $promo['valid_from'] ?? substr((string) $promo['created_at'], 0, 10),
+            'to_date' => $promo['valid_to'],
+            'price' => (string) $promo['promo_price'],
+        ], array_values($promos));
+        $stmt = $this->db->pdo()->prepare("SELECT p.position,
+                SUM(CASE WHEN i.invoice_type = 'credit_note' THEN -ii.quantity ELSE ii.quantity END) AS used
+            FROM JSON_TABLE(?, '$[*]' COLUMNS (
+                position FOR ORDINALITY,
+                stock_item_id BIGINT PATH '$.stock_item_id',
+                currency VARCHAR(3) PATH '$.currency',
+                from_date DATE PATH '$.from_date',
+                to_date DATE PATH '$.to_date' NULL ON EMPTY,
+                price DECIMAL(18,6) PATH '$.price'
+            )) p
+            JOIN invoice_items ii ON ii.stock_item_id = p.stock_item_id
+            JOIN invoices i ON i.id = ii.invoice_id AND i.supplier_id = ?
+            JOIN currencies c ON c.id = i.currency_id AND c.code = p.currency
+            WHERE i.invoice_type IN ('invoice', 'credit_note')
+              AND i.status NOT IN ('draft', 'cancelled')
+              AND COALESCE(i.tax_date, i.issue_date) >= p.from_date
+              AND (p.to_date IS NULL OR COALESCE(i.tax_date, i.issue_date) <= p.to_date)
+              AND ii.unit_price_without_vat <= p.price
+            GROUP BY p.position");
+        $stmt->execute([json_encode($input, JSON_THROW_ON_ERROR), $supplierId]);
+        $out = array_fill(0, count($input), '0.000');
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(int) $row['position'] - 1] = bccomp((string) $row['used'], '0', 3) < 0
+                ? '0.000' : bcadd((string) $row['used'], '0', 3);
+        }
+        return $out;
     }
 
     /**

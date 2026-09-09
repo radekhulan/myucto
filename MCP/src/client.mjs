@@ -22,6 +22,11 @@ const DEFAULTS = {
   maxRetries: 3,
 };
 
+const READ_POST_PATHS = new Set([
+  '/catalog/products/batch',
+  '/catalog/prices/batch',
+]);
+
 export class ApiError extends Error {
   constructor(status, code, message, detail) {
     super(message);
@@ -150,6 +155,18 @@ export class MyUctoClient {
     return this.request('POST', path, { body, tool });
   }
 
+  /**
+   * Čtecí POST pro dávkové dotazy. Endpoint nic nemění, proto se může po
+   * přechodném výpadku zopakovat stejně jako GET. Běžný `post` zůstává bez
+   * retry, protože u zápisu není jisté, zda server požadavek už přijal.
+   */
+  postRead(path, body, tool) {
+    if (!READ_POST_PATHS.has(path)) {
+      throw new Error(`Čtecí POST není pro cestu "${path}" povolen.`);
+    }
+    return this.request('POST', path, { body, tool, retryRead: true });
+  }
+
   put(path, body, tool) {
     return this.request('PUT', path, { body, tool });
   }
@@ -173,7 +190,7 @@ export class MyUctoClient {
     return this.request('DELETE', path, { query, tool });
   }
 
-  async request(method, path, { query, body, tool } = {}) {
+  async request(method, path, { query, body, tool, retryRead = false } = {}) {
     const url = new URL(this.baseUrl + path);
     appendQuery(url.searchParams, query);
 
@@ -187,11 +204,12 @@ export class MyUctoClient {
     if (this.supplierId) headers['X-Supplier-Id'] = String(this.supplierId);
     if (body !== undefined) headers['Content-Type'] = 'application/json';
 
-    return this.throttle.run(() => this.#send(method, url, headers, body));
+    return this.throttle.run(() => this.#send(method, url, headers, body, retryRead));
   }
 
-  async #send(method, url, headers, body) {
+  async #send(method, url, headers, body, retryRead) {
     let lastError;
+    const canRetry = method === 'GET' || retryRead;
 
     for (let attempt = 0; attempt <= DEFAULTS.maxRetries; attempt += 1) {
       const controller = new AbortController();
@@ -228,7 +246,7 @@ export class MyUctoClient {
           'network_error',
           `Spojení s ${url.origin} selhalo: ${detail}${code ? ` (${code})` : ''}`,
         );
-        if (method !== 'GET' || attempt === DEFAULTS.maxRetries) throw lastError;
+        if (!canRetry || attempt === DEFAULTS.maxRetries) throw lastError;
         await sleep(backoffMs(attempt));
         continue;
       }
@@ -236,7 +254,7 @@ export class MyUctoClient {
 
       // 429 / 5xx = přechodné. Retry-After posílá server u rate limitu.
       if (response.status === 429 || response.status >= 500) {
-        if (attempt < DEFAULTS.maxRetries && (method === 'GET' || response.status === 429)) {
+        if (attempt < DEFAULTS.maxRetries && canRetry) {
           const retryAfter = Number(response.headers.get('Retry-After'));
           await sleep(Number.isFinite(retryAfter) && retryAfter > 0
             ? retryAfter * 1000

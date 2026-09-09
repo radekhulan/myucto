@@ -25,14 +25,15 @@ const percent = computed(() => {
 const progressJob = computed(() => {
   if (!props.job) return null
   const failedItems = Array.isArray(props.job.report?.failed_items) ? props.job.report.failed_items : []
+  const counts = props.job.report?.counts as Record<string, number> | undefined
   return {
     id: props.job.id,
     status: props.job.status,
     total_items: props.job.total ?? 0,
     processed: props.job.checkpoint ?? 0,
-    created_count: Number(props.job.report?.processed ?? props.job.checkpoint ?? 0),
-    skipped_count: 0,
-    failed_count: failedItems.length + (props.job.status === 'failed' ? 1 : 0),
+    created_count: counts ? Number(counts.ready ?? 0) + Number(counts.applied ?? 0) : Number(props.job.report?.processed ?? props.job.checkpoint ?? 0),
+    skipped_count: counts ? Number(counts.unchanged ?? 0) + Number(counts.skipped ?? 0) : 0,
+    failed_count: (counts ? Number(counts.failed ?? 0) + Number(counts.conflict ?? 0) : failedItems.length) + (props.job.status === 'failed' ? 1 : 0),
     current_step: t(`eshop.jobs.status.${props.job.status}`),
   }
 })

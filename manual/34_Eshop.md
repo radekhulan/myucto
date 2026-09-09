@@ -6,8 +6,8 @@ v [Nastavení](92_Nastaveni.md) zapnutý modul **Sklad**)*
 Modul **E-shop** rozšiřuje skladovou kartu zboží (`Zboží → Skladové karty`) o vše,
 co potřebuješ pro **prodej přes e-shop**: vícejazyčný popis a SEO, zařazení do
 kategorií a označení štítky, typované parametry/atributy, poplatky (autorský,
-recyklační…), cenotvorbu odvozenou z nákupní ceny ve více měnách, dodavatele
-zboží a hromadný import. Stránka `/eshop` sama o sobě **needituje jednotlivé
+recyklační…), cenotvorbu odvozenou z nákupní ceny ve více měnách, dodavatele zboží
+a hromadný import. Stránka `/eshop` sama o sobě **needituje jednotlivé
 zboží** — je to sada **číselníků a nastavení**, které pak využiješ na kartě
 konkrétní položky v editoru skladové karty (záložky „Jazyky", „Kategorie &
 štítky", „Parametry", „Ceny", „Dodavatelé", „Přílohy").
@@ -17,6 +17,11 @@ akční ceny a dodavatele jako jeden celek. Pokud některá z těchto částí n
 kontrolou, neuloží se ani ostatní rozpracované změny. Když tutéž kartu mezitím
 uloží jiný uživatel, editor změnu odmítne jako konflikt a ponechá rozepsané
 hodnoty ve formuláři, aby je šlo porovnat s aktuálním stavem.
+
+Při přepnutí na jinou stránku editor upozorní na dosud neuložené změny. Spodní
+lišta s akcemi **Uložit** a **Zrušit** zůstává viditelná i při dlouhém formuláři.
+Záložky mají stav v URL, ovládají se také šipkami vlevo/vpravo a aktivní záložka se
+na telefonu automaticky posune do viditelné části lišty.
 
 Záložka **Přílohy** má vlastní stav ukládání. Nahrání, změna pořadí, nastavení
 hlavního obrázku, exportu i smazání se ukládají okamžitě a nejsou součástí
@@ -278,8 +283,7 @@ nákupní cena (CZK)
                                                     výsledná cena bez DPH
 ```
 
-Celý výpočet běží v **celočíselné haléřové aritmetice** (žádná desetinná čísla
-s plovoucí čárkou), takže se v cenách nekumulují zaokrouhlovací chyby.
+Výpočet používá přesnou desetinnou aritmetiku; zaokrouhlení se aplikuje na výslednou cenu.
 
 ### 34.8.2 Nákupní cena — cenová báze
 
@@ -311,8 +315,7 @@ nedává smysl, takže se pokračuje dalším zdrojem v řetězu.
 
 ### 34.8.3 Přirážka vs. marže — nepleť si je
 
-Systém pracuje s **přirážkou** (*markup*), ne s marží. Rozdíl je zásadní a je
-nejčastějším zdrojem zklamání z výsledné ziskovosti:
+Systém nabízí **přirážku** i **cílovou marži**. Každý režim počítá procento z jiného základu:
 
 - **Přirážka %** = kolik procent **nákupní ceny** přidáváš.
   `přirážka = (prodej − nákup) ÷ nákup × 100`
@@ -344,10 +347,32 @@ Vzorce pro přepočet:
 > je omyl v tomhle bodě dražší než cokoli jiného.
 
 > [!WARNING]
-> **Marži systém nikde nepočítá ani nereportuje** — ukládá se jen zadaná
-> přirážka. Pokud chceš hlídat skutečnou ziskovost, musíš si ji spočítat sám z
-> nákupní a prodejní ceny (viz [§ 34.10.4](#34104-kontrola-marze)).
+> **Cílová marže** musí být alespoň 0 % a menší než 100 %. Cena se počítá jako
+> `nákup ÷ (1 − marže / 100)`. Nákup 100 Kč a marže 25 % dají 133,33 Kč.
+> Skutečný zisk dále ovlivňují akční ceny, slevy a dodatečné náklady.
 
+### Cenové profily, pravidla a obchodní kurzy
+
+V **Zboží → Cenová pravidla** nastavíš profil pro jednu měnu: přirážku nebo
+cílovou marži, zaokrouhlení, zdroj obchodního kurzu a jeho maximální stáří.
+Pravidlo přiřadí profil konkrétní kartě, kategorii, výrobci, dodavateli nebo celé firmě.
+Přednost má karta, potom kategorie a výrobce, dodavatel a nakonec výchozí pravidlo.
+Ve stejné úrovni rozhoduje vyšší priorita, při shodě dříve založené pravidlo.
+
+Na cenovém řádku karty zapni **Cenová pravidla**. Výpočet pak přebírá profil;
+ruční přepis ceny má nadále přednost. Bez této volby zůstává lokální nastavení
+cenového řádku. Samotná změna profilu nezaloží kartám chybějící měnové řádky.
+
+Obchodní kurzy mají měnu, datum, zdroj a hodnotu v CZK za jednotku měny.
+Jsou oddělené podle firmy od účetního kurzovního lístku. Profil určuje povolené
+stáří; chybějící nebo starý kurz je chyba, nepřepočítá cenu na nulu.
+Změna profilu, pravidla či kurzu spustí úlohu na pozadí pro existující cenové řádky.
+Průběh je vidět na stránce i v historii úloh. Uložení beze změny další běh nevytváří.
+Běh používá uložená pravidla a kurzy; změněná karta dostane nový přepočet.
+Historické doklady si zachovávají původní ceny a kurzy.
+
+Správa i čtení profilů vyžadují právo na zápis e-shopu a skladových karet,
+protože obsahují nákladové a maržové nastavení.
 ### 34.8.4 Záložka „Ceny"
 
 Záložka rovnou připraví **řádek pro každou aktivní prodejní měnu**. Prázdné
@@ -358,7 +383,7 @@ a zůstávají viditelné.
 | Sloupec | Význam |
 |---|---|
 | **Měna** | Kód měny podle ISO 4217 (3 písmena, např. `CZK`, `EUR`) — jedinečný v rámci karty |
-| **Režim** | **Přirážka %** (dopočet z nákladové báze) nebo **Fixní cena** (pevná částka) |
+| **Režim** | **Přirážka %**, **Cílová marže %** nebo **Fixní cena** (pevná částka) |
 | **Přirážka % / Fixní cena** | Hodnota podle zvoleného režimu — pole se přepíná automaticky |
 | **Zaokrouhlení** | Bez / na haléře / desetihaléře / půlkoruny / koruny / na 9 na konci ([§ 34.8.5](#3485-zaokrouhleni)) |
 | **Ruční** | Zafixuje cenu — přepočet ji nepřepíše |
@@ -680,7 +705,7 @@ nezakládá. Formát souboru a chování popisuje
 
 ### 34.10.4 Kontrola marže
 
-Systém marži nepočítá, ale máš k dispozici obě čísla:
+Cílová marže slouží k nacenění. Pro kontrolu skutečné marže porovnej obě čísla:
 
 - **nákupní cenu** — ve skladových sestavách (ocenění zásob,
   [§ 33.8](33_Sklad.md#338-skladove-sestavy)) nebo na záložce Dodavatelé,
@@ -752,7 +777,7 @@ Ať si nastavíš očekávání správně — tohle cenotvorba v MyÚčto **neum
 | **Částečné uplatnění akce v jednom řádku** | Akce je vše nebo nic per řádek — rozděl řádek ([§ 34.8.9](#3489-akcni-ceny)) |
 | **Historie cen** | Není — uchovává se jen aktuální hodnota a datum posledního přepočtu |
 | **Automatický feed nákupních cen od dodavatele** | Ceník se importuje ručně z XLSX/CSV ([§ 33.10.2](33_Sklad.md#33102-import-ceniku-dodavatele)), online napojení na dodavatele není |
-| **Výpočet a reporting marže** | Ručně z nákupní a prodejní ceny |
+| **Reporting skutečné marže** | Ručně z nákupní a prodejní ceny |
 | **XML feed pro Heureku / Zboží.cz** | Příznak „Exportovat do e-shopu" je jen označení pro externí systém |
 
 ## 34.13 Jazyky
