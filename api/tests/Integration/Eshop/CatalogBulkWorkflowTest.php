@@ -282,6 +282,82 @@ final class CatalogBulkWorkflowTest extends StockTestCase
         self::assertSame('Ruční změna po hromadné úpravě', $current['name']);
     }
 
+    public function testVendorAddRemoveReplaceAuditRestoreAndPricingAreAtomic(): void
+    {
+        $supplierId = $this->createSupplier();
+        $itemId = $this->item($supplierId, 'BULK-VENDORS');
+        $oldVendor = $this->client($supplierId, 'Původní dodavatel');
+        $addedVendor = $this->client($supplierId, 'Přidaný dodavatel');
+        $replacementVendor = $this->client($supplierId, 'Náhradní dodavatel');
+        $vendors = $this->container->get(\MyInvoice\Repository\StockItemVendorRepository::class);
+        $vendors->add($supplierId, $itemId, [
+            'client_id' => $oldVendor,
+            'vendor_sku' => 'OLD-SKU',
+            'purchase_price' => '100.00',
+            'currency_code' => 'CZK',
+            'delivery_days' => 3,
+            'stock_qty' => '7.000',
+            'is_preferred' => true,
+            'note' => 'Původní nabídka',
+            'availability_state' => 'in_stock',
+            'min_order_qty' => '2.000',
+            'package_qty' => '4.000',
+            'price_valid_to' => '2099-12-31',
+            'data_source' => 'manual',
+            'is_active' => true,
+        ]);
+        $this->db->pdo()->prepare('UPDATE stock_items SET pricing_base = "manual" WHERE supplier_id = ? AND id = ?')
+            ->execute([$supplierId, $itemId]);
+        $this->container->get(\MyInvoice\Service\Eshop\Pricing\PriceWriteService::class)->save($supplierId, $itemId, [
+            ['currency_code' => 'CZK', 'price_mode' => 'markup', 'markup_pct' => '10', 'rounding' => 'none'],
+        ]);
+        self::assertSame('110.00', $this->itemsRepo->find($supplierId, $itemId)['sale_price_without_vat']);
+
+        $preview = $this->bulk->preview($supplierId, ['all_matching' => false, 'ids' => [$itemId]], [
+            'vendor_mode' => 'add',
+            'vendor_ids' => [$addedVendor],
+        ]);
+        $preview = $this->worker->tick($supplierId);
+        $audit = $this->jobItems->page($supplierId, $preview['id'])['items'][0];
+        self::assertSame($oldVendor, $audit['before']['vendors'][0]['client_id']);
+        self::assertSame('OLD-SKU', $audit['before']['vendors'][0]['vendor_sku']);
+        self::assertSame([$oldVendor, $addedVendor], array_column($audit['after']['vendors'], 'client_id'));
+
+        $apply = $this->bulk->apply($supplierId, $preview['id']);
+        $apply = $this->worker->tick($supplierId);
+        self::assertSame(1, $apply['report']['counts']['applied']);
+        self::assertSame([$oldVendor, $addedVendor], array_column($this->bulk->states($supplierId, [$itemId])[$itemId]['vendors'], 'client_id'));
+
+        $restore = $this->bulk->restore($supplierId, $apply['id']);
+        $restore = $this->worker->tick($supplierId);
+        self::assertSame(1, $restore['report']['counts']['applied']);
+        $restored = $this->bulk->states($supplierId, [$itemId])[$itemId]['vendors'];
+        self::assertSame([$oldVendor], array_column($restored, 'client_id'));
+        self::assertSame('OLD-SKU', $restored[0]['vendor_sku']);
+        self::assertSame('110.00', $this->itemsRepo->find($supplierId, $itemId)['sale_price_without_vat']);
+
+        $removePreview = $this->bulk->preview($supplierId, ['all_matching' => false, 'ids' => [$itemId]], [
+            'vendor_mode' => 'remove',
+            'vendor_ids' => [$oldVendor],
+        ]);
+        $this->worker->tick($supplierId);
+        $removeApply = $this->bulk->apply($supplierId, $removePreview['id']);
+        $removeApply = $this->worker->tick($supplierId);
+        self::assertSame(1, $removeApply['report']['counts']['applied']);
+        self::assertSame([], $this->bulk->states($supplierId, [$itemId])[$itemId]['vendors']);
+        self::assertNull($this->itemsRepo->find($supplierId, $itemId)['sale_price_without_vat']);
+
+        $replacePreview = $this->bulk->preview($supplierId, ['all_matching' => false, 'ids' => [$itemId]], [
+            'vendor_mode' => 'replace',
+            'vendor_ids' => [$replacementVendor],
+        ]);
+        $replacePreview = $this->worker->tick($supplierId);
+        self::assertSame([$replacementVendor], array_column(
+            $this->jobItems->page($supplierId, $replacePreview['id'])['items'][0]['after']['vendors'],
+            'client_id',
+        ));
+    }
+
     public function testActionRequiresBothPermissionsAndHidesForeignJob(): void
     {
         $supplierId = $this->createSupplier();

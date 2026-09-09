@@ -47,13 +47,13 @@ const progressJob = computed(() => {
         :cancelling="cancelling"
         :show-cancel="canCancel && !job?.cancel_requested"
         counts-key="eshop.jobs.job_counts"
-        background-hint-key="eshop.jobs.job_background_hint"
+        :background-hint-key="['queued', 'running'].includes(job.status) ? 'eshop.jobs.job_background_hint' : 'eshop.jobs.job_finished_hint'"
         running-key="eshop.jobs.job_running"
         cancel-key="eshop.jobs.job_cancel"
         cancelling-key="eshop.jobs.job_cancelling"
         @cancel="$emit('cancel')"
       />
       <p v-if="job?.cancel_requested" class="mt-2 text-xs text-warning-700">{{ t('eshop.jobs.cancel_requested') }}</p>
-      <p v-if="job" class="mt-2 text-xs text-neutral-500">{{ t('eshop.jobs.cancel_boundary') }}</p>
+      <p v-if="['queued', 'running'].includes(job.status)" class="mt-2 text-xs text-neutral-500">{{ t('eshop.jobs.cancel_boundary') }}</p>
   </div>
 </template>

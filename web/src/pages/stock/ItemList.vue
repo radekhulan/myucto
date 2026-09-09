@@ -21,6 +21,7 @@ import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import CatalogBulkDialog from '@/components/stock/CatalogBulkDialog.vue'
 import CatalogExportDialog from '@/components/stock/CatalogExportDialog.vue'
+import PriceMatrixDialog from '@/components/stock/PriceMatrixDialog.vue'
 import ItemQuickDetailDrawer from '@/components/stock/ItemQuickDetailDrawer.vue'
 import type { CatalogBulkFilters, CatalogBulkSelection } from '@/api/catalogBulk'
 
@@ -51,6 +52,7 @@ const excludedIds = ref(new Set<number>())
 const allMatching = ref(false)
 const bulkDialogOpen = ref(false)
 const exportDialogOpen = ref(false)
+const priceMatrixDialogOpen = ref(false)
 const quickDetailId = ref<number | null>(null)
 const quickDetailInitialItem = ref<StockItem | null>(null)
 const quickDetailNeighbors = ref<StockItemNeighborsOptions>({})
@@ -632,6 +634,7 @@ onBeforeUnmount(() => {
       <span v-if="allMatching" class="text-primary-700">{{ bulkT('all_results_selected', { count: selectedCount }) }}</span>
       <button v-if="hasSelection" type="button" :class="btnOutline('neutral')" @click="clearSelection"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18" /></svg>{{ bulkT('clear_selection') }}</button>
       <button v-if="auth.canWrite('eshop.write') && auth.canWrite('stock.items.write')" type="button" :disabled="!hasSelection" :class="btnFilled('primary')" @click="bulkDialogOpen = true"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 5v14m-7-7h14" /></svg>{{ bulkT('action') }}</button>
+      <button v-if="auth.canWrite('eshop.write') && auth.canWrite('stock.items.write')" data-test="open-price-matrix" type="button" :disabled="!hasSelection" :class="btnOutline('accent')" @click="priceMatrixDialogOpen = true"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>{{ t('eshop.price_matrix.open_for_selection') }}</button>
       <button type="button" :disabled="!hasSelection" :class="btnOutline('neutral')" @click="exportDialogOpen = true"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.download" /></svg>{{ t('stock.items.export.title') }}</button>
     </div>
 
@@ -734,6 +737,7 @@ onBeforeUnmount(() => {
     </div>
     <CatalogBulkDialog v-if="bulkDialogOpen" :selection="bulkSelection" :selected-count="selectedCount" :manufacturers="manufacturers" :categories="categories" :tags="tags" @close="bulkDialogOpen = false" @completed="void load(true)" @open-history="navigate('/eshop/jobs')" />
     <CatalogExportDialog v-if="exportDialogOpen" :selection="bulkSelection" :selected-count="selectedCount" :warehouse-options="warehouses" :can-manage-jobs="auth.canWrite('eshop.write')" @close="exportDialogOpen = false" />
+    <PriceMatrixDialog v-if="priceMatrixDialogOpen" :selection="bulkSelection" :selected-count="selectedCount" @close="priceMatrixDialogOpen = false" />
     <ItemQuickDetailDrawer v-if="quickDetailId != null" :item-id="quickDetailId" :initial-item="quickDetailInitialItem" :manufacturers="manufacturers" :neighbors="quickDetailNeighbors" :can-edit="auth.canWrite('stock.items.write') && auth.canWrite('eshop.write')" @close="quickDetailId = null" @navigate="navigateQuickDetail" @open="navigate(`/stock/items/${$event}`)" @edit="navigate(`/stock/items/${$event}/edit`)" />
   </div>
 </template>

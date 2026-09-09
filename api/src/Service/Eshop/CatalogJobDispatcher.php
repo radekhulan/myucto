@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Eshop;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Eshop\Pricing\CatalogPriceJobService;
+use MyInvoice\Service\Eshop\Pricing\PriceMatrixWorker;
 use MyInvoice\Service\Stock\StockValuationJobService;
 use Psr\Container\ContainerInterface;
 
@@ -18,6 +19,10 @@ final class CatalogJobDispatcher
         'catalog_bulk_apply' => CatalogBulkWorker::class,
         'catalog_bulk_restore' => CatalogBulkWorker::class,
         'catalog_export' => CatalogExportWorker::class,
+        'catalog_import_stage' => Import\CatalogImportWorker::class,
+        'catalog_import_apply' => Import\CatalogImportWorker::class,
+        'price_matrix_preview' => PriceMatrixWorker::class,
+        'price_matrix_apply' => PriceMatrixWorker::class,
     ];
 
     public function __construct(private readonly Connection $db, private readonly ContainerInterface $container) {}

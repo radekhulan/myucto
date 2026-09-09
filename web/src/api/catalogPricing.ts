@@ -45,6 +45,66 @@ export interface PricingDeleteResult {
   recompute_job_id: number | null
 }
 
+export type PriceMatrixOperation = 'lock_current' | 'set_fixed' | 'unlock_to_rules' | 'delete' | 'upsert'
+
+export interface PriceMatrixSelection {
+  all_matching: boolean
+  ids: number[]
+}
+
+export interface PriceMatrixOverride {
+  item_id: number
+  currency_code: string
+  operation: PriceMatrixOperation
+  fixed_price?: string
+  rounding?: PricingRounding
+}
+
+export interface PriceMatrixCell {
+  currency_code: string
+  price_mode: 'fixed' | PricingCalculationMode
+  markup_pct: string | null
+  fixed_price: string | null
+  rounding: PricingRounding
+  is_manual_override: boolean
+  use_pricing_rules: boolean
+  price: string | null
+  cost_czk: string | null
+  margin_pct: string | null
+  rate: string | null
+  rate_date: string | null
+  rate_source: string | null
+  profile_id: number | null
+  rule_id: number | null
+  cost_source: string | null
+  deviation_pct?: string | null
+}
+
+export interface PriceMatrixState {
+  id: number
+  sku: string
+  name: string
+  row_version: number
+  cells: Record<string, PriceMatrixCell | null>
+  issues?: Record<string, Array<'missing_price' | 'manual_override' | 'deviation'>>
+}
+
+export interface PriceMatrixJobItem {
+  ordinal: number
+  stock_item_id: number
+  expected_version: number
+  status: 'pending' | 'ready' | 'applied' | 'unchanged' | 'failed' | 'conflict' | 'skipped'
+  error_code: string | null
+  before: PriceMatrixState | null
+  after: PriceMatrixState | null
+}
+
+export interface PriceMatrixItems {
+  job: import('./catalogJobs').CatalogJob
+  items: PriceMatrixJobItem[]
+  pagination: { page: number; limit: number; total: number; pages: number }
+}
+
 export const catalogPricingApi = {
   profiles: () =>
     api.get<PricingProfile[]>('/eshop/pricing/profiles').then(response => response.data),
@@ -74,4 +134,24 @@ export const catalogPricingApi = {
   saveRate: (payload: PricingExchangeRatePayload) =>
     api.put<{ exchange_rate: PricingExchangeRate; recompute_job_id: number | null }>('/eshop/pricing/exchange-rates', payload)
       .then(response => response.data),
+
+  previewMatrix: (selection: PriceMatrixSelection, options: {
+    currencies: string[]
+    on_date: string
+    ensure_missing: boolean
+    reprice: boolean
+    deviation_threshold_pct: string
+    overrides: PriceMatrixOverride[]
+  }) => api.post<import('./catalogJobs').CatalogJob>('/eshop/pricing/matrix/preview', { selection, options }).then(r => r.data),
+  applyMatrix: (id: number) =>
+    api.post<import('./catalogJobs').CatalogJob>(`/eshop/pricing/matrix/${id}/apply`).then(r => r.data),
+  matrixItems: (id: number, params: { page?: number; limit?: number; status?: string; currency?: string; issue?: string } = {}) =>
+    api.get<PriceMatrixItems>(`/eshop/pricing/matrix/${id}/items`, { params }).then(r => r.data),
+  exportMatrix: (id: number, view: 'before' | 'after') =>
+    api.get<Blob>(`/eshop/pricing/matrix/${id}/export`, { params: { view }, responseType: 'blob' }).then(r => r.data),
+  importMatrix: (file: File) => {
+    const data = new FormData()
+    data.append('file', file)
+    return api.post<import('./catalogJobs').CatalogJob>('/eshop/pricing/matrix/import/preview', data).then(r => r.data)
+  },
 }

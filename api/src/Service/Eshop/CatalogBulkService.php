@@ -9,6 +9,7 @@ use MyInvoice\Repository\CatalogJobItemRepository;
 use MyInvoice\Repository\StockItemCategoryRepository;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockItemTagRepository;
+use MyInvoice\Repository\StockItemVendorRepository;
 use PDO;
 
 final class CatalogBulkService
@@ -18,11 +19,11 @@ final class CatalogBulkService
     public const RESTORE_KIND = 'catalog_bulk_restore';
 
     private const CHANGE_FIELDS = [
-        'manufacturer_id', 'category_ids', 'tag_ids', 'is_active', 'export_eshop', 'min_qty',
+        'manufacturer_id', 'category_ids', 'tag_ids', 'vendor_mode', 'vendor_ids', 'is_active', 'export_eshop', 'min_qty',
     ];
 
     private const COMPARED_FIELDS = [
-        'manufacturer_id', 'categories', 'tag_ids', 'is_active', 'export_eshop', 'min_qty',
+        'manufacturer_id', 'categories', 'tag_ids', 'vendors', 'is_active', 'export_eshop', 'min_qty',
     ];
 
     public function __construct(
@@ -33,6 +34,7 @@ final class CatalogBulkService
         private readonly StockItemRepository $stockItems,
         private readonly StockItemCategoryRepository $itemCategories,
         private readonly StockItemTagRepository $itemTags,
+        private readonly StockItemVendorRepository $itemVendors,
         private readonly ProductCardService $cards,
         private readonly \MyInvoice\Service\Eshop\Pricing\PriceCalculationService $pricing,
     ) {}
@@ -87,6 +89,30 @@ final class CatalogBulkService
             }
             $result[$field] = $field === 'tag_ids' ? $expected : $ids;
         }
+        $hasVendorMode = array_key_exists('vendor_mode', $changes);
+        $hasVendorIds = array_key_exists('vendor_ids', $changes);
+        if ($hasVendorMode !== $hasVendorIds) {
+            throw new \InvalidArgumentException('vendor_mode a vendor_ids musí být zadané společně.');
+        }
+        if ($hasVendorMode) {
+            $mode = $changes['vendor_mode'];
+            if (!is_string($mode) || !in_array($mode, ['add', 'remove', 'replace'], true)) {
+                throw new \InvalidArgumentException('vendor_mode musí být add, remove nebo replace.');
+            }
+            $ids = $this->positiveIds($changes['vendor_ids'], 'vendor_ids');
+            if ($mode !== 'replace' && $ids === []) {
+                throw new \InvalidArgumentException('vendor_ids nesmí být pro přidání ani odebrání prázdné.');
+            }
+            $owned = $this->itemVendors->filterOwnedVendors($supplierId, $ids);
+            sort($owned, SORT_NUMERIC);
+            $expected = $ids;
+            sort($expected, SORT_NUMERIC);
+            if ($owned !== $expected) {
+                throw new EshopException('vendor_invalid', 'Zvolený dodavatel neexistuje nebo není označen jako dodavatel.', 422);
+            }
+            $result['vendor_mode'] = $mode;
+            $result['vendor_ids'] = $ids;
+        }
         foreach (['is_active', 'export_eshop'] as $field) {
             if (array_key_exists($field, $changes)) {
                 if (!is_bool($changes[$field])) {
@@ -129,6 +155,7 @@ final class CatalogBulkService
                 'category_ids' => [],
                 'categories' => [],
                 'tag_ids' => [],
+                'vendors' => [],
                 'is_active' => (bool) $row['is_active'],
                 'export_eshop' => (bool) $row['export_eshop'],
                 'min_qty' => $row['min_qty'] === null ? null : (string) $row['min_qty'],
@@ -154,6 +181,15 @@ final class CatalogBulkService
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $states[(int) $row['stock_item_id']]['tag_ids'][] = (int) $row['tag_id'];
         }
+        $stmt = $this->db->pdo()->prepare('SELECT stock_item_id, client_id, vendor_sku, purchase_price,
+            currency_code, delivery_days, stock_qty, is_preferred, note, availability_state,
+            stock_qty_updated_at, min_order_qty, package_qty, price_valid_to, data_source, is_active
+            FROM stock_item_vendors WHERE supplier_id = ? AND stock_item_id IN (' . $ph . ')
+            ORDER BY stock_item_id, client_id');
+        $stmt->execute([$supplierId, ...$ids]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $vendor) {
+            $states[(int) $vendor['stock_item_id']]['vendors'][] = $this->vendorState($vendor);
+        }
         return $states;
     }
 
@@ -161,7 +197,17 @@ final class CatalogBulkService
     {
         $after = $before;
         foreach ($changes as $field => $value) {
+            if (in_array($field, ['vendor_mode', 'vendor_ids'], true)) {
+                continue;
+            }
             $after[$field] = $value;
+        }
+        if (array_key_exists('vendor_mode', $changes)) {
+            $after['vendors'] = $this->changedVendors(
+                $before['vendors'] ?? [],
+                $changes['vendor_mode'],
+                $changes['vendor_ids'],
+            );
         }
         if (array_key_exists('category_ids', $changes)) {
             $after['categories'] = array_map(static fn (int $id, int $index): array => [
@@ -225,6 +271,20 @@ final class CatalogBulkService
                 );
             }
         }
+        if (array_key_exists('vendor_mode', $changes)) {
+            $ids = array_column($desired['vendors'], 'client_id');
+            $owned = $this->itemVendors->filterOwnedVendors($supplierId, $ids);
+            sort($ids, SORT_NUMERIC);
+            sort($owned, SORT_NUMERIC);
+            if ($ids !== $owned) {
+                throw new EshopException('vendor_invalid', 'Zvolený dodavatel již není dostupný.', 422);
+            }
+            $this->itemVendors->deleteForItem($supplierId, $itemId);
+            foreach ($desired['vendors'] as $vendor) {
+                $this->itemVendors->add($supplierId, $itemId, $vendor);
+            }
+            $this->pricing->recompute($supplierId, $itemId);
+        }
         if (array_key_exists('manufacturer_id', $changes) || array_key_exists('category_ids', $changes)) {
             $prices = $this->db->pdo()->prepare('SELECT EXISTS (SELECT 1 FROM stock_item_prices
                 WHERE supplier_id = ? AND stock_item_id = ? AND use_pricing_rules = 1)');
@@ -285,6 +345,76 @@ final class CatalogBulkService
             }
             throw $e;
         }
+    }
+
+    /** @param array<string,mixed> $vendor @return array<string,mixed> */
+    private function vendorState(array $vendor): array
+    {
+        return [
+            'client_id' => (int) $vendor['client_id'],
+            'vendor_sku' => $vendor['vendor_sku'] === null ? null : (string) $vendor['vendor_sku'],
+            'purchase_price' => $vendor['purchase_price'] === null ? null : (string) $vendor['purchase_price'],
+            'currency_code' => (string) $vendor['currency_code'],
+            'delivery_days' => $vendor['delivery_days'] === null ? null : (int) $vendor['delivery_days'],
+            'stock_qty' => $vendor['stock_qty'] === null ? null : (string) $vendor['stock_qty'],
+            'is_preferred' => (bool) $vendor['is_preferred'],
+            'note' => $vendor['note'] === null ? null : (string) $vendor['note'],
+            'availability_state' => (string) $vendor['availability_state'],
+            'stock_qty_updated_at' => $vendor['stock_qty_updated_at'] === null ? null : (string) $vendor['stock_qty_updated_at'],
+            'min_order_qty' => $vendor['min_order_qty'] === null ? null : (string) $vendor['min_order_qty'],
+            'package_qty' => $vendor['package_qty'] === null ? null : (string) $vendor['package_qty'],
+            'price_valid_to' => $vendor['price_valid_to'] === null ? null : (string) $vendor['price_valid_to'],
+            'data_source' => (string) $vendor['data_source'],
+            'is_active' => (bool) $vendor['is_active'],
+        ];
+    }
+
+    /** @param list<array<string,mixed>> $before @param list<int> $ids @return list<array<string,mixed>> */
+    private function changedVendors(array $before, string $mode, array $ids): array
+    {
+        $byClient = [];
+        foreach ($before as $vendor) {
+            $byClient[(int) $vendor['client_id']] = $vendor;
+        }
+        if ($mode === 'remove') {
+            foreach ($ids as $id) {
+                unset($byClient[$id]);
+            }
+        } elseif ($mode === 'add') {
+            foreach ($ids as $id) {
+                $byClient[$id] ??= $this->newVendorState($id);
+            }
+        } else {
+            $replacement = [];
+            foreach ($ids as $id) {
+                $replacement[$id] = $byClient[$id] ?? $this->newVendorState($id);
+            }
+            $byClient = $replacement;
+        }
+        ksort($byClient, SORT_NUMERIC);
+        return array_values($byClient);
+    }
+
+    /** @return array<string,mixed> */
+    private function newVendorState(int $clientId): array
+    {
+        return [
+            'client_id' => $clientId,
+            'vendor_sku' => null,
+            'purchase_price' => null,
+            'currency_code' => 'CZK',
+            'delivery_days' => null,
+            'stock_qty' => null,
+            'is_preferred' => false,
+            'note' => null,
+            'availability_state' => 'unknown',
+            'stock_qty_updated_at' => null,
+            'min_order_qty' => null,
+            'package_qty' => null,
+            'price_valid_to' => null,
+            'data_source' => 'manual',
+            'is_active' => true,
+        ];
     }
 
     private function positiveIds(mixed $value, string $field): array

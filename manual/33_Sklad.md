@@ -77,7 +77,7 @@ neaplikovala na neviditelně rozšířený jiný výsledek. Po výběru všech v
 jednotlivé karty opět odškrtnout.
 
 **Hromadná úprava** nejprve vytvoří náhled změn po jednotlivých kartách. V náhledu
-vidíš původní a zamýšlené hodnoty výrobce, kategorií, štítků, aktivity, exportu do
+vidíš původní a zamýšlené hodnoty výrobce, kategorií, štítků, dodavatelů, aktivity, exportu do
 e-shopu a minimální zásoby. Náhled se také zpracuje jako úloha na pozadí, ale až
 tlačítko **Použít změny na N kartách** založí úlohu, která změny zapíše. Její průběh,
 případné konflikty verzí a chybové řádky jsou v dialogu i v
@@ -148,7 +148,29 @@ natažená dávkově po 500 řádcích bez ohledu na to, kolik pohybů karta má
 > mazání." (HTTP 409) a nabídne deaktivaci. Smazat lze pouze čerstvě založenou kartu
 > bez pohybů.
 
-### 33.2.2 Vazba na e-shopovou kartu
+### 33.2.2 Životní cyklus, duplikace a šablony
+
+Karta může být **Rozpracovaná**, **Připravená** nebo **Vyřazená**. Nová karta
+z duplikace nebo šablony vzniká vždy jako neaktivní a nepublikovaný koncept.
+Akce **Připravit** ji aktivuje. Akce **Vyřadit** ji deaktivuje a vypne export do
+e-shopu; běžná editace ani import ji potom nemohou znovu publikovat. Historie
+skladových pohybů zůstává čitelná a beze změny.
+
+Akce **Duplikovat** otevře dialog, ve kterém zadáš nové SKU a název a výslovně
+vybereš přenášené sekce: základní nebo e-shopové údaje, překlady, kategorie,
+štítky, parametry, poplatky, ceny a dodavatele. SKU, EAN, skladové pohyby a
+zásoby, média, přílohy ani externí identity se nikdy nekopírují.
+Cenová sekce přenese nastavení cen, ale cenu znovu vypočítá pro novou kartu.
+Pokud pro výpočet chybí náklad nebo odpovídající cenové pravidlo, karta se
+nevytvoří a aplikace zobrazí chybu k doplnění cenových podkladů.
+
+V sekci **Šablony skladových karet** na detailu lze stejným výběrem sekcí uložit
+pojmenovaný snapshot. Pozdější změna zdrojové karty uloženou šablonu nezmění.
+Tlačítko **Použít** vyžádá nové SKU a název a založí samostatný koncept, který
+lze před přípravou běžně upravit. Šablony jsou oddělené pro každou firmu a lze
+je ze stejné sekce smazat.
+
+### 33.2.3 Vazba na e-shopovou kartu
 
 Skladová a e-shopová karta je v datech **jeden a týž záznam** (tabulka skladových
 karet nese i e-shopové sloupce), ale zobrazení v e-shopu se neřídí typem karty
@@ -977,7 +999,7 @@ Tlačítko **Doplnění zásob** je v hlavičce seznamu objednávek (§ 33.11.5)
   ne oprava původního dokladu; opakované kliknutí na Zaúčtovat u už zaúčtovaného
   dokladu ale chybu nehlásí (je to bezpečné proti dvojkliku).
 - Zobrazení karty v e-shopu je nezávislé na jejím skladovém typu — řídí ho
-  samostatný příznak **Exportovat do e-shopu** (§ 33.2.2).
+  samostatný příznak **Exportovat do e-shopu** (§ 33.2.3).
 
 ### 33.13.1 Co objednávky ještě neumí
 

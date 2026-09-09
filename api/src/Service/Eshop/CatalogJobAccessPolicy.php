@@ -14,6 +14,7 @@ final class CatalogJobAccessPolicy
         'price_recompute', 'stock_valuation', 'catalog_export',
         'catalog_bulk_preview', 'catalog_bulk_apply', 'catalog_bulk_restore',
         'catalog_import_stage', 'catalog_import_apply',
+        'price_matrix_preview', 'price_matrix_apply',
     ];
 
     public static function allows(Request $request, string $kind, bool $write = false, bool $audit = false): bool
@@ -24,7 +25,7 @@ final class CatalogJobAccessPolicy
         if ($kind === 'stock_valuation') {
             return RequestAuthorization::allows($request, 'stock', $write ? AccessLevel::WRITE : AccessLevel::READ);
         }
-        if (str_starts_with($kind, 'catalog_bulk_') || str_starts_with($kind, 'catalog_import_')) {
+        if (str_starts_with($kind, 'catalog_bulk_') || str_starts_with($kind, 'catalog_import_') || str_starts_with($kind, 'price_matrix_')) {
             if ($write && !RequestAuthorization::isSessionAuth($request)) {
                 return false;
             }

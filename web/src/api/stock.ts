@@ -8,6 +8,7 @@ import type { CatalogJob } from './catalogJobs'
  */
 
 export type StockItemType = 'material' | 'goods' | 'product'
+export type StockItemLifecycleStatus = 'draft' | 'ready' | 'retired'
 export type StockDocType = 'receipt' | 'issue' | 'transfer'
 export type StockDocOrigin = 'manual' | 'invoice' | 'credit_note' | 'purchase_invoice' | 'inventory'
 export type StockDocStatus = 'draft' | 'posted' | 'reversed'
@@ -42,6 +43,8 @@ export interface StockItem extends StockItemEffectivePrice {
   value_total?: string
   avg_unit_cost?: string
   is_active: boolean
+  lifecycle_status?: StockItemLifecycleStatus
+  retired_at?: string | null
   row_version: number
   note: string | null
   created_at: string
@@ -59,6 +62,24 @@ export interface StockItemPayload {
   min_qty?: string | number | null
   is_active?: boolean
   note?: string | null
+}
+
+export interface StockItemDuplicateRequest {
+  sku: string
+  name: string
+  row_version: number
+  sections: Array<'core' | 'product' | 'i18n' | 'categories' | 'tags' | 'attributes' | 'fees' | 'prices' | 'vendors'>
+}
+
+export type StockItemCopySection = StockItemDuplicateRequest['sections'][number]
+
+export interface StockItemTemplate {
+  id: number
+  name: string
+  sections: StockItemCopySection[]
+  row_version: number
+  created_at: string
+  updated_at: string
 }
 
 export interface StockItemSearchResult extends StockItemEffectivePrice {
@@ -546,6 +567,17 @@ export const stockApi = {
   getItem: (id: number, options: { signal?: AbortSignal } = {}) => api.get<StockItem>(`/stock/items/${id}`, { signal: options.signal }).then(r => r.data),
   createItem: (payload: StockItemPayload) => api.post<StockItem>('/stock/items', payload).then(r => r.data),
   updateItem: (id: number, payload: StockItemPayload) => api.put<StockItem>(`/stock/items/${id}`, payload).then(r => r.data),
+  updateLifecycle: (id: number, status: StockItemLifecycleStatus, rowVersion: number) =>
+    api.post<StockItem>(`/stock/items/${id}/lifecycle`, { status, row_version: rowVersion }).then(r => r.data),
+  duplicateItem: (id: number, payload: StockItemDuplicateRequest) =>
+    api.post<StockItem>(`/stock/items/${id}/duplicate`, payload).then(r => r.data),
+  listItemTemplates: () => api.get<StockItemTemplate[]>('/stock/item-templates').then(r => r.data),
+  saveItemTemplate: (id: number, payload: { name: string; row_version: number; sections: StockItemCopySection[] }) =>
+    api.post<StockItemTemplate>(`/stock/items/${id}/templates`, payload).then(r => r.data),
+  applyItemTemplate: (templateId: number, payload: { sku: string; name: string; row_version: number }) =>
+    api.post<StockItem>(`/stock/item-templates/${templateId}/apply`, payload).then(r => r.data),
+  deleteItemTemplate: (templateId: number, rowVersion: number) =>
+    api.delete<{ deleted: true }>(`/stock/item-templates/${templateId}`, { params: { row_version: rowVersion } }).then(r => r.data),
   deleteItem: (id: number) => api.delete<{ deleted: true }>(`/stock/items/${id}`).then(r => r.data),
   itemMovements: (id: number, opts: { warehouse_id?: number; from?: string; to?: string; limit?: number; offset?: number } = {}) =>
     api.get<StockItemMovementsResponse>(`/stock/items/${id}/movements`, { params: toParams(opts) }).then(r => r.data),

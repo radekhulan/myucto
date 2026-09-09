@@ -18,7 +18,7 @@ final class PriceWriteService
 
     public function save(int $supplierId, int $itemId, array $rows, bool $replace = false): array
     {
-        $prepared = $this->prepareRows($rows);
+        $prepared = $this->normalizeRows($rows);
         return $this->write($supplierId, $itemId, function () use ($supplierId, $itemId, $prepared, $replace): void {
             $this->savePrepared($supplierId, $itemId, $prepared, $replace);
         })['prices'];
@@ -38,7 +38,7 @@ final class PriceWriteService
         if ($expectedVersion <= 0) {
             throw new EshopException('version_required', 'Pro uložení je nutná verze karty.', 400);
         }
-        $prepared = $this->prepareRows($rows);
+        $prepared = $this->normalizeRows($rows);
         return $this->write(
             $supplierId,
             $itemId,
@@ -50,7 +50,7 @@ final class PriceWriteService
     }
 
     /** @param list<array<string,mixed>> $rows @return array<string,array<string,mixed>> */
-    private function prepareRows(array $rows): array
+    public function normalizeRows(array $rows): array
     {
         $prepared = [];
         foreach ($rows as $row) {
@@ -125,6 +125,63 @@ final class PriceWriteService
         })['prices'];
     }
 
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @param list<string> $deleteCurrencies
+     * @return array{prices:list<array<string,mixed>>,row_version:int}
+     */
+    public function patchVersioned(
+        int $supplierId,
+        int $itemId,
+        int $expectedVersion,
+        array $rows,
+        array $deleteCurrencies,
+        PricingSnapshot $snapshot,
+        array $recomputeCurrencies,
+    ): array {
+        if ($expectedVersion <= 0) {
+            throw new EshopException('version_required', 'Pro uložení je nutná verze karty.', 400);
+        }
+        $selected = [];
+        foreach ($recomputeCurrencies as $currency) {
+            if (!is_string($currency) || !preg_match('/^[A-Z]{3}$/D', strtoupper(trim($currency)))) {
+                throw new \InvalidArgumentException('Neplatná měna přepočtu.');
+            }
+            $selected[strtoupper(trim($currency))] = true;
+        }
+        if ($selected === []) {
+            throw new \InvalidArgumentException('Vyberte alespoň jednu měnu přepočtu.');
+        }
+        $prepared = $this->normalizeRows($rows);
+        $deletes = [];
+        foreach ($deleteCurrencies as $currency) {
+            if (!is_string($currency) || !preg_match('/^[A-Z]{3}$/D', strtoupper(trim($currency)))) {
+                throw new \InvalidArgumentException('Neplatná měna ke smazání.');
+            }
+            $currency = strtoupper(trim($currency));
+            if (isset($deletes[$currency]) || isset($prepared[$currency])) {
+                throw new \InvalidArgumentException('Duplicitní cenová operace.');
+            }
+            $deletes[$currency] = true;
+        }
+        return $this->write(
+            $supplierId,
+            $itemId,
+            function () use ($supplierId, $itemId, $prepared, $deletes): void {
+                foreach (array_keys($deletes) as $currency) {
+                    $this->prices->delete($supplierId, $itemId, $currency);
+                    if ($currency === 'CZK') {
+                        $this->clearBasePrice($supplierId, $itemId);
+                    }
+                }
+                $this->savePrepared($supplierId, $itemId, $prepared, false);
+            },
+            $expectedVersion,
+            $snapshot,
+            array_keys($selected),
+        );
+    }
+
     private function clearBasePrice(int $supplierId, int $itemId): void
     {
         $this->db->pdo()->prepare('UPDATE stock_items SET sale_price_without_vat = NULL WHERE supplier_id = ? AND id = ?')
@@ -137,6 +194,8 @@ final class PriceWriteService
         int $itemId,
         callable $operation,
         ?int $expectedVersion = null,
+        ?PricingSnapshot $snapshot = null,
+        ?array $recomputeCurrencies = null,
     ): array
     {
         $pdo = $this->db->pdo();
@@ -162,7 +221,12 @@ final class PriceWriteService
             $operation();
             $pdo->prepare('UPDATE stock_items SET row_version = row_version + 1 WHERE supplier_id = ? AND id = ?')
                 ->execute([$supplierId, $itemId]);
-            $prices = $this->calculation->recompute($supplierId, $itemId);
+            $prices = $this->calculation->recompute(
+                $supplierId,
+                $itemId,
+                snapshot: $snapshot,
+                onlyCurrencies: $recomputeCurrencies,
+            );
             $version = $pdo->prepare('SELECT row_version FROM stock_items WHERE supplier_id = ? AND id = ?');
             $version->execute([$supplierId, $itemId]);
             $rowVersion = (int) $version->fetchColumn();

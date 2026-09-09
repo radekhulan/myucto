@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   cancel: vi.fn(),
   retry: vi.fn(),
+  clientsList: vi.fn(),
 }))
 
 vi.mock('@/api/catalogBulk', async (importOriginal) => {
@@ -32,6 +33,9 @@ vi.mock('@/api/catalogJobs', () => ({
     cancel: mocks.cancel,
     retry: mocks.retry,
   },
+}))
+vi.mock('@/api/clients', () => ({
+  clientsApi: { list: mocks.clientsList },
 }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))
 vi.mock('@/i18n', () => ({ i18n: { global: { locale: { value: 'cs' } } } }))
@@ -87,6 +91,7 @@ function state(overrides: Partial<CatalogBulkItemState> = {}): CatalogBulkItemSt
       { category_id: 12, is_primary: false, display_order: 20 },
     ],
     tag_ids: [],
+    vendors: [],
     is_active: true,
     export_eshop: false,
     min_qty: null,
@@ -141,12 +146,16 @@ function mountDialog(
 }
 
 async function chooseActiveChange(wrapper: ReturnType<typeof mountDialog>) {
-  await wrapper.findAll('select')[3]!.setValue('false')
+  await wrapper.findAll('select')[4]!.setValue('false')
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.items.mockResolvedValue(page())
+  mocks.clientsList.mockResolvedValue({
+    data: [{ id: 51, company_name: 'Vendor 51' }],
+    meta: { page: 1, pages: 1, per_page: 500, total: 1 },
+  })
 })
 
 afterEach(() => {
@@ -178,6 +187,27 @@ describe('CatalogBulkDialog', () => {
       },
       excluded_ids: [32],
     }, { is_active: false })
+  })
+
+  it('sends an explicit supplier add operation and renders supplier before and after values', async () => {
+    mocks.preview.mockResolvedValue(job(7, 'catalog_bulk_preview', 'completed', { ready: 1 }))
+    mocks.items.mockResolvedValue(page(1, {
+      before: state({ vendors: [{ client_id: 51, vendor_sku: null, purchase_price: '20.00', currency_code: 'CZK', delivery_days: null, stock_qty: null, is_preferred: true, note: null, availability_state: 'unknown', stock_qty_updated_at: null, min_order_qty: null, package_qty: null, price_valid_to: null, data_source: 'manual', is_active: true }] }),
+      after: state({ vendors: [{ client_id: 51, vendor_sku: null, purchase_price: '20.00', currency_code: 'CZK', delivery_days: null, stock_qty: null, is_preferred: true, note: null, availability_state: 'unknown', stock_qty_updated_at: null, min_order_qty: null, package_qty: null, price_valid_to: null, data_source: 'manual', is_active: true }, { client_id: 52, vendor_sku: null, purchase_price: null, currency_code: 'CZK', delivery_days: null, stock_qty: null, is_preferred: false, note: null, availability_state: 'unknown', stock_qty_updated_at: null, min_order_qty: null, package_qty: null, price_valid_to: null, data_source: 'manual', is_active: true }] }),
+    }))
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    await wrapper.get('[data-test="vendor-mode"]').setValue('add')
+    await wrapper.get('[data-test="vendor-ids"]').setValue(['51'])
+    await wrapper.get('[data-test="preview"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.preview).toHaveBeenCalledWith(
+      { all_matching: false, ids: [31] },
+      { vendor_mode: 'add', vendor_ids: [51] },
+    )
+    expect(wrapper.text()).toContain('stock.items.bulk.field.vendors')
   })
 
   it('keeps a numeric minimum quantity as a decimal string in the preview request', async () => {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { stockApi, type StockItem, type StockLedgerRow } from '@/api/stock'
 import { purchaseOrdersApi, type StockQuantityRow } from '@/api/purchaseOrders'
@@ -10,15 +10,20 @@ import { formatMoney, formatDate } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { btnOutline } from '@/components/ui/buttonStyles'
+import ItemDuplicateDialog from '@/components/stock/ItemDuplicateDialog.vue'
+import ItemTemplatesPanel from '@/components/stock/ItemTemplatesPanel.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
+const router = useRouter()
 
 const id = computed(() => Number(route.params.id))
 const item = ref<StockItem | null>(null)
 const loading = ref(false)
+const duplicateOpen = ref(false)
+const canManageLifecycle = computed(() => auth.canWrite('stock.items.write') && auth.canWrite('eshop.write'))
 
 // Odvozené kvantity (Epic SKLAD, fáze 4) — skladem/rezervováno/na cestě/u dodavatele.
 // BE vrací řádek se samými nulami i pro kartu bez jediného pohybu/objednávky — nikdy
@@ -88,6 +93,19 @@ async function deactivate() {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   }
 }
+async function changeLifecycle(status: 'draft' | 'ready' | 'retired') {
+  if (!item.value) return
+  try {
+    item.value = await stockApi.updateLifecycle(item.value.id, status, item.value.row_version)
+    toast.success(t('common.saved'))
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+function duplicated(created: StockItem) {
+  duplicateOpen.value = false
+  void router.push(`/stock/items/${created.id}/edit`)
+}
 function toPayload(i: StockItem) {
   return {
     sku: i.sku, name: i.name, item_type: i.item_type, unit: i.unit, ean: i.ean,
@@ -105,6 +123,18 @@ const actions = computed<ActionItem[]>(() => [
   {
     key: 'edit', label: t('stock.item_detail.edit'), icon: 'edit', tier: 'secondary', variant: 'warning',
     show: auth.canWrite('stock'), to: `/stock/items/${id.value}/edit`,
+  },
+  {
+    key: 'duplicate', label: t('stock.lifecycle.duplicate'), icon: 'copy', tier: 'secondary', variant: 'neutral',
+    show: canManageLifecycle.value, run: () => { duplicateOpen.value = true },
+  },
+  {
+    key: 'retire', label: t('stock.lifecycle.retire'), icon: 'archive', tier: 'overflow', variant: 'danger',
+    show: canManageLifecycle.value && item.value?.lifecycle_status !== 'retired', run: () => void changeLifecycle('retired'),
+  },
+  {
+    key: 'ready', label: t('stock.lifecycle.ready'), icon: 'check', tier: 'overflow', variant: 'success',
+    show: canManageLifecycle.value && item.value?.lifecycle_status !== 'ready', run: () => void changeLifecycle('ready'),
   },
   {
     key: 'export-pdf', label: t('stock.item_detail.export_pdf'), icon: 'download', tier: 'secondary', variant: 'neutral',
@@ -134,6 +164,7 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-2xl font-semibold">{{ item.name }}</h1>
+            <span class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-200">{{ t(`stock.lifecycle.status.${item.lifecycle_status ?? 'ready'}`) }}</span>
             <span v-if="!item.is_active" class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-500">{{ t('common.no') }}</span>
           </div>
           <p class="text-sm text-neutral-500 mt-0.5">
@@ -142,6 +173,7 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
         </div>
         <ActionBar :actions="actions" />
       </div>
+      <p v-if="item.lifecycle_status === 'retired'" class="mb-4 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800 dark:bg-warning-950/30 dark:text-warning-200">{{ t('stock.lifecycle.retired_hint') }}</p>
 
       <!-- Odvozené kvantity (Epic SKLAD, fáze 4) — musí vykreslit 0, i když karta
            nemá jediný pohyb ani objednávku (BE vrací nulový řádek, ne prázdno). -->
@@ -195,6 +227,8 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
         </div>
       </div>
 
+      <ItemTemplatesPanel v-if="canManageLifecycle" :item="item" @created="duplicated" />
+
       <!-- Tab Pohyby -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="px-5 py-3 border-b border-neutral-200">
@@ -244,5 +278,6 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
         </div>
       </div>
     </template>
+    <ItemDuplicateDialog v-if="duplicateOpen && item" :item="item" @close="duplicateOpen = false" @created="duplicated" />
   </div>
 </template>

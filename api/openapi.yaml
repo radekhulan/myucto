@@ -13855,7 +13855,12 @@ paths:
       tags: [Stock]
       summary: Detail skladové karty
       responses:
-        '200': { description: OK }
+        '200':
+          description: Skladová karta včetně obsahového životního cyklu.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [Stock]
@@ -19454,6 +19459,13 @@ components:
     CatalogProduct:
       type: object
       properties:
+        lifecycle_status:
+          type: string
+          enum: [draft, ready, retired]
+          description: Obsahový stav karty. Pouze ready lze aktivovat nebo publikovat do e-shopu.
+        retired_at:
+          type: [string, 'null']
+          description: Čas vyřazení karty, bez změny skladových pohybů a historických dokladů.
         id:
           type: integer
         row_version:

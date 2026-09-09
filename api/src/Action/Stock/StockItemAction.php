@@ -9,6 +9,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockLevelRepository;
+use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
 use MyInvoice\Service\Eshop\CatalogFilter;
@@ -16,6 +17,10 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\StockItemMovementsPdfRenderer;
 use MyInvoice\Service\Stock\StockReportXlsxExporter;
 use MyInvoice\Service\Stock\StockValuation;
+use MyInvoice\Service\Stock\StockItemLifecycleService;
+use MyInvoice\Service\Stock\StockItemDuplicationService;
+use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockItemTemplateService;
 use MyInvoice\Support\Pagination;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -46,6 +51,9 @@ final class StockItemAction
         private readonly StockItemMovementsPdfRenderer $movementsPdf,
         private readonly StockReportXlsxExporter $xlsx,
         private readonly EffectivePriceResolver $effectivePrice,
+        private readonly StockItemLifecycleService $lifecycle,
+        private readonly StockItemDuplicationService $duplication,
+        private readonly StockItemTemplateService $templates,
     ) {}
 
     /**
@@ -195,6 +203,89 @@ final class StockItemAction
         $this->items->delete($supplierId, $id);
         $this->log($request, 'stock.item_deleted', $id, []);
         return Json::ok($response, ['deleted' => true]);
+    }
+
+    public function lifecycle(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireLifecycleWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $item = $this->lifecycle->transition($supplierId, (int) $args['id'], (string) ($body['status'] ?? ''), (int) ($body['row_version'] ?? 0));
+        } catch (StockException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        }
+        $this->log($request, 'stock.item_lifecycle_changed', (int) $args['id'], ['status' => $item['lifecycle_status']]);
+        return Json::ok($response, $item);
+    }
+
+    public function duplicate(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireLifecycleWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        try {
+            $item = $this->duplication->duplicate($supplierId, (int) $args['id'], (array) ($request->getParsedBody() ?? []));
+        } catch (StockException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        }
+        $this->log($request, 'stock.item_duplicated', (int) $item['id'], ['source_id' => (int) $args['id']]);
+        return Json::ok($response, $item, 201);
+    }
+
+    public function templates(Request $request, Response $response): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        return Json::ok($response, $this->templates->list($supplierId));
+    }
+
+    public function saveTemplate(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireLifecycleWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        try {
+            $template = $this->templates->save($supplierId, (int) $args['id'], (array) ($request->getParsedBody() ?? []));
+        } catch (StockException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        }
+        $this->log($request, 'stock.item_template_saved', (int) $args['id'], ['template_id' => $template['id']]);
+        return Json::ok($response, $template, 201);
+    }
+
+    public function deleteTemplate(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireLifecycleWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        try {
+            $this->templates->delete($supplierId, (int) $args['templateId'], (int) ($request->getQueryParams()['row_version'] ?? 0));
+        } catch (StockException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        }
+        return Json::ok($response, ['deleted' => true]);
+    }
+
+    public function applyTemplate(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireLifecycleWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        try {
+            $item = $this->templates->apply($supplierId, (int) $args['templateId'], (array) ($request->getParsedBody() ?? []));
+        } catch (StockException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        }
+        $this->log($request, 'stock.item_template_applied', (int) $item['id'], ['template_id' => (int) $args['templateId']]);
+        return Json::ok($response, $item, 201);
+    }
+
+    private function requireLifecycleWrite(Request $request, Response $response, ?Response &$err): bool
+    {
+        return $this->requirePermission($request, $response, 'stock.items.write', AccessLevel::WRITE, $err)
+            && $this->requirePermission($request, $response, 'eshop.write', AccessLevel::WRITE, $err);
     }
 
     /** Skladová kniha karty (stránkovaná) s běžnou bilancí (running balance). */

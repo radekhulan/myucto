@@ -605,6 +605,8 @@ final class RoutePermissionMap
         // (`stock.close`), což je úplně jiné oprávnění — i před catch-all `^/api/stock`.
         ['*', '#^/api/stock/purchase-orders(/|$)#', 'stock.orders.write', AccessLevel::WRITE],
         ['POST', '#^/api/stock/items/[0-9]+/neighbors$#', 'stock', AccessLevel::READ],
+        ['GET', '#^/api/stock/item-templates$#', 'stock', AccessLevel::READ],
+        ['*', '#^/api/stock/item-templates(/|$)#', 'stock.items.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/items(/|$)#', 'stock.items.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/documents(/|$)#', 'stock.documents.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/.*/close$#', 'stock.close', AccessLevel::WRITE],

@@ -183,65 +183,42 @@ navázaným zbožím nelze smazat, jen archivovat.
 
 ## 34.7 Import zboží
 
-Záložka **„Import zboží"** umožní hromadně **založit nové i aktualizovat
-existující** skladové karty ze souboru **XLSX nebo CSV** (max 2 MB).
+Záložka **Import zboží** zakládá a aktualizuje skladové karty z CSV nebo XLSX do 50 MB. Soubor se uloží s kontrolním součtem; validace a zápis běží na pozadí jako samostatné úlohy. Průběh a výsledky zůstávají v historii úloh.
 
 ### 34.7.1 Postup
 
-1. **Přetáhni soubor** do vyznačené plochy, nebo klikni a vyber ho ručně.
-2. Zaškrtávátko **„Jen náhled (dry-run) — nic se neuloží"** je při prvním
-   nahrání zapnuté — doporučený postup je vždy nejdřív spustit **náhled**.
-3. Tlačítko se podle stavu přepínače jmenuje **„Zobrazit náhled"** nebo rovnou
-   **„Importovat"**.
-4. Po náhledu se zobrazí **report** — souhrn (počet nových / změn / beze
-   změny / chyb) a řádková tabulka s detailem každého řádku souboru.
-5. Pokud náhled **neobsahuje žádnou chybu**, objeví se tlačítko **„Potvrdit
-   import"**, které provede tentýž soubor **naostro** bez nutnosti ho nahrávat
-   znovu.
-6. Filtr **„Jen problémy"** nad tabulkou zobrazí jen řádky se stavem chyba
-   nebo s doprovodnou zprávou.
+1. Vyber soubor. U CSV nastav oddělovač a kódování UTF-8, Windows-1250 nebo ISO-8859-2; u XLSX zvol list. Náhled ukáže hlavičku a první řádky.
+2. Namapuj sloupce na údaje karty. Zvol identitu podle SKU, interního ID nebo externího ID v pojmenovaném zdroji. U externího ID se existující karta nehledá náhradně podle shodného SKU.
+3. Vyber režim zakládání, aktualizace nebo obojí. Urči zachování či vymazání prázdných hodnot. Mapování a pravidla lze uložit jako verzovaný profil pro další soubor.
+4. Spusť náhled. Úloha ověří celý soubor a uloží rozdíly před zápisem. Report je stránkovaný a rozlišuje připravené řádky, řádky beze změny, chyby a konflikty.
+5. Potvrď aplikaci připravených řádků. Samostatná úloha zapisuje po dávkách a ukazuje průběh. Chybné řádky se nezapisují; oprav je ve zdroji a vytvoř nový náhled.
 
 ### 34.7.2 Sloupce souboru
 
-Povinný je jen **`sku`** — slouží jako **identita řádku** (podle něj se pozná,
-jde-li o nové zboží, nebo aktualizaci existujícího). Přijímají se české i
-anglické varianty názvů sloupců (např. `nazev`/`name`, `vyrobce`/`manufacturer`/
-`znacka`/`brand`), pořadí sloupců není podstatné — párují se podle hlavičky.
+Názvy a pořadí sloupců jsou volitelné, jejich význam určuje mapování. SKU a textové EAN zachovávají úvodní nuly. V XLSX proto identifikátory ukládej jako text; číslice odstraněné už tabulkovým editorem nelze obnovit.
 
-| Sloupec | Význam |
+| Údaj | Význam |
 |---|---|
-| `sku` | Katalogové číslo — povinné, max 50 znaků, musí být v souboru jedinečné (i bez ohledu na velikost písmen) |
-| `nazev` | Název zboží — povinný jen při **zakládání** nové karty |
-| `jednotka` | Měrná jednotka (default `ks`, pokud sloupec chybí) |
-| `ean` | Čárový kód |
-| `cena` | Prodejní cena bez DPH — přijímá český i anglický formát čísla (`1 234,50` i `1234.50`) |
-| `vyrobce` | **Kód existujícího** výrobce — pokud neexistuje, řádek skončí chybou (výrobce se importem nezakládá, založ ho nejdřív v číselníku Výrobci) |
-| `skladem` | `1`/`0` (nebo `ano`/`ne`) — je karta skladová položka, nebo se prodává jen přes dodavatele |
-| `export_eshop` | `1`/`0` — má se karta zobrazit na e-shopu |
-| `hmotnost_g` | Hmotnost v gramech (celé číslo, pro výpočet dopravy) |
-| `zaruka_mesice` | Záruka v měsících |
-| `dodaci_lhuta_dny` | Dodací lhůta ve dnech |
+| SKU | Katalogové číslo, nejvýše 50 znaků; povinné při zakládání nové karty |
+| Název | Povinný pro novou kartu, nejvýše 255 znaků |
+| Jednotka a EAN | Jednotka má výchozí hodnotu `ks`, EAN zůstává textem |
+| Prodejní cena v CZK | Pevná cena bez DPH, například `1234.50` nebo `1 234,50`; ostatní měny zůstávají zachované |
+| Typ, DPH a minimum | Typ zboží/materiál/výrobek, ID existující sazby DPH a minimální množství |
+| Výrobce | Kód nebo ID existujícího výrobce dané firmy |
+| Aktivita a export | Logická hodnota `1`/`0`, `ano`/`ne`, `true`/`false` nebo `yes`/`no` |
+| Hmotnost, záruka a dodání | Celá nezáporná čísla v gramech, měsících a dnech |
+| Kategorie, štítky, překlady, parametry a poplatky | Pokročilé sloupce s JSON seznamy odpovídajícími údajům karty |
+| Měnové ceny | JSON seznam cenových řádků; nelze současně mapovat jednoduchou CZK cenu a měnové ceny |
 
 ### 34.7.3 Chování importu
 
-Sloupec `cena` nastavuje pevnou prodejní cenu bez DPH v CZK i v měnovém ceníku. Ostatní měny ponechá. Prázdná cena stávající cenu zachová; odstranění ceny je samostatná operace v ceníku. Hodnoty `100` a `100.00` představují stejnou cenu a při opakovaném importu nevytvářejí změnu.
-
-- **Nikdy nemaže** — import zboží ani nesmaže existující kartu, ani z ní
-  neodstraní hodnotu, která v souboru chybí (aktualizuje se **jen sloupec,
-  který je v souboru skutečně vyplněný**).
-- Řádky se stavem **„Beze změny"** se přeskočí (import je idempotentní —
-  opakované nahrání téhož souboru nic nezmění).
-- Řádek se stavem **„Nový"** založí kartu jako `zboží` (item_type `goods`).
-- Řádek se stavem **„Chyba"** (např. chybějící povinné pole, duplicitní SKU v
-  souboru, neplatná cena, neexistující kód výrobce, hodnota mimo povolený
-  rozsah) se **nezapíše** a v detailu vidíš konkrétní důvod.
-- Ostrý import je **all-or-nothing v rámci dávky** — pokud náhled hlásí
-  chyby, „Potvrdit import" se nenabídne a musíš soubor nejdřív opravit.
-
-> [!WARNING]
-> Sloupec `vyrobce` **nezakládá nové výrobce** — očekává kód už existujícího
-> záznamu z číselníku Výrobci ([§ 34.2](#342-vyrobci)). Připrav si tedy
-> číselník výrobců dřív, než spustíš import velkého katalogu.
+- Nenamapované údaje se nemění. Prázdné hodnoty se standardně zachovávají; vymazání musí být zvolené pravidlem profilu nebo pole.
+- Import nikdy nemaže kartu, která v souboru chybí. Skladové stavy a pohyby se tímto importem nezapisují.
+- Stejné normalizované hodnoty, například `100` a `100.00`, nevytvářejí věcnou změnu ani novou verzi karty.
+- Duplicitní identita označí všechny dotčené řádky jako chybné. Cizí nebo neexistující interní ID se nenahradí novou kartou.
+- Novější ruční změnu mezi náhledem a aplikací import nepřepíše. Řádek skončí konfliktem a vyžaduje nový náhled.
+- Dokončené dávky zůstávají zapsané. Po přerušení úloha pokračuje od checkpointu bez opakovaného založení karet; velký import nemá globální rollback.
+- Vzorce v XLSX se nespouštějí. Neplatné hodnoty, příliš velké buňky a nebezpečně rozbalitelné soubory se odmítnou.
 
 ## 34.8 Cenotvorba
 
@@ -373,6 +350,26 @@ Historické doklady si zachovávají původní ceny a kurzy.
 
 Správa i čtení profilů vyžadují právo na zápis e-shopu a skladových karet,
 protože obsahují nákladové a maržové nastavení.
+### Cenová matice
+
+Záložka **Cenová matice** v e-shopu porovná ceny vybraných karet po měnách.
+Vyber karty a měny a vytvoř náhled. Náhled i následné použití změn běží jako
+úlohy na pozadí s průběhem a výsledkem po jednotlivých kartách.
+
+U cen vidíš náklad, výslednou cenu, marži a použitý kurz nebo pravidlo.
+Výsledek lze filtrovat podle stavu, měny, chybějící ceny, ruční výjimky nebo
+odchylky od původní ceny. Hranici odchylky nastavíš před výpočtem náhledu.
+
+Jednotlivou cenu lze uzamknout, nastavit jako pevnou, vrátit pod pravidla
+nebo odstranit pro danou měnu. Změny se zapíší až po potvrzení hotového
+náhledu. Konfliktní kartu oprav a zahrň do nového náhledu.
+
+CSV původního nebo navrženého stavu umožní úpravy mimo aplikaci a zpětné
+načtení. Zachovej hlavičku, identifikátor karty a měnu. Zpětné načtení opět
+vytvoří náhled, který je nutné potvrdit. Jeden soubor může mít nejvýše 50 MB
+a 90 000 cenových řádků. Přístup vyžaduje právo zápisu e-shopu i skladových
+karet, protože matice zobrazuje také interní náklady.
+
 ### 34.8.4 Záložka „Ceny"
 
 Záložka rovnou připraví **řádek pro každou aktivní prodejní měnu**. Prázdné

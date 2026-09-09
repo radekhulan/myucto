@@ -59,6 +59,24 @@ final class CatalogPriceJobService
         ], count($ids), 3);
     }
 
+    public function snapshot(int $supplierId, ?string $onDate = null): PricingSnapshot
+    {
+        $onDate ??= date('Y-m-d');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/D', $onDate) || !checkdate((int) substr($onDate, 5, 2), (int) substr($onDate, 8, 2), (int) substr($onDate, 0, 4))) {
+            throw new \InvalidArgumentException('Neplatné datum cenového snapshotu.');
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT currency_code, rate, rate_date FROM (
+            SELECT currency_code, rate, rate_date, ROW_NUMBER() OVER (PARTITION BY currency_code ORDER BY rate_date DESC) AS position
+            FROM exchange_rates WHERE rate_date <= ?
+        ) rates WHERE position = 1');
+        $stmt->execute([$onDate]);
+        $rates = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $rate) {
+            $rates[(string) $rate['currency_code']] = ['rate' => (string) $rate['rate'], 'rate_date' => (string) $rate['rate_date']];
+        }
+        return new PricingSnapshot($onDate, $rates, $this->rules->snapshot($supplierId, $onDate));
+    }
+
     public function tick(int $supplierId, int $maxBatches = 10): ?array
     {
         $job = $this->jobs->claim($supplierId, 'price_recompute');

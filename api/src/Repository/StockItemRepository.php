@@ -22,7 +22,7 @@ final class StockItemRepository
     private const COLUMNS =
         'id, supplier_id, sku, name, item_type, manufacturer_id, unit, ean, vat_rate_id,
          sale_price_without_vat, min_qty, warranty_months, delivery_days, export_eshop,
-         is_stocked, weight_g, pricing_base, is_active, note, row_version, created_at, updated_at';
+         is_stocked, weight_g, pricing_base, is_active, lifecycle_status, retired_at, note, row_version, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -425,7 +425,7 @@ final class StockItemRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, sku, name, unit, vat_rate_id, sale_price_without_vat
                FROM stock_items
-              WHERE supplier_id = ? AND is_active = 1
+              WHERE supplier_id = ? AND is_active = 1 AND lifecycle_status = \'ready\'
                 AND (sku LIKE ? OR name LIKE ? OR ean LIKE ?)
               ORDER BY name ASC
               LIMIT ' . $lim
@@ -506,7 +506,8 @@ final class StockItemRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE stock_items SET
                 sku = ?, name = ?, item_type = ?, unit = ?, ean = ?, vat_rate_id = ?,
-                sale_price_without_vat = ?, min_qty = ?, is_active = ?, note = ?,
+                sale_price_without_vat = ?, min_qty = ?,
+                is_active = CASE WHEN lifecycle_status = \'ready\' THEN ? ELSE 0 END, note = ?,
                 row_version = row_version + 1
               WHERE id = ? AND supplier_id = ?'
         );
@@ -533,7 +534,8 @@ final class StockItemRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE stock_items SET
                 sku = ?, name = ?, item_type = ?, unit = ?, ean = ?, vat_rate_id = ?,
-                sale_price_without_vat = ?, min_qty = ?, is_active = ?, note = ?,
+                sale_price_without_vat = ?, min_qty = ?,
+                is_active = CASE WHEN lifecycle_status = \'ready\' THEN ? ELSE 0 END, note = ?,
                 row_version = row_version + 1
               WHERE id = ? AND supplier_id = ? AND row_version = ?'
         );
@@ -566,7 +568,8 @@ final class StockItemRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE stock_items SET
                 manufacturer_id = ?, warranty_months = ?, delivery_days = ?,
-                export_eshop = ?, is_stocked = ?, weight_g = ?, pricing_base = ?,
+                export_eshop = CASE WHEN lifecycle_status = \'ready\' THEN ? ELSE 0 END,
+                is_stocked = ?, weight_g = ?, pricing_base = ?,
                 row_version = row_version + 1
               WHERE id = ? AND supplier_id = ?'
         );
@@ -606,7 +609,9 @@ final class StockItemRepository
             if (!array_key_exists($field, $data)) {
                 continue;
             }
-            $set[] = $field . ' = ?';
+            $set[] = $field === 'export_eshop'
+                ? "export_eshop = CASE WHEN lifecycle_status = 'ready' THEN ? ELSE 0 END"
+                : $field . ' = ?';
             $params[] = $cast($data[$field]);
         }
         $set[] = 'row_version = row_version + 1';
@@ -685,6 +690,9 @@ final class StockItemRepository
         $r['is_active'] = (bool) $r['is_active'];
         if (array_key_exists('row_version', $r)) {
             $r['row_version'] = (int) $r['row_version'];
+        }
+        if (array_key_exists('lifecycle_status', $r)) {
+            $r['lifecycle_status'] = (string) $r['lifecycle_status'];
         }
         if (array_key_exists('qty', $r)) {
             $r['qty'] = (string) $r['qty'];

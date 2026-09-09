@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { catalogJobsApi, type CatalogJob } from '@/api/catalogJobs'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { formatDateTime } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -15,6 +16,9 @@ import { eshopApi, type Category, type Manufacturer, type Tag } from '@/api/esho
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+const supplier = useSupplierStore()
+let generation = 0
+let loadSequence = 0
 const jobs = ref<CatalogJob[]>([])
 const loading = ref(false)
 const actingId = ref<number | null>(null)
@@ -32,8 +36,13 @@ const STATUS: Record<string, string> = { queued: 'bg-neutral-100 text-neutral-60
 function isActive(job: CatalogJob) { return job.status === 'queued' || job.status === 'running' }
 function canManage(job: CatalogJob) {
   if (job.kind === 'stock_valuation') return auth.canWrite('stock')
-  if (isBulk(job)) return auth.canWrite('eshop.write') && auth.canWrite('stock.items.write')
+  if (isBulk(job) || workflowUrl(job)) return auth.canWrite('eshop.write') && auth.canWrite('stock.items.write')
   return auth.canWrite('eshop.write')
+}
+function workflowUrl(job: CatalogJob): string | null {
+  if (['catalog_import_stage', 'catalog_import_apply'].includes(job.kind)) return `/eshop?tab=import&import_job=${job.id}`
+  if (['price_matrix_preview', 'price_matrix_apply'].includes(job.kind)) return `/eshop?tab=price-matrix&matrix_job=${job.id}`
+  return null
 }
 function failedItems(job: CatalogJob): Array<{ item_id: number; error_code: string; currency_code?: string }> {
   return Array.isArray(job.report?.failed_items) ? job.report.failed_items : []
@@ -43,51 +52,90 @@ function replacementIds(job: CatalogJob): number[] {
   return job.report?.replacement_job_id ? [...ids, Number(job.report.replacement_job_id)] : ids
 }
 async function load(silent = false) {
+  const current = generation
+  const request = ++loadSequence
   if (!silent) loading.value = true
   try {
     const rows = await catalogJobsApi.list()
+    if (disposed || current !== generation || request !== loadSequence) return
     const existing = new Map(jobs.value.map(job => [job.id, job]))
     for (const row of rows) existing.set(row.id, row)
     jobs.value = [...existing.values()].sort((a, b) => b.id - a.id)
     if (!silent) hasMore.value = rows.length === 50
     if (silent) {
       const olderActive = jobs.value.filter(job => !rows.some(row => row.id === job.id) && ['queued', 'running'].includes(job.status))
-      for (const job of olderActive) Object.assign(job, await catalogJobsApi.get(job.id))
+      for (const job of olderActive) {
+        const refreshed = await catalogJobsApi.get(job.id)
+        if (disposed || current !== generation || request !== loadSequence) return
+        Object.assign(job, refreshed)
+      }
     }
-  } catch (e: any) { if (!silent) toast.error(e?.response?.data?.error?.message || t('common.error')) }
-  finally { loading.value = false }
+  } catch (e: any) { if (!silent && !disposed && current === generation && request === loadSequence) toast.error(e?.response?.data?.error?.message || t('common.error')) }
+  finally { if (current === generation && request === loadSequence) loading.value = false }
 }
 async function loadMore() {
   if (loadingMore.value || !jobs.value.length) return
+  const current = generation
   loadingMore.value = true
   try {
     const rows = await catalogJobsApi.list({ before_id: jobs.value[jobs.value.length - 1]!.id })
+    if (disposed || current !== generation) return
     jobs.value.push(...rows.filter(row => !jobs.value.some(job => job.id === row.id)))
     hasMore.value = rows.length === 50
-  } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
-  finally { loadingMore.value = false }
+  } catch (e: any) { if (!disposed && current === generation) toast.error(e?.response?.data?.error?.message || t('common.error')) }
+  finally { if (current === generation) loadingMore.value = false }
 }
-async function retry(id: number) { actingId.value = id; try { await catalogJobsApi.retry(id); await load(true); toast.success(t('eshop.jobs.retry_done')) } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) } finally { actingId.value = null } }
-async function cancel(id: number) { actingId.value = id; try { await catalogJobsApi.cancel(id); await load(true) } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) } finally { actingId.value = null } }
-async function recompute() { actingId.value = -1; try { await catalogJobsApi.recomputePrices(); await load(true); toast.success(t('eshop.jobs.queued')) } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) } finally { actingId.value = null } }
+async function act(id: number, operation: () => Promise<unknown>, success?: string) {
+  if (actingId.value !== null) return
+  const current = generation
+  actingId.value = id
+  try {
+    await operation()
+    if (disposed || current !== generation) return
+    await load(true)
+    if (!disposed && current === generation && success) toast.success(t(success))
+  } catch (e: any) {
+    if (!disposed && current === generation) toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    if (current === generation) actingId.value = null
+  }
+}
+function retry(id: number) { return act(id, () => catalogJobsApi.retry(id), 'eshop.jobs.retry_done') }
+function cancel(id: number) { return act(id, () => catalogJobsApi.cancel(id)) }
+function recompute() { return act(-1, () => catalogJobsApi.recomputePrices(), 'eshop.jobs.queued') }
 function isBulk(job: CatalogJob) { return ['catalog_bulk_preview', 'catalog_bulk_apply', 'catalog_bulk_restore'].includes(job.kind) }
 async function openJob(job: CatalogJob) {
   if (opening.value) return
+  const current = generation
   opening.value = true
   try {
     if (isBulk(job)) {
       const [nextManufacturers, nextCategories, nextTags] = await Promise.allSettled([
         eshopApi.listManufacturers(), eshopApi.listCategories(), eshopApi.listTags(),
       ])
+      if (disposed || current !== generation) return
       if (nextManufacturers.status === 'fulfilled') manufacturers.value = nextManufacturers.value
       if (nextCategories.status === 'fulfilled') categories.value = nextCategories.value
       if (nextTags.status === 'fulfilled') tags.value = nextTags.value
     }
-    if (disposed) return
+    if (disposed || current !== generation) return
     openedJob.value = job
-  } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
-  finally { opening.value = false }
+  } catch (e: any) { if (!disposed && current === generation) toast.error(e?.response?.data?.error?.message || t('common.error')) }
+  finally { if (current === generation) opening.value = false }
 }
+watch(() => supplier.currentSupplierId, () => {
+  generation++
+  jobs.value = []
+  openedJob.value = null
+  manufacturers.value = []
+  categories.value = []
+  tags.value = []
+  hasMore.value = false
+  loadingMore.value = false
+  opening.value = false
+  actingId.value = null
+  void load()
+})
 onMounted(async () => { await load(); if (!disposed) timer = setInterval(() => { if (active.value) load(true) }, 3000) })
 onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer) })
 </script>
@@ -99,8 +147,14 @@ onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer) })
     <EmptyState v-else-if="jobs.length === 0" boxed accent="neutral" icon="chart" :title="t('eshop.jobs.empty_title')" :message="t('eshop.jobs.empty_hint')" />
     <div v-else class="space-y-2">
       <article v-for="job in jobs" :key="job.id" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
-        <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><span class="font-medium">{{ t(`eshop.jobs.kind.${job.kind}`, job.kind) }}</span><span class="text-xs px-2 py-0.5 rounded font-medium" :class="STATUS[job.status]">{{ t(`eshop.jobs.status.${job.status}`) }}</span></div><p class="text-xs text-neutral-500 mt-1">#{{ job.id }} · {{ formatDateTime(job.created_at) }}<span v-if="job.error_code"> · {{ job.error_code }}</span></p></div><div class="flex flex-wrap gap-2"><RouterLink v-if="job.stock_take_id" :to="`/stock/takes/${job.stock_take_id}`" :class="btnOutline('primary')"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>{{ t('eshop.jobs.open_stock_take') }}</RouterLink><RouterLink v-if="job.kind === 'stock_valuation' && !job.stock_take_id" :to="`/stock/reports?valuation_job=${job.id}`" :class="btnOutline('neutral')"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5h10v14H5V9m4 6L19 5" /></svg>{{ t('eshop.jobs.open_valuation') }}</RouterLink><template v-if="!job.stock_take_id && canManage(job)"><button v-if="job.status === 'failed' || job.status === 'cancelled'" type="button" :disabled="actingId === job.id" :class="btnOutline('primary')" @click="retry(job.id)"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8 8 0 0 0 4.582 9M4.582 9H9m11 11v-5h-.581A8 8 0 0 1 4.58 13H15" /></svg>{{ t('common.retry') }}</button></template></div></div>
+        <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><span class="font-medium">{{ t(`eshop.jobs.kind.${job.kind}`, job.kind) }}</span><span class="text-xs px-2 py-0.5 rounded font-medium" :class="STATUS[job.status]">{{ t(`eshop.jobs.status.${job.status}`) }}</span></div><p class="text-xs text-neutral-500 mt-1">#{{ job.id }} · {{ formatDateTime(job.created_at) }}<span v-if="job.error_code"> · {{ job.error_code }}</span></p></div><div class="flex flex-wrap gap-2"><RouterLink v-if="job.stock_take_id" :to="`/stock/takes/${job.stock_take_id}`" :class="btnOutline('primary')"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>{{ t('eshop.jobs.open_stock_take') }}</RouterLink><RouterLink v-if="job.kind === 'stock_valuation' && !job.stock_take_id" :to="`/stock/reports?valuation_job=${job.id}`" :class="btnOutline('neutral')"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5h10v14H5V9m4 6L19 5" /></svg>{{ t('eshop.jobs.open_valuation') }}</RouterLink><template v-if="!job.stock_take_id && canManage(job)"><button v-if="job.status === 'failed' || job.status === 'cancelled'" type="button" :disabled="actingId !== null" :class="btnOutline('primary')" @click="retry(job.id)"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8 8 0 0 0 4.582 9M4.582 9H9m11 11v-5h-.581A8 8 0 0 1 4.58 13H15" /></svg>{{ t('common.retry') }}</button></template></div></div>
         <CatalogJobProgress v-if="isActive(job)" class="mt-3" :job="job" :cancelling="actingId === job.id" :can-cancel="!job.stock_take_id && canManage(job)" @cancel="cancel(job.id)" />
+        <div v-if="workflowUrl(job) && canManage(job)" class="mt-3 flex flex-wrap gap-2">
+          <RouterLink :to="workflowUrl(job)!" :class="btnOutline('primary')">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eye" /></svg>
+            {{ t('eshop.jobs.open_job') }}
+          </RouterLink>
+        </div>
         <div v-if="(isBulk(job) && canManage(job)) || job.kind === 'catalog_export'" class="mt-3 flex flex-wrap gap-2">
           <button type="button" :disabled="opening" :class="btnOutline('primary')" @click="openJob(job)">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eye" /></svg>

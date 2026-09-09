@@ -28,6 +28,8 @@ export interface CatalogBulkChanges {
   manufacturer_id?: number | null
   category_ids?: number[]
   tag_ids?: number[]
+  vendor_mode?: 'add' | 'remove' | 'replace'
+  vendor_ids?: number[]
   is_active?: boolean
   export_eshop?: boolean
   min_qty?: string
@@ -54,6 +56,7 @@ export interface CatalogBulkItemState {
   category_ids: number[]
   categories: CatalogBulkCategoryState[]
   tag_ids: number[]
+  vendors: CatalogBulkVendorState[]
   is_active: boolean
   export_eshop: boolean
   min_qty: string | null
@@ -65,6 +68,24 @@ export interface CatalogBulkCategoryState {
   display_order: number
 }
 
+export interface CatalogBulkVendorState {
+  client_id: number
+  vendor_sku: string | null
+  purchase_price: string | null
+  currency_code: string
+  delivery_days: number | null
+  stock_qty: string | null
+  is_preferred: boolean
+  note: string | null
+  availability_state: string
+  stock_qty_updated_at: string | null
+  min_order_qty: string | null
+  package_qty: string | null
+  price_valid_to: string | null
+  data_source: string
+  is_active: boolean
+}
+
 export type CatalogBulkItemStatus = 'pending' | 'ready' | 'applied' | 'unchanged' | 'failed' | 'conflict' | 'skipped'
 
 export const CATALOG_BULK_ITEM_STATUSES: readonly CatalogBulkItemStatus[] = [
@@ -72,7 +93,7 @@ export const CATALOG_BULK_ITEM_STATUSES: readonly CatalogBulkItemStatus[] = [
 ]
 
 export const CATALOG_BULK_ERROR_CODES = [
-  'unavailable', 'version_conflict', 'manufacturer_invalid', 'category_invalid', 'tag_invalid', 'write_failed',
+  'unavailable', 'version_conflict', 'manufacturer_invalid', 'category_invalid', 'tag_invalid', 'vendor_invalid', 'write_failed',
 ] as const
 
 export type CatalogBulkErrorCode = typeof CATALOG_BULK_ERROR_CODES[number]

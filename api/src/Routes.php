@@ -3023,10 +3023,16 @@ final class Routes
             $g->delete('/warehouses/{id:[0-9]+}',       [\MyInvoice\Action\Stock\WarehouseAction::class, 'delete']);
 
             $g->get   ('/items/search',                 [\MyInvoice\Action\Stock\StockItemAction::class, 'search']);
+            $g->get   ('/item-templates',               [\MyInvoice\Action\Stock\StockItemAction::class, 'templates']);
+            $g->post  ('/item-templates/{templateId:[0-9]+}/apply', [\MyInvoice\Action\Stock\StockItemAction::class, 'applyTemplate']);
+            $g->delete('/item-templates/{templateId:[0-9]+}', [\MyInvoice\Action\Stock\StockItemAction::class, 'deleteTemplate']);
             $g->get   ('/items',                        [\MyInvoice\Action\Stock\StockItemAction::class, 'list']);
             $g->post  ('/items',                        [\MyInvoice\Action\Stock\StockItemAction::class, 'create']);
             $g->get   ('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'get']);
             $g->post  ('/items/{id:[0-9]+}/neighbors',  \MyInvoice\Action\Stock\StockItemNeighborsAction::class);
+            $g->post  ('/items/{id:[0-9]+}/lifecycle',  [\MyInvoice\Action\Stock\StockItemAction::class, 'lifecycle']);
+            $g->post  ('/items/{id:[0-9]+}/duplicate',  [\MyInvoice\Action\Stock\StockItemAction::class, 'duplicate']);
+            $g->post  ('/items/{id:[0-9]+}/templates',  [\MyInvoice\Action\Stock\StockItemAction::class, 'saveTemplate']);
             $g->put   ('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'update']);
             $g->delete('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'delete']);
             $g->get   ('/items/{id:[0-9]+}/movements',        [\MyInvoice\Action\Stock\StockItemAction::class, 'movements']);
@@ -3112,6 +3118,13 @@ final class Routes
         $app->get('/api/catalog/exports/{id:[0-9]+}/download', [\MyInvoice\Action\Eshop\CatalogExportAction::class, 'download']);
         $app->post('/api/catalog/prices/batch', [\MyInvoice\Action\Eshop\CatalogReadAction::class, 'prices']);
         $app->group('/api/eshop', function ($g) {
+            $g->post('/imports/sources', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'upload']);
+            $g->get('/imports/sources/{id:[0-9]+}/sample', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'sample']);
+            $g->get('/imports/profiles', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'profiles']);
+            $g->post('/imports/profiles', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'saveProfile']);
+            $g->put('/imports/profiles/{id:[0-9]+}', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'saveProfile']);
+            $g->post('/imports/preview', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'preview']);
+            $g->post('/imports/{id:[0-9]+}/apply', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'apply']);
             $g->post('/bulk/preview', [\MyInvoice\Action\Eshop\CatalogBulkAction::class, 'preview']);
             $g->post('/bulk/{id:[0-9]+}/apply', [\MyInvoice\Action\Eshop\CatalogBulkAction::class, 'apply']);
             $g->post('/bulk/{id:[0-9]+}/restore', [\MyInvoice\Action\Eshop\CatalogBulkAction::class, 'restore']);
@@ -3125,6 +3138,11 @@ final class Routes
             $g->delete('/pricing/rules/{id:[0-9]+}', [\MyInvoice\Action\Eshop\CatalogPricingRuleAction::class, 'delete']);
             $g->get('/pricing/exchange-rates', [\MyInvoice\Action\Eshop\CatalogPricingExchangeRateAction::class, 'list']);
             $g->put('/pricing/exchange-rates', [\MyInvoice\Action\Eshop\CatalogPricingExchangeRateAction::class, 'save']);
+            $g->post('/pricing/matrix/preview', [\MyInvoice\Action\Eshop\PriceMatrixAction::class, 'preview']);
+            $g->post('/pricing/matrix/import/preview', [\MyInvoice\Action\Eshop\PriceMatrixAction::class, 'importPreview']);
+            $g->post('/pricing/matrix/{id:[0-9]+}/apply', [\MyInvoice\Action\Eshop\PriceMatrixAction::class, 'apply']);
+            $g->get('/pricing/matrix/{id:[0-9]+}/items', [\MyInvoice\Action\Eshop\PriceMatrixAction::class, 'items']);
+            $g->get('/pricing/matrix/{id:[0-9]+}/export', [\MyInvoice\Action\Eshop\PriceMatrixAction::class, 'export']);
             // Výrobci
             $g->get   ('/manufacturers',                 [\MyInvoice\Action\Eshop\ManufacturerAction::class, 'list']);
             $g->post  ('/manufacturers',                 [\MyInvoice\Action\Eshop\ManufacturerAction::class, 'create']);

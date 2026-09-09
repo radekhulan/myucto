@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Category, Manufacturer, Tag } from '@/api/eshop'
+import { clientsApi, type Client } from '@/api/clients'
 import {
   CATALOG_BULK_ERROR_CODES,
   CATALOG_BULK_ITEM_STATUSES,
@@ -52,6 +53,10 @@ const categoryMode = ref<'keep' | 'set' | 'clear'>('keep')
 const categoryIds = ref<number[]>([])
 const tagMode = ref<'keep' | 'set' | 'clear'>('keep')
 const tagIds = ref<number[]>([])
+const vendorMode = ref<'keep' | 'add' | 'remove' | 'replace'>('keep')
+const vendorIds = ref<number[]>([])
+const vendors = ref<Client[]>([])
+const vendorsLoading = ref(false)
 const activeMode = ref<'keep' | 'true' | 'false'>('keep')
 const exportMode = ref<'keep' | 'true' | 'false'>('keep')
 const minQty = ref('')
@@ -71,6 +76,7 @@ let pollTimer: ReturnType<typeof setInterval> | undefined
 let jobRequestVersion = 0
 let reportRequestVersion = 0
 let actionRequestVersion = 0
+let vendorRequestVersion = 0
 const emittedCompletions = new Set<number>()
 
 const changes = computed<CatalogBulkChanges>(() => {
@@ -81,6 +87,10 @@ const changes = computed<CatalogBulkChanges>(() => {
   if (categoryMode.value === 'set') result.category_ids = categoryIds.value.map(Number)
   if (tagMode.value === 'clear') result.tag_ids = []
   if (tagMode.value === 'set') result.tag_ids = tagIds.value.map(Number)
+  if (vendorMode.value !== 'keep') {
+    result.vendor_mode = vendorMode.value
+    result.vendor_ids = vendorIds.value.map(Number)
+  }
   if (activeMode.value !== 'keep') result.is_active = activeMode.value === 'true'
   if (exportMode.value !== 'keep') result.export_eshop = exportMode.value === 'true'
   if (String(minQty.value).trim()) result.min_qty = String(minQty.value).trim()
@@ -96,6 +106,7 @@ const formValid = computed(() => (
   && Object.keys(changes.value).length > 0
   && !minQtyInvalid.value
   && (manufacturerMode.value !== 'set' || manufacturerId.value !== '')
+  && (vendorMode.value === 'keep' || vendorMode.value === 'replace' || vendorIds.value.length > 0)
 ))
 const activeJob = computed(() => !!job.value && ['queued', 'running'].includes(job.value.status))
 const resumeMode = computed(() => props.initialJobId !== undefined)
@@ -117,9 +128,9 @@ const canRestore = computed(() => (
 
 const knownErrorCodes = new Set<string>(CATALOG_BULK_ERROR_CODES)
 const knownStatuses = new Set<string>(CATALOG_BULK_ITEM_STATUSES)
-type ComparedField = 'manufacturer_id' | 'categories' | 'tag_ids' | 'is_active' | 'export_eshop' | 'min_qty'
+type ComparedField = 'manufacturer_id' | 'categories' | 'tag_ids' | 'vendors' | 'is_active' | 'export_eshop' | 'min_qty'
 const comparedFields: ComparedField[] = [
-  'manufacturer_id', 'categories', 'tag_ids', 'is_active', 'export_eshop', 'min_qty',
+  'manufacturer_id', 'categories', 'tag_ids', 'vendors', 'is_active', 'export_eshop', 'min_qty',
 ]
 
 function stopPolling() {
@@ -155,6 +166,21 @@ function categoryValue(state: CatalogBulkItemState): string {
   }).join(', ')
 }
 
+function vendorName(id: number): string {
+  return vendors.value.find(vendor => vendor.id === id)?.company_name ?? `#${id}`
+}
+
+function vendorValue(state: CatalogBulkItemState): string {
+  const vendorRows = state.vendors ?? []
+  if (!vendorRows.length) return bulkText('none')
+  return vendorRows.map(vendor => {
+    const details = [vendor.currency_code]
+    if (vendor.purchase_price !== null) details.push(vendor.purchase_price)
+    if (vendor.is_preferred) details.push(bulkText('vendor_preferred'))
+    return `${vendorName(vendor.client_id)} (${details.join(', ')})`
+  }).join(', ')
+}
+
 function displayValue(state: CatalogBulkItemState | null, field: ComparedField): string {
   if (!state) return '-'
   const value = state[field]
@@ -165,6 +191,7 @@ function displayValue(state: CatalogBulkItemState | null, field: ComparedField):
   if (field === 'tag_ids') {
     return (value as number[]).map(id => showId('tag', id)).join(', ') || bulkText('none')
   }
+  if (field === 'vendors') return vendorValue(state)
   if (field === 'is_active' || field === 'export_eshop') return value ? t('common.yes') : t('common.no')
   if (field === 'min_qty' && value != null) return formatNumber(Number(value), { maximumFractionDigits: 3 })
   return value == null ? bulkText('none') : String(value)
@@ -331,6 +358,25 @@ async function retryJob() {
   }
 }
 
+async function loadVendors(): Promise<void> {
+  const requestVersion = ++vendorRequestVersion
+  vendorsLoading.value = true
+  const loaded: Client[] = []
+  try {
+    for (let page = 1; ; page++) {
+      const result = await clientsApi.list({ role: 'vendors', per_page: 500, page, sort: 'name' })
+      if (requestVersion !== vendorRequestVersion) return
+      loaded.push(...result.data)
+      if (page >= result.meta.pages) break
+    }
+    vendors.value = loaded
+  } catch {
+    if (requestVersion === vendorRequestVersion) vendors.value = []
+  } finally {
+    if (requestVersion === vendorRequestVersion) vendorsLoading.value = false
+  }
+}
+
 function changeReportStatus() {
   if (!job.value || busy.value) return
   void loadReport(1)
@@ -341,9 +387,11 @@ onBeforeUnmount(() => {
   ++jobRequestVersion
   ++reportRequestVersion
   ++actionRequestVersion
+  ++vendorRequestVersion
 })
 
 onMounted(async () => {
+  void loadVendors()
   if (!props.initialJobId) return
   resumeLoading.value = true
   const requestVersion = ++actionRequestVersion
@@ -408,6 +456,20 @@ onMounted(async () => {
         <select v-if="tagMode === 'set'" v-model="tagIds" multiple class="mt-2 min-h-20 w-full rounded-md border border-neutral-300 bg-surface px-2">
           <option v-for="tag in tags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
         </select>
+      </label>
+
+      <label>
+        {{ bulkText('vendors') }}
+        <select data-test="vendor-mode" v-model="vendorMode" class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-2">
+          <option value="keep">{{ bulkText('keep') }}</option>
+          <option value="add">{{ bulkText('vendor_add') }}</option>
+          <option value="remove">{{ bulkText('vendor_remove') }}</option>
+          <option value="replace">{{ bulkText('replace') }}</option>
+        </select>
+        <select v-if="vendorMode !== 'keep'" data-test="vendor-ids" v-model="vendorIds" multiple :disabled="vendorsLoading" class="mt-2 min-h-20 w-full rounded-md border border-neutral-300 bg-surface px-2 disabled:opacity-50">
+          <option v-for="vendor in vendors" :key="vendor.id" :value="vendor.id">{{ vendor.company_name }}</option>
+        </select>
+        <p v-if="vendorMode !== 'keep'" class="mt-1 text-xs text-neutral-500">{{ bulkText('vendor_hint') }}</p>
       </label>
 
       <label>

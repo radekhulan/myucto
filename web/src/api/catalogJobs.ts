@@ -3,6 +3,7 @@ import { api } from './client'
 export type CatalogJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface CatalogJob {
+  apply_job_id?: number | null
   id: number
   supplier_id: number
   stock_take_id?: number | null
@@ -18,6 +19,7 @@ export interface CatalogJob {
   updated_at: string
   finished_at: string | null
   attempts: number
+  currencies?: string[]
 }
 
 export interface ValuationJobResult {
@@ -31,9 +33,9 @@ export interface ValuationJobResult {
 
 export const catalogJobsApi = {
   list: (params: { before_id?: number; limit?: number } = {}) => api.get<CatalogJob[]>('/eshop/jobs', { params }).then(r => r.data),
-  get: (id: number) => api.get<CatalogJob>(`/eshop/jobs/${id}`).then(r => r.data),
-  retry: (id: number) => api.post<CatalogJob>(`/eshop/jobs/${id}/retry`).then(r => r.data),
-  cancel: (id: number) => api.post<CatalogJob>(`/eshop/jobs/${id}/cancel`).then(r => r.data),
+  get: (id: number, signal?: AbortSignal) => api.get<CatalogJob>(`/eshop/jobs/${id}`, { signal }).then(r => r.data),
+  retry: (id: number, signal?: AbortSignal) => api.post<CatalogJob>(`/eshop/jobs/${id}/retry`, undefined, { signal }).then(r => r.data),
+  cancel: (id: number, signal?: AbortSignal) => api.post<CatalogJob>(`/eshop/jobs/${id}/cancel`, undefined, { signal }).then(r => r.data),
   recomputePrices: () => api.post<CatalogJob>('/eshop/jobs/prices-recompute').then(r => r.data),
   createValuation: (payload: { date: string; warehouse_id?: number }) => api.post<CatalogJob>('/stock/reports/valuation-jobs', payload).then(r => r.data),
   getValuation: (id: number, params: { page?: number; limit?: number } = {}) => api.get<ValuationJobResult>(`/stock/reports/valuation-jobs/${id}`, { params }).then(r => r.data),
