@@ -42,15 +42,34 @@ final class DpfoEpoBusinessValidator
             $errors[] = 'DPFO: skutečné výdaje přiřazené činnostem §7 nesouhlasí s peněžním deníkem.';
         }
 
+        // §10: každá položka musí nést kód druhu příjmu podle § 10 odst. 1 ZDP
+        // (sloupec 1 tabulky 2. oddílu Přílohy č. 2, `kod_dr_prij10`). Bez něj úřad
+        // podání vytkne — a slovní popis ho nenahradí, ten je samostatný údaj.
+        // Číselník je {@see Section10Codebook}; kód `kod10` (P/S/Z/N) je opravdu
+        // volitelný, ten se tady nevynucuje.
+        $missingKindCode = false;
+        $missingDescription = false;
         foreach ((array) ($result['s10_items'] ?? []) as $item) {
-            if (!is_array($item) || trim((string) ($item['kind'] ?? '')) === '') {
-                $errors[] = 'DPFO: každý příjem §10 musí mít uveden samostatný druh.';
-                break;
+            if (!is_array($item)) {
+                continue;
+            }
+            if (!Section10Codebook::isKind(Section10Codebook::normalizeKind($item['kind_code'] ?? ''))) {
+                $missingKindCode = true;
+            }
+            // Popis druhu příjmu — `text` je dnešní klíč, `kind` historický (rozeditované
+            // koncepty a starší uložená přiznání).
+            if (trim((string) ($item['text'] ?? $item['kind'] ?? '')) === '') {
+                $missingDescription = true;
             }
             if ((float) ($item['allowed_expenses'] ?? 0) > (float) ($item['income'] ?? 0) + 0.01) {
                 $errors[] = 'DPFO: výdaje §10 překročily příjmy stejného druhu.';
-                break;
             }
+        }
+        if ($missingKindCode) {
+            $errors[] = 'DPFO: každý příjem §10 musí mít vybraný kód druhu příjmu podle § 10 odst. 1 zákona (A–H).';
+        }
+        if ($missingDescription) {
+            $errors[] = 'DPFO: každý příjem §10 musí mít uveden samostatný druh.';
         }
 
         $family = (array) ($result['family'] ?? []);

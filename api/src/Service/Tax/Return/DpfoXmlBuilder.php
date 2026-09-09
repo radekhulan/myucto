@@ -373,6 +373,7 @@ final class DpfoXmlBuilder
             $root->appendChild($vetac);
         }
 
+        $payrollGross = $s7['payroll_gross'] ?? null;
         if ($closing !== null && ($closing['status'] ?? '') === 'final') {
             $opening = (array) ($closing['opening_balances'] ?? []);
             $ending = (array) ($closing['closing_balances'] ?? []);
@@ -402,7 +403,27 @@ final class DpfoXmlBuilder
                     $vetaU->setAttribute('kc_z_dpfmz' . $code, $this->int((float) $ending[$key]));
                 }
             }
+            // Mzdy (kc_dpfmz18). NENÍ to devátá položka tabulky majetku a dluhů — proto
+            // k němu neexistuje protějšek `kc_z_dpfmz18`: je to TOKOVÁ veličina (objem
+            // zúčtovaných mezd za období), ne stav k datu. XSD: „Údaje o mzdách se
+            // přebírají ze mzdové agendy (mzdové listy, rekapitulace mezd apod.). Uveďte
+            // celkový objem zúčtovaných mezd za zdaňovací období." Zdroj je mzdová agenda
+            // (obě větve, {@see DpfoReturnDataProvider::payrollGross}) nebo ruční vstup;
+            // null = poplatník mzdy nevede → atribut se vynechá bez varování.
+            if ($payrollGross !== null) {
+                $vetaU->setAttribute('kc_dpfmz18', $this->int((float) $payrollGross));
+            }
             $root->appendChild($vetaU);
+        } elseif ($payrollGross !== null && (float) $payrollGross > 0.0) {
+            // VetaU nese údaje podle § 7b, takže vzniká jen s dokončenou roční uzávěrkou
+            // daňové evidence. Poplatník v paušálním režimu ji nemá — a údaj o mzdách by
+            // se tak tiše zahodil. Prázdnou VetaU jen kvůli mzdám nestavíme (že by ji
+            // podatelna takhle přijala, ověřené není), ale mlčet o tom nesmíme.
+            $warnings[] = 'Mzdová agenda vykazuje za rok zúčtované mzdy '
+                . number_format((float) $payrollGross, 0, ',', ' ') . ' Kč, ale údaj „Mzdy" '
+                . '(Příloha č. 1, kc_dpfmz18) se posílá spolu s tabulkou majetku a dluhů podle § 7b, '
+                . 'kterou přiznání bez dokončené roční uzávěrky daňové evidence neobsahuje — do podání '
+                . 'se tedy nedostal. Doplňte ho před podáním ručně v portálu EPO.';
         }
 
         // ── VetaC/VetaE — Přílohy 1 oddíl E (rozpis úprav ř.105/106 dle § 23) ────
@@ -499,15 +520,14 @@ final class DpfoXmlBuilder
      * zkušební EPO to vynucuje jako kritickou kontrolu — nenulový ř.105/106 bez aspoň
      * jednoho odpovídajícího řádku VetaC/VetaE odmítne (viz komentář u volání výše).
      *
-     * Appka DNES nemá jistý zdroj položkového rozpisu v rozsahu této opravy —
-     * DpfoReturnDataProvider (mimo povolený rozsah, viz private/DANE-PLAN.md) čte
-     * z `tax_evidence_non_cash_adjustments`/ručních položek §23 jen SOUČET
-     * (`s7_increase`/`s7_decrease`), položky samotné zatím nepředává. Volající PROTO
-     * MŮŽE (ne musí) dodat `$s7['increase_items']`/`['decrease_items']` (tvar
-     * list<{amount, description|text}>, {@see DpfoReturnCalculator::compute}) — pak se
-     * postaví skutečný řádek na položku. Bez nich builder NEVYMÝŠLÍ rozpis: pošle jeden
-     * souhrnný řádek s celou částkou a obecným popisem a VAROVÁNÍM, že jde o zástupnou
-     * agregaci, ne o doložený rozpis — účetní má před podáním ověřit/rozepsat v EPO.
+     * Položky dodává {@see DpfoReturnDataProvider::closing} z `tax_evidence_non_cash_adjustments`
+     * (tvar list<{amount, description|text}>, přes `$s7['increase_items']`/`['decrease_items']`,
+     * {@see DpfoReturnCalculator::compute}) — z TÝCHŽ řádků, ze kterých se sčítá úhrn na
+     * ř. 105/106, takže součet položek a úhrn se nemůžou rozejít. Fallback zůstává pro
+     * případ, kdy položky opravdu nejsou (ruční úpravy §23 u FO v podvojném účetnictví,
+     * starší uzávěrky): builder pak NEVYMÝŠLÍ rozpis, pošle jeden souhrnný řádek s celou
+     * částkou a obecným popisem a VAROVÁNÍM, že jde o zástupnou agregaci, ne o doložený
+     * rozpis — účetní má před podáním ověřit/rozepsat v EPO.
      *
      * @param list<array<string,mixed>> $items
      * @param list<string>              $warnings
@@ -580,11 +600,11 @@ final class DpfoXmlBuilder
      * Nulová aktivita by tak jinak vyrobila prázdnou Přílohu 2, což zadání výslovně
      * zakazuje.
      *
-     * kod_dr_prij10 (číselník A–H, §10 odst. 1 ZDP) a kod10 (P/S/Z/N) NEplníme vůbec —
-     * appka nevede číselník druhů ostatních příjmů, jen volný text (`kind`/`kind_code`
-     * z formuláře, viz DpfoReturnDataProvider/TaxReturnService::section10Items). Doplnění
-     * naslepo by bylo hádání zákonné klasifikace, ne přenos existujícího údaje — proto jen
-     * varujeme (viz private/DANE-PLAN.md, mezera č. 3 dodatek).
+     * kod_dr_prij10 (číselník A–H podle § 10 odst. 1 ZDP) a kod10 (P/S/Z/N) se berou
+     * z položky (`kind_code`, `code`) přes {@see Section10Codebook} — jediný zdroj
+     * pravdy pro obě sady. Prázdné zůstanou jen tehdy, když je uživatel nevyplnil
+     * (starší uložená přiznání) — pak se varuje a finalizaci zablokuje
+     * {@see DpfoEpoBusinessValidator}; nikdy se nedosazují odhadem.
      *
      * @param array<string,mixed>       $s9      DpfoReturnCalculator výstup, klíč 's9' (income/expenses/base)
      * @param array<string,mixed>       $s10     klíč 's10' (income/expenses/base)
@@ -642,6 +662,8 @@ final class DpfoXmlBuilder
         // doslovný součet sloupce 3 (vydaje10) — viz komentář u kc_vyd10 níže.
         $vetaJElements = [];
         $missingKind = [];
+        $missingKindCode = [];
+        $codeWithoutGratuitous = [];
         $itemsIncome = 0.0;
         $itemsExpensesClaimed = 0.0; // nekrácené (= doslovný sloupec 3, ne DpfoReturnCalculator's $s10Expenses)
         foreach ($s10Items as $index => $item) {
@@ -656,7 +678,19 @@ final class DpfoXmlBuilder
             $expensesClaimed = $allowed + $disallowed;
             $itemsIncome += $income;
             $itemsExpensesClaimed += $expensesClaimed;
-            $label = trim((string) ($item['kind_code'] ?? $item['kind'] ?? $item['text'] ?? ''));
+            // Slovní popis (sloupec 1 za písmenem druhu). POZOR na pořadí: `kind_code`
+            // je od zavedení číselníku písmeno A–H, ne popis — kdyby se sem dostal, byl
+            // by `druh_prij10` jednoznakový a skutečný popis by se ztratil.
+            $label = '';
+            foreach (['text', 'kind', 'label'] as $key) {
+                $candidate = trim((string) ($item[$key] ?? ''));
+                if ($candidate !== '') {
+                    $label = $candidate;
+                    break;
+                }
+            }
+            $kindCode = Section10Codebook::normalizeKind($item['kind_code'] ?? '');
+            $code = Section10Codebook::normalizeCode($item['code'] ?? '');
 
             $vetaJ = $dom->createElement('VetaJ');
             $vetaJ->setAttribute('prijmy10', $this->int($income));
@@ -666,6 +700,21 @@ final class DpfoXmlBuilder
                 $vetaJ->setAttribute('druh_prij10', mb_substr($label, 0, 50));
             } else {
                 $missingKind[] = $index + 1;
+            }
+            if ($kindCode !== '') {
+                $vetaJ->setAttribute('kod_dr_prij10', $kindCode);
+            } else {
+                $missingKindCode[] = $index + 1;
+            }
+            if ($code !== '') {
+                $vetaJ->setAttribute('kod10', $code);
+                // Kód „N" popisuje bezúplatný příjem, který je nemovitostí — u jiného
+                // druhu než „G" je to podle popisu struktury protimluv. Neopravujeme
+                // ho za uživatele (obojí je jeho tvrzení o skutečnosti), jen na to
+                // upozorníme.
+                if ($code === Section10Codebook::CODE_REAL_ESTATE && $kindCode !== Section10Codebook::KIND_GRATUITOUS) {
+                    $codeWithoutGratuitous[] = $index + 1;
+                }
             }
             $vetaJElements[] = $vetaJ;
         }
@@ -699,14 +748,17 @@ final class DpfoXmlBuilder
             $warnings[] = 'Položka(y) ostatních příjmů §10 č. ' . implode(', ', $missingKind) . ' nemá(jí) '
                 . 'vyplněný druh příjmu (VetaJ.druh_prij10) — doplňte popis v přiznání před podáním.';
         }
-        if ($vetaJElements !== []) {
-            $warnings[] = 'Zákonnou klasifikaci druhu ostatních příjmů podle číselníku EPO '
-                . '(VetaJ.kod_dr_prij10, A–H dle § 10 odst. 1 zákona) appka nevyplňuje — nevede číselník, '
-                . 'jen volný popisný text. Totéž platí pro kod10 (P/S/Z/N — zemědělská výroba paušálem, '
-                . 'společné jmění manželů, zahraniční zdroj, bezúplatný příjem nemovitosti). Přiřaďte '
-                . 'správné písmeno ručně u každé položky v portálu EPO před podáním (zkušební EPO 31. 8. 2026 '
-                . 'to hlásí jako kritickou výtku: „na ř. … ve sloupci 1 tabulky … není vyplněn kód druhu '
-                . 'příjmu podle § 10 ZDP").';
+        if ($missingKindCode !== []) {
+            $warnings[] = 'Položka(y) ostatních příjmů §10 č. ' . implode(', ', $missingKindCode) . ' nemá(jí) '
+                . 'vyplněný kód druhu příjmu podle § 10 odst. 1 zákona (VetaJ.kod_dr_prij10, A–H) — bez něj '
+                . 'zkušební EPO hlásí kritickou výtku „na ř. … ve sloupci 1 tabulky … není vyplněn kód druhu '
+                . 'příjmu podle § 10 ZDP". Vyberte druh u každé položky v přiznání (Ostatní příjmy §10) '
+                . 'a přiznání vygenerujte znovu.';
+        }
+        if ($codeWithoutGratuitous !== []) {
+            $warnings[] = 'Položka(y) ostatních příjmů §10 č. ' . implode(', ', $codeWithoutGratuitous) . ' má(jí) '
+                . 'kód „N" (bezúplatný příjem, který je nemovitostí), ale druh příjmu není „G" (bezúplatné '
+                . 'příjmy) — ověřte kombinaci před podáním, popis struktury DPFDP7 kód „N" váže na druh „G".';
         }
 
         return ['veta_v' => $vetaV, 'veta_j' => $vetaJElements];

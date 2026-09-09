@@ -17063,6 +17063,13 @@ paths:
     get:
       tags: [TaxReturn]
       summary: Řádky, ruční vstupy a upozornění přiznání
+      description: >-
+        U DPFO (`type=fo`) nese `podklady.section10_codebook` číselník druhů ostatních
+        příjmů podle § 10 odst. 1 zákona (`kinds`, A–H) a volitelných kódů (`codes`,
+        P/S/Z/N) pro položky `inputs.s10_items[]`; `podklady.payroll_gross` je úhrn
+        zúčtovaných mezd nabídnutý mzdovou agendou pro ruční vstup `inputs.s7_payroll_gross`
+        (null = agenda za rok nic nevykazuje). Zrušený jednořádkový vstup `inputs.s10_other`
+        se při čtení i uložení převádí na jednu položku `inputs.s10_items[]`.
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '400': { description: Neplatný typ/rok/variant }

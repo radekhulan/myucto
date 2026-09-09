@@ -454,9 +454,9 @@ final class DpfoXmlBuilderXsdTest extends TestCase
     }
 
     /**
-     * S itemizovaným rozpisem (jak by ho jednou mohl předat DpfoReturnDataProvider,
-     * nebo účetnictví FO s ručními položkami §23) builder postaví JEDEN řádek na
-     * položku — žádný „souhrnný" fallback warning.
+     * S itemizovaným rozpisem (dnes ho z `tax_evidence_non_cash_adjustments` předává
+     * {@see \MyInvoice\Service\Tax\Return\DpfoReturnDataProvider::closing}) builder
+     * postaví JEDEN řádek na položku — žádný „souhrnný" fallback warning.
      */
     public function testAdjustmentSectionEItemizedRowsSkipFallbackWarning(): void
     {
@@ -541,6 +541,58 @@ final class DpfoXmlBuilderXsdTest extends TestCase
         self::assertStringContainsString('m_detiztpp2="0"', $xml);
         self::assertStringContainsString('m_deti3="0"', $xml);   // 3.+ dítě bez ZTP/P — Petr má ZTP/P
         self::assertStringContainsString('m_detiztpp3="12"', $xml);
+
+        $validator = new XmlSchemaValidator();
+        if (!$validator->hasSchema('dpfdp7')) {
+            self::markTestSkipped('XSD dpfdp7_epo2.xsd není k dispozici.');
+        }
+        $validation = $validator->validate($xml, 'dpfdp7');
+        self::assertSame('passed', $validation['status'], 'XSD chyby: ' . implode(' | ', $validation['errors']));
+    }
+
+    /**
+     * Nová pole z private/DANE-PLAN.md P-2/P-5/P-8 pohromadě — kódy § 10
+     * (`kod_dr_prij10`, `kod10`), položkový oddíl E a údaj o mzdách (`kc_dpfmz18`)
+     * musí projít schématem, ne jen unit testem nad řetězcem XML.
+     */
+    public function testSection10CodesSectionEItemsAndPayrollGrossPassXsd(): void
+    {
+        $calc = (new DpfoReturnCalculator())->compute(
+            [
+                's7_income' => 500000,
+                's7_expenses' => 200000,
+                'expense_mode' => 'actual',
+                'expense_rate' => 0,
+                'accounting_mode' => 'tax_evidence',
+                's7_increase' => 30000,
+                's7_increase_items' => [
+                    ['amount' => 20000, 'description' => 'Nepeněžní příjem ze zápočtu'],
+                    ['amount' => 10000, 'description' => 'Osobní spotřeba zásob'],
+                ],
+                's7_decrease' => 15000,
+                's7_decrease_items' => [['amount' => 15000, 'description' => 'Zaplacené pojistné z minulého období']],
+                'payroll_gross' => 1234567.0,
+                'closing' => [
+                    'status' => 'final',
+                    'opening_balances' => ['fixed_assets' => 100000, 'cash' => 5000],
+                    'closing_balances' => ['fixed_assets' => 80000, 'cash' => 7000],
+                ],
+            ],
+            ['s10_items' => [
+                ['kind_code' => 'B', 'code' => 'S', 'text' => 'Prodej rodinného domu', 'income' => 3000000, 'expenses' => 2000000],
+                ['kind_code' => 'G', 'code' => 'N', 'text' => 'Bezúplatný příjem — pozemek', 'income' => 400000, 'expenses' => 0],
+            ]],
+            [],
+            TaxConstants::forYear(2025),
+        );
+        $xml = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc)['xml'];
+
+        self::assertStringContainsString('kod_dr_prij10="B"', $xml);
+        self::assertStringContainsString('kod10="S"', $xml);
+        self::assertStringContainsString('kod_dr_prij10="G"', $xml);
+        self::assertStringContainsString('kod10="N"', $xml);
+        self::assertSame(2, substr_count($xml, '<VetaC'));
+        self::assertStringContainsString('kc_dpfmz18="1234567"', $xml);
 
         $validator = new XmlSchemaValidator();
         if (!$validator->hasSchema('dpfdp7')) {

@@ -1458,6 +1458,9 @@ final class TaxReturnService
             $warnings = array_merge($data['warnings'], $result['warnings']);
         } else {
             // DPFO — §6–§10, Příloha 1 §7 (kasová báze / paušál / VH pro double_entry).
+            // Dřív uložené vstupy mohou nést jednořádkový agregát § 10; převede se na
+            // položku i tady, aby přepočet starého draftu nešel bez podkladu Přílohy č. 2.
+            $inputs = Section10Codebook::mergeLegacyAggregate($inputs);
             $data = $this->dpfoData->gather($supplierId, $year, $inputs);
             $result = $this->dpfoCalc->compute($data, $inputs, (array) $data['profile'], $const);
             $newTax = (float) ($result['tax'] ?? 0);
@@ -1475,6 +1478,13 @@ final class TaxReturnService
                 'blocking_issues' => $data['blocking_issues'] ?? [],
                 'source_manifest' => $data['source_manifest'] ?? [],
                 'child_bonus_min_income' => $const['child_bonus_min_income'] ?? 0,
+                // Číselník druhů ostatních příjmů § 10 (sloupec 1 a 5 Přílohy č. 2) —
+                // jediný zdroj pravdy je {@see Section10Codebook}, formulář ani API si
+                // seznam písmen nedrží vlastní.
+                'section10_codebook' => Section10Codebook::forApi(),
+                // Mzdy (`kc_dpfmz18`): co nabídla mzdová agenda, aby formulář ukázal,
+                // odkud předvyplněná hodnota je a že jde ručně přebít.
+                'payroll_gross' => $data['payroll_gross'] ?? null,
             ];
             $warnings = array_merge($data['warnings'], $result['warnings']);
         }
@@ -1616,6 +1626,15 @@ final class TaxReturnService
                 'expenses' => $this->money($s10['expenses'] ?? 0),
             ];
             $out['s10_items'] = $this->section10Items($inputs['s10_items'] ?? []);
+            // Zrušený jednořádkový agregát § 10 se převede na položku, aby se vyplněné
+            // číslo do podání skutečně dostalo — dřív ho stavěč XML zahazoval, viz
+            // {@see Section10Codebook::mergeLegacyAggregate}.
+            $out = Section10Codebook::mergeLegacyAggregate($out);
+            // Mzdy (Příloha 1, `kc_dpfmz18`) — ruční přebití údaje ze mzdové agendy.
+            // Prázdný vstup (null) znamená „vezmi hodnotu z modulu Mzdy", ne nulu.
+            $payrollGross = $inputs['s7_payroll_gross'] ?? null;
+            $out['s7_payroll_gross'] = ($payrollGross === null || $payrollGross === '')
+                ? null : $this->money($payrollGross);
             // Samostatný základ daně §16a (zahraniční podíly na zisku, sazba 15 %) —
             // {@see DpfoReturnCalculator::compute()} ho čte, whitelist ho neměl, takže
             // volba podle §16a odst. 1 se uložením ztratila. Do XML se nezapisuje
@@ -1683,7 +1702,13 @@ final class TaxReturnService
         return array_slice($out, 0, 200);
     }
 
-    /** @return list<array{kind_code:string,text:string,income:float,expenses:float,evidence_ref:string}> */
+    /**
+     * Položky § 10 (Příloha č. 2, VetaJ). `kind_code` je písmenný druh příjmu A–H a
+     * `code` volitelný kód P/S/Z/N podle {@see Section10Codebook} — číselník je jediný
+     * zdroj pravdy, neznámé písmeno se zahodí (radši prázdný atribut a výtka než odhad).
+     *
+     * @return list<array{kind_code:string,code:string,text:string,income:float,expenses:float,evidence_ref:string}>
+     */
     private function section10Items(mixed $items): array
     {
         if (!is_array($items)) {
@@ -1696,18 +1721,25 @@ final class TaxReturnService
             }
             $income = $this->money($item['income'] ?? 0);
             $expenses = $this->money($item['expenses'] ?? 0);
-            $kind = $this->text($item['kind_code'] ?? '', 30);
+            $kind = Section10Codebook::normalizeKind($item['kind_code'] ?? '');
+            $code = Section10Codebook::normalizeCode($item['code'] ?? '');
             // `kind` je historický název pole z formuláře: ten posílal popis druhu
             // příjmu pod klíčem, který se tady nikdy nečetl, takže se text při uložení
             // tiše zahodil. Formulář posílá `text`, tohle je pojistka pro rozeditované
-            // koncepty. `kind_code` je písmenný číselník druhu příjmu, který aplikace
-            // neeviduje — nechává se prázdný a Příloha č. 2 na to upozorní.
+            // koncepty. Zpětná kompatibilita: `kind_code` dřív nesl volný popis (číselník
+            // se nevedl) — cokoli, co není písmeno číselníku, se proto zachrání do popisu,
+            // ať se uložený text zavedením číselníku neztratí.
             $text = $this->text($item['text'] ?? ($item['kind'] ?? ''), 255);
-            if ($income === 0.0 && $expenses === 0.0 && $kind === '' && $text === '') {
+            $legacyKind = $this->text($item['kind_code'] ?? '', 255);
+            if ($text === '' && $kind === '' && $legacyKind !== '') {
+                $text = $legacyKind;
+            }
+            if ($income === 0.0 && $expenses === 0.0 && $kind === '' && $code === '' && $text === '') {
                 continue;
             }
             $out[] = [
                 'kind_code' => $kind,
+                'code' => $code,
                 'text' => $text,
                 'income' => $income,
                 'expenses' => $expenses,
@@ -1742,6 +1774,13 @@ final class TaxReturnService
     /** @param array<string,mixed> $row @return array<string,mixed> */
     private function publicRow(array $row): array
     {
+        $inputs = (array) $row['inputs'];
+        if ((string) $row['taxpayer_type'] === 'fo') {
+            // Formulář legacy pole § 10 už nemá — převedeme ho na položku i při čtení,
+            // aby účetní viděla, kam se dřív zadané číslo přesunulo (uloží se při
+            // nejbližším Uložit, viz sanitizeInputs()).
+            $inputs = Section10Codebook::mergeLegacyAggregate($inputs);
+        }
         return [
             'year' => (int) $row['year'],
             'type' => (string) $row['taxpayer_type'],
@@ -1749,7 +1788,7 @@ final class TaxReturnService
             'variant_seq' => (int) ($row['variant_seq'] ?? 1),
             'status' => (string) $row['status'],
             'row_version' => (int) $row['row_version'],
-            'inputs' => (array) $row['inputs'],
+            'inputs' => $inputs,
             'last_submission_id' => $row['last_submission_id'] ?? null,
             'final_snapshot_id' => $row['final_snapshot_id'] ?? null,
             'finalized_at' => $row['finalized_at'] ?? null,

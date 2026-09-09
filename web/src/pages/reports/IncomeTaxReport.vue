@@ -127,6 +127,19 @@ function bankAccountLabel(acc: TaxReturnBankAccount): string {
   return acc.bank_name ? `${parts} — ${acc.bank_name}` : parts
 }
 
+// Číselník druhů ostatních příjmů §10 (sloupec 1 a 5 Přílohy č. 2). Jediný zdroj pravdy
+// je backend (Section10Codebook) — formulář si seznam písmen nedrží vlastní, aby se
+// nemohly rozejít.
+const section10Kinds = computed<{ code: string; label: string }[]>(() =>
+  ((state.value?.podklady as any)?.section10_codebook?.kinds as { code: string; label: string }[]) ?? [])
+const section10Codes = computed<{ code: string; label: string }[]>(() =>
+  ((state.value?.podklady as any)?.section10_codebook?.codes as { code: string; label: string }[]) ?? [])
+// Mzdy (Příloha č. 1, kc_dpfmz18) — co nabídla mzdová agenda; ruční vstup ji přebíjí.
+const payrollGrossSuggested = computed<number | null>(() => {
+  const v = (state.value?.podklady as any)?.payroll_gross
+  return typeof v === 'number' ? v : null
+})
+
 // E10 — předfinalizační kontrolní checklist.
 const prefinalize = computed(() => state.value?.prefinalize_check ?? null)
 function checkTone(c: { ok: boolean; severity: string; na?: boolean }): string {
@@ -167,9 +180,14 @@ function blankInputs(): Record<string, any> {
     s6_employment: { income: 0, withholding: 0 },
     s8_capital: { base: 0 },
     s9_rental: { income: 0, expenses: 0, expense_mode: 'actual' },
-    s10_other: { income: 0, expenses: 0 },
+    // § 10 se zadává výhradně položkově (druh příjmu + částky). Dřívější jednořádkový
+    // souhrn `s10_other` už formulář nemá — server ho při načtení i uložení převede na
+    // jednu položku, protože do podání se souhrn bez položek nikdy nedostal.
+    s10_items: [],
     // § 16a — samostatný základ daně (zahraniční podíly na zisku, sazba 15 %).
     s16a_separate_base: 0,
+    // Mzdy (Příloha č. 1, kc_dpfmz18) — null = převzít ze mzdové agendy.
+    s7_payroll_gross: null,
     social_paid_advances: 0, health_paid_advances: 0,
     loss_carryforward: 0,
     tax_paid_advances: 0, notes: '',
@@ -328,7 +346,7 @@ function enableSpouse() {
 }
 function addS10Item() {
   if (!Array.isArray(inputs.s10_items)) inputs.s10_items = []
-  inputs.s10_items.push({ text: '', income: 0, expenses: 0 })
+  inputs.s10_items.push({ kind_code: '', code: '', text: '', income: 0, expenses: 0 })
 }
 function addClosingAdjustment() {
   closing.value?.adjustments.push({ adjustment_on: `${year.value}-12-31`, kind: 'section23_other',
@@ -957,10 +975,6 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                   <option value="actual">{{ t('taxReturn.s9_expense_mode_actual') }}</option>
                   <option value="pausal">{{ t('taxReturn.s9_expense_mode_pausal') }}</option>
                 </select></label>
-              <label class="text-sm">{{ t('taxReturn.s10_income') }}
-                <input type="number" v-model.number="inputs.s10_other.income" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
-              <label class="text-sm">{{ t('taxReturn.s10_expenses') }}
-                <input type="number" v-model.number="inputs.s10_other.expenses" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
               <label class="text-sm">{{ t('taxReturn.s16a_separate_base') }}
                 <input type="number" v-model.number="inputs.s16a_separate_base" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" />
                 <span class="block text-[11px] text-neutral-400 mt-0.5">{{ t('taxReturn.s16a_separate_base_hint') }}</span></label>
@@ -976,6 +990,14 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                 <input type="number" v-model.number="inputs.social_paid_advances" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
               <label class="text-sm">{{ t('taxReturn.health_paid_advances') }}
                 <input type="number" v-model.number="inputs.health_paid_advances" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" /></label>
+              <label class="text-sm">{{ t('taxReturn.payroll_gross') }}
+                <input type="number" v-model.number="inputs.s7_payroll_gross" :placeholder="payrollGrossSuggested !== null ? String(payrollGrossSuggested) : ''"
+                  class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md" />
+                <span class="block text-[11px] text-neutral-400 mt-0.5">
+                  {{ payrollGrossSuggested !== null
+                    ? t('taxReturn.payroll_gross_hint_prefilled', { amount: formatMoney(payrollGrossSuggested, 'CZK') })
+                    : t('taxReturn.payroll_gross_hint_empty') }}
+                </span></label>
             </div>
 
             <div class="bg-surface border border-neutral-200 rounded-lg p-4 space-y-3">
@@ -996,13 +1018,29 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
             </div>
 
             <div class="bg-surface border border-neutral-200 rounded-lg p-4 space-y-3">
-              <div class="flex flex-wrap items-center justify-between gap-2"><div class="text-sm font-semibold">{{ t('taxReturn.s10_items_title') }}</div>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div><div class="text-sm font-semibold">{{ t('taxReturn.s10_items_title') }}</div>
+                  <p class="text-xs text-neutral-500">{{ t('taxReturn.s10_items_hint') }}</p></div>
                 <button type="button" @click="addS10Item" class="h-9 px-3 rounded-md bg-primary-600 text-white text-sm whitespace-nowrap"><span aria-hidden="true">＋</span> {{ t('taxReturn.add_item') }}</button></div>
-              <div v-for="(item, index) in (inputs.s10_items || [])" :key="index" class="grid grid-cols-1 md:grid-cols-4 gap-2">
-                <input v-model="item.text" :placeholder="t('taxReturn.s10_kind')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-                <input type="number" v-model.number="item.income" :placeholder="t('taxReturn.s10_income')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-                <input type="number" v-model.number="item.expenses" :placeholder="t('taxReturn.s10_expenses')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-                <button type="button" @click="inputs.s10_items.splice(index, 1)" class="h-9 px-3 rounded-md border border-danger-500 text-danger-600 text-sm"><span aria-hidden="true">×</span> {{ t('common.delete') }}</button>
+              <div v-for="(item, index) in (inputs.s10_items || [])" :key="index" class="border border-neutral-200 rounded-md p-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                <label class="text-xs md:col-span-2">{{ t('taxReturn.s10_kind_code') }}
+                  <select v-model="item.kind_code" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+                    :class="item.kind_code ? '' : 'border-danger-500'">
+                    <option value="">{{ t('taxReturn.s10_kind_code_empty') }}</option>
+                    <option v-for="kind in section10Kinds" :key="kind.code" :value="kind.code">{{ kind.code }} — {{ kind.label }}</option>
+                  </select></label>
+                <label class="text-xs">{{ t('taxReturn.s10_code') }}
+                  <select v-model="item.code" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+                    <option value="">{{ t('taxReturn.s10_code_empty') }}</option>
+                    <option v-for="code in section10Codes" :key="code.code" :value="code.code">{{ code.code }} — {{ code.label }}</option>
+                  </select></label>
+                <label class="text-xs md:col-span-3">{{ t('taxReturn.s10_kind') }}
+                  <input v-model="item.text" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" /></label>
+                <label class="text-xs">{{ t('taxReturn.s10_income') }}
+                  <input type="number" v-model.number="item.income" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" /></label>
+                <label class="text-xs">{{ t('taxReturn.s10_expenses') }}
+                  <input type="number" v-model.number="item.expenses" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" /></label>
+                <button type="button" @click="inputs.s10_items.splice(index, 1)" class="self-end h-9 px-3 rounded-md border border-danger-500 text-danger-600 text-sm whitespace-nowrap"><span aria-hidden="true">×</span> {{ t('common.delete') }}</button>
               </div>
             </div>
 

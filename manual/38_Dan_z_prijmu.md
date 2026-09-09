@@ -126,6 +126,19 @@ druhu § 10 je nejvýše jeho příjem. Záporný úhrn § 7 až § 10 může vy
 ztrátu, ale nesnižuje dílčí základ § 6. Ztrátu minulých let lze odečíst jen od kladného
 úhrnu § 7 až § 10.
 
+Každý druh ostatního příjmu podle § 10 se zadává jako samostatná položka: **druh příjmu**
+z číselníku A až H podle § 10 odst. 1 zákona (příležitostná činnost, prodej nemovitostí,
+movitých věcí, cenných papírů, převod podle písm. c), jiné ostatní příjmy, bezúplatné
+příjmy, loterie a tomboly), volitelný **kód** P/S/Z/N (zemědělská výroba s výdaji procentem
+z příjmů, majetek ve společném jmění manželů, zdroj v zahraničí, bezúplatný příjem, který
+je nemovitostí) a slovní popis. Druh příjmu je povinný — bez něj finanční úřad podání
+vytkne a přiznání nejde finalizovat.
+
+V Příloze č. 1 se u daňové evidence vykazuje také údaj **Mzdy**, tedy celkový objem
+zúčtovaných mezd za období. Předvyplní se ze mzdové agendy (mzdové běhy modulu Mzdy
+i ruční mzdová rekapitulace); ručním vstupem jde přebít, když se mzdy zpracovávaly
+mimo aplikaci.
+
 Od základu se následně odečtou položky § 15. Úroky z bytové potřeby používají roční
 limit podle data obstarání a počtu měsíců; penzijní produkty, soukromé životní pojištění,
 DIP a pojištění dlouhodobé péče sdílejí zákonný roční limit. Do pole penzijního příspěvku
