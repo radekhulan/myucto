@@ -137,7 +137,16 @@ final class DppoReturnDataProvider
         ];
 
         return [
-            'period' => ['id' => (int) $period['id'], 'starts_on' => $startsOn, 'ends_on' => $endsOn],
+            'period' => [
+                'id' => (int) $period['id'],
+                'starts_on' => $startsOn,
+                'ends_on' => $endsOn,
+                // Existuje starší účetní období? Rozlišuje dva tvary, které z dvojice
+                // dat vypadají stejně: první (zkrácený) rok nově vzniklého poplatníka
+                // a přechodné období z hospodářského roku na kalendářní, které chce jiný
+                // typ přiznání. {@see UnsupportedCaseDetector::checkPeriodShape}
+                'is_first' => !$this->periods->existsBefore($supplierId, $startsOn),
+            ],
             'vh' => $vh,
             'non_deductible_costs' => $nonDeductible,
             'depreciation' => $dep,

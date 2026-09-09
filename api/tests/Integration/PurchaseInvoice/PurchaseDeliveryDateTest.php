@@ -13,7 +13,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * Audit VAT klasifikací 2026-08, nález M-7 — datum dodání (§ 25 vstup) na přijaté faktuře.
  *
- * Dokud sloupec neexistoval (migrace 1784), ukládal ho AI extraktor do `tax_date` a hned
+ * Dokud sloupec neexistoval (migrace 1785), ukládal ho AI extraktor do `tax_date` a hned
  * ho přepisoval dopočteným DUZP; ostatní cesty ho zahodily. Test drží, že datum dodání
  * dojde do DB a zpět OBĚMA zápisovými cestami — INSERT i UPDATE v repozitáři jsou
  * poziční, takže špatně přidaný sloupec by tiše posunul VŠECHNA data dokladu.
@@ -46,7 +46,7 @@ final class PurchaseDeliveryDateTest extends TestCase
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
         if (!$this->db->hasColumn('purchase_invoices', 'delivery_date')) {
-            $this->markTestSkipped('Migrace 1784 na téhle DB neproběhla.');
+            $this->markTestSkipped('Migrace 1785 na téhle DB neproběhla.');
         }
 
         $pdo = $this->db->pdo();

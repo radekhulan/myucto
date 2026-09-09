@@ -1951,7 +1951,7 @@ final class TaxReturnService
                     s.workplace_code, s.cz_nace_code, s.phone, s.email,
                     s.street_number_pop, s.street_number_orient,
                     s.opr_jmeno, s.opr_prijmeni, s.opr_postaveni,
-                    -- Vědomé příznaky poplatníka (migrace 1781) — čte je
+                    -- Vědomé příznaky poplatníka (migrace 1782) — čte je
                     -- {@see UnsupportedCaseDetector} i typ poplatníka do XML.
                     s.epo_taxpayer_code, s.tax_entity_status, s.tax_entity_status_date,
                     s.tax_accounting_decree, s.tax_investment_incentive, s.tax_atad_cfc,

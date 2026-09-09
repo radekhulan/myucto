@@ -1088,7 +1088,7 @@ final class VatLedgerService
                    'CZ' AS country_iso2, 0 AS country_is_eu,
                    -- Ř. 47 (hodnota pořízeného dlouhodobého majetku) je doplňující údaj
                    -- k odpočtu, takže dává smysl jen u VÝDAJOVÉHO dokladu; u příjmového
-                   -- je to tržba, ne pořízení (migrace 1783, nález L-4).
+                   -- je to tržba, ne pořízení (migrace 1784, nález L-4).
                    CASE WHEN cd.doc_type = 'out' THEN cl.is_fixed_asset ELSE 0 END AS is_fixed_asset,
                    COALESCE(cl.vat_classification_code,
                             CASE WHEN cd.doc_type = 'in'

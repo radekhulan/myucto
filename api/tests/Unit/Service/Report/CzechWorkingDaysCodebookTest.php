@@ -10,7 +10,7 @@ use MyInvoice\Service\Report\PublicHolidayProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * P-7 — svátky se čtou z číselníku `public_holidays` (migrace 1780), ne z konstanty.
+ * P-7 — svátky se čtou z číselníku `public_holidays` (migrace 1781), ne z konstanty.
  *
  * Proč to hlídat testem: svátek posouvá přes § 33 odst. 4 daňového řádu VŠECHNY
  * lhůty podání. Dokud byl seznam konstantou v PHP, znamenala novela zákona
@@ -172,7 +172,7 @@ final class CzechWorkingDaysCodebookTest extends TestCase
     }
 
     /**
-     * Pojistka v kódu musí dávat TOTÉŽ co seed migrace 1780 — jinak by odpověď
+     * Pojistka v kódu musí dávat TOTÉŽ co seed migrace 1781 — jinak by odpověď
      * aplikace závisela na tom, jestli je instalace naseedovaná. Porovnává se
      * proti seedu přepsanému do pravidel, ne proti databázi (unit test).
      */
@@ -186,7 +186,7 @@ final class CzechWorkingDaysCodebookTest extends TestCase
         $fromCodebook = CzechWorkingDays::holidaysForYear(2027);
 
         self::assertFalse(CzechWorkingDays::usingFallback());
-        self::assertSame($fallback, $fromCodebook, 'Seed migrace 1780 a pojistka v kódu se rozešly.');
+        self::assertSame($fallback, $fromCodebook, 'Seed migrace 1781 a pojistka v kódu se rozešly.');
     }
 
     /**
@@ -207,7 +207,7 @@ final class CzechWorkingDaysCodebookTest extends TestCase
     }
 
     /**
-     * Seed migrace 1780 přepsaný do tvaru pravidel.
+     * Seed migrace 1781 přepsaný do tvaru pravidel.
      *
      * @return list<array<string,mixed>>
      */

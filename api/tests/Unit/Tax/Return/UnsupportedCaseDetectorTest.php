@@ -356,15 +356,31 @@ final class UnsupportedCaseDetectorTest extends TestCase
         self::assertContains('tax_period_missing', $this->keys($findings));
     }
 
-    /** Zkrácený první rok končící 31. 12. je pořád kalendářní režim — nesmí blokovat. */
+    /** První (zkrácený) rok nově vzniklého poplatníka je legitimní „A" — nic nehlásit. */
     public function testShortFirstCalendarYearIsClean(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryPo(),
             'po',
-            ['period' => ['starts_on' => '2025-03-15', 'ends_on' => '2025-12-31']],
+            ['period' => ['starts_on' => '2025-03-15', 'ends_on' => '2025-12-31', 'is_first' => true]],
         );
         self::assertSame([], $findings);
+    }
+
+    /**
+     * Tentýž tvar období, ale poplatník už dřív účtoval — jde tedy o přechod
+     * z hospodářského roku na kalendářní, který chce jiný typ přiznání (§ 21a, § 38ma).
+     * Aplikace ho neumí, takže o tom aspoň musí říct.
+     */
+    public function testShortCalendarYearAfterEarlierPeriodWarns(): void
+    {
+        $findings = UnsupportedCaseDetector::detectForSupplier(
+            $this->ordinaryPo(),
+            'po',
+            ['period' => ['starts_on' => '2025-04-01', 'ends_on' => '2025-12-31', 'is_first' => false]],
+        );
+        self::assertContains('tax_period_short_calendar', $this->keys($findings));
+        self::assertSame(['warning'], array_values(array_unique(array_column($findings, 'severity'))));
     }
 
     // ── Fotovoltaika § 30b / § 24 odst. 2 písm. v) ────────────────────────────

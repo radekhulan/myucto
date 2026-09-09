@@ -232,7 +232,7 @@ final class CrossCheckSuite
         // Druhá, nezávislá cesta: doklady, které kód pro vyloučení z koeficientu NESOU.
         // Kód se hledá na řádku i na hlavičce — výkazy čtou COALESCE(položka, hlavička).
         $marked = $this->db->pdo()->prepare(
-            "SELECT COUNT(DISTINCT i.id)
+            "SELECT DISTINCT i.id
                FROM invoices i
           LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
               WHERE i.supplier_id = ?
@@ -242,43 +242,56 @@ final class CrossCheckSuite
                      OR i.vat_classification_code IN ('1m', '2m'))"
         );
         $marked->execute([$supplierId, $year . '-01-01', $year . '-12-31']);
-        $markedCount = (int) ($marked->fetchColumn() ?: 0);
+        $markedInvoices = array_fill_keys(
+            array_map('intval', $marked->fetchAll(\PDO::FETCH_COLUMN)),
+            true,
+        );
 
-        $unlinked = array_values(array_filter(
-            $soldAssets,
-            static fn (array $a): bool => empty($a['sale_invoice_id']),
-        ));
+        // POZOR na past, do které se dá spadnout: porovnávat POČET karet proti POČTU
+        // dokladů nejde. Jedna faktura běžně prodá víc karet, takže tři správně
+        // označené karty na jednom dokladu daly „3 − 1 = 2" a kontrola hlásila nesoulad
+        // nad bezvadnými daty. Porovnává se proto karta po kartě: každá vyřazená prodejem
+        // musí mít doklad a ten doklad musí kód nést.
+        $unlinked = [];
+        $unmarked = [];
+        foreach ($soldAssets as $asset) {
+            $invoiceId = (int) ($asset['sale_invoice_id'] ?? 0);
+            if ($invoiceId === 0) {
+                $unlinked[] = $asset;
+            } elseif (!isset($markedInvoices[$invoiceId])) {
+                $unmarked[] = $asset;
+            }
+        }
+        $offenders = array_merge($unlinked, $unmarked);
+
         $note = null;
-        if (count($soldAssets) > $markedCount) {
+        if ($offenders !== []) {
             $names = array_map(
                 static fn (array $a): string => trim((string) $a['inventory_number'] . ' ' . (string) $a['name']),
-                array_slice($soldAssets, 0, 10),
+                array_slice($offenders, 0, 10),
             );
-            $note = 'Karty vyřazené prodejem: ' . implode(', ', $names)
-                . (count($soldAssets) > 10 ? ' …' : '')
-                . '. Zkontrolujte, zda doklad o prodeji nese klasifikaci 1m/2m (řádek s vazbou '
-                . 'na kartu majetku ji dostane sám). '
+            $note = 'Karty vyřazené prodejem bez dokladu s klasifikací 1m/2m: '
+                . implode(', ', $names)
+                . (count($offenders) > 10 ? ' …' : '')
+                . '. Řádek faktury s vazbou na kartu majetku kód dostane sám; '
                 . ($unlinked !== []
-                    ? count($unlinked) . ' z nich nemá vazbu na vydanou fakturu. '
+                    ? count($unlinked) . ' z nich nemá vazbu na vydanou fakturu vůbec. '
                     : '')
                 . 'Osvobozený prodej, doklad v jiném roce nebo vyřazení bez fakturace jsou '
                 . 'legitimní důvody rozdílu.';
         }
 
-        $diff = (float) (count($soldAssets) - $markedCount);
-
         return [
             'check' => 'asset_sale_coefficient',
             'label' => $label,
-            // Rozdíl je PODEZŘENÍ, ne chyba — proto se hlásí jen převis karet nad doklady.
-            // Opačný směr (víc dokladů než karet) je běžný: jedna faktura umí prodat víc
-            // karet a kód se dá zvolit i ručně.
-            'ok' => $diff <= 0.0,
+            // Rozdíl je PODEZŘENÍ, ne chyba — kontrola nic nedosazuje, jen ukáže karty,
+            // u kterých se druhá evidence nepotvrdila.
+            'ok' => $offenders === [],
             'a_label' => 'karet vyřazených prodejem',
             'a' => (float) count($soldAssets),
-            'b_label' => 'dokladů s kódem 1m/2m',
-            'b' => (float) $markedCount,
-            'difference' => $diff,
+            'b_label' => 'z toho s dokladem nesoucím kód 1m/2m',
+            'b' => (float) (count($soldAssets) - count($offenders)),
+            'difference' => (float) count($offenders),
             'note' => $note,
             'skipped' => false,
         ];

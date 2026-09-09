@@ -280,7 +280,7 @@ export interface PurchaseInvoice {
   issue_date: string
   tax_date: string | null
   /**
-   * Datum dodání / převzetí z dokladu (migrace 1784). Evidenční vstup § 25 ZDPH:
+   * Datum dodání / převzetí z dokladu (migrace 1785). Evidenční vstup § 25 ZDPH:
    * u pořízení zboží z EU z něj vzniká zákonné DUZP (15. den následujícího měsíce,
    * příp. dřívější datum vystavení). Prázdné se NEDOMÝŠLÍ — doklad jen dostane varování.
    */

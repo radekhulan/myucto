@@ -16,6 +16,8 @@ use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Epo\EpoDirectClient;
 use MyInvoice\Service\Epo\EpoDirectResponseParser;
+use MyInvoice\Service\Epo\EpoAssistedConfirmationService;
+use MyInvoice\Service\Epo\EpoConfirmationPartsArchiver;
 use MyInvoice\Service\Epo\EpoDirectSubmissionService;
 use MyInvoice\Service\Epo\EpoPkcs7Signer;
 use MyInvoice\Service\Epo\EpoSigningCredentialService;
@@ -80,9 +82,17 @@ final class EpoDirectFormGateTest extends TestCase
                 $container->get(EpoDirectResponseParser::class),
                 $container->get(TaxSubmissionDocumentService::class),
                 $container->get(SecretEncryption::class),
+                $container->get(EpoConfirmationPartsArchiver::class),
+                $container->get(EpoAssistedConfirmationService::class),
             );
+        } catch (\ArgumentCountError|\TypeError $e) {
+            // Rozejití s konstruktorem služby NENÍ důvod ke skipu. Přesně tím se tahle
+            // brána na půl roku vypnula: přibyly dva argumenty, test spadl do catch
+            // a pět testů „prošlo" jako přeskočených, takže regrese v pravidle
+            // „OSS přiznání jde podat jen přes MOSS/OSS" by nikoho neupozornila.
+            self::fail('EpoDirectSubmissionService má jiný konstruktor, než test skládá: ' . $e->getMessage());
         } catch (\Throwable $e) {
-            $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
+            $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
 
         $pdo = $this->db->pdo();

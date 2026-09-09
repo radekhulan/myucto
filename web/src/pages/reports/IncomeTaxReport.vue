@@ -167,6 +167,16 @@ const unsupportedBlockers = computed(() =>
   unsupportedCases.value.filter((c) => c.severity === 'blocker'))
 const unsupportedWarnings = computed(() =>
   unsupportedCases.value.filter((c) => c.severity !== 'blocker'))
+// Souhrn v hlavičce checklistu musí počítat jen to, co je pod ním vidět. Serverové
+// `summary` zahrnuje i nálezy `unsupported_*`, které mají vlastní blok nad seznamem —
+// bez přepočtu hlásila hlavička „3 blokující" nad seznamem s jediným řádkem.
+const regularSummary = computed(() => ({
+  // Stejná pravidla jako v PreFinalizeCheckService::run(): rozhoduje `ok`, ne závažnost.
+  // Nerelevantní kontroly (`na`) se do souhrnu nepočítají vůbec.
+  ok: regularChecks.value.filter((c) => c.ok).length,
+  warning: regularChecks.value.filter((c) => !c.ok && c.severity !== 'blocker').length,
+  blocker: regularChecks.value.filter((c) => !c.ok && c.severity === 'blocker').length,
+}))
 function caseText(c: PreFinalizeCheck, field: 'message' | 'action'): string {
   return String(c.value?.[field] ?? '')
 }
@@ -745,13 +755,13 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
 
     <!-- E10 — předfinalizační kontrolní checklist („závěrková kontrola účetní") -->
     <div v-if="state && prefinalize" class="bg-surface border rounded-lg p-4 mb-4"
-      :class="prefinalize.summary.blocker > 0 ? 'border-danger-500/40' : (prefinalize.summary.warning > 0 ? 'border-warning-500/40' : 'border-neutral-200')">
+      :class="regularSummary.blocker > 0 ? 'border-danger-500/40' : (regularSummary.warning > 0 ? 'border-warning-500/40' : 'border-neutral-200')">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
         <span class="text-sm font-semibold">{{ t('taxReturn.prefinalize_title') }}</span>
         <span class="text-xs">
-          <span class="text-success-700">{{ prefinalize.summary.ok }} {{ t('taxReturn.check_ok') }}</span>
-          <span v-if="prefinalize.summary.warning" class="text-warning-700 ml-2">{{ prefinalize.summary.warning }} {{ t('taxReturn.check_warning') }}</span>
-          <span v-if="prefinalize.summary.blocker" class="text-danger-600 ml-2">{{ prefinalize.summary.blocker }} {{ t('taxReturn.check_blocker') }}</span>
+          <span class="text-success-700">{{ regularSummary.ok }} {{ t('taxReturn.check_ok') }}</span>
+          <span v-if="regularSummary.warning" class="text-warning-700 ml-2">{{ regularSummary.warning }} {{ t('taxReturn.check_warning') }}</span>
+          <span v-if="regularSummary.blocker" class="text-danger-600 ml-2">{{ regularSummary.blocker }} {{ t('taxReturn.check_blocker') }}</span>
         </span>
       </div>
       <ul class="space-y-2">

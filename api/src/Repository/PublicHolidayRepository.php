@@ -11,7 +11,7 @@ use PDO;
 /**
  * Číselník českých svátků (z. č. 245/2000 Sb.) — globální, admin editovatelný.
  *
- * Migrace 1780. Čtecí cestu má jedinou: {@see \MyInvoice\Service\Report\CzechWorkingDays},
+ * Migrace 1781. Čtecí cestu má jedinou: {@see \MyInvoice\Service\Report\CzechWorkingDays},
  * odkud svátky bere jak posun lhůt podle § 33 odst. 4 daňového řádu, tak fond
  * pracovní doby ve mzdách.
  *

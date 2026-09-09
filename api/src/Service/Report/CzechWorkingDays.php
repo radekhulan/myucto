@@ -13,7 +13,7 @@ namespace MyInvoice\Service\Report;
  * KH 06/2026: 25. 7. 2026 = sobota → skutečný termín pondělí 27. 7. 2026).
  *
  * Svátky dle zákona 245/2000 Sb. čte z ČÍSELNÍKU `public_holidays` (migrace
- * 1783) — novela zákona je od té chvíle jeden řádek v databázi, ne nová verze
+ * 1781) — novela zákona je od té chvíle jeden řádek v databázi, ne nová verze
  * aplikace. Pohyblivé svátky (Velký pátek, Velikonoční pondělí) nese číselník
  * jako pravidlo „posun ode dne Velikonoční neděle"; samotné Velikonoce se
  * počítají tady (gregoriánský computus), protože jejich datum není rozhodnutí
@@ -31,7 +31,7 @@ final class CzechWorkingDays
      * Poslední ověřený stav zákona zapečený v kódu — POJISTKA, ne zdroj pravdy.
      *
      * Používá se jen tehdy, když číselník `public_holidays` není k dispozici nebo
-     * je prázdný. Musí zůstat shodný se seedem migrace 1780: odpověď aplikace
+     * je prázdný. Musí zůstat shodný se seedem migrace 1781: odpověď aplikace
      * nesmí záviset na tom, jestli je instalace naseedovaná.
      *
      * @var array<string,array{code:string,name:string}>
@@ -50,7 +50,7 @@ final class CzechWorkingDays
         '12-26' => ['code' => 'boxing_day', 'name' => '2. svátek vánoční'],
     ];
 
-    /** Pohyblivá část pojistky — tytéž posuny, jaké seeduje migrace 1780. */
+    /** Pohyblivá část pojistky — tytéž posuny, jaké seeduje migrace 1781. */
     private const FALLBACK_EASTER_HOLIDAYS = [
         ['code' => 'good_friday', 'name' => 'Velký pátek', 'offset' => -2],
         ['code' => 'easter_monday', 'name' => 'Velikonoční pondělí', 'offset' => 1],

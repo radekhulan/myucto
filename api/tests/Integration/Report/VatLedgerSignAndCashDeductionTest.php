@@ -208,7 +208,7 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
 
     /**
      * L-4: hotovostní pořízení dlouhodobého majetku patří i na ř. 47 přiznání
-     * (hodnota pořízeného majetku — doplňující údaj k odpočtu, migrace 1783).
+     * (hodnota pořízeného majetku — doplňující údaj k odpočtu, migrace 1784).
      *
      * `fetchCash()` měl v SELECTu natvrdo `0 AS is_fixed_asset`, takže stroj koupený
      * za hotové skončil jen v odpočtu na ř. 40 a ř. 47 zůstal prázdný — u přijaté
@@ -217,7 +217,7 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
     public function testCashFixedAssetPurchaseReachesLine47(): void
     {
         if (!$this->db->hasColumn('cash_document_vat_lines', 'is_fixed_asset')) {
-            $this->markTestSkipped('Migrace 1783 na téhle DB neproběhla.');
+            $this->markTestSkipped('Migrace 1784 na téhle DB neproběhla.');
         }
         $this->cash('out', $this->d(11, 3), 121000, [[21.0, 100000, 21000, 'full', 100.0, true]]);
         // Běžný nákup ve stejném období — ř. 47 sumuje JEN majetkovou část základu.
@@ -238,7 +238,7 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
     public function testCashIncomingNeverReachesLine47(): void
     {
         if (!$this->db->hasColumn('cash_document_vat_lines', 'is_fixed_asset')) {
-            $this->markTestSkipped('Migrace 1783 na téhle DB neproběhla.');
+            $this->markTestSkipped('Migrace 1784 na téhle DB neproběhla.');
         }
         $this->cash('in', $this->d(12, 3), 121000, [[21.0, 100000, 21000, 'full', 100.0, true]]);
 

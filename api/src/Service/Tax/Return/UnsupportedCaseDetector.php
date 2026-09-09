@@ -23,7 +23,7 @@ use MyInvoice\Infrastructure\Database\Connection;
  *   sčítá blokující kontroly do `can_finalize`).
  * - `warning` — přiznání se vydá, ale nález je vidět v UI i ve výstupu exportu.
  *
- * Vědomý příznak na firmě s výchozí hodnotou „ne" (migrace 1781) NENÍ tichý
+ * Vědomý příznak na firmě s výchozí hodnotou „ne" (migrace 1782) NENÍ tichý
  * předpoklad: kde jde podezření poznat z dat (NACE finančního sektoru, právní
  * povaha veřejně prospěšného poplatníka, zahraniční sídlo, tvar účetního období),
  * vzniká nález i tehdy, když je příznak vypnutý.
@@ -84,7 +84,7 @@ final class UnsupportedCaseDetector
         $nace = preg_replace('/\D/', '', (string) ($supplier['cz_nace_code'] ?? '')) ?? '';
 
         self::checkEntityStatus($supplier, $findings);
-        self::checkForeignSeat($supplier, $findings);
+        self::checkForeignSeat($supplier, $type, $findings);
 
         if ($type === 'po') {
             self::checkTaxpayerType($supplier, $nace, $findings);
@@ -113,16 +113,25 @@ final class UnsupportedCaseDetector
     public static function foreignSeatWarning(
         string $countryIso2,
         string $taxpayerTypeCode = TaxpayerTypeCodebook::DEFAULT_CODE,
+        bool $corporate = true,
     ): ?string {
         $seat = strtoupper(trim($countryIso2));
         if ($seat === '' || $seat === 'CZ' || $taxpayerTypeCode !== TaxpayerTypeCodebook::DEFAULT_CODE) {
             return null;
         }
 
-        return 'Sídlo (bydliště) poplatníka je mimo ČR (' . $seat . '), ale přiznání se staví pro '
-            . 'typ poplatníka „ostatní" (kód 1). Daňový nerezident má kód 2 a jiný rozsah zdanění '
-            . '(§ 17 odst. 4 ZDP u PO, § 2 odst. 3 ZDP u FO) — ověřte, zda je poplatník daňovým '
-            . 'rezidentem ČR (u PO rozhoduje místo vedení podle § 17 odst. 3 ZDP).';
+        // Kód typu poplatníka existuje jen u DPPO — DPFDP7 atribut `typ_popldpp` vůbec
+        // nemá, takže větu o „kódu 1" fyzická osoba dostat nesmí; mátla by ji odkazem
+        // na pole, které v jejím přiznání není.
+        $typeSentence = $corporate
+            ? ', ale přiznání se staví pro typ poplatníka „ostatní" (kód 1). Daňový nerezident '
+                . 'má kód 2 a jiný rozsah zdanění (§ 17 odst. 4 ZDP)'
+            : ', ale přiznání se staví pro daňového rezidenta ČR. Nerezident má jiný rozsah '
+                . 'zdanění i jiný nárok na slevy a odpočty (§ 2 odst. 3 a § 36 ZDP)';
+
+        return 'Sídlo (bydliště) poplatníka je mimo ČR (' . $seat . ')' . $typeSentence
+            . ' — ověřte, zda je poplatník daňovým rezidentem ČR'
+            . ($corporate ? ' (rozhoduje místo vedení podle § 17 odst. 3 ZDP)' : '') . '.';
     }
 
     /** @param list<array{key:string,severity:string,message:string,action:string}> $findings */
@@ -234,11 +243,11 @@ final class UnsupportedCaseDetector
     }
 
     /** @param list<array{key:string,severity:string,message:string,action:string}> $findings */
-    private static function checkForeignSeat(array $supplier, array &$findings): void
+    private static function checkForeignSeat(array $supplier, string $type, array &$findings): void
     {
         $code = TaxpayerTypeCodebook::normalize($supplier['epo_taxpayer_code'] ?? null)
             ?? TaxpayerTypeCodebook::DEFAULT_CODE;
-        $warning = self::foreignSeatWarning((string) ($supplier['country_iso2'] ?? 'CZ'), $code);
+        $warning = self::foreignSeatWarning((string) ($supplier['country_iso2'] ?? 'CZ'), $code, $type === 'po');
         if ($warning === null) {
             return;
         }
@@ -246,8 +255,9 @@ final class UnsupportedCaseDetector
             'key' => 'foreign_seat',
             'severity' => self::SEVERITY_WARNING,
             'message' => $warning,
-            'action' => 'Je-li poplatník nerezident, přiznání sestavte ručně — typ poplatníka 2 '
-                . 'aplikace nepodporuje.',
+            'action' => $type === 'po'
+                ? 'Je-li poplatník nerezident, přiznání sestavte ručně — typ poplatníka 2 aplikace nepodporuje.'
+                : 'Je-li poplatník nerezident, ověřte rozsah zdanění i nárok na slevy ručně před podáním.',
         ];
     }
 
@@ -336,6 +346,29 @@ final class UnsupportedCaseDetector
                 'message' => 'Účetní období roku není v aplikaci založené, takže se do přiznání '
                     . 'dosadí kalendářní rok a typ zdaňovacího období „A" (§ 21a písm. a) ZDP).',
                 'action' => 'Založte účetní období roku, ať zdaňovací období v přiznání odpovídá skutečnosti.',
+            ];
+
+            return;
+        }
+        if ($shape === TaxPeriodShape::SHORT_CALENDAR) {
+            // První (a proto zkrácený) rok nově vzniklého poplatníka je legitimní „A"
+            // — před ním žádné účetní období není. Varuje se tedy jen tehdy, když
+            // poplatník starší období má, protože pak jde o přechod z hospodářského
+            // roku. Když příznak chybí (starší volající, testy), varuje se raději taky.
+            if (($period['is_first'] ?? false) === true) {
+                return;
+            }
+            $findings[] = [
+                'key' => 'tax_period_short_calendar',
+                'severity' => self::SEVERITY_WARNING,
+                'message' => 'Účetní období ' . $period['starts_on'] . ' - ' . $period['ends_on']
+                    . ' končí 31. 12., ale nezačíná 1. 1. Do přiznání jde typ zdaňovacího období „A" '
+                    . 'a typ přiznání „A" (za zdaňovací období). To sedí u prvního roku nově vzniklého '
+                    . 'poplatníka, ale stejně vypadá i přechodné období při návratu z hospodářského roku '
+                    . 'na kalendářní - a to chce jiný typ přiznání (§ 21a, § 38ma ZDP). Aplikace ty dva '
+                    . 'případy z dat období rozlišit neumí.',
+                'action' => 'Ověřte, o který případ jde. Jde-li o přechod z hospodářského roku, '
+                    . 'opravte typ přiznání ručně v portálu EPO před odesláním.',
             ];
 
             return;

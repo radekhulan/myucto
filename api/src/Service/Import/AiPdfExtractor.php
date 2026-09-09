@@ -791,7 +791,7 @@ final class AiPdfExtractor
 
             $duzpNote = '';
             if ($rcClassification === '23') {
-                // Datum dodání má od migrace 1784 vlastní sloupec. Dokud ho neměl,
+                // Datum dodání má od migrace 1785 vlastní sloupec. Dokud ho neměl,
                 // sloužilo k tomu vytěžené `tax_date` (které se hned přepsalo dopočteným
                 // DUZP) — fallback zůstává kvůli odpovědím bez `delivery_date`.
                 $delivery = self::firstNonEmptyDate([$data['delivery_date'] ?? null, $data['tax_date'] ?? null]);
@@ -875,7 +875,7 @@ final class AiPdfExtractor
             ),
             'issue_date'            => (string) $data['issue_date'],
             'tax_date'              => isset($data['tax_date']) && $data['tax_date'] ? (string) $data['tax_date'] : null,
-            // Datum dodání (migrace 1784) je vstup § 25, ne DUZP — ukládá se zvlášť,
+            // Datum dodání (migrace 1785) je vstup § 25, ne DUZP — ukládá se zvlášť,
             // aby šel dopočet zpětně ověřit a nemusel se dohadovat z `tax_date`.
             'delivery_date'         => self::firstNonEmptyDate([$data['delivery_date'] ?? null]),
             'due_date'              => (string) ($data['due_date'] ?? $data['issue_date']),

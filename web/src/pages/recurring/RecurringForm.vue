@@ -133,7 +133,7 @@ type FormItem = {
   unit: string
   unit_price_without_vat: number
   vat_rate_id: number
-  // Ručně zvolená klasifikace DPH (migrace 1782). Prázdné = derivovat ze SSOT při
+  // Ručně zvolená klasifikace DPH (migrace 1783). Prázdné = derivovat ze SSOT při
   // generování; vyplněné rozhodnutí účetní se přenese na každou vygenerovanou fakturu.
   vat_classification_code: string | null
   order_index: number
@@ -259,7 +259,7 @@ function vatRatesForItem(item: FormItem): VatRate[] {
   return item.oss_applicable ? selectableVatRates.value : domesticVatRates.value
 }
 /**
- * Klasifikace DPH na řádku šablony (migrace 1782, nález M-8 auditu VAT klasifikací).
+ * Klasifikace DPH na řádku šablony (migrace 1783, nález M-8 auditu VAT klasifikací).
  *
  * Prázdné = odvodit při generování ze sazby a měrné jednotky. Vyplněné rozhodnutí
  * účetní se přenese na každou vygenerovanou fakturu — bez toho se dodání zboží do JČS

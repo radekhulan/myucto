@@ -21,10 +21,16 @@ final class TaxPeriodShapeTest extends TestCase
         self::assertSame('A', TaxPeriodShape::typZo(TaxPeriodShape::CALENDAR));
     }
 
-    /** Zkrácený první rok končící 31. 12. je pořád kalendářní režim. */
-    public function testShortFirstYearEndingOnNewYearsEveIsCalendar(): void
+    /**
+     * Období končící 31. 12., které nezačíná 1. 1., má vlastní tvar. Vypadá tak první
+     * (zkrácený) rok nově vzniklého poplatníka i přechodné období z hospodářského roku
+     * na kalendářní — a to druhé chce jiný typ přiznání. Z dvojice dat se rozlišit nedají,
+     * takže `typ_zo` zůstává „A", ale tiše to neprojde.
+     */
+    public function testShortYearEndingOnNewYearsEveIsShortCalendar(): void
     {
-        self::assertSame(TaxPeriodShape::CALENDAR, TaxPeriodShape::classify('2025-03-15', '2025-12-31'));
+        self::assertSame(TaxPeriodShape::SHORT_CALENDAR, TaxPeriodShape::classify('2025-03-15', '2025-12-31'));
+        self::assertSame('A', TaxPeriodShape::typZo(TaxPeriodShape::SHORT_CALENDAR));
     }
 
     public function testFiscalYear(): void

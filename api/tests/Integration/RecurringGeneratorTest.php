@@ -1161,7 +1161,7 @@ final class RecurringGeneratorTest extends TestCase
 
     /**
      * Ručně zvolená klasifikace DPH ze šablony se musí přenést na fakturu
-     * (audit VAT klasifikací 2026-08, nález M-8, migrace 1782).
+     * (audit VAT klasifikací 2026-08, nález M-8, migrace 1783).
      *
      * Šablona kód dosud nenesla, takže ho cron při každém běhu DERIVOVAL ze sazby
      * a měrné jednotky. Rozhodnutí účetní se tím ztratilo měsíc co měsíc: dodání zboží
@@ -1173,7 +1173,7 @@ final class RecurringGeneratorTest extends TestCase
     public function testVatClassificationOnTemplateItemIsCarriedToGeneratedInvoice(): void
     {
         if (!$this->db->hasColumn('recurring_invoice_template_items', 'vat_classification_code')) {
-            $this->markTestSkipped('Migrace 1782 na téhle DB neproběhla.');
+            $this->markTestSkipped('Migrace 1783 na téhle DB neproběhla.');
         }
         $tplId = $this->createPeriodTemplate((new \DateTimeImmutable('today'))->format('Y-m-d'));
         $this->repo->replaceItems($tplId, [

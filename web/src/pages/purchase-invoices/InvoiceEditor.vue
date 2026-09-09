@@ -212,7 +212,7 @@ const form = ref<{
   document_kind: PurchaseDocumentKind
   issue_date: string
   tax_date: string
-  /** Datum dodání z dokladu — evidenční vstup § 25 ZDPH, ne DUZP (migrace 1784). */
+  /** Datum dodání z dokladu — evidenční vstup § 25 ZDPH, ne DUZP (migrace 1785). */
   delivery_date: string
   due_date: string
   received_at: string

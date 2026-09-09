@@ -33,6 +33,9 @@ final class AssetSaleCoefficientCrossCheckTest extends TestCase
     /** @var int[] */
     private array $assetIds = [];
 
+    /** @var int[] */
+    private array $invoiceIds = [];
+
     protected function setUp(): void
     {
         $rootDir = dirname(__DIR__, 4);
@@ -64,6 +67,9 @@ final class AssetSaleCoefficientCrossCheckTest extends TestCase
         foreach ($this->assetIds as $id) {
             $this->db->pdo()->prepare('DELETE FROM assets WHERE id = ?')->execute([$id]);
         }
+        foreach ($this->invoiceIds as $id) {
+            $this->db->pdo()->prepare('DELETE FROM invoices WHERE id = ?')->execute([$id]);
+        }
         $this->db->close();
     }
 
@@ -94,6 +100,43 @@ final class AssetSaleCoefficientCrossCheckTest extends TestCase
         self::assertStringContainsString('T-2098-01', (string) $result['note']);
     }
 
+    /**
+     * Zelený vzorek: prodaná karta s dokladem, který kód nese, hlásit NESMÍ.
+     * Bez tohohle testu by kontrola mohla hlásit úplně všechno a pořád svítit zeleně
+     * v ostatních případech.
+     */
+    public function testSoldAssetWithClassifiedDocumentIsClean(): void
+    {
+        $invoiceId = $this->classifiedInvoice('1m');
+        $this->soldAsset('T-2098-03', 'Prodaný stroj', self::YEAR . '-05-20', 'sold', $invoiceId);
+
+        $result = $this->suite->assetSalesVsCoefficientExclusion($this->supplierId, self::YEAR);
+
+        self::assertTrue($result['ok'], 'Správně označený prodej nesmí být nález.');
+        self::assertSame(1.0, $result['a']);
+        self::assertSame(1.0, $result['b']);
+        self::assertNull($result['note']);
+    }
+
+    /**
+     * Tři karty prodané JEDNOU fakturou. Kontrola, která porovnává počet karet proti
+     * počtu dokladů, tu spočítá 3 − 1 = 2 a nahlásí nesoulad nad bezvadnými daty —
+     * a účetní pak dostane výčet inventárních čísel „ke kontrole", na kterých nic není.
+     */
+    public function testMultipleAssetsOnOneInvoiceAreClean(): void
+    {
+        $invoiceId = $this->classifiedInvoice('1m');
+        $this->soldAsset('T-2098-04', 'Stroj A', self::YEAR . '-06-10', 'sold', $invoiceId);
+        $this->soldAsset('T-2098-05', 'Stroj B', self::YEAR . '-06-10', 'sold', $invoiceId);
+        $this->soldAsset('T-2098-06', 'Stroj C', self::YEAR . '-06-10', 'sold', $invoiceId);
+
+        $result = $this->suite->assetSalesVsCoefficientExclusion($this->supplierId, self::YEAR);
+
+        self::assertTrue($result['ok'], 'Jedna faktura smí prodat víc karet, aniž by to byl nález.');
+        self::assertSame(3.0, $result['a']);
+        self::assertSame(3.0, $result['b']);
+    }
+
     /** Vyřazení JINÝM způsobem než prodejem se § 76 odst. 4 netýká. */
     public function testLiquidatedAssetIsNotReported(): void
     {
@@ -104,13 +147,19 @@ final class AssetSaleCoefficientCrossCheckTest extends TestCase
         self::assertTrue($result['ok'], 'Likvidace není prodej — do koeficientu nevstupuje.');
     }
 
-    private function soldAsset(string $inventoryNumber, string $name, string $disposalDate, string $type = 'sold'): void
-    {
+    private function soldAsset(
+        string $inventoryNumber,
+        string $name,
+        string $disposalDate,
+        string $type = 'sold',
+        ?int $saleInvoiceId = null,
+    ): void {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO assets
                 (supplier_id, inventory_number, name, kind, input_price, acquisition_date,
-                 put_into_use_date, disposal_date, disposal_type, disposal_price, status, tax_group)
-             VALUES (?, ?, ?, "tangible", 500000, ?, ?, ?, ?, 300000, "disposed", 2)'
+                 put_into_use_date, disposal_date, disposal_type, disposal_price, status, tax_group,
+                 sale_invoice_id)
+             VALUES (?, ?, ?, "tangible", 500000, ?, ?, ?, ?, 300000, "disposed", 2, ?)'
         );
         $stmt->execute([
             $this->supplierId,
@@ -120,7 +169,44 @@ final class AssetSaleCoefficientCrossCheckTest extends TestCase
             (self::YEAR - 5) . '-01-10',
             $disposalDate,
             $type,
+            $saleInvoiceId,
         ]);
         $this->assetIds[] = (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** Vydaná faktura nesoucí klasifikaci na hlavičce (kontrola čte řádek i hlavičku). */
+    private function classifiedInvoice(string $code): int
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT id FROM clients WHERE supplier_id = ? ORDER BY id LIMIT 1');
+        $stmt->execute([$this->supplierId]);
+        $clientId = (int) ($stmt->fetchColumn() ?: 0);
+        if ($clientId === 0) {
+            self::markTestSkipped('Supplier nemá žádného klienta pro testovací fakturu.');
+        }
+        $currencyId = (int) ($pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
+        $userId = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO invoices
+                (supplier_id, varsymbol, client_id, issue_date, tax_date, due_date, currency_id,
+                 created_by, total_with_vat, status, vat_classification_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 300000, "issued", ?)'
+        );
+        $stmt->execute([
+            $this->supplierId,
+            (string) random_int(1000000000, 1999999999),
+            $clientId,
+            self::YEAR . '-06-10',
+            self::YEAR . '-06-10',
+            self::YEAR . '-07-10',
+            $currencyId,
+            $userId,
+            $code,
+        ]);
+        $invoiceId = (int) $pdo->lastInsertId();
+        $this->invoiceIds[] = $invoiceId;
+
+        return $invoiceId;
     }
 }

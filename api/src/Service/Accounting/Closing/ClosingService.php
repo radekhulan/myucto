@@ -19,6 +19,7 @@ use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Tax\Return\LegalProvisionLedgerService;
 use MyInvoice\Service\Accounting\Reports\BalanceInventoryService;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
@@ -2215,7 +2216,9 @@ final class ClosingService
         $section = strtolower(trim((string) ($value ?? '')));
         $section = ltrim($section, "§ \t");
 
-        return in_array($section, ['8', '8a', '8b', '8c'], true) ? $section : null;
+        // Výčet žije v LegalProvisionLedgerService::SECTIONS — vlastní kopie by se
+        // s tabulkou C rozešla při nejbližší změně řádků tiskopisu.
+        return in_array($section, LegalProvisionLedgerService::SECTIONS, true) ? $section : null;
     }
 
     // ── krok „daň z příjmů" (D11, 591/341) ────────────────────────────────────

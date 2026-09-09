@@ -35,7 +35,7 @@ const mode = ref<Mode>('top')
 interface Row {
   rate: number; gross: number | null; base: number | null; vat: number | null
   deduction: CashVatDeduction; deductionPercent: number; treatment: CashTaxTreatment
-  // Pořízení dlouhodobého majetku za hotové → doplňující ř. 47 přiznání (migrace 1783).
+  // Pořízení dlouhodobého majetku za hotové → doplňující ř. 47 přiznání (migrace 1784).
   fixedAsset: boolean
 }
 

@@ -563,7 +563,7 @@ final class SettingsAction
             // Tax settings pro EPO výkazy (migrace 0038, fáze 6)
             'taxpayer_type', 'vat_period', 'financial_office_code', 'workplace_code',
             'cz_nace_code', 'data_box_type', 'data_box_id', 'flat_tax_band',
-            // Vědomé příznaky poplatníka pro přiznání k dani z příjmů (migrace 1781).
+            // Vědomé příznaky poplatníka pro přiznání k dani z příjmů (migrace 1782).
             // Aplikace je z účetních dat odvodit neumí; blokují přiznání, které by
             // o poplatníkovi tvrdilo nepravdu (viz UnsupportedCaseDetector).
             'epo_taxpayer_code', 'tax_entity_status', 'tax_entity_status_date',
@@ -621,7 +621,7 @@ final class SettingsAction
             return Json::error($response, 'validation_failed', "accounting_mode musí být 'tax_evidence' nebo 'double_entry'.", 400);
         }
 
-        // Vědomé příznaky poplatníka (migrace 1781). CHECK constraint v DB by z cizí
+        // Vědomé příznaky poplatníka (migrace 1782). CHECK constraint v DB by z cizí
         // hodnoty udělal PDOException → 500; tady je z ní čitelná 400. Prázdný řetězec
         // u typu poplatníka znamená „neurčeno" a ukládá se jako NULL — je to jiný stav
         // než výslovně potvrzená „1" (viz UnsupportedCaseDetector).

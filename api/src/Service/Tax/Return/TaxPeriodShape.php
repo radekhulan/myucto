@@ -21,8 +21,15 @@ use MyInvoice\Service\Accounting\FiscalCalendar;
  */
 final class TaxPeriodShape
 {
-    /** Kalendářní rok (i zkrácený první rok končící 31. 12.) — § 21a písm. a). */
+    /** Kalendářní rok — § 21a písm. a). */
     public const CALENDAR = 'calendar';
+    /**
+     * Období končící 31. 12., ale podstatně kratší než rok. Typicky první rok nově
+     * vzniklého poplatníka (`typ_dapdpp` „M"), ale stejně vypadá i přechodné období
+     * při návratu z hospodářského roku na kalendářní, které chce jiný typ přiznání.
+     * Rozlišit je z dat samotného období nelze — proto vlastní tvar a varování.
+     */
+    public const SHORT_CALENDAR = 'short_calendar';
     /** Hospodářský rok — § 21a písm. b). */
     public const FISCAL = 'fiscal';
     /** Období delší než dvanáct měsíců — § 21a písm. d). */
@@ -35,6 +42,9 @@ final class TaxPeriodShape
     /** Tvar období → hodnota atributu `typ_zo`. */
     private const TYP_ZO = [
         self::CALENDAR => 'A',
+        // Zkrácené období končící 31. 12. je pro `typ_zo` pořád „A" (kratší než rok
+        // kritickou kontrolu XSD neporušuje), ale ne tiše — detektor na něj varuje.
+        self::SHORT_CALENDAR => 'A',
         self::FISCAL => 'B',
         self::LONG => 'D',
         // Atypické zkrácené období žádné písmeno § 21a nevystihuje. Posílá se
@@ -61,7 +71,11 @@ final class TaxPeriodShape
             return self::LONG;
         }
         if (substr($endsOn, 5) === '12-31') {
-            return self::CALENDAR;
+            // Celý kalendářní rok začíná 1. ledna. Cokoli kratšího končící 31. 12. je buď
+            // první rok nově vzniklého poplatníka, nebo přechodné období z hospodářského
+            // roku — a to druhé chce jiný typ přiznání (§ 21a, § 38ma). Z dvojice dat je
+            // od sebe nepoznáme, takže se to nezamlčí, ale ohlásí.
+            return substr($startsOn, 5) === '01-01' ? self::CALENDAR : self::SHORT_CALENDAR;
         }
         if (FiscalCalendar::isFiscalYearShape($startsOn, $endsOn)) {
             return self::FISCAL;

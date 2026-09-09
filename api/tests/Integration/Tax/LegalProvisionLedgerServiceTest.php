@@ -190,6 +190,47 @@ final class LegalProvisionLedgerServiceTest extends TestCase
         self::assertSame(0.0, $data['legal_reserve_created'], 'řádky tvorby tabulky C nesmí být záporné');
     }
 
+    /**
+     * Uzavírací zápis nesmí zůstatky 391 a 451 vynulovat.
+     *
+     * `ClosingEntryBuilder` k rozvahovému dni převádí každý rozvahový účet proti 702,
+     * takže „zůstatek k ends_on" počítaný naivně vyjde po uzavření knih nula — a přiznání
+     * se sestavuje právě nad uzavřeným obdobím. Bez vyloučení uzavíracího zápisu by tabulka
+     * C zůstala prázdná, u rezerv dokonce nekonzistentní: ř. 25 (tvorba z obratu 552) bez
+     * ř. 26 (stav). Nákladová strana ({@see LegalProvisionLedgerService::expenseCreated})
+     * ten predikát měla od začátku, rozvahová ne.
+     */
+    public function testClosingEntryDoesNotWipeBalances(): void
+    {
+        $invId = $this->receivable(50000.00, self::YEAR . '-02-01', '2097-04-30');
+        $this->manualEntry(self::YEAR . '-06-30', '552', '451', 30000.00);
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $invId, 'legal_amount' => 45000.00, 'acct_amount' => 0.0, 'legal_section' => '8a'],
+        ], $this->rv(), $this->meta());
+
+        $before = $this->forPeriod();
+        self::assertEqualsWithDelta(45000.00, $before['allowance_balance'], 0.001);
+        self::assertEqualsWithDelta(30000.00, $before['legal_reserve_balance'], 0.001);
+
+        // Uzavírací zápis v podobě, v jaké ho staví close_books: source_type 'closing',
+        // source_id = plain period_id, entry_date = rozvahový den, rozvahové účty proti 702.
+        // Zapisuje se přímo do deníku, protože období je po `start()` ve stavu `closing`
+        // a `PostingService` do něj běžnou cestou účtovat odmítne (§ 35 ZoÚ) — close_books
+        // má vlastní privilegovanou cestu. Pro tenhle test je podstatný tvar řádků, ne cesta.
+        $this->closingJournalEntry([
+            ['391', 'debit', 45000.00],
+            ['451', 'debit', 30000.00],
+            ['702', 'credit', 75000.00],
+        ]);
+
+        $after = $this->forPeriod();
+        self::assertEqualsWithDelta(45000.00, $after['allowance_balance'], 0.001, 'uzavírací zápis nesmí zůstatek 391 vynulovat');
+        self::assertEqualsWithDelta(30000.00, $after['legal_reserve_balance'], 0.001, 'uzavírací zápis nesmí zůstatek 451 vynulovat');
+        self::assertTrue($after['allowance_split_reliable'], 'rozpad podle paragrafu musí zůstat použitelný i po uzavření knih');
+        self::assertTrue($after['has_activity']);
+    }
+
     /** Odpis pohledávky (546) je ř. 12 tabulky C — § 24 odst. 2 písm. y) ZDP. */
     public function testReceivableWriteOffFeedsRow12(): void
     {
@@ -213,6 +254,43 @@ final class LegalProvisionLedgerServiceTest extends TestCase
     private function meta(): array
     {
         return ['user_id' => $this->userId, 'posted_by' => $this->userId];
+    }
+
+    /**
+     * Zápis se `source_type = 'closing'` a `source_id = period_id` — tvar, jaký v deníku
+     * zanechá close_books. Vkládá se přímo, protože běžná cesta `PostingService` do období
+     * ve stavu `closing` neúčtuje.
+     *
+     * @param list<array{0:string,1:string,2:float}> $lines [účet, strana, částka]
+     */
+    private function closingJournalEntry(array $lines): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'INSERT INTO journal_entries (supplier_id, period_id, entry_date, description, source_type, source_id, posted_at, posted_by)
+             VALUES (?, ?, ?, ?, "closing", ?, NOW(), ?)'
+        );
+        $stmt->execute([
+            $this->supplierId,
+            $this->periodId,
+            self::ENDS_ON,
+            'Uzavření účetních knih',
+            $this->periodId,
+            $this->userId,
+        ]);
+        $entryId = (int) $pdo->lastInsertId();
+
+        $account = $pdo->prepare('SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ? LIMIT 1');
+        $insert = $pdo->prepare(
+            'INSERT INTO journal_entry_lines (entry_id, supplier_id, account_id, side, amount, line_no)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($lines as $index => [$code, $side, $amount]) {
+            $account->execute([$this->supplierId, $code]);
+            $accountId = (int) $account->fetchColumn();
+            self::assertGreaterThan(0, $accountId, "účet {$code} musí být v osnově");
+            $insert->execute([$entryId, $this->supplierId, $accountId, $side, $amount, $index + 1]);
+        }
     }
 
     private function manualEntry(string $date, string $debit, string $credit, float $amount): void

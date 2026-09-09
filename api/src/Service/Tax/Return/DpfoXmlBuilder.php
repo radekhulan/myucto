@@ -114,7 +114,11 @@ final class DpfoXmlBuilder
         $vetaD->setAttribute('audit', (string) ($meta['audit'] ?? 'N'));
         // Bydliště mimo ČR — DPPO na to varovalo, DPFO ne, přestože nerezident (§ 2 odst. 3
         // ZDP) má jiný rozsah zdanění i jiný nárok na slevy. Text je SSOT v detektoru.
-        $seatWarning = UnsupportedCaseDetector::foreignSeatWarning((string) ($supplier['country_iso2'] ?? 'CZ'));
+        $seatWarning = UnsupportedCaseDetector::foreignSeatWarning(
+            (string) ($supplier['country_iso2'] ?? 'CZ'),
+            TaxpayerTypeCodebook::DEFAULT_CODE,
+            corporate: false,
+        );
         if ($seatWarning !== null) {
             $warnings[] = $seatWarning;
         }

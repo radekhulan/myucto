@@ -145,6 +145,15 @@ final class LegalProvisionLedgerService
     /**
      * Zůstatek rozvahového účtu na straně DAL k datu (kladně = kredit), prefix match
      * na analytiky i po roll-upu na syntetiku — shodně s {@see \MyInvoice\Repository\ClosingRepository::accountBalance}.
+     *
+     * Uzavírací zápis se VYLUČUJE. `ClosingEntryBuilder` převádí k rozvahovému dni každý
+     * rozvahový účet s nenulovým zůstatkem proti 702, takže po uzavření knih by 391 i 451
+     * k `ends_on` vyšly nula — a to je přesně stav, ve kterém se přiznání sestavuje
+     * (`PreFinalizeCheckService` chce období `closed`/`approved`). Bez téhle podmínky by
+     * `allowance_split_reliable` nikdy nevyšlo a tabulka C by zůstala prázdná, nebo hůř:
+     * u rezerv by vznikl ř. 25 (tvorba z obratu 552) bez ř. 26 (stav), tedy vnitřně
+     * nekonzistentní podání. Predikát je shodný s {@see self::expenseCreated} — skladové
+     * sloty (source_id ≥ STOCK_SLOT_BASE) jsou běžné účtování, ne převod na 702.
      */
     private function creditBalance(int $supplierId, string $accountCode, string $asOf): float
     {
@@ -156,10 +165,11 @@ final class LegalProvisionLedgerService
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date <= ?
+                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
                 AND (a.account_code LIKE CONCAT(?, '%')
                      OR COALESCE(p.account_code, a.account_code) LIKE CONCAT(?, '%'))"
         );
-        $stmt->execute([$supplierId, $asOf, $accountCode, $accountCode]);
+        $stmt->execute([$supplierId, $asOf, ClosingSourceId::STOCK_SLOT_BASE, $accountCode, $accountCode]);
 
         return round((float) $stmt->fetchColumn(), 2);
     }
