@@ -13,6 +13,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use PDO;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -257,6 +258,96 @@ final class PurchaseMatchActivityLogTest extends TestCase
         self::assertSame(1, (int) $this->db->pdo()->query(
             "SELECT COUNT(*) FROM payment_matches WHERE bank_transaction_id = {$this->transactionId}"
         )->fetchColumn());
+    }
+
+    public static function purchaseRounding(): array
+    {
+        return [
+            'zaokrouhlení dolů' => [-0.24],
+            'zaokrouhlení nahoru' => [0.36],
+        ];
+    }
+
+    #[DataProvider('purchaseRounding')]
+    public function testFuzzyMatchRequiresRoundedAmountAndStillNeedsReview(float $rounding): void
+    {
+        $this->seed(2500.00, 'received', null, self::VENDOR_MARKER . ' Brno CZE');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE purchase_invoices SET rounding = ? WHERE id = ?')
+            ->execute([$rounding, $this->purchaseId]);
+
+        $unrounded = $this->matcher->match($this->transactionId);
+
+        self::assertSame('unmatched', $unrounded['status'] ?? null);
+        self::assertSame('no_fuzzy_match', $unrounded['reason'] ?? null);
+        self::assertArrayNotHasKey('purchase_invoice_id', $unrounded);
+
+        $amount = round(2500.00 + $rounding, 2);
+        $pdo->prepare('UPDATE bank_transactions SET amount = ? WHERE id = ?')
+            ->execute([-$amount, $this->transactionId]);
+
+        $rounded = $this->matcher->match($this->transactionId);
+
+        self::assertSame('unmatched', $rounded['status'] ?? null);
+        self::assertSame('fuzzy_match_requires_review', $rounded['reason'] ?? null);
+        self::assertSame($this->purchaseId, $rounded['purchase_invoice_id'] ?? null);
+        self::assertTrue($rounded['requires_review'] ?? false);
+        self::assertTrue($rounded['fuzzy'] ?? false);
+        self::assertSame('received', $pdo->query(
+            "SELECT status FROM purchase_invoices WHERE id = {$this->purchaseId}"
+        )->fetchColumn());
+        self::assertSame('unmatched', $pdo->query(
+            "SELECT match_status FROM bank_transactions WHERE id = {$this->transactionId}"
+        )->fetchColumn());
+        self::assertSame(0, (int) $pdo->query(
+            "SELECT COUNT(*) FROM payment_matches WHERE bank_transaction_id = {$this->transactionId}"
+        )->fetchColumn());
+    }
+
+    #[DataProvider('purchaseRounding')]
+    public function testSecondPassUsesRoundedAmountAndRecordsPaymentOnce(float $rounding): void
+    {
+        $this->seed(2500.00, 'received', null);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE purchase_invoices SET rounding = ? WHERE id = ?')
+            ->execute([$rounding, $this->purchaseId]);
+
+        $unrounded = $this->matcher->matchBatch([$this->transactionId])[$this->transactionId];
+
+        self::assertSame('unmatched', $unrounded['status'] ?? null);
+        self::assertSame('no_amount_date_match', $unrounded['reason'] ?? null);
+        self::assertSame('received', $pdo->query(
+            "SELECT status FROM purchase_invoices WHERE id = {$this->purchaseId}"
+        )->fetchColumn());
+        self::assertSame(0, (int) $pdo->query(
+            "SELECT COUNT(*) FROM payment_matches WHERE bank_transaction_id = {$this->transactionId}"
+        )->fetchColumn());
+
+        $amount = round(2500.00 + $rounding, 2);
+        $pdo->prepare('UPDATE bank_transactions SET amount = ? WHERE id = ?')
+            ->execute([-$amount, $this->transactionId]);
+
+        $rounded = $this->matcher->matchBatch([$this->transactionId])[$this->transactionId];
+        $repeated = $this->matcher->matchBatch([$this->transactionId])[$this->transactionId];
+
+        self::assertSame('auto_exact', $rounded['status'] ?? null);
+        self::assertSame($this->purchaseId, $rounded['purchase_invoice_id'] ?? null);
+        self::assertTrue($rounded['amount_date'] ?? false);
+        self::assertTrue($rounded['second_pass'] ?? false);
+        self::assertSame('auto_exact', $repeated['status'] ?? null);
+        self::assertTrue($repeated['already_recorded'] ?? false);
+        self::assertSame('paid', $pdo->query(
+            "SELECT status FROM purchase_invoices WHERE id = {$this->purchaseId}"
+        )->fetchColumn());
+        self::assertSame('auto_exact', $pdo->query(
+            "SELECT match_status FROM bank_transactions WHERE id = {$this->transactionId}"
+        )->fetchColumn());
+        $allocations = $pdo->query(
+            "SELECT purchase_invoice_id, amount FROM payment_matches WHERE bank_transaction_id = {$this->transactionId}"
+        )->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(1, $allocations);
+        self::assertSame($this->purchaseId, (int) $allocations[0]['purchase_invoice_id']);
+        self::assertEqualsWithDelta($amount, (float) $allocations[0]['amount'], 0.001);
     }
 
     public function testPrimaryPassDefersAmountDateFallback(): void

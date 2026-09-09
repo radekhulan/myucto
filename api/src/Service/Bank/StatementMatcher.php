@@ -24,8 +24,8 @@ use PDO;
  *   1. Příchozí (amount > 0) — hledá fakturu se shodným varsymbol
  *      a) |amount - amount_to_pay| <= 0.05 Kč → 'auto_exact', faktura → paid
  *      b) |amount - amount_to_pay| <= 1 Kč → 'auto_partial' (částečná platba)
- *   2. Odchozí (amount < 0) — hledá přijatou fakturu (varsymbol nebo
- *      vendor_invoice_number), payment_matches N:N.
+ *   2. Odchozí (amount < 0) — hledá přijatou fakturu podle payment_variable_symbol,
+ *      varsymbol nebo vendor_invoice_number a částky včetně zaokrouhlení, payment_matches N:N.
  *
  * Tolerance 0.05 Kč pro exact match: typické zaokrouhlení 21 % DPH na
  * vícepoložkové faktuře dává ±0.01 — ±0.04 Kč rozdíl mezi součtem
@@ -752,25 +752,21 @@ final class StatementMatcher
         // (ať ve výpisu nevisí). Status/paid_at v tom případě nepřepisujeme.
         // Currency guard viz match() — bez něj by EUR výdaj napároval CZK přijatou.
         //
-        // VS lookup: na rozdíl od vystavených faktur (kde klient platí naši `varsymbol`),
-        // u přijatých platíme my dodavateli — do bank převodu typicky vepíšeme
-        // **VS dodavatele** = `vendor_invoice_number`. Náš `purchase_invoices.varsymbol`
-        // je interní PF-YYYYMM-NNNN, jen občas se s `vendor_invoice_number` shodují
-        // (když user nepoužívá auto-counter). Hledáme proto OR na obojí — uživatel může
-        // platit pod naším PF-... i pod původním číslem dodavatele.
-        // Přesná shoda na náš VS i VS dodavatele + numerická shoda po normalizaci
-        // (číslo dokladu s pomlčkou „PF-2026-0001" × jen-číslice z banky). Viz match().
+        // Platební VS může být jiný než číslo dokladu. Zachováváme i hledání
+        // podle interního a dodavatelského čísla, včetně numerické normalizace.
         $vsDigits = VariableSymbolNormalizer::digits($vs);
         $settled = PurchaseSettledExpr::settled('pi');
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number,
-                       COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) AS amount_to_pay,
+                       COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) + COALESCE(pi.rounding, 0) AS amount_to_pay,
                        ({$settled}) AS settled_amount,
                        pi.exchange_rate, pi.status, cur.code AS currency,
-                       CASE WHEN pi.varsymbol = ? OR pi.vendor_invoice_number = ? THEN 2 ELSE 1 END AS vs_match_rank
+                       CASE WHEN pi.payment_variable_symbol = ? OR pi.varsymbol = ? OR pi.vendor_invoice_number = ? THEN 2 ELSE 1 END AS vs_match_rank
                   FROM purchase_invoices pi
              LEFT JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
-                   AND (pi.varsymbol = ? OR pi.vendor_invoice_number = ?
+                   AND (pi.payment_variable_symbol = ? OR pi.varsymbol = ? OR pi.vendor_invoice_number = ?
+                        OR (pi.payment_variable_symbol REGEXP '[1-9]'
+                            AND CAST(REGEXP_REPLACE(pi.payment_variable_symbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED))
                         OR (pi.varsymbol REGEXP '[1-9]'
                             AND CAST(REGEXP_REPLACE(pi.varsymbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED))
                         OR (pi.vendor_invoice_number REGEXP '[1-9]'
@@ -783,7 +779,7 @@ final class StatementMatcher
                  -- těch, které trefila až normalizace na číslice (viz preferExactVsMatches).
                  ORDER BY vs_match_rank DESC, pi.id LIMIT 5";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$vs, $vs, $supplierId, $vs, $vs, $vsDigits, $vsDigits]);
+        $stmt->execute([$vs, $vs, $vs, $supplierId, $vs, $vs, $vs, $vsDigits, $vsDigits, $vsDigits]);
         $matches = $this->preferExactVsMatches($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
         if (count($matches) > 1) {
             return ['status' => 'unmatched', 'reason' => 'ambiguous_vs_purchase', 'tx_currency' => $txCurrency];
@@ -923,7 +919,7 @@ final class StatementMatcher
         // Měnu nefiltrujeme v SQL — částku porovnáváme přes expectedMatch (cizoměnová
         // faktura placená kartou z CZK účtu se přepočte kurzem faktury).
         $settled = PurchaseSettledExpr::settled('pi');
-        $sql = "SELECT pi.id, COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) AS amount_to_pay,
+        $sql = "SELECT pi.id, COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) + COALESCE(pi.rounding, 0) AS amount_to_pay,
                        ({$settled}) AS settled_amount,
                        pi.exchange_rate, c.company_name AS vendor_name, cur.code AS currency
                   FROM purchase_invoices pi
@@ -1022,7 +1018,7 @@ final class StatementMatcher
             $win = self::AMOUNT_DATE_DAY_WINDOW;
             $stmt = $pdo->prepare(
                 "SELECT pi.id, pi.status, pi.paid_at, pi.payment_method,
-                        COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) AS amount_to_pay,
+                        COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) + COALESCE(pi.rounding, 0) AS amount_to_pay,
                         ({$settled}) AS settled_amount,
                         cur.code AS currency, c.company_name AS vendor_name
                    FROM purchase_invoices pi
@@ -1186,9 +1182,9 @@ final class StatementMatcher
         }
         $digits = VariableSymbolNormalizer::digits($vs);
         $stmt = $pdo->prepare(
-            "SELECT pi.id, COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) AS amount_to_pay,
+            "SELECT pi.id, COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) + COALESCE(pi.rounding, 0) AS amount_to_pay,
                     pi.exchange_rate, cur.code AS currency,
-                    CASE WHEN pi.varsymbol = ? OR pi.vendor_invoice_number = ? THEN 2 ELSE 1 END AS vs_match_rank
+                    CASE WHEN pi.payment_variable_symbol = ? OR pi.varsymbol = ? OR pi.vendor_invoice_number = ? THEN 2 ELSE 1 END AS vs_match_rank
                FROM purchase_invoices pi LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ? AND pi.document_kind = 'credit_note'
                 -- 'paid' v setu ze stejného důvodu jako v matchPurchase(): dobropis bývá
@@ -1196,11 +1192,13 @@ final class StatementMatcher
                 -- visí ve výpisu nespárovaná a úhrada se nezaúčtuje (221/321), takže
                 -- závazek 321 zůstane v deníku otevřený. paid_at nepřepisujeme (viz UPDATE níž).
                 AND pi.status IN ('received','booked','paid')
-                AND (pi.varsymbol = ? OR pi.vendor_invoice_number = ?
+                AND (pi.payment_variable_symbol = ? OR pi.varsymbol = ? OR pi.vendor_invoice_number = ?
+                        OR (pi.payment_variable_symbol REGEXP '[1-9]'
+                            AND CAST(REGEXP_REPLACE(pi.payment_variable_symbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED))
                      OR (pi.varsymbol REGEXP '[1-9]' AND CAST(REGEXP_REPLACE(pi.varsymbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED))
                      OR (pi.vendor_invoice_number REGEXP '[1-9]' AND CAST(REGEXP_REPLACE(pi.vendor_invoice_number, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED)))"
         );
-        $stmt->execute([$vs, $vs, $supplierId, $vs, $vs, $digits, $digits]);
+        $stmt->execute([$vs, $vs, $vs, $supplierId, $vs, $vs, $vs, $digits, $digits, $digits]);
         $matches = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if ((string) $row['currency'] !== self::LOCAL_CURRENCY) continue;
