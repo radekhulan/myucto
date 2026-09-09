@@ -176,8 +176,12 @@ v uživatelském rozhraní se nenabízí ke stažení.
 
 Výpočet navazuje na poslední předchozí GPC nebo PDF se známým konečným
 zůstatkem. Přičte příjmy a odečte výdaje, včetně evidovaných pohybů mezi
-výchozím výpisem a začátkem měsíce. Bez výchozího zůstatku je GPC export
-zablokovaný; nahraj předchozí bankovní výpis. Nula se automaticky nedoplňuje.
+výchozím výpisem a začátkem měsíce. Pokud u API účtu není žádný známý
+počáteční ani konečný zůstatek, výpočet začíná od nuly a zahrne všechny
+evidované pohyby účtu v dané měně až do data výpisu. Pohyby před začátkem
+měsíce tvoří jeho počáteční zůstatek. Tento výchozí předpoklad odpovídá
+novému účtu s nulovým zůstatkem; u účtu se starší historií nahraj předchozí
+bankovní výpis. Známý zůstatek se nulou nenahrazuje.
 
 Zůstatek je označený jako **vypočtený** a předpokládá úplnou evidenci pohybů.
 Po nahrání originálního bankovního výpisu ke stejnému koncovému dni se

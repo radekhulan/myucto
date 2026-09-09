@@ -285,6 +285,36 @@ final class StatementPdfAttachTest extends TestCase
         self::assertNull($pdo->query('SELECT curr_balance FROM bank_statements WHERE id = ' . $apiId)->fetchColumn());
     }
 
+    public function testApiWithoutAnchorStartsAtZeroAndCarriesAcrossMonths(): void
+    {
+        $otherCurrency = $this->insertGpcStatement([], account: '1000000005', date: '2099-06-30');
+        $this->db->pdo()->prepare("UPDATE bank_statements SET currency='EUR', curr_balance=500 WHERE id=?")->execute([$otherCurrency]);
+        $july = $this->insertGpcStatement([['2099-07-02', 10], ['2099-07-03', -3]], account: '1000000005');
+        $august = $this->insertGpcStatement([['2099-08-02', -2]], account: '1000000005', date: '2099-08-31');
+        $this->db->pdo()->prepare("UPDATE bank_statements SET source='bank_api' WHERE id IN (?, ?)")->execute([$july, $august]);
+        $service = new \MyInvoice\Service\Bank\StatementBalanceService($this->db);
+        $batch = $service->summaries($this->supplierId, [$july, $august]);
+        self::assertSame('calculated', $batch[$july]['status']);
+        self::assertEquals(0, $batch[$july]['opening']);
+        self::assertEquals(7, $batch[$july]['closing']);
+        self::assertEquals(7, $batch[$august]['opening']);
+        self::assertEquals(5, $batch[$august]['closing']);
+        self::assertSame(1, $batch[$august]['transaction_count']);
+        self::assertNull($batch[$august]['confirmed_closing']);
+        self::assertSame($batch[$august], $service->summary($this->supplierId, $august));
+        self::assertSame($batch[$august], $service->summaries($this->supplierId, [$august])[$august]);
+    }
+
+    public function testEmptyApiWithoutAnchorHasZeroBalance(): void
+    {
+        $id = $this->insertGpcStatement([], account: '1000000005');
+        $this->db->pdo()->prepare("UPDATE bank_statements SET source='bank_api' WHERE id=?")->execute([$id]);
+        $result = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($this->supplierId, $id);
+        self::assertSame('calculated', $result['status']);
+        self::assertEquals(0, $result['opening']);
+        self::assertEquals(0, $result['closing']);
+    }
+
     public function testMonthlyBalanceWithoutAnchorDoesNotInventZero(): void
     {
         $id = $this->insertGpcStatement([['2099-07-02', 10]]);

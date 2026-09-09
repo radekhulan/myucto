@@ -346,6 +346,26 @@ final class StatementAccountResolutionTest extends TestCase
         self::assertArrayNotHasKey('transactions', $items[$apiId]['balance_calculation']);
     }
 
+    public function testApiWithoutInitialBalanceUsesMovementsInListAndAccountBalances(): void
+    {
+        $account = '1000000005';
+        $currencyId = $this->registerCurrency('CZK', $account, '2250');
+        $id = $this->insertStatement('bank_api', $account, '2250', '2099-07-15', 0.0, 'zero-start-api');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE bank_statements SET curr_balance = NULL WHERE id = ?')->execute([$id]);
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-15', 25, 'CZK')")->execute([$id]);
+        $request = $this->mockRequest($this->supplierId, 'admin', [], [], ['filter' => ['year' => 2099, 'account' => $account]]);
+        $balances = json_decode((string) $this->action->accountBalances($request, new Response())->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $accounts = array_column($balances['accounts'], null, 'id');
+        self::assertSame(25.0, (float) $accounts[$currencyId]['current_balance']);
+        $list = json_decode((string) $this->action->list($request, new Response())->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $items = array_column($list['items'], null, 'id');
+        self::assertSame('calculated', $items[$id]['balance_calculation']['status']);
+        self::assertSame(0.0, (float) $items[$id]['balance_calculation']['opening']);
+        self::assertSame(25.0, (float) $items[$id]['balance_calculation']['closing']);
+        self::assertNull($pdo->query('SELECT curr_balance FROM bank_statements WHERE id = ' . $id)->fetchColumn());
+    }
+
     public function testApiBalanceIsAuthoritativeOnlyWhenProvided(): void
     {
         $account = '1000000005';

@@ -2856,6 +2856,8 @@ paths:
         původní výpis pohybu.
         U bank_api vrací balance_calculation stejný přepočet zůstatku jako detail,
         včetně stavu a odkazu na dostupný originální GPC.
+        Pokud účet v dané měně nemá známý počáteční ani konečný zůstatek,
+        výpočet vychází z nuly a zahrnuje i evidované pohyby před daným měsícem.
         Úplný GPC pro stejný účet a měsíc přebírá tentýž měsíční řádek:
         ID se zachová, source se změní na gpc a soubor lze stáhnout.
         Neúplný GPC již evidované pohyby neodstraňuje.
@@ -21958,7 +21960,7 @@ components:
         curr_balance: { type: [number, "null"], format: float }
         balance_calculation:
           type: [object, "null"]
-          description: Read-only přepočet měsíční evidence z předchozího bankovního zůstatku. Nikdy nepřepisuje originální zůstatky ani účetní zápisy.
+          description: Read-only přepočet měsíční evidence z předchozího bankovního zůstatku. U bank_api bez známého počátečního ani konečného zůstatku vychází z nuly a všech evidovaných pohybů účtu v dané měně do data výpisu; stav je calculated a anchor_date zůstává null. Nikdy nepřepisuje originální zůstatky ani účetní zápisy.
           properties:
             status: { type: string, enum: [calculated, confirmed, missing_anchor, mismatch, unavailable] }
             account_number: { type: string }

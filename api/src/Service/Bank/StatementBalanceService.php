@@ -118,7 +118,7 @@ final class StatementBalanceService
             if ($date >= $from) break;
             if (in_array($row['source'], ['gpc', 'pdf'], true) && $row['curr_balance'] !== null) $anchorDate = $date;
         }
-        return $anchorDate ?? date('Y-m-d', strtotime($from . ' -1 day'));
+        return $anchorDate ?? '1000-01-01';
     }
 
     private function readSnapshot(int $supplierId, int $statementId): array
@@ -148,9 +148,11 @@ final class StatementBalanceService
         $conflict = false;
         $checkpoints = [];
         $unverifiedPdf = false;
+        $hasKnownBalance = false;
         foreach ($statements as $row) {
             $date = substr($row['statement_date'], 0, 10);
             if ($date > $to) continue;
+            if ($row['curr_balance'] !== null || $row['prev_balance'] !== null) $hasKnownBalance = true;
             if ($row['source'] === 'bank_api' && $row['has_pdf'] && $date >= $from) $unverifiedPdf = true;
             if (!in_array($row['source'], ['gpc', 'pdf'], true) || $row['curr_balance'] === null) continue;
             $balance = self::cents($row['curr_balance']);
@@ -185,7 +187,7 @@ final class StatementBalanceService
             $tx->execute([$after, $to]);
             $preloadedTransactions = $tx->fetchAll(PDO::FETCH_ASSOC);
         }
-        $opening = $anchor;
+        $opening = $anchor ?? ($selected['source'] === 'bank_api' && !$hasKnownBalance ? 0 : null);
         $credit = 0;
         $debit = 0;
         $transactions = [];
