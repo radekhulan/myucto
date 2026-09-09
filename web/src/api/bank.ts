@@ -80,6 +80,7 @@ export interface BankTransaction {
   matched_vendor_name?: string | null
   /** Seznam vystavených faktur uhrazených touto transakcí (sloučená úhrada → víc než 1). */
   matched_invoices?: MatchedInvoice[]
+  ignore_note?: string | null
   match_status: MatchStatus
   matched_at: string | null
   /** Datum pohybu nemá otevřené účetní období nebo spadá do účetního zámku. */
@@ -447,8 +448,8 @@ export const bankApi = {
     api.post<{ rejected: true }>(
       `/bank-match-suggestions/${id}/reject`, reason ? { reason } : {},
     ).then(r => r.data),
-  ignore: (txId: number) =>
-    api.post<{ ignored: true }>(`/bank-transactions/${txId}/ignore`, {}).then(r => r.data),
+  ignore: (txId: number, note: string | null = null) =>
+    api.post<{ ignored: true; ignore_note: string | null }>(`/bank-transactions/${txId}/ignore`, { note }).then(r => r.data),
   unmatch: (txId: number) =>
     api.post<{ unmatched: true }>(`/bank-transactions/${txId}/unmatch`, {}).then(r => r.data),
   createPurchaseInvoice: (txId: number, vendorId: number) =>

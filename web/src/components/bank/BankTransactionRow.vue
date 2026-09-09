@@ -16,6 +16,7 @@ import MatchSuggestionPanel from './MatchSuggestionPanel.vue'
 import WhyChip from '@/components/automation/WhyChip.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
+import { BTN_ICON_SM_BASE, OUTLINE, ICONS } from '@/components/ui/buttonStyles'
 import type { BankTransactionActions } from '@/composables/useBankTransactionActions'
 
 /** Náš zdrojový účet (jen scope='all' u „Všechny pohyby" — viz UnpostedBankTransaction). */
@@ -185,7 +186,7 @@ function matchActions(tx: BankTransaction): RowAction[] {
       show: canMatch && st === 'unmatched',
     },
     {
-      key: 'unmatch', label: t('bank.unmatch'), icon: 'uturn', variant: 'neutral',
+      key: 'unmatch', label: t(tx.match_status === 'ignored' ? 'bank.unignore' : 'bank.unmatch'), icon: 'uturn', variant: 'neutral',
       run: () => unmatchTx(tx),
       show: canMatch && ['auto_exact', 'auto_partial', 'manual', 'ignored'].includes(st),
     },
@@ -238,6 +239,7 @@ function candidateReject() {
       <td class="px-3 py-2 text-xs">
         <div class="font-mono text-neutral-600">{{ tx.counterparty_account }}<span v-if="tx.counterparty_bank">/{{ tx.counterparty_bank }}</span></div>
         <div v-if="tx.counterparty_name" class="text-neutral-600">{{ tx.counterparty_name }}</div>
+        <div v-if="tx.match_status === 'ignored' && tx.ignore_note" class="text-neutral-600 whitespace-pre-wrap break-words max-w-xs">{{ t('bank.ignore_note_label') }}: {{ tx.ignore_note }}</div>
         <div v-if="tx.description" class="text-neutral-500 truncate max-w-xs">{{ tx.description }}</div>
       </td>
       <td class="px-3 py-2 text-xs">
@@ -292,6 +294,10 @@ function candidateReject() {
             :tx="tx" :currency="currency()"
             @changed="emit('changed')" @posted="onPosted" />
           <RowActionsMenu :actions="matchActions(tx)" :inline-count="0" />
+          <button type="button" @click="actions.textDetail.value = tx" :title="t('bank.show_transaction_text')" :aria-label="t('bank.show_transaction_text')"
+            :class="[BTN_ICON_SM_BASE, OUTLINE.primary]">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+          </button>
         </div>
       </td>
     </tr>
@@ -358,7 +364,8 @@ function candidateReject() {
     <div class="text-xs">
       <div class="font-mono text-neutral-600 truncate">{{ tx.counterparty_account }}<span v-if="tx.counterparty_bank">/{{ tx.counterparty_bank }}</span></div>
       <div v-if="tx.counterparty_name" class="text-neutral-600 truncate">{{ tx.counterparty_name }}</div>
-      <div v-if="tx.description" class="text-neutral-500 truncate">{{ tx.description }}</div>
+      <div v-if="tx.match_status === 'ignored' && tx.ignore_note" class="text-neutral-600 whitespace-pre-wrap break-words max-w-xs">{{ t('bank.ignore_note_label') }}: {{ tx.ignore_note }}</div>
+        <div v-if="tx.description" class="text-neutral-500 truncate">{{ tx.description }}</div>
     </div>
     <div v-if="(tx.matched_invoices?.length ?? 0) > 1" class="text-xs">
       <RouterLink v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :to="`/invoices/${mi.invoice_id}`"
@@ -404,6 +411,10 @@ function candidateReject() {
         :tx="tx" :currency="currency()"
         @changed="emit('changed')" @posted="onPosted" />
       <RowActionsMenu :actions="matchActions(tx)" :inline-count="1" />
+          <button type="button" @click="actions.textDetail.value = tx" :title="t('bank.show_transaction_text')" :aria-label="t('bank.show_transaction_text')"
+            :class="[BTN_ICON_SM_BASE, OUTLINE.primary]">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+          </button>
     </div>
   </div>
   <Teleport to="body">

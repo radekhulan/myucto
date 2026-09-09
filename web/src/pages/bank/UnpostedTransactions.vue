@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
+import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
 import BankMatchModal from '@/components/bank/BankMatchModal.vue'
 import BankCreatePurchaseModal from '@/components/bank/BankCreatePurchaseModal.vue'
 import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
@@ -21,6 +22,7 @@ const page = ref(1)
 const perPage = ref(50)
 const total = ref(0)
 const loading = ref(false)
+let silentPageChange = false
 const years = ref<number[]>([])
 const year = ref<number | null>(null)
 const search = ref('')
@@ -34,7 +36,7 @@ function accountLabel(a: BankAccountOption): string {
 // Sdílená akční logika nad transakcí (match/ignore/unmatch/create/request-doc/…) —
 // stejná komponenta i logika jako detail výpisu (BankTransactionRow.vue, #52).
 // reload = changed() (přepočítá i county v záložkách bank sekce).
-const bankActions = useBankTransactionActions({ reload: () => changed() })
+const bankActions = useBankTransactionActions({ reload: () => changed(), refresh: () => changed(true) })
 const colspan = computed(() => props.scope === 'all' ? 8 : 7)
 
 // Match v2 („⏳ návrh párování") je párovaný per-výpis na BE — „Všechny pohyby"
@@ -55,8 +57,8 @@ async function loadMatchSuggestions(txs: UnpostedBankTransaction[]) {
   bankActions.setSuggestions(map)
 }
 
-async function load() {
-  loading.value = true
+async function load(silent = false) {
+  if (!silent) loading.value = true
   try {
     const result = await bankPostingApi.listUnposted({
       page: page.value,
@@ -67,6 +69,7 @@ async function load() {
       ...(accountFilter.value ? { account: accountFilter.value } : {}),
     })
     if (result.items.length === 0 && result.total > 0 && page.value > 1) {
+      silentPageChange = silent
       page.value = Math.max(1, Math.ceil(result.total / result.per_page))
       return
     }
@@ -81,9 +84,9 @@ async function load() {
   }
 }
 
-async function changed() {
+async function changed(silent = false) {
   emit('counts-changed')
-  await load()
+  await load(silent)
 }
 
 // Změna filtru vždy zpět na první stranu — jinak by uživatel skončil na prázdné stránce.
@@ -100,7 +103,11 @@ watch(year, resetAndLoad)
 watch(accountFilter, resetAndLoad)
 
 onMounted(load)
-watch(page, load)
+watch(page, () => {
+  const silent = silentPageChange
+  silentPageChange = false
+  void load(silent)
+})
 </script>
 
 <template>
@@ -163,6 +170,7 @@ watch(page, load)
     </div>
     <PaginationBar :page="page" :per-page="perPage" :total="total" @update:page="page = $event" />
 
+    <BankTransactionDialogs :actions="bankActions" fallback-currency="CZK" />
     <BankMatchModal :actions="bankActions" fallback-currency="CZK" />
     <BankCreatePurchaseModal :actions="bankActions" />
     <BankRequestDocModal :actions="bankActions" />

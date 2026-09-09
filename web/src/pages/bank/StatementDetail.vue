@@ -18,6 +18,7 @@ import { formatAccountNumber } from '@/utils/bankAccount'
 import { statementClosingBalance, statementGpcUrl, statementGpcTitle } from '@/utils/bankStatement'
 import RuleHintBanner from '@/components/bank/RuleHintBanner.vue'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
+import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
 import BankMatchModal from '@/components/bank/BankMatchModal.vue'
 import BankCreatePurchaseModal from '@/components/bank/BankCreatePurchaseModal.vue'
 import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
@@ -53,7 +54,7 @@ function closeHint() { hintTx.value = null; hintData.value = null }
 // Sdílená akční logika nad transakcí (match/ignore/unmatch/create/request-doc/…) —
 // extrahováno do BankTransactionRow.vue + useBankTransactionActions, ať ji sdílí
 // i „Všechny pohyby" (UnpostedTransactions.vue), #52.
-const bankActions = useBankTransactionActions({ reload: () => load() })
+const bankActions = useBankTransactionActions({ reload: () => load(), refresh: () => refreshTransactions() })
 
 // E-mailová avíza jsou měsíční agregát (statement_date = 1. den měsíce) → název měsíce.
 function monthLabel(dateStr: string): string {
@@ -137,6 +138,25 @@ async function load(reset = true) {
     loadingMore.value = false
   }
 }
+async function refreshTransactions() {
+  const statementId = Number(route.params.id)
+  const status = statusFilter.value
+  const posting = postingFilter.value
+  const params = { status: status ? status as MatchStatus : undefined, posting_status: posting || undefined }
+  const [first, suggestions] = await Promise.all([
+    bankApi.get(statementId, { ...params, page: 1 }), bankApi.matchSuggestions(statementId),
+  ])
+  const lastPage = Math.max(1, Math.min(txPage.value, first.transactions_meta.pages))
+  const remaining = await Promise.all(Array.from({ length: lastPage - 1 }, (_, index) =>
+    bankApi.get(statementId, { ...params, page: index + 2 })))
+  if (statementId !== Number(route.params.id) || status !== statusFilter.value || posting !== postingFilter.value) return
+  statement.value = { ...first, transactions: [first, ...remaining].flatMap(result => result.transactions) }
+  txPage.value = lastPage
+  txTotal.value = first.transactions_meta.total
+  txPages.value = first.transactions_meta.pages
+  bankActions.setSuggestions(new Map(suggestions.suggestions.filter(s => s.status === 'pending').map(s => [s.bank_transaction_id, s])))
+}
+
 onMounted(() => { void load(true).then(highlightLinkedTx) })
 
 /*
@@ -502,6 +522,7 @@ const statementActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
+    <BankTransactionDialogs :actions="bankActions" :fallback-currency="statement.currency" :own-account="statement.account_number" :own-bank-code="statement.bank_code" />
     <BankMatchModal :actions="bankActions" :fallback-currency="statement.currency" />
     <BankCreatePurchaseModal :actions="bankActions" />
     <BankRequestDocModal :actions="bankActions" />
