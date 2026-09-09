@@ -69,6 +69,13 @@ final class DpfoReturnCalculator
         // položek). Sem se dostane jen to, co volající v $data skutečně předal.
         $s7IncreaseItems = is_array($data['s7_increase_items'] ?? null) ? array_values($data['s7_increase_items']) : [];
         $s7DecreaseItems = is_array($data['s7_decrease_items'] ?? null) ? array_values($data['s7_decrease_items']) : [];
+        // Mzdy (Příloha 1, `kc_dpfmz18`) — toková veličina ze mzdové agendy. Ruční vstup
+        // má přednost, protože je to poslední slovo účetní; null (nezadáno) znamená
+        // „vezmi mzdovou agendu", ne nulu.
+        $payrollManual = $inputs['s7_payroll_gross'] ?? null;
+        $payrollGross = ($payrollManual === null || $payrollManual === '')
+            ? (isset($data['payroll_gross']) && $data['payroll_gross'] !== null ? $this->num($data['payroll_gross']) : null)
+            : max(0.0, $this->num($payrollManual));
         $s7BeforeAdjustments = $activityCalc !== null
             ? $s7Income - $s7Expenses
             : (array_key_exists('s7_base', $data)
@@ -437,6 +444,10 @@ final class DpfoReturnCalculator
                 // $s7IncreaseItems výše a DpfoXmlBuilder::buildAdjustmentRows.
                 'increase_items' => $s7IncreaseItems,
                 'decrease_items' => $s7DecreaseItems,
+                // Mzdy (Příloha 1, `kc_dpfmz18`) — přednost má ruční vstup, jinak úhrn
+                // ze mzdové agendy ({@see DpfoReturnDataProvider::payrollGross}).
+                // null = nevyplňovat; nula je platná odpověď „nic se nezúčtovalo".
+                'payroll_gross' => $payrollGross,
                 'closing' => $data['closing'] ?? null,
             ],
             // Hrubé §9/§10 podklady pro Přílohu č. 2 (VetaV/VetaJ, {@see DpfoXmlBuilder}) —
