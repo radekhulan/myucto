@@ -9,6 +9,7 @@ cfg.local.php
 cfg.docker.php
 .env
 private/
+docs/
 storage/
 api/vendor/
 api/vendor.prod/
