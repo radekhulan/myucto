@@ -38,7 +38,7 @@ type AnchorOption = { value: number; label: string; secondary?: string }
  * request-doc) — StatementDetail typicky reloadne celý výpis, UnpostedTransactions
  * jen aktuální stránku (+ přepočet countů v záložkách).
  */
-export function useBankTransactionActions(opts: { reload: () => Promise<void> | void }) {
+export function useBankTransactionActions(opts: { reload: () => Promise<void> | void; refresh?: () => Promise<void> | void }) {
   const { t } = useI18n()
   const toast = useToast()
   const router = useRouter()
@@ -362,19 +362,79 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   // --- ignorovat / rozpárovat ---
-  async function ignoreTx(tx: BankTransaction) {
-    if (!confirm(t('bank.ignore_confirm'))) return
-    await bankApi.ignore(tx.id)
-    await opts.reload()
+  const textDetail = ref<BankTransaction | null>(null)
+  async function refreshAfterMutation() {
+    try {
+      await (opts.refresh ?? opts.reload)()
+    } catch (e) {
+      toast.error(apiErrorMessage(e))
+    }
   }
 
-  async function unmatchTx(tx: BankTransaction) {
-    if (!confirm(t('bank.unmatch_confirm'))) return
+  const ignoreTarget = ref<BankTransaction | null>(null)
+  const ignoreNote = ref('')
+  const ignoring = ref(false)
+  const ignoreError = ref('')
+
+  function ignoreTx(tx: BankTransaction) {
+    ignoreTarget.value = tx
+    ignoreNote.value = tx.ignore_note ?? ''
+    ignoreError.value = ''
+  }
+
+  function closeIgnore() {
+    if (!ignoring.value) ignoreTarget.value = null
+  }
+
+  async function confirmIgnore() {
+    const tx = ignoreTarget.value
+    if (!tx || ignoring.value) return
+    ignoring.value = true
+    ignoreError.value = ''
+    try {
+      const result = await bankApi.ignore(tx.id, ignoreNote.value.trim() || null)
+      tx.match_status = 'ignored'
+      tx.ignore_note = result.ignore_note
+      ignoreTarget.value = null
+      await refreshAfterMutation()
+    } catch (e) {
+      ignoreError.value = apiErrorMessage(e, t('bank.ignore_failed'))
+    } finally {
+      ignoring.value = false
+    }
+  }
+
+  const unmatchTarget = ref<BankTransaction | null>(null)
+  const unmatching = ref(false)
+  const unmatchError = ref('')
+
+  function unmatchTx(tx: BankTransaction) {
+    unmatchTarget.value = tx
+    unmatchError.value = ''
+  }
+
+  function closeUnmatch() {
+    if (!unmatching.value) unmatchTarget.value = null
+  }
+
+  async function confirmUnmatch() {
+    const tx = unmatchTarget.value
+    if (!tx || unmatching.value) return
+    unmatching.value = true
+    unmatchError.value = ''
     try {
       await bankApi.unmatch(tx.id)
-      await opts.reload()
-    } catch (e: any) {
-      toast.error(apiErrorMessage(e, t('bank.unmatch_failed')))
+      Object.assign(tx, {
+        match_status: 'unmatched', ignore_note: null, matched_invoice_id: null, matched_purchase_invoice_id: null,
+        matched_varsymbol: null, matched_invoice_amount: null, matched_client_name: null,
+        matched_purchase_ref: null, matched_vendor_name: null, matched_invoices: [], matched_at: null,
+      })
+      unmatchTarget.value = null
+      await refreshAfterMutation()
+    } catch (e) {
+      unmatchError.value = apiErrorMessage(e, t('bank.unmatch_failed'))
+    } finally {
+      unmatching.value = false
     }
   }
 
@@ -404,7 +464,8 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     // vyžádání dokladu
     requestDocTx, requestDocDeadline, requestingDoc, openRequestDoc, submitRequestDoc, closeRequestDoc,
     // ignorovat / rozpárovat
-    ignoreTx, unmatchTx,
+    textDetail, ignoreTx, ignoreTarget, ignoreNote, ignoring, ignoreError, closeIgnore, confirmIgnore,
+    unmatchTx, unmatchTarget, unmatching, unmatchError, closeUnmatch, confirmUnmatch,
   }
 }
 

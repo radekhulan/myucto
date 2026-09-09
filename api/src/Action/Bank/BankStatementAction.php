@@ -3312,6 +3312,7 @@ final class BankStatementAction
                 "UPDATE bank_transactions
                     SET matched_invoice_id = NULL,
                         match_status       = 'unmatched',
+                        ignore_note        = NULL,
                         matched_at         = NULL,
                         matched_by         = NULL
                   WHERE id = ?"
@@ -3411,6 +3412,14 @@ final class BankStatementAction
             return Json::error($response, 'not_found', 'Transakce nenalezena.', 404);
         }
 
+        $body = (array) $request->getParsedBody();
+        $note = $body['note'] ?? null;
+        if ($note !== null && (!is_string($note) || mb_strlen($note) > 1000)) {
+            return Json::error($response, 'validation_error', 'Poznámka musí být text o nejvýše 1000 znacích.', 422);
+        }
+        $note = $note !== null ? trim($note) : null;
+        $note = $note === '' ? null : $note;
+
         $pdo = $this->db->pdo();
         // Načti previous state pro audit log (před UPDATE)
         $prev = $pdo->prepare(
@@ -3434,7 +3443,7 @@ final class BankStatementAction
                     return Json::error($response, $pe->errorCode, $pe->getMessage(), $pe->httpStatus);
                 }
             }
-            $pdo->prepare("UPDATE bank_transactions SET match_status = 'ignored' WHERE id = ?")->execute([$txId]);
+            $pdo->prepare("UPDATE bank_transactions SET match_status = 'ignored', ignore_note = ? WHERE id = ?")->execute([$note, $txId]);
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -3460,11 +3469,12 @@ final class BankStatementAction
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.tx_ignore', $userId ?: null, 'bank_transaction', $txId, [
+            'note'                => $note,
             'previous_status'     => $previousStatus,
             'previous_invoice_id' => $previousInvoiceId,
         ], $ip, $request->getHeaderLine('User-Agent'));
 
-        return Json::ok($response, ['ignored' => true]);
+        return Json::ok($response, ['ignored' => true, 'ignore_note' => $note]);
     }
 
     /**

@@ -757,7 +757,7 @@ final class BankPostingSuggestionRepository
                     COALESCE(bt.currency, bs.currency, 'CZK') AS currency,
                     bt.variable_symbol, bt.constant_symbol, bt.specific_symbol,
                     bt.counterparty_account, bt.counterparty_bank, bt.counterparty_name,
-                    bt.description, bt.bank_ref, bt.match_status, bt.matched_invoice_id, bt.matched_at,
+                    bt.description, bt.bank_ref, bt.match_status, bt.ignore_note, bt.matched_invoice_id, bt.matched_at,
                     bs.account_number,
                     COALESCE(
                       (SELECT cur.bank_code FROM currencies cur
@@ -864,6 +864,7 @@ final class BankPostingSuggestionRepository
                 'matched_vendor_name' => $row['matched_vendor_name'] === null ? null : (string) $row['matched_vendor_name'],
                 'matched_invoices' => $matchedByTx[(int) $row['id']] ?? [],
                 'match_status' => (string) $row['match_status'],
+                'ignore_note' => $row['ignore_note'] === null ? null : (string) $row['ignore_note'],
                 'matched_at' => $row['matched_at'] === null ? null : (string) $row['matched_at'],
                 'account_number' => (string) $row['account_number'],
                 'bank_code' => $row['bank_code'] === null ? null : (string) $row['bank_code'],
