@@ -10,6 +10,8 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import { catalogJobsApi, type CatalogJob } from '@/api/catalogJobs'
+import CatalogJobProgress from '@/components/stock/CatalogJobProgress.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -89,22 +91,33 @@ async function createTake() {
 const take = ref<StockTake | null>(null)
 const wizLoading = ref(false)
 const starting = ref(false)
+const cancellingPreparation = ref(false)
+const preparationJob = computed<CatalogJob | null>(() => take.value?.preparation_job ?? null)
+const preparing = computed(() => take.value?.status === 'preparing')
+const preparationFailed = computed(() => ['failed', 'cancelled'].includes(preparationJob.value?.status ?? ''))
+const preparationRunning = computed(() => preparing.value && !preparationFailed.value)
+let preparationTimer: ReturnType<typeof setTimeout> | undefined
+let disposed = false
 const closing = ref(false)
 const savingLines = ref(false)
 
 const step = computed<'setup' | 'counting' | 'recap'>(() => {
   if (!take.value) return 'setup'
-  if (take.value.status === 'draft') return 'setup'
+  if (take.value.status === 'draft' || preparing.value) return 'setup'
   if (take.value.status === 'counting') return 'counting'
   return 'recap'
 })
 
-async function loadTake() {
+async function loadTake(silent = false) {
   if (!id.value) return
-  wizLoading.value = true
-  try { take.value = await stockApi.getTake(id.value) } catch (e: any) {
+  const requestedId = id.value
+  if (!silent) wizLoading.value = true
+  try {
+    const result = await stockApi.getTake(requestedId)
+    if (!disposed && requestedId === id.value) take.value = result
+  } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
-  } finally { wizLoading.value = false }
+  } finally { if (!silent) wizLoading.value = false }
 }
 
 async function startCounting() {
@@ -115,6 +128,21 @@ async function startCounting() {
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally { starting.value = false }
+}
+
+async function pollPreparation() {
+  if (!id.value || !preparationRunning.value || disposed) return
+  await loadTake(true)
+  if (preparationRunning.value && !disposed) preparationTimer = setTimeout(() => { void pollPreparation() }, 1200)
+}
+async function cancelPreparation() {
+  if (!id.value) return
+  cancellingPreparation.value = true
+  try { await catalogJobsApi.cancelTakePreparation(id.value); await loadTake() } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) } finally { cancellingPreparation.value = false }
+}
+async function retryPreparation() {
+  if (!id.value) return
+  try { await catalogJobsApi.retryTakePreparation(id.value); await loadTake() } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
 }
 
 function takeAllExpected() {
@@ -158,6 +186,7 @@ onMounted(async () => {
   if (id.value) await loadTake()
   else await loadList()
 })
+onBeforeUnmount(() => { disposed = true; if (preparationTimer) clearTimeout(preparationTimer) })
 
 // TakeWizard slouží pro /stock/takes i /stock/takes/:id — Vue Router recykluje stejnou
 // instanci, takže onMounted se při router.push (po vytvoření / klik na řádek / zpět na seznam)
@@ -171,12 +200,14 @@ watch(id, async (newId, oldId) => {
     await loadList()
   }
 })
+watch(preparationRunning, (value) => { if (preparationTimer) clearTimeout(preparationTimer); if (value) void pollPreparation() })
 
 function warehouseName(wid: number): string {
   return warehouses.value.find(w => w.id === wid)?.name ?? `#${wid}`
 }
 const STATUS_BADGE: Record<string, string> = {
   draft: 'bg-neutral-100 text-neutral-600',
+  preparing: 'bg-primary-50 text-primary-700',
   counting: 'bg-warning-50 text-warning-600',
   closed: 'bg-success-50 text-success-600',
 }
@@ -297,7 +328,15 @@ const STATUS_BADGE: Record<string, string> = {
         </div>
 
         <!-- Krok 1: založení -->
-        <div v-if="step === 'setup'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
+        <div v-if="preparing" class="bg-surface border border-primary-200 rounded-lg shadow-sm p-5">
+          <h2 class="font-semibold">{{ t(preparationFailed ? 'stock.takes.preparation_failed' : 'stock.takes.preparation_running') }}</h2>
+          <CatalogJobProgress class="mt-3" :job="preparationJob" :cancelling="cancellingPreparation" :can-cancel="auth.canWrite('stock.take')" @cancel="cancelPreparation" />
+          <div v-if="preparationFailed && auth.canWrite('stock.take')" class="mt-3 flex flex-wrap gap-2">
+            <button type="button" :class="btnOutline('primary')" @click="retryPreparation"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8 8 0 0 0 4.582 9M4.582 9H9m11 11v-5h-.581A8 8 0 0 1 4.58 13H15" /></svg>{{ t('common.retry') }}</button>
+            <button type="button" :disabled="cancellingPreparation" :class="btnOutline('danger')" @click="cancelPreparation"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>{{ cancellingPreparation ? t('eshop.jobs.job_cancelling') : t('common.cancel') }}</button>
+          </div>
+        </div>
+        <div v-else-if="step === 'setup'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
           <p class="text-sm text-neutral-600 mb-4">{{ t('stock.takes.setup_hint') }}</p>
           <button v-if="auth.canWrite('stock.take')" @click="startCounting" :disabled="starting" :class="btnFilled('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>

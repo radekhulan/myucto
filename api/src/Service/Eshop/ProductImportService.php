@@ -22,6 +22,8 @@ final class ProductImportService extends AbstractCodebookImportService
         private readonly StockItemRepository $items,
         private readonly ManufacturerRepository $manufacturers,
         private readonly Connection $db,
+        private readonly \MyInvoice\Service\Eshop\Pricing\PriceWriteService $priceWriter,
+        private readonly \MyInvoice\Repository\StockItemPriceRepository $prices,
     ) {}
 
     public static function columns(): array
@@ -182,6 +184,9 @@ final class ProductImportService extends AbstractCodebookImportService
                 $writers[] = function () use ($supplierId, $base, $eshop): void {
                     $id = $this->items->insert($supplierId, $base);
                     $this->items->updateEshopFields($supplierId, $id, $eshop);
+                    if ($base['sale_price_without_vat'] !== null) {
+                        $this->writePrice($supplierId, $id, $base['sale_price_without_vat']);
+                    }
                 };
                 $row['status'] = 'create';
                 $reportRows[$line] = $row;
@@ -215,9 +220,13 @@ final class ProductImportService extends AbstractCodebookImportService
             $this->diffStr($changes, $base, 'name', $has('name') ? $name : null, true);
             $this->diffStr($changes, $base, 'unit', ($has('unit')) ? $unit : null, true);
             $this->diffNullableStr($changes, $base, 'ean', $has('ean') ? $ean : null);
-            if ($has('price')) {
-                $newPrice = $price; // null když prázdná buňka
-                if ((string) ($base['sale_price_without_vat'] ?? '') !== (string) ($newPrice ?? '')) {
+            if ($has('price') && $price !== null) {
+                $newPrice = $price;
+                $rule = $this->prices->findByCurrency($supplierId, (int) $existing['id'], 'CZK');
+                if ((string) ($base['sale_price_without_vat'] ?? '') !== (string) ($newPrice ?? '')
+                    || $rule === null || $rule['price_mode'] !== 'fixed'
+                    || $rule['fixed_price'] !== $newPrice || $rule['rounding'] !== 'none'
+                    || $rule['is_manual_override']) {
                     $changes['price'] = ['from' => $base['sale_price_without_vat'], 'to' => $newPrice];
                     $base['sale_price_without_vat'] = $newPrice;
                 }
@@ -239,9 +248,12 @@ final class ProductImportService extends AbstractCodebookImportService
             }
 
             $id = (int) $existing['id'];
-            $writers[] = function () use ($supplierId, $id, $base, $eshop): void {
+            $writers[] = function () use ($supplierId, $id, $base, $eshop, $changes): void {
                 $this->items->update($supplierId, $id, $base);
                 $this->items->updateEshopFields($supplierId, $id, $eshop);
+                if (isset($changes['price'])) {
+                    $this->writePrice($supplierId, $id, $base['sale_price_without_vat']);
+                }
             };
             $row['status'] = 'update';
             $row['changes'] = $changes;
@@ -278,7 +290,21 @@ final class ProductImportService extends AbstractCodebookImportService
         if (strlen(explode('.', $s, 2)[0]) > 10) {
             return null;
         }
-        return $s;
+        $rounded = \MyInvoice\Service\Eshop\Pricing\PriceRounding::apply($s, 'none');
+        return strlen(explode('.', $rounded, 2)[0]) > 10 ? null : $rounded;
+    }
+
+    private function writePrice(int $supplierId, int $itemId, ?string $price): void
+    {
+        if ($price === null) {
+            $this->priceWriter->delete($supplierId, $itemId, 'CZK');
+            return;
+        }
+        $this->priceWriter->save($supplierId, $itemId, [[
+            'currency_code' => 'CZK',
+            'price_mode' => 'fixed',
+            'fixed_price' => $price,
+        ]]);
     }
 
     /**

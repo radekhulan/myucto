@@ -353,6 +353,7 @@ final class VendorOfferTest extends StockTestCase
             'price_valid_to' => '2099-12-31', 'data_source' => 'feed', 'is_active' => false,
         ])['body']['id'];
         self::assertGreaterThan(0, $id);
+        $versionBefore = $this->itemsRepo->find($sid, $item)['row_version'];
 
         /** @var \MyInvoice\Action\Eshop\ProductVendorAction $productVendors */
         $productVendors = $this->container->get(\MyInvoice\Action\Eshop\ProductVendorAction::class);
@@ -372,5 +373,33 @@ final class VendorOfferTest extends StockTestCase
         self::assertSame('feed', $offer['data_source']);
         self::assertFalse($offer['is_active']);
         self::assertSame('55.00', $offer['purchase_price']);
+        self::assertGreaterThan($versionBefore, $this->itemsRepo->find($sid, $item)['row_version']);
+    }
+
+    public function testMalformedProductVendorRowDoesNotDeleteExistingOffer(): void
+    {
+        $sid = $this->createSupplier();
+        $item = $this->item($sid, 'VO-MALFORMED');
+        $vendor = $this->client($sid, 'Dodavatel Malformed');
+        $this->call('create', 'POST', $sid, [], [
+            'stock_item_id' => $item,
+            'client_id' => $vendor,
+            'purchase_price' => '80.00',
+        ]);
+        $versionBefore = $this->itemsRepo->find($sid, $item)['row_version'];
+
+        $action = $this->container->get(\MyInvoice\Action\Eshop\ProductVendorAction::class);
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('PUT', '/api/eshop/products/' . $item . '/vendors')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $sid)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withParsedBody(['vendors' => ['neplatný řádek']]);
+        $response = $action->put($request, new Psr7Response(), ['id' => (string) $item]);
+
+        self::assertSame(400, $response->getStatusCode());
+        $offers = $this->vendors->listForItem($sid, $item);
+        self::assertCount(1, $offers);
+        self::assertSame('80.00', $offers[0]['purchase_price']);
+        self::assertSame($versionBefore, $this->itemsRepo->find($sid, $item)['row_version']);
     }
 }

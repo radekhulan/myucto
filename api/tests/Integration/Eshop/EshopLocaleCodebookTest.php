@@ -72,6 +72,7 @@ final class EshopLocaleCodebookTest extends StockTestCase
 
         // Jazyk z číselníku projde…
         $this->cards->update($sid, $itemId, [
+            'row_version' => 1,
             'i18n' => [['locale' => 'cs', 'name' => 'Zboží']],
         ]);
         $card = $this->cards->get($sid, $itemId);
@@ -81,6 +82,7 @@ final class EshopLocaleCodebookTest extends StockTestCase
         // …jazyk mimo číselník ne.
         try {
             $this->cards->update($sid, $itemId, [
+                'row_version' => 2,
                 'i18n' => [['locale' => 'cs', 'name' => 'Zboží'], ['locale' => 'no', 'name' => 'Vare']],
             ]);
             self::fail('Jazyk mimo číselník musí skončit chybou unknown_locale.');
@@ -103,6 +105,7 @@ final class EshopLocaleCodebookTest extends StockTestCase
         $this->locales->insert($sid, ['code' => 'sk', 'name' => 'Slovenčina']);
 
         $this->cards->update($sid, $itemId, [
+            'row_version' => 1,
             'i18n' => [['locale' => 'en', 'name' => 'Goods']],
         ]);
 

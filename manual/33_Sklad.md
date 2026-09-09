@@ -384,8 +384,10 @@ bez ohledu na zvolené datum („Na skladu už je rozpracovaná inventura.", HTT
 Nezávisle na tom je i v databázi vynucené, že na jeden sklad a den existuje nejvýš
 jeden záznam inventury vůbec.
 
-Průvodce inventurou má tři kroky (stavy `draft` → `counting` → `closed`, striktně
-jednosměrné — inventuru nejde smazat ani vrátit do předchozího kroku):
+Průvodce inventurou má tři kroky. Mezi založením a sčítáním probíhá příprava
+očekávaných stavů na pozadí (`draft` → `preparing` → `counting` → `closed`).
+Dokud příprava neskončí, nelze zadávat skutečné počty. Její průběh je vidět
+v detailu inventury; po chybě lze přípravu opakovat a běžící přípravu zrušit.
 
 1. **Založení** — inventura je ve stavu **Založena**; tlačítkem **Zahájit sčítání**
    se pořídí snapshot očekávaných stavů (množství i hodnota) **k rozhodnému datu
@@ -429,13 +431,9 @@ jednosměrné — inventuru nejde smazat ani vrátit do předchozího kroku):
 - **Stav zásob** — aktuální množství, průměrná cena a hodnota po jednotlivých
   kartách a skladech k okamžiku zobrazení; řádky pod nastaveným minimem se zvýrazní.
   Filtr jen na sklad (bez data — je to okamžitý stav).
-- **Ocenění** — stejný přehled, ale **k libovolnému historickému datu** (přepočet ze
-  skladové knihy zpětně — systém přehraje všechny zaúčtované pohyby firmy do
-  zadaného data znovu od nuly). Pokud má firma přes **50 000** zaúčtovaných/
-  stornovaných skladových řádků, přepočet k historickému datu odmítne s hláškou
-  „Příliš mnoho skladových pohybů — sestava k historickému datu se pro tak velký
-  objem generuje asynchronně." (HTTP 422) — v tom případě zvol kratší období nebo
-  aktuální den, kde se historický přepočet nepoužívá.
+- **Ocenění** poskytne přehled **k historickému datu**. Výpočet běží jako úloha
+  na pozadí a zobrazuje průběh. Hotové výsledky lze stránkovat. Opakovaný výpočet
+  využívá uložené snapshoty; změna skladových pohybů dotčené snapshoty zneplatní.
 
 Obě sestavy mají **součtový řádek** (počet položek a celková hodnota) a jdou
 exportovat do **PDF** i **XLSX**; každý export se zaznamenává do žurnálu aktivit
@@ -940,10 +938,8 @@ Tlačítko **Doplnění zásob** je v hlavičce seznamu objednávek (§ 33.11.5)
   připravené.
 - Záporný stav zásob **nejde nijak povolit** — nedostatek se musí vždy vyřešit
   příjmem/inventurou dřív, než doklad, který ho způsobuje, půjde zaúčtovat.
-- Počet skladů ani počet skladových karet není v aplikaci nijak omezen; jediný
-  reálný limit je **50 000 zaúčtovaných pohybů firmy** pro okamžitý přepočet
-  historického ocenění (§ 33.8) — nad tuto hranici je potřeba zvolit kratší
-  období.
+- Dlouhá historie pohybů se zpracovává po dávkách. Příprava inventur a ocenění
+  vyžadují běžící plánovač s úlohou `cron-catalog-worker`.
 - Skladová karta typu **Výrobek** se při uzávěrce zaúčtuje na **MD 123 / D 583**;
   při otevření roku se počáteční stav zrcadlově rozpustí.
 - Zaúčtovaný doklad se needituje — jedinou cestou zpět je **storno** (protidoklad),

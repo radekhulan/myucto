@@ -14,6 +14,7 @@ import {
   type ProductPricingBase,
   type ProductMedia,
   type ProductUpdatePayload,
+  type ProductEditorPayload,
   type ProductAttributeRow,
   type ProductPrice,
   type ProductVendor,
@@ -28,6 +29,7 @@ import {
 } from '@/api/eshop'
 import { clientsApi, type Client } from '@/api/clients'
 import { codebooksApi, type VatRate, type Unit } from '@/api/codebooks'
+import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -40,10 +42,13 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
 const pageId = useId()
 
 const isEdit = computed(() => route.params.id !== undefined && route.params.id !== 'new')
 const itemId = computed(() => (isEdit.value ? Number(route.params.id) : null))
+const canWriteEshop = computed(() => auth.canWrite('eshop.write'))
+const canSaveEditor = computed(() => auth.canWrite('stock.items.write') && (!isEdit.value || canWriteEshop.value))
 
 // ── Taby ────────────────────────────────────────────────────────────────
 type Tab = 'general' | 'languages' | 'categories' | 'parameters' | 'prices' | 'vendors' | 'attachments'
@@ -68,6 +73,8 @@ const submitting = ref(false)
 const error = ref('')
 const errors = ref<Record<string, string[]>>({})
 const skuTouched = ref(false)
+const rowVersion = ref(0)
+const editorLoaded = ref(false)
 
 // ── Základní pole (skladová karta) ──────────────────────────────────────
 const form = ref<StockItemPayload>({
@@ -237,13 +244,16 @@ function removePriceRow(idx: number) {
   prices.value.splice(idx, 1)
 }
 async function recomputePrices() {
-  if (!itemId.value) return
+  if (!itemId.value || !editorLoaded.value || !canWriteEshop.value) return
   recomputing.value = true
   try {
-    // Nejprve ulož aktuální nastavení řádků, ať přepočet vychází z editovaných hodnot.
-    await eshopApi.updatePrices(itemId.value, meaningfulPriceRows().map(pricePayloadFrom))
-    const rows = await eshopApi.recomputePrices(itemId.value)
-    prices.value = rows.map(priceRowFrom)
+    const result = await eshopApi.updatePricesVersioned(
+      itemId.value,
+      rowVersion.value,
+      meaningfulPriceRows().map(pricePayloadFrom),
+    )
+    prices.value = result.prices.map(priceRowFrom)
+    rowVersion.value = result.row_version
     toast.success(t('common.saved'))
   } catch (err: any) {
     toast.error(mapError(err))
@@ -427,6 +437,7 @@ function vendorPayloadFrom(r: VendorRow) {
 // ── Přílohy (média) ─────────────────────────────────────────────────────
 const media = ref<ProductMedia[]>([])
 const uploading = ref(false)
+const mediaSaveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 const fileInput = ref<HTMLInputElement | null>(null)
 
 function mapError(e: any): string {
@@ -494,7 +505,9 @@ async function loadCodebooks() {
 }
 
 async function loadProduct(id: number) {
+  editorLoaded.value = false
   const p = await eshopApi.getProduct(id)
+  rowVersion.value = p.row_version
   // základní pole
   form.value = {
     sku: p.sku,
@@ -548,13 +561,14 @@ async function loadProduct(id: number) {
   media.value = [...(p.media ?? [])].sort((a, b) => a.display_order - b.display_order)
   // ceny + akční ceny + dodavatelé (samostatné endpointy)
   const [pr, pp, vn] = await Promise.all([
-    eshopApi.getPrices(id).catch(() => []),
-    eshopApi.getPromoPrices(id).catch(() => []),
-    eshopApi.getVendors(id).catch(() => []),
+    eshopApi.getPrices(id),
+    eshopApi.getPromoPrices(id),
+    eshopApi.getVendors(id),
   ])
   prices.value = pr.map(priceRowFrom)
   promos.value = pp.map(promoRowFrom)
   vendors.value = vn.map(vendorRowFrom)
+  editorLoaded.value = true
 }
 
 /**
@@ -589,7 +603,7 @@ onMounted(async () => {
 })
 
 // ── Sestavení payloadů ──────────────────────────────────────────────────
-function buildProductPayload(): ProductUpdatePayload {
+function buildProductPayload(): Omit<ProductUpdatePayload, 'row_version'> {
   const attrRows: ProductAttributeRow[] = []
   for (const a of attributes.value) {
     if (a.archived) continue
@@ -647,17 +661,23 @@ function validateBeforeSubmit(): boolean {
 }
 
 async function submit() {
+  if (!canSaveEditor.value || (isEdit.value && !editorLoaded.value)) return
   error.value = ''
   errors.value = {}
   if (isEdit.value && !validateBeforeSubmit()) return
   submitting.value = true
   try {
     if (isEdit.value && itemId.value) {
-      await stockApi.updateItem(itemId.value, form.value)
-      await eshopApi.updateProduct(itemId.value, buildProductPayload())
-      await eshopApi.updatePrices(itemId.value, meaningfulPriceRows().map(pricePayloadFrom))
-      await eshopApi.updatePromoPrices(itemId.value, promos.value.map(promoPayloadFrom))
-      await eshopApi.updateVendors(itemId.value, vendors.value.map(vendorPayloadFrom))
+      const payload: ProductEditorPayload = {
+        row_version: rowVersion.value,
+        item: form.value,
+        product: buildProductPayload(),
+        prices: meaningfulPriceRows().map(pricePayloadFrom),
+        promo_prices: promos.value.map(promoPayloadFrom),
+        vendors: vendors.value.map(vendorPayloadFrom),
+      }
+      const saved = await eshopApi.saveProductEditor(itemId.value, payload)
+      rowVersion.value = saved.row_version
       toast.success(t('common.saved'))
       await loadProduct(itemId.value)
     } else {
@@ -682,13 +702,16 @@ async function submit() {
 function triggerUpload() { fileInput.value?.click() }
 async function onFilesPicked(e: Event) {
   const input = e.target as HTMLInputElement
-  if (!input.files || input.files.length === 0 || !itemId.value) return
+  if (!input.files || input.files.length === 0 || !itemId.value || !canWriteEshop.value) return
   uploading.value = true
+  mediaSaveState.value = 'saving'
   try {
     await eshopApi.uploadMedia(itemId.value, Array.from(input.files))
     media.value = (await eshopApi.listMedia(itemId.value)).sort((a, b) => a.display_order - b.display_order)
     toast.success(t('common.saved'))
+    mediaSaveState.value = 'saved'
   } catch (err: any) {
+    mediaSaveState.value = 'error'
     toast.error(mapError(err))
   } finally {
     uploading.value = false
@@ -697,39 +720,52 @@ async function onFilesPicked(e: Event) {
 }
 async function moveMedia(idx: number, dir: -1 | 1) {
   const target = idx + dir
-  if (target < 0 || target >= media.value.length || !itemId.value) return
+  if (target < 0 || target >= media.value.length || !itemId.value || !canWriteEshop.value) return
   const arr = [...media.value]
   const tmp = arr[idx]; arr[idx] = arr[target]; arr[target] = tmp
   media.value = arr
+  mediaSaveState.value = 'saving'
   try {
     await eshopApi.reorderMedia(itemId.value, arr.map(m => m.id))
+    mediaSaveState.value = 'saved'
   } catch (err: any) {
+    mediaSaveState.value = 'error'
     toast.error(mapError(err))
   }
 }
 async function setPrimaryMedia(m: ProductMedia) {
-  if (!itemId.value) return
+  if (!itemId.value || !canWriteEshop.value) return
+  mediaSaveState.value = 'saving'
   try {
     await eshopApi.updateMedia(m.id, { is_primary: true })
     media.value = (await eshopApi.listMedia(itemId.value)).sort((a, b) => a.display_order - b.display_order)
+    mediaSaveState.value = 'saved'
   } catch (err: any) {
+    mediaSaveState.value = 'error'
     toast.error(mapError(err))
   }
 }
 async function toggleMediaExport(m: ProductMedia) {
+  if (!canWriteEshop.value) return
+  mediaSaveState.value = 'saving'
   try {
     await eshopApi.updateMedia(m.id, { export_eshop: !m.export_eshop })
     m.export_eshop = !m.export_eshop
+    mediaSaveState.value = 'saved'
   } catch (err: any) {
+    mediaSaveState.value = 'error'
     toast.error(mapError(err))
   }
 }
 async function removeMedia(m: ProductMedia) {
-  if (!confirm(t('eshop.attachments.delete_confirm')) || !itemId.value) return
+  if (!canWriteEshop.value || !confirm(t('eshop.attachments.delete_confirm')) || !itemId.value) return
+  mediaSaveState.value = 'saving'
   try {
     await eshopApi.deleteMedia(m.id)
     media.value = media.value.filter(x => x.id !== m.id)
+    mediaSaveState.value = 'saved'
   } catch (err: any) {
+    mediaSaveState.value = 'error'
     toast.error(mapError(err))
   }
 }
@@ -1036,7 +1072,7 @@ function onImgError(e: Event) {
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
               {{ t('eshop.prices.add_currency') }}
             </button>
-            <button type="button" @click="recomputePrices" :disabled="recomputing || prices.length === 0" :class="btnOutline('neutral')">
+            <button type="button" @click="recomputePrices" :disabled="recomputing || prices.length === 0 || !editorLoaded || !canWriteEshop" :class="btnOutline('neutral')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
               {{ recomputing ? t('eshop.prices.recomputing') : t('eshop.prices.recompute') }}
             </button>
@@ -1262,13 +1298,23 @@ function onImgError(e: Event) {
       <!-- ═══════════ TAB: PŘÍLOHY ═══════════ -->
       <div v-if="isEdit" v-show="tab === 'attachments'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
         <div class="p-5 space-y-4">
-          <div class="flex items-center gap-3">
+          <div v-if="canWriteEshop" class="flex flex-wrap items-center gap-3">
             <input ref="fileInput" type="file" multiple class="hidden" @change="onFilesPicked" />
             <button type="button" @click="triggerUpload" :disabled="uploading" :class="btnFilled('primary')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
               {{ uploading ? t('eshop.attachments.uploading') : t('eshop.attachments.upload') }}
             </button>
+            <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"
+              :class="mediaSaveState === 'error'
+                ? 'border-danger-200 bg-danger-50 text-danger-700'
+                : mediaSaveState === 'saving'
+                  ? 'border-warning-200 bg-warning-50 text-warning-700'
+                  : 'border-success-200 bg-success-50 text-success-700'">
+              <span class="h-1.5 w-1.5 rounded-full currentColor bg-current"></span>
+              {{ t(`eshop.attachments.immediate_${mediaSaveState}`) }}
+            </span>
           </div>
+          <p class="text-sm text-neutral-500">{{ t('eshop.attachments.immediate_save_hint') }}</p>
 
           <EmptyState v-if="media.length === 0" dense accent="neutral" icon="folderOpen"
             :title="t('eshop.attachments.empty')" />
@@ -1285,7 +1331,7 @@ function onImgError(e: Event) {
               </div>
               <div class="p-2 text-xs space-y-1.5">
                 <div class="truncate font-medium" :title="m.original_name">{{ m.original_name }}</div>
-                <div class="flex items-center justify-between gap-1">
+                <div v-if="canWriteEshop" class="flex items-center justify-between gap-1">
                   <div class="flex items-center gap-0.5">
                     <button type="button" @click="moveMedia(idx, -1)" :disabled="idx === 0" :title="t('eshop.attachments.move_up')" class="cursor-pointer text-neutral-400 hover:text-primary-600 disabled:opacity-30 px-1">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" /></svg>
@@ -1298,7 +1344,7 @@ function onImgError(e: Event) {
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                   </button>
                 </div>
-                <div class="flex items-center justify-between gap-1 pt-1 border-t border-neutral-100">
+                <div v-if="canWriteEshop" class="flex items-center justify-between gap-1 pt-1 border-t border-neutral-100">
                   <button type="button" @click="setPrimaryMedia(m)" :disabled="m.is_primary" class="cursor-pointer text-neutral-500 hover:text-primary-600 disabled:opacity-40 disabled:cursor-default">
                     {{ t('eshop.attachments.set_primary') }}
                   </button>
@@ -1318,7 +1364,7 @@ function onImgError(e: Event) {
 
       <div class="mt-4 flex justify-end gap-3">
         <RouterLink to="/stock/items" :class="btnOutline('neutral')">{{ t('common.cancel') }}</RouterLink>
-        <button v-if="tab !== 'attachments'" type="submit" :disabled="submitting" :class="btnFilled('primary')">
+        <button v-if="tab !== 'attachments' && canSaveEditor" type="submit" :disabled="submitting || (isEdit && !editorLoaded)" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
         </button>

@@ -18,10 +18,10 @@ final class StockTakeRepository
     private const COLUMNS =
         'id, supplier_id, warehouse_id, take_date, status, note, counting_method,
          responsible_count_name, responsible_inventory_name, started_at, receipt_document_id,
-         issue_document_id, created_by, closed_by, closed_at, created_at, updated_at';
+         issue_document_id, created_by, closed_by, closed_at, created_at, updated_at, preparation_job_id';
 
     /** Sloupce, které smí updateStatus() přes $extra nastavit (whitelist). */
-    private const STATUS_EXTRA_COLUMNS = ['started_at', 'closed_by', 'closed_at', 'receipt_document_id', 'issue_document_id'];
+    private const STATUS_EXTRA_COLUMNS = ['started_at', 'closed_by', 'closed_at', 'receipt_document_id', 'issue_document_id', 'preparation_job_id'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -69,7 +69,7 @@ final class StockTakeRepository
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT " . self::COLUMNS . " FROM stock_takes
-              WHERE supplier_id = ? AND warehouse_id = ? AND status = 'counting'
+              WHERE supplier_id = ? AND warehouse_id = ? AND status IN ('preparing','counting')
               LIMIT 1"
         );
         $stmt->execute([$supplierId, $warehouseId]);
@@ -234,6 +234,7 @@ final class StockTakeRepository
         $r['id'] = (int) $r['id'];
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['warehouse_id'] = (int) $r['warehouse_id'];
+        $r['preparation_job_id'] = $r['preparation_job_id'] !== null ? (int) $r['preparation_job_id'] : null;
         $r['receipt_document_id'] = $r['receipt_document_id'] !== null ? (int) $r['receipt_document_id'] : null;
         $r['issue_document_id'] = $r['issue_document_id'] !== null ? (int) $r['issue_document_id'] : null;
         $r['created_by'] = $r['created_by'] !== null ? (int) $r['created_by'] : null;

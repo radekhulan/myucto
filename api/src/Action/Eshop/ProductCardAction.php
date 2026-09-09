@@ -9,10 +9,12 @@ use MyInvoice\Action\Stock\GuardsStockEnabled;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemI18nRepository;
+use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\EshopException;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
 use MyInvoice\Service\Eshop\ProductCardService;
+use MyInvoice\Service\Eshop\ProductEditorService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -35,6 +37,7 @@ final class ProductCardAction
     public function __construct(
         private readonly Connection $db,
         private readonly ProductCardService $cards,
+        private readonly ProductEditorService $editor,
         private readonly StockItemI18nRepository $i18n,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -59,7 +62,7 @@ final class ProductCardAction
 
     public function update(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requirePermission($request, $response, 'eshop.write', AccessLevel::WRITE, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -73,6 +76,33 @@ final class ProductCardAction
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
         }
         $this->log($request, 'eshop.product_updated', (int) $args['id'], []);
+        return Json::ok($response, $card);
+    }
+
+    public function saveEditor(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'eshop.write', AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        if (!$this->requirePermission($request, $response, 'stock.items.write', AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $itemId = (int) $args['id'];
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $card = $this->editor->save($supplierId, $itemId, $body);
+        } catch (EshopException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+        $this->log($request, 'eshop.product_editor_saved', $itemId, [
+            'row_version' => $card['row_version'] ?? null,
+        ]);
         return Json::ok($response, $card);
     }
 

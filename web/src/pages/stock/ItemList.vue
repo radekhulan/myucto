@@ -33,10 +33,6 @@ const page = ref(1)
 const pages = ref(1)
 const total = ref(0)
 const warehouses = ref<Warehouse[]>([])
-// stock_item_id => souhrn napříč sklady (nebo jen vybraný sklad, viz filters.warehouse_id)
-// — dopočteno jen pro karty na (dosud) načtených stránkách, viz load().
-const levelsByItem = ref<Record<number, { qty: number; value: number }>>({})
-
 const filters = reactive({
   type: '' as StockItemType | '',
   warehouse_id: '' as number | '',
@@ -100,6 +96,9 @@ async function load(reset = true) {
       active: filters.active || undefined,
       q: filters.q || undefined,
       only_below_min: filters.only_below_min || undefined,
+      warehouse_id: filters.warehouse_id || undefined,
+      sort: tbl.sort.value?.key as 'sku' | 'name' | 'type' | 'qty' | 'value' | undefined,
+      direction: tbl.sort.value?.dir,
       page: page.value,
       per_page: PER_PAGE,
     })
@@ -107,23 +106,6 @@ async function load(reset = true) {
     total.value = res.meta.total
     pages.value = res.meta.pages ?? 1
 
-    // Stav zásob jen pro karty na právě načtené stránce (scoped přes item_ids) —
-    // ať /stock/levels netahá celý sklad, jen řádky relevantní pro zobrazené karty.
-    const map = reset ? {} : { ...levelsByItem.value }
-    if (res.data.length > 0) {
-      const lvl = await stockApi.levels({
-        warehouse_id: filters.warehouse_id || undefined,
-        item_ids: res.data.map(i => i.id),
-        per_page: 200,
-      })
-      for (const l of lvl.data) {
-        const cur = map[l.stock_item_id] ?? { qty: 0, value: 0 }
-        cur.qty += Number(l.qty)
-        cur.value += Number(l.value_total)
-        map[l.stock_item_id] = cur
-      }
-    }
-    levelsByItem.value = map
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -195,33 +177,10 @@ function onViewClick(f: SavedFilter) {
 
 watch(() => tbl.sort.value, () => load())
 
-function qty(i: StockItem): number { return levelsByItem.value[i.id]?.qty ?? 0 }
-function value(i: StockItem): number { return levelsByItem.value[i.id]?.value ?? 0 }
-function avgCost(i: StockItem): number { const q = qty(i); return q !== 0 ? value(i) / q : 0 }
+function qty(i: StockItem): number { return Number(i.qty ?? 0) }
+function value(i: StockItem): number { return Number(i.value_total ?? 0) }
+function avgCost(i: StockItem): number { return Number(i.avg_unit_cost ?? 0) }
 function belowMin(i: StockItem): boolean { return i.min_qty != null && qty(i) < Number(i.min_qty) }
-
-const sortedItems = computed<StockItem[]>(() => {
-  const s = tbl.sort.value
-  if (!s) return items.value
-  const dir = s.dir === 'desc' ? -1 : 1
-  const arr = items.value.slice()
-  arr.sort((a, b) => {
-    let av: string | number = ''
-    let bv: string | number = ''
-    switch (s.key) {
-      case 'sku': av = a.sku; bv = b.sku; break
-      case 'name': av = a.name; bv = b.name; break
-      case 'type': av = a.item_type; bv = b.item_type; break
-      case 'qty': av = qty(a); bv = qty(b); break
-      case 'value': av = value(a); bv = value(b); break
-      default: return 0
-    }
-    if (av < bv) return -1 * dir
-    if (av > bv) return 1 * dir
-    return 0
-  })
-  return arr
-})
 
 const TYPE_BADGE: Record<StockItemType, string> = {
   material: 'bg-neutral-100 text-neutral-600',
@@ -371,7 +330,7 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="i in sortedItems" :key="i.id" class="cursor-pointer hover:bg-neutral-50" :class="{ 'opacity-50': !i.is_active }"
+            <tr v-for="i in items" :key="i.id" class="cursor-pointer hover:bg-neutral-50" :class="{ 'opacity-50': !i.is_active }"
               @click="openDetail(i, $event)" @auxclick.prevent="openDetail(i, $event)">
               <td v-if="tbl.isVisible('sku')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">
                 <RouterLink class="row-link" :to="`/stock/items/${i.id}`" @click.stop @auxclick.stop>{{ i.sku }}</RouterLink>
@@ -408,7 +367,7 @@ onMounted(async () => {
 
     <!-- Mobile card list -->
     <div v-if="!loading && items.length > 0" class="md:hidden space-y-2">
-      <div v-for="i in sortedItems" :key="`m-${i.id}`" @click="openDetail(i, $event)"
+      <div v-for="i in items" :key="`m-${i.id}`" @click="openDetail(i, $event)"
         class="cursor-pointer bg-surface border border-neutral-200 rounded-lg shadow-sm p-3" :class="{ 'opacity-50': !i.is_active }">
         <div class="flex items-center justify-between gap-2">
           <RouterLink class="row-link font-mono text-xs text-neutral-500" :to="`/stock/items/${i.id}`" @click.stop @auxclick.stop>{{ i.sku }}</RouterLink>

@@ -58,12 +58,14 @@ final class StockDocumentService
         private readonly DocumentSeriesService $series,
         private readonly AccountingPeriodRepository $periods,
         private readonly StockRecomputeService $recompute,
+        private readonly \MyInvoice\Repository\StockValuationSnapshotRepository $snapshots,
         private readonly WarehouseRepository $warehouses,
         private readonly StockItemRepository $items,
         private readonly StockTakeRepository $takes,
         private readonly StockLandedCostRepository $landedCosts,
         private readonly StockReferenceGuard $references,
         private readonly PurchaseOrderStateService $orderStates,
+        private readonly \MyInvoice\Service\Eshop\Pricing\CatalogPriceJobService $priceJobs,
     ) {}
 
     // ── CRUD draftu ──────────────────────────────────────────────────────────────
@@ -104,19 +106,20 @@ final class StockDocumentService
      */
     public function updateDraft(int $supplierId, int $id, array $body, ?int $userId): array
     {
-        $existing = $this->docs->find($supplierId, $id);
-        if ($existing === null) {
-            throw new StockException('not_found', 'Skladový doklad nenalezen.', 404);
-        }
-        if ($existing['status'] !== 'draft') {
-            throw new StockException('not_draft', 'Upravovat lze jen rozpracovaný (draft) doklad.');
-        }
-
-        [$header, $lines] = $this->validateBody($supplierId, $body, blockInactiveItems: true);
-
-        return $this->runInTransaction(function () use ($supplierId, $id, $header, $lines): array {
+        return $this->runInTransaction(function () use ($supplierId, $id, $body): array {
+            $existing = $this->docs->lockForPost($supplierId, $id);
+            if ($existing === null) {
+                throw new StockException('not_found', 'Skladový doklad nenalezen.', 404);
+            }
+            if ($existing['status'] !== 'draft') {
+                throw new StockException('not_draft', 'Upravovat lze jen rozpracovaný (draft) doklad.', 409);
+            }
+            $body['allow_over_delivery'] ??= $existing['allow_over_delivery'];
+            [$header, $lines] = $this->validateBody($supplierId, $body, blockInactiveItems: true);
             $persistedCosts = $this->landedCosts->listForDocument($supplierId, $id);
-            $this->docs->updateDraftHeader($supplierId, $id, $header);
+            if (!$this->docs->updateDraftHeader($supplierId, $id, $header)) {
+                throw new StockException('not_draft', 'Doklad se během úpravy změnil.', 409);
+            }
             $this->docs->replaceLines($supplierId, $id, $lines);
             if ($persistedCosts !== []) {
                 $this->reallocateLandedCosts($supplierId, $id, (string) $header['doc_date'], $persistedCosts);
@@ -223,6 +226,11 @@ final class StockDocumentService
             throw new StockException('invalid_document', 'Doklad nemá žádné řádky.');
         }
 
+        $lockedOrders = $this->orderStates->lockForLines($supplierId, $lines);
+        if ($docType === 'receipt') {
+            $this->orderStates->assertReceiptAllowed($supplierId, $doc, $lines, $lockedOrders);
+        }
+
         // 2a) Sklady musí být platné i v okamžiku post (mohly být deaktivovány po draftu).
         $this->requireActiveWarehouse($supplierId, $warehouseId);
         if ($docType === 'transfer') {
@@ -242,6 +250,7 @@ final class StockDocumentService
         // 3) Zámky VŠECH dotčených stavů jedním lockLevels (převodka: oba sklady).
         $pairs = $this->buildPairs($docType, $warehouseId, $warehouseToId, $lines);
         $this->levels->lockLevels($supplierId, $pairs);
+        $this->snapshots->invalidate($supplierId, $pairs, $docDate);
 
         // 4) Backdating (§3.2): starší doc_date než poslední pohyb karty → replay
         //    NEJDŘÍV (normalizace stavů + guard uzavřených období), pod drženými zámky.
@@ -283,6 +292,7 @@ final class StockDocumentService
         //     Kdyby se přepočet dělal až po commitu, existovalo by okno, ve kterém
         //     zboží na skladě leží, ale objednávka pořád tvrdí, že je na cestě.
         $this->recomputeTouchedOrders($supplierId, $lines);
+        $this->priceJobs->enqueue($supplierId, array_column($lines, 'stock_item_id'));
 
         // 8) Způsob B — žádný deníkový zápis.
         $posted = $this->docs->findWithLines($supplierId, $id);
@@ -324,6 +334,7 @@ final class StockDocumentService
             }
 
             $origType    = (string) $orig['doc_type'];
+            $this->orderStates->lockForLines($supplierId, $origLines);
             $counterType = self::REVERSE_TYPE[$origType]
                 ?? throw new StockException('invalid_document', 'Neznámý typ skladového dokladu.');
             $docDate = (string) $orig['doc_date'];
@@ -349,6 +360,7 @@ final class StockDocumentService
             // Zámky všech dotčených stavů (u převodky oba sklady dohromady).
             $pairs = $this->buildPairs($counterType, $counterWh, $counterWhTo, $origLines);
             $this->levels->lockLevels($supplierId, $pairs);
+            $this->snapshots->invalidate($supplierId, $pairs, $docDate);
 
             // Kontrola dostupnosti výdejových noh protidokladu — storno příjemky
             // po výdejích nesmí vytvořit minus; PŘED výdejem čísla řady (B3).
@@ -421,6 +433,7 @@ final class StockDocumentService
             // Storno příjemky vrací zboží „na cestu" → stav objednávky se musí
             // vrátit z received/partially_received zpátky, ve stejné transakci.
             $this->recomputeTouchedOrders($supplierId, $origLines);
+            $this->priceJobs->enqueue($supplierId, array_column($origLines, 'stock_item_id'));
 
             $original = $this->docs->findWithLines($supplierId, $id);
             $reversal = $this->docs->findWithLines($supplierId, $counterId);
@@ -442,38 +455,8 @@ final class StockDocumentService
      */
     private function recomputeTouchedOrders(int $supplierId, array $lines): void
     {
-        $lineIds = [];
-        foreach ($lines as $line) {
-            $polId = (int) ($line['purchase_order_line_id'] ?? 0);
-            if ($polId > 0) {
-                $lineIds[$polId] = true;
-            }
-        }
-        if ($lineIds === []) {
-            return;
-        }
-        foreach ($this->orderIdsForLines($supplierId, array_keys($lineIds)) as $orderId) {
-            $this->orderStates->recompute($supplierId, $orderId);
-        }
+        $this->orderStates->recomputeForLines($supplierId, $lines);
     }
-
-    /**
-     * @param list<int> $lineIds
-     * @return list<int>
-     */
-    private function orderIdsForLines(int $supplierId, array $lineIds): array
-    {
-        $place = implode(',', array_fill(0, count($lineIds), '?'));
-        $stmt  = $this->db->pdo()->prepare(
-            "SELECT DISTINCT order_id FROM purchase_order_lines
-              WHERE supplier_id = ? AND id IN ($place)"
-        );
-        $stmt->execute([$supplierId, ...$lineIds]);
-
-        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
-    }
-
-    // ── interní: post pomocníci ─────────────────────────────────────────────────
 
     /**
      * Dvojice (sklad, karta) všech noh dokladu — převodka přidává cílový sklad
@@ -840,6 +823,7 @@ final class StockDocumentService
             'purchase_order_id'   => isset($body['purchase_order_id']) && (int) $body['purchase_order_id'] > 0 ? (int) $body['purchase_order_id'] : null,
             'stock_take_id'       => isset($body['stock_take_id']) && (int) $body['stock_take_id'] > 0 ? (int) $body['stock_take_id'] : null,
             'status'              => 'draft',
+            'allow_over_delivery' => !empty($body['allow_over_delivery']),
         ];
 
         $this->assertReferencesOwned($supplierId, $header, $lines);

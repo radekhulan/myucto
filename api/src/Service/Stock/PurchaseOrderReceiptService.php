@@ -45,6 +45,7 @@ final class PurchaseOrderReceiptService
         private readonly PurchaseOrderRepository $orders,
         private readonly StockDocumentRepository $docs,
         private readonly StockDocumentService $documents,
+        private readonly StockAcquisitionCostService $costs,
     ) {}
 
     /**
@@ -140,7 +141,6 @@ final class PurchaseOrderReceiptService
         $rate         = $order['exchange_rate'] !== null ? (float) $order['exchange_rate'] : 1.0;
 
         $docLines   = [];
-        $overLines  = [];
         $overflow   = [];
         $costEstimate = false;
         foreach ($rawLines as $rl) {
@@ -175,7 +175,6 @@ final class PurchaseOrderReceiptService
                     ];
                     continue;
                 }
-                $overLines[] = $polId;
             }
 
             if (isset($rl['unit_cost']) && $rl['unit_cost'] !== '' && $rl['unit_cost'] !== null) {
@@ -218,7 +217,7 @@ final class PurchaseOrderReceiptService
         }
 
         return $this->runInTransaction(function () use (
-            $supplierId, $orderId, $warehouseId, $docDate, $description, $docLines, $overLines, $userId, $costEstimate
+            $supplierId, $orderId, $warehouseId, $docDate, $description, $docLines, $userId, $costEstimate, $allowOver, $body
         ): array {
             $draft = $this->documents->create($supplierId, [
                 'doc_type'          => 'receipt',
@@ -227,12 +226,11 @@ final class PurchaseOrderReceiptService
                 'doc_date'          => $docDate,
                 'description'       => $description,
                 'purchase_order_id' => $orderId,
+                'allow_over_delivery' => $allowOver,
                 'lines'             => $docLines,
             ], $userId);
 
-            foreach (array_unique($overLines) as $polId) {
-                $this->orders->markLineOverDelivery($supplierId, (int) $polId);
-            }
+            $this->costs->applyLandedCosts($supplierId, (int) $draft['id'], $docDate, is_array($body['landed_costs'] ?? null) ? $body['landed_costs'] : []);
 
             $doc = $this->docs->findWithLines($supplierId, (int) $draft['id']) ?? $draft;
             $doc['cost_is_estimate'] = $costEstimate;
@@ -279,22 +277,26 @@ final class PurchaseOrderReceiptService
     private function invoiceCostsByOrderLine(int $supplierId, int $orderId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.purchase_order_line_id,
-                    pii.total_without_vat / NULLIF(pii.quantity, 0) AS unit_cost
+            'SELECT pii.purchase_order_line_id, pii.quantity, pii.total_without_vat, pii.total_with_vat,
+                    pi.id AS purchase_invoice_id, pi.exchange_rate, pi.tax_date, pi.issue_date
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
                JOIN purchase_order_lines pol ON pol.id = pii.purchase_order_line_id
               WHERE pi.supplier_id = ? AND pol.supplier_id = pi.supplier_id
-                AND pol.order_id = ? AND pii.purchase_order_line_id IS NOT NULL'
+                AND pol.order_id = ? AND pii.purchase_order_line_id IS NOT NULL
+                AND pi.document_kind = \'invoice\' AND pii.quantity > 0
+              ORDER BY pi.issue_date DESC, pi.id DESC, pii.id DESC'
         );
         $stmt->execute([$supplierId, $orderId]);
 
         $out = [];
+        $contexts = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
-            if ($r['unit_cost'] === null) {
+            if (isset($out[(int) $r['purchase_order_line_id']])) {
                 continue;
             }
-            $out[(int) $r['purchase_order_line_id']] = number_format((float) $r['unit_cost'], 6, '.', '');
+            $context = $contexts[(int) $r['purchase_invoice_id']] ??= $this->costs->context($supplierId, $r);
+            $out[(int) $r['purchase_order_line_id']] = number_format($this->costs->unitCost($context, $r), 6, '.', '');
         }
 
         return $out;

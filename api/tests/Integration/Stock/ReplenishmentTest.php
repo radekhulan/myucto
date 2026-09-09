@@ -133,6 +133,49 @@ final class ReplenishmentTest extends StockTestCase
         self::assertSame('25.000', $row['suggested_qty']);
     }
 
+    public function testMinimumOrderQuantityIsRoundedUpToWholePackages(): void
+    {
+        $sid  = $this->createSupplier();
+        $whId = $this->warehouse($sid);
+        $item = $this->itemWithMin($sid, 'RP-MOQ-PACK', '10.000');
+        $this->receiveStock($sid, $whId, $item, '7.000', 20.0); // chybí 3
+        $vendorId = $this->client($sid, 'Dodavatel s minimem i balením');
+        $this->vendorOffer($sid, $item, $vendorId, [
+            'min_order_qty' => '15.000',
+            'package_qty'   => '10.000',
+        ]);
+
+        $row = $this->onlySuggestion($sid, $item);
+        self::assertSame('3.000', $row['shortfall']);
+        self::assertSame('20.000', $row['suggested_qty']);
+    }
+
+    public function testSuggestionIncludesItemBeyondFormerTwoThousandItemCutoff(): void
+    {
+        $sid = $this->createSupplier();
+        $this->warehouse($sid);
+
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO stock_items (supplier_id, sku, name, item_type, unit, min_qty, is_active)
+             VALUES (?, ?, ?, "goods", "ks", ?, 1)'
+        );
+        $lastId = 0;
+        for ($i = 1; $i <= 2001; $i++) {
+            $stmt->execute([
+                $sid,
+                'RP-LIMIT-' . str_pad((string) $i, 4, '0', STR_PAD_LEFT),
+                'Karta ' . $i,
+                $i === 2001 ? '5.000' : null,
+            ]);
+            $lastId = (int) $this->db->pdo()->lastInsertId();
+        }
+
+        $result = $this->replenishment->suggest($sid, ['limit' => 10, 'offset' => 0]);
+        self::assertSame(1, $result['total']);
+        self::assertSame($lastId, $result['items'][0]['stock_item_id']);
+        self::assertSame('5.000', $result['items'][0]['suggested_qty']);
+    }
+
     public function testPreferredVendorWinsOverCheaperOne(): void
     {
         $sid  = $this->createSupplier();

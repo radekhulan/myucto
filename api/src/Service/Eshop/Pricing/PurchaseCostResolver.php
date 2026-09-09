@@ -31,18 +31,24 @@ final class PurchaseCostResolver
      * @param array<string,mixed> $item řádek stock_items (potřebuje id, pricing_base)
      * @return array{base_czk:string, source:string}|null
      */
-    public function resolve(int $supplierId, array $item, string $onDate): ?array
+    public function resolve(int $supplierId, array $item, string $onDate, ?PricingSnapshot $snapshot = null): ?array
     {
         $itemId = (int) $item['id'];
         $base = (string) ($item['pricing_base'] ?? 'weighted_avg');
 
         // Primární zdroj dle pricing_base.
-        $primary = match ($base) {
-            'weighted_avg'  => $this->pair($this->levels->weightedAvgCost($supplierId, $itemId), 'weighted_avg'),
-            'last_purchase' => $this->pair($this->levels->lastPurchaseCost($supplierId, $itemId), 'last_purchase'),
-            'manual'        => $this->vendorCzk($supplierId, $itemId, $onDate),
-            default         => null,
-        };
+        $missingRate = null;
+        try {
+            $primary = match ($base) {
+                'weighted_avg'  => $this->pair($this->levels->weightedAvgCost($supplierId, $itemId), 'weighted_avg'),
+                'last_purchase' => $this->pair($this->levels->lastPurchaseCost($supplierId, $itemId), 'last_purchase'),
+                'manual'        => $this->vendorCzk($supplierId, $itemId, $onDate, $snapshot),
+                default         => null,
+            };
+        } catch (PricingInputException $e) {
+            $missingRate = $e;
+            $primary = null;
+        }
         if ($primary !== null) {
             return $primary;
         }
@@ -52,7 +58,10 @@ final class PurchaseCostResolver
         if ($fallbackLast !== null) {
             return $fallbackLast;
         }
-        return $this->vendorCzk($supplierId, $itemId, $onDate);
+        if ($missingRate !== null) {
+            throw $missingRate;
+        }
+        return $this->vendorCzk($supplierId, $itemId, $onDate, $snapshot);
     }
 
     /** @return array{base_czk:string, source:string}|null */
@@ -69,7 +78,7 @@ final class PurchaseCostResolver
     }
 
     /** Preferovaný dodavatel → CZK (přes FX, když je v cizí měně). */
-    private function vendorCzk(int $supplierId, int $itemId, string $onDate): ?array
+    private function vendorCzk(int $supplierId, int $itemId, string $onDate, ?PricingSnapshot $snapshot = null): ?array
     {
         $vendor = $this->vendors->preferredPurchase($supplierId, $itemId);
         if ($vendor === null) {
@@ -80,7 +89,7 @@ final class PurchaseCostResolver
         if ($currency === 'CZK') {
             return $this->pair($price, 'vendor');
         }
-        $czk = $this->fx->toCzk($price, $currency, $onDate);
+        $czk = $this->fx->toCzk($price, $currency, $onDate, $snapshot);
         if ($czk === null) {
             return null; // kurz chybí → nelze převést
         }

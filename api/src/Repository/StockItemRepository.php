@@ -15,10 +15,14 @@ use PDO;
  */
 final class StockItemRepository
 {
+    public const SORT_FIELDS = ['sku', 'name', 'type', 'qty', 'value'];
+    public const AVAILABILITY_FILTERS = ['in_stock', 'out_of_stock', 'below_min'];
+    public const MISSING_FIELDS = ['manufacturer', 'category', 'image', 'price', 'ean'];
+
     private const COLUMNS =
         'id, supplier_id, sku, name, item_type, manufacturer_id, unit, ean, vat_rate_id,
          sale_price_without_vat, min_qty, warranty_months, delivery_days, export_eshop,
-         is_stocked, weight_g, pricing_base, is_active, note, created_at, updated_at';
+         is_stocked, weight_g, pricing_base, is_active, note, row_version, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -43,8 +47,7 @@ final class StockItemRepository
     }
 
     /**
-     * @param array{type?:string, active?:bool, q?:string, only_below_min?:bool,
-     *              limit?:int, offset?:int} $filters
+     * @param array<string,mixed> $filters
      * @return list<array<string,mixed>>
      */
     public function list(int $supplierId, array $filters = []): array
@@ -55,9 +58,10 @@ final class StockItemRepository
             explode(',', self::COLUMNS)
         ));
 
-        $sql = 'SELECT ' . $cols . ' FROM stock_items si' . $parts['join']
+        $sql = 'SELECT ' . $cols . ', ' . $this->aggregateColumns()
+             . ' FROM stock_items si' . $parts['join']
              . ' WHERE ' . $parts['where']
-             . ' ORDER BY si.name ASC';
+             . ' ORDER BY ' . $this->orderBy($filters);
 
         // LIMIT/OFFSET inlinujeme jako validované inty (vzor DocumentRepository::search) —
         // native prepared statements neumí LIMIT/OFFSET s parametrem typu string.
@@ -77,7 +81,7 @@ final class StockItemRepository
      * Stránkovaná verze list() pro API (Support\Pagination kontrakt) — vrací
      * i celkový počet (COUNT přes stejné WHERE/JOIN, bez LIMIT).
      *
-     * @param array{type?:string, active?:bool, q?:string, only_below_min?:bool} $filters
+     * @param array<string,mixed> $filters
      * @return array{0:list<array<string,mixed>>, 1:int}
      */
     public function listPaged(int $supplierId, array $filters, int $perPage, int $offset): array
@@ -94,9 +98,10 @@ final class StockItemRepository
             static fn (string $c): string => 'si.' . trim($c),
             explode(',', self::COLUMNS)
         ));
-        $sql = 'SELECT ' . $cols . ' FROM stock_items si' . $parts['join']
+        $sql = 'SELECT ' . $cols . ', ' . $this->aggregateColumns()
+             . ' FROM stock_items si' . $parts['join']
              . ' WHERE ' . $parts['where']
-             . ' ORDER BY si.name ASC'
+             . ' ORDER BY ' . $this->orderBy($filters)
              . ' LIMIT ' . max(1, $perPage) . ' OFFSET ' . max(0, $offset);
 
         $stmt = $this->db->pdo()->prepare($sql);
@@ -110,7 +115,7 @@ final class StockItemRepository
      * Sestaví sdílené WHERE/JOIN/params pro list()/listPaged() (stejné filtry,
      * bez LIMIT/OFFSET) — aby COUNT(*) a datový dotaz vždy zůstaly konzistentní.
      *
-     * @param array{type?:string, active?:bool, q?:string, only_below_min?:bool} $filters
+     * @param array<string,mixed> $filters
      * @return array{where:string, join:string, params:array<int,mixed>}
      */
     private function buildListQueryParts(int $supplierId, array $filters): array
@@ -138,25 +143,162 @@ final class StockItemRepository
             $whereParams[] = '%' . $q . '%';
         }
 
-        $onlyBelowMin = !empty($filters['only_below_min']);
-        $join = '';
-        $params = [];
-        if ($onlyBelowMin) {
-            // Součet stavu napříč sklady pro danou kartu — porovnání s min_qty.
-            $join = ' LEFT JOIN (
-                        SELECT stock_item_id, SUM(qty) AS tot FROM stock_levels
-                         WHERE supplier_id = ? GROUP BY stock_item_id
-                      ) sl ON sl.stock_item_id = si.id';
-            $params[] = $supplierId;
+        if (!empty($filters['manufacturer_id'])) {
+            $where[] = 'si.manufacturer_id = ?';
+            $whereParams[] = (int) $filters['manufacturer_id'];
         }
+        if (!empty($filters['vendor_id'])) {
+            $where[] = 'EXISTS (
+                SELECT 1 FROM stock_item_vendors siv
+                 WHERE siv.supplier_id = si.supplier_id AND siv.stock_item_id = si.id
+                   AND siv.client_id = ? AND siv.is_active = 1
+            )';
+            $whereParams[] = (int) $filters['vendor_id'];
+        }
+        if (!empty($filters['category_id'])) {
+            $where[] = 'EXISTS (
+                SELECT 1
+                  FROM stock_item_categories sic
+                  JOIN stock_categories sc
+                    ON sc.id = sic.category_id AND sc.supplier_id = sic.supplier_id
+                  JOIN stock_categories root
+                    ON root.id = ? AND root.supplier_id = sic.supplier_id
+                 WHERE sic.supplier_id = si.supplier_id AND sic.stock_item_id = si.id
+                   AND sc.path LIKE CONCAT(root.path, "%")
+            )';
+            $whereParams[] = (int) $filters['category_id'];
+        }
+        foreach (array_values(array_unique(array_filter(
+            array_map('intval', (array) ($filters['tag_ids'] ?? [])),
+            static fn (int $id): bool => $id > 0,
+        ))) as $tagId) {
+            $where[] = 'EXISTS (
+                SELECT 1 FROM stock_item_tags sit
+                 WHERE sit.supplier_id = si.supplier_id AND sit.stock_item_id = si.id
+                   AND sit.tag_id = ?
+            )';
+            $whereParams[] = $tagId;
+        }
+        foreach ((array) ($filters['attribute_filters'] ?? []) as $attribute) {
+            if (!is_array($attribute) || (int) ($attribute['attribute_id'] ?? 0) <= 0) {
+                throw new \InvalidArgumentException('Invalid stock attribute filter.');
+            }
+            $predicate = [
+                'siav.supplier_id = si.supplier_id',
+                'siav.stock_item_id = si.id',
+                'siav.attribute_id = ?',
+            ];
+            $attributeParams = [(int) $attribute['attribute_id']];
+            if (isset($attribute['option_id']) && (int) $attribute['option_id'] > 0) {
+                $predicate[] = 'siav.option_id = ?';
+                $attributeParams[] = (int) $attribute['option_id'];
+            }
+            if (array_key_exists('value_text', $attribute)) {
+                $predicate[] = 'siav.value_text = ?';
+                $attributeParams[] = (string) $attribute['value_text'];
+            }
+            if (array_key_exists('value_bool', $attribute)) {
+                $predicate[] = 'siav.value_bool = ?';
+                $attributeParams[] = (int) (bool) $attribute['value_bool'];
+            }
+            if (array_key_exists('value_num_min', $attribute)) {
+                $predicate[] = 'siav.value_num >= ?';
+                $attributeParams[] = (string) $attribute['value_num_min'];
+            }
+            if (array_key_exists('value_num_max', $attribute)) {
+                $predicate[] = 'siav.value_num <= ?';
+                $attributeParams[] = (string) $attribute['value_num_max'];
+            }
+            $where[] = 'EXISTS (
+                SELECT 1
+                  FROM stock_item_attribute_values siav
+                  JOIN stock_attributes sa
+                    ON sa.id = siav.attribute_id AND sa.supplier_id = siav.supplier_id
+                 WHERE ' . implode(' AND ', $predicate) . '
+            )';
+            array_push($whereParams, ...$attributeParams);
+        }
+
+        foreach (array_values(array_unique((array) ($filters['missing'] ?? []))) as $missing) {
+            $where[] = match ($missing) {
+                'manufacturer' => 'si.manufacturer_id IS NULL',
+                'category' => 'NOT EXISTS (
+                    SELECT 1 FROM stock_item_categories sic
+                     WHERE sic.supplier_id = si.supplier_id AND sic.stock_item_id = si.id
+                )',
+                'image' => 'NOT EXISTS (
+                    SELECT 1 FROM stock_media sm
+                     WHERE sm.supplier_id = si.supplier_id AND sm.stock_item_id = si.id
+                       AND sm.media_type = "image"
+                )',
+                'price' => 'si.sale_price_without_vat IS NULL AND NOT EXISTS (
+                    SELECT 1 FROM stock_item_prices sip
+                     WHERE sip.supplier_id = si.supplier_id AND sip.stock_item_id = si.id
+                       AND COALESCE(sip.computed_price, sip.fixed_price) IS NOT NULL
+                )',
+                'ean' => '(si.ean IS NULL OR si.ean = "")',
+                default => throw new \InvalidArgumentException('Unknown missing stock field.'),
+            };
+        }
+
+        $availability = !empty($filters['only_below_min'])
+            ? 'below_min'
+            : (string) ($filters['availability'] ?? '');
+        if ($availability === 'below_min') {
+            $where[] = 'si.min_qty IS NOT NULL AND COALESCE(stock.qty, 0) < si.min_qty';
+        } elseif ($availability === 'in_stock') {
+            $where[] = 'COALESCE(stock.qty, 0) > 0';
+        } elseif ($availability === 'out_of_stock') {
+            $where[] = 'COALESCE(stock.qty, 0) <= 0';
+        }
+        if (array_key_exists('qty_min', $filters)) {
+            $where[] = 'COALESCE(stock.qty, 0) >= ?';
+            $whereParams[] = (string) $filters['qty_min'];
+        }
+        if (array_key_exists('qty_max', $filters)) {
+            $where[] = 'COALESCE(stock.qty, 0) <= ?';
+            $whereParams[] = (string) $filters['qty_max'];
+        }
+
+        $join = ' LEFT JOIN (
+                    SELECT stock_item_id, SUM(qty) AS qty, SUM(value_total) AS value_total
+                      FROM stock_levels
+                     WHERE supplier_id = ?';
+        $params = [$supplierId];
+        if (!empty($filters['warehouse_id'])) {
+            $join .= ' AND warehouse_id = ?';
+            $params[] = (int) $filters['warehouse_id'];
+        }
+        $join .= ' GROUP BY stock_item_id
+                  ) stock ON stock.stock_item_id = si.id';
         $params = array_merge($params, $whereParams);
 
-        $whereSql = implode(' AND ', $where);
-        if ($onlyBelowMin) {
-            $whereSql .= ' AND si.min_qty IS NOT NULL AND COALESCE(sl.tot, 0) < si.min_qty';
-        }
+        return ['where' => implode(' AND ', $where), 'join' => $join, 'params' => $params];
+    }
 
-        return ['where' => $whereSql, 'join' => $join, 'params' => $params];
+    private function aggregateColumns(): string
+    {
+        return 'COALESCE(stock.qty, 0) AS qty,
+                COALESCE(stock.value_total, 0) AS value_total,
+                CASE WHEN COALESCE(stock.qty, 0) = 0 THEN 0
+                     ELSE stock.value_total / stock.qty END AS avg_unit_cost';
+    }
+
+    /** @param array<string,mixed> $filters */
+    private function orderBy(array $filters): string
+    {
+        $sort = in_array($filters['sort'] ?? '', self::SORT_FIELDS, true)
+            ? (string) $filters['sort'] : 'name';
+        $direction = strtolower((string) ($filters['direction'] ?? 'asc')) === 'desc' ? 'DESC' : 'ASC';
+        $expression = match ($sort) {
+            'sku' => 'si.sku',
+            'type' => 'si.item_type',
+            'qty' => 'COALESCE(stock.qty, 0)',
+            'value' => 'COALESCE(stock.value_total, 0)',
+            default => 'si.name',
+        };
+
+        return $expression . ' ' . $direction . ', si.id ASC';
     }
 
     /**
@@ -191,6 +333,30 @@ final class StockItemRepository
                 'sale_price_without_vat' => $r['sale_price_without_vat'],
             ];
         }, $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * @param list<int> $itemIds
+     * @return list<int>
+     */
+    public function replenishmentCandidateIds(int $supplierId, array $itemIds = []): array
+    {
+        $params = [$supplierId];
+        $sql = 'SELECT id FROM stock_items
+                 WHERE supplier_id = ? AND is_active = 1 AND min_qty IS NOT NULL';
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $itemIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids !== []) {
+            $sql .= ' AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')';
+            array_push($params, ...$ids);
+        }
+        $sql .= ' ORDER BY id ASC';
+
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
     }
 
     /**
@@ -232,7 +398,8 @@ final class StockItemRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE stock_items SET
                 sku = ?, name = ?, item_type = ?, unit = ?, ean = ?, vat_rate_id = ?,
-                sale_price_without_vat = ?, min_qty = ?, is_active = ?, note = ?
+                sale_price_without_vat = ?, min_qty = ?, is_active = ?, note = ?,
+                row_version = row_version + 1
               WHERE id = ? AND supplier_id = ?'
         );
         $stmt->execute([
@@ -252,6 +419,34 @@ final class StockItemRepository
         return $stmt->rowCount() > 0;
     }
 
+    /** @param array<string,mixed> $data */
+    public function updateVersioned(int $supplierId, int $id, int $expectedVersion, array $data): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE stock_items SET
+                sku = ?, name = ?, item_type = ?, unit = ?, ean = ?, vat_rate_id = ?,
+                sale_price_without_vat = ?, min_qty = ?, is_active = ?, note = ?,
+                row_version = row_version + 1
+              WHERE id = ? AND supplier_id = ? AND row_version = ?'
+        );
+        $stmt->execute([
+            (string) $data['sku'],
+            (string) $data['name'],
+            (string) ($data['item_type'] ?? 'goods'),
+            (string) ($data['unit'] ?? 'ks'),
+            $data['ean'] ?? null,
+            isset($data['vat_rate_id']) ? (int) $data['vat_rate_id'] : null,
+            isset($data['sale_price_without_vat']) ? (string) $data['sale_price_without_vat'] : null,
+            isset($data['min_qty']) ? (string) $data['min_qty'] : null,
+            (int) ($data['is_active'] ?? true),
+            $data['note'] ?? null,
+            $id,
+            $supplierId,
+            $expectedVersion,
+        ]);
+        return $stmt->rowCount() > 0;
+    }
+
     /**
      * Aktualizace eshopových sloupců karty (Epic ESHOP) — bez zásahu do
      * skladové identity (sku/name/vat/cena řeší update()).
@@ -263,7 +458,8 @@ final class StockItemRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE stock_items SET
                 manufacturer_id = ?, warranty_months = ?, delivery_days = ?,
-                export_eshop = ?, is_stocked = ?, weight_g = ?, pricing_base = ?
+                export_eshop = ?, is_stocked = ?, weight_g = ?, pricing_base = ?,
+                row_version = row_version + 1
               WHERE id = ? AND supplier_id = ?'
         );
         $stmt->execute([
@@ -277,7 +473,43 @@ final class StockItemRepository
             $id,
             $supplierId,
         ]);
-        return $stmt->rowCount() >= 0;
+        return $stmt->rowCount() > 0;
+    }
+
+    /** @param array<string,mixed> $data */
+    public function updateEshopFieldsVersioned(
+        int $supplierId,
+        int $id,
+        int $expectedVersion,
+        array $data,
+    ): bool {
+        $casts = [
+            'manufacturer_id' => static fn (mixed $value): ?int => $value === null ? null : (int) $value,
+            'warranty_months' => static fn (mixed $value): ?int => $value === null ? null : (int) $value,
+            'delivery_days' => static fn (mixed $value): ?int => $value === null ? null : (int) $value,
+            'export_eshop' => static fn (mixed $value): int => (int) (bool) $value,
+            'is_stocked' => static fn (mixed $value): int => (int) (bool) $value,
+            'weight_g' => static fn (mixed $value): ?int => $value === null ? null : (int) $value,
+            'pricing_base' => static fn (mixed $value): string => (string) $value,
+        ];
+        $set = [];
+        $params = [];
+        foreach ($casts as $field => $cast) {
+            if (!array_key_exists($field, $data)) {
+                continue;
+            }
+            $set[] = $field . ' = ?';
+            $params[] = $cast($data[$field]);
+        }
+        $set[] = 'row_version = row_version + 1';
+        array_push($params, $id, $supplierId, $expectedVersion);
+
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE stock_items SET ' . implode(', ', $set)
+            . ' WHERE id = ? AND supplier_id = ? AND row_version = ?'
+        );
+        $stmt->execute($params);
+        return $stmt->rowCount() > 0;
     }
 
     /**
@@ -287,10 +519,11 @@ final class StockItemRepository
     public function setSalePrice(int $supplierId, int $id, ?string $price): bool
     {
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE stock_items SET sale_price_without_vat = ? WHERE id = ? AND supplier_id = ?'
+            'UPDATE stock_items SET sale_price_without_vat = ?, row_version = row_version + 1
+              WHERE id = ? AND supplier_id = ?'
         );
         $stmt->execute([$price !== null ? (string) $price : null, $id, $supplierId]);
-        return $stmt->rowCount() >= 0;
+        return $stmt->rowCount() > 0;
     }
 
     /** Patří manufacturer_id témuž tenantovi? (guard proti cross-tenant vazbě) */
@@ -318,7 +551,8 @@ final class StockItemRepository
     public function deactivate(int $supplierId, int $id): bool
     {
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE stock_items SET is_active = 0 WHERE id = ? AND supplier_id = ?'
+            'UPDATE stock_items SET is_active = 0, row_version = row_version + 1
+              WHERE id = ? AND supplier_id = ?'
         );
         $stmt->execute([$id, $supplierId]);
         return $stmt->rowCount() > 0;
@@ -341,6 +575,14 @@ final class StockItemRepository
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['vat_rate_id'] = $r['vat_rate_id'] !== null ? (int) $r['vat_rate_id'] : null;
         $r['is_active'] = (bool) $r['is_active'];
+        if (array_key_exists('row_version', $r)) {
+            $r['row_version'] = (int) $r['row_version'];
+        }
+        if (array_key_exists('qty', $r)) {
+            $r['qty'] = (string) $r['qty'];
+            $r['value_total'] = (string) $r['value_total'];
+            $r['avg_unit_cost'] = (string) $r['avg_unit_cost'];
+        }
         // Eshop rozšíření (1028) — sloupce mohou chybět u projekcí bez COLUMNS.
         if (array_key_exists('manufacturer_id', $r)) {
             $r['manufacturer_id'] = $r['manufacturer_id'] !== null ? (int) $r['manufacturer_id'] : null;

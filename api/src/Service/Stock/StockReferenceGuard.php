@@ -17,7 +17,7 @@ use PDO;
  * security report 2026-08, sweep S102 — tam vedený jako „guarded", protože
  * extrakce viděla jen Action vrstvu; FK se konzumují až
  * v {@see StockDocumentService::validateBody()} a
- * {@see StockReceiptService::applyLandedCosts()}).
+ * {@see StockAcquisitionCostService::applyLandedCosts()}).
  *
  * ## Proč to nežije v `TenantReferenceGuard::SCOPES`
  *

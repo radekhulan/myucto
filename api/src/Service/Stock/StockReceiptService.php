@@ -6,8 +6,6 @@ namespace MyInvoice\Service\Stock;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockDocumentRepository;
-use MyInvoice\Repository\StockLandedCostRepository;
-use MyInvoice\Service\Vat\VatStatusService;
 use PDO;
 
 /**
@@ -48,9 +46,7 @@ final class StockReceiptService
         private readonly Connection $db,
         private readonly StockDocumentService $documents,
         private readonly StockDocumentRepository $docs,
-        private readonly StockLandedCostRepository $landedCosts,
-        private readonly VatStatusService $vatStatus,
-        private readonly StockReferenceGuard $references,
+        private readonly StockAcquisitionCostService $costs,
     ) {}
 
     private static function isNotReceivableKind(string $documentKind): bool
@@ -81,8 +77,7 @@ final class StockReceiptService
             ];
         }
 
-        $isVatPayer = $this->isVatPayerAtDocument($supplierId, $pi);
-        $rate       = $pi['exchange_rate'] !== null ? (float) $pi['exchange_rate'] : 1.0;
+        $costContext = $this->costs->context($supplierId, $pi);
         $received   = $this->docs->receivedQtyByPurchaseInvoiceItem($supplierId, $piId);
 
         $stockLines    = [];
@@ -96,8 +91,7 @@ final class StockReceiptService
             }
 
             if ($it['stock_item_id'] !== null) {
-                $base     = $isVatPayer ? (float) $it['total_without_vat'] : (float) $it['total_with_vat'];
-                $unitCost = $qty > 0 ? ($base / $qty) * $rate : 0.0;
+                $unitCost = $this->costs->unitCost($costContext, $it);
                 $stockLines[] = [
                     'purchase_invoice_item_id' => (int) $it['id'],
                     // Příjem z faktury musí zavírat i objednávku, na kterou je řádek
@@ -112,11 +106,11 @@ final class StockReceiptService
                     'unit_cost'                => number_format($unitCost, 6, '.', ''),
                 ];
             } else {
-                $base = $isVatPayer ? (float) $it['total_without_vat'] : (float) $it['total_with_vat'];
+                $base = $this->costs->amount($costContext, $it);
                 $costCandidates[] = [
                     'purchase_invoice_item_id' => (int) $it['id'],
                     'description'              => (string) $it['description'],
-                    'amount'                   => number_format($base * $rate, 2, '.', ''),
+                    'amount'                   => number_format($base, 2, '.', ''),
                 ];
             }
         }
@@ -175,10 +169,9 @@ final class StockReceiptService
                 throw new StockException('invalid_document', 'Příjemka musí mít aspoň jeden řádek.');
             }
 
+            $costContext = $this->costs->context($supplierId, $pi);
             $piItemsById = $this->purchaseInvoiceItemsById($supplierId, $piId);
             $received    = $this->docs->receivedQtyByPurchaseInvoiceItem($supplierId, $piId);
-            $rate        = $pi['exchange_rate'] !== null ? (float) $pi['exchange_rate'] : 1.0;
-            $isVatPayer  = $this->isVatPayerAtDocument($supplierId, $pi);
 
             $docLines = [];
             foreach ($rawLines as $rl) {
@@ -218,9 +211,7 @@ final class StockReceiptService
                 if (isset($rl['unit_cost']) && $rl['unit_cost'] !== '' && $rl['unit_cost'] !== null) {
                     $unitCost = (float) $rl['unit_cost'];
                 } else {
-                    $base     = $isVatPayer ? (float) $piItem['total_without_vat'] : (float) $piItem['total_with_vat'];
-                    $itemQty  = (float) $piItem['quantity'];
-                    $unitCost = $itemQty > 0 ? ($base / $itemQty) * $rate : 0.0;
+                    $unitCost = $this->costs->unitCost($costContext, $piItem);
                 }
 
                 $docLines[] = [
@@ -251,7 +242,7 @@ final class StockReceiptService
                 'lines'               => $docLines,
             ], $userId);
 
-            $this->applyLandedCosts($supplierId, (int) $draft['id'], $docDate, is_array($body['landed_costs'] ?? null) ? $body['landed_costs'] : []);
+            $this->costs->applyLandedCosts($supplierId, (int) $draft['id'], $docDate, is_array($body['landed_costs'] ?? null) ? $body['landed_costs'] : []);
 
             return $this->docs->findWithLines($supplierId, (int) $draft['id']) ?? $draft;
         });
@@ -261,89 +252,6 @@ final class StockReceiptService
     public function receiptsForPurchaseInvoice(int $supplierId, int $piId): array
     {
         return $this->docs->listByPurchaseInvoice($supplierId, $piId);
-    }
-
-    // ── vedlejší náklady (A8) ────────────────────────────────────────────────────
-
-    /**
-     * @param list<array<string,mixed>> $rawCosts
-     */
-    private function applyLandedCosts(int $supplierId, int $documentId, string $docDate, array $rawCosts): void
-    {
-        if ($rawCosts === []) {
-            return;
-        }
-
-        // Vedlejší náklad si nese vlastní vazbu na PF a její řádek — obojí z TĚLA
-        // requestu a do opravy R2 bez kontroly vlastnictví (sweep S020 měl ověřené
-        // jen `lines`, ne `landed_costs`). Tenant hranice se hlídá stejným guardem
-        // jako u hlavičky dokladu; zbytek (existence, částka) řeší validace níž.
-        $bad = $this->references->violations($supplierId, [
-            'purchase_invoice_id'      => array_map(
-                static fn (mixed $rc): mixed => is_array($rc) ? ($rc['purchase_invoice_id'] ?? null) : null,
-                $rawCosts,
-            ),
-            'purchase_invoice_item_id' => array_map(
-                static fn (mixed $rc): mixed => is_array($rc) ? ($rc['purchase_invoice_item_id'] ?? null) : null,
-                $rawCosts,
-            ),
-        ]);
-        if ($bad !== []) {
-            throw new StockException(
-                'invalid_reference',
-                'Vedlejší náklad odkazuje na záznam mimo vaši firmu.',
-                422,
-                $bad,
-            );
-        }
-
-        $costs = [];
-        foreach ($rawCosts as $rc) {
-            if (!is_array($rc)) {
-                continue;
-            }
-            $amount = (float) ($rc['amount'] ?? 0);
-            if ($amount <= 0) {
-                continue;
-            }
-            $allocation = ((string) ($rc['allocation'] ?? 'by_value')) === 'by_qty' ? 'by_qty' : 'by_value';
-            $amountStr  = number_format($amount, 2, '.', '');
-            $this->landedCosts->insert($supplierId, [
-                'document_id'              => $documentId,
-                'purchase_invoice_id'      => isset($rc['purchase_invoice_id']) && (int) $rc['purchase_invoice_id'] > 0 ? (int) $rc['purchase_invoice_id'] : null,
-                'purchase_invoice_item_id' => isset($rc['purchase_invoice_item_id']) && (int) $rc['purchase_invoice_item_id'] > 0 ? (int) $rc['purchase_invoice_item_id'] : null,
-                'description'              => trim((string) ($rc['description'] ?? '')) !== '' ? trim((string) $rc['description']) : 'Vedlejší náklad',
-                'amount'                   => $amountStr,
-                'allocation'               => $allocation,
-            ]);
-            $costs[] = ['amount' => StockValuation::valueToC($amountStr), 'allocation' => $allocation];
-        }
-        if ($costs === []) {
-            return;
-        }
-
-        $lines = $this->docs->lines($supplierId, $documentId);
-        if ($lines === []) {
-            return;
-        }
-        $allocLines = array_map(static fn (array $l): array => [
-            'value' => StockValuation::valueToC((string) $l['value_total']),
-            'qty'   => StockValuation::qtyToT((string) $l['qty']),
-        ], $lines);
-        $extraPerLine = LandedCostAllocator::allocate($allocLines, $costs);
-
-        foreach ($lines as $i => $l) {
-            $extraC    = $extraPerLine[$i] ?? 0;
-            $newValueC = StockValuation::valueToC((string) $l['value_total']) + $extraC;
-            $this->docs->updateLineValuation(
-                $supplierId,
-                (int) $l['id'],
-                (string) $l['unit_cost'],
-                StockValuation::cToDecimal($newValueC),
-                StockValuation::cToDecimal($extraC),
-                $docDate,
-            );
-        }
     }
 
     // ── čtení PF (přímý SQL, tenant-scoped, jen SELECT) ─────────────────────────
@@ -410,23 +318,6 @@ final class StockReceiptService
         );
         $stmt->execute([$supplierId, $piId]);
         return (bool) $stmt->fetchColumn();
-    }
-
-    /**
-     * Plátcovství DPH k rozhodnému datu zdrojového dokladu (tax_date ?? issue_date
-     * přijaté faktury) — pořizovací cena bez DPH se smí použít jen tehdy, když měla
-     * firma nárok na odpočet v okamžiku plnění, ne podle dnešní cache
-     * supplier.is_vat_payer ({@see VatStatusService}).
-     *
-     * @param array<string,mixed> $pi řádek purchase_invoices (tax_date, issue_date)
-     */
-    private function isVatPayerAtDocument(int $supplierId, array $pi): bool
-    {
-        $date = (string) (($pi['tax_date'] ?? null) ?: ($pi['issue_date'] ?? ''));
-        if ($date === '') {
-            $date = date('Y-m-d');
-        }
-        return $this->vatStatus->isVatPayerAt($supplierId, $date);
     }
 
     /**

@@ -3086,6 +3086,7 @@ final class Routes
             $g->get   ('/takes/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockTakeAction::class, 'get']);
             $g->put   ('/takes/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockTakeAction::class, 'update']);
             $g->post  ('/takes/{id:[0-9]+}/start',      [\MyInvoice\Action\Stock\StockTakeAction::class, 'start']);
+            $g->post  ('/takes/{id:[0-9]+}/{operation:cancel-preparation|retry-preparation}', [\MyInvoice\Action\Stock\StockTakeAction::class, 'preparation']);
             $g->post  ('/takes/{id:[0-9]+}/close',      [\MyInvoice\Action\Stock\StockTakeAction::class, 'close']);
             $g->get   ('/takes/{id:[0-9]+}/pdf',        [\MyInvoice\Action\Stock\StockTakeAction::class, 'pdf']);
 
@@ -3093,6 +3094,10 @@ final class Routes
             // name je vždy poslední segment /reports/{name}/export, konflikt nehrozí.
             $g->get   ('/reports/status',                [\MyInvoice\Action\Stock\StockReportAction::class, 'status']);
             $g->get   ('/reports/valuation',              [\MyInvoice\Action\Stock\StockReportAction::class, 'valuation']);
+            $g->post  ('/reports/valuation-jobs',         [\MyInvoice\Action\Stock\StockReportAction::class, 'createValuationJob']);
+            $g->get   ('/reports/valuation-jobs/{id:[0-9]+}', [\MyInvoice\Action\Stock\StockReportAction::class, 'valuationJobResult']);
+            $g->get   ('/reports/valuation-jobs/{id:[0-9]+}/status', [\MyInvoice\Action\Stock\StockReportAction::class, 'valuationJobStatus']);
+            $g->post  ('/reports/valuation-jobs/{id:[0-9]+}/cancel', [\MyInvoice\Action\Stock\StockReportAction::class, 'cancelValuationJob']);
             $g->get   ('/reports/{name}/export',          [\MyInvoice\Action\Stock\StockReportAction::class, 'export']);
         });
 
@@ -3159,15 +3164,22 @@ final class Routes
 
             // Import zboží (XLS/CSV) — literální cesta PŘED generickými /products/{id}.
             $g->post  ('/products/import',                     [\MyInvoice\Action\Eshop\ProductImportAction::class, 'import']);
+            $g->get   ('/jobs',                                [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'list']);
+            $g->post  ('/jobs/prices-recompute',                [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'prices']);
+            $g->get   ('/jobs/{id:[0-9]+}',                     [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'get']);
+            $g->post  ('/jobs/{id:[0-9]+}/{operation:retry|cancel}', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'change']);
 
             // Karta Zboží (agregát) + média; specifické PŘED generickými.
             $g->get   ('/products/{id:[0-9]+}/i18n',           [\MyInvoice\Action\Eshop\ProductCardAction::class, 'getI18n']);
+            $g->put   ('/products/{id:[0-9]+}/editor',         [\MyInvoice\Action\Eshop\ProductCardAction::class, 'saveEditor']);
             $g->get   ('/products/{id:[0-9]+}/media',          [\MyInvoice\Action\Eshop\ProductMediaAction::class, 'list']);
             $g->post  ('/products/{id:[0-9]+}/media',          [\MyInvoice\Action\Eshop\ProductMediaAction::class, 'upload']);
             $g->put   ('/products/{id:[0-9]+}/media/reorder',  [\MyInvoice\Action\Eshop\ProductMediaAction::class, 'reorder']);
             // Cenotvorba + dodavatelé (F2)
             $g->get   ('/products/{id:[0-9]+}/prices',            [\MyInvoice\Action\Eshop\ProductPriceAction::class, 'get']);
             $g->put   ('/products/{id:[0-9]+}/prices',            [\MyInvoice\Action\Eshop\ProductPriceAction::class, 'put']);
+            $g->patch ('/products/{id:[0-9]+}/prices',            [\MyInvoice\Action\Eshop\ProductPriceAction::class, 'put']);
+            $g->delete('/products/{id:[0-9]+}/prices/{currency:[A-Za-z]{3}}', [\MyInvoice\Action\Eshop\ProductPriceAction::class, 'delete']);
             $g->post  ('/products/{id:[0-9]+}/prices/recompute',  [\MyInvoice\Action\Eshop\ProductPriceAction::class, 'recompute']);
             // Akční (promoční) ceny — dočasný override nad cenotvorbou (migrace 1328)
             $g->get   ('/products/{id:[0-9]+}/promo-prices',       [\MyInvoice\Action\Eshop\ProductPromoPriceAction::class, 'get']);

@@ -56,6 +56,7 @@ final class CronDispatcherTest extends TestCase
                 'cron-epo-status',
                 'cron-payroll-document-worker',
                 'cron-payroll-period-export-worker',
+                'cron-catalog-worker',
             ],
             $report['due'],
         );

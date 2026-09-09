@@ -35,6 +35,17 @@ final class PurchaseOrderRepository
 
     public function __construct(private readonly Connection $db) {}
 
+    public function orderIdsForLines(int $supplierId, array $lineIds): array
+    {
+        $lineIds = self::positiveIds($lineIds);
+        if ($lineIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT DISTINCT order_id FROM purchase_order_lines WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($lineIds), '?')) . ') ORDER BY order_id');
+        $stmt->execute([$supplierId, ...$lineIds]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
     /** @return array<string,mixed>|null */
     public function find(int $supplierId, int $id): ?array
     {
@@ -357,7 +368,7 @@ final class PurchaseOrderRepository
             'UPDATE purchase_orders SET
                 vendor_id = ?, vendor_reference = ?, order_date = ?, expected_date = ?,
                 warehouse_id = ?, currency_id = ?, exchange_rate = ?, note = ?, internal_note = ?
-              WHERE id = ? AND supplier_id = ?'
+              WHERE id = ? AND supplier_id = ? AND state = \'draft\''
         );
         $stmt->execute([
             (int) $data['vendor_id'],
@@ -373,20 +384,79 @@ final class PurchaseOrderRepository
             $supplierId,
         ]);
 
-        return $stmt->rowCount() > 0;
+        return $stmt->rowCount() > 0 || ($this->find($supplierId, $id)['state'] ?? null) === 'draft';
     }
 
     /** @param list<array<string,mixed>> $lines */
     public function replaceLines(int $supplierId, int $orderId, array $lines): void
     {
-        $this->db->pdo()->prepare(
-            'DELETE FROM purchase_order_lines WHERE order_id = ? AND supplier_id = ?'
-        )->execute([$orderId, $supplierId]);
-
-        foreach ($lines as $line) {
-            $line['order_id'] = $orderId;
-            $this->insertLine($supplierId, $line);
+        $existing = [];
+        foreach ($this->lines($supplierId, $orderId) as $line) {
+            $existing[(int) $line['id']] = $line;
         }
+        $used = [];
+        $resolved = [];
+        foreach ($lines as $line) {
+            $id = (int) ($line['id'] ?? 0);
+            if ($id === 0) {
+                foreach ($existing as $candidateId => $candidate) {
+                    if (!isset($used[$candidateId]) && (int) $candidate['line_no'] === (int) $line['line_no']
+                        && $candidate['stock_item_id'] === $line['stock_item_id']) {
+                        $id = $candidateId;
+                        break;
+                    }
+                }
+            }
+            if ($id > 0) {
+                if (!isset($existing[$id]) || isset($used[$id])) {
+                    throw new \MyInvoice\Service\Stock\StockException('invalid_order', 'Neplatná nebo duplicitní identita řádku objednávky.', 422);
+                }
+                if ($existing[$id]['stock_item_id'] !== $line['stock_item_id'] && $this->lineHasReferences($supplierId, $id)) {
+                    throw new \MyInvoice\Service\Stock\StockException('order_line_linked', 'Navázaný řádek nemůže změnit skladovou kartu.', 409);
+                }
+                $used[$id] = true;
+            }
+            $line['id'] = $id;
+            $resolved[] = $line;
+        }
+        foreach ($existing as $id => $line) {
+            if (isset($used[$id])) {
+                continue;
+            }
+            if ($this->lineHasReferences($supplierId, $id)) {
+                throw new \MyInvoice\Service\Stock\StockException('order_line_linked', 'Navázaný řádek objednávky nelze odstranit.', 409);
+            }
+            $this->db->pdo()->prepare('DELETE FROM purchase_order_lines WHERE supplier_id = ? AND order_id = ? AND id = ?')
+                ->execute([$supplierId, $orderId, $id]);
+        }
+        if ($existing !== []) {
+            $offset = max(count($lines), max(array_column($existing, 'line_no'))) + 1;
+            $this->db->pdo()->prepare('UPDATE purchase_order_lines SET line_no = line_no + ? WHERE supplier_id = ? AND order_id = ? ORDER BY line_no DESC')
+                ->execute([$offset, $supplierId, $orderId]);
+        }
+        $fields = ['line_no', 'stock_item_id', 'warehouse_id', 'vendor_sku', 'description', 'unit',
+            'qty_ordered', 'unit_price', 'vat_rate_id', 'expected_date', 'note'];
+        foreach ($resolved as $line) {
+            $id = (int) $line['id'];
+            if ($id > 0) {
+                $values = array_map(static fn (string $field): mixed => $line[$field] ?? null, $fields);
+                $stmt = $this->db->pdo()->prepare('UPDATE purchase_order_lines SET '
+                    . implode(', ', array_map(static fn (string $field): string => $field . ' = ?', $fields))
+                    . ' WHERE supplier_id = ? AND order_id = ? AND id = ?');
+                $stmt->execute([...$values, $supplierId, $orderId, $id]);
+            } else {
+                $line['order_id'] = $orderId;
+                $this->insertLine($supplierId, $line);
+            }
+        }
+    }
+
+    private function lineHasReferences(int $supplierId, int $id): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT EXISTS(SELECT 1 FROM stock_document_lines WHERE supplier_id = ? AND purchase_order_line_id = ?)
+            OR EXISTS(SELECT 1 FROM purchase_invoice_items i JOIN purchase_invoices p ON p.id = i.purchase_invoice_id WHERE p.supplier_id = ? AND i.purchase_order_line_id = ?)');
+        $stmt->execute([$supplierId, $id, $supplierId, $id]);
+        return (bool) $stmt->fetchColumn();
     }
 
     /** @param array<string,mixed> $data */

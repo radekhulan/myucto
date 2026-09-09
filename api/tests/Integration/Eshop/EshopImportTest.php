@@ -31,6 +31,59 @@ final class EshopImportTest extends StockTestCase
         return $this->import->import($sid, $this->userId, $csv, 'zbozi.csv', $dryRun);
     }
 
+    public function testIdenticalNormalizedPriceDoesNotChangeProduct(): void
+    {
+        $sid = $this->createSupplier();
+        $this->imp($sid, "sku;nazev;cena\nIMP-NORMAL;Test;100\n", false);
+        $result = $this->imp($sid, "sku;nazev;cena\nIMP-NORMAL;Test;100\n", false);
+        self::assertSame(0, $result['updated']);
+    }
+
+    public function testBlankPricePreservesExistingPrice(): void
+    {
+        $sid = $this->createSupplier();
+        $this->imp($sid, "sku;nazev;cena\nIMP-BLANK;Test;100\n", false);
+        $this->imp($sid, "sku;cena\nIMP-BLANK;\n", false);
+        self::assertSame('100.00', $this->itemsRepo->findBySku($sid, 'IMP-BLANK')['sale_price_without_vat']);
+    }
+
+    public function testEqualImportedPriceReplacesMarkupRule(): void
+    {
+        $sid = $this->createSupplier();
+        $item = $this->item($sid, 'IMP-RULE');
+        $wh = $this->warehouse($sid);
+        $this->receiveStock($sid, $wh, $item, '1.000', 100.0);
+        $this->container->get(\MyInvoice\Service\Eshop\Pricing\PriceWriteService::class)->save($sid, $item, [
+            ['currency_code' => 'CZK', 'price_mode' => 'markup', 'markup_pct' => '0'],
+        ]);
+        $this->imp($sid, "sku;cena\nIMP-RULE;100\n", false);
+        $row = $this->container->get(\MyInvoice\Repository\StockItemPriceRepository::class)->findByCurrency($sid, $item, 'CZK');
+        self::assertSame('fixed', $row['price_mode']);
+    }
+
+    public function testImportedPriceRoundsHalfUp(): void
+    {
+        $sid = $this->createSupplier();
+        $this->imp($sid, "sku;nazev;cena\nIMP-ROUND;Test;19.999\n", false);
+        self::assertSame('20.00', $this->itemsRepo->findBySku($sid, 'IMP-ROUND')['sale_price_without_vat']);
+    }
+
+    public function testImportedPriceChangesEffectiveCzkWithoutRemovingEur(): void
+    {
+        $sid = $this->createSupplier();
+        $item = $this->item($sid, 'IMP-EFFECTIVE');
+        $writer = $this->container->get(\MyInvoice\Service\Eshop\Pricing\PriceWriteService::class);
+        $writer->save($sid, $item, [
+            ['currency_code' => 'CZK', 'price_mode' => 'fixed', 'fixed_price' => '100'],
+            ['currency_code' => 'EUR', 'price_mode' => 'fixed', 'fixed_price' => '20'],
+        ]);
+        $result = $this->imp($sid, "sku;cena\nIMP-EFFECTIVE;150\n", false);
+        self::assertTrue($result['ok']);
+        $prices = $this->container->get(\MyInvoice\Repository\StockItemPriceRepository::class);
+        self::assertSame('150.00', $prices->findByCurrency($sid, $item, 'CZK')['computed_price']);
+        self::assertSame('20.00', $prices->findByCurrency($sid, $item, 'EUR')['computed_price']);
+    }
+
     public function testDryRunDoesNotWrite(): void
     {
         $sid = $this->createSupplier();

@@ -228,6 +228,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'stock/takes',            name: 'stock-takes',           component: () => import('@/pages/stock/TakeWizard.vue'),   meta: { requiresStock: true } },
       { path: 'stock/takes/:id(\\d+)',  name: 'stock-take-detail',     component: () => import('@/pages/stock/TakeWizard.vue'),   meta: { requiresStock: true } },
       { path: 'stock/reports',          name: 'stock-reports',         component: () => import('@/pages/stock/Reports.vue'),      meta: { requiresStock: true } },
+      { path: 'eshop/jobs',             name: 'eshop-jobs',            component: () => import('@/pages/stock/CatalogJobs.vue'),  meta: { requiresStock: true, requiresSupplier: true } },
       // E-shop — číselníky (Výrobci/Kategorie/Atributy/Tagy/Poplatky/Sklady) + import
       // jako záložky jedné stránky (?tab=…). Poslední položka sekce „Zboží".
       { path: 'eshop',               name: 'eshop',               component: () => import('@/pages/eshop/EshopPage.vue'),     meta: { requiresStock: true, requiresSupplier: true } },

@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { StockItemPayload } from './stock'
 
 /**
  * E-shop číselníky (Epic ESHOP).
@@ -219,6 +220,7 @@ export interface ProductMediaPayload {
  */
 export interface Product {
   id: number
+  row_version: number
   supplier_id: number
   sku: string
   name: string
@@ -274,6 +276,11 @@ export interface ProductPricePayload {
   fixed_price: string | null
   rounding: PriceRounding
   is_manual_override: boolean
+}
+
+export interface ProductPriceWriteResult {
+  prices: ProductPrice[]
+  row_version: number
 }
 
 // ── Akční (promoční) ceny karty (Promo prices, migrace 1328) ─────────────
@@ -387,6 +394,7 @@ export interface ProductImportReport {
 
 /** PUT /eshop/products/{id} — všechny sekce volitelné (částečný update agregátu). */
 export interface ProductUpdatePayload {
+  row_version: number
   manufacturer_id?: number | null
   warranty_months?: number | null
   delivery_days?: number | null
@@ -399,6 +407,15 @@ export interface ProductUpdatePayload {
   tag_ids?: number[]
   attributes?: ProductAttributeRow[]
   fees?: ProductFeeRow[]
+}
+
+export interface ProductEditorPayload {
+  row_version: number
+  item: StockItemPayload
+  product: Omit<ProductUpdatePayload, 'row_version'>
+  prices: ProductPricePayload[]
+  promo_prices: ProductPromoPricePayload[]
+  vendors: ProductVendorPayload[]
 }
 
 function toParams<T extends object>(f: T = {} as T): Record<string, string | number> {
@@ -486,6 +503,8 @@ export const eshopApi = {
   getProduct: (id: number) => api.get<Product>(`/eshop/products/${id}`).then(r => r.data),
   updateProduct: (id: number, payload: ProductUpdatePayload) =>
     api.put<Product>(`/eshop/products/${id}`, payload).then(r => r.data),
+  saveProductEditor: (id: number, payload: ProductEditorPayload) =>
+    api.put<Product>(`/eshop/products/${id}/editor`, payload).then(r => r.data),
   getProductI18n: (id: number) => api.get<ProductI18nRow[]>(`/eshop/products/${id}/i18n`).then(r => r.data),
 
   // ── Import zboží (Epic ESHOP F3) ─────────────────────────────────────────
@@ -503,6 +522,11 @@ export const eshopApi = {
     api.get<ProductPrice[]>(`/eshop/products/${productId}/prices`).then(r => r.data),
   updatePrices: (productId: number, prices: ProductPricePayload[]) =>
     api.put<ProductPrice[]>(`/eshop/products/${productId}/prices`, { prices }).then(r => r.data),
+  updatePricesVersioned: (productId: number, rowVersion: number, prices: ProductPricePayload[]) =>
+    api.put<ProductPriceWriteResult>(`/eshop/products/${productId}/prices`, {
+      row_version: rowVersion,
+      prices,
+    }).then(r => r.data),
   recomputePrices: (productId: number) =>
     api.post<ProductPrice[]>(`/eshop/products/${productId}/prices/recompute`).then(r => r.data),
 

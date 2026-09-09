@@ -36,31 +36,39 @@ final class PriceCalculationService
      * Přepočte všechny cenové řádky karty. Idempotentní, běží v transakci.
      * @return list<array<string,mixed>> aktualizované cenové řádky
      */
-    public function recompute(int $supplierId, int $stockItemId, ?string $onDate = null, ?string $now = null): array
+    public function recompute(int $supplierId, int $stockItemId, ?string $onDate = null, ?string $now = null, ?PricingSnapshot $snapshot = null, ?int $expectedRowVersion = null): array
     {
-        $onDate = $onDate ?? date('Y-m-d');
+        $onDate = $snapshot?->onDate ?? $onDate ?? date('Y-m-d');
         $now = $now ?? date('Y-m-d H:i:s');
-
-        $item = $this->items->find($supplierId, $stockItemId);
-        if ($item === null) {
-            return [];
-        }
-        $rows = $this->prices->listForItem($supplierId, $stockItemId);
-        if ($rows === []) {
-            return [];
-        }
-
-        $cost = $this->costResolver->resolve($supplierId, $item, $onDate); // ?{base_czk, source}
-        $baseCzk = $cost['base_czk'] ?? null;
-
-        $czkComputed = null; // pro zrcadlo do sale_price_without_vat
 
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) {
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
             $pdo->beginTransaction();
         }
         try {
+            $lock = $pdo->prepare('SELECT row_version FROM stock_items WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $lock->execute([$supplierId, $stockItemId]);
+            $lockedVersion = $lock->fetchColumn();
+            $item = $this->items->find($supplierId, $stockItemId);
+            if ($item === null) {
+                if ($ownTx) {
+                    $pdo->commit();
+                }
+                return [];
+            }
+            if ($expectedRowVersion !== null && (int) $lockedVersion !== $expectedRowVersion) {
+                throw new PricingInputException('stale_price_input', ['expected_version' => $expectedRowVersion, 'actual_version' => (int) $lockedVersion]);
+            }
+            $rows = $this->prices->listForItem($supplierId, $stockItemId);
+            $needsCost = array_filter($rows, static fn (array $row): bool => !$row['is_manual_override'] && $row['price_mode'] === 'markup') !== [];
+            $cost = $needsCost ? $this->costResolver->resolve($supplierId, $item, $onDate, $snapshot) : null;
+            $baseCzk = $cost['base_czk'] ?? null;
+            if ($snapshot !== null && $needsCost && $baseCzk === null) {
+                throw new PricingInputException('missing_purchase_cost');
+            }
+            $czkComputed = null;
             foreach ($rows as $row) {
                 if ($row['is_manual_override']) {
                     // Ruční cena: markup se NEaplikuje. Zadaná fixed_price = manuální
@@ -100,7 +108,7 @@ final class PriceCalculationService
                             $raw = bcmul($baseCzk, $factor, 6);
                             $computedPrice = PriceRounding::apply($raw, $rounding);
                         } else {
-                            $rate = $this->fx->rateFor($currency, $onDate);
+                            $rate = $this->fx->rateFor($currency, $onDate, $snapshot);
                             if ($rate !== null && bccomp($rate, '0', 6) > 0) {
                                 $baseCcy = bcdiv($baseCzk, $rate, 6);
                                 $raw = bcmul($baseCcy, $factor, 6);
@@ -130,6 +138,9 @@ final class PriceCalculationService
             // Zrcadlo CZK ceny do skladové karty (default do řádku FV).
             if ($czkComputed !== null) {
                 $this->items->setSalePrice($supplierId, $stockItemId, $czkComputed);
+            } elseif ($rows !== []) {
+                $pdo->prepare('UPDATE stock_items SET row_version = row_version + 1 WHERE supplier_id = ? AND id = ?')
+                    ->execute([$supplierId, $stockItemId]);
             }
 
             if ($ownTx) {

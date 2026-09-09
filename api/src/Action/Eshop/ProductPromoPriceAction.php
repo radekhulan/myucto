@@ -10,8 +10,11 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemPromoPriceRepository;
 use MyInvoice\Repository\StockItemRepository;
+use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Eshop\EshopException;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
+use MyInvoice\Service\Eshop\ProductPromoPriceWriteService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -29,13 +32,11 @@ final class ProductPromoPriceAction
     use AccountingActionSupport;
     use GuardsStockEnabled;
 
-    private const QTY_MODES = ['stock', 'limited', 'unlimited'];
-    private const MAX_ROWS = 50;
-
     public function __construct(
         private readonly Connection $db,
         private readonly StockItemRepository $items,
         private readonly StockItemPromoPriceRepository $promos,
+        private readonly ProductPromoPriceWriteService $writer,
         private readonly EffectivePriceResolver $resolver,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -57,7 +58,7 @@ final class ProductPromoPriceAction
 
     public function put(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requirePermission($request, $response, 'eshop.write', AccessLevel::WRITE, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -70,62 +71,17 @@ final class ProductPromoPriceAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $rows = is_array($body['promo_prices'] ?? null) ? $body['promo_prices'] : [];
-        if (count($rows) > self::MAX_ROWS) {
-            return Json::error($response, 'validation_failed', 'Karta může mít nejvýše ' . self::MAX_ROWS . ' akčních cen.', 400);
+        if (!isset($body['promo_prices']) || !is_array($body['promo_prices']) || !array_is_list($body['promo_prices'])) {
+            return Json::error($response, 'validation_failed', 'Pole promo_prices musí být seznam akčních cen.', 400);
         }
 
-        $prepared = [];
-        foreach ($rows as $r) {
-            if (!is_array($r)) {
-                continue;
-            }
-            [$data, $error] = $this->validateRow($r);
-            if ($error !== null) {
-                return Json::error($response, 'validation_failed', $error, 400);
-            }
-            $id = (int) ($r['id'] ?? 0);
-            // Cizí/neexistující id v payloadu se nesmí přepsat (IDOR) — repository
-            // filtruje na tenanta, ale ověříme to explicitně a nahlas.
-            if ($id > 0) {
-                $existing = $this->promos->find($supplierId, $id);
-                if ($existing === null || (int) $existing['stock_item_id'] !== $itemId) {
-                    return Json::error($response, 'not_found', 'Akční cena nenalezena.', 404);
-                }
-            }
-            $prepared[] = ['id' => $id, 'data' => $data];
-        }
-
-        // Reentrantní obal (vzor ProductPriceAction) — pod už běžící transakcí by
-        // holé beginTransaction() shodilo request na PDOException.
-        $pdo = $this->db->pdo();
-        $owns = !$pdo->inTransaction();
-        if ($owns) {
-            $pdo->beginTransaction();
-        }
         try {
-            $keep = [];
-            foreach ($prepared as $p) {
-                if ($p['id'] > 0) {
-                    $this->promos->update($supplierId, $p['id'], $p['data']);
-                    $keep[] = $p['id'];
-                } else {
-                    $keep[] = $this->promos->insert($supplierId, $itemId, $p['data']);
-                }
-            }
-            $this->promos->deleteForItemExcept($supplierId, $itemId, $keep);
-            if ($owns) {
-                $pdo->commit();
-            }
-        } catch (\Throwable $e) {
-            if ($owns && $pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            throw $e;
+            $saved = $this->writer->save($supplierId, $itemId, $body['promo_prices']);
+        } catch (EshopException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
         }
 
-        $this->log($request, 'eshop.promo_prices_updated', $itemId, ['count' => count($prepared)]);
-        $saved = $this->promos->listForItem($supplierId, $itemId);
+        $this->log($request, 'eshop.promo_prices_updated', $itemId, ['count' => count($saved)]);
         return Json::ok($response, $this->resolver->annotate($supplierId, $saved));
     }
 
@@ -157,97 +113,6 @@ final class ProductPromoPriceAction
             (string) ($q['qty'] ?? '1'),
             $onDate !== '' ? $onDate : null,
         ));
-    }
-
-    /**
-     * @param array<string,mixed> $r
-     * @return array{0:array<string,mixed>, 1:?string} [data, chyba]
-     */
-    private function validateRow(array $r): array
-    {
-        $currency = strtoupper(trim((string) ($r['currency_code'] ?? 'CZK')));
-        if (!preg_match('/^[A-Z]{3}$/', $currency)) {
-            return [[], 'Neplatný kód měny (ISO 4217, 3 znaky).'];
-        }
-        $price = $this->numOrNull($r['promo_price'] ?? null);
-        if ($price === null || bccomp($price, '0', 2) < 0) {
-            return [[], 'Akční cena musí být nezáporné číslo.'];
-        }
-
-        $mode = (string) ($r['qty_mode'] ?? 'stock');
-        if (!in_array($mode, self::QTY_MODES, true)) {
-            return [[], 'Neplatný režim množstevního stropu akce.'];
-        }
-        $limit = $this->numOrNull($r['qty_limit'] ?? null);
-        if ($mode === 'limited') {
-            if ($limit === null || bccomp($limit, '0', 3) <= 0) {
-                return [[], 'Pro omezený počet kusů zadej kladný počet.'];
-            }
-        } else {
-            $limit = null; // strop drží sklad ('stock') nebo se neomezuje ('unlimited')
-        }
-
-        $from = $this->dateOrNull($r['valid_from'] ?? null);
-        $to = $this->dateOrNull($r['valid_to'] ?? null);
-        if ($from === false || $to === false) {
-            return [[], 'Neplatné datum platnosti akce (formát RRRR-MM-DD).'];
-        }
-        if ($from !== null && $to !== null && $to < $from) {
-            return [[], 'Konec platnosti akce nesmí předcházet jejímu začátku.'];
-        }
-
-        $label = $this->strOrNull($r['label'] ?? null, 60);
-        if ($label === false) {
-            return [[], 'Název akce může mít nejvýše 60 znaků.'];
-        }
-        $note = $this->strOrNull($r['note'] ?? null, 255);
-        if ($note === false) {
-            return [[], 'Poznámka může mít nejvýše 255 znaků.'];
-        }
-
-        return [[
-            'currency_code' => $currency,
-            'promo_price'   => bcadd($price, '0', 2),
-            'label'         => $label,
-            'valid_from'    => $from,
-            'valid_to'      => $to,
-            'qty_mode'      => $mode,
-            'qty_limit'     => $limit !== null ? bcadd($limit, '0', 3) : null,
-            'is_active'     => (bool) ($r['is_active'] ?? true),
-            'note'          => $note,
-        ], null];
-    }
-
-    private function numOrNull(mixed $v): ?string
-    {
-        if ($v === null || $v === '') {
-            return null;
-        }
-        $s = str_replace(',', '.', (string) $v);
-        return is_numeric($s) ? $s : null;
-    }
-
-    /** @return string|null|false false = neplatný formát */
-    private function dateOrNull(mixed $v): string|null|false
-    {
-        if ($v === null || trim((string) $v) === '') {
-            return null;
-        }
-        $s = trim((string) $v);
-        return $this->isDate($s) ? $s : false;
-    }
-
-    /** @return string|null|false false = příliš dlouhé */
-    private function strOrNull(mixed $v, int $max): string|null|false
-    {
-        if ($v === null) {
-            return null;
-        }
-        $s = trim((string) $v);
-        if ($s === '') {
-            return null;
-        }
-        return mb_strlen($s) > $max ? false : $s;
     }
 
     private function isDate(string $s): bool

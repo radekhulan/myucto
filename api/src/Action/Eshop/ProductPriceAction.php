@@ -10,8 +10,11 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemPriceRepository;
 use MyInvoice\Repository\StockItemRepository;
+use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Eshop\EshopException;
 use MyInvoice\Service\Eshop\Pricing\PriceRecomputeDispatcher;
+use MyInvoice\Service\Eshop\Pricing\PriceWriteService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -28,14 +31,12 @@ final class ProductPriceAction
     use AccountingActionSupport;
     use GuardsStockEnabled;
 
-    private const MODES = ['markup', 'fixed'];
-    private const ROUNDINGS = ['none', '0.01', '0.10', '0.50', '1', '9_ending'];
-
     public function __construct(
         private readonly Connection $db,
         private readonly StockItemRepository $items,
         private readonly StockItemPriceRepository $prices,
         private readonly PriceRecomputeDispatcher $dispatcher,
+        private readonly PriceWriteService $writer,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
     ) {}
@@ -55,7 +56,7 @@ final class ProductPriceAction
 
     public function put(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requirePermission($request, $response, 'eshop.write', AccessLevel::WRITE, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -67,82 +68,33 @@ final class ProductPriceAction
             return Json::error($response, 'not_found', 'Karta zboží nenalezena.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
-        $rows = is_array($body['prices'] ?? null) ? $body['prices'] : [];
-
-        // Validace + normalizace řádků.
-        $prepared = [];
-        $keepCurrencies = [];
-        foreach ($rows as $r) {
-            if (!is_array($r)) {
-                continue;
-            }
-            $currency = strtoupper(trim((string) ($r['currency_code'] ?? '')));
-            if (!preg_match('/^[A-Z]{3}$/', $currency)) {
-                return Json::error($response, 'validation_failed', 'Neplatný kód měny (ISO 4217, 3 znaky).', 400);
-            }
-            $mode = (string) ($r['price_mode'] ?? 'markup');
-            if (!in_array($mode, self::MODES, true)) {
-                return Json::error($response, 'validation_failed', 'Neplatný režim ceny.', 400);
-            }
-            $rounding = (string) ($r['rounding'] ?? 'none');
-            if (!in_array($rounding, self::ROUNDINGS, true)) {
-                return Json::error($response, 'validation_failed', 'Neplatné zaokrouhlení.', 400);
-            }
-            $markup = $this->numOrNull($r['markup_pct'] ?? null);
-            $fixed = $this->numOrNull($r['fixed_price'] ?? null);
-            if ($mode === 'fixed' && $fixed === null) {
-                return Json::error($response, 'validation_failed', 'Pevná cena musí být zadaná pro režim „fixed".', 400);
-            }
-            if ($mode === 'markup' && $markup === null) {
-                $markup = '0';
-            }
-            $keepCurrencies[$currency] = true;
-            $prepared[] = [
-                'currency_code'      => $currency,
-                'price_mode'         => $mode,
-                'markup_pct'         => $markup,
-                'fixed_price'        => $fixed,
-                'rounding'           => $rounding,
-                'is_manual_override' => (bool) ($r['is_manual_override'] ?? false),
-            ];
+        if (!isset($body['prices']) || !is_array($body['prices']) || !array_is_list($body['prices'])) {
+            return Json::error($response, 'validation_failed', 'Pole prices musí být seznam cen.', 400);
         }
+        $rows = $body['prices'];
 
-        // Reentrantní obal (vzor služeb) — pod už běžící transakcí by holé
-        // beginTransaction() shodilo request na PDOException místo zápisu.
-        $pdo = $this->db->pdo();
-        $owns = !$pdo->inTransaction();
-        if ($owns) {
-            $pdo->beginTransaction();
-        }
         try {
-            // Smaž měny, které v payloadu nejsou.
-            foreach ($this->prices->listForItem($supplierId, $itemId) as $existing) {
-                if (!isset($keepCurrencies[strtoupper((string) $existing['currency_code'])])) {
-                    $this->prices->delete($supplierId, $itemId, (string) $existing['currency_code']);
-                }
-            }
-            foreach ($prepared as $p) {
-                $this->prices->upsert($supplierId, $itemId, $p['currency_code'], $p);
-            }
-            if ($owns) {
-                $pdo->commit();
-            }
-        } catch (\Throwable $e) {
-            if ($owns && $pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            throw $e;
+            $result = array_key_exists('row_version', $body)
+                ? $this->writer->saveVersioned(
+                    $supplierId,
+                    $itemId,
+                    (int) $body['row_version'],
+                    $rows,
+                    $request->getMethod() === 'PUT',
+                )
+                : $this->writer->save($supplierId, $itemId, $rows, $request->getMethod() === 'PUT');
+        } catch (EshopException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
-
-        // Přepočet (mimo předchozí tx — recompute si otevře vlastní).
-        $result = $this->dispatcher->recomputeItem($supplierId, $itemId);
-        $this->log($request, 'eshop.prices_updated', $itemId, ['currencies' => array_keys($keepCurrencies)]);
+        $this->log($request, 'eshop.prices_updated', $itemId, ['currencies' => array_column($rows, 'currency_code')]);
         return Json::ok($response, $result);
     }
 
     public function recompute(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requirePermission($request, $response, 'eshop.write', AccessLevel::WRITE, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -158,13 +110,22 @@ final class ProductPriceAction
         return Json::ok($response, $result);
     }
 
-    private function numOrNull(mixed $v): ?string
+    public function delete(Request $request, Response $response, array $args): Response
     {
-        if ($v === null || $v === '') {
-            return null;
+        if (!$this->requirePermission($request, $response, 'eshop.write', AccessLevel::WRITE, $err)) {
+            return $err;
         }
-        $s = str_replace(',', '.', (string) $v);
-        return is_numeric($s) ? $s : null;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $itemId = (int) $args['id'];
+        if ($this->items->find($supplierId, $itemId) === null) {
+            return Json::error($response, 'not_found', 'Karta zboží nenalezena.', 404);
+        }
+        $result = $this->writer->delete($supplierId, $itemId, (string) $args['currency']);
+        $this->log($request, 'eshop.price_deleted', $itemId, ['currency' => strtoupper((string) $args['currency'])]);
+        return Json::ok($response, $result);
     }
 
     private function log(Request $request, string $action, int $id, array $payload): void

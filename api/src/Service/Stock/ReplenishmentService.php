@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Stock;
 
-use MyInvoice\Repository\InTransitRepository;
+use MyInvoice\Repository\StockItemRepository;
 
 /**
  * „Co objednat" (Epic SKLAD „na cestě", §5.6).
@@ -16,8 +16,8 @@ use MyInvoice\Repository\InTransitRepository;
  * `reserved` se naopak PŘIČÍTÁ — ty kusy sice fyzicky leží ve skladu, ale jsou
  * už fakticky pryč (drží je vystavená faktura), takže na pokrytí minima nejsou.
  *
- * Výsledek se zaokrouhlí nahoru na násobek `package_qty` preferovaného dodavatele
- * a podlahuje se jeho `min_order_qty` — objednat 3 kusy tam, kde se prodává
+ * Výsledek se nejdřív dorovná na `min_order_qty` preferovaného dodavatele a pak
+ * zaokrouhlí nahoru na násobek `package_qty` — objednat 3 kusy tam, kde se prodává
  * po deseti, je návrh, který dodavatel odmítne.
  */
 final class ReplenishmentService
@@ -26,7 +26,7 @@ final class ReplenishmentService
     private const DEFAULT_COEFFICIENT = 1.0;
 
     public function __construct(
-        private readonly InTransitRepository $repo,
+        private readonly StockItemRepository $items,
         private readonly InTransitService $quantities,
     ) {}
 
@@ -43,55 +43,13 @@ final class ReplenishmentService
         $coefficient = isset($filters['coefficient']) && (float) $filters['coefficient'] > 0
             ? (float) $filters['coefficient'] : self::DEFAULT_COEFFICIENT;
 
-        $rows   = $this->quantities->quantities($supplierId, $itemIds, $warehouseId, 2000);
-        $offers = $this->repo->vendorOffersForItems($supplierId, array_map(
-            static fn (array $r): int => (int) $r['stock_item_id'],
-            $rows,
-        ));
-
         $suggestions = [];
-        foreach ($rows as $row) {
-            if (!$row['is_active']) {
-                continue;
+        $candidateIds = $this->items->replenishmentCandidateIds($supplierId, $itemIds);
+        foreach (array_chunk($candidateIds, 500) as $chunk) {
+            $rows = $this->quantities->quantities($supplierId, $chunk, $warehouseId, count($chunk));
+            foreach ($rows as $row) {
+                $this->appendSuggestion($suggestions, $row, $warehouseId, $coefficient, $belowMin);
             }
-            // Karta, která se skladem nedrží (zboží na zakázku), se přes tenhle
-            // modul neobjednává — rozhodnutí #6 (dropshipping se v1 neřeší).
-            if ($row['min_qty'] === null) {
-                continue;
-            }
-
-            $minT       = StockValuation::qtyToT($row['min_qty']);
-            $onHandT    = StockValuation::qtyToT($row['on_hand']);
-            $reservedT  = StockValuation::qtyToT($row['reserved']);
-            $inTransitT = StockValuation::qtyToT($row['in_transit']);
-
-            $targetT = (int) ceil($minT * $coefficient);
-            $needT   = $targetT - $onHandT + $reservedT - $inTransitT;
-            if ($needT <= 0) {
-                continue;
-            }
-            if ($belowMin && $onHandT - $reservedT >= $minT) {
-                continue;
-            }
-
-            $vendor      = $this->preferredVendor($offers, (int) $row['stock_item_id']);
-            $suggestedT  = $this->roundToPackage($needT, $vendor);
-
-            $suggestions[] = [
-                'stock_item_id'    => $row['stock_item_id'],
-                'sku'              => $row['sku'],
-                'name'             => $row['name'],
-                'unit'             => $row['unit'],
-                'warehouse_id'     => $warehouseId,
-                'on_hand'          => $row['on_hand'],
-                'reserved'         => $row['reserved'],
-                'in_transit'       => $row['in_transit'],
-                'sellable'         => $row['sellable'],
-                'min_qty'          => $row['min_qty'],
-                'shortfall'        => StockValuation::tToDecimal($needT),
-                'suggested_qty'    => StockValuation::tToDecimal($suggestedT),
-                'preferred_vendor' => $vendor,
-            ];
         }
 
         $total  = count($suggestions);
@@ -99,6 +57,49 @@ final class ReplenishmentService
         $limit  = max(1, min(500, (int) ($filters['limit'] ?? 100)));
 
         return ['items' => array_slice($suggestions, $offset, $limit), 'total' => $total];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $suggestions
+     * @param array<string,mixed> $row
+     */
+    private function appendSuggestion(
+        array &$suggestions,
+        array $row,
+        ?int $warehouseId,
+        float $coefficient,
+        bool $belowMin,
+    ): void {
+        $minT       = StockValuation::qtyToT((string) $row['min_qty']);
+        $onHandT    = StockValuation::qtyToT($row['on_hand']);
+        $reservedT  = StockValuation::qtyToT($row['reserved']);
+        $inTransitT = StockValuation::qtyToT($row['in_transit']);
+
+        $targetT = (int) ceil($minT * $coefficient);
+        $needT   = $targetT - $onHandT + $reservedT - $inTransitT;
+        if ($needT <= 0 || ($belowMin && $onHandT - $reservedT >= $minT)) {
+            return;
+        }
+
+        $offers = is_array($row['vendor_offers'] ?? null) ? $row['vendor_offers'] : [];
+        $vendor = $this->preferredVendor($offers, (int) $row['stock_item_id']);
+        $suggestedT = $this->roundToPackage($needT, $vendor);
+
+        $suggestions[] = [
+            'stock_item_id'    => $row['stock_item_id'],
+            'sku'              => $row['sku'],
+            'name'             => $row['name'],
+            'unit'             => $row['unit'],
+            'warehouse_id'     => $warehouseId,
+            'on_hand'          => $row['on_hand'],
+            'reserved'         => $row['reserved'],
+            'in_transit'       => $row['in_transit'],
+            'sellable'         => $row['sellable'],
+            'min_qty'          => $row['min_qty'],
+            'shortfall'        => StockValuation::tToDecimal($needT),
+            'suggested_qty'    => StockValuation::tToDecimal($suggestedT),
+            'preferred_vendor' => $vendor,
+        ];
     }
 
     /**
@@ -112,13 +113,14 @@ final class ReplenishmentService
         if ($vendor === null) {
             return $needT;
         }
+        $minOrderT = $vendor['min_order_qty'] !== null ? StockValuation::qtyToT((string) $vendor['min_order_qty']) : 0;
+        $needT = max($needT, $minOrderT);
         $packageT = $vendor['package_qty'] !== null ? StockValuation::qtyToT((string) $vendor['package_qty']) : 0;
         if ($packageT > 0) {
             $needT = (int) (ceil($needT / $packageT) * $packageT);
         }
-        $minOrderT = $vendor['min_order_qty'] !== null ? StockValuation::qtyToT((string) $vendor['min_order_qty']) : 0;
 
-        return max($needT, $minOrderT);
+        return $needT;
     }
 
     /**

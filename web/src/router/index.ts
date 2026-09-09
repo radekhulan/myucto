@@ -150,7 +150,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'stock-purchase-orders': ['stock'], 'stock-purchase-order-new': ['stock.orders.write', 'write'], 'stock-purchase-order-detail': ['stock'],
   'stock-replenishment': ['stock'],
   'stock-warehouses': ['stock'], 'stock-vendor-offers': ['stock'],
-  'stock-takes': ['stock'], 'stock-take-detail': ['stock'], 'stock-reports': ['stock'], eshop: ['eshop'],
+  'stock-takes': ['stock'], 'stock-take-detail': ['stock'], 'stock-reports': ['stock'], 'eshop-jobs': ['eshop'], eshop: ['eshop'],
   logbook: ['logbook'], stats: ['dashboard'], 'purchase-stats': ['dashboard'], 'bank-statements': ['bank'], 'bank-detail': ['bank'], gopay: ['bank'],
   'admin-electronic-signatures': ['settings.signing', 'write'], 'admin-databox': ['settings.signing', 'write'], templates: ['accounting.templates'], tools: ['utilities'], 'crm-dashboard': ['dashboard.portfolio'], 'portfolio-overview': ['dashboard.portfolio'],
   'automation-cockpit': ['accounting'],

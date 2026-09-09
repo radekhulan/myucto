@@ -16,12 +16,11 @@ use PDO;
  */
 final class StockReportService
 {
-    /** B8: nad tento počet posted+reversed řádků skladové knihy firmy → 422 (v2 = async). */
-    private const MAX_MOVEMENTS = 50000;
-
     public function __construct(
         private readonly Connection $db,
         private readonly StockLevelRepository $levels,
+        private readonly StockLedgerReader $ledger,
+        private readonly \MyInvoice\Repository\StockValuationSnapshotRepository $snapshots,
     ) {}
 
     /**
@@ -71,7 +70,6 @@ final class StockReportService
      *
      * @param array<string,mixed> $filters {warehouse_id?:int}
      * @return array<string,mixed>
-     * @throws StockException too_many_movements (422, B8) — nad 50 000 pohybů firmy
      */
     public function valuation(int $supplierId, string $date, array $filters): array
     {
@@ -79,155 +77,58 @@ final class StockReportService
             throw new StockException('invalid_document', 'Datum sestavy je povinné (YYYY-MM-DD).');
         }
 
-        if ($this->countPostedLines($supplierId) > self::MAX_MOVEMENTS) {
-            throw new StockException(
-                'too_many_movements',
-                'Příliš mnoho skladových pohybů — sestava k historickému datu se pro tak velký objem generuje asynchronně (v2).',
-                422,
-            );
+        $pdo = $this->db->pdo();
+        $ownTransaction = !$pdo->inTransaction();
+        if ($ownTransaction) {
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $pdo->beginTransaction();
         }
-
-        $warehouseId = !empty($filters['warehouse_id']) ? (int) $filters['warehouse_id'] : null;
-        $rows        = $this->fetchLinesUpTo($supplierId, $date, $warehouseId);
-        $itemsMeta   = $this->itemsMetaMap($supplierId);
-        $warehouses  = $this->warehouseMetaMap($supplierId);
-
-        $out         = [];
-        $totalValueC = 0;
-        $curKey      = null;
-        $qtyT        = 0;
-        $valueC      = 0;
-
-        $flush = function () use (&$out, &$curKey, &$qtyT, &$valueC, $itemsMeta, $warehouses, &$totalValueC): void {
-            if ($curKey === null || ($qtyT === 0 && $valueC === 0)) {
-                return;
+        try {
+            $warehouseId = !empty($filters['warehouse_id']) ? (int) $filters['warehouse_id'] : null;
+            $this->snapshots->versions($supplierId, $warehouseId !== null ? [$warehouseId] : null);
+            $itemsMeta = $this->itemsMetaMap($supplierId);
+            $warehouses = $this->warehouseMetaMap($supplierId);
+            $out = [];
+            $totalValueC = 0;
+            foreach ($this->ledger->pairs($supplierId, $date, $warehouseId) as $pair) {
+                $whId = (int) $pair['warehouse_id'];
+                $itemId = (int) $pair['stock_item_id'];
+                $snapshot = $this->snapshots->latest($supplierId, $whId, $itemId, $date);
+                $qtyT = StockValuation::qtyToT((string) ($snapshot['qty'] ?? '0'));
+                $valueC = StockValuation::valueToC((string) ($snapshot['value_total'] ?? '0'));
+                foreach ($this->ledger->stream($supplierId, $whId, $itemId, $date, $snapshot['cutoff_date'] ?? null) as $line) {
+                    $state = StockLedgerReplay::advance($qtyT, $valueC, $line);
+                    $qtyT = $state['qtyT'];
+                    $valueC = $state['valueC'];
+                }
+                if ($qtyT === 0 && $valueC === 0) {
+                    continue;
+                }
+                $out[] = [
+                    'warehouse_id' => $whId,
+                    'warehouse_code' => $warehouses[$whId]['code'] ?? '',
+                    'warehouse_name' => $warehouses[$whId]['name'] ?? '',
+                    'stock_item_id' => $itemId,
+                    'sku' => $itemsMeta[$itemId]['sku'] ?? '',
+                    'name' => $itemsMeta[$itemId]['name'] ?? '',
+                    'unit' => $itemsMeta[$itemId]['unit'] ?? '',
+                    'qty' => StockValuation::tToDecimal($qtyT),
+                    'value_total' => StockValuation::cToDecimal($valueC),
+                ];
+                $totalValueC += $valueC;
             }
-            [$whId, $itemId] = $curKey;
-            $out[] = [
-                'warehouse_id'   => $whId,
-                'warehouse_code' => $warehouses[$whId]['code'] ?? '',
-                'warehouse_name' => $warehouses[$whId]['name'] ?? '',
-                'stock_item_id'  => $itemId,
-                'sku'            => $itemsMeta[$itemId]['sku'] ?? '',
-                'name'           => $itemsMeta[$itemId]['name'] ?? '',
-                'unit'           => $itemsMeta[$itemId]['unit'] ?? '',
-                'qty'            => StockValuation::tToDecimal($qtyT),
-                'value_total'    => StockValuation::cToDecimal($valueC),
-            ];
-            $totalValueC += $valueC;
-        };
-
-        foreach ($rows as $r) {
-            $key = [(int) $r['warehouse_id'], (int) $r['stock_item_id']];
-            if ($curKey === null || $key !== $curKey) {
-                $flush();
-                $curKey = $key;
-                $qtyT   = 0;
-                $valueC = 0;
+            if ($ownTransaction) {
+                $pdo->commit();
             }
-
-            $lineQtyT = StockValuation::qtyToT((string) $r['qty']);
-            if ((int) $r['direction'] === 1) {
-                $qtyT   += $lineQtyT;
-                $valueC += StockValuation::valueToC((string) $r['value_total']);
-                continue;
+            return ['date' => $date, 'items' => $out, 'totals' => [
+                'value_total' => StockValuation::cToDecimal($totalValueC), 'count' => count($out),
+            ]];
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
             }
-
-            // Fixní (nepřeceňovaná) výdejová noha storna — hodnotová neutralita §4.4,
-            // shodně s StockRecomputeService::replay().
-            $frozen = (bool) $r['is_reversal'] || ((string) $r['status'] === 'reversed');
-            if ($frozen) {
-                $lineValueC = StockValuation::valueToC((string) $r['value_total']);
-                $qtyT   -= $lineQtyT;
-                $valueC -= $lineValueC;
-                continue;
-            }
-
-            $res    = StockValuation::issue($qtyT, $valueC, $lineQtyT);
-            $qtyT   = $res['qtyT'];
-            $valueC = $res['valueC'];
+            throw $e;
         }
-        $flush();
-
-        return [
-            'date'   => $date,
-            'items'  => $out,
-            'totals' => [
-                'value_total' => StockValuation::cToDecimal($totalValueC),
-                'count'       => count($out),
-            ],
-        ];
-    }
-
-    // ── interní: skladová kniha k datu ──────────────────────────────────────────
-
-    /**
-     * Řádky skladové knihy (obě nohy převodky) se supplier_id ≤ `$date`,
-     * seřazené (stock_item_id, warehouse_id, doc_date, booked_at, document_id,
-     * line_no, line_id) — replay-ready pořadí (vzor
-     * {@see \MyInvoice\Repository\StockDocumentRepository::postedLinesForItemFrom()}).
-     *
-     * @return list<array<string,mixed>>
-     */
-    private function fetchLinesUpTo(int $supplierId, string $date, ?int $warehouseId): array
-    {
-        $wCondSource = $warehouseId !== null ? ' AND d.warehouse_id = ?' : '';
-        $wCondDest   = $warehouseId !== null ? ' AND d.warehouse_to_id = ?' : '';
-
-        $isReversalExpr = 'EXISTS (SELECT 1 FROM stock_documents o WHERE o.supplier_id = d.supplier_id AND o.reversal_document_id = d.id)';
-
-        $sql = "
-            (SELECT l.id AS line_id, l.document_id, d.doc_type, d.status, l.doc_date, d.booked_at, l.line_no,
-                    d.warehouse_id AS warehouse_id, l.stock_item_id, l.qty, l.unit_cost, l.value_total, l.extra_cost,
-                    CASE WHEN d.doc_type = 'receipt' THEN 1 ELSE -1 END AS direction,
-                    {$isReversalExpr} AS is_reversal
-               FROM stock_document_lines l
-               JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND d.status IN ('posted','reversed') AND l.doc_date <= ?
-                AND d.doc_type IN ('receipt','issue'){$wCondSource})
-            UNION ALL
-            (SELECT l.id AS line_id, l.document_id, d.doc_type, d.status, l.doc_date, d.booked_at, l.line_no,
-                    d.warehouse_id AS warehouse_id, l.stock_item_id, l.qty, l.unit_cost, l.value_total, l.extra_cost,
-                    -1 AS direction,
-                    {$isReversalExpr} AS is_reversal
-               FROM stock_document_lines l
-               JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND d.status IN ('posted','reversed') AND l.doc_date <= ?
-                AND d.doc_type = 'transfer'{$wCondSource})
-            UNION ALL
-            (SELECT l.id AS line_id, l.document_id, d.doc_type, d.status, l.doc_date, d.booked_at, l.line_no,
-                    d.warehouse_to_id AS warehouse_id, l.stock_item_id, l.qty, l.unit_cost, l.value_total, l.extra_cost,
-                    1 AS direction,
-                    {$isReversalExpr} AS is_reversal
-               FROM stock_document_lines l
-               JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND d.status IN ('posted','reversed') AND l.doc_date <= ?
-                AND d.doc_type = 'transfer'{$wCondDest})
-            ORDER BY stock_item_id ASC, warehouse_id ASC, doc_date ASC, booked_at ASC, document_id ASC, line_no ASC, line_id ASC";
-
-        $params = [];
-        foreach ([$wCondSource, $wCondSource, $wCondDest] as $cond) {
-            $params[] = $supplierId;
-            $params[] = $date;
-            if ($cond !== '') {
-                $params[] = $warehouseId;
-            }
-        }
-
-        $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    }
-
-    private function countPostedLines(int $supplierId): int
-    {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT COUNT(*) FROM stock_document_lines l
-               JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND d.status IN ('posted','reversed')"
-        );
-        $stmt->execute([$supplierId]);
-        return (int) $stmt->fetchColumn();
     }
 
     /** @return array<int,array{sku:string,name:string,unit:string}> */

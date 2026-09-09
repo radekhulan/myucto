@@ -837,6 +837,7 @@
     "stock_warehouses": "Warehouses",
     "stock_vendor_offers": "At vendor",
     "stock_reports": "Reports",
+    "eshop_jobs": "E-shop jobs",
     "section_eshop": "E-shop",
     "eshop_manufacturers": "Manufacturers",
     "eshop_tags": "Tags",
@@ -9013,6 +9014,8 @@
       "closed_issue": "Generated issue",
       "no_diffs": "No differences — stock matches.",
       "counting_in_progress": "A stock take on {date} is in progress in this warehouse — movements are temporarily blocked.",
+      "preparation_failed": "Stock take preparation failed. Retry or cancel the preparation.",
+      "preparation_running": "Preparing stock take",
       "pdf": "Stock take PDF"
     },
     "reports": {
@@ -9033,7 +9036,9 @@
       "export_pdf": "Export PDF",
       "export_xlsx": "Export XLSX",
       "empty": "No data to display.",
-      "too_many_movements": "The warehouse has too many movements for an immediate historical recalculation — try a shorter period or today's date."
+      "too_many_movements": "The warehouse has too many movements for an immediate historical recalculation — try a shorter period or today's date.",
+      "valuation_running": "Preparing historical valuation",
+      "valuation_failed": "Historical valuation could not be prepared."
     },
     "availability": {
       "in_stock": "in stock {qty} {unit}",
@@ -9121,6 +9126,36 @@
     }
   },
   "eshop": {
+    "jobs": {
+      "job_counts": "processed {changed}, skipped {skipped}, errors {failed}",
+      "job_running": "Job in progress",
+      "job_cancel": "Stop job",
+      "job_cancelling": "Stopping…",
+      "job_background_hint": "The job runs in the background. You can close this page and progress will resume when you return.",
+      "title": "E-shop jobs",
+      "subtitle": "History of imports and bulk recalculations. Running jobs refresh automatically.",
+      "empty_title": "No jobs yet",
+      "empty_hint": "An import or bulk recalculation will appear here once it is started.",
+      "recompute_prices": "Recalculate prices",
+      "queued": "The job was queued.",
+      "retry_done": "The job was queued again.",
+      "cancel_requested": "Cancellation requested",
+      "open_stock_take": "Open stock take",
+      "completed_errors": "Items with errors: {count}. Their prices were left unchanged.",
+      "replacement_runs": "Newer changes are handled by follow-up jobs:",
+      "first_errors": "Showing the first 20 errors.",
+      "errors": { "missing_exchange_rate": "Missing exchange rate", "missing_purchase_cost": "Missing purchase cost" },
+      "open_valuation": "Open valuation",
+      "run_detail": "Run details",
+      "attempts": "Attempts",
+      "last_update": "Last update",
+      "finished_at": "Finished",
+      "processed": "Processed",
+      "load_older": "Load older jobs",
+      "cancel_boundary": "Cancellation stops subsequent batches. Completed changes remain saved.",
+      "kind": { "price_recompute": "Price recalculation", "stock_valuation": "Valuation and stock take preparation" },
+      "status": { "queued": "Queued", "running": "Running", "completed": "Completed", "failed": "Failed", "cancelled": "Cancelled" }
+    },
     "page_subtitle": "Codebooks and settings for selling goods in the e-shop.",
     "manufacturers": {
       "title": "Manufacturers",
@@ -9365,6 +9400,11 @@
     "attachments": {
       "title": "Attachments",
       "upload": "Upload files",
+      "immediate_idle": "Saved separately",
+      "immediate_saving": "Saving…",
+      "immediate_saved": "Saved separately",
+      "immediate_error": "Save failed",
+      "immediate_save_hint": "Attachments and their settings are saved immediately and are not part of the Save product action.",
       "uploading": "Uploading…",
       "empty": "No attachments yet.",
       "primary": "Primary",

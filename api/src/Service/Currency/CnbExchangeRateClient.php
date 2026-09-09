@@ -39,6 +39,7 @@ final class CnbExchangeRateClient
         private readonly Connection $db,
         private readonly LoggerInterface $logger,
         private readonly Config $config,
+        private readonly \MyInvoice\Service\Eshop\Pricing\CatalogExchangeRateStore $rateStore,
     ) {}
 
     /**
@@ -332,13 +333,7 @@ final class CnbExchangeRateClient
     {
         if ($rates === []) return;
 
-        $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO exchange_rates (rate_date, currency_code, rate) VALUES (?, ?, ?)
-             ON DUPLICATE KEY UPDATE rate = VALUES(rate), fetched_at = NOW()'
-        );
-        foreach ($rates as $code => $rate) {
-            $stmt->execute([$date, $code, $rate]);
-        }
+        $this->rateStore->save($date, $rates);
     }
 
     private function isDemo(): bool

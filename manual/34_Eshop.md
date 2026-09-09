@@ -12,6 +12,16 @@ zboží** — je to sada **číselníků a nastavení**, které pak využiješ n
 konkrétní položky v editoru skladové karty (záložky „Jazyky", „Kategorie &
 štítky", „Parametry", „Ceny", „Dodavatelé", „Přílohy").
 
+Tlačítko **Uložit** v editoru zapíše základní údaje, e-shopový obsah, ceny,
+akční ceny a dodavatele jako jeden celek. Pokud některá z těchto částí neprojde
+kontrolou, neuloží se ani ostatní rozpracované změny. Když tutéž kartu mezitím
+uloží jiný uživatel, editor změnu odmítne jako konflikt a ponechá rozepsané
+hodnoty ve formuláři, aby je šlo porovnat s aktuálním stavem.
+
+Záložka **Přílohy** má vlastní stav ukládání. Nahrání, změna pořadí, nastavení
+hlavního obrázku, exportu i smazání se ukládají okamžitě a nejsou součástí
+tlačítka **Uložit** pro zbytek karty.
+
 Kapitola má dvě části: **§ 34.1–34.7** popisují číselníky a import na stránce
 `/eshop`, **§ 34.8–34.10** pak cenotvorbu a dodavatele, které se zadávají přímo
 na kartě zboží. Číselník jazyků je popsaný samostatně v
@@ -208,6 +218,8 @@ anglické varianty názvů sloupců (např. `nazev`/`name`, `vyrobce`/`manufactu
 | `dodaci_lhuta_dny` | Dodací lhůta ve dnech |
 
 ### 34.7.3 Chování importu
+
+Sloupec `cena` nastavuje pevnou prodejní cenu bez DPH v CZK i v měnovém ceníku. Ostatní měny ponechá. Prázdná cena stávající cenu zachová; odstranění ceny je samostatná operace v ceníku. Hodnoty `100` a `100.00` představují stejnou cenu a při opakovaném importu nevytvářejí změnu.
 
 - **Nikdy nemaže** — import zboží ani nesmaže existující kartu, ani z ní
   neodstraní hodnotu, která v souboru chybí (aktualizuje se **jen sloupec,
@@ -427,8 +439,7 @@ posílení koruny sama klesá.
 
 ### 34.8.7 Kdy se cena přepočítá
 
-Přepočet **není v databázi ani na časovači** — spouští ho aplikace v těchto
-okamžicích:
+Přepočet spouští aplikace při zápisu ceny nebo prostřednictvím trvalé úlohy:
 
 | Událost | Přepočet |
 |---|:---:|
@@ -436,18 +447,14 @@ okamžicích:
 | Kliknutí na **„Přepočítat"** | ✅ vynuceně |
 | Uložení dodavatelů (záložka Dodavatelé) | ✅ automaticky |
 | Uložení karty zboží | ✅ automaticky |
-| **Zaúčtování příjemky** (změní vážený průměr) | ❌ **ne** |
-| **Import nových kurzů** | ❌ **ne** |
-| Hromadné přecenění katalogu | ❌ nedostupné |
+| **Zaúčtování nebo storno skladového dokladu** | Automaticky ve frontě pro dotčené karty |
+| **Import změněných kurzů** | Automaticky ve frontě pro dotčené firmy |
+| Hromadné přecenění katalogu | Tlačítkem v přehledu úloh |
 
-> [!WARNING]
-> **Tohle je nejdůležitější provozní úskalí celé cenotvorby.** Zaúčtování
-> příjemky změní váženou průměrnou nákupní cenu, ale **prodejní ceny odvozené
-> přirážkou se samy nepřepočtou** — zůstanou na hodnotě z posledního přepočtu.
-> Totéž platí po aktualizaci kurzů u cen v cizí měně. Po naskladnění za jinou
-> nákupní cenu (a po výraznějším pohybu kurzu) je potřeba **projít dotčené
-> karty a kliknout na „Přepočítat"**. Hromadné přecenění v aplikaci není,
-> takže se to dělá kartu po kartě.
+Průběh najdeš v **Úlohách katalogu**. Úloha ukazuje stav a počet dokončených
+položek. Po chybě ji lze opakovat od poslední dokončené dávky. Zrušení zastaví
+další dávky, ale již uložené ceny ponechá. Pevné ceny zůstávají pevné.
+Přepočet na pozadí vyžaduje běžící plánovač s úlohou `cron-catalog-worker`.
 
 > [!NOTE]
 > **Akčních cen** ([§ 34.8.9](#3489-akcni-ceny)) se přepočet netýká — je to
@@ -742,9 +749,7 @@ Ať si nastavíš očekávání správně — tohle cenotvorba v MyÚčto **neum
 | **Množstevní slevy** (od X ks levněji) | Samostatná karta pro balení, nebo sleva na dokladu — akční cena umí jen *strop* počtu kusů, ne cenové pásmo |
 | **Částečné uplatnění akce v jednom řádku** | Akce je vše nebo nic per řádek — rozděl řádek ([§ 34.8.9](#3489-akcni-ceny)) |
 | **Historie cen** | Není — uchovává se jen aktuální hodnota a datum posledního přepočtu |
-| **Hromadné přecenění** | Kartu po kartě přes „Přepočítat" |
 | **Automatický feed nákupních cen od dodavatele** | Ceník se importuje ručně z XLSX/CSV ([§ 33.10.2](33_Sklad.md#33102-import-ceniku-dodavatele)), online napojení na dodavatele není |
-| **Automatický přepočet po příjemce / po importu kurzů** | Ruční „Přepočítat" ([§ 34.8.7](#3487-kdy-se-cena-prepocita)) |
 | **Výpočet a reporting marže** | Ručně z nákupní a prodejní ceny |
 | **XML feed pro Heureku / Zboží.cz** | Příznak „Exportovat do e-shopu" je jen označení pro externí systém |
 

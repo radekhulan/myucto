@@ -13074,25 +13074,35 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/eshop/products/{id}/prices:
     parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
-      - in: path
-        name: id
-        required: true
-        schema: { type: integer, format: int64 }
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        format: int64
     get:
-      tags: [Eshop]
+      tags:
+      - Eshop
       summary: Seznam cen karty zboží (per měna)
       responses:
-        '200': { description: OK }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '200':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
-      tags: [Eshop]
+      tags:
+      - Eshop
       summary: Uloží ceny karty zboží (bulk) a přepočte je
-      description: |
-        Nahradí ceny (`prices`) — měny, které v payloadu nejsou, se smažou.
+      description: 'Nahradí ceny (`prices`) — měny, které v payloadu nejsou, se smažou.
+
         Každý řádek: `currency_code` (ISO 4217), `price_mode` (markup/fixed),
+
         `markup_pct`, `fixed_price` (povinná u `fixed`), `rounding`,
+
         `is_manual_override`. Po zápisu se vždy spustí přepočet ceny.
+
+        '
       requestBody:
         required: true
         content:
@@ -13104,17 +13114,145 @@ paths:
                   type: array
                   items:
                     type: object
-                    required: [currency_code]
+                    required:
+                    - currency_code
                     properties:
-                      currency_code: { type: string, minLength: 3, maxLength: 3 }
-                      price_mode: { type: string, enum: [markup, fixed], default: markup }
-                      markup_pct: { type: [number, "null"] }
-                      fixed_price: { type: [number, "null"] }
-                      rounding: { type: string, enum: [none, '0.01', '0.10', '0.50', '1', '9_ending'], default: none }
-                      is_manual_override: { type: boolean, default: false }
+                      currency_code:
+                        type: string
+                        minLength: 3
+                        maxLength: 3
+                      price_mode:
+                        type: string
+                        enum:
+                        - markup
+                        - fixed
+                        default: markup
+                      markup_pct:
+                        type:
+                        - number
+                        - 'null'
+                      fixed_price:
+                        type:
+                        - number
+                        - 'null'
+                      rounding:
+                        type: string
+                        enum:
+                        - none
+                        - '0.01'
+                        - '0.10'
+                        - '0.50'
+                        - '1'
+                        - 9_ending
+                        default: none
+                      is_manual_override:
+                        type: boolean
+                        default: false
+                row_version:
+                  type: integer
+                  minimum: 1
+                  description: Volitelná očekávaná verze karty; při zadání vyžaduje
+                    shodu pod zámkem.
+              required:
+              - prices
       responses:
-        '200': { description: Výsledek přepočtu cen }
-        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '200':
+          description: Bez row_version seznam cen; s row_version atomicky načtený seznam
+            cen a nová verze.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: array
+                  items:
+                    type: object
+                - type: object
+                  required:
+                  - prices
+                  - row_version
+                  properties:
+                    prices:
+                      type: array
+                      items:
+                        type: object
+                    row_version:
+                      type: integer
+                      minimum: 1
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: version_conflict
+    patch:
+      tags:
+      - Eshop
+      summary: Doplní nebo upraví pouze uvedené měny
+      description: Ostatní měny zůstávají zachovány. Validace, zápis a přepočet jsou
+        atomické.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - prices
+              properties:
+                prices:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/EshopPriceInput'
+                row_version:
+                  type: integer
+                  minimum: 1
+                  description: Volitelná očekávaná verze karty; při zadání vyžaduje
+                    shodu pod zámkem.
+      responses:
+        '200':
+          description: Bez row_version seznam cen; s row_version atomicky načtený seznam
+            cen a nová verze.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: array
+                  items:
+                    type: object
+                - type: object
+                  required:
+                  - prices
+                  - row_version
+                  properties:
+                    prices:
+                      type: array
+                      items:
+                        type: object
+                    row_version:
+                      type: integer
+                      minimum: 1
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: version_conflict
+  /api/v1/eshop/products/{id}/prices/{currency}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+      - in: path
+        name: currency
+        required: true
+        schema: { type: string, pattern: '^[A-Za-z]{3}$' }
+    delete:
+      tags: [Eshop]
+      summary: Odstraní cenu jedné měny
+      responses:
+        '200': { description: Zbývající ceny karty }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/eshop/products/{id}/prices/recompute:
     parameters:
@@ -13264,32 +13402,52 @@ paths:
         '422': { description: Neplatný dodavatel nebo více preferovaných dodavatelů }
   /api/v1/eshop/products/{id}:
     parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
-      - in: path
-        name: id
-        required: true
-        schema: { type: integer, format: int64 }
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        format: int64
     get:
-      tags: [Eshop]
+      tags:
+      - Eshop
       summary: Karta zboží (agregát)
-      description: |
-        Vrací agregát nad `stock_items` (item_type=goods): eshopové sloupce +
+      description: 'Vrací agregát nad `stock_items` (item_type=goods): eshopové sloupce +
+
         `i18n`, `categories`, `tag_ids`, `attributes`, `fees`, `media`.
+
         Základní skladová identita (sku/název/DPH/cena) se edituje přes
+
         `/api/stock/items`.
+
+        '
       responses:
-        '200': { description: OK }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
-      tags: [Eshop]
+      tags:
+      - Eshop
       summary: Upraví eshopový obsah karty zboží (partial update agregátu)
-      description: |
-        Zapisují se jen přítomné sekce payloadu. `manufacturer_id` (pokud
+      description: 'Zapisují se jen přítomné sekce payloadu. `manufacturer_id` (pokud
+
         zadán) musí patřit tenantovi. `categories` — pole objektů
+
         `{category_id, is_primary?, display_order?}` (max 1 primary, jinak
+
         422). `tag_ids` — pole id štítků. `fees` — pole
+
         `{fee_type_id, amount, currency_code, vat_included}`. `attributes` —
+
         typované hodnoty parametrů. Změna `pricing_base` vyvolá přepočet cen.
+
+        '
       requestBody:
         required: true
         content:
@@ -13297,44 +13455,80 @@ paths:
             schema:
               type: object
               properties:
-                manufacturer_id: { type: [integer, "null"] }
-                warranty_months: { type: [integer, "null"] }
-                delivery_days: { type: [integer, "null"] }
-                export_eshop: { type: boolean }
-                is_stocked: { type: boolean }
-                weight_g: { type: [integer, "null"] }
-                pricing_base: { type: string }
+                manufacturer_id:
+                  type:
+                  - integer
+                  - 'null'
+                warranty_months:
+                  type:
+                  - integer
+                  - 'null'
+                delivery_days:
+                  type:
+                  - integer
+                  - 'null'
+                export_eshop:
+                  type: boolean
+                is_stocked:
+                  type: boolean
+                weight_g:
+                  type:
+                  - integer
+                  - 'null'
+                pricing_base:
+                  type: string
                 i18n:
                   type: array
-                  items: { type: object }
+                  items:
+                    type: object
                 categories:
                   type: array
                   items:
                     type: object
                     properties:
-                      category_id: { type: integer }
-                      is_primary: { type: boolean }
-                      display_order: { type: integer }
+                      category_id:
+                        type: integer
+                      is_primary:
+                        type: boolean
+                      display_order:
+                        type: integer
                 tag_ids:
                   type: array
-                  items: { type: integer }
+                  items:
+                    type: integer
                 attributes:
                   type: array
-                  items: { type: object }
+                  items:
+                    type: object
                 fees:
                   type: array
                   items:
                     type: object
                     properties:
-                      fee_type_id: { type: integer }
-                      amount: { type: number }
-                      currency_code: { type: string }
-                      vat_included: { type: boolean }
+                      fee_type_id:
+                        type: integer
+                      amount:
+                        type: number
+                      currency_code:
+                        type: string
+                      vat_included:
+                        type: boolean
+                row_version:
+                  type: integer
+                  minimum: 1
+              required:
+              - row_version
       responses:
-        '200': { description: OK }
-        '400': { $ref: '#/components/responses/ValidationFailed' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { description: Neplatná vazba (výrobce/kategorie/štítek) nebo více hlavních kategorií }
+        '200':
+          description: OK
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Neplatná vazba (výrobce/kategorie/štítek) nebo více hlavních kategorií
+        '409':
+          description: 'version_conflict: karta byla mezitím změněna'
   /api/v1/eshop/media/{mid}/file:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -13489,35 +13683,135 @@ paths:
         '200': { description: OK }
   /api/v1/stock/items:
     parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
+    - $ref: '#/components/parameters/SupplierIdHeader'
     get:
-      tags: [Stock]
+      tags:
+      - Stock
       summary: Seznam skladových karet
       parameters:
-        - in: query
-          name: type
-          schema: { type: string, enum: [material, goods, product] }
-        - in: query
-          name: active
-          schema: { type: boolean }
-        - in: query
-          name: q
-          schema: { type: string }
-          description: Fulltextové hledání (SKU, název, EAN).
-        - in: query
-          name: only_below_min
-          schema: { type: boolean }
-          description: Jen karty pod minimální zásobou (`min_qty`).
-        - in: query
-          name: limit
-          schema: { type: integer, default: 200, minimum: 1, maximum: 500 }
-        - in: query
-          name: offset
-          schema: { type: integer, default: 0, minimum: 0 }
+      - in: query
+        name: type
+        schema:
+          type: string
+          enum:
+          - material
+          - goods
+          - product
+      - in: query
+        name: active
+        schema:
+          type: boolean
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Fulltextové hledání (SKU, název, EAN).
+      - in: query
+        name: only_below_min
+        schema:
+          type: boolean
+        description: Jen karty pod minimální zásobou (`min_qty`).
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 200
+          minimum: 1
+          maximum: 500
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+      - in: query
+        name: warehouse_id
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: manufacturer_id
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: category_id
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: vendor_id
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: tag_ids
+        description: ID štítků oddělená čárkou; karta musí mít všechny.
+        schema:
+          type: string
+      - in: query
+        name: attribute_filters
+        description: JSON pole filtrů atributů.
+        schema:
+          type: string
+      - in: query
+        name: missing
+        description: Chybějící údaje oddělené čárkou.
+        schema:
+          type: string
+      - in: query
+        name: availability
+        description: Filtr fyzického množství.
+        schema:
+          type: string
+      - in: query
+        name: qty_min
+        description: Minimální množství.
+        schema:
+          type: string
+      - in: query
+        name: qty_max
+        description: Maximální množství.
+        schema:
+          type: string
+      - in: query
+        name: sort
+        schema:
+          type: string
+          enum:
+          - sku
+          - name
+          - type
+          - qty
+          - value
+      - in: query
+        name: direction
+        schema:
+          type: string
+          enum:
+          - asc
+          - desc
       responses:
-        '200': { description: OK }
+        '200':
+          description: Úplné agregace po kartách
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CatalogProduct'
+                  total:
+                    type: integer
+        '400':
+          description: Neplatný filtr
+      description: Řazení a agregace se vyhodnocují nad celým filtrovaným katalogem. Kategorie zahrnuje podstrom. Druhým řadicím
+        klíčem je ID.
     post:
-      tags: [Stock]
+      tags:
+      - Stock
       summary: Nová skladová karta
       requestBody:
         required: true
@@ -13525,22 +13819,56 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name]
+              required:
+              - name
               properties:
-                sku: { type: string, maxLength: 50, description: 'Nepovinné — bez zadání se odvodí slug z názvu.' }
-                name: { type: string, maxLength: 255 }
-                item_type: { type: string, enum: [material, goods, product], default: goods }
-                unit: { type: string, default: ks }
-                ean: { type: [string, "null"] }
-                vat_rate_id: { type: [integer, "null"] }
-                sale_price_without_vat: { type: [string, "null"] }
-                min_qty: { type: [string, "null"] }
-                is_active: { type: boolean, default: true }
-                note: { type: [string, "null"] }
+                sku:
+                  type: string
+                  maxLength: 50
+                  description: Nepovinné — bez zadání se odvodí slug z názvu.
+                name:
+                  type: string
+                  maxLength: 255
+                item_type:
+                  type: string
+                  enum:
+                  - material
+                  - goods
+                  - product
+                  default: goods
+                unit:
+                  type: string
+                  default: ks
+                ean:
+                  type:
+                  - string
+                  - 'null'
+                vat_rate_id:
+                  type:
+                  - integer
+                  - 'null'
+                sale_price_without_vat:
+                  type:
+                  - string
+                  - 'null'
+                min_qty:
+                  type:
+                  - string
+                  - 'null'
+                is_active:
+                  type: boolean
+                  default: true
+                note:
+                  type:
+                  - string
+                  - 'null'
       responses:
-        '201': { description: Vytvořeno }
-        '400': { $ref: '#/components/responses/ValidationFailed' }
-        '409': { description: 'Skladová karta s tímto SKU už existuje.' }
+        '201':
+          description: Vytvořeno
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '409':
+          description: Skladová karta s tímto SKU už existuje.
   /api/v1/stock/items/{id}:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14123,59 +14451,109 @@ paths:
         '404': { description: Objednávka nenalezena. }
   /api/v1/stock/purchase-orders/{id}/receipt:
     parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
-      - in: path
-        name: id
-        required: true
-        schema: { type: integer, format: int64 }
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        format: int64
     get:
-      tags: [Stock]
+      tags:
+      - Stock
       summary: Návrh příjemky z objednávky
-      description: |
-        Otevřené řádky se skladovou kartou, „zbývá přijmout" a pořizovací cena.
+      description: 'Otevřené řádky se skladovou kartou, „zbývá přijmout" a pořizovací cena.
+
         Cena se bere z napárovaného řádku přijaté faktury; když faktura ještě
+
         nedorazila, použije se `unit_price × exchange_rate` z objednávky jako ODHAD
+
         a řádek nese `cost_is_estimate: true`.
+
+        '
       responses:
-        '200': { description: OK }
-        '404': { description: Objednávka nenalezena. }
+        '200':
+          description: OK
+        '404':
+          description: Objednávka nenalezena.
     post:
-      tags: [Stock]
+      tags:
+      - Stock
       summary: Založení DRAFT příjemky z objednávky
-      description: |
-        Vytvoří `stock_documents` s `origin='purchase_order'`, `purchase_order_id`
+      description: 'Vytvoří `stock_documents` s `origin=''purchase_order''`, `purchase_order_id`
+
         na hlavičce a `purchase_order_line_id` na řádcích. Zaúčtování zůstává na
+
         `POST /api/stock/documents/{id}/post` — ten uvnitř téže transakce přepočte
+
         i stav objednávky (`partially_received` / `received`).
 
+
         Nadměrná dodávka končí `409 over_receipt`; s `allow_over_delivery: true`
+
         se přijme a řádek dostane `has_over_delivery = 1`. `qty_ordered` se nikdy
+
         nezvyšuje.
+
+        '
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [doc_date, lines]
+              required:
+              - doc_date
+              - lines
               properties:
-                doc_date: { type: string, format: date }
-                warehouse_id: { type: integer, format: int64 }
-                description: { type: string, maxLength: 255 }
-                allow_over_delivery: { type: boolean, default: false }
+                doc_date:
+                  type: string
+                  format: date
+                warehouse_id:
+                  type: integer
+                  format: int64
+                description:
+                  type: string
+                  maxLength: 255
+                allow_over_delivery:
+                  type: boolean
+                  default: false
                 lines:
                   type: array
                   minItems: 1
                   items:
                     type: object
-                    required: [purchase_order_line_id, qty]
+                    required:
+                    - purchase_order_line_id
+                    - qty
                     properties:
-                      purchase_order_line_id: { type: integer, format: int64 }
-                      qty: { type: string }
-                      unit_cost: { type: string, nullable: true }
+                      purchase_order_line_id:
+                        type: integer
+                        format: int64
+                      qty:
+                        type: string
+                      unit_cost:
+                        type: string
+                        nullable: true
+                landed_costs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      amount:
+                        type:
+                        - number
+                        - string
+                      allocation:
+                        type: string
+                        enum:
+                        - by_qty
+                        - by_value
       responses:
-        '201': { description: DRAFT příjemka vytvořena }
-        '409': { description: Nadměrná dodávka nebo objednávka v neplatném stavu. }
+        '201':
+          description: DRAFT příjemka vytvořena
+        '409':
+          description: Nadměrná dodávka nebo objednávka v neplatném stavu.
   /api/v1/stock/purchase-orders/{id}/receipts:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14351,105 +14729,217 @@ paths:
         '422': { description: Soubor je příliš velký nebo má příliš mnoho řádků. }
   /api/v1/stock/documents:
     parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
+    - $ref: '#/components/parameters/SupplierIdHeader'
     get:
-      tags: [Stock]
+      tags:
+      - Stock
       summary: Seznam skladových dokladů
       description: Stránkovaný seznam dokladů PRI/VYD/PRE (příjemka/výdejka/převodka).
       parameters:
-        - in: query
-          name: doc_type
-          schema: { type: string, enum: [receipt, issue, transfer] }
-        - in: query
-          name: status
-          schema: { type: string, enum: [draft, posted, reversed] }
-        - in: query
-          name: origin
-          schema: { type: string, enum: [manual, invoice, credit_note, purchase_invoice, inventory] }
-        - in: query
-          name: warehouse_id
-          schema: { type: integer }
-        - in: query
-          name: q
-          schema: { type: string }
-        - in: query
-          name: from
-          schema: { type: string, format: date }
-        - in: query
-          name: to
-          schema: { type: string, format: date }
-        - in: query
-          name: limit
-          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
-        - in: query
-          name: offset
-          schema: { type: integer, default: 0, minimum: 0 }
+      - in: query
+        name: doc_type
+        schema:
+          type: string
+          enum:
+          - receipt
+          - issue
+          - transfer
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - draft
+          - posted
+          - reversed
+      - in: query
+        name: origin
+        schema:
+          type: string
+          enum:
+          - manual
+          - invoice
+          - credit_note
+          - purchase_invoice
+          - inventory
+      - in: query
+        name: warehouse_id
+        schema:
+          type: integer
+      - in: query
+        name: q
+        schema:
+          type: string
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 100
+          minimum: 1
+          maximum: 500
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
       responses:
-        '200': { description: 'OK — `{items, total, limit, offset}`.' }
+        '200':
+          description: OK — `{items, total, limit, offset}`.
     post:
-      tags: [Stock]
+      tags:
+      - Stock
       summary: Nový skladový doklad (draft)
-      description: |
-        Založí draft dokladu (hlavička + řádky). U `doc_type=transfer` je povinný i
+      description: 'Založí draft dokladu (hlavička + řádky). U `doc_type=transfer` je povinný i
+
         `warehouse_to_id` (odlišný od `warehouse_id`). U příjemky se ocenění řádků
+
         (`unit_cost`/`extra_cost`) počítá zadanou pořizovací cenou; u výdeje/převodky
+
         se doplní až při zaúčtování (`post`).
+
+        '
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [doc_type, doc_date, description, warehouse_id, lines]
+              required:
+              - doc_type
+              - doc_date
+              - description
+              - warehouse_id
+              - lines
               properties:
-                doc_type: { type: string, enum: [receipt, issue, transfer] }
-                origin: { type: string, enum: [manual, invoice, credit_note, purchase_invoice, inventory], default: manual }
-                doc_date: { type: string, format: date }
-                description: { type: string, maxLength: 255 }
-                warehouse_id: { type: integer }
-                warehouse_to_id: { type: [integer, "null"], description: 'Povinné jen u transfer.' }
-                partner_name: { type: [string, "null"] }
-                invoice_id: { type: [integer, "null"] }
-                purchase_invoice_id: { type: [integer, "null"] }
-                stock_take_id: { type: [integer, "null"] }
+                doc_type:
+                  type: string
+                  enum:
+                  - receipt
+                  - issue
+                  - transfer
+                origin:
+                  type: string
+                  enum:
+                  - manual
+                  - invoice
+                  - credit_note
+                  - purchase_invoice
+                  - inventory
+                  default: manual
+                doc_date:
+                  type: string
+                  format: date
+                description:
+                  type: string
+                  maxLength: 255
+                warehouse_id:
+                  type: integer
+                warehouse_to_id:
+                  type:
+                  - integer
+                  - 'null'
+                  description: Povinné jen u transfer.
+                partner_name:
+                  type:
+                  - string
+                  - 'null'
+                invoice_id:
+                  type:
+                  - integer
+                  - 'null'
+                purchase_invoice_id:
+                  type:
+                  - integer
+                  - 'null'
+                stock_take_id:
+                  type:
+                  - integer
+                  - 'null'
                 lines:
                   type: array
                   items:
                     type: object
-                    required: [stock_item_id, qty]
+                    required:
+                    - stock_item_id
+                    - qty
                     properties:
-                      stock_item_id: { type: integer }
-                      qty: { type: string }
-                      unit_cost: { type: string, description: 'Jen u receipt.' }
-                      extra_cost: { type: string, description: 'Vedlejší pořizovací náklady, jen u receipt.' }
-                      invoice_item_id: { type: [integer, "null"] }
-                      purchase_invoice_item_id: { type: [integer, "null"] }
-                      source_description: { type: [string, "null"] }
-                      source_qty: { type: [string, "null"] }
-                      note: { type: [string, "null"] }
+                      stock_item_id:
+                        type: integer
+                      qty:
+                        type: string
+                      unit_cost:
+                        type: string
+                        description: Jen u receipt.
+                      extra_cost:
+                        type: string
+                        description: Vedlejší pořizovací náklady, jen u receipt.
+                      invoice_item_id:
+                        type:
+                        - integer
+                        - 'null'
+                      purchase_invoice_item_id:
+                        type:
+                        - integer
+                        - 'null'
+                      source_description:
+                        type:
+                        - string
+                        - 'null'
+                      source_qty:
+                        type:
+                        - string
+                        - 'null'
+                      note:
+                        type:
+                        - string
+                        - 'null'
+                allow_over_delivery:
+                  type: boolean
+                  default: false
       responses:
-        '201': { description: 'Vytvořeno (draft).' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '201':
+          description: Vytvořeno (draft).
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
   /api/v1/stock/documents/{id}:
     parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
-      - in: path
-        name: id
-        required: true
-        schema: { type: integer, format: int64 }
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        format: int64
     get:
-      tags: [Stock]
+      tags:
+      - Stock
       summary: Detail skladového dokladu
       description: Vč. řádků.
       responses:
-        '200': { description: OK }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '200':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
-      tags: [Stock]
+      tags:
+      - Stock
       summary: Úprava skladového dokladu (draft)
-      description: |
-        Přepíše hlavičku a nahradí řádky. Lze upravovat jen doklad ve stavu `draft`
+      description: 'Přepíše hlavičku a nahradí řádky. Lze upravovat jen doklad ve stavu `draft`
+
         (jinak 422 `not_draft`). Tělo stejné jako u vytvoření.
+
+        '
       requestBody:
         required: true
         content:
@@ -14457,28 +14947,62 @@ paths:
             schema:
               type: object
               properties:
-                doc_type: { type: string, enum: [receipt, issue, transfer] }
-                origin: { type: string, enum: [manual, invoice, credit_note, purchase_invoice, inventory] }
-                doc_date: { type: string, format: date }
-                description: { type: string, maxLength: 255 }
-                warehouse_id: { type: integer }
-                warehouse_to_id: { type: [integer, "null"] }
-                partner_name: { type: [string, "null"] }
+                doc_type:
+                  type: string
+                  enum:
+                  - receipt
+                  - issue
+                  - transfer
+                origin:
+                  type: string
+                  enum:
+                  - manual
+                  - invoice
+                  - credit_note
+                  - purchase_invoice
+                  - inventory
+                doc_date:
+                  type: string
+                  format: date
+                description:
+                  type: string
+                  maxLength: 255
+                warehouse_id:
+                  type: integer
+                warehouse_to_id:
+                  type:
+                  - integer
+                  - 'null'
+                partner_name:
+                  type:
+                  - string
+                  - 'null'
                 lines:
                   type: array
-                  items: { type: object }
+                  items:
+                    type: object
+                allow_over_delivery:
+                  type: boolean
+                  default: false
       responses:
-        '200': { description: OK }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { description: 'Doklad není draft, nebo validace řádků selhala.' }
+        '200':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Doklad není draft, nebo validace řádků selhala.
     delete:
-      tags: [Stock]
+      tags:
+      - Stock
       summary: Smazání skladového dokladu (draft)
       description: Smazat lze jen doklad ve stavu `draft`.
       responses:
-        '200': { description: OK }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { description: 'Doklad není draft.' }
+        '200':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Doklad není draft.
   /api/v1/stock/documents/{id}/post:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14628,22 +15152,30 @@ paths:
         '422': { description: 'Inventura není ve fázi counting.' }
   /api/v1/stock/takes/{id}/start:
     parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
-      - in: path
-        name: id
-        required: true
-        schema: { type: integer, format: int64 }
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        format: int64
     post:
-      tags: [Stock]
-      summary: Spuštění inventury (draft → counting)
-      description: |
-        Vytvoří snapshot očekávaných stavů (`expected_qty`/`expected_value`) všech
-        aktivních karet skladu k okamžiku spuštění a přepne inventuru do fáze
-        `counting`. Lze spustit jen inventuru ve stavu `draft`.
+      tags:
+      - Stock
+      summary: Asynchronní příprava inventury
+      description: Založí úlohu přípravy očekávaných stavů k rozhodnému datu inventury. Do dokončení nelze zadávat
+        počty. Opakované zahájení vrací stávající přípravu.
       responses:
-        '200': { description: OK }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { description: 'Inventura není draft.' }
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockTakePreparation'
+        '404':
+          description: Inventura nenalezena
+        '409':
+          description: Nepovolený stav
   /api/v1/stock/takes/{id}/close:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14725,53 +15257,86 @@ paths:
         '200': { description: OK }
   /api/v1/stock/reports/{name}/export:
     parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
-      - in: path
-        name: name
-        required: true
-        schema: { type: string, enum: [status, valuation] }
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: name
+      required: true
+      schema:
+        type: string
+        enum:
+        - status
+        - valuation
     get:
-      tags: [Stock]
+      tags:
+      - Stock
       summary: Export sestavy (PDF/XLSX)
-      description: Export sestavy `status` nebo `valuation` (stejné filtry jako u dat sestavy).
+      description: Export sestavy `status` nebo `valuation` (stejné filtry jako u dat
+        sestavy).
       parameters:
-        - in: query
-          name: format
-          required: true
-          schema: { type: string, enum: [pdf, xlsx] }
-        - in: query
-          name: warehouse_id
-          schema: { type: integer }
-        - in: query
-          name: item_type
-          schema: { type: string, enum: [material, goods, product] }
-          description: Jen u sestavy status.
-        - in: query
-          name: below_min
-          schema: { type: boolean }
-          description: Jen u sestavy status.
-        - in: query
-          name: active
-          schema: { type: boolean }
-          description: Jen u sestavy status.
-        - in: query
-          name: q
-          schema: { type: string }
-          description: Jen u sestavy status.
-        - in: query
-          name: date
-          schema: { type: string, format: date }
-          description: Jen u sestavy valuation.
+      - in: query
+        name: format
+        required: true
+        schema:
+          type: string
+          enum:
+          - pdf
+          - xlsx
+      - in: query
+        name: warehouse_id
+        schema:
+          type: integer
+      - in: query
+        name: item_type
+        schema:
+          type: string
+          enum:
+          - material
+          - goods
+          - product
+        description: Jen u sestavy status.
+      - in: query
+        name: below_min
+        schema:
+          type: boolean
+        description: Jen u sestavy status.
+      - in: query
+        name: active
+        schema:
+          type: boolean
+        description: Jen u sestavy status.
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Jen u sestavy status.
+      - in: query
+        name: date
+        schema:
+          type: string
+          format: date
+        description: Jen u sestavy valuation.
+      - in: query
+        name: job_id
+        description: Dokončená úloha ocenění; exportuje její výsledek a rozhodné datum.
+        schema:
+          type: integer
+          minimum: 1
       responses:
         '200':
-          description: 'Soubor (PDF nebo XLSX dle `format`).'
+          description: Soubor (PDF nebo XLSX dle `format`).
           content:
             application/pdf:
-              schema: { type: string, format: binary }
+              schema:
+                type: string
+                format: binary
             application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
-              schema: { type: string, format: binary }
-        '404': { description: 'Neznámá sestava.' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Neznámá sestava.
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
   /api/v1/documents/{entity_type}/{id}/signature-selection:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -17914,6 +18479,334 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/eshop/products/{id}/editor:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+    put:
+      tags:
+      - Eshop
+      summary: Atomicky uloží celý editor skladové karty
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogEditorInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        '400':
+          description: Neplatný vstup
+        '404':
+          description: Karta nenalezena
+        '409':
+          description: Konflikt verze
+        '422':
+          description: Neplatná vazba
+
+  /api/v1/eshop/jobs:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags:
+      - Eshop
+      summary: Historie katalogových úloh
+      parameters:
+      - in: query
+        name: before_id
+        schema:
+          type: integer
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          maximum: 100
+      responses:
+        '200':
+          description: Úlohy od nejnovějších
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CatalogJob'
+
+  /api/v1/eshop/jobs/{id}:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+    get:
+      tags:
+      - Eshop
+      summary: Detail a průběh katalogové úlohy
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogJob'
+
+  /api/v1/eshop/jobs/{id}/retry:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+    post:
+      tags:
+      - Eshop
+      summary: Pokračovat v úloze
+      description: Dokončené dávky se nevracejí zpět. Příprava inventury se ovládá v detailu inventury.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogJob'
+        '409':
+          description: Operace není dostupná v aktuálním stavu
+
+  /api/v1/eshop/jobs/{id}/cancel:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+    post:
+      tags:
+      - Eshop
+      summary: Zastavit další dávky úlohy
+      description: Dokončené dávky se nevracejí zpět. Příprava inventury se ovládá v detailu inventury.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogJob'
+        '409':
+          description: Operace není dostupná v aktuálním stavu
+
+  /api/v1/eshop/jobs/prices-recompute:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags:
+      - Eshop
+      summary: Zařadí dávkový přepočet aktuálních cen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                item_ids:
+                  type: array
+                  maxItems: 30000
+                  items:
+                    type: integer
+                    minimum: 1
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogJob'
+        '422':
+          description: Výběr nemá měnové ceny
+
+  /api/v1/stock/takes/{id}/cancel-preparation:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    post:
+      tags:
+      - Stock
+      summary: Zruší přípravu inventury
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockTakePreparation'
+        '404':
+          description: Inventura nenalezena
+        '409':
+          description: Nepovolený stav
+
+  /api/v1/stock/takes/{id}/retry-preparation:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    post:
+      tags:
+      - Stock
+      summary: Opakuje přípravu inventury
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockTakePreparation'
+        '404':
+          description: Inventura nenalezena
+        '409':
+          description: Nepovolený stav
+
+  /api/v1/stock/reports/valuation-jobs:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags:
+      - Stock
+      summary: Založí asynchronní historické ocenění
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - date
+              properties:
+                date:
+                  type: string
+                  format: date
+                warehouse_id:
+                  type: integer
+                  minimum: 1
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogJob'
+        '422':
+          description: Neplatné datum nebo sklad
+
+  /api/v1/stock/reports/valuation-jobs/{id}:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    get:
+      tags:
+      - Stock
+      summary: Stránka dokončeného ocenění
+      parameters:
+      - in: query
+        name: page
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          minimum: 1
+          default: 100
+          maximum: 500
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockValuationJobResult'
+        '404':
+          description: Úloha nenalezena
+        '409':
+          description: Výsledek ještě není připraven
+
+  /api/v1/stock/reports/valuation-jobs/{id}/status:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    get:
+      tags:
+      - Stock
+      summary: Průběh historického ocenění
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogJob'
+        '404':
+          description: Ocenění nenalezeno
+        '409':
+          description: Nepovolený stav
+
+  /api/v1/stock/reports/valuation-jobs/{id}/cancel:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    post:
+      tags:
+      - Stock
+      summary: Zrušení dalších dávek ocenění
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogJob'
+        '404':
+          description: Ocenění nenalezeno
+        '409':
+          description: Nepovolený stav
+
 components:
   securitySchemes:
     BearerAuth:
@@ -17977,6 +18870,198 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    StockTakePreparation:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          enum:
+          - draft
+          - preparing
+          - counting
+          - closed
+        preparation_job_id:
+          type:
+          - integer
+          - 'null'
+        preparation_job:
+          anyOf:
+          - $ref: '#/components/schemas/CatalogJob'
+          - type: 'null'
+        items:
+          type: array
+          items:
+            type: object
+    StockValuationJobResult:
+      type: object
+      properties:
+        job_id:
+          type: integer
+        date:
+          type: string
+          format: date
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              warehouse_id:
+                type: integer
+              stock_item_id:
+                type: integer
+              warehouse_code:
+                type: string
+              warehouse_name:
+                type: string
+              sku:
+                type: string
+              name:
+                type: string
+              unit:
+                type: string
+              qty:
+                type: string
+              value_total:
+                type: string
+        totals:
+          type: object
+          properties:
+            count:
+              type: integer
+            value_total:
+              type: string
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total:
+              type: integer
+            pages:
+              type: integer
+        source_versions:
+          type: object
+          additionalProperties:
+            type: integer
+    CatalogJob:
+      type: object
+      properties:
+        id:
+          type: integer
+        supplier_id:
+          type: integer
+        input_version:
+          type: integer
+        checkpoint:
+          type: integer
+        total:
+          type: integer
+        attempts:
+          type: integer
+        kind:
+          type: string
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - completed
+          - failed
+          - cancelled
+        cancel_requested:
+          type: boolean
+        error_code:
+          type:
+          - string
+          - 'null'
+        report:
+          type: object
+        stock_take_id:
+          type:
+          - integer
+          - 'null'
+        created_at:
+          type:
+          - string
+          - 'null'
+        updated_at:
+          type:
+          - string
+          - 'null'
+        finished_at:
+          type:
+          - string
+          - 'null'
+    CatalogProduct:
+      type: object
+      properties:
+        id:
+          type: integer
+        row_version:
+          type: integer
+          minimum: 1
+        qty:
+          type: string
+        value_total:
+          type: string
+        avg_unit_cost:
+          type: string
+    CatalogEditorInput:
+      type: object
+      required:
+      - row_version
+      - item
+      - product
+      - prices
+      - promo_prices
+      - vendors
+      properties:
+        row_version:
+          type: integer
+          minimum: 1
+        item:
+          type: object
+        product:
+          type: object
+        prices:
+          type: array
+          items:
+            $ref: '#/components/schemas/EshopPriceInput'
+        promo_prices:
+          type: array
+          items:
+            $ref: '#/components/schemas/EshopPromoPriceInput'
+        vendors:
+          type: array
+          items:
+            type: object
+    StockDocumentState:
+      type: object
+      properties:
+        id:
+          type: integer
+        allow_over_delivery:
+          type: boolean
+        status:
+          type: string
+          enum:
+          - draft
+          - posted
+          - reversed
+    EshopPriceInput:
+      type: object
+      required: [currency_code]
+      properties:
+        currency_code: { type: string, pattern: '^[A-Za-z]{3}$' }
+        price_mode: { type: string, enum: [markup, fixed], default: markup }
+        markup_pct: { type: [number, string, 'null'], description: Přirážka od -100 do 9999.999 }
+        fixed_price: { type: [number, string, 'null'], description: Nezáporná cena do 9999999999.99; povinná pro fixed }
+        rounding: { type: string, enum: [none, '0.01', '0.10', '0.50', '1', '9_ending'], default: none }
+        is_manual_override: { type: boolean, default: false }
     CrmActionItem:
       type: object
       required: [type, severity, title, hint, link]

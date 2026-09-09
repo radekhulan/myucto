@@ -371,6 +371,15 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                'script' => 'cron-catalog-worker',
+                'recommended' => 'every_minute',
+                'linux_cron' => '* * * * *',
+                'windows_schtasks' => '/sc minute /mo 1',
+                'max_age_hours' => 1,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-ai-worker',
                 'recommended' => 'every_10_min',
                 'linux_cron' => '*/10 * * * *',

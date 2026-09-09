@@ -34,6 +34,8 @@ final class StockTakeService
         private readonly WarehouseRepository $warehouses,
         private readonly StockReportService $reports,
         private readonly StockDocumentRepository $documentRepository,
+        private readonly StockValuationJobService $valuationJobs,
+        private readonly \MyInvoice\Service\Eshop\CatalogJobService $jobs,
     ) {}
 
     /**
@@ -211,6 +213,51 @@ final class StockTakeService
         });
     }
 
+    public function prepare(int $supplierId, int $id, ?int $userId): array
+    {
+        return $this->runInTransaction(function () use ($supplierId, $id): array {
+            $take = $this->get($supplierId, $id);
+            $this->warehouses->lockForStockOperation($supplierId, [(int) $take['warehouse_id']]);
+            $take = $this->takes->find($supplierId, $id);
+            if ($take['status'] === 'preparing') {
+                return $this->get($supplierId, $id);
+            }
+            if ($take['status'] !== 'draft') {
+                throw new StockException('invalid_document', 'Připravit lze jen rozpracovanou inventuru.', 409);
+            }
+            $job = $this->valuationJobs->enqueue($supplierId, $take['take_date'], [
+                'warehouse_id' => (int) $take['warehouse_id'], 'stock_take_id' => $id,
+            ]);
+            $this->takes->updateStatus($supplierId, $id, 'preparing', ['preparation_job_id' => $job['id']]);
+            return $this->get($supplierId, $id);
+        });
+    }
+
+    public function cancelPreparation(int $supplierId, int $id): array
+    {
+        return $this->runInTransaction(function () use ($supplierId, $id): array {
+            $take = $this->get($supplierId, $id);
+            if ($take['status'] !== 'preparing') {
+                throw new StockException('invalid_document', 'Inventura není ve fázi přípravy.', 409);
+            }
+            $this->jobs->cancel($supplierId, (int) $take['preparation_job_id']);
+            $this->warehouses->lockForStockOperation($supplierId, [(int) $take['warehouse_id']]);
+            $take = $this->takes->find($supplierId, $id);
+            if ($take['status'] !== 'preparing') {
+                throw new StockException('stock_take_preparation_conflict', 'Příprava inventury již skončila.', 409);
+            }
+            $this->takes->replaceLines($supplierId, $id, []);
+            $this->takes->updateStatus($supplierId, $id, 'draft', ['preparation_job_id' => null]);
+            return $this->get($supplierId, $id);
+        });
+    }
+
+    public function retryPreparation(int $supplierId, int $id): array
+    {
+        $this->cancelPreparation($supplierId, $id);
+        return $this->prepare($supplierId, $id, null);
+    }
+
     /**
      * Zadání skutečností — jen ve fázi counting. `body.lines` = list
      * {id (stock_take_lines.id), counted_qty (string|null)}.
@@ -375,6 +422,7 @@ final class StockTakeService
         if ($take === null) {
             throw new StockException('not_found', 'Inventura nenalezena.', 404);
         }
+        $take['preparation_job'] = $take['preparation_job_id'] !== null ? $this->jobs->find($supplierId, (int) $take['preparation_job_id']) : null;
         $take['lines'] = array_map(static function (array $l): array {
             if ($l['counted_qty'] === null) {
                 $l['diff_qty'] = null;
@@ -383,7 +431,7 @@ final class StockTakeService
                 $l['diff_qty'] = StockValuation::tToDecimal($diffT);
             }
             return $l;
-        }, $this->takes->lines($supplierId, $id));
+        }, $take['status'] === 'preparing' ? [] : $this->takes->lines($supplierId, $id));
         return $take;
     }
 
@@ -400,7 +448,7 @@ final class StockTakeService
     private function openTakeForWarehouse(int $supplierId, int $warehouseId): ?array
     {
         foreach ($this->takes->list($supplierId, ['warehouse_id' => $warehouseId]) as $t) {
-            if (in_array((string) $t['status'], ['draft', 'counting'], true)) {
+            if (in_array((string) $t['status'], ['draft', 'preparing', 'counting'], true)) {
                 return $t;
             }
         }

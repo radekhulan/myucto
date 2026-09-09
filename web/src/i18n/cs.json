@@ -837,6 +837,7 @@
     "stock_warehouses": "Sklady",
     "stock_vendor_offers": "U dodavatele",
     "stock_reports": "Sestavy",
+    "eshop_jobs": "Úlohy e-shopu",
     "section_eshop": "E-shop",
     "eshop_manufacturers": "Výrobci",
     "eshop_tags": "Tagy",
@@ -9013,6 +9014,8 @@
       "closed_issue": "Vzniklá výdejka",
       "no_diffs": "Žádné rozdíly — sklad souhlasí.",
       "counting_in_progress": "Ve skladu probíhá inventura {date} — pohyby jsou dočasně zablokované.",
+      "preparation_failed": "Příprava inventury se nezdařila. Zkuste ji opakovat nebo zrušit.",
+      "preparation_running": "Připravuji inventuru",
       "pdf": "Inventurní soupis PDF"
     },
     "reports": {
@@ -9033,7 +9036,9 @@
       "export_pdf": "Export PDF",
       "export_xlsx": "Export XLSX",
       "empty": "Žádná data k zobrazení.",
-      "too_many_movements": "Sklad má příliš mnoho pohybů pro okamžitý přepočet k historickému datu — zkuste kratší období nebo aktuální den."
+      "too_many_movements": "Sklad má příliš mnoho pohybů pro okamžitý přepočet k historickému datu — zkuste kratší období nebo aktuální den.",
+      "valuation_running": "Připravuji historické ocenění",
+      "valuation_failed": "Historické ocenění se nepodařilo připravit."
     },
     "availability": {
       "in_stock": "skladem {qty} {unit}",
@@ -9121,6 +9126,36 @@
     }
   },
   "eshop": {
+    "jobs": {
+      "job_counts": "zpracováno {changed}, přeskočeno {skipped}, chyby {failed}",
+      "job_running": "Úloha běží",
+      "job_cancel": "Zastavit úlohu",
+      "job_cancelling": "Zastavuji…",
+      "job_background_hint": "Úloha běží na pozadí. Stránku můžete zavřít a průběh se po návratu znovu načte.",
+      "title": "Úlohy e-shopu",
+      "subtitle": "Historie importů a hromadných přepočtů. Běžící úlohy se obnovují automaticky.",
+      "empty_title": "Zatím nejsou žádné úlohy",
+      "empty_hint": "Po spuštění importu nebo hromadného přepočtu se jeho průběh objeví zde.",
+      "recompute_prices": "Přepočítat ceny",
+      "queued": "Úloha byla zařazena do fronty.",
+      "retry_done": "Úloha byla zařazena znovu.",
+      "cancel_requested": "Čeká na zrušení",
+      "open_stock_take": "Otevřít inventuru",
+      "completed_errors": "Počet položek s chybou: {count}. Jejich ceny zůstaly beze změny.",
+      "replacement_runs": "Novější změny zpracují navazující úlohy:",
+      "first_errors": "Zobrazeno prvních 20 chyb.",
+      "errors": { "missing_exchange_rate": "Chybí kurz měny", "missing_purchase_cost": "Chybí nákupní cena" },
+      "open_valuation": "Otevřít ocenění",
+      "run_detail": "Podrobnosti běhu",
+      "attempts": "Počet pokusů",
+      "last_update": "Poslední změna",
+      "finished_at": "Dokončeno",
+      "processed": "Zpracováno",
+      "load_older": "Načíst starší úlohy",
+      "cancel_boundary": "Zrušení zastaví další dávky. Již dokončené změny zůstanou uložené.",
+      "kind": { "price_recompute": "Přepočet cen", "stock_valuation": "Ocenění a příprava inventury" },
+      "status": { "queued": "Ve frontě", "running": "Běží", "completed": "Dokončeno", "failed": "Chyba", "cancelled": "Zrušeno" }
+    },
     "page_subtitle": "Číselníky a nastavení pro prodej zboží na eshopu.",
     "manufacturers": {
       "title": "Výrobci",
@@ -9365,6 +9400,11 @@
     "attachments": {
       "title": "Přílohy",
       "upload": "Nahrát soubory",
+      "immediate_idle": "Ukládá se samostatně",
+      "immediate_saving": "Ukládám…",
+      "immediate_saved": "Uloženo samostatně",
+      "immediate_error": "Uložení selhalo",
+      "immediate_save_hint": "Přílohy a jejich nastavení se ukládají ihned a nejsou součástí tlačítka Uložit kartu.",
       "uploading": "Nahrávám…",
       "empty": "Zatím žádné přílohy.",
       "primary": "Hlavní",

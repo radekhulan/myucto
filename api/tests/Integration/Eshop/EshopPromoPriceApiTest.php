@@ -166,6 +166,45 @@ final class EshopPromoPriceApiTest extends StockTestCase
         self::assertSame([], $this->promos->listForItem($sid, $item), 'Neplatný payload nesmí nic uložit.');
     }
 
+    public function testMalformedRowDoesNotDeleteExistingPromoOrAdvanceVersion(): void
+    {
+        $sid = $this->createSupplier();
+        $item = $this->pricedItem($sid, 'API-PROMO-MALFORMED');
+        $promoId = $this->promos->insert($sid, $item, [
+            'currency_code' => 'CZK', 'promo_price' => '500.00', 'label' => 'Původní',
+            'valid_from' => null, 'valid_to' => null,
+            'qty_mode' => 'unlimited', 'qty_limit' => null, 'is_active' => true, 'note' => null,
+        ]);
+        $versionBefore = $this->itemsRepo->find($sid, $item)['row_version'];
+
+        [$status, $body] = $this->call([$this->action, 'put'], $this->request($sid, 'PUT', '/', [
+            'promo_prices' => ['neplatný řádek'],
+        ]), ['id' => $item]);
+
+        self::assertSame(400, $status);
+        self::assertSame('validation_failed', $body['error']['code']);
+        self::assertSame('500.00', $this->promos->find($sid, $promoId)['promo_price']);
+        self::assertSame($versionBefore, $this->itemsRepo->find($sid, $item)['row_version']);
+    }
+
+    public function testStandalonePromoWriteAdvancesParentVersion(): void
+    {
+        $sid = $this->createSupplier();
+        $item = $this->pricedItem($sid, 'API-PROMO-VERSION');
+        $versionBefore = $this->itemsRepo->find($sid, $item)['row_version'];
+
+        [$status] = $this->call([$this->action, 'put'], $this->request($sid, 'PUT', '/', [
+            'promo_prices' => [[
+                'currency_code' => 'CZK',
+                'promo_price' => '450.00',
+                'qty_mode' => 'unlimited',
+            ]],
+        ]), ['id' => $item]);
+
+        self::assertSame(200, $status);
+        self::assertGreaterThan($versionBefore, $this->itemsRepo->find($sid, $item)['row_version']);
+    }
+
     public function testInvertedWindowIsRejected(): void
     {
         $sid = $this->createSupplier();

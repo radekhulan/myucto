@@ -25,7 +25,7 @@ final class StockDocumentRepository
         'id, supplier_id, doc_type, origin, warehouse_id, warehouse_to_id, doc_number, doc_date,
          description, partner_name, invoice_id, purchase_invoice_id, purchase_order_id, stock_take_id,
          journal_entry_id, reversal_document_id, status, booked_at, booked_by,
-         created_by, created_at, updated_at';
+         created_by, created_at, updated_at, allow_over_delivery';
 
     /** Stavy, jejichž pohyby jsou součástí skladové knihy (viz class docblock). */
     private const LEDGER_STATUSES = "('posted','reversed')";
@@ -188,8 +188,8 @@ final class StockDocumentRepository
             'INSERT INTO stock_documents
                 (supplier_id, doc_type, origin, warehouse_id, warehouse_to_id, doc_number,
                  doc_date, description, partner_name, invoice_id, purchase_invoice_id,
-                 purchase_order_id, stock_take_id, status, created_by)
-             VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 purchase_order_id, stock_take_id, status, created_by, allow_over_delivery)
+             VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             (string) $data['doc_type'],
@@ -205,6 +205,7 @@ final class StockDocumentRepository
             isset($data['stock_take_id']) && (int) $data['stock_take_id'] > 0 ? (int) $data['stock_take_id'] : null,
             (string) ($data['status'] ?? 'draft'),
             isset($data['created_by']) && (int) $data['created_by'] > 0 ? (int) $data['created_by'] : null,
+            !empty($data['allow_over_delivery']) ? 1 : 0,
         ]);
         return (int) $pdo->lastInsertId();
     }
@@ -252,7 +253,7 @@ final class StockDocumentRepository
             "UPDATE stock_documents SET
                 doc_type = ?, origin = ?, warehouse_id = ?, warehouse_to_id = ?, doc_date = ?,
                 description = ?, partner_name = ?, invoice_id = ?, purchase_invoice_id = ?,
-                purchase_order_id = ?, stock_take_id = ?
+                purchase_order_id = ?, stock_take_id = ?, allow_over_delivery = ?
               WHERE id = ? AND supplier_id = ? AND status = 'draft'"
         );
         $stmt->execute([
@@ -267,10 +268,11 @@ final class StockDocumentRepository
             isset($data['purchase_invoice_id']) && (int) $data['purchase_invoice_id'] > 0 ? (int) $data['purchase_invoice_id'] : null,
             isset($data['purchase_order_id']) && (int) $data['purchase_order_id'] > 0 ? (int) $data['purchase_order_id'] : null,
             isset($data['stock_take_id']) && (int) $data['stock_take_id'] > 0 ? (int) $data['stock_take_id'] : null,
+            !empty($data['allow_over_delivery']) ? 1 : 0,
             $id,
             $supplierId,
         ]);
-        return $stmt->rowCount() > 0;
+        return $stmt->rowCount() > 0 || ($this->find($supplierId, $id)['status'] ?? null) === 'draft';
     }
 
     /**
@@ -338,7 +340,7 @@ final class StockDocumentRepository
         $pdo->prepare(
             'UPDATE stock_document_lines l
                JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
-                SET l.doc_date = d.doc_date
+                SET l.doc_date = d.doc_date, l.ledger_booked_at = d.booked_at
               WHERE l.document_id = ? AND l.supplier_id = ?'
         )->execute([$id, $supplierId]);
         return true;
@@ -429,6 +431,21 @@ final class StockDocumentRepository
             $out[(int) $row['stock_item_id']] = number_format((float) $row['unit_cost'], 6, '.', '');
         }
         return $out;
+    }
+
+    public function lastKnownUnitCost(int $supplierId, int $warehouseId, int $stockItemId, string $date): ?string
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT l.value_total / NULLIF(l.qty, 0)
+            FROM stock_document_lines l FORCE INDEX (idx_sdl_valuation_cursor)
+            STRAIGHT_JOIN stock_documents d FORCE INDEX (PRIMARY) ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+            WHERE l.supplier_id = ? AND l.stock_item_id = ? AND l.doc_date <= ? AND d.warehouse_id = ?
+              AND d.status = 'posted' AND l.qty > 0 AND l.value_total > 0
+              AND NOT EXISTS (SELECT 1 FROM stock_documents original
+                WHERE original.supplier_id = d.supplier_id AND original.reversal_document_id = d.id)
+            ORDER BY l.doc_date DESC, l.ledger_booked_at DESC, l.document_id DESC, l.line_no DESC, l.id DESC LIMIT 1");
+        $stmt->execute([$supplierId, $stockItemId, $date, $warehouseId]);
+        $cost = $stmt->fetchColumn();
+        return $cost === false ? null : number_format((float) $cost, 6, '.', '');
     }
 
     /**
@@ -559,6 +576,7 @@ final class StockDocumentRepository
     /** @return array<string,mixed> */
     private static function cast(array $r): array
     {
+        $r['allow_over_delivery'] = (bool) $r['allow_over_delivery'];
         $r['id'] = (int) $r['id'];
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['warehouse_id'] = (int) $r['warehouse_id'];

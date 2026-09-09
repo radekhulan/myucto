@@ -13,12 +13,8 @@ use PDO;
  * Replay ledgeru skladové karty (§3.2 — backdating, storno). Přehraje average-cost
  * sekvenci pohybů karty na skladu a přepíše ocenění výdejových řádků + stock_levels.
  *
- * STRATEGIE v1 (simplest-correct): plný replay CELÉ karty od nuly přes všechny
- * pohyby stavů ('posted','reversed') v chronologickém pořadí
- * (doc_date, document_id, line_no). Rekonstrukce stavu „těsně před fromDate"
- * by vyžadovala perzistentní snapshoty; plný replay je deterministický a
- * idempotentní — `fromDate` slouží JEN pro guard uzavřených období (dotčené
- * pohyby = doc_date >= fromDate).
+ * Replay začíná posledním platným snapshotem před fromDate, jinak od nuly.
+ * Historie se čte po omezených dávkách ve stejném pořadí jako skladová sestava.
  *
  * Pravidla ocenění při replayi:
  *  - příjmové nohy (receipt, převodka-příjem) drží ULOŽENOU hodnotu řádku
@@ -48,6 +44,8 @@ final class StockRecomputeService
         private readonly StockLevelService $levels,
         private readonly StockDocumentRepository $docs,
         private readonly AccountingPeriodRepository $periods,
+        private readonly StockLedgerReader $ledger,
+        private readonly \MyInvoice\Repository\StockValuationSnapshotRepository $snapshots,
     ) {}
 
     /**
@@ -64,69 +62,17 @@ final class StockRecomputeService
             throw new StockException('no_transaction', 'Replay ledgeru vyžaduje otevřenou transakci (a držený zámek stock_levels).', 500);
         }
 
-        // Plný replay od nuly (viz class docblock) — všechny pohyby karty.
-        $lines = $this->docs->postedLinesForItemFrom($supplierId, $warehouseId, $stockItemId, '0000-01-01');
-
-        $this->guardLockedPeriods($supplierId, $lines, $fromDate);
-
-        $qtyT   = 0;
-        $valueC = 0;
-
-        foreach ($lines as $line) {
-            $lineQtyT = StockValuation::qtyToT($line['qty']);
-            if ($lineQtyT <= 0) {
-                // Řádky jsou vždy kladné (A6); nulový/záporný řádek = poškozená data.
-                throw new StockException('invalid_document', 'Replay narazil na neplatné množství řádku #' . $line['line_id'] . '.', 422, [[
-                    'line_id' => $line['line_id'],
-                    'qty'     => $line['qty'],
-                ]]);
-            }
-
-            if ($line['direction'] === 1) {
-                // Příjem — uložená hodnota (zadaná PC + extra; u převodky hodnota
-                // výdejové nohy, u storna původní hodnota výdeje).
-                $qtyT   += $lineQtyT;
-                $valueC += StockValuation::valueToC($line['value_total']);
+        $snapshot = $this->snapshots->latest($supplierId, $warehouseId, $stockItemId, $fromDate, true);
+        $this->guardLockedPeriods($supplierId, $this->ledger->affectedDates($supplierId, $warehouseId, $stockItemId, $fromDate), $fromDate);
+        $qtyT = StockValuation::qtyToT((string) ($snapshot['qty'] ?? '0'));
+        $valueC = StockValuation::valueToC((string) ($snapshot['value_total'] ?? '0'));
+        foreach ($this->ledger->stream($supplierId, $warehouseId, $stockItemId, '9999-12-31', $snapshot['cutoff_date'] ?? null) as $line) {
+            $res = StockLedgerReplay::advance($qtyT, $valueC, $line);
+            $qtyT = $res['qtyT'];
+            $valueC = $res['valueC'];
+            if ((int) $line['direction'] === 1 || !empty($line['is_reversal']) || $line['status'] === 'reversed') {
                 continue;
             }
-
-            // Výdejová noha.
-            if ($lineQtyT > $qtyT) {
-                throw new StockException('insufficient_stock', 'Zpětný přepočet karty by vytvořil záporný stav zásob.', 409, [[
-                    'stock_item_id' => $stockItemId,
-                    'sku'           => $line['sku'],
-                    'name'          => $line['name'],
-                    'requested'     => StockValuation::tToDecimal($lineQtyT),
-                    'available'     => StockValuation::tToDecimal($qtyT),
-                    'doc_date'      => $line['doc_date'],
-                ]]);
-            }
-
-            // Fixní (nepřeceňovaná) výdejová noha, když je doklad SÁM stornovaný
-            // (status='reversed') NEBO je protidokladem storna (is_reversal).
-            // Storno-pár (+q,+v)/(−q,−v) v téže uložené hodnotě je pak plně
-            // transparentní vůči replayi → hodnotová neutralita §4.4 platí i po
-            // zpětném pohybu, který změnil průměr (review CRITICAL 2). Stornované
-            // doklady se navíc nikdy nepřepisují (§3.5 immutabilita).
-            $frozen = $line['is_reversal'] || (($line['status'] ?? '') === 'reversed');
-            if ($frozen) {
-                $lineValueC = StockValuation::valueToC($line['value_total']);
-                if ($lineValueC > $valueC) {
-                    throw new StockException('insufficient_stock', 'Zpětný přepočet karty by vytvořil zápornou hodnotu zásob (storno v původní ceně).', 409, [[
-                        'stock_item_id' => $stockItemId,
-                        'sku'           => $line['sku'],
-                        'name'          => $line['name'],
-                        'requested'     => StockValuation::cToDecimal($lineValueC),
-                        'available'     => StockValuation::cToDecimal($valueC),
-                        'doc_date'      => $line['doc_date'],
-                    ]]);
-                }
-                $qtyT   -= $lineQtyT;
-                $valueC -= $lineValueC;
-                continue;
-            }
-
-            $res = StockValuation::issue($qtyT, $valueC, $lineQtyT);
 
             // HIGH 3: přecenění výdejové nohy PŘEVODKY by rozešlo hodnotu s cílovou
             // kartou (přijala PŮVODNÍ hodnotu, zde se kaskádově nepřehrává). Místo
@@ -160,7 +106,7 @@ final class StockRecomputeService
             ) {
                 $this->docs->updateLineValuation(
                     $supplierId,
-                    $line['line_id'],
+                    (int) $line['line_id'],
                     $newUnitCost,
                     $newValueTotal,
                     $line['extra_cost'],

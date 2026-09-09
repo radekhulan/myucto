@@ -30,6 +30,69 @@ final class PurchaseOrderStateService
 
     public function __construct(private readonly PurchaseOrderRepository $orders) {}
 
+    public function lockForLines(int $supplierId, array $lines): array
+    {
+        $ids = array_column($lines, 'purchase_order_line_id');
+        $orders = [];
+        foreach ($this->orders->orderIdsForLines($supplierId, $ids) as $orderId) {
+            $order = $this->orders->lockForUpdate($supplierId, $orderId);
+            if ($order !== null) {
+                $orders[$orderId] = $order;
+            }
+        }
+        return $orders;
+    }
+
+    public function assertReceiptAllowed(int $supplierId, array $doc, array $lines, array $orders): void
+    {
+        $requested = [];
+        $requestedItems = [];
+        foreach ($lines as $line) {
+            $id = (int) ($line['purchase_order_line_id'] ?? 0);
+            if ($id > 0) {
+                $requested[$id] = ($requested[$id] ?? 0) + StockValuation::qtyToT((string) $line['qty']);
+                $requestedItems[$id][(int) $line['stock_item_id']] = true;
+            }
+        }
+        $received = $this->orders->receivedByOrder($supplierId, array_keys($orders));
+        foreach ($orders as $orderId => $order) {
+            if (!in_array((string) $order['state'], self::OPEN_STATES, true)) {
+                throw new StockException('order_state_conflict', 'Objednávka již nepovoluje příjem.', 409);
+            }
+            foreach ($this->orders->lines($supplierId, $orderId) as $line) {
+                $id = (int) $line['id'];
+                if (!isset($requested[$id])) {
+                    continue;
+                }
+                if (array_keys($requestedItems[$id]) !== [(int) $line['stock_item_id']]) {
+                    throw new StockException('invalid_reference', 'Příjem musí odpovídat skladové kartě řádku objednávky.', 409);
+                }
+                $remaining = max(0, self::effectiveQtyT($line) - StockValuation::qtyToT((string) ($received[$id] ?? '0')));
+                if ($requested[$id] > $remaining) {
+                    if (empty($doc['allow_over_delivery'])) {
+                        throw new StockException('over_receipt', 'Množství přesahuje zbývající k příjmu z objednávky.', 409, [
+                            'purchase_order_line_id' => $id,
+                            'requested' => StockValuation::tToDecimal($requested[$id]),
+                            'remaining' => StockValuation::tToDecimal($remaining),
+                        ]);
+                    }
+                    $this->orders->markLineOverDelivery($supplierId, $id);
+                }
+                unset($requested[$id]);
+            }
+        }
+        if ($requested !== []) {
+            throw new StockException('invalid_reference', 'Řádek objednávky již není dostupný.', 409);
+        }
+    }
+
+    public function recomputeForLines(int $supplierId, array $lines): void
+    {
+        foreach (array_keys($this->lockForLines($supplierId, $lines)) as $orderId) {
+            $this->recompute($supplierId, $orderId);
+        }
+    }
+
     /**
      * Přepočte stav objednávky podle skutečně přijatého množství.
      *
@@ -84,7 +147,7 @@ final class PurchaseOrderStateService
         $lines    = $this->orders->lines($supplierId, $orderId);
         $received = $this->orders->receivedByOrder($supplierId, [$orderId]);
 
-        $expectedT = 0;
+        $remainingT = 0;
         $receivedT = 0;
         $anyStockLine = false;
         foreach ($lines as $line) {
@@ -92,8 +155,9 @@ final class PurchaseOrderStateService
                 continue;
             }
             $anyStockLine = true;
-            $expectedT += max(0, self::effectiveQtyT($line));
-            $receivedT += max(0, StockValuation::qtyToT((string) ($received[(int) $line['id']] ?? '0')));
+            $lineReceivedT = max(0, StockValuation::qtyToT((string) ($received[(int) $line['id']] ?? '0')));
+            $remainingT += max(0, self::effectiveQtyT($line) - $lineReceivedT);
+            $receivedT += $lineReceivedT;
         }
 
         if (!$anyStockLine) {
@@ -104,7 +168,7 @@ final class PurchaseOrderStateService
         if ($receivedT <= self::EPSILON_T) {
             return $fallback;
         }
-        if ($receivedT + self::EPSILON_T >= $expectedT) {
+        if ($remainingT <= self::EPSILON_T) {
             return 'received';
         }
 

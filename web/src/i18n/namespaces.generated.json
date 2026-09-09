@@ -616,13 +616,23 @@
       "stock"
     ],
     "stock-takes": [
+      "eshop",
+      "imports",
       "stock"
     ],
     "stock-take-detail": [
+      "eshop",
+      "imports",
       "stock"
     ],
     "stock-reports": [
+      "eshop",
+      "imports",
       "stock"
+    ],
+    "eshop-jobs": [
+      "eshop",
+      "imports"
     ],
     "eshop": [
       "eshop",

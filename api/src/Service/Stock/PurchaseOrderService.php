@@ -75,23 +75,15 @@ final class PurchaseOrderService
      */
     public function update(int $supplierId, int $id, array $body, ?int $userId): array
     {
-        $existing = $this->orders->find($supplierId, $id);
-        if ($existing === null) {
-            throw new StockException('not_found', 'Objednávka nenalezena.', 404);
-        }
-        if (!in_array((string) $existing['state'], self::EDITABLE_STATES, true)) {
-            throw new StockException(
-                'order_not_editable',
-                'Upravovat lze jen rozpracovanou (draft) objednávku. Odeslanou objednávku uprav přes potvrzení nebo uzavření zbytku.',
-                409,
-                ['state' => (string) $existing['state']],
-            );
-        }
-
-        [$header, $lines] = $this->validateBody($supplierId, $body);
-
-        return $this->runInTransaction(function () use ($supplierId, $id, $header, $lines): array {
-            $this->orders->updateHeader($supplierId, $id, $header);
+        return $this->runInTransaction(function () use ($supplierId, $id, $body): array {
+            $existing = $this->requireLocked($supplierId, $id);
+            if (!in_array((string) $existing['state'], self::EDITABLE_STATES, true)) {
+                throw new StockException('order_not_editable', 'Upravovat lze jen rozpracovanou objednávku.', 409);
+            }
+            [$header, $lines] = $this->validateBody($supplierId, $body);
+            if (!$this->orders->updateHeader($supplierId, $id, $header)) {
+                throw new StockException('order_not_editable', 'Stav objednávky se během úpravy změnil.', 409);
+            }
             $this->orders->replaceLines($supplierId, $id, $lines);
             $this->recalcTotals($supplierId, $id, $lines);
 
@@ -102,20 +94,13 @@ final class PurchaseOrderService
     /** Smazat jde jen draft — odeslaná objednávka se stornuje, ať zůstane stopa. */
     public function delete(int $supplierId, int $id): bool
     {
-        $existing = $this->orders->find($supplierId, $id);
-        if ($existing === null) {
-            throw new StockException('not_found', 'Objednávka nenalezena.', 404);
-        }
-        if ((string) $existing['state'] !== 'draft') {
-            throw new StockException(
-                'order_not_editable',
-                'Smazat lze jen rozpracovanou (draft) objednávku — odeslanou stornuj.',
-                409,
-                ['state' => (string) $existing['state']],
-            );
-        }
-
-        return $this->orders->delete($supplierId, $id);
+        return $this->runInTransaction(function () use ($supplierId, $id): bool {
+            $existing = $this->requireLocked($supplierId, $id);
+            if ((string) $existing['state'] !== 'draft') {
+                throw new StockException('order_not_editable', 'Smazat lze jen rozpracovanou objednávku.', 409);
+            }
+            return $this->orders->delete($supplierId, $id);
+        });
     }
 
     /**
@@ -506,6 +491,7 @@ final class PurchaseOrderService
             }
 
             $lines[] = [
+                'id' => (int) ($rl['id'] ?? 0),
                 'line_no'       => $lineNo++,
                 'stock_item_id' => $itemId > 0 ? $itemId : null,
                 'warehouse_id'  => (int) ($rl['warehouse_id'] ?? 0) > 0 ? (int) $rl['warehouse_id'] : null,

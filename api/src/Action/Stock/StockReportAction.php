@@ -14,6 +14,8 @@ use MyInvoice\Service\Pdf\StockValuationPdfRenderer;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockReportService;
 use MyInvoice\Service\Stock\StockReportXlsxExporter;
+use MyInvoice\Service\Stock\StockValuationJobService;
+use MyInvoice\Service\Eshop\CatalogJobService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -39,6 +41,8 @@ final class StockReportAction
         private readonly StockReportXlsxExporter $xlsx,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly StockValuationJobService $valuationJobs,
+        private readonly CatalogJobService $jobs,
     ) {}
 
     public function status(Request $request, Response $response): Response
@@ -73,6 +77,83 @@ final class StockReportAction
         }
     }
 
+    public function createValuationJob(Request $request, Response $response): Response
+    {
+        if (!$this->requirePermission($request, $response, 'stock', \MyInvoice\Security\AccessLevel::READ, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        if (!is_string($body['date'] ?? null)
+            || (isset($body['warehouse_id']) && (!is_int($body['warehouse_id']) || $body['warehouse_id'] < 1))) {
+            return Json::error($response, 'validation_failed', 'Neplatné datum nebo sklad.', 422);
+        }
+        try {
+            $filters = isset($body['warehouse_id']) ? ['warehouse_id' => $body['warehouse_id']] : [];
+            $job = $this->valuationJobs->enqueue($supplierId, $body['date'], $filters);
+            unset($job['input'], $job['lease_token']);
+            return Json::ok($response, $job, 202);
+        } catch (\Throwable $e) {
+            return $this->mapStockError($response, $e);
+        }
+    }
+
+    public function valuationJobResult(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $query = $request->getQueryParams();
+        $page = filter_var($query['page'] ?? 1, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $limit = filter_var($query['limit'] ?? 100, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 500]]);
+        if ($page === false || $limit === false) {
+            return Json::error($response, 'validation_failed', 'Neplatné stránkování.', 422);
+        }
+        try {
+            return Json::ok($response, $this->valuationJobs->result($supplierId, (int) $args['id'], $page, $limit));
+        } catch (\Throwable $e) {
+            return $this->mapStockError($response, $e);
+        }
+    }
+
+    public function valuationJobStatus(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $job = $this->jobs->find($supplierId, (int) $args['id']);
+        if ($job === null || $job['kind'] !== 'stock_valuation' || !empty($job['input']['stock_take_id'])) {
+            return Json::error($response, 'not_found', 'Ocenění nenalezeno.', 404);
+        }
+        unset($job['input'], $job['lease_token']);
+        return Json::ok($response, $job);
+    }
+
+    public function cancelValuationJob(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'stock', \MyInvoice\Security\AccessLevel::WRITE, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $id = (int) $args['id'];
+        $job = $this->jobs->find($supplierId, $id);
+        if ($job === null || $job['kind'] !== 'stock_valuation' || !empty($job['input']['stock_take_id'])) {
+            return Json::error($response, 'not_found', 'Ocenění nenalezeno.', 404);
+        }
+        if (!$this->jobs->cancel($supplierId, $id)) {
+            return Json::error($response, 'job_state_conflict', 'Úlohu již nelze zrušit.', 409);
+        }
+        return $this->valuationJobStatus($request, $response, $args);
+    }
+
     public function export(Request $request, Response $response, array $args): Response
     {
         $supplierId = $this->currentSupplierId($request);
@@ -98,7 +179,21 @@ final class StockReportAction
                 $q = $request->getQueryParams();
                 $date = trim((string) ($q['date'] ?? (new \DateTimeImmutable())->format('Y-m-d')));
                 $filters = !empty($q['warehouse_id']) ? ['warehouse_id' => (int) $q['warehouse_id']] : [];
-                $data = $this->service->valuation($supplierId, $date, $filters);
+                if (isset($q['job_id'])) {
+                    $jobId = filter_var($q['job_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                    if ($jobId === false) {
+                        return Json::error($response, 'validation_failed', 'Neplatné ID ocenění.', 422);
+                    }
+                    $data = $this->valuationJobs->result($supplierId, $jobId, 1, 500);
+                    $date = $data['date'];
+                    $pages = (int) ceil($data['pagination']['total'] / 500);
+                    for ($page = 2; $page <= $pages; $page++) {
+                        $next = $this->valuationJobs->result($supplierId, $jobId, $page, 500);
+                        array_push($data['items'], ...$next['items']);
+                    }
+                } else {
+                    $data = $this->service->valuation($supplierId, $date, $filters);
+                }
                 $out = $format === 'pdf'
                     ? ['bytes' => $this->valuationPdf->render($data), 'filename' => 'oceneni-zasob-' . $date . '.pdf', 'mime' => 'application/pdf']
                     : $this->xlsx->valuation($data);

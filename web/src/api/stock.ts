@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { CatalogJob } from './catalogJobs'
 
 /**
  * Skladová evidence (Epic SKLAD). Money/qty pole jsou DECIMAL uložené na backendu
@@ -10,7 +11,7 @@ export type StockItemType = 'material' | 'goods' | 'product'
 export type StockDocType = 'receipt' | 'issue' | 'transfer'
 export type StockDocOrigin = 'manual' | 'invoice' | 'credit_note' | 'purchase_invoice' | 'inventory'
 export type StockDocStatus = 'draft' | 'posted' | 'reversed'
-export type StockTakeStatus = 'draft' | 'counting' | 'closed'
+export type StockTakeStatus = 'draft' | 'preparing' | 'counting' | 'closed'
 export type LandedCostAllocation = 'by_value' | 'by_qty'
 
 /**
@@ -31,12 +32,17 @@ export interface StockItem extends StockItemEffectivePrice {
   sku: string
   name: string
   item_type: StockItemType
+  manufacturer_id: number | null
   unit: string
   ean: string | null
   vat_rate_id: number | null
   sale_price_without_vat: string | null
   min_qty: string | null
+  qty?: string
+  value_total?: string
+  avg_unit_cost?: string
   is_active: boolean
+  row_version: number
   note: string | null
   created_at: string
   updated_at: string
@@ -69,8 +75,29 @@ export interface StockItemListFilters {
   active?: boolean
   q?: string
   only_below_min?: boolean
+  warehouse_id?: number
+  manufacturer_id?: number
+  category_id?: number
+  vendor_id?: number
+  tag_ids?: number[]
+  attribute_filters?: StockItemAttributeFilter[]
+  missing?: Array<'manufacturer' | 'category' | 'image' | 'price' | 'ean'>
+  availability?: 'in_stock' | 'out_of_stock' | 'below_min'
+  qty_min?: string | number
+  qty_max?: string | number
+  sort?: 'sku' | 'name' | 'type' | 'qty' | 'value'
+  direction?: 'asc' | 'desc'
   page?: number
   per_page?: number
+}
+
+export interface StockItemAttributeFilter {
+  attribute_id: number
+  option_id?: number
+  value_text?: string
+  value_bool?: boolean
+  value_num_min?: string | number
+  value_num_max?: string | number
 }
 
 /** Stránkovací meta blok (jednotný kontrakt, vzor invoicesApi.listGrouped). */
@@ -286,6 +313,7 @@ export interface StockTake {
   closed_at: string | null
   created_at: string
   updated_at: string
+  preparation_job?: CatalogJob | null
   lines?: StockTakeLine[]
   receipt_document?: StockDocument | null
   issue_document?: StockDocument | null
@@ -485,8 +513,17 @@ export const stockApi = {
   deleteWarehouse: (id: number) => api.delete<{ deleted: true }>(`/stock/warehouses/${id}`).then(r => r.data),
 
   // ── Skladové karty ──────────────────────────────────────────────────────
-  listItems: (filters: StockItemListFilters = {}) =>
-    api.get<{ data: StockItem[]; meta: StockPageMeta }>('/stock/items', { params: toParams(filters) }).then(r => r.data),
+  listItems: (filters: StockItemListFilters = {}) => {
+    const { tag_ids, attribute_filters, missing, ...rest } = filters
+    return api.get<{ data: StockItem[]; meta: StockPageMeta }>('/stock/items', {
+      params: toParams({
+        ...rest,
+        tag_ids: tag_ids?.length ? tag_ids.join(',') : undefined,
+        attribute_filters: attribute_filters?.length ? JSON.stringify(attribute_filters) : undefined,
+        missing: missing?.length ? missing.join(',') : undefined,
+      }),
+    }).then(r => r.data)
+  },
   searchItems: (q: string, limit = 50) =>
     api.get<StockItemSearchResult[]>('/stock/items/search', { params: { q, limit } }).then(r => r.data),
   getItem: (id: number) => api.get<StockItem>(`/stock/items/${id}`).then(r => r.data),

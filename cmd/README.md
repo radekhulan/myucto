@@ -66,6 +66,7 @@ má vždy přednost před oběma.
 | `cron-generate-recurring-invoices.{cmd,sh}` | Generování faktur ze šablon pravidelné fakturace; volitelné rovnou vystavení a odeslání klientovi (`--dry-run`) |
 | `cron-automation-digest.{cmd,sh}` | Ranní souhrn kokpitu Automat podle nastavené hodiny (`--dry-run`, `--hour=N`) |
 | `cron-ai-worker.{cmd,sh}` | Zpracování fronty AI návrhů účtování (`--supplier=N`, `--limit=N`, `--dry-run`) |
+| `cron-catalog-worker.{cmd,sh}` | Dávkový přepočet cen, historické ocenění a příprava inventur; pokračuje od posledního dokončeného checkpointu |
 | `cron-payroll-document-worker.{cmd,ps1,sh}` | Asynchronní generování mzdových PDF po osobách, retry a dokončení měsíčního ZIPu; táhne i frontu ročních dokumentů (mzdový list, potvrzení o zdanitelných příjmech) — měsíční pásky mají přednost (`--limit=N`; PowerShell: `-Limit N`) |
 | `cron-payroll-period-export-worker.{cmd,ps1,sh}` | Asynchronní sestavení mzdového exportu období/roku; durable lease a retry (`--limit=N`; PowerShell: `-Limit N`). Aplikace tentýž worker spouští po zařazení archivu rovnou na pozadí (`--job-id=N --supplier-id=N`, doběhne celý job se stropem `--max-iterations=N` a `--max-seconds=N`); cron je pojistka pro případ, že se spawn nepovede |
 | `cron-payroll-registration-changes.{cmd,sh}` | **Denně** — detekce hlásitelných změn v registru pojištěnců (ČSSZ) u všech firem se zapnutými mzdami. Zakládá jen **návrh povinnosti s termínem**, nikdy nic neodesílá; podání z návrhu vyrobí člověk ve frontě **Mzdy → Podání a hlášení**. Bez cronu se detekce spouští jen při otevření karty zaměstnance nebo na tlačítko ve frontě, takže osmidenní lhůta (§ 19 odst. 5 zákona č. 323/2025 Sb.) tiše utíká. Opakované spuštění je bezpečné — porovnávají se jen vztahy, u kterých se pohnul vodoznak zdroje (`--environment=test`, `--supplier=ID`, `--batch=N`, `--max-batches=N`) |
@@ -150,6 +151,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-generate-recurring-invoices` | 1× denně | 06:30 |
 | `cron-automation-digest` | každou hodinu v ranním okně | 06:00–08:00 |
 | `cron-ai-worker` | každých 10 minut | `*/10 * * * *` |
+| `cron-catalog-worker` | každou minutu | `* * * * *` |
 | `cron-payroll-document-worker` | každou minutu (jen firmy se mzdami, jen když něco leží ve frontě) | `* * * * *` |
 | `cron-payroll-period-export-worker` | každou minutu (jen firmy se mzdami, jen když něco leží ve frontě) | `* * * * *` |
 | `cron-payroll-registration-changes` | 1× denně (jen firmy se mzdami) | 05:00 (`0 5 * * *`) |
@@ -239,6 +241,7 @@ schtasks /create /tn "MyUcto JmhzSourceMonitor" /tr "C:\inetpub\wwwroot\myucto.c
 schtasks /create /tn "MyUcto Recurring"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-generate-recurring-invoices.cmd" /sc daily /st 06:30 /ru SYSTEM
 schtasks /create /tn "MyUcto AutomationDigest"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-automation-digest.cmd" /sc hourly /mo 1 /st 06:00 /et 08:59 /ru SYSTEM
 schtasks /create /tn "MyUcto AI Worker"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-worker.cmd" /sc minute /mo 10 /ru SYSTEM
+schtasks /create /tn "MyUcto Catalog Worker" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-catalog-worker.cmd" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto Payroll Documents" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-document-worker.ps1" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto Payroll Period Export" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-period-export-worker.ps1" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto PayrollRegistrationChanges" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-registration-changes.cmd" /sc daily /st 05:00 /ru SYSTEM
@@ -304,6 +307,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
  30  6  *   *   *    /var/www/myucto.cz/cmd/cron-generate-recurring-invoices.sh
   0  6-8 *   *   *    /var/www/myucto.cz/cmd/cron-automation-digest.sh
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-ai-worker.sh
+  *  *  *   *   *    /var/www/myucto.cz/cmd/cron-catalog-worker.sh
   *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-document-worker.sh
   *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-period-export-worker.sh
   0  4  *   *   *    /var/www/myucto.cz/cmd/cron-ai-rule-miner.sh

@@ -31,6 +31,11 @@ final class StockTakeAction
     use AccountingActionSupport;
     use GuardsStockEnabled;
 
+    private function requireWrite(Request $request, Response $response, ?Response &$err): bool
+    {
+        return $this->requirePermission($request, $response, 'stock.take', \MyInvoice\Security\AccessLevel::WRITE, $err);
+    }
+
     public function __construct(
         private readonly Connection $db,
         private readonly StockTakeService $service,
@@ -121,8 +126,28 @@ final class StockTakeAction
         }
         $id = (int) $args['id'];
         try {
-            $result = $this->service->start($supplierId, $id, $this->userId($request));
+            $result = $this->service->prepare($supplierId, $id, $this->userId($request));
             $this->log($request, 'stock.take_started', $id, []);
+            return Json::ok($response, $result, 202);
+        } catch (\Throwable $e) {
+            return $this->mapStockError($response, $e);
+        }
+    }
+
+    public function preparation(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        $id = (int) $args['id'];
+        try {
+            $result = $args['operation'] === 'retry-preparation'
+                ? $this->service->retryPreparation($supplierId, $id)
+                : $this->service->cancelPreparation($supplierId, $id);
             return Json::ok($response, $result);
         } catch (\Throwable $e) {
             return $this->mapStockError($response, $e);

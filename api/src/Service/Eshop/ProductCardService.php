@@ -73,78 +73,136 @@ final class ProductCardService
             throw new EshopException('not_found', 'Karta zboží nenalezena.', 404);
         }
 
-        // Guard: manufacturer_id (pokud zadán) musí patřit tenantovi.
-        $manufacturerId = null;
-        if (array_key_exists('manufacturer_id', $payload) && $payload['manufacturer_id'] !== null && $payload['manufacturer_id'] !== '') {
-            $manufacturerId = (int) $payload['manufacturer_id'];
-            if (!$this->items->manufacturerOwned($supplierId, $manufacturerId)) {
-                throw new EshopException('manufacturer_invalid', 'Zvolený výrobce neexistuje.', 422);
-            }
+        $expectedVersion = (int) ($payload['row_version'] ?? 0);
+        if ($expectedVersion <= 0) {
+            throw new EshopException('version_required', 'Pro uložení je nutná verze karty.', 400);
         }
+        $prepared = $this->prepareWrite($supplierId, $base, $payload);
 
-        // Předvalidace vazeb (mimo tx).
-        $categories = $this->prepareCategories($supplierId, $payload);
-        $tagIds     = $this->prepareTags($supplierId, $payload);
-        $fees       = $this->prepareFees($supplierId, $payload);
-
-        // Změna zdroje nákupní ceny → po zápisu přepočítat ceny.
-        $oldBase = (string) ($base['pricing_base'] ?? 'weighted_avg');
-        $newBase = $this->pricingBase($payload['pricing_base'] ?? $oldBase);
-        $baseChanged = $oldBase !== $newBase;
-
-        $this->tx(function () use ($supplierId, $id, $base, $payload, $manufacturerId, $categories, $tagIds, $fees): void {
-            // 1) Eshopové sloupce stock_items.
-            $this->items->updateEshopFields($supplierId, $id, [
-                'manufacturer_id' => $manufacturerId,
-                'warranty_months' => $this->intOrNull($payload['warranty_months'] ?? $base['warranty_months'] ?? null),
-                'delivery_days'   => $this->intOrNull($payload['delivery_days'] ?? $base['delivery_days'] ?? null),
-                'export_eshop'    => array_key_exists('export_eshop', $payload) ? (bool) $payload['export_eshop'] : (bool) ($base['export_eshop'] ?? false),
-                'is_stocked'      => array_key_exists('is_stocked', $payload) ? (bool) $payload['is_stocked'] : (bool) ($base['is_stocked'] ?? true),
-                'weight_g'        => $this->intOrNull($payload['weight_g'] ?? $base['weight_g'] ?? null),
-                'pricing_base'    => $this->pricingBase($payload['pricing_base'] ?? ($base['pricing_base'] ?? 'weighted_avg')),
-            ]);
-
-            // 2) i18n (replace — payload nese plnou sadu locale).
-            if (array_key_exists('i18n', $payload) && is_array($payload['i18n'])) {
-                $this->replaceI18n($supplierId, $id, $payload['i18n']);
+        $this->tx(function () use ($supplierId, $id, $payload, $expectedVersion, $prepared): void {
+            if (!$this->items->updateEshopFieldsVersioned(
+                $supplierId,
+                $id,
+                $expectedVersion,
+                $prepared['eshop_fields'],
+            )) {
+                throw new EshopException(
+                    'version_conflict',
+                    'Kartu mezitím změnil jiný uživatel. Načtěte aktuální data.',
+                    409,
+                );
             }
-
-            // 3) Kategorie M:N + primary.
-            if ($categories !== null) {
-                $this->itemCategories->deleteForItem($supplierId, $id);
-                foreach ($categories as $c) {
-                    $this->itemCategories->add($supplierId, $id, $c['category_id'], $c['is_primary'], $c['display_order']);
-                }
-            }
-
-            // 4) Tagy.
-            if ($tagIds !== null) {
-                $this->itemTags->deleteForItem($supplierId, $id);
-                foreach ($tagIds as $tagId) {
-                    $this->itemTags->add($supplierId, $id, $tagId);
-                }
-            }
-
-            // 5) Parametry (typované, validace v AttributeValueService — reentrantní tx).
-            if (array_key_exists('attributes', $payload) && is_array($payload['attributes'])) {
-                $this->attributeService->replaceForItem($supplierId, $id, $payload['attributes']);
-            }
-
-            // 6) Poplatky.
-            if ($fees !== null) {
-                $this->itemFees->deleteForItem($supplierId, $id);
-                foreach ($fees as $f) {
-                    $this->itemFees->add($supplierId, $id, $f);
-                }
+            $this->writeSatellites($supplierId, $id, $payload, $prepared);
+            if ($prepared['pricing_base_changed']) {
+                $this->priceDispatcher->recomputeItem($supplierId, $id);
             }
         });
 
-        // Přepočet cen po změně pricing_base (mimo předchozí tx — recompute má vlastní).
-        if ($baseChanged) {
-            $this->priceDispatcher->recomputeItem($supplierId, $id);
+        return $this->get($supplierId, $id) ?? [];
+    }
+
+    /**
+     * Zápis produktového obsahu uvnitř transakce editoru. Verzi zvyšuje
+     * koordinující ProductEditorService společně se základními poli.
+     *
+     * @param array<string,mixed> $base
+     * @param array<string,mixed> $payload
+     */
+    public function updateForEditor(int $supplierId, int $id, array $base, array $payload): bool
+    {
+        if (!$this->db->pdo()->inTransaction()) {
+            throw new \LogicException('Editor produktu musí zapisovat v aktivní transakci.');
+        }
+        $prepared = $this->prepareWrite($supplierId, $base, $payload);
+        $this->items->updateEshopFields($supplierId, $id, array_replace([
+            'manufacturer_id' => $base['manufacturer_id'] ?? null,
+            'warranty_months' => $base['warranty_months'] ?? null,
+            'delivery_days' => $base['delivery_days'] ?? null,
+            'export_eshop' => (bool) ($base['export_eshop'] ?? false),
+            'is_stocked' => (bool) ($base['is_stocked'] ?? true),
+            'weight_g' => $base['weight_g'] ?? null,
+            'pricing_base' => (string) ($base['pricing_base'] ?? 'weighted_avg'),
+        ], $prepared['eshop_fields']));
+        $this->writeSatellites($supplierId, $id, $payload, $prepared);
+        return $prepared['pricing_base_changed'];
+    }
+
+    /**
+     * @param array<string,mixed> $base
+     * @param array<string,mixed> $payload
+     * @return array{eshop_fields:array<string,mixed>,categories:?array,tag_ids:?array,fees:?array,pricing_base_changed:bool}
+     */
+    private function prepareWrite(int $supplierId, array $base, array $payload): array
+    {
+        $eshopFields = [];
+        if (array_key_exists('manufacturer_id', $payload)) {
+            $manufacturerId = $this->intOrNull($payload['manufacturer_id']);
+            if ($manufacturerId !== null && !$this->items->manufacturerOwned($supplierId, $manufacturerId)) {
+                throw new EshopException('manufacturer_invalid', 'Zvolený výrobce neexistuje.', 422);
+            }
+            $eshopFields['manufacturer_id'] = $manufacturerId;
+        }
+        foreach (['warranty_months', 'delivery_days', 'weight_g'] as $field) {
+            if (array_key_exists($field, $payload)) {
+                $eshopFields[$field] = $this->intOrNull($payload[$field]);
+            }
+        }
+        foreach (['export_eshop', 'is_stocked'] as $field) {
+            if (array_key_exists($field, $payload)) {
+                $eshopFields[$field] = (bool) $payload[$field];
+            }
+        }
+        $oldPricingBase = (string) ($base['pricing_base'] ?? 'weighted_avg');
+        if (array_key_exists('pricing_base', $payload)) {
+            $eshopFields['pricing_base'] = $this->pricingBase($payload['pricing_base']);
         }
 
-        return $this->get($supplierId, $id) ?? [];
+        return [
+            'eshop_fields' => $eshopFields,
+            'categories' => $this->prepareCategories($supplierId, $payload),
+            'tag_ids' => $this->prepareTags($supplierId, $payload),
+            'fees' => $this->prepareFees($supplierId, $payload),
+            'pricing_base_changed' => isset($eshopFields['pricing_base'])
+                && $eshopFields['pricing_base'] !== $oldPricingBase,
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @param array{categories:?array,tag_ids:?array,fees:?array} $prepared
+     */
+    private function writeSatellites(int $supplierId, int $id, array $payload, array $prepared): void
+    {
+        if (array_key_exists('i18n', $payload) && is_array($payload['i18n'])) {
+            $this->replaceI18n($supplierId, $id, $payload['i18n']);
+        }
+        if ($prepared['categories'] !== null) {
+            $this->itemCategories->deleteForItem($supplierId, $id);
+            foreach ($prepared['categories'] as $category) {
+                $this->itemCategories->add(
+                    $supplierId,
+                    $id,
+                    $category['category_id'],
+                    $category['is_primary'],
+                    $category['display_order'],
+                );
+            }
+        }
+        if ($prepared['tag_ids'] !== null) {
+            $this->itemTags->deleteForItem($supplierId, $id);
+            foreach ($prepared['tag_ids'] as $tagId) {
+                $this->itemTags->add($supplierId, $id, $tagId);
+            }
+        }
+        if (array_key_exists('attributes', $payload) && is_array($payload['attributes'])) {
+            $this->attributeService->replaceForItem($supplierId, $id, $payload['attributes']);
+        }
+        if ($prepared['fees'] !== null) {
+            $this->itemFees->deleteForItem($supplierId, $id);
+            foreach ($prepared['fees'] as $fee) {
+                $this->itemFees->add($supplierId, $id, $fee);
+            }
+        }
     }
 
     /**
