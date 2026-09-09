@@ -21,6 +21,12 @@ export interface CashVatLine {
   vat_deduction?: CashVatDeduction
   vat_deduction_percent?: number
   tax_treatment?: CashTaxTreatment
+  /**
+   * L-4: pořízení dlouhodobého majetku za hotové. Hodnota se v přiznání uvede navíc
+   * na ř. 47 jako doplňující údaj k odpočtu; bez příznaku tam hotovostní nákup stroje
+   * nikdy nedorazil. Jen u výdajového dokladu — u příjmového je to tržba.
+   */
+  is_fixed_asset?: boolean
 }
 // vat_rate je number — sazby se čtou z API (taxConstants per rok), ŽÁDNÝ hardcode 21|12 (A4)
 

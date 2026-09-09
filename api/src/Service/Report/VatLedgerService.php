@@ -1085,7 +1085,11 @@ final class VatLedgerService
                    cd.total_amount AS inv_total, 0 AS rc_flag,
                    cl.vat_deduction, cl.vat_deduction_percent,
                    COALESCE(cd.partner_name, '') AS counterparty_name, cd.partner_dic AS counterparty_dic,
-                   'CZ' AS country_iso2, 0 AS country_is_eu, 0 AS is_fixed_asset,
+                   'CZ' AS country_iso2, 0 AS country_is_eu,
+                   -- Ř. 47 (hodnota pořízeného dlouhodobého majetku) je doplňující údaj
+                   -- k odpočtu, takže dává smysl jen u VÝDAJOVÉHO dokladu; u příjmového
+                   -- je to tržba, ne pořízení (migrace 1789, nález L-4).
+                   CASE WHEN cd.doc_type = 'out' THEN cl.is_fixed_asset ELSE 0 END AS is_fixed_asset,
                    COALESCE(cl.vat_classification_code,
                             CASE WHEN cd.doc_type = 'in'
                                  THEN CASE WHEN cl.vat_rate >= ? THEN '1'  ELSE '2'  END

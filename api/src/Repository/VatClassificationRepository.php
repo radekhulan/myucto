@@ -140,15 +140,26 @@ final class VatClassificationRepository
      * (stavební práce) pro všechny tuzemské režimy a uživatel neměl jak to změnit.
      * Dodavatel odpadu, zlata nebo zboží z přílohy 6 tak posílal do KH systematicky
      * špatný kód.
+     *
+     * ⚠️ Číselník NENÍ jen číselný — má i kódy s písmenným sufixem (`1a` odpad a šrot,
+     * `3a`). Normalizace kdysi nechávala jen číslice, takže validace v
+     * {@see \MyInvoice\Action\Codebook\VatClassificationsAction} sice `1a` pustila, ale
+     * do DB se tiše uložilo `1` (= zlato) — tichý špatný kód předmětu plnění v KH.
+     * Písmenný sufix se proto zachovává; ořez na 3 znaky drží XSD limit `maxLength=3`.
      */
     private static function normalizeKodPredPl(mixed $value): ?string
     {
         if ($value === null || $value === '') {
             return null;
         }
-        $digits = preg_replace('/\D/', '', (string) $value) ?? '';
+        $normalized = preg_replace('/[^0-9a-z]/', '', strtolower(trim((string) $value))) ?? '';
+        // Kód číselníku vždy začíná číslicí (`4`, `1a`, `3a`). Text, který jí nezačíná,
+        // není zkomolený kód, ale něco jiného — dřív z „A.1" vzniklo tiše `1` (zlato).
+        if ($normalized === '' || !ctype_digit($normalized[0])) {
+            return null;
+        }
 
-        return $digits === '' ? null : substr($digits, 0, 3);
+        return substr($normalized, 0, 3);
     }
 
     private function cast(array $r): array

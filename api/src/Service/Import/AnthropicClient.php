@@ -215,6 +215,7 @@ JSON schema:
   "document_kind": "invoice"|"credit_note"|"advance"|"receipt"|"tax_document",
   "issue_date": "YYYY-MM-DD",
   "tax_date": "YYYY-MM-DD"|null,
+  "delivery_date": "YYYY-MM-DD"|null,
   "due_date": "YYYY-MM-DD"|null,
   "currency": "CZK"|"EUR"|"USD"|...,
   "items": [
@@ -266,6 +267,13 @@ DŮLEŽITÉ k DATŮM (`issue_date`, `tax_date`, `due_date`) — NEJDŮLEŽITĚJ�
   „Dátum dodania" (SK), „Date of supply", „Tax point". Pokud na dokladu NENÍ → vrať null
   (systém pak použije datum vystavení). DUZP je daňově zásadní — přiřaď ho PŘESNĚ podle
   tohoto popisku, nezaměňuj ho se splatností ani vystavením.
+- `delivery_date` = DATUM DODÁNÍ / PŘEVZETÍ. Popisky: „Datum dodání", „Datum dodávky",
+  „Datum uskutečnění dodávky", „Leistungsdatum", „Lieferdatum", „Date of supply",
+  „Delivery date". Nese-li doklad jediné datum plnění, vrať TOTÉŽ datum i v `tax_date`.
+  Když doklad datum dodání NEUVÁDÍ, vrať `null` — NEODVOZUJ ho z data vystavení ani
+  z fakturovaného období. U pořízení zboží z jiného členského státu z něj vzniká zákonné
+  DUZP dle § 25 ZDPH (15. den následujícího měsíce), takže odhad by přesunul daň do
+  jiného zdaňovacího období.
 - `due_date` = DATUM SPLATNOSTI. Popisky: „Datum splatnosti", „Splatnost", „Splatno do",
   „Splatné do" (SK), „Zaplaťte do", „Úhrada do", „Due date", „Payment due", „Date due".
   Když doklad splatnost NEUVÁDÍ (typicky doklad hrazený kartou nebo předem), vrať `null` —

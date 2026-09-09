@@ -111,7 +111,7 @@ final class CashDocumentRepository
      * (`full`/100/`deductible`), takže hotovostní nákup byl v daňové evidenci vždy
      * plně daňový s plným nárokem na odpočet a poměrný odpočet nešlo zaznamenat.
      *
-     * @param list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code?:?string, vat_deduction?:string, vat_deduction_percent?:float, tax_treatment?:string}> $lines
+     * @param list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code?:?string, vat_deduction?:string, vat_deduction_percent?:float, tax_treatment?:string, is_fixed_asset?:bool|int}> $lines
      */
     public function replaceVatLines(int $cashDocumentId, array $lines): void
     {
@@ -124,8 +124,8 @@ final class CashDocumentRepository
         $stmt = $pdo->prepare(
             'INSERT INTO cash_document_vat_lines
                 (cash_document_id, vat_rate, base_amount, vat_amount, vat_classification_code,
-                 vat_deduction, vat_deduction_percent, tax_treatment)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                 vat_deduction, vat_deduction_percent, tax_treatment, is_fixed_asset)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($lines as $l) {
             $stmt->execute([
@@ -137,18 +137,19 @@ final class CashDocumentRepository
                 (string) ($l['vat_deduction'] ?? 'full'),
                 (float) ($l['vat_deduction_percent'] ?? 100.0),
                 (string) ($l['tax_treatment'] ?? 'deductible'),
+                !empty($l['is_fixed_asset']) ? 1 : 0,
             ]);
         }
     }
 
     /**
-     * @return list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code:?string, vat_deduction:string, vat_deduction_percent:float, tax_treatment:string}>
+     * @return list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code:?string, vat_deduction:string, vat_deduction_percent:float, tax_treatment:string, is_fixed_asset:bool}>
      */
     public function vatLinesFor(int $cashDocumentId): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT vat_rate, base_amount, vat_amount, vat_classification_code,
-                    vat_deduction, vat_deduction_percent, tax_treatment
+                    vat_deduction, vat_deduction_percent, tax_treatment, is_fixed_asset
                FROM cash_document_vat_lines WHERE cash_document_id = ? ORDER BY id'
         );
         $stmt->execute([$cashDocumentId]);
@@ -160,6 +161,7 @@ final class CashDocumentRepository
             'vat_deduction'           => (string) $r['vat_deduction'],
             'vat_deduction_percent'   => (float) $r['vat_deduction_percent'],
             'tax_treatment'           => (string) $r['tax_treatment'],
+            'is_fixed_asset'          => (bool) $r['is_fixed_asset'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 

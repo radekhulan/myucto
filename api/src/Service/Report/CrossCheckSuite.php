@@ -61,6 +61,9 @@ final class CrossCheckSuite
         }
 
         $results = $this->vatChecksForYear($supplierId, $year);
+        // Nezávisí na uzávěrce (porovnává evidenci majetku s doklady, ne účty), proto
+        // ještě před bránou uzavřeného období.
+        $results[] = $this->assetSalesVsCoefficientExclusion($supplierId, $year);
 
         $status = (string) ($period['status'] ?? '');
         if (!in_array($status, ['closed', 'approved'], true)) {
@@ -185,6 +188,100 @@ final class CrossCheckSuite
         }
 
         return $out;
+    }
+
+    /**
+     * Prodej dlouhodobého majetku ↔ vyloučení z koeficientu § 76 odst. 4
+     * (audit VAT klasifikací 2026-08, nález M-2).
+     *
+     * Kódy `1m`/`2m` (ř. 1/2 + doplňující ř. 51) se na vydané faktuře dosadí JEN tehdy,
+     * má-li řádek vazbu na kartu majetku (`invoice_items.asset_id`). Faktura „prodej
+     * vozidla" bez té vazby dostane běžný kód `1` a plnění zůstane v čitateli i jmenovateli
+     * vypořádacího koeficientu — u plátce s kráceným nárokem tím koeficient nadhodnotí
+     * a odpočet vyjde vyšší, než na jaký je nárok.
+     *
+     * Audit výslovně odmítá heuristiku nad popisem řádku („prodej vozu" najde i nájem
+     * vozu) — jediná spolehlivá cesta je porovnat DVĚ NEZÁVISLÉ EVIDENCE: karty majetku
+     * vyřazené prodejem v daném roce proti dokladům, které kód `1m`/`2m` skutečně nesou.
+     * Kontrola proto NIC NEDOSAZUJE, jen ukáže rozdíl; posoudit ho musí účetní (prodej
+     * osvobozený od daně, doklad vystavený v jiném roce nebo vyřazení bez fakturace jsou
+     * legitimní důvody, proč se čísla nepotkají).
+     *
+     * @return array{check:string, label:string, ok:bool, a_label:string, a:?float,
+     *               b_label:string, b:?float, difference:?float, note:?string, skipped:bool}
+     */
+    public function assetSalesVsCoefficientExclusion(int $supplierId, int $year): array
+    {
+        $label = 'Prodej majetku ↔ vyloučení z koeficientu § 76/4 (kód 1m/2m) ' . $year;
+        if (!$this->db->hasColumn('assets', 'disposal_type')
+            || !$this->db->hasColumn('assets', 'sale_invoice_id')
+        ) {
+            return $this->skip('asset_sale_coefficient', $label, 'evidence majetku není na téhle instalaci k dispozici');
+        }
+
+        $sold = $this->db->pdo()->prepare(
+            "SELECT a.id, a.inventory_number, a.name, a.sale_invoice_id
+               FROM assets a
+              WHERE a.supplier_id = ?
+                AND a.disposal_type = 'sold'
+                AND a.disposal_date BETWEEN ? AND ?"
+        );
+        $sold->execute([$supplierId, $year . '-01-01', $year . '-12-31']);
+        $soldAssets = $sold->fetchAll(\PDO::FETCH_ASSOC);
+
+        // Druhá, nezávislá cesta: doklady, které kód pro vyloučení z koeficientu NESOU.
+        // Kód se hledá na řádku i na hlavičce — výkazy čtou COALESCE(položka, hlavička).
+        $marked = $this->db->pdo()->prepare(
+            "SELECT COUNT(DISTINCT i.id)
+               FROM invoices i
+          LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
+              WHERE i.supplier_id = ?
+                AND i.status <> 'draft'
+                AND COALESCE(i.tax_date, i.issue_date) BETWEEN ? AND ?
+                AND (ii.vat_classification_code IN ('1m', '2m')
+                     OR i.vat_classification_code IN ('1m', '2m'))"
+        );
+        $marked->execute([$supplierId, $year . '-01-01', $year . '-12-31']);
+        $markedCount = (int) ($marked->fetchColumn() ?: 0);
+
+        $unlinked = array_values(array_filter(
+            $soldAssets,
+            static fn (array $a): bool => empty($a['sale_invoice_id']),
+        ));
+        $note = null;
+        if (count($soldAssets) > $markedCount) {
+            $names = array_map(
+                static fn (array $a): string => trim((string) $a['inventory_number'] . ' ' . (string) $a['name']),
+                array_slice($soldAssets, 0, 10),
+            );
+            $note = 'Karty vyřazené prodejem: ' . implode(', ', $names)
+                . (count($soldAssets) > 10 ? ' …' : '')
+                . '. Zkontrolujte, zda doklad o prodeji nese klasifikaci 1m/2m (řádek s vazbou '
+                . 'na kartu majetku ji dostane sám). '
+                . ($unlinked !== []
+                    ? count($unlinked) . ' z nich nemá vazbu na vydanou fakturu. '
+                    : '')
+                . 'Osvobozený prodej, doklad v jiném roce nebo vyřazení bez fakturace jsou '
+                . 'legitimní důvody rozdílu.';
+        }
+
+        $diff = (float) (count($soldAssets) - $markedCount);
+
+        return [
+            'check' => 'asset_sale_coefficient',
+            'label' => $label,
+            // Rozdíl je PODEZŘENÍ, ne chyba — proto se hlásí jen převis karet nad doklady.
+            // Opačný směr (víc dokladů než karet) je běžný: jedna faktura umí prodat víc
+            // karet a kód se dá zvolit i ručně.
+            'ok' => $diff <= 0.0,
+            'a_label' => 'karet vyřazených prodejem',
+            'a' => (float) count($soldAssets),
+            'b_label' => 'dokladů s kódem 1m/2m',
+            'b' => (float) $markedCount,
+            'difference' => $diff,
+            'note' => $note,
+            'skipped' => false,
+        ];
     }
 
     /**

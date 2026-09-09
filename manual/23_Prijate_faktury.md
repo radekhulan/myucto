@@ -143,6 +143,7 @@ Limity:
 | **DUZP (datum uskutečnění zdanitelného plnění)** | Klíčové pro DPH období. Default = datum vystavení. U **reverse charge** se doklad zařazuje do DPH období právě podle DUZP (povinnost přiznat daň vzniká bez ohledu na doručení dokladu); u **pořízení zboží z EU** je DUZP dle § 25 ZDPH **15. den měsíce následujícího po dodání**, pokud doklad nebyl vystaven dříve — editor to připomene hintem. |
 | **Splatnost** | Z platebních podmínek dodavatele. |
 | **Datum přijetí** | Kdy jsi to fyzicky / e-mailem dostal. Default = dnes. |
+| **Datum dodání** | Datum dodání či převzetí uvedené na dokladu (na zahraničním „Leistungsdatum" / „date of supply"). Evidenční údaj — DUZP zůstává ve svém poli. U **pořízení zboží z jiného členského státu** je vstupem výpočtu podle § 25 ZDPH: aplikace z něj ověří, že DUZP odpovídá 15. dni měsíce následujícího po dodání (nebo dřívějšímu datu vystavení). Necháš-li pole prázdné, systém datum **nedomýšlí** — doklad jen dostane upozornění, že § 25 nelze ověřit. |
 | **Měna faktury** | Měna, ve které je doklad vystaven (USD, EUR, CZK…). |
 | **Kurz k DUZP** | Pokud je měna ≠ CZK, **musíš zafixovat kurz**. Tlačítko „Načíst z ČNB" stáhne denní kurz k rozhodnému dni dokladu. Korunový doklad kurz nemá — když měnu přepneš na CZK, kurz i jeho datum se vyprázdní. Viz [§ 23.2.9](#2329-kurz-cizi-meny-a-jeho-prenacitani). |
 | **Reverse charge** | Zaškrtni, pokud je doklad B2B s přenesenou daňovou povinností (pořízení zboží z EU, služby z EU/3. země, tuzemský §92a). Položkám nastav **tuzemskou sazbu** (typicky 21 %) a odpovídající klasifikační kód — daň na dokladu zůstane 0 (dodavatel ji neúčtuje), samovyměření i zrcadlový odpočet dopočítají výkazy DPH. Viz [§ 23.2.7](#2327-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba). |
@@ -397,6 +398,10 @@ Klíčové principy:
   faktura za zboží převzaté v dubnu tak patří do **května** (DUZP 15. 5.), ne do
   měsíce vystavení.
 - **Kurz ČNB se váže k DUZP** (§ 4 odst. 8 — den vzniku povinnosti přiznat daň).
+- **Datum dodání vyplň** — je to jediný vstup, ze kterého jde § 25 spočítat. Aplikace
+  z něj DUZP **nepřepíše**: porovná ho s tím, co máš zadané, a když se rozejdou,
+  upozorní. Prázdné datum dodání znamená, že § 25 nelze ověřit, a doklad to řekne
+  nahlas místo toho, aby si datum domyslel.
 - **AI import tohle vše nastaví sám** — viz [AI extrakce](25_AI_extrakce.md).
 
 > ⚠️ U **vybraných osobních automobilů** pohlídej limit odpočtu dle § 72

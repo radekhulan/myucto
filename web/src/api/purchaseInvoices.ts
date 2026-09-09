@@ -279,6 +279,12 @@ export interface PurchaseInvoice {
   document_kind: PurchaseDocumentKind
   issue_date: string
   tax_date: string | null
+  /**
+   * Datum dodání / převzetí z dokladu (migrace 1790). Evidenční vstup § 25 ZDPH:
+   * u pořízení zboží z EU z něj vzniká zákonné DUZP (15. den následujícího měsíce,
+   * příp. dřívější datum vystavení). Prázdné se NEDOMÝŠLÍ — doklad jen dostane varování.
+   */
+  delivery_date?: string | null
   due_date: string
   received_at: string
   /**
@@ -542,6 +548,7 @@ export interface PurchaseInvoicePayload {
   varsymbol?: string | null
   issue_date: string
   tax_date?: string | null
+  delivery_date?: string | null
   due_date: string
   received_at?: string
   currency_id: number

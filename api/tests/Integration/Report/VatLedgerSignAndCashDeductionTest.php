@@ -206,6 +206,47 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
         $this->assertSame(2100.0, (float) $line1['vat']);
     }
 
+    /**
+     * L-4: hotovostní pořízení dlouhodobého majetku patří i na ř. 47 přiznání
+     * (hodnota pořízeného majetku — doplňující údaj k odpočtu, migrace 1789).
+     *
+     * `fetchCash()` měl v SELECTu natvrdo `0 AS is_fixed_asset`, takže stroj koupený
+     * za hotové skončil jen v odpočtu na ř. 40 a ř. 47 zůstal prázdný — u přijaté
+     * faktury přitom tentýž nákup ř. 47 naplní.
+     */
+    public function testCashFixedAssetPurchaseReachesLine47(): void
+    {
+        if (!$this->db->hasColumn('cash_document_vat_lines', 'is_fixed_asset')) {
+            $this->markTestSkipped('Migrace 1789 na téhle DB neproběhla.');
+        }
+        $this->cash('out', $this->d(11, 3), 121000, [[21.0, 100000, 21000, 'full', 100.0, true]]);
+        // Běžný nákup ve stejném období — ř. 47 sumuje JEN majetkovou část základu.
+        $this->cash('out', $this->d(11, 4), 12100, [[21.0, 10000, 2100, 'full']]);
+
+        $result = $this->dph->build($this->supplierId, self::YEAR, 11, 'monthly');
+        $lines = $result['summary']['lines'];
+
+        self::assertArrayHasKey('47', $lines, 'Hotovostní pořízení majetku se na ř. 47 vůbec nedostalo.');
+        self::assertSame(100000.0, (float) $lines['47']['base'], 'Ř. 47 nese jen hodnotu majetku.');
+        self::assertSame(110000.0, (float) $lines['40']['base'], 'Odpočet na ř. 40 zůstává za oba doklady.');
+    }
+
+    /**
+     * L-4: příznak majetku má smysl jen u výdaje. U příjmového dokladu je to tržba,
+     * ne pořízení — ř. 47 (doplňující údaj k ODPOČTU) by z ní vzniknout nesměl.
+     */
+    public function testCashIncomingNeverReachesLine47(): void
+    {
+        if (!$this->db->hasColumn('cash_document_vat_lines', 'is_fixed_asset')) {
+            $this->markTestSkipped('Migrace 1789 na téhle DB neproběhla.');
+        }
+        $this->cash('in', $this->d(12, 3), 121000, [[21.0, 100000, 21000, 'full', 100.0, true]]);
+
+        $result = $this->dph->build($this->supplierId, self::YEAR, 12, 'monthly');
+
+        self::assertArrayNotHasKey('47', $result['summary']['lines'], 'Tržba nesmí naplnit ř. 47.');
+    }
+
     /** C-1: § 75 poměrný odpočet u pokladny — daň se krátí zadaným procentem. */
     public function testCashProportionalDeductionIsApplied(): void
     {
@@ -264,6 +305,42 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
         $this->assertSame(10000.0, (float) ($result['summary']['lines']['2']['base'] ?? 0), 'základ patří na ř. 2');
         $this->assertSame(1200.0, (float) ($result['summary']['lines']['2']['vat'] ?? 0));
         $this->assertSame(0.0, (float) ($result['summary']['lines']['1']['base'] ?? 0), 'ř. 1 zůstane prázdný');
+    }
+
+    /**
+     * H-4: platební kalendář se přizná JEDNORÁZOVĚ celý, ačkoli § 31a ZDPH dělá
+     * z každé splátky samostatné zdanitelné plnění (daň ke dni splatnosti nebo přijetí
+     * úplaty, co nastane dřív). Rozpad do období systém zatím neumí a vyloučit doklad
+     * z evidence by daň zatajilo — jediná poctivá odpověď je HLASITÉ varování.
+     * Bez něj doklad vypadá jako běžná faktura a nesoulad KH s odběratelem se pozná
+     * až z výzvy finančního úřadu.
+     */
+    public function testPaymentCalendarSpanningPeriodsIsWarnedAbout(): void
+    {
+        $cust = $this->client('Odběratel kalendář', 'CZ90000236');
+        $id = $this->sale('S-KALENDAR', $cust, 'payment_calendar', $this->d(2, 1), [[120000, 25200, 21]]);
+        // 12 měsíčních splátek od února — 11 z nich má splatnost mimo únor.
+        $this->paymentSchedule($id, $this->d(2, 1), 12, 10000.0, 2100.0);
+
+        $result = $this->dph->build($this->supplierId, self::YEAR, 2, 'monthly');
+        $warnings = implode("\n", $result['warnings']);
+
+        self::assertStringContainsString('S-KALENDAR', $warnings, 'Kalendář přes víc období musí být vidět.');
+        self::assertStringContainsString('§ 31a', $warnings);
+        // Čísla se NEMĚNÍ — varování daň nesmí ani přidat, ani ubrat.
+        self::assertSame(120000.0, (float) ($result['summary']['lines']['1']['base'] ?? 0));
+    }
+
+    /** Jednorázový kalendář uvnitř období je v pořádku — kontrola nesmí křičet zbytečně. */
+    public function testSingleInstalmentCalendarInsidePeriodIsNotWarnedAbout(): void
+    {
+        $cust = $this->client('Odběratel jednorázový', 'CZ90000237');
+        $id = $this->sale('S-KAL-1', $cust, 'payment_calendar', $this->d(3, 1), [[10000, 2100, 21]]);
+        $this->paymentSchedule($id, $this->d(3, 20), 1, 10000.0, 2100.0);
+
+        $result = $this->dph->build($this->supplierId, self::YEAR, 3, 'monthly');
+
+        self::assertStringNotContainsString('S-KAL-1', implode("\n", $result['warnings']));
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -345,7 +422,7 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
     /**
      * @param list<array{0:float,1:float,2:float}> $items [base, vat, vat_rate_snapshot]
      */
-    private function sale(string $varsymbol, int $clientId, string $type, string $date, array $items): void
+    private function sale(string $varsymbol, int $clientId, string $type, string $date, array $items): int
     {
         $base = 0.0;
         $vat  = 0.0;
@@ -377,13 +454,40 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
             [$itemBase, $itemVat, $snapshot] = $it;
             $itemStmt->execute([$id, $itemBase, $this->vatRateId, $snapshot, $itemBase, $itemVat, $itemBase + $itemVat, $i]);
         }
+
+        return $id;
+    }
+
+    /**
+     * Rozpis plateb platebního kalendáře (§ 31a) — splátky po měsících od `$firstDue`.
+     * Mazání jde kaskádou přes `invoices` (FK ON DELETE CASCADE), stejně jako u položek.
+     */
+    private function paymentSchedule(int $invoiceId, string $firstDue, int $count, float $base, float $vat): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO invoice_payment_schedule
+                (supplier_id, invoice_id, due_on, base_amount, vat_amount, total_amount, order_index)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        $due = new \DateTimeImmutable($firstDue);
+        for ($i = 0; $i < $count; $i++) {
+            $stmt->execute([
+                $this->supplierId,
+                $invoiceId,
+                $due->modify('+' . $i . ' month')->format('Y-m-d'),
+                $base,
+                $vat,
+                $base + $vat,
+                $i,
+            ]);
+        }
     }
 
     /**
      * Pokladní doklad se sazbovými řádky.
      *
-     * @param list<array{0:float,1:float,2:float,3:string,4?:float}> $lines
-     *        [vat_rate, base, vat, vat_deduction, vat_deduction_percent]
+     * @param list<array{0:float,1:float,2:float,3:string,4?:float,5?:bool}> $lines
+     *        [vat_rate, base, vat, vat_deduction, vat_deduction_percent, is_fixed_asset]
      */
     private function cash(string $docType, string $date, float $total, array $lines): void
     {
@@ -409,11 +513,12 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
 
         $lineStmt = $this->db->pdo()->prepare(
             'INSERT INTO cash_document_vat_lines
-                (cash_document_id, vat_rate, base_amount, vat_amount, vat_deduction, vat_deduction_percent)
-             VALUES (?, ?, ?, ?, ?, ?)'
+                (cash_document_id, vat_rate, base_amount, vat_amount, vat_deduction,
+                 vat_deduction_percent, is_fixed_asset)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($lines as $l) {
-            $lineStmt->execute([$id, $l[0], $l[1], $l[2], $l[3], $l[4] ?? 100.0]);
+            $lineStmt->execute([$id, $l[0], $l[1], $l[2], $l[3], $l[4] ?? 100.0, !empty($l[5]) ? 1 : 0]);
         }
     }
 }
