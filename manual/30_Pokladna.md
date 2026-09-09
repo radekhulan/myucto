@@ -176,6 +176,12 @@ DPH vynuceně vypnuté — u úhrady faktury DPH nese už samotná faktura). Po 
   „Krácený odpočet". U **příjmového** dokladu je to tržba, na kterou se nárok na odpočet
   nevztahuje — tam se nastavení neuplatní.
 
+- **Pořízení dlouhodobého majetku** — zaškrtávátko na řádku rozpadu, opět jen u účelu **Nákup**.
+  Označí tu část základu, která připadá na majetek vymezený v § 4 odst. 4 (vozidlo, stroj);
+  hodnota se v přiznání uvede navíc na **ř. 47** jako doplňující údaj, odpočet zůstává na
+  ř. 40/41. Příznak je na řádku, ne na dokladu, protože jeden výdajový doklad běžně kombinuje
+  pořízení majetku s drobným nákupem v jiné sazbě. U příjmového dokladu se nenabízí.
+
 > [!NOTE]
 > **Rozpad DPH ve valutové pokladně se zadává v měně pokladny.** V databázi se ukládá
 > v korunách přepočtený kurzem dokladu, ale formulář ho při otevření rozpracovaného dokladu

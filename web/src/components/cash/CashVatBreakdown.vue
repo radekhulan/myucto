@@ -35,6 +35,8 @@ const mode = ref<Mode>('top')
 interface Row {
   rate: number; gross: number | null; base: number | null; vat: number | null
   deduction: CashVatDeduction; deductionPercent: number; treatment: CashTaxTreatment
+  // Pořízení dlouhodobého majetku za hotové → doplňující ř. 47 přiznání (migrace 1789).
+  fixedAsset: boolean
 }
 
 const VAT_DEDUCTIONS: CashVatDeduction[] = ['full', 'proportional', 'reduced', 'none']
@@ -50,6 +52,7 @@ function newRow(): Row {
   return {
     rate: defaultRate.value, gross: null, base: null, vat: null,
     deduction: 'full', deductionPercent: 100, treatment: 'deductible',
+    fixedAsset: false,
   }
 }
 
@@ -66,6 +69,7 @@ function seedFromModel(): void {
       deduction: l.vat_deduction ?? 'full',
       deductionPercent: l.vat_deduction_percent ?? 100,
       treatment: l.tax_treatment ?? 'deductible',
+      fixedAsset: l.is_fixed_asset ?? false,
     }))
   } else {
     rows.value = [newRow()]
@@ -122,6 +126,9 @@ const emitted = computed<CashVatLine[]>(() => {
     vat_deduction: r.deduction,
     vat_deduction_percent: r.deduction === 'proportional' ? round2(r.deductionPercent) : 100,
     tax_treatment: r.treatment,
+    // Ř. 47 se týká jen pořízení; u příjmového dokladu se příznak nenabízí a server
+    // ho stejně zahodí (`CashDocumentService::normalize()`).
+    is_fixed_asset: props.deduction ? r.fixedAsset : false,
   }))
   const totalC = cents(props.total)
   const sumC = lines.reduce((s, l) => s + cents(l.base_amount) + cents(l.vat_amount), 0)
@@ -239,10 +246,15 @@ watch(matches, v => emit('update:matches', v), { immediate: true })
             <option v-for="tr in TAX_TREATMENTS" :key="tr" :value="tr">{{ t(`cash.tax_treatment.${tr}`) }}</option>
           </select>
         </div>
+        <label class="col-span-12 inline-flex items-center gap-2 text-sm text-neutral-700">
+          <input v-model="row.fixedAsset" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+          <span>{{ t('cash.form.is_fixed_asset') }}</span>
+        </label>
       </div>
       </div>
     </div>
     <p v-if="deduction" class="text-[11px] text-neutral-500">{{ t('cash.form.vat_deduction_hint') }}</p>
+    <p v-if="deduction" class="text-[11px] text-neutral-500">{{ t('cash.form.is_fixed_asset_hint') }}</p>
 
     <p v-if="!matches" class="text-xs px-3 py-2 rounded-md bg-warning-50 text-warning-700">
       {{ t('cash.form.vat_mismatch_hint', { amount: formatMoney(residual) }) }}

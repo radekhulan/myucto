@@ -20,7 +20,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const route = useRoute()
 const toast = useToast()
 const auth = useAuthStore()
@@ -425,8 +425,41 @@ function onDialogEscape(e: KeyboardEvent) {
 onMounted(() => document.addEventListener('keydown', onDialogEscape))
 onBeforeUnmount(() => document.removeEventListener('keydown', onDialogEscape))
 
+/**
+ * Řádky přiznání pro výběr — chodí z backendu, aby se whitelist validace nerozešel
+ * s nabídkou. Volný text tu byl past: kódy se jmenují jako čísla řádků (kód „42" =
+ * přijaté plnění bez nároku na odpočet, řádek 42 = odpočet při dovozu přes celní úřad),
+ * takže se do políčka dalo omylem opsat číslo kódu a vyrobit neexistující odpočet.
+ */
+const dphLines = ref<string[]>([])
+
+/**
+ * Aktuální hodnota se do nabídky doplní, i když ji whitelist nezná (starší per-tenant
+ * záznam, nedostupný endpoint) — jinak by editace jiného pole tiše smazala řádek.
+ */
+const dphLineOptions = computed(() => {
+  const current = vatClsDraft.dphdp3_line
+  return current && !dphLines.value.includes(current)
+    ? [current, ...dphLines.value]
+    : dphLines.value
+})
+
+function dphLineLabel(line: string): string {
+  // Plochý klíč (`line_42`), ne vnořený `line_opt.42` — číselný segment cesty si
+  // vue-i18n vykládá jako index pole.
+  const key = `vat_classifications.line_${line}`
+  return te(key) ? `${line} — ${t(key)}` : line
+}
+
 async function loadVatClassifications() {
   vatClassifications.value = await vatClassificationsApi.list(undefined, true)
+  if (dphLines.value.length === 0) {
+    try {
+      dphLines.value = await vatClassificationsApi.lines()
+    } catch {
+      dphLines.value = []
+    }
+  }
 }
 
 function newVatCls() {
@@ -1523,6 +1556,7 @@ watch(tab, (newTab) => {
                 :disabled="vatClsEditMode === 'edit'"
                 @input="vatClsSlug.markManual(($event.target as HTMLInputElement).value)"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" />
+              <p class="mt-1 text-xs text-neutral-500">{{ t('vat_classifications.code_hint') }}</p>
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('vat_classifications.direction') }}</label>
@@ -1547,8 +1581,11 @@ watch(tab, (newTab) => {
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('vat_classifications.dphdp3_line') }}</label>
-              <input v-model="vatClsDraft.dphdp3_line" type="text" maxlength="10" placeholder="1"
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+              <select v-model="vatClsDraft.dphdp3_line"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option value="">{{ t('vat_classifications.dphdp3_line_none') }}</option>
+                <option v-for="line in dphLineOptions" :key="line" :value="line">{{ dphLineLabel(line) }}</option>
+              </select>
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('vat_classifications.kh_section') }}</label>

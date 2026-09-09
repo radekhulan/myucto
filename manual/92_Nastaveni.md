@@ -836,7 +836,17 @@ i kompletní tabulka vestavěných kódů.
 **Kód předmětu plnění** (`kod_pred_pl`, jde do vět KH A.1 a B.1) přijímá jednu až dvě
 číslice s volitelným písmenem — číselník MFČR obsahuje i hodnoty jako `1a` nebo `3a`.
 Hodnotový výčet se záměrně nevaliduje: vlastní seznam by se s číselníkem rozešel
-a odmítal by legitimní kódy.
+a odmítal by legitimní kódy. Text, který nezačíná číslicí, se neuloží vůbec (dřív
+se z něj tiše stalo číslo).
+
+> [!WARNING]
+> **Kód klasifikace není číslo řádku přiznání.** Většina vestavěných kódů se sice
+> jmenuje číslem svého řádku (`1` → ř. 1, `40` → ř. 40), ale ne všechny: kód **42**
+> znamená *přijaté plnění bez nároku na odpočet* a do přiznání nepatří vůbec, kdežto
+> **řádek 42** je odpočet při dovozu zboží vyměřeném celním úřadem. Podobně kód `3`
+> patří na ř. 50, kód `22` na ř. 21 a kód `26` na ř. 22. Řádek přiznání se proto
+> vybírá ze seznamu s popisky, ne opisuje jako text, a uložení dvojice, která tyhle
+> záměny reprodukuje, aplikace odmítne s vysvětlením.
 
 **Vlastní kód přidávej pro režim, který vestavěné nepokrývají**, ne pro překlopení
 existujícího na jiný řádek. Vestavěné varianty už pokrývají tuzemský přenos podle

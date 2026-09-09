@@ -547,6 +547,7 @@ final class Routes
 
         // VAT klasifikační kódy (pro DPHDP3 + KH)
         $app->get   ('/api/vat-classifications',                 [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'list']);
+        $app->get   ('/api/vat-classifications/lines',           [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'lines']);
         $app->post  ('/api/vat-classifications',                 [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'create']);
         $app->put   ('/api/vat-classifications/{id:[0-9]+}',     [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'update']);
         $app->delete('/api/vat-classifications/{id:[0-9]+}',     [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'delete']);

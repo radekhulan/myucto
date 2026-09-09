@@ -225,7 +225,8 @@ final class DphBookBuilderTest extends TestCase
         $this->pdo->exec("CREATE TABLE cash_document_vat_lines (
             id INTEGER PRIMARY KEY, cash_document_id INTEGER NOT NULL, vat_rate REAL NOT NULL,
             base_amount REAL NOT NULL, vat_amount REAL NOT NULL, vat_classification_code TEXT NULL,
-            vat_deduction TEXT NOT NULL DEFAULT 'full', vat_deduction_percent REAL NOT NULL DEFAULT 100
+            vat_deduction TEXT NOT NULL DEFAULT 'full', vat_deduction_percent REAL NOT NULL DEFAULT 100,
+            is_fixed_asset INTEGER NOT NULL DEFAULT 0
         )");
     }
 

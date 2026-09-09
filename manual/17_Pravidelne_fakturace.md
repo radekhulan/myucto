@@ -88,6 +88,16 @@ faktuře propíše jako konkrétní rozsah měsíce.
 Položky šablony se 1:1 kopírují na každou vygenerovanou fakturu (popis, mn.,
 cena/j, sazba DPH). Sazba se bere podle vybraného `vat_rate_id` ze šablony.
 
+Vedle sazby má řádek volitelnou **klasifikaci DPH** — kód, podle kterého se plnění
+dostane na správný řádek přiznání a do kontrolního či souhrnného hlášení. Výchozí
+volba **Automaticky podle sazby** ho nechá odvodit při každém generování ze sazby
+a měrné jednotky; to stačí u drtivé většiny šablon. Vyplň ho tam, kde odvození
+nemůže uspět — typicky **dodání zboží do jiného členského státu** (kód `20`) u řádku
+s jednotkou „ks", který by se jinak odvodil jako služba (`22`, ř. 21 a kód plnění 3
+v souhrnném hlášení místo ř. 20 a kódu 0). Zvolený kód se přenese na každou
+vygenerovanou fakturu. U neplátce DPH a u řádku vykazovaného v režimu OSS se volba
+neuplatní — tam kód do českého přiznání nepatří.
+
 Řádek může být zadaný ručně nebo napojený na **ceníkovou položku**. U napojené
 položky zvolíš také zdroj popisu a cenovou politiku:
 

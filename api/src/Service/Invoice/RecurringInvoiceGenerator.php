@@ -545,18 +545,7 @@ final class RecurringInvoiceGenerator
                 if ($syncTarget !== null) {
                     $description = MonthSynchronizer::syncTo($description, $syncTarget);
                 }
-                $items[] = [
-                    'description'            => $description,
-                    'quantity'               => (float) $item['quantity'],
-                    'unit'                   => (string) $item['unit'],
-                    'unit_price_without_vat' => (float) $item['unit_price_without_vat'],
-                    'vat_rate_id'            => (int) $item['vat_rate_id'],
-                    'order_index'            => (int) $item['order_index'],
-                    // Vazba na skladovou kartu (A15) — recurring faktura přenáší
-                    // stock_item_id/warehouse_id ze šablony, aby auto-výdejka fungovala.
-                    'stock_item_id'          => $item['stock_item_id'] ?? null,
-                    'warehouse_id'           => $item['warehouse_id'] ?? null,
-                ] + $this->ossColumnsFor(
+                $ossColumns = $this->ossColumnsFor(
                     $item,
                     (int) $template['supplier_id'],
                     $ossClient,
@@ -564,6 +553,27 @@ final class RecurringInvoiceGenerator
                     $taxDate ?? $issueDate,
                     !empty($template['reverse_charge']),
                 );
+                $items[] = [
+                    'description'            => $description,
+                    'quantity'               => (float) $item['quantity'],
+                    'unit'                   => (string) $item['unit'],
+                    'unit_price_without_vat' => (float) $item['unit_price_without_vat'],
+                    'vat_rate_id'            => (int) $item['vat_rate_id'],
+                    'order_index'            => (int) $item['order_index'],
+                    // Ručně zvolená klasifikace DPH (migrace 1788). Bez ní derivace
+                    // v replaceItems() rozhodovala podle sazby a měrné jednotky, takže
+                    // dodání zboží do JČS ('20', ř. 20 + SH kód 0) u jednotky „ks"
+                    // každý měsíc spadlo na '22' (služba, ř. 21 + SH kód 3).
+                    // OSS řádek kód nést NESMÍ — plnění se přiznává v zemi spotřeby,
+                    // ne v českém přiznání (replaceItems() to u derivace řeší stejně).
+                    'vat_classification_code' => empty($ossColumns['oss_applicable'])
+                        ? ($item['vat_classification_code'] ?? null)
+                        : null,
+                    // Vazba na skladovou kartu (A15) — recurring faktura přenáší
+                    // stock_item_id/warehouse_id ze šablony, aby auto-výdejka fungovala.
+                    'stock_item_id'          => $item['stock_item_id'] ?? null,
+                    'warehouse_id'           => $item['warehouse_id'] ?? null,
+                ] + $ossColumns;
             }
             $this->invoices->replaceItems($newId, $items);
 
@@ -666,6 +676,12 @@ final class RecurringInvoiceGenerator
 
         foreach ($items as &$item) {
             $item['vat_rate_id'] = (int) $zeroId;
+            // Uložená klasifikace se sazbou padá taky. Kód jako '1' (tuzemské plnění
+            // v základní sazbě) na coercnutém 0% řádku by tvrdil daň, kterou neplátce
+            // nepřiznává — a oprava #30 přiřazení kódu neplátci a identifikované osobě
+            // výslovně zakazuje. Bez kódu ho derivace v replaceItems() vyhodnotí znovu,
+            // už se znalostí plátcovství.
+            $item['vat_classification_code'] = null;
         }
         unset($item);
 

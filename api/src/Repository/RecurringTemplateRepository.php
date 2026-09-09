@@ -114,8 +114,8 @@ final class RecurringTemplateRepository
                     i.catalog_source_currency_code, i.catalog_source_unit_price,
                     i.catalog_exchange_rate, i.catalog_exchange_rate_date,
                     i.description, i.quantity, i.unit,
-                    i.unit_price_without_vat, i.vat_rate_id, i.order_index,
-                    i.stock_item_id, i.warehouse_id,
+                    i.unit_price_without_vat, i.vat_rate_id, i.vat_classification_code,
+                    i.order_index, i.stock_item_id, i.warehouse_id,
                     vr.code AS vat_code, vr.rate_percent AS vat_rate_percent,
                     pli.code AS price_list_item_code, pli.name AS price_list_item_name,
                     pli.archived AS price_list_item_archived'
@@ -470,8 +470,8 @@ final class RecurringTemplateRepository
         // Položky všech šablon jedním dotazem, seskupené po template_id.
         $itemsStmt = $this->db->pdo()->prepare(
             'SELECT i.id, i.template_id, i.description, i.quantity, i.unit,
-                    i.unit_price_without_vat, i.vat_rate_id, i.order_index,
-                    i.stock_item_id, i.warehouse_id,
+                    i.unit_price_without_vat, i.vat_rate_id, i.vat_classification_code,
+                    i.order_index, i.stock_item_id, i.warehouse_id,
                     vr.code AS vat_code, vr.rate_percent AS vat_rate_percent'
             . $this->ossItemSelect('i') . '
                FROM recurring_invoice_template_items i
@@ -746,8 +746,9 @@ final class RecurringTemplateRepository
                  catalog_price_source, catalog_source_currency_code,
                  catalog_source_unit_price, catalog_exchange_rate,
                  catalog_exchange_rate_date, description, quantity, unit,
-                 unit_price_without_vat, vat_rate_id, order_index' . $ossColumns . ')
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $ossPlaceholders . ')'
+                 unit_price_without_vat, vat_rate_id, vat_classification_code,
+                 order_index' . $ossColumns . ')
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $ossPlaceholders . ')'
         );
         foreach (array_values($items) as $i => $item) {
             $params = [
@@ -765,6 +766,11 @@ final class RecurringTemplateRepository
                 (string) ($item['unit'] ?? 'ks'),
                 (float) ($item['unit_price_without_vat'] ?? 0),
                 (int) ($item['vat_rate_id'] ?? 0),
+                // Prázdný řetězec = „nech derivovat" (formulář posílá '' místo null),
+                // jinak by se do faktury přenesl kód, který v číselníku neexistuje.
+                ($item['vat_classification_code'] ?? '') !== ''
+                    ? (string) $item['vat_classification_code']
+                    : null,
                 (int) ($item['order_index'] ?? $i),
             ];
             if ($supportsOss) {
