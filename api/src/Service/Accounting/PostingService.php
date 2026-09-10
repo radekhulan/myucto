@@ -2000,6 +2000,15 @@ final class PostingService
                 AND p.account_code REGEXP '^[0-9]{3}$'
                 AND p.account_code NOT IN ({$excluded})
                 AND c.tax_deductibility = 'deductible'
+                -- Analytika mezičlenu platební karty (378.101 …) nikdy není jedinou analytikou
+                -- syntetiky: přesměr by na ni poslal cizí zápisy na 378 a zůstatek karty by
+                -- přestal odpovídat nevypořádaným platbám.
+                AND NOT EXISTS (
+                    SELECT 1 FROM payment_cards pc
+                     WHERE pc.supplier_id = c.supplier_id AND pc.analytic_suffix IS NOT NULL
+                       AND c.account_code = CONCAT(p.account_code, '.', pc.analytic_suffix)
+                )
+                AND NOT (p.account_code IN ('378', '261', '395') AND c.account_code = CONCAT(p.account_code, '.199'))
               GROUP BY p.id, p.account_code
              HAVING COUNT(*) = 1
                 AND MIN(c.account_code) REGEXP '^[0-9]{3}[.][0-9]{1,6}$'"

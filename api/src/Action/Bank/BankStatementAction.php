@@ -3295,9 +3295,11 @@ final class BankStatementAction
             }
             // Automatizace: stornuj případné zaúčtování (reverse + detach) v téže transakci,
             // aby zápis nezůstal viset bez párování. Zavřené období → 409, unmatch se nedokončí.
+            // Platba kartou přes mezičlen: stornuje se jen vypořádání s dokladem, bankovní
+            // zápis 378.x/221 zůstává (viz BankPostingService::releaseMatch).
             if ($this->bankPosting !== null) {
                 try {
-                    $this->bankPosting->unpost(SupplierGuard::currentId($request), $txId, [
+                    $this->bankPosting->releaseMatch(SupplierGuard::currentId($request), $txId, [
                         'user_id' => $userId ?: null,
                         'reason' => 'unmatch',
                     ]);

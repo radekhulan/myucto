@@ -27,11 +27,80 @@ export interface PaymentCard {
   valid_from: string | null
   valid_to: string | null
   is_active: boolean
+  /** false = kartu založil import výpisu z neznámé koncovky; čeká na doplnění. */
+  is_verified: boolean
+  /** Číslo analytiky mezičlenu ('101'); kód skládá syntetika z nastavení účtování karet. */
+  analytic_suffix: string | null
   archived: boolean
   archived_at: string | null
   note: string | null
   created_at: string
+  /** Jen v detailu karty: mezičlen karty (analytika, zůstatek = nedoložené platby). */
+  clearing?: PaymentCardClearing
 }
+
+export interface PaymentCardClearingOption {
+  id: number
+  account_code: string
+  name: string
+  card_id: number | null
+}
+
+export interface PaymentCardClearing {
+  account_code: string | null
+  account_id: number | null
+  balance: number
+  synthetic: string
+  enabled: boolean
+  options: PaymentCardClearingOption[]
+}
+
+export type CardClearingSynthetic = '378' | '261' | '395'
+
+export interface CardClearingSettings {
+  configured: boolean
+  enabled: boolean
+  effective_from: string | null
+  clearing_synthetic: CardClearingSynthetic
+  writeoff_account_id: number | null
+  holder_account_id: number | null
+  fx_loss_account_id: number | null
+  fx_gain_account_id: number | null
+  rounding_loss_account_id: number | null
+  rounding_gain_account_id: number | null
+  auto_create_cards: boolean
+  unmatched_alert_days: number
+}
+
+export interface CardClearingAccountOption {
+  id: number
+  account_code: string
+  name: string
+  account_type: string
+  is_synthetic: boolean
+  parent_id: number | null
+  non_deductible: boolean
+}
+
+export interface CardClearingSettingsResponse {
+  configured: boolean
+  double_entry: boolean
+  settings: CardClearingSettings
+  defaults: {
+    writeoff_account_code: string
+    holder_account_code: string
+    fx_loss_account_code: string
+    fx_gain_account_code: string
+    rounding_loss_account_code: string
+    rounding_gain_account_code: string
+    effective_from: string | null
+  }
+  synthetic_options: Array<{ account_code: CardClearingSynthetic; available: boolean; balance: number }>
+  account_options: CardClearingAccountOption[]
+  unverified_cards: number
+}
+
+export type CardWriteOffTarget = 'expense' | 'holder'
 
 /** Stručný popis karty u bankovního pohybu. */
 export interface PaymentCardSummary {
@@ -73,6 +142,8 @@ export interface CardPaymentRow {
   counterparty_name: string | null
   description: string | null
   card_last4: string
+  /** Analytika mezičlenu, na které platba čeká na doklad (null = účtováno bez mezičlenu). */
+  clearing_account?: string | null
   /** Platba na čerpací stanici: vozidlo držitele karty (reason ambiguous = víc vozidel). */
   vehicle_hint?: CardPaymentVehicleHint | null
 }
@@ -139,4 +210,19 @@ export const paymentCardsApi = {
   },
   rematch: (transactionId: number) =>
     api.post<CardRematchResult>(`/payment-cards/unmatched-payments/${transactionId}/rematch`).then(r => r.data),
+
+  // Účtování plateb kartou přes mezičlen (nastavení, analytika karty, uzavření bez dokladu).
+  clearingSettings: () => api.get<CardClearingSettingsResponse>('/payment-cards/settings').then(r => r.data),
+  saveClearingSettings: (payload: Partial<CardClearingSettings> & { confirm?: boolean }) =>
+    api.put<CardClearingSettingsResponse>('/payment-cards/settings', payload).then(r => r.data),
+  setAnalytic: (id: number, accountCode: string | null, confirm = false) =>
+    api.put<{ card: PaymentCard; clearing: PaymentCardClearing }>(`/payment-cards/${id}/analytic`, { account_code: accountCode, confirm })
+      .then(r => r.data),
+  verify: (id: number) => api.post<{ card: PaymentCard }>(`/payment-cards/${id}/verify`).then(r => r.data.card),
+  writeOff: (transactionId: number, target: CardWriteOffTarget, accountId: number | null = null) =>
+    api.post<{ entry_id: number; account_code: string }>(
+      `/payment-cards/unmatched-payments/${transactionId}/write-off`, { target, account_id: accountId },
+    ).then(r => r.data),
+  cancelWriteOff: (transactionId: number) =>
+    api.delete<{ reversal_id: number | null }>(`/payment-cards/unmatched-payments/${transactionId}/write-off`).then(r => r.data),
 }

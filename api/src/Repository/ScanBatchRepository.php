@@ -139,6 +139,17 @@ final class ScanBatchRepository
         return $row === false ? null : self::castItem($row);
     }
 
+    /** Koncovka karty z připojeného skenu účtenky; ručně zadanou hodnotu nepřepíše. */
+    public function setPurchaseCardLast4(int $supplierId, int $purchaseInvoiceId, string $last4): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices SET card_last4 = ?
+              WHERE id = ? AND supplier_id = ? AND card_last4 IS NULL'
+        );
+        $stmt->execute([$last4, $purchaseInvoiceId, $supplierId]);
+        return $stmt->rowCount() > 0;
+    }
+
     /** @return array<string,int> outcome → počet */
     public function countItemsByOutcome(int $supplierId, int $jobId): array
     {

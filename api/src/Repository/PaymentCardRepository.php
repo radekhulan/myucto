@@ -156,13 +156,87 @@ final class PaymentCardRepository
         return (int) $this->db->pdo()->lastInsertId();
     }
 
+    /**
+     * Karta, kterou systém založil sám z koncovky ve výpisu (režim účtování karet přes
+     * mezičlen). Je neověřená, dokud ji někdo neotevře a neuloží — do té doby ji stránka
+     * Platební karty ukazuje mezi kartami k doplnění.
+     */
+    public function createUnverified(int $supplierId, string $last4, ?int $currencyId, string $label): int
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payment_cards
+                (supplier_id, label, last4, card_type, currency_id, is_active, is_verified)
+             VALUES (?, ?, ?, 'debit', ?, 1, 0)"
+        )->execute([$supplierId, mb_substr($label, 0, 120), $last4, $currencyId]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** Karty firmy s danou koncovkou bez ohledu na platnost (i archivované). @return list<array<string,mixed>> */
+    public function findAllByLast4(int $supplierId, string $last4): array
+    {
+        $stmt = $this->db->pdo()->prepare(self::SELECT . ' WHERE pc.supplier_id = ? AND pc.last4 = ? ORDER BY pc.id');
+        $stmt->execute([$supplierId, $last4]);
+        return array_map(fn (array $r): array => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Přidělí suffix analytiky, jen když ho karta ještě nemá. Souběh dvou importů řeší
+     * unikátní index (supplier_id, analytic_suffix) a podmínka na prázdný sloupec.
+     */
+    public function assignSuffixIfEmpty(int $supplierId, int $id, string $suffix): bool
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare(
+                'UPDATE payment_cards SET analytic_suffix = ?
+                  WHERE id = ? AND supplier_id = ? AND analytic_suffix IS NULL'
+            );
+            $stmt->execute([$suffix, $id, $supplierId]);
+            return $stmt->rowCount() > 0;
+        } catch (\PDOException $e) {
+            if (($e->errorInfo[0] ?? null) === '23000') {
+                return false;
+            }
+            throw $e;
+        }
+    }
+
+    public function markVerified(int $supplierId, int $id): void
+    {
+        $this->db->pdo()->prepare('UPDATE payment_cards SET is_verified = 1 WHERE id = ? AND supplier_id = ?')
+            ->execute([$id, $supplierId]);
+    }
+
+    /** Ruční výběr analytiky mezičlenu v detailu karty (validuje volající). */
+    public function setAnalyticSuffix(int $supplierId, int $id, ?string $suffix): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payment_cards SET analytic_suffix = ? WHERE id = ? AND supplier_id = ?'
+        )->execute([$suffix, $id, $supplierId]);
+    }
+
+    /** @return array<string,int> suffix => id karty */
+    public function usedSuffixes(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT analytic_suffix, id FROM payment_cards WHERE supplier_id = ? AND analytic_suffix IS NOT NULL'
+        );
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $out[(string) $r['analytic_suffix']] = (int) $r['id'];
+        }
+        return $out;
+    }
+
     /** @param array<string,mixed> $data normalizovaný vstup z PaymentCardInput */
     public function update(int $supplierId, int $id, array $data): void
     {
+        // Uložení z formuláře je ověření karty člověkem — i té, kterou založil import.
         $this->db->pdo()->prepare(
             'UPDATE payment_cards
                 SET label = ?, holder_name = ?, last4 = ?, card_type = ?, card_network = ?, currency_id = ?,
-                    employee_id = ?, user_id = ?, valid_from = ?, valid_to = ?, is_active = ?, note = ?
+                    employee_id = ?, user_id = ?, valid_from = ?, valid_to = ?, is_active = ?, note = ?,
+                    is_verified = 1
               WHERE id = ? AND supplier_id = ?'
         )->execute([
             $data['label'], $data['holder_name'], $data['last4'], $data['card_type'], $data['card_network'],
@@ -248,6 +322,7 @@ final class PaymentCardRepository
             'employee_id' => $card['employee_id'] ?? null,
             'user_id'     => $card['user_id'] ?? null,
             'archived'    => (bool) ($card['archived'] ?? false),
+            'is_verified' => (bool) ($card['is_verified'] ?? true),
         ];
     }
 
@@ -279,6 +354,8 @@ final class PaymentCardRepository
             'valid_from'        => $r['valid_from'] !== null ? (string) $r['valid_from'] : null,
             'valid_to'          => $r['valid_to'] !== null ? (string) $r['valid_to'] : null,
             'is_active'         => (bool) $r['is_active'],
+            'is_verified'       => (bool) ($r['is_verified'] ?? true),
+            'analytic_suffix'   => isset($r['analytic_suffix']) && $r['analytic_suffix'] !== null ? (string) $r['analytic_suffix'] : null,
             'archived'          => $r['archived_at'] !== null,
             'archived_at'       => $r['archived_at'] !== null ? (string) $r['archived_at'] : null,
             'note'              => $r['note'] !== null ? (string) $r['note'] : null,

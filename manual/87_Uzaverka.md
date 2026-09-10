@@ -172,6 +172,10 @@ zobrazí je v tabulce se sloupci **Závažnost** (Chyba/Varování/Info), **Kont
 - **vydané a přijaté faktury** období bez účetního zápisu,
 - nenulové zůstatky technických účtů: **261** (Peníze na cestě), **395** (Vnitřní
   zúčtování), **041/042** (nedokončené pořízení majetku),
+- **mezičlen plateb kartou** (378.x): zůstatek každé analytiky karty proti
+  konkrétním nevypořádaným platbám kartou a zvlášť rozdíl, který platbami
+  vysvětlit nejde (viz [Platební karty](92a_Platebni_karty.md#kontroly));
+  analytiky karet se proto nehlásí u 261/395 ani mezi průběžnými účty,
 - **nerozdělený výsledek hospodaření na 431** z minulých let,
 - **majetek v užívání bez zaúčtovaných odpisů** roku,
 - **cizoměnové otevřené doklady** čekající na přecenění,
@@ -613,6 +617,9 @@ přepočtou; po prvním načtení stránky se automaticky spustí za poslední d
 zůstatků**:
 
 - **111/131** — nedočerpané zálohy na pořízení materiálu/zboží,
+- **Platby kartou bez dokladu** — při zapnutém účtování karet přes mezičlen
+  platby kartou bez dokladu starší než lhůta z nastavení; řádek vede do přehledu
+  plateb bez dokladu na stránce Platební karty,
 - **Účty na neobvyklé straně** — porovná zůstatek každého účtu s jeho **obvyklou
   stranou** dle typu (aktivum = MD, pasivum = D) a upozorní na výjimky — typicky
   **přeplatek** (311 v kreditu) nebo **záporný závazek** (321 v debetu),

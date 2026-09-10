@@ -81,6 +81,9 @@ final class DocumentBranchParityGuardsTest extends TestCase
         'Service/Bank/StatementMatcher.php' => [
             'matchPurchase'             => 'vydaný DDKP je vždy paid → nikdy platební cíl',
             'matchPurchaseFuzzy'        => 'vydaný DDKP je vždy paid → nikdy platební cíl',
+            // Doklad k platbě firemní kartou je vždy přijatý; vydaná faktura se kartou
+            // firmy neplatí a vydaný DDKP je navíc vždy paid.
+            'matchCardDocument'         => 'platbu firemní kartou dokládá jen přijatý doklad',
         ],
         'Service/Accounting/Bank/BankPostingService.php' => [
             'outgoingCounterAccount' => 'vydaný DDKP je vždy paid → protiúčet nedosažitelný',

@@ -144,6 +144,8 @@ const DOC_CHECK_LIST: Record<string, RouteLocationRaw> = {
   unposted_purchases: { path: '/purchase-invoices', query: { booked: '0' } },
   attachment_vat_period: { name: 'scan-attach', hash: '#attachment-discrepancies' },
   attachment_mismatch: { name: 'scan-attach', hash: '#attachment-discrepancies' },
+  card_payments_unmatched: { name: 'payment-cards', query: { tab: 'unmatched' } },
+  card_clearing_open: { name: 'payment-cards', query: { tab: 'unmatched' } },
 }
 
 const BALANCE_CHECK_CODES: Record<string, string[]> = {

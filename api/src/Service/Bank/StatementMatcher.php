@@ -1067,6 +1067,87 @@ final class StatementMatcher
         return ['status' => 'unmatched', 'reason' => $weak === [] ? 'no_card_match' : 'ambiguous_card_match'];
     }
 
+    /**
+     * Doklad s koncovkou karty dorazil AŽ PO platbě (AI import účtenky, připojený sken,
+     * přijetí konceptu) — najdi k němu nespárovaný pohyb téže karty a spáruj ho.
+     *
+     * Opačný směr než {@see matchPurchaseByCard()}, ale rozhodnutí dělá TÁŽ větev: když
+     * k dokladu sedí právě jeden volný pohyb (koncovka, částka, datové okno), pustí se
+     * na něj běžné {@see match()} se všemi pojistkami (konkurenční pohyby, jiná karta,
+     * souběh). Vrací id spárovaného pohybu, nebo null.
+     */
+    public function matchCardDocument(int $supplierId, int $purchaseInvoiceId): ?int
+    {
+        $pdo = $this->db->pdo();
+        $settled = PurchaseSettledExpr::settled('pi');
+        $doc = $pdo->prepare(
+            "SELECT pi.id, pi.status, pi.card_last4, pi.document_kind, pi.cash_register_id, pi.exchange_rate,
+                    COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) + COALESCE(pi.rounding, 0) AS amount_to_pay,
+                    ({$settled}) AS settled_amount,
+                    COALESCE(pi.tax_date, pi.issue_date) AS doc_date, cur.code AS currency
+               FROM purchase_invoices pi
+          LEFT JOIN currencies cur ON cur.id = pi.currency_id
+              WHERE pi.id = ? AND pi.supplier_id = ?"
+        );
+        $doc->execute([$purchaseInvoiceId, $supplierId]);
+        $pi = $doc->fetch(PDO::FETCH_ASSOC);
+        if ($pi === false
+            || !\MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) ($pi['card_last4'] ?? ''))
+            || !in_array((string) $pi['status'], ['received', 'booked', 'paid'], true)
+            || (string) $pi['document_kind'] === 'tax_document'
+            || $pi['cash_register_id'] !== null
+            || $pi['doc_date'] === null
+        ) {
+            return null;
+        }
+        $remaining = round((float) $pi['amount_to_pay'] - (float) ($pi['settled_amount'] ?? 0.0), 2);
+        if ($remaining <= 0.005) {
+            return null;
+        }
+        $stmt = $pdo->prepare(
+            "SELECT bt.id, bt.amount, COALESCE(NULLIF(bt.currency, ''), bs.currency) AS currency
+               FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.card_last4 = ?
+                AND bt.match_status = 'unmatched'
+                AND bt.source = 'statement'
+                AND bt.amount < 0
+                AND DATEDIFF(bt.posted_at, ?) BETWEEN ? AND ?
+                AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.bank_transaction_id = bt.id)
+                AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql('bs') . '
+              ORDER BY bt.posted_at, bt.id'
+        );
+        $stmt->execute(array_merge(
+            [
+                (string) $pi['card_last4'],
+                (string) $pi['doc_date'],
+                -\MyInvoice\Service\Bank\Card\CardPaymentCandidates::DAYS_AFTER_POSTING,
+                \MyInvoice\Service\Bank\Card\CardPaymentCandidates::DAYS_BEFORE_POSTING,
+            ],
+            \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId),
+        ));
+        $hits = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $tx) {
+            $m = $this->expectedMatch(
+                $remaining,
+                (string) ($pi['currency'] ?? self::LOCAL_CURRENCY),
+                (float) ($pi['exchange_rate'] ?: 0),
+                $tx['currency'] !== null && $tx['currency'] !== '' ? (string) $tx['currency'] : null,
+            );
+            if ($m !== null && abs(abs((float) $tx['amount']) - $m['expected']) <= $m['exact']) {
+                $hits[] = (int) $tx['id'];
+            }
+        }
+        if (count($hits) !== 1) {
+            return null;
+        }
+        $result = $this->match($hits[0]);
+        return in_array($result['status'] ?? null, ['auto_exact', 'auto_partial'], true)
+            && (int) ($result['purchase_invoice_id'] ?? 0) === $purchaseInvoiceId
+            ? $hits[0]
+            : null;
+    }
+
     /** Okno ±N dní kolem data platby pro shodu dle částky+data (zrcadlí BankStatementAction). */
     private const AMOUNT_DATE_DAY_WINDOW = 14;
 

@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import {
   paymentCardsApi, PAYMENT_CARD_NETWORKS, PAYMENT_CARD_TYPES,
   type PaymentCard, type PaymentCardHolders, type PaymentCardPayload,
 } from '@/api/paymentCards'
 import { settingsApi, type CurrencyAccount } from '@/api/settings'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
+import { formatMoney } from '@/composables/useFormat'
 import { formatAccountNumber } from '@/utils/bankAccount'
 
 const { t } = useI18n()
@@ -44,6 +46,52 @@ function fill(c: PaymentCard) {
     currency_id: c.currency_id, holder_name: c.holder_name, employee_id: c.employee_id,
     user_id: c.user_id, valid_from: c.valid_from, valid_to: c.valid_to, is_active: c.is_active, note: c.note,
   })
+  analyticChoice.value = c.clearing?.account_code ?? null
+}
+
+// ── mezičlen karty (účtování plateb kartou přes 378.x) ──────────────────────
+const canPost = computed(() => auth.canWrite('bank.post'))
+const analyticChoice = ref<string | null>(null)
+const analyticBusy = ref(false)
+const clearing = computed(() => card.value?.clearing ?? null)
+const showClearing = computed(() => !!clearing.value && (clearing.value.enabled || !!clearing.value.account_code))
+
+/** Odpověď uložení karty nese kartu bez mezičlenu — ten zůstává z detailu. */
+function keepClearing(c: PaymentCard): PaymentCard {
+  return { ...c, clearing: c.clearing ?? card.value?.clearing }
+}
+
+async function changeAnalytic(confirm = false) {
+  if (!card.value) return
+  analyticBusy.value = true
+  try {
+    const r = await paymentCardsApi.setAnalytic(card.value.id, analyticChoice.value, confirm)
+    card.value = { ...r.card, clearing: r.clearing }
+    analyticChoice.value = r.clearing.account_code
+    toast.success(t('payment_cards.clearing_changed_toast'))
+  } catch (e) {
+    if (apiErrorCode(e) === 'confirm_required' && window.confirm(apiErrorMessage(e))) {
+      analyticBusy.value = false
+      await changeAnalytic(true)
+      return
+    }
+    toast.error(apiErrorMessage(e, t('payment_cards.clearing_change_failed')))
+  } finally {
+    analyticBusy.value = false
+  }
+}
+
+async function verify() {
+  if (!card.value) return
+  busy.value = true
+  try {
+    card.value = keepClearing(await paymentCardsApi.verify(card.value.id))
+    toast.success(t('payment_cards.verified_toast'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('payment_cards.save_failed')))
+  } finally {
+    busy.value = false
+  }
 }
 
 function accountLabel(a: CurrencyAccount): string {
@@ -92,8 +140,8 @@ async function save() {
     const r = wasNew
       ? await paymentCardsApi.create(payload())
       : await paymentCardsApi.update(cardId.value as number, payload())
-    card.value = r.card
-    fill(r.card)
+    card.value = keepClearing(r.card)
+    fill(card.value)
     toast.success(t('payment_cards.saved'))
     if (r.last4_truncated) toast.warning(t('payment_cards.last4_truncated'))
     if (wasNew) void router.replace({ name: 'payment-card-detail', params: { id: r.card.id } })
@@ -109,7 +157,7 @@ async function archive() {
   if (!card.value || !window.confirm(t('payment_cards.archive_confirm'))) return
   busy.value = true
   try {
-    card.value = await paymentCardsApi.archive(card.value.id)
+    card.value = keepClearing(await paymentCardsApi.archive(card.value.id))
     fill(card.value)
     toast.success(t('payment_cards.archived_toast'))
   } catch (e) {
@@ -123,7 +171,7 @@ async function restore() {
   if (!card.value) return
   busy.value = true
   try {
-    card.value = await paymentCardsApi.restore(card.value.id)
+    card.value = keepClearing(await paymentCardsApi.restore(card.value.id))
     fill(card.value)
     toast.success(t('payment_cards.restored_toast'))
   } catch (e) {
@@ -142,6 +190,11 @@ const actions = computed<ActionItem[]>(() => [
   {
     key: 'restore', label: t('payment_cards.restore'), icon: 'uturn', tier: 'primary', variant: 'success',
     run: restore, loading: busy.value, show: canWrite.value && !!card.value?.archived,
+  },
+  {
+    key: 'verify', label: t('payment_cards.verify'), icon: 'check', tier: 'secondary', variant: 'success',
+    run: verify, disabled: busy.value,
+    show: canWrite.value && !!card.value && !card.value.is_verified && !card.value.archived,
   },
   { key: 'back', label: t('payment_cards.back'), icon: 'table', tier: 'secondary', variant: 'neutral', to: { name: 'payment-cards' } },
   {
@@ -167,6 +220,9 @@ const INPUT = 'h-9 w-full px-3 border border-neutral-300 rounded-md text-sm bg-s
 
     <div v-if="card?.archived" class="mb-4 rounded-lg border border-warning-500/40 bg-warning-50 px-4 py-3 text-sm text-warning-700">
       {{ t('payment_cards.archived_notice') }}
+    </div>
+    <div v-else-if="card && !card.is_verified" class="mb-4 rounded-lg border border-warning-500/40 bg-warning-50 px-4 py-3 text-sm text-warning-700">
+      {{ t('payment_cards.unverified_notice') }}
     </div>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
@@ -269,5 +325,49 @@ const INPUT = 'h-9 w-full px-3 border border-neutral-300 rounded-md text-sm bg-s
         </fieldset>
       </div>
     </form>
+
+    <section v-if="!loading && showClearing && clearing" class="mt-4 bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 md:p-5 space-y-3"
+      data-testid="card-clearing">
+      <h2 class="text-sm font-semibold text-neutral-700">{{ t('payment_cards.section_clearing') }}</h2>
+      <div class="grid gap-3 sm:grid-cols-3 text-sm">
+        <div>
+          <div class="text-xs text-neutral-500">{{ t('payment_cards.clearing_account') }}</div>
+          <div class="font-mono">{{ clearing.account_code ?? t('payment_cards.clearing_none') }}</div>
+        </div>
+        <div>
+          <div class="text-xs text-neutral-500">{{ t('payment_cards.clearing_balance') }}</div>
+          <div class="font-medium" :class="Math.abs(clearing.balance) >= 0.005 ? 'text-warning-700' : 'text-neutral-800'">
+            {{ formatMoney(clearing.balance) }}
+          </div>
+          <div class="text-xs text-neutral-500">{{ t('payment_cards.clearing_balance_help') }}</div>
+        </div>
+        <div class="flex items-end">
+          <RouterLink v-if="clearing.account_id" :to="{ name: 'accounting-account-statement', params: { accountId: clearing.account_id } }"
+            :class="btnOutline('neutral')" class="whitespace-nowrap">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" />
+            </svg>
+            {{ t('payment_cards.clearing_open_statement') }}
+          </RouterLink>
+        </div>
+      </div>
+      <div v-if="canPost && !card?.archived" class="flex flex-wrap items-end gap-2">
+        <label class="block text-sm">
+          <span class="text-xs font-medium text-neutral-600">{{ t('payment_cards.clearing_change_label') }}</span>
+          <select v-model="analyticChoice" :class="INPUT" class="min-w-[16rem]">
+            <option :value="null">{{ t('payment_cards.clearing_auto') }}</option>
+            <option v-for="o in clearing.options" :key="o.id" :value="o.account_code">{{ o.account_code }} — {{ o.name }}</option>
+          </select>
+        </label>
+        <button type="button" :class="btnOutline('warning')" class="whitespace-nowrap"
+          :disabled="analyticBusy || analyticChoice === clearing.account_code" @click="changeAnalytic()">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+          </svg>
+          {{ t('payment_cards.clearing_change') }}
+        </button>
+      </div>
+      <p class="text-xs text-neutral-500">{{ t('payment_cards.clearing_change_help') }}</p>
+    </section>
   </div>
 </template>

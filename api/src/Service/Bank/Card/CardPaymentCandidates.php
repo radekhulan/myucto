@@ -47,14 +47,19 @@ final class CardPaymentCandidates
                FROM purchase_invoices pi
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
-                AND pi.status IN ('received','booked')
+                AND (pi.status IN ('received','booked')
+                     -- Účtenka, kterou import rovnou označil jako zaplacenou (uhrazeno kartou),
+                     -- ale k níž ještě není žádná úhrada: pohyb její karty je právě ta úhrada.
+                     OR (pi.status = 'paid' AND pi.card_last4 = ?
+                         AND NOT EXISTS (SELECT 1 FROM payment_matches pm0
+                                          WHERE pm0.supplier_id = pi.supplier_id AND pm0.purchase_invoice_id = pi.id)))
                 AND pi.document_kind <> 'tax_document'
                 AND pi.cash_register_id IS NULL
                 AND (pi.card_last4 = ? OR (pi.card_last4 IS NULL AND pi.payment_method = 'card'))
                 AND DATEDIFF(?, COALESCE(pi.tax_date, pi.issue_date)) BETWEEN ? AND ?
               ORDER BY pi.id"
         );
-        $stmt->execute([$supplierId, $last4, $postedAt, -self::DAYS_AFTER_POSTING, self::DAYS_BEFORE_POSTING]);
+        $stmt->execute([$supplierId, $last4, $last4, $postedAt, -self::DAYS_AFTER_POSTING, self::DAYS_BEFORE_POSTING]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 

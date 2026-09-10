@@ -87,7 +87,7 @@ const SOURCE_TYPES = [
   'manual', 'invoice', 'purchase_invoice', 'bank', 'gopay', 'cash',
   'depreciation', 'asset', 'asset_disposal',
   'closing', 'opening', 'fx_revaluation', 'stock',
-  'offset', 'settlement', 'vat_clearing',
+  'offset', 'settlement', 'vat_clearing', 'card_settlement', 'card_writeoff',
 ] as const
 
 // Drill-down z detailu dokladu (FV/PF): ?source_type=&source_id= → filtruje deník na

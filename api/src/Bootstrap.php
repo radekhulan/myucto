@@ -623,6 +623,9 @@ final class Bootstrap
                 // strana; bez explicitní vazby by autowire nullable class-param
                 // nechal null a odvod by se zaúčtoval dvakrát.
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
+                // Platby kartou přes mezičlen 378.x a jejich vypořádání s dokladem.
+                $c->get(\MyInvoice\Service\Accounting\Card\CardClearingRegime::class),
+                $c->get(\MyInvoice\Service\Accounting\Card\CardSettlementService::class),
             ),
 
             // Ú-16 — protizápis úhrady mzdového závazku. ?BankAnalyticResolver je

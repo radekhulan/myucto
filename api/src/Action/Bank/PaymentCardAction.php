@@ -34,6 +34,7 @@ final class PaymentCardAction
         private readonly TenantReferenceGuard $tenantRefs,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly \MyInvoice\Service\Accounting\Card\CardClearingSettingsService $clearing,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -50,11 +51,13 @@ final class PaymentCardAction
 
     public function get(Request $request, Response $response, array $args): Response
     {
-        $card = $this->cards->find(SupplierGuard::currentId($request), (int) ($args['id'] ?? 0));
+        $supplierId = SupplierGuard::currentId($request);
+        $card = $this->cards->find($supplierId, (int) ($args['id'] ?? 0));
         if ($card === null) {
             return Json::error($response, 'not_found', 'Platební karta nenalezena.', 404);
         }
-        return Json::ok($response, $card);
+        // Mezičlen karty (analytika, zůstatek = nedoložené platby, proklik na obraty).
+        return Json::ok($response, $card + ['clearing' => $this->clearing->cardClearing($supplierId, $card)]);
     }
 
     public function create(Request $request, Response $response): Response

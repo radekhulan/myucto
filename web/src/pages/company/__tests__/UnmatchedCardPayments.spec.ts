@@ -7,11 +7,12 @@ const m = vi.hoisted(() => ({
   unmatchedPayments: vi.fn(),
   uploadReceipt: vi.fn(),
   rematch: vi.fn(),
+  writeOff: vi.fn(),
   push: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 vi.mock('@/api/paymentCards', () => ({
-  paymentCardsApi: { unmatchedPayments: m.unmatchedPayments, uploadReceipt: m.uploadReceipt, rematch: m.rematch },
+  paymentCardsApi: { unmatchedPayments: m.unmatchedPayments, uploadReceipt: m.uploadReceipt, rematch: m.rematch, writeOff: m.writeOff },
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => m.toast }))
@@ -39,6 +40,7 @@ const overview: Overview = {
       transactions: [{
         id: 41, statement_id: 7, posted_at: '2026-06-12', amount: -250, currency: 'CZK', counterparty_name: 'TESTOVACI STANICE', description: null, card_last4: '1111',
         vehicle_hint: { car_id: 5, registration: '1AB 2345', car_name: null, reason: 'ok' },
+        clearing_account: '378.101',
       }],
     },
     {
@@ -89,6 +91,21 @@ describe('Platby kartou bez dokladu', () => {
     await flushPromises()
     expect(m.rematch).toHaveBeenCalledWith(41)
     expect(m.toast.success).toHaveBeenCalledWith('payment_cards.unmatched.rematched')
+    expect(m.unmatchedPayments).toHaveBeenCalledTimes(2)
+  })
+
+  it('platbu na mezičlenu karty jde uzavřít bez dokladu a přehled se načte znovu', async () => {
+    m.writeOff.mockResolvedValue({ entry_id: 5, account_code: '548.990' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = await render()
+    expect(wrapper.find('[data-testid="clearing-account"]').exists()).toBe(true)
+    // Platba bez mezičlenu (neznámá karta účtovaná postaru) uzavření nenabízí.
+    expect(wrapper.findAll('[data-testid="write-off-expense"]')).toHaveLength(1)
+
+    await wrapper.find('[data-testid="write-off-expense"]').trigger('click')
+    await flushPromises()
+
+    expect(m.writeOff).toHaveBeenCalledWith(41, 'expense')
     expect(m.unmatchedPayments).toHaveBeenCalledTimes(2)
   })
 

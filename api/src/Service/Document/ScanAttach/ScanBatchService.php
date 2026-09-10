@@ -27,6 +27,7 @@ final class ScanBatchService
         private readonly DocumentStorage $storage,
         private readonly FuelingFromScan $fuelingFromScan,
         private readonly AttachmentCheckService $attachmentChecks,
+        private readonly \MyInvoice\Service\Accounting\Card\CardPaymentAutomation $cardAutomation,
     ) {}
 
     /**
@@ -69,6 +70,28 @@ final class ScanBatchService
             $this->attachmentChecks->recheckEntity($supplierId, $targetType, $targetId);
         } catch (\Throwable) {
         }
+        // Účtenka s koncovkou karty: koncovka přejde na doklad (ruční hodnotu nepřepíše)
+        // a doklad se spáruje s pohybem karty a vypořádá. Nadstavba — chyba nevrací připojení.
+        if ($targetType === 'purchase_invoice') {
+            try {
+                $this->applyCardFromScan($supplierId, $targetId, (string) ($item['sha256'] ?? ''));
+            } catch (\Throwable) {
+            }
+        }
+    }
+
+    private function applyCardFromScan(int $supplierId, int $purchaseInvoiceId, string $sha256): void
+    {
+        if ($sha256 === '') {
+            return;
+        }
+        $extraction = $this->extractions->mapOkBySha($supplierId, [$sha256], ScanExtractionNormalizer::SCHEMA_VERSION)[$sha256] ?? null;
+        $last4 = ScanExtractionNormalizer::cardLast4(is_array($extraction) ? ($extraction['card_last4'] ?? null) : null);
+        if ($last4 === null) {
+            return;
+        }
+        $this->batches->setPurchaseCardLast4($supplierId, $purchaseInvoiceId, $last4);
+        $this->cardAutomation->afterPurchaseReady($supplierId, $purchaseInvoiceId);
     }
 
     /**

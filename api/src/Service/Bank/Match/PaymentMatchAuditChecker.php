@@ -321,7 +321,9 @@ final class PaymentMatchAuditChecker
                    JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                    JOIN chart_of_accounts ca ON ca.id = l.account_id
               LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
-                  WHERE e.source_type = 'bank' AND e.source_id IN ($placeholders)
+                  -- Platba kartou přes mezičlen nese kurzový rozdíl ve vypořádání s dokladem,
+                  -- ne v bankovním zápisu (378.x/221) — patří do téhož součtu.
+                  WHERE e.source_type IN ('bank', 'card_settlement') AND e.source_id IN ($placeholders)
                     AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
                     AND (ca.account_code LIKE '563%' OR ca.account_code LIKE '663%'
                          OR COALESCE(pa.account_code, '') LIKE '563%' OR COALESCE(pa.account_code, '') LIKE '663%')

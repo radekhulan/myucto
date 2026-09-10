@@ -59,6 +59,9 @@ final class AiPdfExtractor
         // Uložení vytěžení zdrojového PDF pro kontrolu dokladů proti přílohám. Nullable
         // jen kvůli unit testům čistých helperů, které import nespouštějí.
         private readonly ?\MyInvoice\Service\Document\AttachmentCheck\ImportedPdfExtractionRecorder $extractionRecorder,
+        // Účtenka zaplacená kartou: po založení dokladu ho spáruje s pohybem karty
+        // a zaúčtuje vypořádání. Nullable jen kvůli unit testům čistých helperů.
+        private readonly ?\MyInvoice\Service\Accounting\Card\CardPaymentAutomation $cardAutomation,
         ?LoggerInterface $logger = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
@@ -317,6 +320,9 @@ final class AiPdfExtractor
             // Attach PDF — uložit do archive a updatnout pdf_path/hash/size na faktuře
             $this->attachPdf($invoiceId, $supplierId, $pdfBytes, $originalFilename);
             $this->tagImportBatch($invoiceId, $supplierId, $importBatchId);
+            // Koncept čeká na kontrolu; doklad, který import rovnou uzavřel (účtenka
+            // „uhrazeno kartou"), se hned spáruje s pohybem karty a vypořádá.
+            $this->cardAutomation?->afterPurchaseReady($supplierId, $invoiceId, $userId > 0 ? $userId : null);
             $this->extractionRecorder?->record(
                 $supplierId,
                 $invoiceId,

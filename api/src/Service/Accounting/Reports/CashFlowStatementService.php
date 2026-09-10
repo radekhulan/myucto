@@ -68,7 +68,24 @@ final class CashFlowStatementService
     public function __construct(
         private readonly Connection $db,
         private readonly AccountingPeriodRepository $periods,
+        // Mezičlen plateb kartou může ležet pod 261 — jeho analytiky ale peníze nejsou:
+        // platba kartou odešla z banky v den platby, ne až při vypořádání s dokladem.
+        private readonly \MyInvoice\Service\Accounting\Card\CardClearingAccounts $cardAccounts,
     ) {}
+
+    /** SQL podmínka „účet není analytikou mezičlenu karty" pro alias účtu (prázdná, když karty nejsou). */
+    private function notCardClearing(int $supplierId, string $alias): string
+    {
+        $codes = $this->cardAccounts->allClearingCodes($supplierId);
+        if ($codes === []) {
+            return '1 = 1';
+        }
+        $pdo = $this->db->pdo();
+        return "{$alias}.account_code NOT IN (" . implode(', ', array_map(
+            static fn (string $c): string => (string) $pdo->quote($c),
+            $codes,
+        )) . ')';
+    }
 
     /**
      * @return array{
@@ -161,14 +178,14 @@ final class CashFlowStatementService
      */
     private function cashMovements(int $supplierId, string $from, string $to): array
     {
-        $nonCash = 'NOT (' . implode(' OR ', array_map(
+        $nonCash = '(NOT (' . implode(' OR ', array_map(
             static fn (string $p): string => "a.account_code LIKE '{$p}%'",
             self::CASH_PREFIXES,
-        )) . ')';
-        $touchesCash = implode(' OR ', array_map(
+        )) . ') OR NOT (' . $this->notCardClearing($supplierId, 'a') . '))';
+        $touchesCash = '(' . implode(' OR ', array_map(
             static fn (string $p): string => "ca.account_code LIKE '{$p}%'",
             self::CASH_PREFIXES,
-        ));
+        )) . ') AND ' . $this->notCardClearing($supplierId, 'ca');
         $bookkeeping = "'" . implode("', '", self::BOOKKEEPING_SOURCE_TYPES) . "'";
 
         $sql =
@@ -216,6 +233,7 @@ final class CashFlowStatementService
             static fn (string $p): string => "a.account_code LIKE '{$p}%'",
             self::CASH_PREFIXES,
         ));
+        $notCard = $this->notCardClearing($supplierId, 'a');
 
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
@@ -231,7 +249,8 @@ final class CashFlowStatementService
                 -- předchází, plus otevírací zápis.
                 AND (:is_start = 0 OR e.entry_date < :as_of_start OR e.source_type = 'opening')
                 AND NOT (e.source_type = 'closing' AND e.entry_date BETWEEN :p_from AND :p_to)
-                AND ({$cond})"
+                AND ({$cond})
+                AND {$notCard}"
         );
         $stmt->execute([
             ':supplier_id' => $supplierId,

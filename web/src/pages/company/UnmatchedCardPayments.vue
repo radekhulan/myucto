@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { BTN_BASE, OUTLINE, ICONS } from '@/components/ui/buttonStyles'
 import {
-  paymentCardsApi, type CardPaymentGroup, type CardPaymentRow, type UnmatchedCardPayments,
+  paymentCardsApi, type CardPaymentGroup, type CardPaymentRow, type CardWriteOffTarget, type UnmatchedCardPayments,
 } from '@/api/paymentCards'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
@@ -34,6 +34,22 @@ const uploadTarget = ref<CardPaymentRow | null>(null)
 const canUpload = computed(() => auth.canWrite('purchase_invoices.scan'))
 const canMatch = computed(() => auth.canWrite('bank.match'))
 const canManageCards = computed(() => auth.canWrite('settings.bank_accounts'))
+const canPost = computed(() => auth.canWrite('bank.post'))
+
+/** Uzavření platby bez dokladu: nedaňový náklad, nebo k tíži držitele karty. */
+async function writeOff(tx: CardPaymentRow, target: CardWriteOffTarget) {
+  if (!window.confirm(t(`payment_cards.unmatched.write_off_confirm_${target}`))) return
+  busyTx.value = tx.id
+  try {
+    const r = await paymentCardsApi.writeOff(tx.id, target)
+    toast.success(t('payment_cards.unmatched.written_off', { account: r.account_code }))
+    await load()
+  } catch (err) {
+    toast.error(apiErrorMessage(err, t('payment_cards.unmatched.write_off_failed')))
+  } finally {
+    busyTx.value = null
+  }
+}
 
 async function load() {
   loading.value = true
@@ -181,6 +197,9 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                   <div v-if="tx.description" class="text-neutral-500 truncate max-w-md">{{ tx.description }}</div>
                   <div v-if="tx.vehicle_hint" class="mt-0.5" :class="tx.vehicle_hint.reason === 'ok' ? 'text-primary-700' : 'text-warning-700'"
                     :title="t('payment_cards.unmatched.vehicle_hint_title')" data-testid="vehicle-hint">{{ vehicleHint(tx) }}</div>
+                  <div v-if="tx.clearing_account" class="mt-0.5 font-mono text-neutral-500" data-testid="clearing-account">
+                    {{ t('payment_cards.unmatched.clearing', { code: tx.clearing_account }) }}
+                  </div>
                 </td>
                 <td class="px-3 py-2">
                   <div class="flex flex-wrap justify-end gap-2">
@@ -198,6 +217,22 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                       </svg>
                       {{ t('payment_cards.unmatched.rematch') }}
                     </button>
+                    <template v-if="canPost && tx.clearing_account">
+                      <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                        :disabled="busyTx !== null" data-testid="write-off-expense" @click="writeOff(tx, 'expense')">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                        </svg>
+                        {{ t('payment_cards.unmatched.write_off_expense') }}
+                      </button>
+                      <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                        :disabled="busyTx !== null" @click="writeOff(tx, 'holder')">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" />
+                        </svg>
+                        {{ t('payment_cards.unmatched.write_off_holder') }}
+                      </button>
+                    </template>
                     <RouterLink :to="{ name: 'bank-detail', params: { id: tx.statement_id } }"
                       :class="[BTN_BASE, OUTLINE.neutral]" class="whitespace-nowrap">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -236,6 +271,22 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                 </svg>
                 {{ t('payment_cards.unmatched.rematch') }}
               </button>
+              <template v-if="canPost && tx.clearing_account">
+                <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                  :disabled="busyTx !== null" @click="writeOff(tx, 'expense')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                  </svg>
+                  {{ t('payment_cards.unmatched.write_off_expense') }}
+                </button>
+                <button type="button" :class="[BTN_BASE, OUTLINE.warning]" class="whitespace-nowrap"
+                  :disabled="busyTx !== null" @click="writeOff(tx, 'holder')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" />
+                  </svg>
+                  {{ t('payment_cards.unmatched.write_off_holder') }}
+                </button>
+              </template>
             </div>
           </div>
         </div>

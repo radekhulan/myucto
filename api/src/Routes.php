@@ -3006,6 +3006,12 @@ final class Routes
         $app->get   ('/api/payment-cards/unmatched-payments',                       [\MyInvoice\Action\Bank\CardPaymentOverviewAction::class, 'list']);
         $app->post  ('/api/payment-cards/unmatched-payments/{id:[0-9]+}/receipt',   [\MyInvoice\Action\Bank\CardPaymentOverviewAction::class, 'uploadReceipt']);
         $app->post  ('/api/payment-cards/unmatched-payments/{id:[0-9]+}/rematch',   [\MyInvoice\Action\Bank\CardPaymentOverviewAction::class, 'rematch']);
+        $app->post  ('/api/payment-cards/unmatched-payments/{id:[0-9]+}/write-off', [\MyInvoice\Action\Bank\CardClearingAction::class, 'writeOff']);
+        $app->delete('/api/payment-cards/unmatched-payments/{id:[0-9]+}/write-off', [\MyInvoice\Action\Bank\CardClearingAction::class, 'cancelWriteOff']);
+        $app->get   ('/api/payment-cards/settings',                                 [\MyInvoice\Action\Bank\CardClearingAction::class, 'settings']);
+        $app->put   ('/api/payment-cards/settings',                                 [\MyInvoice\Action\Bank\CardClearingAction::class, 'saveSettings']);
+        $app->put   ('/api/payment-cards/{id:[0-9]+}/analytic',                     [\MyInvoice\Action\Bank\CardClearingAction::class, 'setAnalytic']);
+        $app->post  ('/api/payment-cards/{id:[0-9]+}/verify',                       [\MyInvoice\Action\Bank\CardClearingAction::class, 'verify']);
         $app->get   ('/api/payment-cards/{id:[0-9]+}',                              [\MyInvoice\Action\Bank\PaymentCardAction::class, 'get']);
         $app->put   ('/api/payment-cards/{id:[0-9]+}',                              [\MyInvoice\Action\Bank\PaymentCardAction::class, 'update']);
         $app->post  ('/api/payment-cards/{id:[0-9]+}/archive',                      [\MyInvoice\Action\Bank\PaymentCardAction::class, 'archive']);

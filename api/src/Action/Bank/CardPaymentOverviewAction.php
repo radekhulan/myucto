@@ -41,6 +41,7 @@ final class CardPaymentOverviewAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly CardPaymentVehicleHints $vehicleHints,
+        private readonly \MyInvoice\Service\Accounting\Bank\BankPostingService $bankPosting,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -116,7 +117,11 @@ final class CardPaymentOverviewAction
             return Json::error($response, 'not_found', 'Platba kartou nenalezena.', 404);
         }
         $result = $this->matcher->matchBatch([$tx['id']])[$tx['id']] ?? ['status' => 'unmatched'];
-        return Json::ok($response, ['bank_transaction_id' => $tx['id'], 'result' => $result]);
+        // Spárování ze seznamu plateb kartou vede na totéž zaúčtování a vypořádání jako
+        // import a ruční párování (platba 378.x/221, vypořádání 321/378.x).
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $posting = $this->bankPosting->handleTransaction($tx['id'], ((int) ($user['id'] ?? 0)) ?: null);
+        return Json::ok($response, ['bank_transaction_id' => $tx['id'], 'result' => $result, 'posting' => $posting]);
     }
 
     private static function date(mixed $value): ?string

@@ -642,6 +642,13 @@ final class RoutePermissionMap
         ['GET', '#^/api/payment-cards/unmatched-payments$#', 'bank', AccessLevel::READ],
         ['POST', '#^/api/payment-cards/unmatched-payments/[0-9]+/receipt$#', 'purchase_invoices.scan', AccessLevel::WRITE],
         ['POST', '#^/api/payment-cards/unmatched-payments/[0-9]+/rematch$#', 'bank.match', AccessLevel::WRITE],
+        // Účtování plateb kartou (nastavení, analytika karty, uzavření bez dokladu) je
+        // zápis do účetnictví — stejné právo jako nastavení a zpracování GoPay.
+        ['GET', '#^/api/payment-cards/settings$#', 'bank', AccessLevel::READ],
+        ['PUT', '#^/api/payment-cards/settings$#', 'bank.post', AccessLevel::WRITE],
+        ['PUT', '#^/api/payment-cards/[0-9]+/analytic$#', 'bank.post', AccessLevel::WRITE],
+        ['POST', '#^/api/payment-cards/unmatched-payments/[0-9]+/write-off$#', 'bank.post', AccessLevel::WRITE],
+        ['DELETE', '#^/api/payment-cards/unmatched-payments/[0-9]+/write-off$#', 'bank.post', AccessLevel::WRITE],
         // Evidence karet patří k nastavení bankovních účtů firmy.
         ['GET', '#^/api/payment-cards(/|$)#', 'settings.bank_accounts', AccessLevel::READ],
         ['*', '#^/api/payment-cards(/|$)#', 'settings.bank_accounts', AccessLevel::WRITE],

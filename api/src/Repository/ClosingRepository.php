@@ -337,10 +337,17 @@ final class ClosingRepository
      * (vzor accountBalance/bsBalances; `reversed_by IS NULL` by účet posunul o storno).
      * Jen nenulové (tolerance 0,5 Kč — účty jsou saldokontní/haléřové zbytky nehlásíme).
      *
+     * `$excludeCodes`: analytiky, které hlídá jiná kontrola (mezičlen plateb kartou pod
+     * 261/395) — jinak by se tentýž zůstatek hlásil dvakrát.
+     *
+     * @param list<string> $excludeCodes
      * @return list<array{account_id:int, account_code:string, name:string, bal:float}>
      */
-    public function clearingAccountsWithBalance(int $supplierId, string $asOf): array
+    public function clearingAccountsWithBalance(int $supplierId, string $asOf, array $excludeCodes = []): array
     {
+        $exclude = $excludeCodes === []
+            ? ''
+            : 'AND a.account_code NOT IN (' . implode(',', array_fill(0, count($excludeCodes), '?')) . ')';
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(p.id, a.id) AS account_id,
                     COALESCE(p.account_code, a.account_code) AS account_code,
@@ -353,11 +360,12 @@ final class ClosingRepository
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date <= ?
                 AND (a.is_clearing = 1 OR COALESCE(p.is_clearing, 0) = 1)
+                {$exclude}
               GROUP BY COALESCE(p.id, a.id), COALESCE(p.account_code, a.account_code), COALESCE(p.name, a.name)
              HAVING ABS(bal) > 0.005
               ORDER BY account_code"
         );
-        $stmt->execute([$supplierId, $asOf]);
+        $stmt->execute([$supplierId, $asOf, ...array_values($excludeCodes)]);
         return array_map(self::castBalance(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 

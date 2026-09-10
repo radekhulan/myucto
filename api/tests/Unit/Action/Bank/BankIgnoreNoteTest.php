@@ -133,7 +133,7 @@ final class BankIgnoreNoteTest extends TestCase
         $reflection->getProperty('ownership')->setValue($action, new \MyInvoice\Repository\BankStatementOwnershipResolver($db));
         $posting = $this->createStub(\MyInvoice\Service\Accounting\Bank\BankPostingService::class);
         if ($closed) {
-            $posting->method('unpost')->willThrowException(new \MyInvoice\Service\Accounting\PostingException('period_closed', 'Test closed period', 409));
+            $posting->method('releaseMatch')->willThrowException(new \MyInvoice\Service\Accounting\PostingException('period_closed', 'Test closed period', 409));
         }
         $reflection->getProperty('bankPosting')->setValue($action, $posting);
         $matchReflection = new \ReflectionClass(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class);

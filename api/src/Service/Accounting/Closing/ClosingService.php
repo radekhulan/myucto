@@ -204,6 +204,9 @@ final class ClosingService
         private readonly \MyInvoice\Service\Accounting\Vat\VatClearingService $vatClearing,
         // Zaúčtované doklady proti vytěžení příloh — read-only, porovnává živě.
         private readonly \MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService $attachmentChecks,
+        // Mezičlen plateb kartou (378.x): vlastní kontroly a vyloučení analytik karet
+        // z kontrol 261/395/průběžných účtů, ať se tentýž zůstatek nehlásí dvakrát.
+        private readonly \MyInvoice\Service\Accounting\Card\CardClearingOverview $cardClearing,
     ) {}
 
     // ── stav pro FE ───────────────────────────────────────────────────────────
@@ -3931,7 +3934,8 @@ final class ClosingService
             if (!$wants($key)) {
                 continue;
             }
-            $bal = round($this->closing->accountBalance($supplierId, $code, $rangeTo), 2);
+            $bal = round($this->closing->accountBalance($supplierId, $code, $rangeTo)
+                - $this->cardClearing->clearingBalanceUnder($supplierId, $code, $rangeTo), 2);
             $checks[] = ['key' => $key, 'severity' => 'warning', 'ok' => abs($bal) < 0.005, 'value' => ['account' => $code, 'balance' => $bal]];
         }
         if ($wants('acquisition_04x_open')) {
@@ -3982,13 +3986,40 @@ final class ClosingService
         // (nedočerpaná záloha, pořízení na cestě) → warning, ne error. Zůstatek počítán
         // BEZ filtru na reversed_by (originál + storno se v SUM vyruší).
         if ($wants('clearing_accounts_open')) {
-            $clearingOpen = $this->closing->clearingAccountsWithBalance($supplierId, $rangeTo);
+            $clearingOpen = $this->closing->clearingAccountsWithBalance(
+                $supplierId,
+                $rangeTo,
+                array_keys($this->cardClearing->clearingAccounts($supplierId)),
+            );
             $checks[] = [
                 'key' => 'clearing_accounts_open',
                 'severity' => 'warning',
                 'ok' => $clearingOpen === [],
                 'value' => ['count' => count($clearingOpen), 'accounts' => $clearingOpen],
             ];
+        }
+
+        // Mezičlen plateb kartou: zůstatek každé analytiky karty musí vysvětlovat
+        // konkrétní nevypořádané platby (nabídka uzavření je v přehledu plateb kartou).
+        if ($wants('card_clearing_open')) {
+            $card = $this->cardClearing->closingCheck($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'card_clearing_open',
+                'severity' => 'warning',
+                'ok' => $card['ok'],
+                'value' => ['count' => count($card['accounts']), 'accounts' => $card['accounts'], 'unexplained' => $card['unexplained']],
+            ];
+        }
+        if ($wants('card_payments_unmatched')) {
+            $unmatchedCards = $this->cardClearing->unmatchedOlderThan($supplierId, $rangeTo);
+            if ($unmatchedCards['enabled']) {
+                $checks[] = [
+                    'key' => 'card_payments_unmatched',
+                    'severity' => 'warning',
+                    'ok' => $unmatchedCards['count'] === 0,
+                    'value' => $unmatchedCards,
+                ];
+            }
         }
 
         // Chybějící účetní odpis hlásit JEN u majetku, který v daném období skutečně odpisovat šel.
@@ -4481,7 +4512,9 @@ final class ClosingService
     /** @return array{key:string,severity:string,ok:bool,value:array<string,mixed>} */
     private function checkTransit261(int $supplierId, string $asOf): array
     {
-        $balance = round($this->closing->accountBalance($supplierId, '261', $asOf), 2);
+        // Analytiky mezičlenu karet pod 261 hlídá kontrola card_clearing_open.
+        $balance = round($this->closing->accountBalance($supplierId, '261', $asOf)
+            - $this->cardClearing->clearingBalanceUnder($supplierId, '261', $asOf), 2);
         if (abs($balance) < 0.005) {
             return [
                 'key' => 'transit_261_open',

@@ -73,7 +73,14 @@ Platba kartou se páruje s přijatou fakturou nebo účtenkou podle koncovky kar
   nehádá, která z nich to byla.
 
 Koncovku nese doklad vzniklý nahráním účtenky z přehledu plateb bez dokladu
-(viz níže).
+(viz níže), účtenka z AI importu a doklad, ke kterému se připojil sken účtenky
+s koncovkou karty.
+
+Doklad nemusí být v aplikaci dřív než platba. Když přijde později, spáruje se
+s platbou své karty sám, jakmile je přijatý: po AI importu účtenky, kterou import
+rovnou označil jako zaplacenou, po připojení skenu s koncovkou karty a po přijetí
+konceptu dokladu. Nezaúčtovaný doklad se přitom zaúčtuje, má-li firma zapnuté
+automatické účtování přijatých dokladů.
 
 ## Platby kartou bez dokladu
 
@@ -86,8 +93,15 @@ U každé platby jsou akce:
 - **Nahrát účtenku** — nahrajete PDF nebo fotografii účtenky. Doklad se vytěží
   stejně jako při AI importu přijaté faktury, dostane formu úhrady „karta"
   a koncovku karty z platby. Otevřete ho, zkontrolujte a potvrďte.
-- **Spárovat** — po potvrzení dokladu spustí párování platby znovu.
+- **Spárovat** — po potvrzení dokladu spustí párování platby znovu. Spárovaná
+  platba se hned zaúčtuje i s vypořádáním (viz Účtování plateb kartou).
+- **Uzavřít bez dokladu** a **K tíži držitele** — jen u platby zaúčtované přes
+  mezičlen karty, ke které doklad nebude (viz níže).
 - **Výpis** — otevře bankovní výpis s platbou.
+
+U platby zaúčtované přes mezičlen se pod obchodníkem zobrazí analytika karty,
+na které platba čeká na doklad (například „Mezičlen 378.101"). Uzavřená platba
+z přehledu zmizí.
 
 U platby na čerpací stanici (podle obchodníka, např. název sítě stanic nebo
 pohonné hmoty v popisu) se pod obchodníkem zobrazí **vozidlo držitele karty**,
@@ -111,9 +125,101 @@ Přiřazení vozidla.
 Evidenci karet vidí a upravují uživatelé s oprávněním ke správě bankovních
 účtů firmy. Přehled plateb bez dokladu vyžaduje přístup k bance, nahrání
 účtenky oprávnění k nahrávání přijatých dokladů a spárování oprávnění
-k párování bankovních pohybů.
+k párování bankovních pohybů. Nastavení účtování karet, změna analytiky karty
+a uzavření platby bez dokladu vyžadují oprávnění k zaúčtování bankovních
+pohybů (stejné jako nastavení GoPay).
 
-## Účtování
+## Účtování plateb kartou
 
-Spárovaná platba kartou se účtuje stejně jako jiná úhrada přijatého dokladu
-z bankovního účtu, ke kterému je karta vedená.
+Bez zapnutého režimu mezičlenu se spárovaná platba kartou účtuje stejně jako
+jiná úhrada přijatého dokladu z bankovního účtu, ke kterému je karta vedená
+(MD 321 / D 221).
+
+V podvojném účetnictví lze platby kartou účtovat **přes mezičlen s analytikou
+pro každou kartu**. Zapíná se v záložce **Nastavení účtování** na stránce
+Platební karty. Platba kartou se pak z výpisu zaúčtuje hned, i když k ní ještě
+není doklad, a zůstatek analytiky karty vždy ukazuje platby, ke kterým doklad
+chybí.
+
+### Předkontace
+
+| Situace | Kdy se účtuje | Zápis |
+|---|---|---|
+| Platba kartou z výpisu | při zaúčtování bankovního pohybu, automaticky | MD 378.x / D 221 |
+| Předpis přijatého dokladu | beze změny | MD 5xx (+ 343) / D 321 |
+| Vypořádání s dokladem | při spárování platby kartou s přijatým dokladem | MD 321 / D 378.x |
+| Kurzový rozdíl | ve vypořádání, když se platba v Kč liší od předpisu dokladu v cizí měně | MD 563 nebo D 663 |
+| Haléřový rozdíl | ve vypořádání, když se platba liší od dokladu do 1 Kč | MD 548 nebo D 648 |
+| Vratka na kartu | při zaúčtování příjmu kartou a jeho spárování s dobropisem | MD 221 / D 378.x, pak MD 378.x / D 321 |
+| Uzavření bez dokladu | akce Uzavřít bez dokladu | MD 548 (nedaňová analytika) / D 378.x |
+| K tíži držitele karty | akce K tíži držitele | MD 335 / D 378.x |
+| Poplatek za kartu | beze změny, pravidlem bankovního poplatku | MD 568 / D 221 |
+| Výběr hotovosti kartou | beze změny, převodem přes peníze na cestě | MD 261 / D 221, MD 211 / D 261 |
+
+Vypořádání je **samostatný zápis** (v deníku zdroj „Vypořádání platby
+kartou"). Bankovní zápis platby se kvůli dokladu nikdy nepřepisuje: spárování
+přidá vypořádání, zrušení párování vypořádání stornuje a zůstatek analytiky
+karty se vrátí. Stejně jako u zrušení zaúčtování bankovního pohybu platí, že
+v uzavřeném nebo zamčeném období storno nejde provést.
+
+Dorazí-li doklad až k platbě, kterou jste mezitím uzavřeli bez dokladu,
+uzavření se samo stornuje a zaúčtuje se vypořádání.
+
+### Analytika karty
+
+Každá karta dostane vlastní analytiku mezičlenu **postupně** (378.101, 378.102
+…), nikoli podle koncovky. Analytika vznikne automaticky u první platby karty
+a jmenuje se „Karta ****1234 (název karty)". V detailu karty je vidět analytika,
+její zůstatek (platby bez dokladu) a odkaz na obraty účtu. Jinou existující
+analytiku mezičlenu lze kartě vybrat ručně; analytiku jiné karty převzít nejde.
+
+Platba kartou, kterou firma neeviduje, založí **neověřenou kartu** s vlastní
+analytikou. Neověřené karty stránka Platební karty zvýrazní — doplňte název
+a držitele a kartu uložte, nebo ji ověřte akcí Ověřit kartu. Když je
+zakládání karet vypnuté, nebo kartu nejde k datu platby jednoznačně určit,
+jde platba na záchrannou analytiku **378.199 Neevidované karty**.
+
+Karta vedená k cizoměnovému účtu má analytiku vedenou v měně účtu: zápisy nesou
+cizoměnovou částku i kurz dne platby.
+
+### Nastavení účtování
+
+| Pole | Význam |
+|---|---|
+| Účtovat přes mezičlen | zapnutí režimu |
+| Platí od | datum účinnosti; výchozí je začátek prvního otevřeného období |
+| Mezičlen | syntetika 378 (výchozí), 261 nebo 395; 325 nabídnout nejde, je to saldokonto |
+| Uzavřít bez dokladu | výchozí nedaňová analytika 548 |
+| Pohledávka za držitelem | výchozí 335 |
+| Kurzová ztráta a zisk | výchozí 563 a 663 |
+| Haléřový rozdíl | výchozí 548 a 648 |
+| Zakládat neznámé karty | vypnuto = platba jde na záchrannou analytiku 199 |
+| Upozornit po (dnech) | lhůta měsíční kontroly plateb bez dokladu |
+
+**Historie se nepřeúčtovává.** Platby kartou před datem účinnosti zůstávají
+zaúčtované tak, jak byly (321/221, 548/221 …). Zaúčtovaná platba drží režim,
+ve kterém se zaúčtovala: zapnutí režimu, jeho vypnutí, změna mezičlenu ani
+změna analytiky karty už zaúčtované platby nemění a platí jen pro nové zápisy.
+Nese-li původní analytika zůstatek, uložení změny chce potvrzení a zůstatek
+na původním účtu vypořádáte ručně.
+
+### Kontroly
+
+- **Měsíční kontrola** hlásí platby kartou bez dokladu starší než lhůta
+  z nastavení (jen od data účinnosti režimu). Řádek vede do přehledu plateb bez
+  dokladu.
+- **Předuzávěrková kontrola** „Mezičlen plateb kartou se zůstatkem" porovná
+  zůstatek každé analytiky karty s konkrétními nevypořádanými platbami
+  a zvlášť ukáže rozdíl, který platbami vysvětlit nejde (typicky ruční zápis
+  na analytiku karty). Nevypořádané platby uzavřete v přehledu plateb bez
+  dokladu.
+- Analytiky karet pod 261 nebo 395 se nehlásí v kontrole peněz na cestě,
+  vnitřního zúčtování ani průběžných účtů — hlídá je jen kontrola mezičlenu.
+- Výkaz peněžních toků bere platbu kartou jako výdaj v den platby, i když je
+  mezičlen pod 261.
+
+### Daňová evidence
+
+Firma v daňové evidenci účty nemá. Platba kartou je v ní bankovní výdaj
+v peněžním deníku a mezičlen se nepoužívá; neznámé karty se nezakládají.
+Přehled plateb bez dokladu slouží jako výzva k doložení výdaje.
