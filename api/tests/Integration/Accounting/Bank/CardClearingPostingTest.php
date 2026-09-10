@@ -492,7 +492,10 @@ final class CardClearingPostingTest extends BankPostingTestCase
     {
         return [
             'cards'    => (int) $this->db->pdo()->query("SELECT COUNT(*) FROM payment_cards WHERE supplier_id = {$this->supplierId}")->fetchColumn(),
-            'accounts' => (int) $this->db->pdo()->query("SELECT COUNT(*) FROM chart_of_accounts WHERE supplier_id = {$this->supplierId}")->fetchColumn(),
+            // Jen analytiky mezičlenu karet: zpracování pohybu smí mimo jiné založit
+            // analytiku bankovního účtu (221.x), která s kartou nesouvisí — na čisté
+            // databázi (CI) ji test jinak započítal jako porušení.
+            'accounts' => (int) $this->db->pdo()->query("SELECT COUNT(*) FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code LIKE '378.%'")->fetchColumn(),
         ];
     }
 
