@@ -64,6 +64,7 @@
     "instance_export",
     "integrations",
     "kb_plus",
+    "linked_documents",
     "lock",
     "logbook",
     "manualQueue",
@@ -151,6 +152,7 @@
       "instance_export",
       "integrations",
       "kb_plus",
+      "linked_documents",
       "lock",
       "logbook",
       "manualQueue",
@@ -264,6 +266,7 @@
     ],
     "client-detail": [
       "documents",
+      "linked_documents",
       "project",
       "purchase_invoice",
       "recurring",
@@ -283,6 +286,7 @@
     ],
     "project-detail": [
       "documents",
+      "linked_documents",
       "project",
       "workReportTracking"
     ],
@@ -318,6 +322,7 @@
       "cash",
       "cash_settlement",
       "documents",
+      "linked_documents",
       "lock",
       "payment_method",
       "recurring",
@@ -392,6 +397,7 @@
       "cash",
       "cash_settlement",
       "documents",
+      "linked_documents",
       "lock",
       "payment_method",
       "purchase_invoice",
@@ -503,7 +509,8 @@
     "accounting-journal": [
       "activation",
       "automation",
-      "documents"
+      "documents",
+      "linked_documents"
     ],
     "accounting-setup-assistant": [
       "imports"
@@ -550,7 +557,9 @@
       "reports"
     ],
     "accounting-cash": [
-      "cash"
+      "cash",
+      "documents",
+      "linked_documents"
     ],
     "accounting-cash-new": [
       "cash",
@@ -712,6 +721,7 @@
       "documents",
       "errors",
       "kb_plus",
+      "linked_documents",
       "payment_method",
       "purchase_invoice",
       "vendor"
@@ -726,6 +736,7 @@
       "document_requests",
       "documents",
       "errors",
+      "linked_documents",
       "payment_method",
       "purchase_invoice",
       "vendor"

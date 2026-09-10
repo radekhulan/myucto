@@ -73,6 +73,9 @@ final class UploadDocumentAction
         }
 
         $createdTotal = 0;
+        // Dokumenty „nejvyšší úrovně" — co volající může rovnou navázat na doklad.
+        // U ZFO je to obálka zprávy, ne její přílohy (ty jsou její děti).
+        $rootIds = [];
         $skipped = [];
         $errors = [];
 
@@ -111,6 +114,7 @@ final class UploadDocumentAction
             try {
                 $res = $this->ingest->ingestUploadedTemp($tmp, $sid, $targetFolder, $originalName, $userId, $zipMode);
                 $createdTotal += count($res['created_ids']);
+                $rootIds = array_merge($rootIds, $res['container_id'] !== null ? [(int) $res['container_id']] : $res['created_ids']);
                 $skipped = array_merge($skipped, $res['skipped']);
                 foreach ($res['created_ids'] as $newId) {
                     $this->logger->log('document.uploaded', $userId, 'document', $newId,
@@ -131,6 +135,7 @@ final class UploadDocumentAction
 
         return Json::ok($response, [
             'created' => $createdTotal,
+            'root_ids' => $rootIds,
             'skipped' => $skipped,
             'errors'  => $errors,
         ]);

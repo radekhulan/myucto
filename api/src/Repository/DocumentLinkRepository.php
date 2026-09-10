@@ -7,10 +7,10 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
-/** Polymorfní vazba dokument ↔ entita (client/invoice/purchase_invoice/project/journal_entry/bank_transaction). */
+/** Polymorfní vazba dokument ↔ entita (client/invoice/purchase_invoice/project/journal_entry/bank_transaction/cash_document). */
 final class DocumentLinkRepository
 {
-    public const ENTITY_TYPES = ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction'];
+    public const ENTITY_TYPES = ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction', 'cash_document'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -58,6 +58,7 @@ final class DocumentLinkRepository
             'journal_entry'    => 'SELECT 1 FROM journal_entries WHERE id = ? AND supplier_id = ? LIMIT 1',
             // bank_transactions nemá supplier_id přímo — scope jde přes bank_statements (viz BankPostingSuggestionRepository).
             'bank_transaction' => 'SELECT 1 FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ? AND bs.supplier_id = ? LIMIT 1',
+            'cash_document'    => 'SELECT 1 FROM cash_documents WHERE id = ? AND supplier_id = ? LIMIT 1',
         };
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$id, $supplierId]);
@@ -192,6 +193,19 @@ final class DocumentLinkRepository
                             $parts[] = number_format((float) $r['amount'], 2, ',', ' ') . ' ' . (string) $r['currency'];
                             if ($r['counterparty_name']) $parts[] = (string) $r['counterparty_name'];
                             $labels['bank_transaction:' . $id] = implode(' · ', $parts);
+                        }
+                        break;
+                    case 'cash_document':
+                        $stmt = $pdo->prepare(
+                            "SELECT id, doc_number, issue_date, total_amount, currency_code, partner_name, description
+                               FROM cash_documents
+                              WHERE supplier_id = ? AND id IN ($place)"
+                        );
+                        $stmt->execute([$supplierId, ...$ids]);
+                        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                            $id = (int) $r['id'];
+                            $who = (string) ($r['partner_name'] ?: $r['description'] ?: '');
+                            $labels['cash_document:' . $id] = $this->invoiceLabel((string) ($r['doc_number'] ?? ''), $who, $r['issue_date'], $r['total_amount'], (string) $r['currency_code'], $id);
                         }
                         break;
                 }

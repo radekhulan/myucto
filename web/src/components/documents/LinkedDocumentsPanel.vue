@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted, nextTick, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -8,7 +8,9 @@ import { documentsApi, type DocItem, type EntityType } from '@/api/documents'
 import { docTypeBadge, formatBytes } from './docFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 
-const props = defineProps<{ entityType: EntityType; entityId: number }>()
+// `uploadable` přidá nahrání nového souboru rovnou s vazbou na entitu (sken
+// účtenky k pokladnímu dokladu) — bez něj panel jen připojuje existující dokumenty.
+const props = defineProps<{ entityType: EntityType; entityId: number; uploadable?: boolean; title?: string }>()
 
 const { t } = useI18n()
 const router = useRouter()
@@ -18,10 +20,40 @@ const toast = useToast()
 const docs = ref<DocItem[]>([])
 const loading = ref(false)
 const attaching = ref(false)
+const uploading = ref(false)
 const query = ref('')
 const candidates = ref<DocItem[]>([])
 const searchInput = ref<HTMLInputElement | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 let debounce: ReturnType<typeof setTimeout> | null = null
+
+const canUpload = computed(() =>
+  !!props.uploadable && auth.canWrite('documents.upload') && auth.canWrite('documents.move'))
+
+function pickFiles() {
+  fileInput.value?.click()
+}
+
+async function onFiles(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''
+  if (files.length === 0) return
+  uploading.value = true
+  try {
+    const r = await documentsApi.upload(files, { zipMode: 'keep' })
+    for (const id of r.root_ids ?? []) {
+      await documentsApi.addLink(id, props.entityType, props.entityId)
+    }
+    await load()
+    if (r.errors.length > 0) toast.error(t('linked_documents.upload_failed'))
+    else toast.success(t('linked_documents.uploaded'))
+  } catch (err: any) {
+    toast.error(err?.response?.data?.error?.message || t('linked_documents.upload_failed'))
+  } finally {
+    uploading.value = false
+  }
+}
 
 function toggleAttach() {
   attaching.value = !attaching.value
@@ -73,25 +105,34 @@ onMounted(load)
 
 <template>
   <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
-    <div class="flex items-center justify-between mb-3">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
       <h3 class="text-sm font-medium text-neutral-700 flex items-center gap-2">
         <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 0 0 2-2V9.414a1 1 0 0 0-.293-.707l-5.414-5.414A1 1 0 0 0 12.586 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zM9 13h6m-6 4h6" />
         </svg>
-        {{ t('documents.panel_title') }}
+        {{ title ?? t('documents.panel_title') }}
         <span v-if="docs.length" class="text-xs text-neutral-400">({{ docs.length }})</span>
       </h3>
-      <!-- Stejný tvar jako „Přidat přílohu" o panel výš: obě tlačítka dělají
-           v témže detailu totéž (přiložit něco k dokladu), takže se nesmí lišit. -->
-      <button
-        v-if="auth.canWrite('documents.move')"
-        type="button"
-        :class="btnOutline('neutral')"
-        @click="toggleAttach"
-      >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
-        {{ t('documents.panel_attach') }}
-      </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <template v-if="canUpload">
+          <input ref="fileInput" type="file" multiple accept="application/pdf,image/*" class="hidden" data-testid="linked-docs-file" @change="onFiles" />
+          <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" :disabled="uploading" data-testid="linked-docs-upload" @click="pickFiles">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ uploading ? t('linked_documents.uploading') : t('linked_documents.upload') }}
+          </button>
+        </template>
+        <!-- Stejný tvar jako „Přidat přílohu" o panel výš: obě tlačítka dělají
+             v témže detailu totéž (přiložit něco k dokladu), takže se nesmí lišit. -->
+        <button
+          v-if="auth.canWrite('documents.move')"
+          type="button"
+          :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+          @click="toggleAttach"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+          {{ t('documents.panel_attach') }}
+        </button>
+      </div>
     </div>
 
     <!-- Připojení existujícího dokumentu (fulltext) -->
@@ -139,6 +180,9 @@ onMounted(load)
           <span class="block text-sm text-neutral-800 truncate hover:text-primary-600">{{ d.title }}</span>
           <span class="block text-xs text-neutral-400">{{ formatBytes(d.size_bytes) }}</span>
         </button>
+        <a :href="documentsApi.previewUrl(d.id)" target="_blank" rel="noopener" class="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-primary-600" :title="t('linked_documents.preview')" data-testid="linked-docs-preview">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+        </a>
         <a :href="documentsApi.downloadUrl(d.id)" class="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-primary-600" :title="t('documents.download')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5 5-5M12 15V3" /></svg>
         </a>

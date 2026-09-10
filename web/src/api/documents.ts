@@ -1,7 +1,7 @@
 import { api } from './client'
 
 export type DocType = 'pdf' | 'docx' | 'xlsx' | 'xml' | 'zfo' | 'p7s' | 'zip' | 'image' | 'other'
-export type EntityType = 'client' | 'invoice' | 'purchase_invoice' | 'project' | 'journal_entry' | 'bank_transaction'
+export type EntityType = 'client' | 'invoice' | 'purchase_invoice' | 'project' | 'journal_entry' | 'bank_transaction' | 'cash_document'
 
 /** Viditelnost dokladu v rámci tenanta (Epic F7). company = celá firma, user = jen vlastník. */
 export type DocScope = 'company' | 'user'
@@ -141,6 +141,8 @@ export interface UploadSkip {
 /** Výsledek synchronního uploadu — kolik vzniklo + co se nenahrálo. */
 export interface UploadResult {
   created: number
+  /** Dokumenty nejvyšší úrovně (u ZFO obálka) — ty se navazují na doklad. */
+  root_ids?: number[]
   skipped: UploadSkip[]
   errors: UploadSkip[]
 }

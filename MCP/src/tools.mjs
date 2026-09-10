@@ -2001,10 +2001,10 @@ export const TOOLS = [
     title: 'Dokumenty připojené k záznamu',
     description:
       'Vrátí dokumenty navázané na odběratele, fakturu, přijatou fakturu, zakázku, '
-      + 'účetní zápis nebo bankovní transakci.',
+      + 'účetní zápis, bankovní transakci nebo pokladní doklad.',
     inputSchema: schema({
       entity_type: str('Typ záznamu.', {
-        enum: ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction'],
+        enum: ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction', 'cash_document'],
       }),
       entity_id: int('ID záznamu.'),
     }, ['entity_type', 'entity_id']),
@@ -2035,7 +2035,7 @@ export const TOOLS = [
     inputSchema: schema({
       id: int('ID dokumentu.'),
       entity_type: str('Typ záznamu.', {
-        enum: ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction'],
+        enum: ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction', 'cash_document'],
       }),
       entity_id: int('ID záznamu.'),
     }, ['id', 'entity_type', 'entity_id']),
@@ -2054,7 +2054,7 @@ export const TOOLS = [
     inputSchema: schema({
       id: int('ID dokumentu.'),
       entity_type: str('Typ záznamu.', {
-        enum: ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction'],
+        enum: ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction', 'cash_document'],
       }),
       entity_id: int('ID záznamu.'),
       confirm: CONFIRM,

@@ -3,6 +3,8 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS } from '@/components/ui/buttonStyles'
+import { useAuthStore } from '@/stores/auth'
+import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import type { CashDocument } from '@/api/cash'
 
 /**
@@ -15,6 +17,7 @@ import type { CashDocument } from '@/api/cash'
 defineProps<{ doc: CashDocument; purposeLabel: (purpose: string) => string }>()
 
 const { t } = useI18n()
+const auth = useAuthStore()
 </script>
 
 <template>
@@ -54,6 +57,12 @@ const { t } = useI18n()
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
         {{ t('common.view_in_journal') }}
       </RouterLink>
+    </div>
+    <!-- Sken účtenky / pokladního dokladu. @click.stop: na mobilu leží detail
+         v kartě, jejíž klik rozbalení zavírá. -->
+    <div v-if="auth.canRead('documents')" class="mt-3" data-testid="cash-attachments" @click.stop>
+      <LinkedDocumentsPanel entity-type="cash_document" :entity-id="doc.id" uploadable
+        :title="t('linked_documents.title')" />
     </div>
   </div>
 </template>

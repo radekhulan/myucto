@@ -7402,6 +7402,7 @@ paths:
                 type: object
                 properties:
                   created: { type: integer }
+                  root_ids: { type: array, items: { type: integer }, description: 'Nově vzniklé dokumenty nejvyšší úrovně (u ZFO obálka zprávy, ne její přílohy) — ty lze rovnou navázat na entitu přes /documents/{id}/links.' }
                   skipped: { type: array, items: { type: object } }
                   errors: { type: array, items: { type: object } }
   /api/v1/documents/search:
@@ -7424,11 +7425,11 @@ paths:
   /api/v1/documents/link-search:
     get:
       tags: [Documents]
-      summary: Našeptávač pro párování — hledá faktury, přijaté faktury, klienty a projekty
+      summary: Našeptávač pro párování — hledá faktury, přijaté faktury, klienty, projekty a pokladní doklady
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { name: q, in: query, required: true, schema: { type: string, minLength: 2 } }
-        - { name: types, in: query, schema: { type: string }, description: 'CSV filtr: invoice,purchase_invoice,client,project' }
+        - { name: types, in: query, schema: { type: string }, description: 'CSV filtr: invoice,purchase_invoice,client,project,cash_document' }
       responses:
         '200':
           description: Kandidáti pro vazbu
@@ -7516,7 +7517,7 @@ paths:
   /api/v1/documents/{id}/links:
     post:
       tags: [Documents]
-      summary: Připojit dokument k entitě (faktura / přijatá faktura / klient / projekt)
+      summary: Připojit dokument k entitě (faktura / přijatá faktura / klient / projekt / pokladní doklad)
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -7528,7 +7529,7 @@ paths:
               type: object
               required: [entity_type, entity_id]
               properties:
-                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction] }
+                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
                 entity_id: { type: integer }
       responses:
         '200': { description: Aktuální vazby, content: { application/json: { schema: { type: object, properties: { links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } } } } } } }
@@ -7545,7 +7546,7 @@ paths:
             schema:
               type: object
               properties:
-                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction] }
+                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
                 entity_id: { type: integer }
       responses:
         '200': { description: Aktuální vazby, content: { application/json: { schema: { type: object, properties: { links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } } } } } } }
@@ -7556,7 +7557,7 @@ paths:
       summary: Dokumenty navázané na entitu (oboustranné párování)
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
-        - { name: type, in: path, required: true, schema: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction] } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] } }
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         '200': { description: Navázané dokumenty, content: { application/json: { schema: { type: object, properties: { documents: { type: array, items: { $ref: '#/components/schemas/Document' } } } } } } }
@@ -22962,13 +22963,13 @@ components:
     DocumentLink:
       type: object
       properties:
-        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction] }
+        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
         entity_id: { type: integer }
         label: { type: string }
     DocumentLinkCandidate:
       type: object
       properties:
-        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction] }
+        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document] }
         entity_id: { type: integer }
         label: { type: string }
         sublabel: { type: string }

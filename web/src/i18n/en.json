@@ -412,7 +412,8 @@
       "purchase_invoice": "Received invoice",
       "project": "Project",
       "journal_entry": "Journal entry",
-      "bank_transaction": "Bank transaction"
+      "bank_transaction": "Bank transaction",
+      "cash_document": "Cash document"
     },
     "panel_title": "Documents",
     "panel_attach": "Attach document",
@@ -8413,6 +8414,14 @@
     "period_status_closed": "closed",
     "open_company": "Open company",
     "generated_at": "Generated at"
+  },
+  "linked_documents": {
+    "title": "Attachments",
+    "upload": "Upload scan",
+    "uploading": "Uploading…",
+    "uploaded": "The attachment is uploaded and linked to the document",
+    "upload_failed": "The attachment could not be uploaded",
+    "preview": "Preview"
   },
   "cash": {
     "title": "Cash register",

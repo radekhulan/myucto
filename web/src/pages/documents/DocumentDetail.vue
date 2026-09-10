@@ -134,7 +134,11 @@ function goEntity(l: { entity_type: EntityType; entity_id: number }) {
     router.push({ name: 'bank-statements' })
     return
   }
-  const map: Record<Exclude<EntityType, 'journal_entry' | 'bank_transaction'>, string> = {
+  if (l.entity_type === 'cash_document') {
+    router.push({ name: 'accounting-cash' })
+    return
+  }
+  const map: Record<Exclude<EntityType, 'journal_entry' | 'bank_transaction' | 'cash_document'>, string> = {
     invoice: 'invoice-detail',
     purchase_invoice: 'purchase-invoice-detail',
     client: 'client-detail',

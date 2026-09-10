@@ -71,13 +71,15 @@ zůstává dohledatelné podle názvu a tagů.
 ## 31.5 Párování s fakturami a klienty
 
 V detailu dokumentu v sekci **Souvisí s** přidáš vazbu přes **našeptávač** — píšeš
-a aplikace průběžně nabízí **vystavené i přijaté faktury, klienty a zakázky**.
-Hledat můžeš podle **čísla dokladu, názvu firmy, e-mailu, IČ/DIČ, názvu nebo čísla
-projektu**. Klikneš na nabídku a vazba je hotová.
+a aplikace průběžně nabízí **vystavené i přijaté faktury, klienty, zakázky a pokladní
+doklady**. Hledat můžeš podle **čísla dokladu, názvu firmy, e-mailu, IČ/DIČ, názvu nebo
+čísla projektu**, u pokladních dokladů i podle partnera a popisu. Klikneš na nabídku
+a vazba je hotová.
 
 Obráceně: v detailu **klienta, vystavené faktury, přijaté faktury i zakázky**
 najdeš panel **Dokumenty**, kde vidíš všechny připojené soubory a přes tlačítko
-*Připojit dokument* k nim přidáš další.
+*Připojit dokument* k nim přidáš další. Pokladní doklad má stejný panel pod názvem
+**Přílohy** a navíc v něm jde sken rovnou nahrát (viz kapitola Pokladna, § 30.2.2).
 
 ## 31.6 Hromadné akce
 

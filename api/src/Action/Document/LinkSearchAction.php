@@ -15,11 +15,12 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * GET /api/documents/link-search?q=&types=invoice,purchase_invoice,client,project
+ * GET /api/documents/link-search?q=&types=invoice,purchase_invoice,client,project,cash_document
  *
  * Našeptávač pro párování dokumentů s entitami. Hledá napříč vystavenými i
  * přijatými fakturami (číslo dokladu / VS / číslo dodavatele), klienty/dodavateli
- * (název firmy, e-mail, IČ, DIČ) a projekty (název, číslo projektu). Vrací
+ * (název firmy, e-mail, IČ, DIČ), projekty (název, číslo projektu) a pokladními
+ * doklady (číslo, partner, popis). Vrací
  * normalizovaný seznam s popisky pro pohodlný výběr. Tenant scope per-supplier.
  */
 final class LinkSearchAction
@@ -39,7 +40,7 @@ final class LinkSearchAction
 
         $types = isset($params['types']) && $params['types'] !== ''
             ? array_map('trim', explode(',', (string) $params['types']))
-            : ['invoice', 'purchase_invoice', 'client', 'project'];
+            : ['invoice', 'purchase_invoice', 'client', 'project', 'cash_document'];
 
         if (mb_strlen($q) < 2) {
             return Json::ok($response, ['results' => [], 'query' => $q]);
@@ -99,7 +100,45 @@ final class LinkSearchAction
             }
         }
 
+        if (in_array('cash_document', $types, true)) {
+            foreach ($this->searchCashDocuments($q, $sid) as $r) {
+                $who = (string) ($r['partner_name'] ?: $r['description'] ?: '');
+                $results[] = [
+                    'entity_type' => 'cash_document',
+                    'entity_id'   => (int) $r['id'],
+                    'label'       => $r['doc_number'] !== null ? (string) $r['doc_number'] : ('#' . $r['id']),
+                    'sublabel'    => trim($who . ' · ' . (string) $r['issue_date']),
+                    'meta'        => $this->fmtMoney((float) $r['total_amount'], (string) $r['currency_code']),
+                ];
+            }
+        }
+
         return Json::ok($response, ['results' => $results, 'query' => $q]);
+    }
+
+    /** Pokladní doklady: každý token matchne číslo dokladu, partnera nebo popis. */
+    private function searchCashDocuments(string $q, int $sid): array
+    {
+        $toks = $this->tokens($q);
+        if ($toks === []) return [];
+        $where = ['supplier_id = ?'];
+        $params = [$sid];
+        foreach ($toks as $tk) {
+            $esc = '%' . addcslashes($tk, '%_\\') . '%';
+            $where[] = '(doc_number LIKE ? OR partner_name LIKE ? OR description LIKE ?)';
+            $params[] = $esc;
+            $params[] = $esc;
+            $params[] = $esc;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, doc_number, issue_date, total_amount, currency_code, partner_name, description
+               FROM cash_documents
+              WHERE ' . implode(' AND ', $where) . '
+              ORDER BY issue_date DESC, id DESC
+              LIMIT 8'
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
     /** Rozdělí dotaz na neprázdné tokeny (mix search „fialka 2605"). @return list<string> */

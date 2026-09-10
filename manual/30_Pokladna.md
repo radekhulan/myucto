@@ -86,6 +86,26 @@ DUZP, název pokladny a u dokladu s DPH tabulka rozpadu základ/sazba/daň po je
 V detailu je také prokliknutí **Zobrazit v deníku** na konkrétní zápis (jen v podvojném
 účetnictví — daňová evidence deník nemá).
 
+### 30.2.2 Přílohy pokladního dokladu
+
+V rozbaleném detailu je sekce **Přílohy** pro sken účtenky, paragonu nebo podepsaného
+pokladního dokladu. Příloha patří přímo k pokladnímu dokladu, takže ji lze připojit
+i ke konceptu a funguje stejně v podvojném účetnictví i v daňové evidenci.
+
+- **Nahrát sken** — vybrané soubory (PDF nebo obrázek) se uloží do modulu Dokumenty
+  a rovnou se k dokladu připojí.
+- **Připojit dokument** — připojí soubor, který už v Dokumentech je (vyhledání podle
+  názvu nebo obsahu).
+- U každé přílohy je **náhled** (otevře soubor v nové záložce), stažení a **odpojení**.
+  Odpojení soubor nemaže, jen zruší vazbu; soubor zůstává v Dokumentech.
+
+Obráceně lze pokladní doklad připojit i z detailu dokumentu v sekci **Souvisí s**
+(hledá se podle čísla dokladu, partnera nebo popisu). Připojit jde jen doklad téže firmy.
+
+Při smazání pokladního dokladu se jeho vazby na přílohy zruší, soubory samotné zůstanou
+v Dokumentech. Sekce se zobrazuje uživatelům s přístupem k modulu Dokumenty; nahrávat
+a připojovat mohou ti, kdo mají práva nahrát a přesunout dokument.
+
 U každého řádku jsou k dispozici:
 
 - **Tisk** — otevře PDF dokladu (§ 30.4).

@@ -412,7 +412,8 @@
       "purchase_invoice": "Přijatá faktura",
       "project": "Projekt",
       "journal_entry": "Zápis deníku",
-      "bank_transaction": "Bankovní pohyb"
+      "bank_transaction": "Bankovní pohyb",
+      "cash_document": "Pokladní doklad"
     },
     "panel_title": "Dokumenty",
     "panel_attach": "Připojit dokument",
@@ -8413,6 +8414,14 @@
     "period_status_closed": "uzavřené",
     "open_company": "Otevřít firmu",
     "generated_at": "Vygenerováno"
+  },
+  "linked_documents": {
+    "title": "Přílohy",
+    "upload": "Nahrát sken",
+    "uploading": "Nahrávám…",
+    "uploaded": "Příloha je nahraná a připojená k dokladu",
+    "upload_failed": "Přílohu se nepodařilo nahrát",
+    "preview": "Náhled"
   },
   "cash": {
     "title": "Pokladna",
