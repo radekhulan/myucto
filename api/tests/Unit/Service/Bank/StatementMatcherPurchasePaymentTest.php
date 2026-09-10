@@ -36,7 +36,7 @@ final class StatementMatcherPurchasePaymentTest extends TestCase
             CREATE TABLE bank_transactions (id INTEGER PRIMARY KEY, match_status TEXT DEFAULT 'unmatched', matched_at TEXT);
             INSERT INTO bank_transactions (id) VALUES (1);
             CREATE TABLE payment_matches (id INTEGER PRIMARY KEY, invoice_id INTEGER, supplier_id INTEGER, bank_transaction_id INTEGER,
-                purchase_invoice_id INTEGER, amount REAL, match_type TEXT, match_confidence INTEGER);
+                purchase_invoice_id INTEGER, amount REAL, match_type TEXT, match_confidence INTEGER, matched_by_user_id INTEGER);
             CREATE TABLE offset_agreement_items (supplier_id INTEGER, agreement_id INTEGER, doc_type TEXT, doc_id INTEGER, amount REAL);
             CREATE TABLE offset_agreements (id INTEGER, status TEXT);
             CREATE TABLE invoice_settlements (id INTEGER, supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, status TEXT, amount REAL);");

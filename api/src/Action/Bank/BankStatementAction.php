@@ -3165,12 +3165,10 @@ final class BankStatementAction
                 )->execute([$postedAt, $purchaseInvoiceId]);
             }
 
-            // Insert payment_match row (N:N support pro splátky)
-            $pdo->prepare(
-                "INSERT INTO payment_matches
-                    (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, matched_by_user_id)
-                 VALUES (?, ?, ?, ?, 'manual', ?)"
-            )->execute([$supplierId, $txId, $purchaseInvoiceId, $absAmount, $userId ?: null]);
+            // Pohyb z auto_partial už auto řádek pro tuto dvojici má — ruční párování ho převezme.
+            \MyInvoice\Service\Bank\PurchasePaymentMatchWriter::record(
+                $pdo, $supplierId, $txId, $purchaseInvoiceId, $absAmount, 'manual', null, $userId ?: null,
+            );
 
             // Mark transakci jako manual (matched_invoice_id zůstane NULL — to je pro vystavené)
             $pdo->prepare(

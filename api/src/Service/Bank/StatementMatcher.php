@@ -771,6 +771,9 @@ final class StatementMatcher
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number,
                        COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) + COALESCE(pi.rounding, 0) AS amount_to_pay,
                        ({$settled}) AS settled_amount,
+                       (SELECT COALESCE(SUM(own.amount), 0) FROM payment_matches own
+                         WHERE own.supplier_id = pi.supplier_id AND own.purchase_invoice_id = pi.id
+                           AND own.bank_transaction_id = ?) AS own_amount,
                        pi.exchange_rate, pi.status, cur.code AS currency,
                        CASE WHEN pi.payment_variable_symbol = ? OR pi.varsymbol = ? OR pi.vendor_invoice_number = ? THEN 2 ELSE 1 END AS vs_match_rank
                   FROM purchase_invoices pi
@@ -791,7 +794,7 @@ final class StatementMatcher
                  -- těch, které trefila až normalizace na číslice (viz preferExactVsMatches).
                  ORDER BY vs_match_rank DESC, pi.id LIMIT 5";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$vs, $vs, $vs, $supplierId, $vs, $vs, $vs, $vsDigits, $vsDigits, $vsDigits]);
+        $stmt->execute([$transactionId, $vs, $vs, $vs, $supplierId, $vs, $vs, $vs, $vsDigits, $vsDigits, $vsDigits]);
         $matches = $this->preferExactVsMatches($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
         if (count($matches) > 1) {
             return ['status' => 'unmatched', 'reason' => 'ambiguous_vs_purchase', 'tx_currency' => $txCurrency];
@@ -802,7 +805,9 @@ final class StatementMatcher
         }
 
         $alreadyPaid = ($pi['status'] === 'paid');
-        $settledAmount = round((float) ($pi['settled_amount'] ?? 0.0), 2);
+        // Vlastní alokace pohybu (z dřívějšího auto_partial) není cizí úhrada — jinak by
+        // opakované párování porovnávalo platbu sama se sebou a přesná shoda by ji zdvojila.
+        $settledAmount = round((float) ($pi['settled_amount'] ?? 0.0) - (float) ($pi['own_amount'] ?? 0.0), 2);
         $remaining = round((float) $pi['amount_to_pay'] - $settledAmount, 2);
         if (!$alreadyPaid && $remaining <= 0.005) {
             return [
@@ -838,14 +843,8 @@ final class StatementMatcher
                 $pdo->prepare(
                     "UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?"
                 )->execute([$postedAt, $pi['id']]);
-                // payment_matches je N:N — INSERT bezpečný i pro paid invoice.
-                // (Pokud by user spustil rematch znovu, transakce je už auto_exact a do
-                // rematch setu nespadne — duplikace tedy nehrozí.)
-                $pdo->prepare(
-                    "INSERT INTO payment_matches
-                        (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
-                     VALUES (?, ?, ?, ?, 'auto', 95)"
-                )->execute([$supplierId, $transactionId, $pi['id'], $absAmount]);
+                // Pohyb z auto_partial už řádek pro tuto dvojici má — přesná shoda ho povýší.
+                PurchasePaymentMatchWriter::record($pdo, $supplierId, $transactionId, (int) $pi['id'], $absAmount, 'auto', 95);
                 $pdo->prepare(
                     "UPDATE bank_transactions
                         SET match_status = 'auto_exact', matched_at = NOW()
@@ -880,28 +879,7 @@ final class StatementMatcher
                     $pdo->rollBack();
                     return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
                 }
-                $existing = $pdo->prepare(
-                    'SELECT id FROM payment_matches
-                      WHERE supplier_id = ? AND bank_transaction_id = ? AND purchase_invoice_id = ?
-                        AND invoice_id IS NULL
-                      ORDER BY id LIMIT 1'
-                );
-                $existing->execute([$supplierId, $transactionId, $pi['id']]);
-                $existingId = $existing->fetchColumn();
-                if ($existingId !== false) {
-                    // Ruční párování má přednost před auto — částku ani confidence nepřepisujeme.
-                    $pdo->prepare(
-                        "UPDATE payment_matches
-                            SET amount = ?, match_confidence = 70
-                          WHERE id = ? AND match_type = 'auto'"
-                    )->execute([$absAmount, (int) $existingId]);
-                } else {
-                    $pdo->prepare(
-                        "INSERT INTO payment_matches
-                            (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
-                         VALUES (?, ?, ?, ?, 'auto', 70)"
-                    )->execute([$supplierId, $transactionId, $pi['id'], $absAmount]);
-                }
+                PurchasePaymentMatchWriter::record($pdo, $supplierId, $transactionId, (int) $pi['id'], $absAmount, 'auto', 70);
                 $pdo->prepare(
                     "UPDATE bank_transactions
                         SET match_status = 'auto_partial', matched_at = NOW()
@@ -1062,11 +1040,7 @@ final class StatementMatcher
                 }
                 $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ? AND supplier_id = ?")
                     ->execute([$postedAt, $pi['id'], $supplierId]);
-                $pdo->prepare(
-                    "INSERT INTO payment_matches
-                        (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
-                     VALUES (?, ?, ?, ?, 'auto', 90)"
-                )->execute([$supplierId, $transactionId, $pi['id'], $absAmount]);
+                PurchasePaymentMatchWriter::record($pdo, $supplierId, $transactionId, (int) $pi['id'], $absAmount, 'auto', 90);
                 $pdo->prepare(
                     "UPDATE bank_transactions SET match_status = 'auto_exact', matched_at = NOW()
                       WHERE id = ? AND match_status = 'unmatched'"
@@ -1222,11 +1196,7 @@ final class StatementMatcher
                 $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?")
                     ->execute([$postedAt, $pi['id']]);
             }
-            $pdo->prepare(
-                "INSERT INTO payment_matches
-                    (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
-                 VALUES (?, ?, ?, ?, 'auto', 80)"
-            )->execute([$supplierId, $transactionId, $pi['id'], $absAmount]);
+            PurchasePaymentMatchWriter::record($pdo, $supplierId, $transactionId, (int) $pi['id'], $absAmount, 'auto', 80);
             $pdo->prepare(
                 "UPDATE bank_transactions
                     SET match_status = 'auto_exact', matched_at = NOW()
@@ -1367,11 +1337,7 @@ final class StatementMatcher
             }
             $pdo->prepare("UPDATE purchase_invoices SET status='paid', paid_at=? WHERE id=? AND status<>'paid'")
                 ->execute([$postedAt, $credit['id']]);
-            $pdo->prepare(
-                "INSERT INTO payment_matches
-                    (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
-                 VALUES (?, ?, ?, ?, 'auto', 95)"
-            )->execute([$supplierId, $transactionId, $credit['id'], $amount]);
+            PurchasePaymentMatchWriter::record($pdo, $supplierId, $transactionId, (int) $credit['id'], $amount, 'auto', 95);
             $pdo->prepare("UPDATE bank_transactions SET match_status='auto_exact', matched_at=NOW() WHERE id=?")
                 ->execute([$transactionId]);
             $pdo->commit();
