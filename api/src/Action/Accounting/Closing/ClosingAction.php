@@ -922,18 +922,34 @@ final class ClosingAction
         return Json::ok($response, $data);
     }
 
-    /** Krok 7 — otevření nového roku přes 701 (+ FX storno dle R11). */
+    /**
+     * Krok 7 — otevření nového roku přes 701 (+ FX storno dle R11). Má-li další rok už
+     * převzaté počáteční stavy, krok je při shodě převezme; při rozdílu je nahradí
+     * vypočtenými jen na výslovnou žádost `replace_taken_over_opening` s důvodem.
+     */
     public function openNext(Request $request, Response $response, array $args): Response
     {
         if (!$this->requireClose($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
         $periodId = (int) ($args['id'] ?? 0);
-        $rowVersion = $this->rowVersion($request, $response, $err);
+        $body = (array) ($request->getParsedBody() ?? []);
+        $rowVersion = $this->rowVersion($request, $response, $err, $body);
         if ($rowVersion === null) return $err;
 
+        $replaceReason = null;
+        if (filter_var($body['replace_taken_over_opening'] ?? false, FILTER_VALIDATE_BOOL)) {
+            $replaceReason = $this->nullableString($body['replace_reason'] ?? null);
+            if ($replaceReason === null || mb_strlen($replaceReason) < 3) {
+                return Json::error($response, 'validation_failed', 'replace_reason (důvod náhrady převzatých počátečních stavů) je povinný a musí mít alespoň 3 znaky.', 422);
+            }
+            if (mb_strlen($replaceReason) > 500) {
+                return Json::error($response, 'validation_failed', 'replace_reason může mít nejvýše 500 znaků.', 422);
+            }
+        }
+
         try {
-            $data = $this->closing->openNext($supplierId, $periodId, $rowVersion, $this->auditMeta($request));
+            $data = $this->closing->openNext($supplierId, $periodId, $rowVersion, $this->auditMeta($request), $replaceReason);
         } catch (\Throwable $e) {
             return $this->mapError($response, $e, 'Otevření nového období selhalo');
         }

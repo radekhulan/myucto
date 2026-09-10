@@ -238,7 +238,13 @@ final class AccountingPeriodAction
             // vyjmenovala oba, takže posílala uživatele revertovat i krok, který nikdy
             // nespustil — a ten pak v průvodci marně hledal tlačítko.
             $blocking = [];
-            if ($next !== null && $this->closingRepo->hasOpeningEntries($supplierId, (int) $next['id'])) {
+            // Převzatý otevírací zápis (krok open_next ho jen převzal) na uzávěrce období
+            // nestojí — reopen neblokuje, a proto se z kontroly vynechává.
+            if ($next !== null && $this->closingRepo->hasOpeningEntries(
+                $supplierId,
+                (int) $next['id'],
+                $this->closingRepo->takenOverOpeningEntryIds($supplierId, $id),
+            )) {
                 $blocking[] = 'Otevření nového roku';
             }
             if ($this->closingRepo->hasClosingEntries($supplierId, $id)) {

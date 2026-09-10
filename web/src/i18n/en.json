@@ -12699,6 +12699,36 @@
         "fx_reversal_note": "If the reversal of receivable/payable revaluation is enabled in settings, a mirror FX entry is booked on the first day of the new period (KR document series).",
         "fx_reversal_created": "The revaluation reversal was booked on the first day of the period."
       },
+      "opening_takeover": {
+        "status_label": "Opening balances of the next year",
+        "status": {
+          "to_create": "To be created",
+          "match": "Taken over",
+          "mismatch": "Difference",
+          "unavailable": "Cannot compare"
+        },
+        "to_create_hint": "The next year has no opening entry yet; this step will book it.",
+        "match_hint": "The next year already has an opening entry from another source (data transfer or manual entry) and it matches the closing balances account by account. The step takes it over and books nothing new.",
+        "mismatch_hint": "The next year already has an opening entry from another source, but it does not match the closing balances. The year cannot be opened until the differences are resolved or the taken-over balances are explicitly replaced with the calculated ones.",
+        "unavailable_hint": "Closing balances cannot be calculated — run the checks in step 1.",
+        "preliminary": "Preliminary comparison — it becomes final after the books are closed.",
+        "entries": "Taken-over entries",
+        "col_account": "Account",
+        "col_expected": "Calculated",
+        "col_existing": "Taken over",
+        "col_difference": "Difference",
+        "compare_note": "Compared account by account; 70x clearing accounts are skipped and account 431 is compared at the synthetic level.",
+        "take_over_button": "Take over opening balances",
+        "replace_button": "Replace taken-over balances with calculated ones",
+        "replace_title": "Replace taken-over opening balances",
+        "replace_text": "The taken-over opening entries of the next year will be deleted (with an audit trail) and the calculated opening entry will be booked. State why the taken-over balances are not valid.",
+        "replace_reason": "Reason for replacement",
+        "replace_reason_ph": "E.g. the taken-over balances contained an error in receivables",
+        "replace_confirm": "Replace and open the year",
+        "done_taken_over": "Opening balances taken over — they match on {count} accounts, nothing was booked.",
+        "done_replaced": "The taken-over opening balances were replaced with the calculated ones. Reason: {reason}",
+        "revert_keeps": "Undoing this step does not delete the taken-over entry."
+      },
       "revert": {
         "confirm": "Really undo this step? Its closing entries will be deleted (with an audit trail).",
         "done": "The step has been undone.",
@@ -12892,6 +12922,7 @@
       },
       "errors": {
         "version_conflict": "The period was modified by another user — data has been reloaded.",
+        "opening_takeover_mismatch": "The taken-over opening balances of the next year do not match the closing balances — review the differences table in the Open the new year step.",
         "closing_entries_exist": "Closing entries exist — first undo the Open the new year and Close the books steps.",
         "invalid_status_transition": "Invalid period status transition.",
         "use_closing_workflow": "Use the closing wizard — the status cannot be changed directly.",
@@ -21293,6 +21324,7 @@
       "opening_701_forbidden": "Do not enter account 701 — the system adds it automatically.",
       "opening_unbalanced": "Opening balance is not balanced.",
       "opening_owned_by_closing": "The opening entry is managed by the previous period closing — update it in the closing workflow.",
+      "opening_already_posted": "The period already has an opening entry from another source (taken-over opening balances) — another one would double them.",
       "opening_empty": "The opening balance has no rows.",
       "period_not_open": "The accounting start period is not open — open it in accounting periods and run the check again.",
       "job_already_running": "A backfill job is already running.",

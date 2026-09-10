@@ -704,11 +704,47 @@ final class ClosingRepository
         if ($periodId !== null && (int) $entry['period_id'] !== $periodId) {
             return null;
         }
+        return $this->hardDeleteWithDump(
+            $supplierId,
+            $entry,
+            $sourceType === 'closing' && $sourceId === (int) $entry['period_id'],
+        );
+    }
+
+    /**
+     * HARD DELETE převzatého otevíracího zápisu podle id — výslovná náhrada převzatých
+     * počátečních stavů vypočtenými v kroku open_next. Převzatý zápis nemusí mít
+     * uzávěrkový klíč (source_id bývá NULL), proto nejde přes {@see deleteClosingEntry}.
+     * Guard: jen source_type 'opening' a jen v otevřeném/uzavíraném období.
+     *
+     * @return array{entry: array<string,mixed>, lines: list<array<string,mixed>>}|null
+     */
+    public function deleteOpeningEntry(int $supplierId, int $entryId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, supplier_id, period_id, entry_date, document_date, document_no, description,
+                    source_type, source_id, posted_at, posted_by, reversed_by, row_version
+               FROM journal_entries
+              WHERE supplier_id = ? AND id = ? AND source_type = 'opening'
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $entryId]);
+        $entry = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $entry === false ? null : $this->hardDeleteWithDump($supplierId, $entry, false);
+    }
+
+    /**
+     * @param array<string,mixed> $entry
+     * @return array{entry: array<string,mixed>, lines: list<array<string,mixed>>}
+     */
+    private function hardDeleteWithDump(int $supplierId, array $entry, bool $allowClosedPeriod): array
+    {
+        $pdo = $this->db->pdo();
         $status = $pdo->prepare('SELECT status FROM accounting_periods WHERE supplier_id = ? AND id = ? FOR UPDATE');
         $status->execute([$supplierId, $entry['period_id']]);
         $periodStatus = $status->fetchColumn();
         if (!in_array($periodStatus, ['open', 'closing'], true)
-            && !($sourceType === 'closing' && $sourceId === (int) $entry['period_id'] && $periodStatus === 'closed')) {
+            && !($allowClosedPeriod && $periodStatus === 'closed')) {
             throw new \MyInvoice\Service\Accounting\Closing\ClosingException('period_not_open', 'Zápis uzavřeného období nelze smazat.', 409);
         }
         $entryId = (int) $entry['id'];
@@ -770,20 +806,112 @@ final class ClosingRepository
     }
 
     /**
-     * Existuje zaúčtovaný opening zápis následujícího období (R3 guard)?
+     * Existuje zaúčtovaný opening zápis následujícího období pod klíčem průvodce (R3 guard)?
+     *
+     * Záměrně podle klíče ('opening', next_period_id): ptá se, jestli v N+1 leží zápis,
+     * který na uzávěrce N stojí. `$excludeEntryIds` = převzaté zápisy, které krok
+     * open_next jen převzal ({@see takenOverOpeningEntryIds}) — na uzávěrce N nestojí,
+     * i když nesou stejný klíč (ruční otevírací rozvaha při zahájení účetnictví).
+     *
+     * @param list<int> $excludeEntryIds
      */
-    public function hasOpeningEntries(int $supplierId, int $nextPeriodId): bool
+    public function hasOpeningEntries(int $supplierId, int $nextPeriodId, array $excludeEntryIds = []): bool
     {
+        $exclude = '';
+        $params = [$supplierId, $nextPeriodId];
+        if ($excludeEntryIds !== []) {
+            $exclude = ' AND id NOT IN (' . implode(',', array_fill(0, count($excludeEntryIds), '?')) . ')';
+            array_push($params, ...array_map('intval', $excludeEntryIds));
+        }
         $stmt = $this->db->pdo()->prepare(
             "SELECT EXISTS (
                 SELECT 1 FROM journal_entries
                  WHERE supplier_id = ? AND source_type = 'opening' AND source_id = ?
-                   AND posted_at IS NOT NULL
+                   AND posted_at IS NOT NULL{$exclude}
              )"
         );
-        $stmt->execute([$supplierId, $nextPeriodId]);
+        $stmt->execute($params);
         return (bool) $stmt->fetchColumn();
     }
+
+    /**
+     * Živé otevírací zápisy období: zaúčtované, source_type 'opening', BEZ OHLEDU na
+     * source_id. Převzatý zápis (převod z jiného systému) klíč nemá, ruční otevírací
+     * rozvaha ho má shodný s průvodcem — kdo se ptá „má rok počáteční stavy?", musí se
+     * ptát takhle, jinak zápis přehlédne a založí druhý. Stornovaný zápis a jeho storno
+     * (storno nese tentýž source_type) se vzájemně ruší, proto se vynechávají oba.
+     *
+     * @return list<array{id:int, document_no:?string, entry_date:string, description:?string, source_id:?int}>
+     */
+    public function openingEntriesInPeriod(int $supplierId, int $periodId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT e.id, e.document_no, e.entry_date, e.description, e.source_id
+               FROM journal_entries e
+              WHERE e.supplier_id = ? AND ' . self::LIVE_OPENING_SQL . '
+              ORDER BY e.id'
+        );
+        $stmt->execute([$supplierId, $periodId, $supplierId]);
+        return array_map(static fn (array $r): array => [
+            'id' => (int) $r['id'],
+            'document_no' => $r['document_no'] === null ? null : (string) $r['document_no'],
+            'entry_date' => (string) $r['entry_date'],
+            'description' => $r['description'] === null ? null : (string) $r['description'],
+            'source_id' => $r['source_id'] === null ? null : (int) $r['source_id'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Zůstatky živých otevíracích zápisů období per účet (signed netto, MD kladně) —
+     * druhá strana porovnání převzatých počátečních stavů s vypočtenými.
+     *
+     * @return array<string,float>
+     */
+    public function openingBalancesInPeriod(int $supplierId, int $periodId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT a.account_code, SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS bal
+               FROM journal_entries e
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+               JOIN chart_of_accounts a   ON a.id = l.account_id
+              WHERE e.supplier_id = ? AND " . self::LIVE_OPENING_SQL . '
+              GROUP BY a.account_code'
+        );
+        $stmt->execute([$supplierId, $periodId, $supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(string) $r['account_code']] = (float) $r['bal'];
+        }
+        return $out;
+    }
+
+    /**
+     * Id otevíracích zápisů N+1, které krok open_next období N převzal (payload kroku,
+     * i po revertu kroku — převzatý zápis revert nemaže a nesmí pak blokovat guardy).
+     *
+     * @return list<int>
+     */
+    public function takenOverOpeningEntryIds(int $supplierId, int $periodId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT payload FROM accounting_closing_steps
+              WHERE supplier_id = ? AND period_id = ? AND step_key = 'open_next'"
+        );
+        $stmt->execute([$supplierId, $periodId]);
+        $payload = json_decode((string) ($stmt->fetchColumn() ?: ''), true);
+        if (!is_array($payload) || ($payload['opening_source'] ?? null) !== 'taken_over') {
+            return [];
+        }
+        return array_values(array_map('intval', (array) ($payload['taken_over_entry_ids'] ?? [])));
+    }
+
+    /**
+     * Filtr živých otevíracích zápisů za `e.supplier_id = ? AND`, který stojí v každém
+     * statementu doslova (tenant guard); parametry (supplier_id, period_id, supplier_id).
+     */
+    private const LIVE_OPENING_SQL = "e.period_id = ? AND e.source_type = 'opening'
+                AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                AND NOT EXISTS (SELECT 1 FROM journal_entries o WHERE o.supplier_id = ? AND o.reversed_by = e.id)";
 
     // ── prechecky (§3.4) ──────────────────────────────────────────────────────
 

@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
 use MyInvoice\Service\Accounting\Bank\BankAnalyticResolver;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
@@ -28,6 +29,7 @@ final class OpeningBalanceService
         private readonly TransitionReportService $transition,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly BankAnalyticResolver $bankAnalytics,
+        private readonly ClosingRepository $closingRepo,
     ) {}
 
     public function prefill(int $supplierId, string $asOf): array
@@ -118,22 +120,34 @@ final class OpeningBalanceService
                 'status' => 422,
             ];
         }
+        // Otevírací zápis z jiného zdroje (převzaté počáteční stavy) nemá klíč tohoto
+        // průvodce. Přepsat ho post() neumí — založil by vedle něj druhý a rozvaha by se
+        // zdvojila. Vlastní zápis (klíč = id období) se naopak smí přepsat.
+        if ($period !== null) {
+            foreach ($this->closingRepo->openingEntriesInPeriod($supplierId, (int) $period['id']) as $entry) {
+                if ($entry['source_id'] !== (int) $period['id']) {
+                    return [
+                        'code' => 'opening_already_posted',
+                        'message' => 'Období už má otevírací zápis z jiného zdroje — další by zdvojil počáteční stavy.',
+                        'status' => 409,
+                    ];
+                }
+            }
+        }
         return null;
     }
 
-    /** Má už firma otevírací zápis k datu zahájení? Rozhoduje o tom, zda ho průvodce nabídne doplnit. */
+    /**
+     * Má už firma otevírací zápis k datu zahájení? Rozhoduje o tom, zda ho průvodce nabídne
+     * doplnit. Ptá se bez ohledu na source_id — převzatý zápis se počítá stejně jako vlastní.
+     */
     public function isPosted(int $supplierId, string $startsOn): bool
     {
         $period = $this->periods->findForDate($supplierId, $startsOn);
         if ($period === null) {
             return false;
         }
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT 1 FROM journal_entries
-              WHERE supplier_id = ? AND source_type = 'opening' AND source_id = ? LIMIT 1"
-        );
-        $stmt->execute([$supplierId, (int) $period['id']]);
-        return $stmt->fetchColumn() !== false;
+        return $this->closingRepo->openingEntriesInPeriod($supplierId, (int) $period['id']) !== [];
     }
 
     public function post(int $supplierId, string $startsOn, array $meta): array

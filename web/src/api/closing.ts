@@ -145,6 +145,11 @@ export interface ClosingStepPayload {
   entry_ids?: Record<string, number>
   warnings?: StockWarning[]
   reason?: string
+  // Krok open_next: odkud jsou počáteční stavy dalšího roku (vypočtené / převzaté / nahrazené).
+  opening_source?: 'computed' | 'taken_over' | 'replaced'
+  taken_over_entry_ids?: number[]
+  taken_over_accounts?: number
+  replace_reason?: string
 }
 
 export interface ClosingStep {
@@ -175,6 +180,28 @@ export interface ClosingState {
   /** Krok je vyžadován k uzavření knih jen tehdy, dává-li v období smysl. */
   stock_step_required?: boolean
   depreciation_step_required?: boolean
+  /** Počáteční stavy dalšího roku pro krok open_next; null = krok je hotový. */
+  opening_takeover?: OpeningTakeover | null
+}
+
+export type OpeningTakeoverStatus = 'to_create' | 'match' | 'mismatch' | 'unavailable'
+
+export interface OpeningTakeoverDiffRow {
+  account_code: string
+  expected: number
+  existing: number
+  difference: number
+}
+
+export interface OpeningTakeover {
+  status: OpeningTakeoverStatus
+  next_period_id: number | null
+  entries: { id: number; document_no: string | null; entry_date: string; description: string | null; source_id: number | null }[]
+  diff: OpeningTakeoverDiffRow[]
+  accounts: number
+  /** Porovnání před uzavřením knih počítá ze zůstatků, ne ze zaúčtovaného uzávěrkového zápisu. */
+  preliminary: boolean
+  message?: string
 }
 
 // ── Featura I: audit spárovaných plateb banka↔faktura ──────────────────────
@@ -641,8 +668,8 @@ export const closingApi = {
     api.post(`/accounting/periods/${periodId}/closing/entries/${entryId}/reverse`, { row_version: rowVersion }).then(r => r.data),
   close: (periodId: number, rowVersion: number, override?: { override_unposted: true; override_reason: string }) =>
     api.post(`/accounting/periods/${periodId}/close`, { row_version: rowVersion, ...(override ?? {}) }).then(r => r.data),
-  openNext: (periodId: number, rowVersion: number) =>
-    api.post(`/accounting/periods/${periodId}/open-next`, { row_version: rowVersion }).then(r => r.data),
+  openNext: (periodId: number, rowVersion: number, replace?: { replace_taken_over_opening: true; replace_reason: string }) =>
+    api.post(`/accounting/periods/${periodId}/open-next`, { row_version: rowVersion, ...(replace ?? {}) }).then(r => r.data),
   // Stavový automat období (R2) — closed→approved, approved→closed, closed→open (reason ≥ 10 znaků).
   setPeriodStatus: (periodId: number, payload: PeriodStatusPayload) =>
     api.post<ClosingPeriod>(`/accounting/periods/${periodId}/status`, payload).then(r => r.data),

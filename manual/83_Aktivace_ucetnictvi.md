@@ -226,6 +226,7 @@ stavy, joby a zrušení vyžadují administrátorské
 | `opening_empty` | Otevírací rozvaha neobsahuje žádný řádek |
 | `period_not_open` | Období zahájení není otevřené; otevři je v účetních obdobích |
 | `opening_owned_by_closing` | Otevírací zápis patří uzávěrce předchozího roku |
+| `opening_already_posted` | Období už má otevírací zápis z jiného zdroje (převzaté počáteční stavy); druhý by je zdvojil |
 | `dry_run_required` | Změnila se data; spusť znovu kontrolu |
 | `job_already_running` | Počkej na aktivní job nebo jej řízeně zruš |
 | `remaining/period/lock` | Zdrojová data či období se od náhledu změnily |

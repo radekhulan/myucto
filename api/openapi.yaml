@@ -11165,7 +11165,12 @@ paths:
     get:
       tags: [Accounting]
       summary: Stav uzávěrkového průvodce období (Epic F4)
-      description: Období + kroky (precheck…open_next, stav pending/done/skipped, payload) + odvozené flagy can_*.
+      description: |
+        Období + kroky (precheck…open_next, stav pending/done/skipped, payload) + odvozené flagy can_*.
+        `opening_takeover` (null po dokončení open_next) = počáteční stavy dalšího roku:
+        `status` to_create / match / mismatch / unavailable, převzaté zápisy `entries`,
+        tabulka rozdílů `diff` [{account_code, expected, existing, difference}],
+        `preliminary` = porovnání před uzavřením knih.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -11506,12 +11511,29 @@ paths:
         Admin-only, stav closed. Následující období se dohledá/založí (musí přesně
         navazovat — 422 `period_gap`); opening zápis = zrcadlo rozvahové části
         closingu + VH na 431, číslo z řady OT; volitelné FX storno saldokonta.
+
+        Převzaté počáteční stavy: má-li následující období už zaúčtovaný otevírací
+        zápis z jiného zdroje (bez ohledu na source_id), porovná se účet po účtu
+        (70x vynechané, 431 za syntetiku). Shoda → krok hotový s `opening_source =
+        taken_over`, nic se neúčtuje. Rozdíl → 422 `opening_takeover_mismatch`
+        (tabulka rozdílů je v `opening_takeover` stavu průvodce), dokud klient
+        nepošle `replace_taken_over_opening: true` s důvodem — pak se převzaté
+        zápisy smažou (auditní událost `accounting.opening_takeover_replaced`
+        s dumpem) a zaúčtuje se vypočtený zápis (`opening_source = replaced`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [row_version], properties: { row_version: { type: integer, minimum: 1 } } } } }
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [row_version]
+              properties:
+                row_version: { type: integer, minimum: 1 }
+                replace_taken_over_opening: { type: boolean, description: 'Výslovná náhrada převzatých počátečních stavů vypočtenými.' }
+                replace_reason: { type: string, minLength: 3, maxLength: 500, description: 'Povinný důvod náhrady (při replace_taken_over_opening = true).' }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }

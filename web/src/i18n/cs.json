@@ -12699,6 +12699,36 @@
         "fx_reversal_note": "Je-li v nastavení zapnuté storno přecenění saldokonta, zaúčtuje se k 1. dni nového období zrcadlový zápis kurzových rozdílů (doklad řady KR).",
         "fx_reversal_created": "Bylo zaúčtováno storno přecenění saldokonta k 1. dni období."
       },
+      "opening_takeover": {
+        "status_label": "Počáteční stavy dalšího roku",
+        "status": {
+          "to_create": "K založení",
+          "match": "Převzato",
+          "mismatch": "Rozdíl",
+          "unavailable": "Nelze porovnat"
+        },
+        "to_create_hint": "Další rok zatím nemá otevírací zápis, krok ho zaúčtuje.",
+        "match_hint": "Další rok už má otevírací zápis z jiného zdroje (převod dat nebo ruční zadání) a souhlasí s konečnými stavy účet po účtu. Krok ho převezme a nic nového nezaúčtuje.",
+        "mismatch_hint": "Další rok už má otevírací zápis z jiného zdroje, ale nesouhlasí s konečnými stavy. Rok nejde otevřít, dokud rozdíly nevyřešíte, nebo převzaté stavy výslovně nenahradíte vypočtenými.",
+        "unavailable_hint": "Konečné stavy nejde spočítat — spusťte kontroly v kroku 1.",
+        "preliminary": "Předběžné porovnání — definitivní bude po uzavření knih.",
+        "entries": "Převzaté zápisy",
+        "col_account": "Účet",
+        "col_expected": "Vypočteno",
+        "col_existing": "Převzato",
+        "col_difference": "Rozdíl",
+        "compare_note": "Porovnává se účet po účtu; rozvažné účty 70x se vynechávají, účet 431 se srovnává za syntetiku.",
+        "take_over_button": "Převzít počáteční stavy",
+        "replace_button": "Nahradit převzaté stavy vypočtenými",
+        "replace_title": "Nahradit převzaté počáteční stavy",
+        "replace_text": "Převzaté otevírací zápisy dalšího roku se smažou (s auditní stopou) a zaúčtuje se vypočtený otevírací zápis. Uveďte, proč převzaté stavy neplatí.",
+        "replace_reason": "Důvod náhrady",
+        "replace_reason_ph": "Např. převzaté stavy obsahovaly chybu v saldokontu",
+        "replace_confirm": "Nahradit a otevřít rok",
+        "done_taken_over": "Počáteční stavy převzaty — souhlasí na {count} účtech, nic se neúčtovalo.",
+        "done_replaced": "Převzaté počáteční stavy byly nahrazeny vypočtenými. Důvod: {reason}",
+        "revert_keeps": "Vzetí kroku zpět převzatý zápis nesmaže."
+      },
       "revert": {
         "confirm": "Opravdu vzít krok zpět? Uzávěrkové zápisy kroku se smažou (s auditní stopou).",
         "done": "Krok byl vzat zpět.",
@@ -12892,6 +12922,7 @@
       },
       "errors": {
         "version_conflict": "Období mezitím změnil jiný uživatel — data byla znovu načtena.",
+        "opening_takeover_mismatch": "Převzaté počáteční stavy dalšího roku nesouhlasí s konečnými stavy — projděte tabulku rozdílů v kroku Otevření nového roku.",
         "closing_entries_exist": "Existují uzávěrkové zápisy — nejprve vezměte zpět otevření roku a uzavření knih.",
         "invalid_status_transition": "Nepovolený přechod stavu období.",
         "use_closing_workflow": "Použijte průvodce uzávěrkou — stav nelze měnit přímo.",
@@ -21293,6 +21324,7 @@
       "opening_701_forbidden": "Účet 701 do rozvahy nezadávejte — systém ho doplní automaticky.",
       "opening_unbalanced": "Otevírací rozvaha není vyrovnaná.",
       "opening_owned_by_closing": "Otevírací zápis spravuje uzávěrka předchozího období — upravte ho v uzávěrce.",
+      "opening_already_posted": "Období už má otevírací zápis z jiného zdroje (převzaté počáteční stavy) — další by stavy zdvojil.",
       "opening_empty": "Otevírací rozvaha neobsahuje žádný řádek.",
       "period_not_open": "Období zahájení účetnictví není otevřené — otevřete ho v účetních obdobích a spusťte kontrolu znovu.",
       "job_already_running": "Doúčtování už běží.",

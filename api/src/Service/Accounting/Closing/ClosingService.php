@@ -257,7 +257,87 @@ final class ClosingService
                 && $steps['fx_revaluation']['status'] === 'done',
             'can_revert_stock' => $period['status'] === 'closing'
                 && $steps['stock']['status'] === 'done',
+            'opening_takeover' => $steps['open_next']['status'] === 'done'
+                ? null
+                : $this->openingTakeoverPreview($supplierId, $period, $steps, $next),
         ];
+    }
+
+    /**
+     * Stav počátečních stavů dalšího roku pro krok open_next (převzato / rozdíl / k založení).
+     * Read-only. Před uzavřením knih je porovnání předběžné (počítá se ze zůstatků, ne
+     * ze zaúčtovaného uzávěrkového zápisu).
+     *
+     * @param array<string,mixed> $period
+     * @param array<string, array<string,mixed>> $steps
+     * @param array<string,mixed>|null $next
+     * @return array<string,mixed>
+     */
+    private function openingTakeoverPreview(int $supplierId, array $period, array $steps, ?array $next): array
+    {
+        $entries = $next === null ? [] : $this->closing->openingEntriesInPeriod($supplierId, (int) $next['id']);
+        $base = [
+            'next_period_id' => $next === null ? null : (int) $next['id'],
+            'entries' => $entries,
+            'diff' => [],
+            'accounts' => 0,
+            'preliminary' => $steps['close_books']['status'] !== 'done',
+        ];
+        if ($entries === []) {
+            return ['status' => 'to_create'] + $base;
+        }
+        try {
+            $cmp = OpeningTakeoverComparison::compare(
+                $this->expectedOpeningLines($supplierId, $period, $steps),
+                $this->closing->openingBalancesInPeriod($supplierId, (int) $next['id']),
+            );
+        } catch (ClosingException $e) {
+            // Nevyvážené zůstatky (rozbitý deník) hlásí precheck; stav průvodce kvůli
+            // tomu padat nesmí.
+            return ['status' => 'unavailable', 'message' => $e->getMessage()] + $base;
+        }
+        return ['status' => $cmp['diff'] === [] ? 'match' : 'mismatch', 'diff' => $cmp['diff'], 'accounts' => $cmp['accounts']] + $base;
+    }
+
+    /**
+     * Řádky otevíracího zápisu N+1, které by zaúčtoval krok open_next — jediný zdroj pro
+     * zaúčtování i porovnání s převzatými počátečními stavy. Po uzavření knih zrcadlo
+     * rozvahové části closing zápisu (c) + VH z payloadu kroku 6 (kontinuita 702↔701 po
+     * haléřích); před ním týž výpočet ze zůstatků, jaký dělá closeBooks.
+     *
+     * @param array<string,mixed> $period
+     * @param array<string, array<string,mixed>> $steps
+     * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
+     */
+    private function expectedOpeningLines(int $supplierId, array $period, array $steps): array
+    {
+        $periodId = (int) $period['id'];
+        if ($steps['close_books']['status'] === 'done') {
+            $closingEntry = $this->findEntryWithLines($supplierId, 'closing', $periodId);
+            $profit = round((float) ($steps['close_books']['payload']['profit'] ?? 0.0), 2);
+            $bs = [];
+            foreach ($closingEntry['lines'] ?? [] as $l) {
+                if (!in_array((string) $l['account_type'], ['asset', 'liability', 'equity'], true)) {
+                    continue;
+                }
+                // (c): debetní zůstatek → MD 702 / D účet (řádek účtu = credit);
+                //      kreditní zůstatek → MD účet / D 702 (řádek účtu = debit).
+                $bs[] = [
+                    'account_id' => (int) $l['account_id'],
+                    'account_code' => (string) $l['account_code'],
+                    'name' => (string) ($l['account_name'] ?? ''),
+                    'bal' => $l['side'] === 'credit' ? (float) $l['amount'] : -(float) $l['amount'],
+                ];
+            }
+        } else {
+            $pl = $this->closing->plBalances($supplierId, $periodId, (string) $period['starts_on'], (string) $period['ends_on']);
+            $bs = $this->closing->bsBalances($supplierId, $periodId, (string) $period['ends_on']);
+            $profit = round((float) $this->builder->closingLines($pl, $bs)['profit'], 2);
+        }
+        if ($bs === [] && abs($profit) < 0.005) {
+            return [];
+        }
+        return $this->builder->openingLines($bs, $profit);
     }
 
     // ── start / abort ─────────────────────────────────────────────────────────
@@ -3255,9 +3335,13 @@ final class ClosingService
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array<string,mixed>
      */
-    public function openNext(int $supplierId, int $periodId, int $rowVersion, array $meta = []): array
+    public function openNext(int $supplierId, int $periodId, int $rowVersion, array $meta = [], ?string $replaceTakenOverReason = null): array
     {
-        return $this->tx(function () use ($supplierId, $periodId, $rowVersion, $meta): array {
+        $replaceTakenOverReason = $replaceTakenOverReason === null ? null : trim($replaceTakenOverReason);
+        if ($replaceTakenOverReason === '') {
+            $replaceTakenOverReason = null;
+        }
+        return $this->tx(function () use ($supplierId, $periodId, $rowVersion, $meta, $replaceTakenOverReason): array {
             $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
             // Past #37: open_next musí jít i nad 'approved' obdobím. Je to čistě technický
             // přenos počátečních zůstatků do NÁSLEDUJÍCÍHO období (N+1, open) — do knih
@@ -3292,46 +3376,68 @@ final class ClosingService
             $nextStart = (string) $next['starts_on'];
             $nextEnds = (string) $next['ends_on'];
 
-            // Zrcadlo části (c) closing zápisu: rozvahové řádky proti 702.
-            $closingEntry = $this->findEntryWithLines($supplierId, 'closing', $periodId);
-            $profit = round((float) ($steps['close_books']['payload']['profit'] ?? 0.0), 2);
-            $bs = [];
-            foreach ($closingEntry['lines'] ?? [] as $l) {
-                if (!in_array((string) $l['account_type'], ['asset', 'liability', 'equity'], true)) {
-                    continue;
+            $lines = $this->expectedOpeningLines($supplierId, $period, $steps);
+
+            // Převzaté počáteční stavy: N+1 už má otevírací zápis, který nevznikl tímto
+            // krokem (převod z jiného systému bez source_id, ruční otevírací rozvaha se
+            // shodným klíčem). Hledá se v CELÉM období bez ohledu na source_id — hledání
+            // podle klíče ho přehlédlo a založilo druhý (zdvojená rozvaha N+1), resp.
+            // ruční rozvahu tiše přepsalo. Shoda účet po účtu = převzít a nic neúčtovat;
+            // rozdíl = blok, dokud účetní převzaté stavy výslovně nenahradí (s důvodem).
+            $openingSource = 'computed';
+            $takenOver = $this->closing->openingEntriesInPeriod($supplierId, $nextId);
+            $takenOverIds = [];
+            $takenOverAccounts = 0;
+            if ($takenOver !== []) {
+                $cmp = OpeningTakeoverComparison::compare($lines, $this->closing->openingBalancesInPeriod($supplierId, $nextId));
+                if ($replaceTakenOverReason !== null) {
+                    $replacedDumps = [];
+                    foreach ($takenOver as $entry) {
+                        $dump = $this->closing->deleteOpeningEntry($supplierId, (int) $entry['id']);
+                        if ($dump !== null) {
+                            $replacedDumps[] = $dump;
+                        }
+                    }
+                    $this->audit($supplierId, 'accounting.opening_takeover_replaced', $periodId, [
+                        'next_period_id' => $nextId,
+                        'reason' => mb_substr($replaceTakenOverReason, 0, 500),
+                        'diff' => $cmp['diff'],
+                        'entry_dump' => $replacedDumps,
+                    ], $meta);
+                    $openingSource = 'replaced';
+                } elseif ($cmp['diff'] === []) {
+                    $openingSource = 'taken_over';
+                    $takenOverIds = array_map(static fn (array $e): int => (int) $e['id'], $takenOver);
+                    $takenOverAccounts = $cmp['accounts'];
+                } else {
+                    // 422, ne 409: průvodce čte 409 jako souběžnou změnu a jen znovu načte stav.
+                    throw new ClosingException(
+                        'opening_takeover_mismatch',
+                        'Následující rok už má převzaté počáteční stavy a ' . count($cmp['diff'])
+                            . ' účtů nesouhlasí s konečnými stavy (např. ' . $cmp['diff'][0]['account_code'] . ') — '
+                            . 'rozdíly vyřeš, nebo převzaté stavy výslovně nahraď vypočtenými.',
+                    );
                 }
-                // (c): debetní zůstatek → MD 702 / D účet (řádek účtu = credit);
-                //      kreditní zůstatek → MD účet / D 702 (řádek účtu = debit).
-                $bal = $l['side'] === 'credit' ? (float) $l['amount'] : -(float) $l['amount'];
-                $bs[] = [
-                    'account_id' => (int) $l['account_id'],
-                    'account_code' => (string) $l['account_code'],
-                    'name' => (string) ($l['account_name'] ?? ''),
-                    'bal' => $bal,
-                ];
             }
 
             $entryId = null;
             $docNo = null;
-            if ($bs !== [] || abs($profit) >= 0.005) {
-                $lines = $this->builder->openingLines($bs, $profit);
-                if ($lines !== []) {
-                    $this->assertKnownCodes($supplierId, $lines);
-                    $existingOpening = $this->journal->findBySource($supplierId, 'opening', $nextId);
-                    $docNo = $existingOpening !== null && $existingOpening['document_no'] !== null
-                        ? (string) $existingOpening['document_no']
-                        : $this->series->next($supplierId, 'opening', $nextFy);
-                    $entryId = $this->posting->postDocument($supplierId, 'opening', $nextId, $lines, [
-                        'entry_date' => $nextStart,
-                        'document_no' => $docNo,
-                        'description' => 'Otevření účetních knih ' . $nextFy,
-                        'posted' => true,
-                        'posted_by' => $meta['posted_by'] ?? null,
-                        'user_id' => $meta['user_id'] ?? null,
-                        'ip' => $meta['ip'] ?? null,
-                        'user_agent' => $meta['user_agent'] ?? null,
-                    ]);
-                }
+            if ($openingSource !== 'taken_over' && $lines !== []) {
+                $this->assertKnownCodes($supplierId, $lines);
+                $existingOpening = $this->journal->findBySource($supplierId, 'opening', $nextId);
+                $docNo = $existingOpening !== null && $existingOpening['document_no'] !== null
+                    ? (string) $existingOpening['document_no']
+                    : $this->series->next($supplierId, 'opening', $nextFy);
+                $entryId = $this->posting->postDocument($supplierId, 'opening', $nextId, $lines, [
+                    'entry_date' => $nextStart,
+                    'document_no' => $docNo,
+                    'description' => 'Otevření účetních knih ' . $nextFy,
+                    'posted' => true,
+                    'posted_by' => $meta['posted_by'] ?? null,
+                    'user_id' => $meta['user_id'] ?? null,
+                    'ip' => $meta['ip'] ?? null,
+                    'user_agent' => $meta['user_agent'] ?? null,
+                ]);
             }
 
             // FX storno saldokonta k 1. dni nového období (R11, slot 3) — jen slot 1,
@@ -3502,7 +3608,14 @@ final class ClosingService
                 'prepaid_expense_release_entry_id' => $prepaidExpenseReleaseId,
                 'next_period_id' => $nextId,
                 'document_no' => $docNo,
+                'opening_source' => $openingSource,
             ];
+            if ($openingSource === 'taken_over') {
+                $payload['taken_over_entry_ids'] = $takenOverIds;
+                $payload['taken_over_accounts'] = $takenOverAccounts;
+            } elseif ($openingSource === 'replaced') {
+                $payload['replace_reason'] = mb_substr((string) $replaceTakenOverReason, 0, 500);
+            }
             $this->closing->upsertStep($supplierId, $periodId, 'open_next', 'done', $payload, null, $meta['user_id'] ?? null);
             $this->bumpVersion($supplierId, $periodId, $rowVersion);
             $this->audit($supplierId, 'accounting.books_opened', $periodId, [
@@ -3510,6 +3623,8 @@ final class ClosingService
                 'fx_reversal_entry_id' => $fxReversalId,
                 'next_period_id' => $nextId,
                 'document_no' => $docNo,
+                'opening_source' => $openingSource,
+                'taken_over_entry_ids' => $takenOverIds,
             ], $meta);
             return $payload;
         });
@@ -3563,7 +3678,19 @@ final class ClosingService
                                 . 'opening zápis nelze smazat (§17/7). Nejprve znovu otevři následující období.',
                         );
                     }
-                    if ($next !== null) {
+                    // Převzatý otevírací zápis (krok ho jen převzal, nic neúčtoval) patří
+                    // dalšímu roku, ne uzávěrce — revert ho nesmaže, i když nese klíč
+                    // ('opening', next_id) jako ruční otevírací rozvaha. `imported_opening`
+                    // = krok označený hotovým převodním skriptem ještě před touto logikou.
+                    $openPayload = $steps['open_next']['payload'] ?? [];
+                    $keptTakenOver = null;
+                    if (($openPayload['opening_source'] ?? null) === 'taken_over') {
+                        $keptTakenOver = array_values(array_map('intval', (array) ($openPayload['taken_over_entry_ids'] ?? [])));
+                    } elseif (!empty($openPayload['imported_opening']) && $next !== null) {
+                        $keptTakenOver = array_map(static fn (array $e): int => $e['id'],
+                            $this->closing->openingEntriesInPeriod($supplierId, (int) $next['id']));
+                    }
+                    if ($next !== null && $keptTakenOver === null) {
                         $dump = $this->closing->deleteClosingEntry($supplierId, 'opening', (int) $next['id']);
                         if ($dump !== null) {
                             $dumps['opening'] = $dump;
@@ -3588,7 +3715,18 @@ final class ClosingService
                     if ($dump !== null) {
                         $dumps['prepaid_expense_release'] = $dump;
                     }
-                    $this->closing->resetStep($supplierId, $periodId, 'open_next');
+                    if ($keptTakenOver !== null) {
+                        // Krok zpět na pending, ale s evidencí převzatých zápisů (vzor
+                        // estimates/deferrals) — guardy close_books revertu a reopenu je
+                        // podle ní nepočítají za zápis stojící na uzávěrce.
+                        $this->closing->upsertStep($supplierId, $periodId, 'open_next', 'pending', [
+                            'opening_source' => 'taken_over',
+                            'taken_over_entry_ids' => $keptTakenOver,
+                        ], null, $userId);
+                        $result['kept_taken_over_entry_ids'] = $keptTakenOver;
+                    } else {
+                        $this->closing->resetStep($supplierId, $periodId, 'open_next');
+                    }
                     $this->bumpVersion($supplierId, $periodId, $rowVersion);
                     break;
 
@@ -3596,7 +3734,11 @@ final class ClosingService
                     $this->assertStatus($period, ['closed']);
                     $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
                     if ($steps['open_next']['status'] === 'done'
-                        || ($next !== null && $this->closing->hasOpeningEntries($supplierId, (int) $next['id']))) {
+                        || ($next !== null && $this->closing->hasOpeningEntries(
+                            $supplierId,
+                            (int) $next['id'],
+                            $this->closing->takenOverOpeningEntryIds($supplierId, $periodId),
+                        ))) {
                         throw new ClosingException(
                             'revert_order_violation',
                             'Nejprve proveď revert kroku open_next (vynucené pořadí R12).',

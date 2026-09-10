@@ -707,6 +707,34 @@ function openNext() {
   mutate(() => closingApi.openNext(periodId, rowVersion.value), t('accounting.closing.open.done'))
 }
 
+// Převzaté počáteční stavy dalšího roku (převod dat / ruční otevírací rozvaha): při shodě
+// krok zápis převezme, při rozdílu jde dál jen výslovnou náhradou s důvodem.
+const openingTakeover = computed(() => state.value?.opening_takeover ?? null)
+const showReplaceOpening = ref(false)
+const replaceOpeningReason = ref('')
+
+function takeOverOpening() {
+  mutate(() => closingApi.openNext(periodId, rowVersion.value), t('accounting.closing.open.done'))
+}
+
+function replaceTakenOverOpening() {
+  const reason = replaceOpeningReason.value.trim()
+  mutate(() => closingApi.openNext(periodId, rowVersion.value, { replace_taken_over_opening: true, replace_reason: reason }),
+    t('accounting.closing.open.done')).then(ok => {
+    if (ok) {
+      showReplaceOpening.value = false
+      replaceOpeningReason.value = ''
+    }
+  })
+}
+
+function takeoverBadge(status: string): string {
+  if (status === 'match') return 'bg-success-50 text-success-600'
+  if (status === 'mismatch') return 'bg-danger-50 text-danger-600'
+  if (status === 'unavailable') return 'bg-warning-50 text-warning-600'
+  return 'bg-neutral-100 text-neutral-500'
+}
+
 function revertStep(key: ClosingStepKey) {
   if (!confirm(t('accounting.closing.revert.confirm'))) return
   mutate(() => closingApi.revertStep(periodId, key, rowVersion.value), t('accounting.closing.revert.done'))
@@ -1570,6 +1598,14 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
           <template v-if="step('open_next')?.status === 'done'">
             <div class="text-sm space-y-1">
               <div class="text-success-600 font-medium">{{ t('accounting.closing.open.done') }}</div>
+              <div v-if="openNextPayload?.opening_source === 'taken_over'" class="text-neutral-600">
+                <span class="text-xs px-2 py-0.5 rounded font-medium mr-1" :class="takeoverBadge('match')">{{ t('accounting.closing.opening_takeover.status.match') }}</span>
+                {{ t('accounting.closing.opening_takeover.done_taken_over', { count: openNextPayload?.taken_over_accounts ?? 0 }) }}
+                <div class="text-xs text-neutral-500">{{ t('accounting.closing.opening_takeover.revert_keeps') }}</div>
+              </div>
+              <div v-else-if="openNextPayload?.opening_source === 'replaced'" class="text-neutral-600">
+                {{ t('accounting.closing.opening_takeover.done_replaced', { reason: openNextPayload?.replace_reason ?? '' }) }}
+              </div>
               <div v-if="openNextPayload?.fx_reversal_entry_id" class="text-neutral-500">
                 {{ t('accounting.closing.open.fx_reversal_created') }}
               </div>
@@ -1582,13 +1618,69 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
           <template v-else>
             <p class="text-sm text-neutral-600">{{ t('accounting.closing.open.hint') }}</p>
             <p class="text-xs text-neutral-500">{{ t('accounting.closing.open.fx_reversal_note') }}</p>
+
+            <!-- Počáteční stavy dalšího roku: k založení / převzato / rozdíl -->
+            <div v-if="openingTakeover" class="border-t border-neutral-200 pt-3 space-y-2">
+              <div class="flex flex-wrap items-center gap-2 text-sm">
+                <span class="font-medium text-neutral-700">{{ t('accounting.closing.opening_takeover.status_label') }}:</span>
+                <span class="text-xs px-2 py-0.5 rounded font-medium" :class="takeoverBadge(openingTakeover.status)">
+                  {{ t(`accounting.closing.opening_takeover.status.${openingTakeover.status}`) }}
+                </span>
+              </div>
+              <p class="text-sm text-neutral-600">{{ t(`accounting.closing.opening_takeover.${openingTakeover.status}_hint`) }}</p>
+              <p v-if="openingTakeover.status !== 'to_create' && openingTakeover.preliminary" class="text-xs text-warning-700">
+                {{ t('accounting.closing.opening_takeover.preliminary') }}
+              </p>
+              <div v-if="openingTakeover.entries.length" class="text-xs text-neutral-500">
+                {{ t('accounting.closing.opening_takeover.entries') }}:
+                <span v-for="(e, i) in openingTakeover.entries" :key="e.id" class="font-mono">
+                  {{ e.document_no || ('#' + e.id) }} ({{ formatDate(e.entry_date) }}){{ i < openingTakeover.entries.length - 1 ? ', ' : '' }}
+                </span>
+              </div>
+              <div v-if="openingTakeover.status === 'mismatch'" class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                  <thead>
+                    <tr class="text-left text-xs text-neutral-500 border-b border-neutral-200">
+                      <th class="py-1 pr-3 font-medium">{{ t('accounting.closing.opening_takeover.col_account') }}</th>
+                      <th class="py-1 pr-3 font-medium text-right">{{ t('accounting.closing.opening_takeover.col_expected') }}</th>
+                      <th class="py-1 pr-3 font-medium text-right">{{ t('accounting.closing.opening_takeover.col_existing') }}</th>
+                      <th class="py-1 font-medium text-right">{{ t('accounting.closing.opening_takeover.col_difference') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in openingTakeover.diff" :key="row.account_code" class="border-b border-neutral-100">
+                      <td class="py-1 pr-3 font-mono">{{ row.account_code }}</td>
+                      <td class="py-1 pr-3 font-mono text-right whitespace-nowrap">{{ formatMoney(row.expected) }}</td>
+                      <td class="py-1 pr-3 font-mono text-right whitespace-nowrap">{{ formatMoney(row.existing) }}</td>
+                      <td class="py-1 font-mono text-right whitespace-nowrap text-danger-600">{{ formatMoney(row.difference) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p class="text-xs text-neutral-500 mt-1">{{ t('accounting.closing.opening_takeover.compare_note') }}</p>
+              </div>
+            </div>
+
             <div v-if="!auth.canWrite('accounting.periods.close')" class="text-sm text-neutral-400">{{ t('accounting.periods.admin_only') }}</div>
-            <button v-else @click="showOpenConfirm = true"
-              :disabled="busy || !canOpenNextStage || !(state.can_open_next ?? true) || step('close_books')?.status !== 'done'"
-              :class="btnFilled('success')">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
-              {{ t('accounting.closing.open.button') }}
-            </button>
+            <div v-else class="flex flex-wrap gap-2">
+              <button v-if="openingTakeover?.status === 'match'" @click="takeOverOpening"
+                :disabled="busy || !canOpenNextStage || !(state.can_open_next ?? true) || step('close_books')?.status !== 'done'"
+                :class="[btnFilled('success'), 'whitespace-nowrap']">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                {{ t('accounting.closing.opening_takeover.take_over_button') }}
+              </button>
+              <button v-else-if="openingTakeover?.status !== 'mismatch'" @click="showOpenConfirm = true"
+                :disabled="busy || !canOpenNextStage || !(state.can_open_next ?? true) || step('close_books')?.status !== 'done'"
+                :class="[btnFilled('success'), 'whitespace-nowrap']">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
+                {{ t('accounting.closing.open.button') }}
+              </button>
+              <button v-if="openingTakeover?.status === 'mismatch'" @click="showReplaceOpening = true"
+                :disabled="busy || !canOpenNextStage || !(state.can_open_next ?? true) || step('close_books')?.status !== 'done'"
+                :class="[btnOutline('danger'), 'whitespace-nowrap']">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
+                {{ t('accounting.closing.opening_takeover.replace_button') }}
+              </button>
+            </div>
           </template>
         </template>
       </div>
@@ -1748,6 +1840,27 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
           <button @click="openNext" :disabled="busy" :class="btnFilled('success')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
             {{ t('accounting.closing.open.button') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Náhrada převzatých počátečních stavů vypočtenými — výslovná volba s důvodem -->
+    <div v-if="showReplaceOpening" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
+        <h3 class="text-lg font-semibold mb-2">{{ t('accounting.closing.opening_takeover.replace_title') }}</h3>
+        <p class="text-sm text-neutral-600 mb-3">{{ t('accounting.closing.opening_takeover.replace_text') }}</p>
+        <label :for="`${pageId}-replace-opening-reason`" class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.closing.opening_takeover.replace_reason') }}</label>
+        <textarea :id="`${pageId}-replace-opening-reason`" v-model="replaceOpeningReason" rows="3" maxlength="500"
+          :placeholder="t('accounting.closing.opening_takeover.replace_reason_ph')"
+          class="w-full px-2 py-1.5 border border-neutral-300 rounded-md text-sm bg-surface"></textarea>
+        <div class="flex flex-wrap justify-end gap-2 mt-4">
+          <button @click="showReplaceOpening = false" :class="[btnOutline('neutral'), 'whitespace-nowrap']">
+            {{ t('common.cancel') }}
+          </button>
+          <button @click="replaceTakenOverOpening" :disabled="busy || replaceOpeningReason.trim().length < 3" :class="[btnFilled('danger'), 'whitespace-nowrap']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
+            {{ t('accounting.closing.opening_takeover.replace_confirm') }}
           </button>
         </div>
       </div>

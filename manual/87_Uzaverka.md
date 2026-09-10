@@ -415,6 +415,37 @@ panelu se pak zobrazí hláška „Bylo zaúčtováno storno přecenění saldok
 období." Administrátor může i tento krok tlačítkem **„Vzít zpět otevření roku"**
 zrušit.
 
+#### Převzaté počáteční stavy
+
+Následující rok může mít otevírací zápis už dřív, než rok otevřeš v průvodci — typicky
+po převodu dat z jiného účetního systému nebo po ručním zadání otevírací rozvahy při
+zahájení účetnictví. Krok proto nejdřív zjistí, jestli v následujícím období nějaký
+zaúčtovaný otevírací zápis leží, a panel ukáže jeden ze stavů:
+
+| Stav | Význam | Co krok udělá |
+|---|---|---|
+| **K založení** | další rok otevírací zápis nemá | zaúčtuje vypočtený otevírací zápis |
+| **Převzato** | převzatý zápis souhlasí s konečnými stavy | tlačítko **„Převzít počáteční stavy"** označí krok jako hotový a nic nezaúčtuje |
+| **Rozdíl** | převzatý zápis nesouhlasí | otevření roku je zablokované, panel zobrazí tabulku rozdílů |
+
+Porovnává se účet po účtu: konečné stavy rozvahových účtů a výsledek hospodaření na
+účtu 431 (tak, jak by je krok zaúčtoval) proti součtu převzatých otevíracích zápisů.
+Rozvažné účty 70x se vynechávají a účet 431 se srovnává za syntetiku, takže nevadí,
+když převzaté stavy vedou výsledek hospodaření na analytice. Dokud nejsou uzavřené
+knihy, je porovnání jen předběžné.
+
+Při rozdílu máš dvě cesty. Buď rozdíl dohledáš a opravíš (v uzavíraném roce nebo v
+převzatém zápisu), nebo použiješ **„Nahradit převzaté stavy vypočtenými"**. Náhrada
+vyžaduje **povinný důvod**, převzaté otevírací zápisy smaže (jejich obsah se uloží do
+auditní události `accounting.opening_takeover_replaced` spolu s důvodem a tabulkou
+rozdílů) a zaúčtuje vypočtený otevírací zápis z řady **OT**.
+
+> [!NOTE]
+> **„Vzít zpět otevření roku"** převzatý zápis nesmaže — patří k dalšímu roku, ne k
+> uzávěrce. Smažou se jen zápisy, které krok sám zaúčtoval (storno přecenění,
+> rozpuštění časového rozlišení, počáteční stav zásob). Převzatý zápis pak nebrání ani
+> vzetí zpět uzavření knih, ani znovuotevření období.
+
 ## 87.4 Interní kontrola, schválení závěrky a znovuotevření
 
 Jakmile je krok *Uzavření knih* hotový, období je ve stavu **Uzavřené** a je možné
