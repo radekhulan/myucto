@@ -1,6 +1,6 @@
 # Platební karty
 
-Sekce **Firma → Platební karty** vede firemní platební karty a jejich držitele.
+Sekce **Peníze → Platební karty** vede firemní platební karty a jejich držitele.
 Z bankovních výpisů pak aplikace pozná, kterou kartou se platilo, spáruje
 platbu s účtenkou nebo fakturou téže karty a ukáže, ke kterým platbám kartou
 ještě chybí doklad.
