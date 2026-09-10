@@ -23085,6 +23085,8 @@
     "upload_title": "Nahrajte zálohu agendy",
     "upload_hint": "V Money S3 zvolte Zálohovat agendu a nahrajte vzniklý soubor .lz. Záloha se jen čte, instalace Money se převodem nemění.",
     "choose_file": "Soubor zálohy agendy (.lz)",
+    "support_notice": "Tento import je určen pro menší množství dat. Pokud máte v deníku tisíce záznamů nebo speciální požadavky na import, kontaktujte naši podporu. V rámci placeného servisu vám s importem rádi pomůžeme a upravíme ho na míru.",
+    "support_notice_link": "Kontaktovat podporu",
     "file_help_title": "Co je soubor zálohy agendy",
     "file_help_items": [
       "Jeden soubor s příponou .lz, který Money S3 vytvoří funkcí Zálohovat agendu. Jméno obsahuje IČO firmy a číslo agendy, například 12345678ag001.lz.",

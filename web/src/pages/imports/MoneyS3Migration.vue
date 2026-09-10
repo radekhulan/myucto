@@ -270,6 +270,11 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
       <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('money_s3.subtitle') }}</p>
     </div>
 
+    <div class="max-w-3xl rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="money-s3-support-notice">
+      <p>{{ t('money_s3.support_notice') }}</p>
+      <RouterLink to="/admin/support" class="mt-1 inline-block font-medium underline hover:no-underline">{{ t('money_s3.support_notice_link') }}</RouterLink>
+    </div>
+
     <ol class="grid grid-cols-2 gap-2 sm:grid-cols-4">
       <li v-for="step in steps" :key="step.number">
         <button type="button" :disabled="!canGoTo(step.number)" class="flex w-full items-center rounded-lg border px-3 py-3 text-left text-sm transition-colors"

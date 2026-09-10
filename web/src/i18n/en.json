@@ -23085,6 +23085,8 @@
     "upload_title": "Upload the agenda backup",
     "upload_hint": "In Money S3 choose Back up agenda and upload the resulting .lz file. The backup is only read; the Money installation is not changed.",
     "choose_file": "Agenda backup file (.lz)",
+    "support_notice": "This import is intended for smaller amounts of data. If your journal has thousands of records or you have special import requirements, contact our support. As part of our paid service, we will be happy to help you with the import and tailor it to your needs.",
+    "support_notice_link": "Contact support",
     "file_help_title": "What the agenda backup file is",
     "file_help_items": [
       "A single file with the .lz extension that Money S3 creates with its Back up agenda function. The name contains the company ID and the agenda number, for example 12345678ag001.lz.",
