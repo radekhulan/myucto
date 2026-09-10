@@ -9,6 +9,13 @@ const TRANSLATED = new Set([
   'diagnostics.checks.php_extensions.actual_label',
   'diagnostics.checks.php_extensions.expected_label',
   'diagnostics.checks.app_url.values.app_url_invalid_origin',
+  'diagnostics.checks.cron_health.variants.dispatcher_down.label',
+  'diagnostics.checks.cron_health.variants.dispatcher_down.fix',
+  'diagnostics.checks.cron_health.affected_label',
+  'diagnostics.cron_inactive.not_in_use',
+  'diagnostics.cron_inactive.feature_off',
+  'diagnostics.cron_inactive.not_in_use_by_script.cron-epo-status',
+  'diagnostics.schema_findings.table_leftover',
 ])
 
 vi.mock('vue-i18n', () => ({
@@ -82,6 +89,67 @@ describe('EnvironmentCheckList', () => {
 
     expect(labels).toContain('diagnostics.checks.php_extensions.actual_label:')
     expect(labels).not.toContain('diagnostics.actual:')
+  })
+
+  it('varianta nahradí popisek i nápravu a zaseklé úlohy ukáže jen jako podrobnost', () => {
+    const wrapper = mount(EnvironmentCheckList, {
+      props: {
+        checks: [check({
+          id: 'cron_health',
+          status: 'fail',
+          actual: 'dispatcher_down',
+          variant: 'dispatcher_down',
+          meta: { affected: ['cron-dispatch', 'cron-epo-status'] },
+        })],
+      },
+    })
+    const text = wrapper.text()
+
+    expect(text).toContain('diagnostics.checks.cron_health.variants.dispatcher_down.label')
+    expect(text).toContain('diagnostics.checks.cron_health.variants.dispatcher_down.fix')
+    expect(text).not.toContain('diagnostics.checks.cron_health.label')
+    const affected = wrapper.findAll('dd').filter((dd) => dd.text() === 'cron-dispatch, cron-epo-status')
+    expect(affected).toHaveLength(1)
+    expect(affected[0].classes()).not.toContain('text-danger-600')
+  })
+
+  it('u neaktivní úlohy ukáže konkrétní důvod, jinak obecný', () => {
+    const wrapper = mount(EnvironmentCheckList, {
+      props: {
+        checks: [check({
+          id: 'cron_health',
+          status: 'ok',
+          info: 'cron-epo-status, cron-ai-worker',
+          meta: { inactive: { 'cron-epo-status': 'not_in_use', 'cron-ai-worker': 'feature_off' } },
+        })],
+      },
+    })
+    const text = wrapper.text()
+
+    expect(text).toContain('diagnostics.cron_inactive.not_in_use_by_script.cron-epo-status')
+    expect(text).toContain('diagnostics.cron_inactive.feature_off')
+    expect(text).not.toContain('diagnostics.cron_inactive.not_in_use ')
+  })
+
+  it('pozůstatky starší verze ukáže i u kontroly v pořádku, šedě', () => {
+    const wrapper = mount(EnvironmentCheckList, {
+      props: {
+        checks: [check({
+          id: 'schema_integrity',
+          status: 'ok',
+          actual: '0 / 0',
+          meta: {
+            findings: [{ severity: 'info', code: 'table_leftover', object: 'bank_statement_owners', expected: '', actual: '' }],
+            total: 1,
+          },
+        })],
+      },
+    })
+
+    const finding = wrapper.findAll('span').filter((s) => s.text() === 'diagnostics.schema_findings.table_leftover')
+    expect(finding).toHaveLength(1)
+    expect(finding[0].classes()).toContain('text-neutral-600')
+    expect(wrapper.text()).toContain('bank_statement_owners')
   })
 
   it('bezpečný reason code konfigurace přeloží přes slovník kontroly', () => {

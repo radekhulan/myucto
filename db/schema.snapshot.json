@@ -799,7 +799,8 @@
         "1811_money_s3_automation_snapshot.sql",
         "1812_card_clearing.sql",
         "1813_invoice_counter_floor.sql",
-        "1814_gopay_payout_account_default.sql"
+        "1814_gopay_payout_account_default.sql",
+        "1815_drop_leftover_migration_procedures.sql"
     ],
     "tables": {
         "accounting_archives": {

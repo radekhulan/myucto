@@ -51,6 +51,65 @@ final class CronPreflight
     }
 
     /**
+     * Čeká nějaké přímé podání EPO na stav, třeba i s dotazem až později?
+     *
+     * Širší protějšek {@see self::hasEpoWork()} bez termínu dalšího dotazu.
+     * Čte ho {@see CronJobGate}: bez takového podání nemá `cron-epo-status`
+     * co obsluhovat, takže jeho stárnoucí heartbeat není výpadek.
+     */
+    public static function hasPendingEpoAttempts(PDO $pdo): bool
+    {
+        return self::probe($pdo, "
+            SELECT 1 FROM tax_submission_attempts
+             WHERE channel = 'epo_direct'
+               AND status IN ('processing','confirmed','uncertain')
+               AND next_poll_at IS NOT NULL
+               AND poll_count < 12
+             LIMIT 1
+        ");
+    }
+
+    /**
+     * Visí nějaké mzdové podání u ČSSZ? Čeká na protokol, nebo je hotové
+     * a čeká na uzavření transakce.
+     *
+     * Širší protějšek {@see self::hasJmhzTransportWork()} bez termínu dalšího
+     * dotazu a bez stropu pokusů o uzavření. Čte ho {@see CronJobGate}.
+     */
+    public static function hasOpenJmhzTransport(PDO $pdo): bool
+    {
+        try {
+            return PayrollSubmissionTransportAttemptRepository::hasUnfinishedJmhzTransport($pdo);
+        } catch (Throwable) {
+            return true;
+        }
+    }
+
+    /**
+     * Má katalogový worker co obsluhovat?
+     *
+     * Protějšek {@see \MyInvoice\Service\Eshop\CatalogJobDispatcher::tick()}:
+     * tick zpracuje frontu `catalog_jobs` (sklad, ceníky, importy a exporty
+     * katalogu), a napojením e-shopu uklízí feed změn a diagnostiku a plánuje
+     * srovnání. Všechno z toho visí na jedné ze tří tabulek níž. Bez nich
+     * tick jen projde prázdné dotazy.
+     */
+    public static function hasCatalogWorkerUse(PDO $pdo): bool
+    {
+        return self::probe($pdo, "
+            SELECT 1 FROM (
+                SELECT 1 AS work FROM catalog_jobs
+                 WHERE status IN ('queued', 'running')
+                UNION ALL
+                SELECT 1 FROM integration_connections
+                UNION ALL
+                SELECT 1 FROM integration_change_state
+            ) uses
+             LIMIT 1
+        ");
+    }
+
+    /**
      * Čeká nějaké mzdové podání na protokol ČSSZ nebo na uzavření transakce?
      *
      * Výběr sdílí s frontou, aby jiné agendy a vyčerpaná uzavření

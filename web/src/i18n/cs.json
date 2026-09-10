@@ -18975,7 +18975,12 @@
     "mode_dispatcher_desc": "Naplánovaná je jediná položka ({script}, každou minutu), která si sama spočítá, co je na řadě, přeskočí úlohy bez práce a zbytek spustí jako samostatné procesy. Místo {count} položek stačí jedna — cenou je, že její výpadek zastaví všechny úlohy.",
     "mode_confirm": "Přepnout režim plánování na „{mode}“? Samotné přepnutí plán nezmění — crontab / Task Scheduler bude potřeba vygenerovat znovu (v Dockeru restartem kontejneru).",
     "mode_saved": "Režim plánování přepnut na „{mode}“.",
-    "mode_failed": "Přepnutí režimu plánování se nezdařilo."
+    "mode_failed": "Přepnutí režimu plánování se nezdařilo.",
+    "scheduler_down_title": "Plánovač úloh neběží",
+    "scheduler_down_dispatcher_down": "Plánovač {script} se přestal spouštět, proto nejede žádná úloha. Ověř, že je naplánovaný každou minutu a že jeho log nekončí chybou; zaseklé úlohy v tabulce jsou jen důsledek.",
+    "scheduler_down_nothing_runs": "Žádná úloha neproběhla ve svém intervalu, takže nejede cron na serveru. Zkontroluj službu cron nebo Task Scheduler; zaseklé úlohy v tabulce jsou jen důsledek.",
+    "inactive_title": "Neaktivní úlohy ({n})",
+    "inactive_hint": "Tyhle úlohy u instalace nemají co dělat, proto se jejich běh nehlídá. Jakmile práci dostanou, objeví se v tabulce."
   },
   "export": {
     "title": "Export vydaných faktur",
@@ -22187,7 +22192,27 @@
         "fix": "Zkontrolujte naplánování úloh a jejich poslední běh na stránce Plánované úlohy.",
         "actual_label": "Zaseklé úlohy",
         "expected_label": "Očekáváno",
-        "info_label": "Neaktivní úlohy (nenastavené nebo vypnuté)"
+        "info_label": "Neaktivní úlohy (nenastavené, vypnuté nebo bez práce)",
+        "affected_label": "Stojí kvůli tomu",
+        "values": {
+          "dispatcher_down": "plánovač cron-dispatch neběží",
+          "nothing_runs": "žádná plánovaná úloha neběží",
+          "scheduler_running": "plánovač spouští úlohy"
+        },
+        "variants": {
+          "dispatcher_down": {
+            "label": "Plánovač úloh neběží",
+            "actual_label": "Stav",
+            "impact": "Instalace je v režimu jednoho dispatcheru a ten se přestal spouštět. Nespouští se proto žádná úloha: nevznikají zálohy, neodcházejí upomínky, nestahují se kurzy ČNB. Úlohy samotné v pořádku jsou, jen je nikdo nespouští.",
+            "fix": "Ověřte, že je v crontabu nebo Task Scheduleru naplánovaný cron-dispatch každou minutu a že jeho log v log/cron nekončí chybou. Ručně ho spustíte příkazem php api/bin/cron-dispatch.php. V Dockeru zkontrolujte, že v kontejneru běží cron."
+          },
+          "nothing_runs": {
+            "label": "Plánovač úloh neběží",
+            "actual_label": "Stav",
+            "impact": "Žádná plánovaná úloha neproběhla ve svém intervalu, takže nejede cron na serveru, ne jednotlivé úlohy. Nevznikají zálohy, neodcházejí upomínky, nestahují se kurzy ČNB.",
+            "fix": "Zkontrolujte, že běží služba cron (Linux) nebo Task Scheduler (Windows) a že jsou úlohy naplánované pod účtem s právem zápisu do log/ a storage/. Návod s cestami tohoto serveru je na stránce Plánované úlohy."
+          }
+        }
       },
       "app_debug": {
         "label": "Ladicí režim",
@@ -22238,7 +22263,24 @@
       "routine_extra": "Uložená procedura navíc",
       "routine_changed": "Změněná uložená procedura",
       "routine_renamed": "Uložená procedura pod jiným názvem",
-      "migration_unknown": "Migrace, kterou tato verze nezná"
+      "migration_unknown": "Migrace, kterou tato verze nezná",
+      "migration_leftover": "Pozůstatek starší verze, lze bezpečně odstranit (záznam migrace)",
+      "table_leftover": "Pozůstatek starší verze, lze bezpečně odstranit (tabulka)",
+      "routine_leftover": "Pozůstatek starší verze, lze bezpečně odstranit (procedura)"
+    },
+    "cron_inactive": {
+      "not_configured": "chybí nastavený adresář, se kterým úloha pracuje",
+      "feature_off": "funkce, kterou úloha obsluhuje, není u žádné firmy zapnutá",
+      "managed_only": "patří jen ke spravovanému provozu",
+      "disabled_by_config": "vypnuto konfigurací (cron.disabled_jobs)",
+      "not_in_use": "úloha nemá co obsluhovat",
+      "not_in_use_by_script": {
+        "cron-bank-connections": "žádné aktivní bankovní napojení",
+        "cron-bank-email-notices": "žádná zapnutá IMAP schránka bankovních avíz",
+        "cron-catalog-worker": "žádná katalogová úloha ve frontě ani napojení e-shopu",
+        "cron-epo-status": "žádné podání EPO nečeká na stav",
+        "cron-jmhz-poll": "žádné mzdové podání nečeká na protokol ČSSZ"
+      }
     },
     "bundle": {
       "title": "Diagnostický balíček",

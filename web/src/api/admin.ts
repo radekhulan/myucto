@@ -341,6 +341,8 @@ export interface CronScheduleContext {
   individual_count: number
   /** Přepnutí režimu samo nic nepřeplánuje — crontab se musí vygenerovat znovu. */
   requires_replan: boolean
+  /** Stojí celý plánovač (mrtvý dispatcher, nebo cron nespouští nic)? */
+  scheduler_down?: 'dispatcher_down' | 'nothing_runs' | null
 }
 
 export interface SetCronScheduleModeResponse {
@@ -365,6 +367,8 @@ export interface CronInstallContext {
 
 export interface CronJobsResponse {
   jobs: CronJob[]
+  /** Úlohy, které instalace nehlídá, protože nemají co dělat: skript => důvod. */
+  inactive?: Record<string, string> | []
   server_time: string
   install?: CronInstallContext
   schedule?: CronScheduleContext

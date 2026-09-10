@@ -6,10 +6,15 @@
  * Problémy jdou nahoru, `ok` dolů. U seznamových kontrol (chybějící rozšíření,
  * adresáře bez zápisu) se popisek řádku přebíjí přes i18n — „Naměřeno: intl"
  * se totiž čte jako „nainstalováno je jen intl", což je pravý opak pravdy.
+ *
+ * Kontrola s `variant` je jiná podoba téhož nálezu (třeba „plánovač neběží"
+ * místo seznamu zaseklých úloh) a texty bere přednostně z
+ * `diagnostics.checks.<id>.variants.<variant>.*`.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { DiagnosticCheck } from '@/api/diagnostics'
+import { cronInactiveEntries, cronInactiveReason, type CronInactiveJob } from './cronInactive'
 
 const props = withDefaults(
   defineProps<{
@@ -32,15 +37,26 @@ const visibleChecks = computed<DiagnosticCheck[]>(() => {
   return list.sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9))
 })
 
-/** Popisek kontroly z i18n; když klíč chybí, ukáže se aspoň `id`. */
-function checkText(id: string, part: 'label' | 'impact' | 'fix'): string {
-  const key = `diagnostics.checks.${id}.${part}`
-  return te(key) ? t(key) : part === 'label' ? id : ''
+/** Klíč textu varianty kontroly, pokud ho varianta má. */
+function variantKey(check: DiagnosticCheck, part: string): string | null {
+  if (!check.variant) return null
+  const key = `diagnostics.checks.${check.id}.variants.${check.variant}.${part}`
+  return te(key) ? key : null
 }
 
-/** Popisek hodnoty — kontrola si ho smí přebít vlastním klíčem. */
-function valueLabel(id: string, part: 'actual' | 'expected' | 'info'): string {
-  const key = `diagnostics.checks.${id}.${part}_label`
+/** Popisek kontroly z i18n; když klíč chybí, ukáže se aspoň `id`. */
+function checkText(check: DiagnosticCheck, part: 'label' | 'impact' | 'fix'): string {
+  const variant = variantKey(check, part)
+  if (variant) return t(variant)
+  const key = `diagnostics.checks.${check.id}.${part}`
+  return te(key) ? t(key) : part === 'label' ? check.id : ''
+}
+
+/** Popisek hodnoty — kontrola i její varianta si ho smí přebít vlastním klíčem. */
+function valueLabel(check: DiagnosticCheck, part: 'actual' | 'expected' | 'info' | 'affected'): string {
+  const variant = variantKey(check, `${part}_label`)
+  if (variant) return t(variant)
+  const key = `diagnostics.checks.${check.id}.${part}_label`
   return te(key) ? t(key) : t(`diagnostics.${part}`)
 }
 
@@ -49,6 +65,21 @@ function checkValue(check: DiagnosticCheck, part: 'actual' | 'expected' | 'info'
   const value = check[part] ?? ''
   const key = `diagnostics.checks.${check.id}.values.${value}`
   return value && te(key) ? t(key) : value
+}
+
+/** Čeho se nález týká, když ho varianta shrnuje do jedné věty (úlohy stojící kvůli plánovači). */
+function affectedOf(check: DiagnosticCheck): string[] {
+  const list = check.meta?.affected
+  return check.variant && Array.isArray(list) ? list.map(String) : []
+}
+
+/** Neaktivní plánované úlohy i s důvodem — jen u kontrol, které je v `meta.inactive` nesou. */
+function inactiveOf(check: DiagnosticCheck): CronInactiveJob[] {
+  return cronInactiveEntries(check.meta?.inactive)
+}
+
+function inactiveText(job: CronInactiveJob): string {
+  return cronInactiveReason(job, t, te)
 }
 
 interface CheckFinding {
@@ -77,6 +108,17 @@ function findingLabel(code: string): string {
 
 function findingTitle(finding: CheckFinding): string {
   return [finding.expected, finding.actual].filter((v) => v !== '').join(' → ')
+}
+
+function findingClass(severity: string): string {
+  switch (severity) {
+    case 'fail':
+      return 'text-danger-600 font-semibold'
+    case 'warn':
+      return 'text-warning-800'
+    default:
+      return 'text-neutral-600'
+  }
 }
 
 function rowClass(status: string): string {
@@ -117,12 +159,12 @@ function statusPill(status: string): string {
     >
       <div class="flex flex-wrap items-start gap-2">
         <span :class="statusPill(check.status)">{{ t(`diagnostics.status.${check.status}`) }}</span>
-        <span class="text-sm font-medium text-neutral-900">{{ checkText(check.id, 'label') }}</span>
+        <span class="text-sm font-medium text-neutral-900">{{ checkText(check, 'label') }}</span>
       </div>
 
       <dl class="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-neutral-600">
         <div v-if="check.actual" class="flex gap-1.5">
-          <dt class="text-neutral-500 shrink-0">{{ valueLabel(check.id, 'actual') }}:</dt>
+          <dt class="text-neutral-500 shrink-0">{{ valueLabel(check, 'actual') }}:</dt>
           <!-- U nálezu je `actual` to špatné (chybějící rozšíření, nízký limit) —
                ať to jde poznat na první pohled, ne až po přečtení pilulky vlevo. -->
           <dd
@@ -131,28 +173,37 @@ function statusPill(status: string): string {
           >{{ checkValue(check, 'actual') }}</dd>
         </div>
         <div v-if="check.expected" class="flex gap-1.5">
-          <dt class="text-neutral-500 shrink-0">{{ valueLabel(check.id, 'expected') }}:</dt>
+          <dt class="text-neutral-500 shrink-0">{{ valueLabel(check, 'expected') }}:</dt>
           <dd class="font-mono break-all">{{ checkValue(check, 'expected') }}</dd>
+        </div>
+        <!-- Podrobnost souhrnného nálezu: šedě, opravuje se příčina, ne každá položka. -->
+        <div v-if="affectedOf(check).length" class="flex gap-1.5 sm:col-span-2">
+          <dt class="text-neutral-500 shrink-0">{{ valueLabel(check, 'affected') }}:</dt>
+          <dd class="font-mono break-all">{{ affectedOf(check).join(', ') }}</dd>
         </div>
         <!-- `info` je informace, ne nález — zůstává šedá i u kontroly ve stavu fail,
              ať se nepřičte k tomu, co má uživatel opravovat. -->
         <div v-if="check.info" class="flex gap-1.5 sm:col-span-2">
-          <dt class="text-neutral-500 shrink-0">{{ valueLabel(check.id, 'info') }}:</dt>
-          <dd class="font-mono break-all">{{ checkValue(check, 'info') }}</dd>
+          <dt class="text-neutral-500 shrink-0">{{ valueLabel(check, 'info') }}:</dt>
+          <dd v-if="inactiveOf(check).length" class="flex flex-col gap-0.5">
+            <span v-for="job in inactiveOf(check)" :key="job.script">
+              <span class="font-mono">{{ job.script }}</span> · {{ inactiveText(job) }}
+            </span>
+          </dd>
+          <dd v-else class="font-mono break-all">{{ checkValue(check, 'info') }}</dd>
         </div>
       </dl>
 
-      <ul
-        v-if="(check.status === 'fail' || check.status === 'warn') && findingsOf(check).length"
-        class="mt-1.5 space-y-0.5 text-xs"
-      >
+      <!-- Nálezy i u kontroly v pořádku: pozůstatky starší verze stav nezvedají,
+           ale správce o nich vědět má. -->
+      <ul v-if="findingsOf(check).length" class="mt-1.5 space-y-0.5 text-xs">
         <li
           v-for="(finding, index) in findingsOf(check)"
           :key="index"
           class="flex flex-wrap gap-x-1.5"
           :title="findingTitle(finding)"
         >
-          <span :class="finding.severity === 'fail' ? 'text-danger-600 font-semibold' : 'text-warning-800'">
+          <span :class="findingClass(finding.severity)">
             {{ findingLabel(finding.code) }}
           </span>
           <span class="font-mono break-all text-neutral-700">{{ finding.object }}</span>
@@ -163,12 +214,12 @@ function statusPill(status: string): string {
       </ul>
 
       <template v-if="check.status === 'fail' || check.status === 'warn'">
-        <p v-if="checkText(check.id, 'impact')" class="mt-1.5 text-sm text-neutral-700">
-          {{ checkText(check.id, 'impact') }}
+        <p v-if="checkText(check, 'impact')" class="mt-1.5 text-sm text-neutral-700">
+          {{ checkText(check, 'impact') }}
         </p>
-        <p v-if="checkText(check.id, 'fix')" class="mt-0.5 text-sm text-neutral-600">
+        <p v-if="checkText(check, 'fix')" class="mt-0.5 text-sm text-neutral-600">
           <span class="font-medium">{{ t('diagnostics.fix') }}:</span>
-          {{ checkText(check.id, 'fix') }}
+          {{ checkText(check, 'fix') }}
           <a
             v-if="check.manual"
             :href="`/manual?ch=${check.manual}`"

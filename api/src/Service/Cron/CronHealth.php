@@ -53,6 +53,11 @@ final class CronHealth
     /** Žádný běh v historii, ale instalace ještě nestihla ani jednu periodu úlohy. */
     public const PENDING = 'pending';
 
+    /** Dispatcher nežije, takže se nespouští nic z toho, co spouští on. */
+    public const SCHEDULER_DISPATCHER_DOWN = 'dispatcher_down';
+    /** V režimu jednotlivých úloh neproběhla ve svém intervalu žádná: cron na serveru nejede. */
+    public const SCHEDULER_NOTHING_RUNS = 'nothing_runs';
+
     /** Zdroj, ze kterého stav vychází — kvůli srozumitelnému tooltipu v UI. */
     public const SOURCE_SELF = 'self';
     public const SOURCE_DISPATCHER = 'dispatcher';
@@ -103,6 +108,33 @@ final class CronHealth
         }
 
         return [$health, self::SOURCE_SELF];
+    }
+
+    /**
+     * Stojí celý plánovač, ne jednotlivé úlohy?
+     *
+     * Když nejede dispatcher nebo cron samotný, jsou všechny úlohy „zaseklé"
+     * naráz. Hlásit je po jedné vede k hledání chyby v každé z nich, přitom
+     * náprava je jediná. Proto se to pozná tady a hlásí se jeden nález.
+     *
+     * DISPATCHER: rozhoduje jeho vlastní heartbeat ({@see isDispatcherAlive()}).
+     * INDIVIDUAL: aspoň dvě úlohy po limitu a žádná ve svém intervalu. Jediná
+     * zaseklá úloha vedle běžících je nález o té úloze, ne o plánovači.
+     *
+     * Sdílí ho kontrola prostředí i stránka Plánované úlohy.
+     *
+     * @param int $overdue Kolik aktivních úloh je po svém limitu.
+     * @param int $running Kolik aktivních úloh proběhlo ve svém intervalu (i s chybou, i nečinně).
+     */
+    public static function schedulerDown(string $mode, bool $dispatcherAlive, int $overdue, int $running): ?string
+    {
+        if ($overdue === 0) {
+            return null;
+        }
+        if ($mode === CronScheduleMode::DISPATCHER) {
+            return $dispatcherAlive ? null : self::SCHEDULER_DISPATCHER_DOWN;
+        }
+        return $overdue >= 2 && $running === 0 ? self::SCHEDULER_NOTHING_RUNS : null;
     }
 
     /**

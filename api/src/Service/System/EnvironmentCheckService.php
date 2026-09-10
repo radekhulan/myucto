@@ -440,6 +440,7 @@ final class EnvironmentCheckService
             'stale'             => [],
             'inactive'          => [],
             'idle'              => [],
+            'scheduler_down'    => null,
         ];
 
         if (!$this->db->hasTable('cron_heartbeat')) {
@@ -485,7 +486,7 @@ final class EnvironmentCheckService
         }
 
         return ['available' => true, 'jobs' => count($rows), 'inactive' => $inactive]
-            + self::classifyCronHeartbeats($rows, $inactive, $gatedScripts, $dispatcherAlive, $now);
+            + self::classifyCronHeartbeats($rows, $inactive, $gatedScripts, $dispatcherAlive, $now, $mode);
     }
 
     /**
@@ -497,7 +498,8 @@ final class EnvironmentCheckService
      * @param list<array<string,mixed>> $rows řádky `cron_heartbeat`
      * @param array<string,string> $inactive skript => důvod nečinnosti
      * @param list<string> $gatedScripts skripty, které dispatcher spouští jen když mají práci
-     * @return array{oldest_ok_age_sec:?int,stale:list<string>,idle:list<string>}
+     * @param string $mode {@see CronScheduleMode}
+     * @return array{oldest_ok_age_sec:?int,stale:list<string>,idle:list<string>,scheduler_down:?string}
      */
     public static function classifyCronHeartbeats(
         array $rows,
@@ -505,15 +507,17 @@ final class EnvironmentCheckService
         array $gatedScripts,
         bool $dispatcherAlive,
         int $now,
+        string $mode = CronScheduleMode::INDIVIDUAL,
     ): array {
         $catalog = [];
         foreach (CronCatalog::all() as $job) {
             $catalog[(string) $job['script']] = $job;
         }
 
-        $oldest = null;
-        $stale  = [];
-        $idle   = [];
+        $oldest  = null;
+        $stale   = [];
+        $idle    = [];
+        $running = 0;
 
         foreach ($rows as $row) {
             $script = (string) ($row['script'] ?? '');
@@ -552,10 +556,70 @@ final class EnvironmentCheckService
                 $idle[] = $script;
             } elseif ($health === CronHealth::OVERDUE || $health === CronHealth::OVERDUE_AND_FAILING) {
                 $stale[] = $script;
+                continue;
             }
+            $running++;
         }
 
-        return ['oldest_ok_age_sec' => $oldest, 'stale' => $stale, 'idle' => $idle];
+        return [
+            'oldest_ok_age_sec' => $oldest,
+            'stale'             => $stale,
+            'idle'              => $idle,
+            'scheduler_down'    => CronHealth::schedulerDown($mode, $dispatcherAlive, count($stale), $running),
+        ];
+    }
+
+    /**
+     * Kontrola „Plánované úlohy" z roztříděných heartbeatů.
+     *
+     * Stojí-li sám plánovač, je to JEDEN nález s vlastní nápravou (varianta
+     * `scheduler_down`), ne seznam všech úloh, které kvůli němu stojí. Ty
+     * zůstávají v `meta.stale` jako podrobnost.
+     *
+     * @param array<string,mixed> $cron výstup {@see cronStatus()}
+     * @return array<string,mixed>
+     */
+    public static function cronHealthCheck(array $cron): array
+    {
+        $stale     = array_values((array) ($cron['stale'] ?? []));
+        $inactive  = (array) ($cron['inactive'] ?? []);
+        $scheduler = is_string($cron['scheduler_down'] ?? null) ? $cron['scheduler_down'] : null;
+        $meta = [
+            'stale'          => $stale,
+            'inactive'       => $inactive,
+            'idle'           => array_values((array) ($cron['idle'] ?? [])),
+            'scheduler_down' => $scheduler,
+        ];
+        $info = implode(', ', array_slice(array_keys($inactive), 0, 8));
+
+        if (empty($cron['available'])) {
+            return self::check('cron_health', self::STATUS_SKIP, '', '', '999_Reseni_problemu', $meta, $info);
+        }
+
+        if ($scheduler !== null) {
+            return self::check(
+                'cron_health',
+                self::STATUS_FAIL,
+                $scheduler,
+                'scheduler_running',
+                '999_Reseni_problemu',
+                $meta + ['affected' => $stale],
+                $info,
+                $scheduler,
+            );
+        }
+
+        return self::check(
+            'cron_health',
+            $stale === [] ? self::STATUS_OK : self::STATUS_FAIL,
+            implode(', ', array_slice($stale, 0, 8)),
+            // Ne plochých 26 hodin: měsíční úloha se za dvanáct dní nezasekla.
+            // Interval si nese každá úloha v katalogu sama.
+            'každá aktivní úloha proběhla ve svém intervalu',
+            '999_Reseni_problemu',
+            $meta,
+            $info,
+        );
     }
 
     // ── Vyhodnocení pravidel ─────────────────────────────────────────────────
@@ -802,7 +866,7 @@ final class EnvironmentCheckService
         if ($onlyIds === null || in_array('schema_integrity', $onlyIds, true)) {
             $schema = $this->guard(
                 fn () => SchemaIntegrityService::forConnection($this->db)->report(),
-                ['status' => self::STATUS_SKIP, 'reason' => 'unavailable', 'counts' => ['fail' => 0, 'warn' => 0], 'findings' => []],
+                ['status' => self::STATUS_SKIP, 'reason' => 'unavailable', 'counts' => ['fail' => 0, 'warn' => 0, 'info' => 0], 'findings' => []],
             );
             $checks[] = $this->check(
                 'schema_integrity',
@@ -820,21 +884,7 @@ final class EnvironmentCheckService
             );
         }
 
-        $cron     = $runtime['cron'] ?? [];
-        $stale    = (array) ($cron['stale'] ?? []);
-        $inactive = (array) ($cron['inactive'] ?? []);
-        $idle     = (array) ($cron['idle'] ?? []);
-        $checks[] = $this->check(
-            'cron_health',
-            empty($cron['available']) ? self::STATUS_SKIP : ($stale === [] ? self::STATUS_OK : self::STATUS_FAIL),
-            $stale === [] ? '' : implode(', ', array_slice($stale, 0, 8)),
-            // Ne plochých 26 hodin: měsíční úloha se za dvanáct dní nezasekla.
-            // Interval si nese každá úloha v katalogu sama.
-            'každá aktivní úloha proběhla ve svém intervalu',
-            '97_Bezpecnost',
-            ['stale' => array_values($stale), 'inactive' => $inactive, 'idle' => array_values($idle)],
-            implode(', ', array_slice(array_keys($inactive), 0, 8))
-        );
+        $checks[] = self::cronHealthCheck((array) ($runtime['cron'] ?? []));
 
         // --- Provozní hygiena ---
         $appUrl = $this->appUrl->status();
@@ -913,11 +963,21 @@ final class EnvironmentCheckService
      * @param array<string,mixed> $meta
      * @param string $info Zjištění, které není nález — ukazuje se v každém stavu
      *                     a nikdy nezvedá závažnost.
+     * @param string $variant Jiná podoba téže kontroly s vlastním popisem dopadu
+     *                        a nápravy (i18n `diagnostics.checks.<id>.variants.<variant>`).
      * @return array<string,mixed>
      */
-    private function check(string $id, string $status, string $actual, string $expected, string $manual, array $meta = [], string $info = ''): array
-    {
-        return [
+    private static function check(
+        string $id,
+        string $status,
+        string $actual,
+        string $expected,
+        string $manual,
+        array $meta = [],
+        string $info = '',
+        string $variant = '',
+    ): array {
+        $check = [
             'id'       => $id,
             'status'   => $status,
             'actual'   => $actual,
@@ -926,6 +986,10 @@ final class EnvironmentCheckService
             'manual'   => $manual,
             'meta'     => $meta,
         ];
+        if ($variant !== '') {
+            $check['variant'] = $variant;
+        }
+        return $check;
     }
 
     /**

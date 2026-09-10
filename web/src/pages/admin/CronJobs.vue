@@ -6,12 +6,14 @@ import { useToast } from '@/composables/useToast'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 import { useAuthStore } from '@/stores/auth'
+import { cronInactiveEntries, cronInactiveReason, type CronInactiveJob } from '@/components/system/cronInactive'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
 
 const jobs = ref<CronJob[]>([])
+const inactiveJobs = ref<CronInactiveJob[]>([])
 const install = ref<CronInstallContext | null>(null)
 const schedule = ref<CronScheduleContext | null>(null)
 const serverTime = ref<string>('')
@@ -33,6 +35,7 @@ async function load(signal?: AbortSignal) {
   try {
     const r = await adminApi.cronJobs(signal)
     jobs.value = r.jobs
+    inactiveJobs.value = cronInactiveEntries(r.inactive)
     install.value = r.install ?? null
     schedule.value = r.schedule ?? null
     serverTime.value = r.server_time
@@ -339,6 +342,20 @@ async function copySetup() {
       </div>
     </div>
 
+    <!-- Stojí-li plánovač, je to jedna příčina pro všechny zaseklé úlohy v tabulce.
+         Stejné pravidlo (CronHealth::schedulerDown) hlásí i kontrola prostředí. -->
+    <div
+      v-if="schedule?.scheduler_down"
+      class="mb-4 flex items-start gap-2 rounded border border-danger-300 bg-danger-50 px-3 py-2"
+      role="alert"
+    >
+      <span class="text-danger-600 shrink-0 text-sm leading-5">⚠</span>
+      <div class="text-xs text-danger-800">
+        <p class="font-semibold">{{ t('cron_jobs.scheduler_down_title') }}</p>
+        <p class="mt-0.5">{{ t(`cron_jobs.scheduler_down_${schedule.scheduler_down}`, { script: schedule.dispatcher_script }) }}</p>
+      </div>
+    </div>
+
     <div v-if="loading && !jobs.length" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
@@ -519,6 +536,23 @@ async function copySetup() {
     </div>
 
     <p v-if="!hasProblems && jobs.length" class="mt-3 text-xs text-success-600">✓ {{ t('cron_jobs.all_ok') }}</p>
+
+    <!-- Úlohy, které instalace nehlídá, protože nemají co dělat — stejný
+         seznam i důvody jako v Diagnostice. -->
+    <details v-if="inactiveJobs.length" class="mt-4 rounded-lg border border-neutral-200">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-medium text-neutral-700">
+        {{ t('cron_jobs.inactive_title', { n: inactiveJobs.length }) }}
+      </summary>
+      <div class="px-4 pb-3">
+        <p class="text-xs text-neutral-500 mb-2">{{ t('cron_jobs.inactive_hint') }}</p>
+        <ul class="space-y-1 text-xs text-neutral-600">
+          <li v-for="job in inactiveJobs" :key="job.script" class="flex flex-wrap gap-x-1.5">
+            <span class="font-mono text-neutral-800">{{ job.script }}</span>
+            <span>· {{ cronInactiveReason(job, t, te) }}</span>
+          </li>
+        </ul>
+      </div>
+    </details>
 
     <!-- Jak úlohy naplánovat — sbaleno, řeší se jednou při instalaci. -->
     <details v-if="install && jobs.length" class="mt-6 rounded-lg border border-neutral-200">

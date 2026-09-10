@@ -26,7 +26,9 @@ use PDO;
  *   - fail — chybí něco, na čem stojí správnost dat: tabulka, sloupec, jiný typ
  *     nebo NULL, unikátní index, cizí klíč, CHECK, trigger, rutina, auditní historie,
  *   - warn — odchylka, která funkci nebere: collation, výchozí hodnota, engine,
- *     neunikátní index, jiné tělo triggeru, objekty navíc.
+ *     neunikátní index, jiné tělo triggeru, objekty navíc,
+ *   - info — známý pozůstatek starší verze ({@see self::KNOWN_LEFTOVERS}); nic
+ *     nezvedá, jen nabízí SQL pro ruční úklid.
  */
 final class SchemaIntegrityService
 {
@@ -34,9 +36,43 @@ final class SchemaIntegrityService
     public const STATUS_WARN = 'warn';
     public const STATUS_FAIL = 'fail';
     public const STATUS_SKIP = 'skip';
+    /** Závažnost nálezu, ne stav kontroly: pozůstatek starší verze. */
+    public const SEVERITY_INFO = 'info';
 
     /** Tabulky, které aplikace zakládá za běhu mimo migrace. */
     private const RUNTIME_TABLES = [InstanceRestoreTriggers::RECOVERY_TABLE];
+
+    /**
+     * Známé pozůstatky starších verzí: objekty, které po sobě nechala dřívější
+     * historie migrací a které současný kód nepoužívá. Hlásí se jako informace
+     * s SQL pro ruční odstranění, ne jako varování. Jméno je konkrétní, žádné
+     * vzory: neznámý objekt navíc musí dál varovat.
+     *
+     * Tabulku nemaže žádná migrace, protože v ní můžou být data; o smazání
+     * rozhoduje správce.
+     *
+     * @var array<string,array<string,string>> druh => jméno => proč je to pozůstatek
+     */
+    private const KNOWN_LEFTOVERS = [
+        'migration' => [
+            '1110_tax_evidence_dpfo_audit.sql'
+                => 'migrace starší řady, která z repozitáře zmizela; její změny nesou pozdější migrace',
+            '1720_gopay_payout_account_no_default.sql'
+                => 'krátce vydaná a vrácená migrace; její efekt srovnává 1814_gopay_payout_account_default.sql',
+        ],
+        'table' => [
+            'bank_statement_owners'
+                => 'tabulka starší verze bankovních výpisů; současný kód ji nečte ani nezapisuje',
+        ],
+        'routine' => [
+            'sp_f1_add_system_versioning'                    => 'dočasná procedura migrace 1029',
+            'sp_journal_versioning_selfheal'                 => 'dočasná procedura migrace 1167',
+            'migrate_payroll_contacts_1193'                  => 'dočasná procedura migrace 1193',
+            'myucto_1401_accumulator_health'                 => 'dočasná procedura migrace 1401',
+            'migrate_cash_amount_guard_1505'                 => 'dočasná procedura migrace 1505',
+            'assert_payroll_registration_event_business_keys' => 'dočasná procedura migrace 1605',
+        ],
+    ];
 
     public function __construct(
         private readonly PDO $pdo,
@@ -85,7 +121,7 @@ final class SchemaIntegrityService
     public function report(): array
     {
         $skip = static fn (string $reason): array => [
-            'status' => self::STATUS_SKIP, 'reason' => $reason, 'counts' => ['fail' => 0, 'warn' => 0], 'findings' => [],
+            'status' => self::STATUS_SKIP, 'reason' => $reason, 'counts' => ['fail' => 0, 'warn' => 0, 'info' => 0], 'findings' => [],
         ];
 
         $snapshot = SchemaSnapshot::load($this->snapshotPath());
@@ -106,26 +142,47 @@ final class SchemaIntegrityService
             return $skip('migrations_pending');
         }
 
-        $findings = [];
-        foreach (array_diff($applied, $files) as $unknown) {
-            $findings[] = self::finding(self::STATUS_WARN, 'migration_unknown', $unknown, '', 'applied');
-        }
-        $findings = array_merge($findings, self::compare($snapshot, SchemaSnapshot::capture($this->pdo, $files)));
+        $findings = array_merge(
+            self::unknownMigrations($applied, $files),
+            self::compare($snapshot, SchemaSnapshot::capture($this->pdo, $files)),
+        );
 
         return self::summarize($findings);
     }
 
     /**
+     * Migrace evidované jako proběhlé, které tahle verze nezná. Známý
+     * pozůstatek starší historie je informace, cokoli jiného varování.
+     *
+     * @param list<string> $applied
+     * @param list<string> $files
+     * @return list<array{severity:string,code:string,object:string,expected:string,actual:string}>
+     */
+    public static function unknownMigrations(array $applied, array $files): array
+    {
+        $findings = [];
+        foreach (array_diff($applied, $files) as $unknown) {
+            $findings[] = self::finding(self::STATUS_WARN, 'migration_unknown', (string) $unknown, '', 'applied');
+        }
+        return self::markLeftovers($findings);
+    }
+
+    /**
      * @param list<array{severity:string,code:string,object:string,expected:string,actual:string}> $findings
-     * @return array{status:string,reason:string,counts:array{fail:int,warn:int},findings:list<array{severity:string,code:string,object:string,expected:string,actual:string}>}
+     * @return array{status:string,reason:string,counts:array{fail:int,warn:int,info:int},findings:list<array{severity:string,code:string,object:string,expected:string,actual:string}>}
      */
     public static function summarize(array $findings): array
     {
+        $rank = static fn (string $severity): int => match ($severity) {
+            self::STATUS_FAIL => 0,
+            self::STATUS_WARN => 1,
+            default           => 2,
+        };
         usort($findings, static fn (array $a, array $b): int =>
-            [$a['severity'] === self::STATUS_FAIL ? 0 : 1, $a['object'], $a['code']]
-            <=> [$b['severity'] === self::STATUS_FAIL ? 0 : 1, $b['object'], $b['code']]);
+            [$rank($a['severity']), $a['object'], $a['code']]
+            <=> [$rank($b['severity']), $b['object'], $b['code']]);
 
-        $counts = ['fail' => 0, 'warn' => 0];
+        $counts = ['fail' => 0, 'warn' => 0, 'info' => 0];
         foreach ($findings as $finding) {
             $counts[$finding['severity']]++;
         }
@@ -221,7 +278,44 @@ final class SchemaIntegrityService
                 static fn (): bool => true, changedIsFail: false),
         );
 
+        return self::markLeftovers($findings);
+    }
+
+    /**
+     * Přebývající objekt ze seznamu {@see self::KNOWN_LEFTOVERS} přeznačí na
+     * informaci `<druh>_leftover`. Očekávaná hodnota nese důvod, skutečná SQL
+     * pro ruční odstranění.
+     *
+     * @param list<array{severity:string,code:string,object:string,expected:string,actual:string}> $findings
+     * @return list<array{severity:string,code:string,object:string,expected:string,actual:string}>
+     */
+    private static function markLeftovers(array $findings): array
+    {
+        $kinds = ['migration_unknown' => 'migration', 'table_extra' => 'table', 'routine_extra' => 'routine'];
+        foreach ($findings as $i => $finding) {
+            $kind = $kinds[$finding['code']] ?? null;
+            $reason = $kind !== null ? (self::KNOWN_LEFTOVERS[$kind][$finding['object']] ?? null) : null;
+            if ($reason === null) {
+                continue;
+            }
+            $findings[$i] = self::finding(
+                self::SEVERITY_INFO,
+                $kind . '_leftover',
+                $finding['object'],
+                $reason,
+                self::removalSql($kind, $finding['object']),
+            );
+        }
         return $findings;
+    }
+
+    private static function removalSql(string $kind, string $name): string
+    {
+        return match ($kind) {
+            'migration' => "DELETE FROM migrations WHERE filename = '" . $name . "';",
+            'table'     => 'DROP TABLE IF EXISTS `' . $name . '`;',
+            default     => 'DROP PROCEDURE IF EXISTS `' . $name . '`;',
+        };
     }
 
     /**

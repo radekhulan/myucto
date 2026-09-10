@@ -767,7 +767,8 @@
       "sent_emails"
     ],
     "cron-jobs": [
-      "cron_jobs"
+      "cron_jobs",
+      "diagnostics"
     ],
     "admin-users": [
       "roles",

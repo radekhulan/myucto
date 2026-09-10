@@ -52,6 +52,41 @@ final class CronJobGate
     public const INACTIVE_DISABLED_BY_CONFIG = 'disabled_by_config';
     /** Úloha dává smysl jen ve spravovaném provozu, a ten tu není zapnutý. */
     public const INACTIVE_MANAGED_ONLY = 'managed_only';
+    /**
+     * Volitelná úloha nemá u téhle instalace co obsluhovat: žádné bankovní
+     * napojení, IMAP schránka, podání čekající na stav… Od FEATURE_OFF se liší
+     * tím, že nejde o zapnutou funkci firmy, ale o to, jestli ji někdo používá.
+     */
+    public const INACTIVE_NOT_IN_USE = 'not_in_use';
+
+    /** Aspoň jedno zapnuté bankovní napojení s tokenem. */
+    public const USAGE_BANK_CONNECTIONS = 'bank_connections';
+    /** Aspoň jedna zapnutá IMAP schránka bankovních avíz. */
+    public const USAGE_BANK_EMAIL_NOTICES = 'bank_email_notices';
+    /** Fronta katalogových úloh nebo napojení e-shopu. */
+    public const USAGE_CATALOG = 'catalog';
+    /** Přímé podání EPO čekající na stav. */
+    public const USAGE_EPO_PENDING = 'epo_pending';
+    /** Mzdové podání čekající na protokol ČSSZ nebo na uzavření transakce. */
+    public const USAGE_JMHZ_TRANSPORT = 'jmhz_transport';
+
+    /**
+     * Sondy k `requires_usage` z {@see CronCatalog}. Každá je v {@see CronPreflight},
+     * vedle brány, kterou si úloha dělá sama před prací, a je stejně široká nebo
+     * širší. Kdyby byla užší, schovala by úlohu, která práci má.
+     *
+     * Dynamické podmínky, proto jen v {@see inactiveReason()}, nikdy
+     * v {@see isSchedulable()}: crontab se kvůli nim přegenerovat nesmí.
+     *
+     * @var array<string,array{class-string,string}>
+     */
+    private const USAGE_PROBES = [
+        self::USAGE_BANK_CONNECTIONS   => [CronPreflight::class, 'hasBankConnections'],
+        self::USAGE_BANK_EMAIL_NOTICES => [CronPreflight::class, 'hasBankEmailNoticeAccounts'],
+        self::USAGE_CATALOG            => [CronPreflight::class, 'hasCatalogWorkerUse'],
+        self::USAGE_EPO_PENDING        => [CronPreflight::class, 'hasPendingEpoAttempts'],
+        self::USAGE_JMHZ_TRANSPORT     => [CronPreflight::class, 'hasOpenJmhzTransport'],
+    ];
 
     /** Cfg klíč se seznamem jmen úloh z {@see CronCatalog}, které mají na téhle instalaci zůstat vypnuté. */
     private const DISABLED_JOBS_CONFIG_KEY = 'cron.disabled_jobs';
@@ -93,6 +128,9 @@ final class CronJobGate
 
     /** @var array<string,bool> */
     private array $featureCache = [];
+
+    /** @var array<string,bool> */
+    private array $usageCache = [];
 
     /** @var array<string,true>|null */
     private ?array $disabledJobsCache = null;
@@ -140,6 +178,10 @@ final class CronJobGate
         $feature = $job['requires_feature'] ?? null;
         if (is_string($feature) && $feature !== '' && !$this->hasFeature($feature)) {
             return self::INACTIVE_FEATURE_OFF;
+        }
+        $usage = $job['requires_usage'] ?? null;
+        if (is_string($usage) && $usage !== '' && !$this->isInUse($usage)) {
+            return self::INACTIVE_NOT_IN_USE;
         }
         return null;
     }
@@ -330,6 +372,26 @@ final class CronJobGate
             return $this->featureCache[$feature] = ($stmt === false || $stmt->fetchColumn() !== false);
         } catch (Throwable) {
             return $this->featureCache[$feature] = true; // fail-open
+        }
+    }
+
+    /**
+     * Neznámý název sondy je překlep v katalogu — stejně jako u funkcí tedy
+     * úlohu nechává aktivní.
+     */
+    private function isInUse(string $usage): bool
+    {
+        if (array_key_exists($usage, $this->usageCache)) {
+            return $this->usageCache[$usage];
+        }
+        $probe = self::USAGE_PROBES[$usage] ?? null;
+        if ($probe === null || $this->pdo === null) {
+            return $this->usageCache[$usage] = true;
+        }
+        try {
+            return $this->usageCache[$usage] = (bool) $probe($this->pdo);
+        } catch (Throwable) {
+            return $this->usageCache[$usage] = true; // fail-open
         }
     }
 

@@ -373,14 +373,48 @@ na fakturu / 14 dní.
    Linuxu vlastníka a oprávnění adresářů.
 3. Spusť ručně `php api/bin/cron-bank-scan.php` a zkontroluj konkrétní chybu.
 
-### 999.6.3 „K doúčtování“ není prázdné, ale Automat ano
+### 999.6.3 Diagnostika hlásí zaseklé plánované úlohy
+
+Kontrola **Plánované úlohy** v Systém → Diagnostika posuzuje jen úlohy, které
+na instalaci mají co dělat. Úloha je **neaktivní** a jako zaseklá se nehlásí,
+když:
+
+| Úloha | Neaktivní, dokud |
+|---|---|
+| `cron-bank-scan`, `cron-scan-purchase-inbox` | není nastavený adresář, který skenují |
+| `cron-bank-connections` | neexistuje zapnuté bankovní napojení |
+| `cron-bank-email-notices` | není zapnutá IMAP schránka bankovních avíz |
+| `cron-catalog-worker` | nečeká katalogová úloha (sklad, ceník, import) a není napojený e-shop |
+| `cron-epo-status` | nečeká žádné přímé podání EPO na stav |
+| `cron-jmhz-poll` | nejsou zapnuté mzdy, nebo žádné mzdové podání nečeká na protokol ČSSZ |
+| `cron-jmhz-source-monitor`, mzdové úlohy | nejsou u žádné firmy zapnuté mzdy |
+| `cron-ai-worker` | žádná firma nemá zapnutého AI asistenta |
+| `cron-payroll-post`, `cron-vat-clearing` | žádná firma nevede podvojné účetnictví |
+| `cron-storage-usage` | instalace neběží ve spravovaném provozu |
+
+Seznam neaktivních úloh i s důvodem ukazuje kontrola jako informaci, na stránce
+Plánované úlohy je pod tabulkou. Jakmile úloha práci dostane (připojíte banku,
+odešlete podání), je znovu aktivní a hlídá se její interval. Povinné úlohy jako
+zálohy, kurzy ČNB, upomínky nebo opakované faktury jsou aktivní vždy.
+
+Když stojí **sám plánovač**, hlásí kontrola jediný problém **Plánovač úloh
+neběží** a zaseklé úlohy uvede jen jako podrobnost. Náprava je jedna:
+
+- v režimu **Jeden dispatcher** ověř, že je každou minutu naplánovaný
+  `cron-dispatch` a že jeho log v `log/cron` nekončí chybou; ručně ho spustíš
+  příkazem `php api/bin/cron-dispatch.php`,
+- v režimu **Jednotlivé úlohy** ověř, že běží služba cron (Linux) nebo Task
+  Scheduler (Windows) a že úlohy běží pod účtem s právem zápisu do `log/`
+  a `storage/`.
+
+### 999.6.4 „K doúčtování“ není prázdné, ale Automat ano
 
 To je očekávané. **Automat** zobrazuje návrhy a blokace automatizačního motoru.
 **K doúčtování** navíc inventarizuje bankovní pohyby bez jakéhokoli návrhu,
 nezaúčtované vydané/přijaté doklady a otevřené žádosti o dokument. Otevři akci
 na řádku; společná fronta je read-only a sama zápis nevytváří.
 
-### 999.6.4 V reportu Úplnost dokladů chybí nebo přebývá položka
+### 999.6.5 V reportu Úplnost dokladů chybí nebo přebývá položka
 
 Report vychází z aktuálních vazeb. Bankovní pohyb zmizí po doložení a párování
 nebo po vzniku aktivního bankovního zápisu; stornovaný zápis se za aktivní
@@ -388,7 +422,7 @@ nepočítá. Zkontroluj nastavený práh dnů a směr příchozí/odchozí. Druh
 reportu vychází ze saldokonta 311/321 a ukazuje jen doklady po splatnosti s
 nenulovým zůstatkem, nikoli všechny faktury ve stavu „nezaplaceno“.
 
-### 999.6.5 Valutová pokladna nenabízí úhradu faktury nebo převod
+### 999.6.6 Valutová pokladna nenabízí úhradu faktury nebo převod
 
 Není to chyba oprávnění. Valutová pokladna podporuje PPD Prodej/Ostatní a VPD
 Nákup/Ostatní s kurzem a CZK protihodnotou. Úhrada cizoměnové faktury přes
@@ -396,7 +430,7 @@ Nákup/Ostatní s kurzem a CZK protihodnotou. Úhrada cizoměnové faktury přes
 záměrně blokuje. Proveď doložený ruční zápis v deníku. V daňové evidenci je
 pokladna pouze korunová.
 
-### 999.6.6 AI kontace nic nenavrhla
+### 999.6.7 AI kontace nic nenavrhla
 
 Ověř zapnutí AI asistence pro daný typ, přihlašovací údaje poskytovatele,
 potvrzenou DPA, rezidenční politiku a denní limit. Nepoužitelná odpověď levného
@@ -404,7 +438,7 @@ modelu může být jednou zopakována silnějším modelem; pokud ani ta neprojd
 položka zůstane ruční. AI nikdy nezaúčtuje položku sama. Pokus a jeho výsledek
 jsou uložené v auditní stopě návrhu.
 
-### 999.6.7 Úplné mzdy zastavily výpočet v ruční kontrole
+### 999.6.8 Úplné mzdy zastavily výpočet v ruční kontrole
 
 Úplné mzdy jsou zkušební agenda. Stav **Ruční kontrola** je bezpečnostní výsledek,
 ne technická porucha: pro rozhodné datum může chybět účinný a odborně schválený
@@ -416,7 +450,7 @@ a nepoužívej jej jako jediný podklad pro výplatu nebo podání. Podrobný po
 v kapitolách [Mzdové běhy](63_Mzdove_behy.md) a
 [Legislativní pravidla mezd](75_Legislativni_pravidla_mezd.md).
 
-### 999.6.8 Odkaz do EPO po otevření zmizel
+### 999.6.9 Odkaz do EPO po otevření zmizel
 
 To je očekávané. Handoff URL je jednorázová a portál ji spotřebuje prvním
 otevřením; MyÚčto ji proto podruhé nenabídne. Pokud jsi podání v otevřeném okně
@@ -531,6 +565,21 @@ Typické příčiny odchylky:
 |---|---|
 | **Nevyhovuje** | chybí tabulka, sloupec, unikátní index, cizí klíč, kontrola CHECK, trigger, uložená procedura nebo auditní historie, případně má sloupec jiný typ |
 | **S výhradami** | jiná collation, výchozí hodnota nebo engine, obyčejný index, jiné tělo triggeru, objekty navíc |
+| **Informace** | známý pozůstatek starší verze, stav kontroly nezhoršuje |
+
+**Pozůstatky starších verzí.** Některé objekty po sobě nechala dřívější historie
+migrací a současná verze je nepoužívá. Kontrola je zná jménem a místo varování
+je ukáže jako informaci „pozůstatek starší verze, lze bezpečně odstranit“:
+
+| Objekt | Co to je | Odstranění |
+|---|---|---|
+| záznam migrace `1110_tax_evidence_dpfo_audit.sql` | migrace starší řady, kterou nahradily pozdější | `DELETE FROM migrations WHERE filename = '1110_tax_evidence_dpfo_audit.sql';` |
+| záznam migrace `1720_gopay_payout_account_no_default.sql` | krátce vydaná a vrácená migrace, efekt srovnává 1814 | `DELETE FROM migrations WHERE filename = '1720_gopay_payout_account_no_default.sql';` |
+| tabulka `bank_statement_owners` | tabulka starší verze bankovních výpisů | `DROP TABLE IF EXISTS bank_statement_owners;` |
+
+Tabulku aplikace sama nemaže, protože v ní můžou zůstat data. Před smazáním si
+udělej zálohu databáze. Dočasné procedury, které po sobě měly migrace uklidit
+(například `sp_journal_versioning_selfheal`), odstraní migrace 1815 sama.
 
 Dokud čekají nespuštěné migrace, kontrola se **přeskočí**: rozdíl by byl jen
 seznam toho, co migrace teprve přinesou. Nejdřív proto spusť

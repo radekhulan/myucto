@@ -10,6 +10,7 @@ use MyInvoice\Service\Cron\CronJobGate;
 use MyInvoice\Service\Cron\CronScheduleMode;
 use PDO;
 use PDOStatement;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -147,6 +148,82 @@ final class CronJobGateRelevanceTest extends TestCase
         self::assertSame(CronJobGate::INACTIVE_OTHER_MODE, $gate->inactiveReason($job, CronScheduleMode::INDIVIDUAL));
     }
 
+    /**
+     * Volitelné úlohy, které na instalaci nemají co obsluhovat. Bez vlastní
+     * brány svítily v diagnostice jako zaseklé, přestože jen neměly práci.
+     *
+     * @return iterable<string,array{string}>
+     */
+    public static function optionalJobProvider(): iterable
+    {
+        yield 'bankovní napojení' => ['cron-bank-connections'];
+        yield 'e-mailová avíza' => ['cron-bank-email-notices'];
+        yield 'katalogový worker' => ['cron-catalog-worker'];
+        yield 'stav podání EPO' => ['cron-epo-status'];
+    }
+
+    #[DataProvider('optionalJobProvider')]
+    public function testOptionalJobWithNothingToServeIsNotInUse(string $script): void
+    {
+        $gate = new CronJobGate(new Config([]), $this->pdoReturning(false));
+
+        self::assertSame(CronJobGate::INACTIVE_NOT_IN_USE, $gate->inactiveReason($this->job($script)));
+    }
+
+    #[DataProvider('optionalJobProvider')]
+    public function testOptionalJobWithSomethingToServeIsRelevant(string $script): void
+    {
+        $gate = new CronJobGate(new Config([]), $this->pdoReturning('1'));
+
+        self::assertNull($gate->inactiveReason($this->job($script)));
+    }
+
+    /** Hlášení JMHZ i hlídání jeho dokumentace existují jen kvůli mzdám. */
+    public function testJmhzJobsAreInactiveWithoutPayroll(): void
+    {
+        $gate = new CronJobGate(new Config([]), $this->pdoReturning(false));
+
+        self::assertSame(CronJobGate::INACTIVE_FEATURE_OFF, $gate->inactiveReason($this->job('cron-jmhz-poll')));
+        self::assertSame(CronJobGate::INACTIVE_FEATURE_OFF, $gate->inactiveReason($this->job('cron-jmhz-source-monitor')));
+    }
+
+    /** Se mzdami, ale bez otevřeného podání nemá dotazování ČSSZ na co čekat. */
+    public function testJmhzPollWithPayrollButWithoutOpenSubmissionIsNotInUse(): void
+    {
+        $gate = new CronJobGate(
+            new Config([]),
+            $this->pdoAnswering(static fn (string $sql): bool => str_contains($sql, 'payroll_enabled')),
+        );
+
+        self::assertSame(CronJobGate::INACTIVE_NOT_IN_USE, $gate->inactiveReason($this->job('cron-jmhz-poll')));
+        self::assertNull($gate->inactiveReason($this->job('cron-jmhz-source-monitor')));
+    }
+
+    /** Povinné úlohy na tom, co je na instalaci zapnuté, nezávisí nikdy. */
+    public function testMandatoryJobsNeverDependOnUsage(): void
+    {
+        $gate = new CronJobGate(new Config([]), $this->pdoReturning(false));
+
+        foreach ([
+            'cron-backup', 'cron-cleanup', 'cron-cnb-rates', 'cron-send-reminders',
+            'cron-generate-recurring-invoices', 'cron-journal-integrity-check', 'cron-license-renew',
+        ] as $script) {
+            self::assertNull($gate->inactiveReason($this->job($script)), $script);
+        }
+    }
+
+    /** Fail-open platí i pro nové brány: nečitelná databáze úlohu neumlčí. */
+    public function testUnreadableDatabaseKeepsOptionalJobsRelevant(): void
+    {
+        $pdo = $this->createStub(PDO::class);
+        $pdo->method('query')->willThrowException(new \PDOException('no such table'));
+        $gate = new CronJobGate(new Config([]), $pdo);
+
+        foreach (['cron-bank-connections', 'cron-bank-email-notices', 'cron-catalog-worker', 'cron-epo-status', 'cron-jmhz-poll'] as $script) {
+            self::assertNull($gate->inactiveReason($this->job($script)), $script);
+        }
+    }
+
     /** `isVisibleInUi()` nesmí být druhá definice relevance, jen její predikát. */
     public function testVisibilityMirrorsInactiveReason(): void
     {
@@ -181,6 +258,19 @@ final class CronJobGateRelevanceTest extends TestCase
 
         $pdo = $this->createStub(PDO::class);
         $pdo->method('query')->willReturn($stmt);
+
+        return $pdo;
+    }
+
+    /** @param callable(string):bool $answer Najde dotaz řádek? */
+    private function pdoAnswering(callable $answer): PDO
+    {
+        $pdo = $this->createStub(PDO::class);
+        $pdo->method('query')->willReturnCallback(function (string $sql) use ($answer): PDOStatement {
+            $stmt = $this->createStub(PDOStatement::class);
+            $stmt->method('fetchColumn')->willReturn($answer($sql) ? '1' : false);
+            return $stmt;
+        });
 
         return $pdo;
     }

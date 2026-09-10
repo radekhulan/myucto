@@ -18975,7 +18975,12 @@
     "mode_dispatcher_desc": "A single entry is scheduled ({script}, every minute) that works out what is due, skips jobs with nothing to do and launches the rest as separate processes. One entry instead of {count} — the trade-off is that its failure stops every job.",
     "mode_confirm": "Switch scheduling mode to “{mode}”? Switching alone does not change the schedule — the crontab / Task Scheduler has to be regenerated (restart the container on Docker).",
     "mode_saved": "Scheduling mode switched to “{mode}”.",
-    "mode_failed": "Failed to switch scheduling mode."
+    "mode_failed": "Failed to switch scheduling mode.",
+    "scheduler_down_title": "The job scheduler is not running",
+    "scheduler_down_dispatcher_down": "The {script} scheduler has stopped running, so no job runs. Check that it is scheduled every minute and that its log does not end with an error; the stale jobs in the table are only the consequence.",
+    "scheduler_down_nothing_runs": "No job ran within its interval, so cron on the server is not running. Check the cron service or Task Scheduler; the stale jobs in the table are only the consequence.",
+    "inactive_title": "Inactive jobs ({n})",
+    "inactive_hint": "These jobs have nothing to do on this installation, so their runs are not watched. Once they get work, they appear in the table."
   },
   "export": {
     "title": "Issued invoices export",
@@ -22187,7 +22192,27 @@
         "fix": "Check the schedule and the last run on the Scheduled jobs page.",
         "actual_label": "Stale jobs",
         "expected_label": "Expected",
-        "info_label": "Inactive jobs (not configured or turned off)"
+        "info_label": "Inactive jobs (not configured, turned off or with nothing to do)",
+        "affected_label": "Stopped as a result",
+        "values": {
+          "dispatcher_down": "the cron-dispatch scheduler is not running",
+          "nothing_runs": "no scheduled job is running",
+          "scheduler_running": "the scheduler launches the jobs"
+        },
+        "variants": {
+          "dispatcher_down": {
+            "label": "The job scheduler is not running",
+            "actual_label": "State",
+            "impact": "The installation uses a single dispatcher and it has stopped running. No job is launched: no backups are made, no reminders go out, no ČNB rates are fetched. The jobs themselves are fine, nobody starts them.",
+            "fix": "Check that cron-dispatch is scheduled every minute in crontab or Task Scheduler and that its log in log/cron does not end with an error. Run it by hand with php api/bin/cron-dispatch.php. On Docker check that cron is running inside the container."
+          },
+          "nothing_runs": {
+            "label": "The job scheduler is not running",
+            "actual_label": "State",
+            "impact": "No scheduled job ran within its interval, so it is cron on the server that stopped, not individual jobs. No backups are made, no reminders go out, no ČNB rates are fetched.",
+            "fix": "Check that the cron service (Linux) or Task Scheduler (Windows) is running and that the jobs run under an account allowed to write into log/ and storage/. The Scheduled jobs page has instructions with this server's paths."
+          }
+        }
       },
       "app_debug": {
         "label": "Debug mode",
@@ -22238,7 +22263,24 @@
       "routine_extra": "Extra stored routine",
       "routine_changed": "Changed stored routine",
       "routine_renamed": "Stored routine under a different name",
-      "migration_unknown": "Migration unknown to this version"
+      "migration_unknown": "Migration unknown to this version",
+      "migration_leftover": "Leftover from an older version, safe to remove (migration record)",
+      "table_leftover": "Leftover from an older version, safe to remove (table)",
+      "routine_leftover": "Leftover from an older version, safe to remove (procedure)"
+    },
+    "cron_inactive": {
+      "not_configured": "the directory the job works with is not configured",
+      "feature_off": "the feature the job serves is not enabled for any company",
+      "managed_only": "belongs to managed hosting only",
+      "disabled_by_config": "turned off by configuration (cron.disabled_jobs)",
+      "not_in_use": "the job has nothing to serve",
+      "not_in_use_by_script": {
+        "cron-bank-connections": "no active bank connection",
+        "cron-bank-email-notices": "no enabled IMAP mailbox for bank notices",
+        "cron-catalog-worker": "no catalog job queued and no e-shop connection",
+        "cron-epo-status": "no EPO submission is waiting for its status",
+        "cron-jmhz-poll": "no payroll submission is waiting for a ČSSZ protocol"
+      }
     },
     "bundle": {
       "title": "Diagnostic bundle",

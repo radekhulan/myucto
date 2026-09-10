@@ -46,17 +46,19 @@ if ($json) {
         printf("PŘESKOČENO: %s\n", $reasons[$report['reason']] ?? $report['reason']);
     } else {
         foreach ($report['findings'] as $f) {
-            printf("[%s] %-22s %s\n", $f['severity'] === 'fail' ? 'FAIL' : 'WARN', $f['code'], $f['object']);
+            printf("[%s] %-22s %s\n", strtoupper($f['severity']), $f['code'], $f['object']);
             if ($f['expected'] !== '') {
                 printf("         očekáváno: %s\n", $f['expected']);
             }
             if ($f['actual'] !== '') {
-                printf("         v databázi: %s\n", $f['actual']);
+                printf($f['severity'] === SchemaIntegrityService::SEVERITY_INFO
+                    ? "         odstranění: %s\n"
+                    : "         v databázi: %s\n", $f['actual']);
             }
         }
-        printf("%sNálezů: %d chyb, %d varování → %s\n",
+        printf("%sNálezů: %d chyb, %d varování, %d pozůstatků starší verze → %s\n",
             $report['findings'] === [] ? '' : "\n",
-            $report['counts']['fail'], $report['counts']['warn'],
+            $report['counts']['fail'], $report['counts']['warn'], $report['counts']['info'],
             match ($report['status']) {
                 SchemaIntegrityService::STATUS_OK => 'SHODA S MIGRACEMI',
                 SchemaIntegrityService::STATUS_WARN => 'SHODA S VÝHRADAMI',

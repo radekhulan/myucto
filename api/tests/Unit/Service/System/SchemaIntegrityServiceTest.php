@@ -30,6 +30,57 @@ final class SchemaIntegrityServiceTest extends TestCase
         );
     }
 
+    /**
+     * Objekt, který po sobě nechala starší verze a který současný kód nepoužívá,
+     * není odchylka od migrací, jen úklid. Varování by vedlo k hledání chyby tam,
+     * kde žádná není. Neznámá tabulka navíc ale varováním zůstává.
+     */
+    public function testKnownLeftoverTableIsInfoButUnknownExtraTableWarns(): void
+    {
+        $actual = self::snapshot();
+        $actual['tables']['bank_statement_owners'] = self::table();
+        $actual['tables']['leftover'] = self::table();
+
+        self::assertSame(
+            ['warn table_extra leftover', 'info table_leftover bank_statement_owners'],
+            self::codes(SchemaIntegrityService::compare(self::snapshot(), $actual)),
+        );
+    }
+
+    public function testKnownLeftoverAloneKeepsStructureOkAndOffersRemoval(): void
+    {
+        $actual = self::snapshot();
+        $actual['tables']['bank_statement_owners'] = self::table();
+
+        $summary = SchemaIntegrityService::summarize(SchemaIntegrityService::compare(self::snapshot(), $actual));
+
+        self::assertSame('ok', $summary['status']);
+        self::assertSame(['fail' => 0, 'warn' => 0, 'info' => 1], $summary['counts']);
+        self::assertSame('DROP TABLE IF EXISTS `bank_statement_owners`;', $summary['findings'][0]['actual']);
+    }
+
+    public function testRemovedMigrationOfOlderVersionIsInfoButUnknownMigrationWarns(): void
+    {
+        $findings = SchemaIntegrityService::unknownMigrations(
+            [
+                '0001_init.sql',
+                '1110_tax_evidence_dpfo_audit.sql',
+                '1720_gopay_payout_account_no_default.sql',
+                '1999_neznama.sql',
+            ],
+            ['0001_init.sql'],
+        );
+
+        self::assertSame(
+            [
+                'warn migration_unknown 1999_neznama.sql',
+                'info migration_leftover 1110_tax_evidence_dpfo_audit.sql',
+                'info migration_leftover 1720_gopay_payout_account_no_default.sql',
+            ],
+            self::codes($findings),
+        );
+    }
+
     public function testLostSystemVersioningFails(): void
     {
         $actual = self::snapshot();

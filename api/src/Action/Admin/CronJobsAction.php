@@ -108,6 +108,9 @@ final class CronJobsAction
         }
 
         $rows = [];
+        $inactive = [];
+        $overdue = 0;
+        $running = 0;
         foreach ($catalog as $job) {
             $reason = $gate->inactiveReason($job, $mode);
 
@@ -117,7 +120,12 @@ final class CronJobsAction
             // `cron.disabled_jobs` — to je explicitní vůle admina/spravované
             // instalace, takže se má v přehledu ukázat jako "vypnuto konfigurací",
             // ne zmizet stejně jako automaticky nerelevantní úlohy.
+            // Proč úloha chybí, jde ven v `inactive` — stejný seznam ukazuje
+            // i kontrola prostředí.
             if ($reason !== null && $reason !== CronJobGate::INACTIVE_DISABLED_BY_CONFIG) {
+                if ($reason !== CronJobGate::INACTIVE_OTHER_MODE) {
+                    $inactive[(string) $job['script']] = $reason;
+                }
                 continue;
             }
 
@@ -176,6 +184,12 @@ final class CronJobsAction
                 $installAgeSec,
             );
 
+            if (in_array($health, [CronHealth::OVERDUE, CronHealth::OVERDUE_AND_FAILING, CronHealth::NEVER_RAN], true)) {
+                $overdue++;
+            } elseif (in_array($health, [CronHealth::OK, CronHealth::FAILING, CronHealth::IDLE], true)) {
+                $running++;
+            }
+
             $report = null;
             if ($last !== null && !empty($last['last_report'])) {
                 $report = json_decode((string) $last['last_report'], true);
@@ -226,9 +240,16 @@ final class CronJobsAction
         // Server time pro UI (klient může mít jinou TZ než server).
         return Json::ok($response, [
             'jobs'        => $rows,
+            // Skript => důvod ({@see CronJobGate}::INACTIVE_*). Bez úloh jiného
+            // režimu plánování: ty nejsou neaktivní, jen se plánují jinak.
+            'inactive'    => $inactive,
             'server_time' => date('c'),
             'install'     => $this->installContext(),
-            'schedule'    => $this->scheduleContext($pdo),
+            'schedule'    => $this->scheduleContext($pdo) + [
+                // Stejné pravidlo jako kontrola prostředí: stojí-li plánovač,
+                // je to jeden problém, ne seznam zaseklých úloh.
+                'scheduler_down' => CronHealth::schedulerDown($mode, $dispatcherAlive, $overdue, $running),
+            ],
         ]);
     }
 

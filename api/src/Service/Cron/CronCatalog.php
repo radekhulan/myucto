@@ -33,8 +33,14 @@ final class CronCatalog
      *   requires_managed?:bool,
      *   requires_ai_opt_in?:bool,
      *   requires_feature?:string,
+     *   requires_usage?:string,
      *   dispatcher_only?:bool
      * }>
+     *
+     * `requires_usage` (volitelné) = co musí na instalaci existovat, aby
+     * volitelná úloha měla co obsluhovat (bankovní napojení, IMAP schránka,
+     * podání čekající na stav…). Sondu k němu drží {@see CronJobGate}. Povinné
+     * úlohy (zálohy, kurzy ČNB, upomínky…) tenhle klíč nemají nikdy.
      *
      * `requires_managed` (volitelné) = úloha dává smysl jen ve spravovaném
      * provozu (`app.managed`). Na self-hostu se nenaplánuje ani nezobrazí —
@@ -157,6 +163,7 @@ final class CronCatalog
             ],
             [
                 'script' => 'cron-bank-email-notices',
+                'requires_usage' => CronJobGate::USAGE_BANK_EMAIL_NOTICES,
                 'recommended' => 'every_30_min',
                 'linux_cron' => '*/30 * * * *',
                 'windows_schtasks' => '/sc minute /mo 30',
@@ -166,6 +173,7 @@ final class CronCatalog
             ],
             [
                 'script' => 'cron-bank-connections',
+                'requires_usage' => CronJobGate::USAGE_BANK_CONNECTIONS,
                 'recommended' => 'every_30_min',
                 'linux_cron' => '*/30 * * * *',
                 'windows_schtasks' => '/sc minute /mo 30',
@@ -212,6 +220,7 @@ final class CronCatalog
             ],
             [
                 'script' => 'cron-epo-status',
+                'requires_usage' => CronJobGate::USAGE_EPO_PENDING,
                 'recommended' => 'every_1_min',
                 'linux_cron' => '* * * * *',
                 'windows_schtasks' => '/sc minute /mo 1',
@@ -227,6 +236,8 @@ final class CronCatalog
                 // hodinový tick by u čerstvého podání zbytečně čekal. Vlastní
                 // odstup si hlídá ledger, tick ho jen obsluhuje.
                 'script' => 'cron-jmhz-poll',
+                'requires_feature' => CronJobGate::FEATURE_PAYROLL,
+                'requires_usage' => CronJobGate::USAGE_JMHZ_TRANSPORT,
                 'recommended' => 'every_10_min',
                 'linux_cron' => '*/10 * * * *',
                 'windows_schtasks' => '/sc minute /mo 10',
@@ -240,6 +251,8 @@ final class CronCatalog
                 // Změna se ukáže v provozním přehledu jako konkrétní dokument,
                 // verze a URL; nikdy sama neinstaluje číselník ani nemění mzdy.
                 'script' => 'cron-jmhz-source-monitor',
+                // Hlídá dokumentaci mzdového hlášení; bez mezd nemá čtenáře.
+                'requires_feature' => CronJobGate::FEATURE_PAYROLL,
                 'recommended' => 'daily_0700',
                 'linux_cron' => '0 7 * * *',
                 'windows_schtasks' => '/sc daily /st 07:00',
@@ -372,6 +385,7 @@ final class CronCatalog
             ],
             [
                 'script' => 'cron-catalog-worker',
+                'requires_usage' => CronJobGate::USAGE_CATALOG,
                 'recommended' => 'every_minute',
                 'linux_cron' => '* * * * *',
                 'windows_schtasks' => '/sc minute /mo 1',

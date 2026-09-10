@@ -13,6 +13,8 @@ export interface DiagnosticCheck {
   info?: string
   /** Kapitola manuálu s nápravou (`/manual?ch=…`). */
   manual: string
+  /** Jiná podoba téhož nálezu s vlastními texty (`diagnostics.checks.<id>.variants.<variant>`). */
+  variant?: string
   meta?: Record<string, unknown>
 }
 
