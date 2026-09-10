@@ -62,6 +62,12 @@ odkaz pro nastavení nového hesla (platnost 1 hodina).
 
 ![Reset hesla](img/04_reset.webp)
 
+Ve spravované instalaci posílá obnovu hesla, pozvánku k nastavení hesla a přihlašovací
+kódy systém pod odesílatelem nastaveným provozovatelem hostingu. Tyto zprávy nepřebírají
+firemní odesílací profil, logo ani kontaktní patičku a neobsahují hlavičku Reply-To.
+Odesílání faktur nadále používá firemní nastavení. Ve vlastní (self-hosted) instalaci
+se i u systémových zpráv používá nastavený firemní profil a jeho obvyklé náhradní hodnoty.
+
 Pokud e-mail nepřišel:
 
 - Zkontroluj spam.

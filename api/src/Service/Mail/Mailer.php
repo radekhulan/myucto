@@ -17,6 +17,7 @@ use MyInvoice\Service\Mail\RateLimit\MailRateLimiter;
 use MyInvoice\Service\Mail\RateLimit\MailRecipientBatcher;
 use MyInvoice\Service\Mail\RateLimit\MailSendCounter;
 use MyInvoice\Service\Signing\Email\EmailSigningService;
+use MyInvoice\Service\System\ManagedModeGuard;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\Envelope;
 use Symfony\Component\Mailer\Mailer as SymfonyMailer;
@@ -254,7 +255,11 @@ final class Mailer
         $twig = $this->twig();
 
         $vars['locale'] = $locale;
-        if (!isset($vars['supplier'])) {
+        $managedSystemMail = (new ManagedModeGuard($this->config))->isManaged()
+            && in_array($code, ['password_reset', 'user_invite', 'login_otp'], true);
+        if ($managedSystemMail) {
+            $vars['supplier'] = null;
+        } elseif (!isset($vars['supplier'])) {
             $vars['supplier'] = $this->loadSupplierFooter();
         }
         // Pre-compute display dimensions pro logo (HTML width/height attributy
@@ -306,7 +311,7 @@ final class Mailer
         $globalFromEmail = (string) $this->config->get('smtp.from_email');
         $globalFromName  = (string) $this->config->get('smtp.from_name');
         $supplier = is_array($vars['supplier'] ?? null) ? $vars['supplier'] : null;
-        $emailProfile = $emailProfileOverride ?? $this->defaultEmailProfile($supplier);
+        $emailProfile = $managedSystemMail ? null : ($emailProfileOverride ?? $this->defaultEmailProfile($supplier));
         $fromName = $globalFromName;
         if ($supplier !== null) {
             $supName = (string) ($supplier['display_name'] ?? $supplier['company_name'] ?? '');
@@ -378,7 +383,7 @@ final class Mailer
             $replyEmail = (string) $this->config->get('smtp.reply_to_email', '');
             $replyName  = (string) $this->config->get('smtp.reply_to_name', '');
         }
-        if ($replyEmail !== '') {
+        if (!$managedSystemMail && $replyEmail !== '') {
             $email->replyTo(new Address($replyEmail, $replyName));
         }
 
@@ -700,7 +705,7 @@ final class Mailer
      */
     private function stampInstanceHeader(Email $email): void
     {
-        if (!$this->config->get('app.managed', false)) {
+        if (!(new ManagedModeGuard($this->config))->isManaged()) {
             return;
         }
         $host = strtolower((string) (parse_url((string) $this->config->get('app.url', ''), PHP_URL_HOST) ?: ''));
