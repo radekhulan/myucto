@@ -26,6 +26,9 @@ final class CardNumberMask
      */
     public const MASKED_PATTERN = '(?<![0-9A-Za-z])(?:[0-9]{4,6} ?)?(?:[*Xx][ -]?){4,15}([0-9]{4})(?![0-9])';
 
+    /** Kandidát na celé číslo karty: 13–19 číslic, volitelně s mezerami či pomlčkami. */
+    private const FULL_PAN_PATTERN = '/(?<![0-9])(?:[0-9][ -]?){12,18}[0-9](?![0-9])/';
+
     /**
      * Maskovaný (i nemaskovaný) IBAN: kód země, dvě kontrolní číslice nebo maska
      * a skupiny BBAN. Bankovní API ho v datech pohybu nesou u každé transakce
@@ -163,7 +166,7 @@ final class CardNumberMask
         if ($text === null || $text === '') {
             return false;
         }
-        if (preg_match_all('/(?<![0-9])(?:[0-9][ -]?){12,18}[0-9](?![0-9])/', $text, $m) === 0) {
+        if (preg_match_all(self::FULL_PAN_PATTERN, $text, $m) === 0) {
             return false;
         }
         foreach ($m[0] as $candidate) {
@@ -174,6 +177,52 @@ final class CardNumberMask
             }
         }
         return false;
+    }
+
+    /**
+     * Celá čísla karet v textu nahradí maskou s koncovkou („**** 1234"). Číslo,
+     * které Luhnovým součtem neprojde (IČO, účet, telefon), zůstane beze změny.
+     */
+    public static function maskFullPans(string $text): string
+    {
+        return (string) preg_replace_callback(self::FULL_PAN_PATTERN, static function (array $m): string {
+            $digits = (string) preg_replace('/[^0-9]/', '', $m[0]);
+            $len = strlen($digits);
+            return $len >= 13 && $len <= 19 && self::luhn($digits) ? '**** ' . substr($digits, -4) : $m[0];
+        }, $text);
+    }
+
+    /**
+     * Surová odpověď modelu před uložením (vytěžení dokladu): klíč `card_last4`
+     * zúží na koncovku a v ostatních textech zamaskuje celá čísla karet. Model
+     * občas vrátí celé číslo karty i tam, kde má být jen koncovka.
+     *
+     * @param array<mixed> $payload
+     * @return array<mixed>
+     */
+    public static function scrubPayload(array $payload): array
+    {
+        foreach ($payload as $key => $value) {
+            if (is_array($value)) {
+                $payload[$key] = self::scrubPayload($value);
+                continue;
+            }
+            if (!is_string($value) && !is_int($value) && !is_float($value)) {
+                continue;
+            }
+            $text = is_float($value) ? sprintf('%.0f', $value) : (string) $value;
+            if ($key === 'card_last4') {
+                $payload[$key] = self::last4FromText($text) ?? self::normalizeLast4($text);
+                continue;
+            }
+            if (is_string($value) || self::containsFullPan($text)) {
+                $masked = self::maskFullPans($text);
+                if ($masked !== $text) {
+                    $payload[$key] = $masked;
+                }
+            }
+        }
+        return $payload;
     }
 
     private static function luhn(string $digits): bool

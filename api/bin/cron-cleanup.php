@@ -22,10 +22,12 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Cron\CronRun;
+use MyInvoice\Service\Document\ScanAttach\ScanStagingCleaner;
 
-$rootDir = Bootstrap::rootDir();
-$config  = Config::load($rootDir);
-$pdo     = (new Connection($config))->pdo();
+$rootDir    = Bootstrap::rootDir();
+$config     = Config::load($rootDir);
+$connection = new Connection($config);
+$pdo        = $connection->pdo();
 
 $run = CronRun::start($pdo, 'cron-cleanup');
 $startedAt = microtime(true);
@@ -168,6 +170,10 @@ if ($exportIds !== []) {
 }
 $report['monthly_export_jobs']  = count($exportIds);
 $report['monthly_export_files'] = $exportFilesDeleted;
+
+// 7) Nahrané soubory dávek skenů — dávka bez záznamu hned, opuštěné nahrávání
+//    po 48 h bez známky života, skončená dávka po 7 dnech (viz ScanStagingCleaner).
+$report['scan_attach_staging'] = (new ScanStagingCleaner($connection))->purge();
 
 // Pročisti cron_runs — drž max 500 posledních záznamů na skript.
 $report['cron_runs_purged'] = CronRun::purgeOld($pdo, 500);

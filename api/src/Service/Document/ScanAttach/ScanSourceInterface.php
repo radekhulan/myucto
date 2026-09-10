@@ -26,6 +26,12 @@ interface ScanSourceInterface
      */
     public function files(): iterable;
 
+    /**
+     * Má zdroj ještě soubory k vydání? Po úklidu dokončené dávky ne — opakovaný
+     * běh pak pracuje jen s tím, co už je uložené v Dokumentech.
+     */
+    public function hasFiles(): bool;
+
     /** Úklid po úspěšně dokončené dávce. */
     public function cleanup(): void;
 }

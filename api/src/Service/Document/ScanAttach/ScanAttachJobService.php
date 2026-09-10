@@ -32,6 +32,10 @@ final class ScanAttachJobService
     public const FOLDER_ROOT = 'Skeny dokladů';
 
     private const CANCEL_CHECK_EVERY = 10;
+    /** Jak dlouho dávka čeká, než doběhne jiná dávka téže firmy. */
+    public const LOCK_WAIT_SECONDS = 6 * 3600;
+    private const LOCK_POLL_SECONDS = 30;
+    private const PROGRESS_EVERY = 25;
 
     private int $failed = 0;
 
@@ -46,6 +50,7 @@ final class ScanAttachJobService
         private readonly ScanTargetRegistry $targets,
         private readonly ScanBatchService $service,
         private readonly PaymentCardRepository $cards,
+        private readonly int $lockWaitSeconds = self::LOCK_WAIT_SECONDS,
     ) {}
 
     /** Staging dávky (chunkovaný upload) — přežije pád workeru, maže se po dokončení. */
@@ -69,14 +74,45 @@ final class ScanAttachJobService
         $source ??= new UploadedScanSource(self::stagingDir($sid, $jobId));
         $this->failed = 0;
 
+        $lock = $this->waitForBatchLock($jobId, $sid);
+        if ($lock === 'cancelled') {
+            $this->jobs->appendLog($jobId, 'Zrušeno uživatelem — dávku lze znovu spustit a naváže.');
+            $this->jobs->markCancelled($jobId);
+            return;
+        }
+        if ($lock === 'timeout') {
+            $message = 'Jiná dávka skenů téže firmy pořád běží — spusťte tuto dávku znovu po jejím dokončení.';
+            $this->jobs->appendLog($jobId, $message);
+            $this->jobs->markFailed($jobId, $message);
+            return;
+        }
+
         try {
-            if (!$this->storeFiles($jobId, $sid, $userId, $source) || !$this->extractFiles($jobId, $sid, $params)) {
+            // Dokončená dávka má nahrané soubory uklizené. Opakovaný běh (nové
+            // párování po doplnění dokladů) pak pracuje s tím, co je v Dokumentech.
+            if ($this->batches->countItems($sid, $jobId) > 0 && !$source->hasFiles()) {
+                $this->jobs->appendLog($jobId, 'Soubory dávky jsou uložené v Dokumentech — navazuji vytěžením a párováním.');
+                $stored = true;
+            } else {
+                $stored = $this->storeFiles($jobId, $sid, $userId, $source);
+            }
+            if (!$stored || !$this->extractFiles($jobId, $sid, $params)) {
                 $this->jobs->appendLog($jobId, 'Zrušeno uživatelem — dávku lze znovu spustit a naváže.');
                 $this->jobs->markCancelled($jobId);
                 return;
             }
             $summary = $this->matchFiles($jobId, $sid, $params);
-            $source->cleanup();
+            // Nahrané soubory zůstanou, dokud se všechny nepodaří uložit — jinak by
+            // je opakovaný běh už neměl odkud vzít. Opuštěné uklidí denní úklid.
+            $unstored = $this->batches->countUnstoredItems($sid, $jobId);
+            if ($unstored === 0) {
+                $source->cleanup();
+            } else {
+                $this->jobs->appendLog($jobId, sprintf(
+                    'Nepodařilo se uložit %d souborů — nahrané soubory dávky zůstávají, Spustit znovu je zkusí uložit znovu.',
+                    $unstored,
+                ));
+            }
             $this->jobs->appendLog($jobId, sprintf(
                 'Hotovo: připojeno %d, k potvrzení %d, skeny firmy bez dokladu %d, nerozpoznané %d.',
                 $summary['attached'], $summary['proposed'], $summary['orphan'], $summary['unrecognized'],
@@ -85,7 +121,35 @@ final class ScanAttachJobService
         } catch (\Throwable $e) {
             $this->jobs->appendLog($jobId, 'Chyba: ' . $e->getMessage());
             $this->jobs->markFailed($jobId, $e->getMessage());
+        } finally {
+            $this->batches->releaseBatchLock($sid);
         }
+    }
+
+    /**
+     * Dávky téže firmy běží jedna po druhé ({@see ScanBatchRepository::acquireBatchLock()}).
+     * Čekající dávka se hlásí jako živá a reaguje na zrušení.
+     *
+     * @return 'ok'|'cancelled'|'timeout'
+     */
+    private function waitForBatchLock(int $jobId, int $sid): string
+    {
+        if ($this->batches->acquireBatchLock($sid, 0)) {
+            return 'ok';
+        }
+        $this->jobs->updateProgress($jobId, ['current_step' => 'Čekám na dokončení jiné dávky skenů']);
+        $this->jobs->appendLog($jobId, 'Jiná dávka skenů téže firmy právě běží — čekám na její dokončení.');
+        $deadline = time() + $this->lockWaitSeconds;
+        while (time() < $deadline) {
+            if ($this->jobs->isCancelRequested($jobId)) {
+                return 'cancelled';
+            }
+            if ($this->batches->acquireBatchLock($sid, min(self::LOCK_POLL_SECONDS, max(1, $deadline - time())))) {
+                return 'ok';
+            }
+            $this->batches->touchJob($sid, $jobId);
+        }
+        return 'timeout';
     }
 
     /** @return bool false = zrušeno */
@@ -113,9 +177,11 @@ final class ScanAttachJobService
             }
             try {
                 $sha = (string) hash_file('sha256', $file->path);
-                if ($this->batches->itemIdBySha($sid, $jobId, $sha) !== null) {
+                $existing = $this->batches->itemBySha($sid, $jobId, $sha);
+                if ($existing !== null && $existing['document_id'] !== null) {
                     continue; // hotové z předchozího běhu nebo duplicitní obsah v dávce
                 }
+                // Soubor, jehož uložení dřív selhalo, se zkusí uložit znovu.
                 $documentId = $this->batches->documentIdBySha($sid, $sha);
                 if ($documentId === null) {
                     // Ingest dočasný soubor PŘESUNE do úložiště.
@@ -123,10 +189,17 @@ final class ScanAttachJobService
                     $documentId = (int) ($res['created_ids'][0] ?? 0) ?: null;
                     $new++;
                 }
-                $this->batches->insertItem($sid, $jobId, $file->name, $sha, $file->size, $documentId, $documentId !== null ? 'stored' : 'skipped', null);
+                $status = $documentId !== null ? 'stored' : 'skipped';
+                if ($existing === null) {
+                    $this->batches->insertItem($sid, $jobId, $file->name, $sha, $file->size, $documentId, $status, null);
+                } else {
+                    $this->batches->updateItem($sid, $existing['id'], ['document_id' => $documentId, 'status' => $status, 'error' => null]);
+                }
             } catch (\Throwable $e) {
                 $this->failed++;
-                if (isset($sha)) {
+                if (isset($existing)) {
+                    $this->batches->updateItem($sid, $existing['id'], ['error' => $e->getMessage()]);
+                } elseif (isset($sha)) {
                     $this->batches->insertItem($sid, $jobId, $file->name, $sha, $file->size, null, 'skipped', $e->getMessage());
                 }
                 $this->jobs->appendLog($jobId, $file->name . ': ' . $e->getMessage());
@@ -134,7 +207,7 @@ final class ScanAttachJobService
                 if (is_file($file->path)) {
                     @unlink($file->path);
                 }
-                unset($sha);
+                unset($sha, $existing);
             }
             $this->jobs->updateProgress($jobId, ['processed' => $n, 'failed_count' => $this->failed]);
         }
@@ -237,6 +310,11 @@ final class ScanAttachJobService
                 $attachedTargets[] = $tk;
             }
         }
+        // Doklad, který už má sken z jiné dávky, další sken podle obsahu nedostane
+        // (čárový kód a číslo v názvu přidají další strany dál).
+        foreach ($this->batches->targetsWithScanFromOtherBatches($sid, $jobId, $this->service->targetTypes($params)) as $tk) {
+            $attachedTargets[] = $tk;
+        }
         $this->batches->deleteProposed($sid, $jobId);
 
         $identity = $this->batches->supplierIdentity($sid);
@@ -259,15 +337,17 @@ final class ScanAttachJobService
         ]);
 
         $attachFailed = [];
+        $written = 0;
         foreach ($result['targets'] as $tk => $r) {
             if ($r['files'] === []) {
                 continue;
             }
             [$type, $id] = explode(':', (string) $tk, 2);
             foreach ($r['files'] as $fk) {
-                $state = $r['attach'] ? 'attached' : 'proposed';
-                $note = $r['note'];
-                if ($r['attach']) {
+                $decision = $r['per_file'][$fk] ?? ['attach' => $r['attach'], 'level' => $r['level'], 'note' => $r['note']];
+                $state = $decision['attach'] ? 'attached' : 'proposed';
+                $note = $decision['note'];
+                if ($decision['attach']) {
                     try {
                         $this->service->attachItem($sid, $type, (int) $id, (int) $fk);
                     } catch (\Throwable $e) {
@@ -277,11 +357,19 @@ final class ScanAttachJobService
                         $this->jobs->appendLog($jobId, "Připojení se nepovedlo ({$tk}): " . $e->getMessage());
                     }
                 }
-                $this->batches->upsertMatch($sid, $jobId, (int) $fk, $type, (int) $id, $r['method'], $r['level'], $r['score'], $state, $note);
+                $this->batches->upsertMatch($sid, $jobId, (int) $fk, $type, (int) $id, $r['method'], $decision['level'], $r['score'], $state, $note);
+                // Připojování tisíců skenů trvá; bez průběhu by úklid neaktivních
+                // úloh dávku po čtvrthodině ukončil jako mrtvou.
+                if (++$written % self::PROGRESS_EVERY === 0) {
+                    $this->jobs->updateProgress($jobId, ['processed' => $written]);
+                }
             }
         }
         foreach ($result['files'] as $fk => $f) {
             $this->batches->updateItem($sid, (int) $fk, ['outcome' => $f['outcome'], 'ownership' => $f['ownership']]);
+            if (++$written % self::PROGRESS_EVERY === 0) {
+                $this->batches->touchJob($sid, $jobId);
+            }
         }
         foreach (array_unique($attachFailed) as $itemId) {
             $this->service->refreshOutcome($sid, $itemId);

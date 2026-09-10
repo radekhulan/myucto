@@ -528,7 +528,8 @@
       "doc_no_confirmed": "Číslo potvrzené obsahem",
       "doc_no_unconfirmed": "Číslo v názvu bez potvrzení obsahem",
       "ambiguous": "Víc stejně dobrých shod",
-      "attach_failed": "Připojení se nepovedlo"
+      "attach_failed": "Připojení se nepovedlo",
+      "side_mismatch": "Sken uvádí na straně firmy jinou firmu"
     },
     "outcome": {
       "foreign": "Doklad jiné firmy",

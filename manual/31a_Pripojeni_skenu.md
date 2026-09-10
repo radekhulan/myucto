@@ -31,7 +31,12 @@ Stránka je v menu **Dokumenty → Skeny k dokladům**.
 
 Soubory se nahrávají po částech, takže velikost dávky neomezuje nastavení serveru.
 Zpracování pak běží na pozadí a stránku můžete zavřít. Jeden soubor smí mít nejvýš
-32 MB, dávka nejvýš 20 000 souborů.
+32 MB, dávka nejvýš 20 000 souborů a dohromady 2 GB. Větší soubor se nenahraje a
+v dávce ho uvidíte mezi chybami.
+
+Firma může mít najednou nejvýš tři rozpracované dávky (nahrávané nebo čekající na
+zpracování). Dávky jedné firmy se zpracovávají postupně: když jedna běží, další
+počká, až doběhne.
 
 ## Jak aplikace skeny páruje
 
@@ -54,6 +59,11 @@ dodavatel. Když účtenka odběratele neuvádí, pozná se firma podle SPZ vozi
 z [knihy jízd](32_Kniha_jizd.md). Když IČO chybí, rozhoduje jméno odběratele;
 sken s cizím odběratelem se nepřipojí.
 
+Jistota se posuzuje u každého souboru zvlášť. Sken, na kterém je na straně firmy
+uvedená jiná firma, se nepřipojí ani tehdy, když název souboru začíná číslem dokladu
+(složka může obsahovat skeny sesterské firmy se stejnou číselnou řadou). Když k němu
+sedí čárový kód, nabídne se v záložce **Ke kontrole**.
+
 Párování probíhá **ve dvou kolech**. Nejdřív se pro všechny doklady použijí čárové
 kódy a čísla dokladů, teprve potom obsah, a to jen u skenů, které zatím nikam
 nepatří. Pravidelná faktura téhož dodavatele na stejnou částku (například roční
@@ -67,7 +77,10 @@ aplikace nerozhoduje sama a nabídne je jako kandidáty k ručnímu výběru.
 - Sken je vždy v sekci Dokumenty s vazbou na doklad, takže je vidět v detailu dokladu
   v panelu propojených dokumentů.
 - U přijaté faktury se první sken navíc uloží jako PDF faktury, pokud faktura žádné
-  PDF nemá. Obrázek se převede na PDF.
+  PDF nemá. Obrázek se převede na PDF. Faktura v uzavřeném účetním období PDF
+  nedostane (stejně jako při ručním nahrání), sken je u ní jen jako propojený dokument.
+- Doklad, který už má sken z dřívější dávky, další sken podle obsahu nedostane.
+  Čárový kód a číslo dokladu v názvu souboru připojí další strany dál.
 - Stejný soubor se neukládá dvakrát. Když firma sken se stejným obsahem v Dokumentech
   už má, dávka použije ten existující.
 - Vytěžené údaje se zapíšou jako text dokumentu. Sken bez textové vrstvy tak najdete
@@ -148,8 +161,13 @@ všechny doklady firmy znovu. Měsíční kontrola a odznak porovnávají vždy 
 
 Tlačítko **Spustit znovu** dávku zpracuje ještě jednou. Použijte ho po výpadku nebo
 zrušení zpracování, nebo když mezitím přibyly doklady, ke kterým by skeny mohly patřit.
-Uložené soubory a vytěžení se znovu nezpracovávají. Připojené, potvrzené i odmítnuté
+Uložené soubory a vytěžení se znovu nezpracovávají. Soubor, který se napoprvé
+nepodařilo uložit do Dokumentů, se uloží znovu. Připojené, potvrzené i odmítnuté
 páry zůstávají, znovu se počítají jen návrhy.
+
+Nahrané soubory dávky aplikace drží, dokud je všechny neuloží do Dokumentů. Po
+dokončení se smažou; když se některý soubor uložit nepodařilo, zůstanou pro Spustit
+znovu ještě 7 dní. Nahrávání, které nikdo nedokončil, se uklidí po 48 hodinách.
 
 **Smazat dávku** odstraní jen záznam o dávce. Soubory v Dokumentech i jejich
 připojení k dokladům zůstanou.

@@ -18,7 +18,9 @@ use MyInvoice\Service\BackgroundProcess;
 use MyInvoice\Service\Document\DocumentViewerResolver;
 use MyInvoice\Service\Document\ScanAttach\ScanAttachJobService;
 use MyInvoice\Service\Document\ScanAttach\ScanBatchService;
+use MyInvoice\Service\Document\ScanAttach\ScanStagingCleaner;
 use MyInvoice\Service\Document\ScanAttach\ScanTargetRegistry;
+use MyInvoice\Service\Document\ScanAttach\UploadedScanSource;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
@@ -44,9 +46,11 @@ use Psr\Http\Message\UploadedFileInterface;
 final class ScanAttachAction
 {
     private const SOURCE = ScanAttachJobService::SOURCE;
-    /** Strop chunkovaného ZIP (anti-DoS). */
+    /** Strop velikosti dávky — ZIP i jednotlivé soubory dohromady (anti-DoS). */
     private const MAX_CHUNKED_BYTES = 2 * 1024 * 1024 * 1024;
     private const MAX_FILES = 20000;
+    /** Rozpracované dávky firmy (nahrávané nebo čekající), každá až MAX_CHUNKED_BYTES na disku. */
+    private const MAX_QUEUED_BATCHES = 3;
 
     public function __construct(
         private readonly ImportJobRepository $jobs,
@@ -54,6 +58,7 @@ final class ScanAttachAction
         private readonly ScanBatchService $service,
         private readonly ScanTargetRegistry $targets,
         private readonly ActivityLogger $logger,
+        private readonly ScanStagingCleaner $stagingCleaner,
     ) {}
 
     /** GET /api/scan-attach/targets */
@@ -125,12 +130,17 @@ final class ScanAttachAction
         }
 
         $this->jobs->reapStale($sid, self::SOURCE);
+        $this->stagingCleaner->purge($sid);
         foreach ($this->jobs->listForTenant($sid, self::SOURCE, 10) as $existing) {
             if ($existing['status'] === 'running') {
                 return Json::error($response, 'already_running',
                     "Dávka skenů už běží (#{$existing['id']}). Počkejte na její dokončení.", 409,
                     ['existing_job_id' => $existing['id']]);
             }
+        }
+        if ($this->batches->countQueuedBatches($sid) >= self::MAX_QUEUED_BATCHES) {
+            return Json::error($response, 'too_many_batches',
+                'Firma má rozpracované ' . self::MAX_QUEUED_BATCHES . ' dávky skenů. Dokončete jejich nahrání, nebo je smažte.', 409);
         }
 
         $params = [
@@ -175,6 +185,7 @@ final class ScanAttachAction
             @unlink($blob);
             return Json::error($response, 'too_large', 'Soubor je příliš velký.', 413);
         }
+        $this->batches->touchJob((int) $job['supplier_id'], (int) $job['id']);
         return Json::ok($response, ['size' => (int) @filesize($blob)]);
     }
 
@@ -185,9 +196,13 @@ final class ScanAttachAction
         if ($job instanceof Response) {
             return $job;
         }
-        $dir = ScanAttachJobService::stagingDir((int) $job['supplier_id'], (int) $job['id']);
+        $sid = (int) $job['supplier_id'];
+        $dir = ScanAttachJobService::stagingDir($sid, (int) $job['id']);
         $manifest = $dir . '/manifest.jsonl';
-        $already = is_file($manifest) ? count(file($manifest, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []) : 0;
+        [$already, $bytes] = self::manifestTotals($manifest);
+        $append = static function (array $entry) use ($manifest): void {
+            @file_put_contents($manifest, json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+        };
 
         $files = $request->getUploadedFiles();
         $list = isset($files['file']) ? (is_array($files['file']) ? array_values($files['file']) : [$files['file']]) : [];
@@ -203,19 +218,69 @@ final class ScanAttachAction
             if ($name === '') {
                 continue;
             }
+            $name = mb_substr(basename(str_replace('\\', '/', $name)), 0, 255);
+            // Soubor nad strop jednoho souboru se neukládá; v dávce zůstane jako chyba.
+            $declared = (int) ($file->getSize() ?? 0);
+            if ($declared > UploadedScanSource::MAX_FILE_BYTES) {
+                $append(['n' => $name, 'e' => 'too_large', 's' => $declared]);
+                $added++;
+                continue;
+            }
+            if ($bytes + $declared > self::MAX_CHUNKED_BYTES) {
+                return $this->batchTooLarge($response);
+            }
             $part = $dir . '/p' . bin2hex(random_bytes(8));
             try {
                 $file->moveTo($part);
             } catch (\Throwable) {
                 continue;
             }
-            @file_put_contents($manifest, json_encode(
-                ['f' => basename($part), 'n' => mb_substr(basename(str_replace('\\', '/', $name)), 0, 255)],
-                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
-            ) . "\n", FILE_APPEND);
+            clearstatcache(true, $part);
+            $size = (int) @filesize($part);
+            if ($size > UploadedScanSource::MAX_FILE_BYTES) {
+                @unlink($part);
+                $append(['n' => $name, 'e' => 'too_large', 's' => $size]);
+                $added++;
+                continue;
+            }
+            if ($bytes + $size > self::MAX_CHUNKED_BYTES) {
+                @unlink($part);
+                return $this->batchTooLarge($response);
+            }
+            $append(['f' => basename($part), 'n' => $name, 's' => $size]);
+            $bytes += $size;
             $added++;
         }
+        $this->batches->touchJob($sid, (int) $job['id']);
         return Json::ok($response, ['added' => $added]);
+    }
+
+    private function batchTooLarge(Response $response): Response
+    {
+        return Json::error($response, 'batch_too_large',
+            'Dávka může mít dohromady nejvýš ' . (int) (self::MAX_CHUNKED_BYTES / 1024 / 1024 / 1024) . ' GB.', 413);
+    }
+
+    /**
+     * Počet souborů a součet velikostí už nahraných do dávky.
+     *
+     * @return array{0:int,1:int}
+     */
+    private static function manifestTotals(string $manifest): array
+    {
+        if (!is_file($manifest)) {
+            return [0, 0];
+        }
+        $count = 0;
+        $bytes = 0;
+        foreach (file($manifest, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+            $count++;
+            $e = json_decode($line, true);
+            if (is_array($e) && !isset($e['e'])) {
+                $bytes += (int) ($e['s'] ?? 0);
+            }
+        }
+        return [$count, $bytes];
     }
 
     /** POST /api/scan-attach/batches/{id}/finish */

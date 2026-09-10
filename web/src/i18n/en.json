@@ -528,7 +528,8 @@
       "doc_no_confirmed": "Number confirmed by content",
       "doc_no_unconfirmed": "Number in the name not confirmed by content",
       "ambiguous": "Several equally good matches",
-      "attach_failed": "Attaching failed"
+      "attach_failed": "Attaching failed",
+      "side_mismatch": "The scan names another company on the company's side"
     },
     "outcome": {
       "foreign": "Another company's document",

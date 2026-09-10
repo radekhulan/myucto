@@ -53,6 +53,8 @@ final class ScanMatcher
     public const NOTE_DOC_NO_CONFIRMED = 'doc_no_confirmed';
     public const NOTE_DOC_NO_UNCONFIRMED = 'doc_no_unconfirmed';
     public const NOTE_AMBIGUOUS = 'ambiguous';
+    /** Klíč sedí, ale obsah skenu uvádí na straně firmy jinou firmu. */
+    public const NOTE_SIDE_MISMATCH = 'side_mismatch';
 
     private const AMOUNT_TOLERANCE = 1.0;
     private const DATE_TOLERANCE_DAYS = 5;
@@ -76,9 +78,11 @@ final class ScanMatcher
      *        `claimed_files` = soubory už připojené dřív (dávka běží znovu);
      *        `attached_targets` = doklady, které už sken z téže dávky mají (obsahem se jim další nepřidá)
      * @return array{
-     *   targets: array<string, array{files:list<string>,method:string,level:string,note:string,score:int,attach:bool}>,
+     *   targets: array<string, array{files:list<string>,method:string,level:string,note:string,score:int,attach:bool,per_file:array<string,array{attach:bool,level:string,note:string}>}>,
      *   files: array<string, array{outcome:string,ownership:?string}>
      * }
+     *        `per_file` = rozhodnutí pro každý soubor dokladu zvlášť (skupina skenů
+     *        jednoho čísla může mít část souborů jistou a část k potvrzení).
      */
     public function match(array $files, array $targets, array $context): array
     {
@@ -175,24 +179,35 @@ final class ScanMatcher
         };
 
         // ── Kolo 1: čárový kód a číslo dokladu pro VŠECHNY doklady ────────────────
+        // Jistota se určuje PO SOUBORECH, ne za celou skupinu: složka může vedle
+        // vlastního skenu obsahovat sken sesterské firmy se stejným číslem, a ten
+        // se nesmí svézt s potvrzením cizího souboru.
         foreach ($targets as $t) {
             $tk = (string) $t['key'];
             $results[$tk] = self::empty();
             $total = abs((float) $t['total']);
+            $direction = (string) $t['direction'];
 
             $bc = self::normCode((string) ($t['barcode'] ?? ''));
             if ($bc !== '' && isset($byBarcode[$bc])) {
                 $fs = $free($byBarcode[$bc], $tk);
                 if ($fs !== []) {
-                    $note = '';
+                    $perFile = [];
                     foreach ($fs as $fk) {
-                        if ($info[$fk]['amounts'] !== [] && !$this->amountMatches($info[$fk]['amounts'], $total)) {
-                            $note = self::NOTE_AMOUNT_MISMATCH;
+                        // Obsah skenu uvádí na straně firmy jinou firmu → kód sám
+                        // nestačí, rozhodne uživatel.
+                        if ($this->ownSide($info[$fk], $direction) === self::SIDE_NO) {
+                            $perFile[$fk] = ['attach' => false, 'level' => self::LEVEL_CANDIDATE, 'note' => self::NOTE_SIDE_MISMATCH];
+                            $proposed[$fk] = true;
+                            continue;
                         }
+                        $note = $info[$fk]['amounts'] !== [] && !$this->amountMatches($info[$fk]['amounts'], $total)
+                            ? self::NOTE_AMOUNT_MISMATCH : '';
+                        $perFile[$fk] = ['attach' => true, 'level' => self::LEVEL_CERTAIN, 'note' => $note];
                         $taken[$fk] = true;
                         $attachedNow[$fk] = true;
                     }
-                    $results[$tk] = ['files' => $fs, 'method' => 'barcode', 'level' => self::LEVEL_CERTAIN, 'note' => $note, 'score' => 10, 'attach' => true];
+                    $results[$tk] = self::grouped($fs, $perFile, 'barcode', 10);
                     continue;
                 }
             }
@@ -201,20 +216,34 @@ final class ScanMatcher
                 if (!isset($byToken[$n])) {
                     continue;
                 }
-                $fs = $free($byToken[$n], $tk);
+                // Sken, jehož obsah na straně firmy uvádí jinou firmu, k dokladu
+                // nepatří ani se stejným číslem (sesterská firma se stejnou řadou).
+                $fs = array_values(array_filter(
+                    $free($byToken[$n], $tk),
+                    fn (string $fk): bool => $this->ownSide($info[$fk], $direction) !== self::SIDE_NO,
+                ));
                 if ($fs === []) {
                     continue;
                 }
-                $confirmed = false;
+                // Potvrzený soubor = firma na správné straně (IČO, SPZ, karta), nebo
+                // aspoň nevyloučená strana a sedící částka.
+                $confirmed = [];
                 foreach ($fs as $fk) {
-                    $side = $this->ownSide($info[$fk], (string) $t['direction']);
                     if ($info[$fk]['x'] !== null
-                        && ($side === self::SIDE_STRONG || $side === self::SIDE_WEAK || $this->amountMatches($info[$fk]['amounts'], $total))) {
-                        $confirmed = true;
+                        && ($this->ownSide($info[$fk], $direction) === self::SIDE_STRONG || $this->amountMatches($info[$fk]['amounts'], $total))) {
+                        $confirmed[$fk] = true;
                     }
                 }
-                $certain = $confirmed || $trustDocNo;
+                $perFile = [];
                 foreach ($fs as $fk) {
+                    // Nevytěžená fotka další strany téhož dokladu převezme potvrzení
+                    // vytěženého souboru; vytěžený sken, který nesedí, jistý není.
+                    $certain = isset($confirmed[$fk]) || $trustDocNo || ($info[$fk]['x'] === null && $confirmed !== []);
+                    $perFile[$fk] = [
+                        'attach' => $certain,
+                        'level' => $certain ? self::LEVEL_CERTAIN : self::LEVEL_CANDIDATE,
+                        'note' => isset($confirmed[$fk]) || ($certain && $confirmed !== []) ? self::NOTE_DOC_NO_CONFIRMED : self::NOTE_DOC_NO_UNCONFIRMED,
+                    ];
                     if ($certain) {
                         $taken[$fk] = true;
                         $attachedNow[$fk] = true;
@@ -222,12 +251,7 @@ final class ScanMatcher
                         $proposed[$fk] = true;
                     }
                 }
-                $results[$tk] = [
-                    'files' => $fs, 'method' => 'doc_no',
-                    'level' => $certain ? self::LEVEL_CERTAIN : self::LEVEL_CANDIDATE,
-                    'note' => $confirmed ? self::NOTE_DOC_NO_CONFIRMED : self::NOTE_DOC_NO_UNCONFIRMED,
-                    'score' => 8, 'attach' => $certain,
-                ];
+                $results[$tk] = self::grouped($fs, $perFile, 'doc_no', 8);
                 continue 2;
             }
         }
@@ -326,11 +350,10 @@ final class ScanMatcher
 
             if (count($tiedFiles) > 1 || count($tiedTargets) > 1) {
                 foreach ($tiedTargets as $tt) {
-                    $results[$tt] = [
-                        'files' => $tt === $p['t'] ? $tiedFiles : [$p['f']],
-                        'method' => 'content', 'level' => self::LEVEL_CANDIDATE,
-                        'note' => self::NOTE_AMBIGUOUS, 'score' => $p['score'], 'attach' => false,
-                    ];
+                    $results[$tt] = self::uniform(
+                        $tt === $p['t'] ? $tiedFiles : [$p['f']],
+                        'content', self::LEVEL_CANDIDATE, self::NOTE_AMBIGUOUS, $p['score'], false,
+                    );
                     $done[$tt] = true;
                 }
                 foreach ($tiedFiles as $ff) {
@@ -347,10 +370,7 @@ final class ScanMatcher
             } else {
                 $proposed[$p['f']] = true;
             }
-            $results[$p['t']] = [
-                'files' => [$p['f']], 'method' => 'content', 'level' => $p['level'],
-                'note' => '', 'score' => $p['score'], 'attach' => $attach,
-            ];
+            $results[$p['t']] = self::uniform([$p['f']], 'content', $p['level'], '', $p['score'], $attach);
         }
 
         // ── Výsledek po souborech ────────────────────────────────────────────────
@@ -377,10 +397,53 @@ final class ScanMatcher
         return strtoupper((string) preg_replace('/[^0-9A-Za-z]/', '', $s));
     }
 
-    /** @return array{files:list<string>,method:string,level:string,note:string,score:int,attach:bool} */
+    /** @return array{files:list<string>,method:string,level:string,note:string,score:int,attach:bool,per_file:array<string,array{attach:bool,level:string,note:string}>} */
     private static function empty(): array
     {
-        return ['files' => [], 'method' => 'none', 'level' => self::LEVEL_NONE, 'note' => '', 'score' => 0, 'attach' => false];
+        return ['files' => [], 'method' => 'none', 'level' => self::LEVEL_NONE, 'note' => '', 'score' => 0, 'attach' => false, 'per_file' => []];
+    }
+
+    /**
+     * Výsledek, kde všechny soubory dokladu mají stejné rozhodnutí.
+     *
+     * @param list<string> $files
+     * @return array{files:list<string>,method:string,level:string,note:string,score:int,attach:bool,per_file:array<string,array{attach:bool,level:string,note:string}>}
+     */
+    private static function uniform(array $files, string $method, string $level, string $note, int $score, bool $attach): array
+    {
+        $perFile = [];
+        foreach ($files as $fk) {
+            $perFile[$fk] = ['attach' => $attach, 'level' => $level, 'note' => $note];
+        }
+        return ['files' => $files, 'method' => $method, 'level' => $level, 'note' => $note, 'score' => $score, 'attach' => $attach, 'per_file' => $perFile];
+    }
+
+    /**
+     * Výsledek skupiny souborů s rozhodnutím po souborech. Doklad je „jistý",
+     * když se k němu aspoň jeden soubor připojí; poznámka dokladu je poznámka
+     * připojeného souboru (jinak prvního).
+     *
+     * @param list<string> $files
+     * @param array<string,array{attach:bool,level:string,note:string}> $perFile
+     * @return array{files:list<string>,method:string,level:string,note:string,score:int,attach:bool,per_file:array<string,array{attach:bool,level:string,note:string}>}
+     */
+    private static function grouped(array $files, array $perFile, string $method, int $score): array
+    {
+        $attached = array_filter($perFile, static fn (array $d): bool => $d['attach']);
+        $note = '';
+        foreach ([$attached, $perFile] as $pool) {
+            foreach ($pool as $d) {
+                if ($d['note'] !== '') {
+                    $note = $d['note'];
+                    break 2;
+                }
+            }
+        }
+        return [
+            'files' => $files, 'method' => $method,
+            'level' => $attached !== [] ? self::LEVEL_CERTAIN : self::LEVEL_CANDIDATE,
+            'note' => $note, 'score' => $score, 'attach' => $attached !== [], 'per_file' => $perFile,
+        ];
     }
 
     /**

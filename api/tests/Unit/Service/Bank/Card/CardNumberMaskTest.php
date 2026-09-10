@@ -89,6 +89,32 @@ final class CardNumberMaskTest extends TestCase
         self::assertFalse(CardNumberMask::containsFullPan('Firemní karta 1234'));
     }
 
+    public function testMaskFullPansKeepsOnlyTheEnding(): void
+    {
+        self::assertSame('Zaplaceno kartou **** 1111', CardNumberMask::maskFullPans('Zaplaceno kartou 4111 1111 1111 1111'));
+        self::assertSame('**** 1111', CardNumberMask::maskFullPans('4111-1111-1111-1111'));
+        self::assertSame('VS 4111111111111112', CardNumberMask::maskFullPans('VS 4111111111111112'), 'bez Luhnova součtu to karta není');
+        self::assertSame('IČO 12345678', CardNumberMask::maskFullPans('IČO 12345678'));
+    }
+
+    /** Surová odpověď modelu: koncovka zůstane, celé číslo karty nikde. */
+    public function testScrubPayloadRemovesFullCardNumberEverywhere(): void
+    {
+        $scrubbed = CardNumberMask::scrubPayload([
+            'card_last4' => '4111 1111 1111 1111',
+            'notes' => 'Platba kartou 4111111111111111',
+            'payment' => ['card' => 4111111111111111, 'variable_symbol' => '2026000123'],
+            'items' => [['description' => 'Nafta', 'total' => 1210.5]],
+        ]);
+
+        self::assertSame('1111', $scrubbed['card_last4']);
+        self::assertSame('Platba kartou **** 1111', $scrubbed['notes']);
+        self::assertSame('**** 1111', $scrubbed['payment']['card']);
+        self::assertSame('2026000123', $scrubbed['payment']['variable_symbol']);
+        self::assertSame(1210.5, $scrubbed['items'][0]['total']);
+        self::assertFalse(CardNumberMask::containsFullPan((string) json_encode($scrubbed)));
+    }
+
     public function testParsedTransactionPrefersExplicitColumnThenTextThenApiMetadata(): void
     {
         self::assertSame('3333', CardNumberMask::forParsedTransaction([

@@ -148,6 +148,80 @@ final class ScanMatcherTest extends TestCase
         self::assertTrue($r['targets']['purchase_invoice:1']['attach']);
     }
 
+    /**
+     * Složka obsahuje vlastní fotku dokladu i sken sesterské firmy se stejným
+     * číslem a stejnou částkou. Cizí sken nesmí dokladu potvrdit číslo a sám se
+     * připojit nesmí vůbec.
+     */
+    public function testForeignScanWithSameDocumentNumberDoesNotConfirmOrAttach(): void
+    {
+        $r = $this->matchWith(
+            [
+                $this->file('own', 'PF260268 foto.jpg', null),
+                $this->file('sister', 'PF260268.pdf', $this->received(['buyer_ico' => '99887766'])),
+            ],
+            [$this->target('purchase_invoice:1', 1210.0, '2026-03-10', ['doc_numbers' => ['PF260268']])],
+        );
+
+        $t = $r['targets']['purchase_invoice:1'];
+        self::assertSame(['own'], $t['files'], 'sken cizí firmy k dokladu nepatří');
+        self::assertFalse($t['attach'], 'bez potvrzení vlastním obsahem jde jen k potvrzení');
+        self::assertSame(ScanMatcher::LEVEL_CANDIDATE, $t['level']);
+        self::assertSame(ScanMatcher::OUTCOME_PROPOSED, $r['files']['own']['outcome']);
+        self::assertSame(ScanMatcher::OUTCOME_FOREIGN, $r['files']['sister']['outcome']);
+    }
+
+    /** Potvrzení jednoho souboru nepřenáší jistotu na vytěžený soubor, který nesedí. */
+    public function testDocumentNumberCertaintyIsPerFile(): void
+    {
+        $r = $this->matchWith(
+            [
+                $this->file('ok', 'PF260268 foto1.jpg', $this->received()),
+                $this->file('odd', 'PF260268 foto2.jpg', ['total_with_vat' => 99.0, 'company_role' => 'none']),
+                $this->file('page', 'PF260268 foto3.jpg', null),
+            ],
+            [$this->target('purchase_invoice:1', 1210.0, '2026-03-10', ['doc_numbers' => ['PF260268']])],
+        );
+
+        self::assertSame(ScanMatcher::OUTCOME_PROPOSED, $r['files']['odd']['outcome'], 'vytěžený sken s jinou částkou a bez firmy není jistý');
+        $t = $r['targets']['purchase_invoice:1'];
+        self::assertTrue($t['attach']);
+        self::assertTrue($t['per_file']['ok']['attach']);
+        self::assertTrue($t['per_file']['page']['attach'], 'nevytěžená další strana převezme potvrzení');
+        self::assertFalse($t['per_file']['odd']['attach'], 'vytěžený sken s jinou částkou a bez firmy není jistý');
+        self::assertSame(ScanMatcher::LEVEL_CANDIDATE, $t['per_file']['odd']['level']);
+        self::assertSame(ScanMatcher::OUTCOME_ATTACHED, $r['files']['ok']['outcome']);
+        self::assertSame(ScanMatcher::OUTCOME_PROPOSED, $r['files']['odd']['outcome']);
+    }
+
+    /** Jméno firmy (slabá strana) samo číslo v názvu nepotvrdí — jen s částkou. */
+    public function testWeakSideAloneDoesNotConfirmDocumentNumber(): void
+    {
+        $weak = $this->received(['buyer_ico' => null, 'buyer_name' => 'Vlastní firma s.r.o.', 'total_with_vat' => 99.0]);
+        $r = $this->matchWith(
+            [$this->file('f1', 'PF260268 foto.jpg', $weak)],
+            [$this->target('purchase_invoice:1', 1210.0, '2026-03-10', ['doc_numbers' => ['PF260268']])],
+        );
+
+        self::assertFalse($r['targets']['purchase_invoice:1']['attach']);
+        self::assertSame(ScanMatcher::OUTCOME_PROPOSED, $r['files']['f1']['outcome']);
+    }
+
+    /** Čárový kód na skenu, jehož odběratel je jiná firma → k potvrzení, ne jistě. */
+    public function testBarcodeScanOfAnotherBuyerWaitsForConfirmation(): void
+    {
+        $r = $this->matchWith(
+            [$this->file('f1', '4400123456.pdf', $this->received(['buyer_ico' => '99887766']))],
+            [$this->target('purchase_invoice:1', 1210.0, '2026-03-10', ['barcode' => '4400123456'])],
+        );
+
+        $t = $r['targets']['purchase_invoice:1'];
+        self::assertSame(['f1'], $t['files']);
+        self::assertFalse($t['attach']);
+        self::assertSame(ScanMatcher::NOTE_SIDE_MISMATCH, $t['per_file']['f1']['note']);
+        self::assertSame(ScanMatcher::OUTCOME_PROPOSED, $r['files']['f1']['outcome']);
+    }
+
     public function testScanOfAnotherCompanyIsNotMatched(): void
     {
         $r = $this->matchWith(

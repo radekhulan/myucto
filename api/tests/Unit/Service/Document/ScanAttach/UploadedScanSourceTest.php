@@ -74,4 +74,20 @@ final class UploadedScanSourceTest extends TestCase
         $source->cleanup();
         self::assertDirectoryDoesNotExist($this->dir);
     }
+
+    /** Soubor odmítnutý už při nahrání (příliš velký) projde dávkou jako chyba, ne jako „ztracený". */
+    public function testManifestEntryRejectedAtUploadYieldsItsError(): void
+    {
+        file_put_contents($this->dir . '/manifest.jsonl',
+            json_encode(['n' => 'obri-sken.pdf', 'e' => 'too_large', 's' => UploadedScanSource::MAX_FILE_BYTES + 1]) . "\n");
+
+        $source = new UploadedScanSource($this->dir);
+        self::assertTrue($source->hasFiles());
+        $files = iterator_to_array($source->files(), false);
+
+        self::assertCount(1, $files);
+        self::assertSame('obri-sken.pdf', $files[0]->name);
+        self::assertSame('too_large', $files[0]->error);
+        self::assertSame('', $files[0]->path);
+    }
 }

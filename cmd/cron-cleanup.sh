@@ -4,7 +4,8 @@
 #  Frekvence: 1× denně, doporučeno 03:00
 #
 #  Smaže: login_attempts >24h, expirované sessions, použité password_resets,
-#         ARES/VIES cache >30 dní, PDF cache >90 dní, log files nad max_files.
+#         ARES/VIES cache >30 dní, PDF cache >90 dní, log files nad max_files,
+#         nahrané soubory dávek skenů (opuštěné >48 h, skončené >7 dní).
 #
 #  crontab:
 #    0 3 * * *  /var/www/myucto.cz/cmd/cron-cleanup.sh

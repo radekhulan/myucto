@@ -59,6 +59,11 @@ final class UploadedScanSource implements ScanSourceInterface
         throw new \RuntimeException('Soubory dávky nenalezeny (staging je prázdný).');
     }
 
+    public function hasFiles(): bool
+    {
+        return is_file($this->dir . '/manifest.jsonl') || is_file($this->dir . '/blob');
+    }
+
     public function cleanup(): void
     {
         if (!is_dir($this->dir)) {
@@ -82,6 +87,11 @@ final class UploadedScanSource implements ScanSourceInterface
                 continue;
             }
             $name = self::cleanName((string) ($e['n'] ?? 'sken'));
+            // Soubor odmítnutý už při nahrání (příliš velký) — v dávce zůstane jako chyba.
+            if (is_string($e['e'] ?? null) && $e['e'] !== '') {
+                yield new ScanSourceFile($name, '', (int) ($e['s'] ?? 0), $e['e']);
+                continue;
+            }
             $staged = $this->dir . '/' . basename((string) ($e['f'] ?? ''));
             if (!is_file($staged)) {
                 yield new ScanSourceFile($name, '', 0, 'missing');

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Document\ScanAttach;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DocumentLinkRepository;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Import\ImageToPdfConverter;
 use MyInvoice\Service\Import\PurchaseInvoicePdfArchiver;
 use PDO;
@@ -23,6 +24,7 @@ final class PurchaseInvoiceScanTarget implements ScanTargetInterface
         private readonly DocumentLinkRepository $links,
         private readonly PurchaseInvoicePdfArchiver $archiver,
         private readonly ImageToPdfConverter $images,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function type(): string
@@ -134,9 +136,19 @@ final class PurchaseInvoiceScanTarget implements ScanTargetInterface
     {
         $this->links->attach($supplierId, $documentId, $this->type(), $targetId);
 
-        $has = $this->db->pdo()->prepare('SELECT pdf_path FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
-        $has->execute([$targetId, $supplierId]);
-        if (trim((string) $has->fetchColumn()) !== '' || !is_file($absPath)) {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, pdf_path, booked_at, status, effective_cost_date, issue_date, tax_date
+               FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([$targetId, $supplierId]);
+        $pi = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($pi === false || trim((string) $pi['pdf_path']) !== '' || !is_file($absPath)) {
+            return;
+        }
+        // Stejné pravidlo jako ruční nahrání PDF (UploadPurchaseInvoicePdfAction):
+        // doklad v uzavřeném období PDF slot nemění. Vazba v Dokumentech zůstává,
+        // takže sken je v detailu dokladu vidět i tak.
+        if ($this->locks->forPurchaseInvoice($pi)->inClosedPeriod) {
             return;
         }
         $bytes = (string) file_get_contents($absPath);

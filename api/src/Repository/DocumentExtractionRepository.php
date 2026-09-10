@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\Card\CardNumberMask;
 use PDO;
 
 /**
@@ -68,7 +69,8 @@ final class DocumentExtractionRepository
      * ať je v přehledu vidět proč — a další běh ho zkusí znovu.
      *
      * @param array<string,mixed> $fields normalizované údaje
-     * @param array<string,mixed>|null $payload úplná odpověď modelu
+     * @param array<string,mixed>|null $payload úplná odpověď modelu; celé číslo
+     *        platební karty se z ní před uložením zamaskuje (ukládá se jen koncovka)
      */
     public function save(
         int $supplierId,
@@ -87,7 +89,7 @@ final class DocumentExtractionRepository
             $supplierId, $documentId, $sha256, $schemaVersion, $status,
             $provider !== null ? mb_substr($provider, 0, 32) : null,
             $model !== null ? mb_substr($model, 0, 100) : null,
-            $payload !== null ? json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) : null,
+            $payload !== null ? json_encode(CardNumberMask::scrubPayload($payload), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) : null,
             $error !== null ? mb_substr($error, 0, 500) : null,
             date('Y-m-d H:i:s'),
         ];

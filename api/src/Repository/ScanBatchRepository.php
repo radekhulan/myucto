@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use PDO;
 
 /**
@@ -29,6 +30,41 @@ final class ScanBatchRepository
         $stmt->execute([$supplierId, $jobId, $sha256]);
         $id = $stmt->fetchColumn();
         return $id === false ? null : (int) $id;
+    }
+
+    /**
+     * Soubor dávky podle obsahu, s uloženým dokumentem (null = uložení dřív selhalo).
+     *
+     * @return array{id:int,document_id:?int}|null
+     */
+    public function itemBySha(int $supplierId, int $jobId, string $sha256): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, document_id FROM scan_batch_items WHERE supplier_id = ? AND job_id = ? AND sha256 = ? LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $jobId, $sha256]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : [
+            'id' => (int) $row['id'],
+            'document_id' => $row['document_id'] !== null ? (int) $row['document_id'] : null,
+        ];
+    }
+
+    public function countItems(int $supplierId, int $jobId): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM scan_batch_items WHERE supplier_id = ? AND job_id = ?');
+        $stmt->execute([$supplierId, $jobId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** Soubory dávky, které se zatím nepodařilo uložit do Dokumentů. */
+    public function countUnstoredItems(int $supplierId, int $jobId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM scan_batch_items WHERE supplier_id = ? AND job_id = ? AND document_id IS NULL'
+        );
+        $stmt->execute([$supplierId, $jobId]);
+        return (int) $stmt->fetchColumn();
     }
 
     /** Idempotentní: stejný obsah v téže dávce vrátí existující řádek. */
@@ -268,6 +304,74 @@ final class ScanBatchRepository
         );
         $stmt->execute([$jobId, $supplierId, self::SOURCE]);
         return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * Zámek dávek skenů firmy. Dávky téže firmy běží jedna po druhé: deduplikace
+     * obsahu v Dokumentech (sha256) i kontrola „doklad už sken má" jsou jinak
+     * check-then-insert a dvě souběžné dávky by založily duplicitní dokumenty
+     * nebo připojily sken k dokladu, který mezitím dostal sken z druhé dávky.
+     */
+    public function acquireBatchLock(int $supplierId, int $timeoutSeconds): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT GET_LOCK(?, ?)');
+        $stmt->execute([NamedLockName::for($this->db, 'scan_attach_batch', $supplierId), max(0, $timeoutSeconds)]);
+        return (int) $stmt->fetchColumn() === 1;
+    }
+
+    /** Dávky firmy ve frontě (nahrávají se nebo čekají na zpracování). */
+    public function countQueuedBatches(int $supplierId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM import_jobs WHERE supplier_id = ? AND source = ? AND status = 'queued'"
+        );
+        $stmt->execute([$supplierId, self::SOURCE]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    public function releaseBatchLock(int $supplierId): void
+    {
+        $this->db->pdo()->prepare('SELECT RELEASE_LOCK(?)')->execute([NamedLockName::for($this->db, 'scan_attach_batch', $supplierId)]);
+    }
+
+    /**
+     * Známka života dávky: nahrávání po částech a čekání na zámek jinak nemění
+     * průběh a úklid neaktivních úloh by dávku ukončil jako mrtvou.
+     */
+    public function touchJob(int $supplierId, int $jobId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE import_jobs SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND supplier_id = ? AND source = ?'
+        )->execute([$jobId, $supplierId, self::SOURCE]);
+    }
+
+    /**
+     * Doklady daných typů, které už mají připojený sken z JINÉ dávky firmy
+     * (vazba v Dokumentech na dokument, který do firmy přinesla dávka skenů).
+     *
+     * @param list<string> $types
+     * @return list<string> klíče „typ:id"
+     */
+    public function targetsWithScanFromOtherBatches(int $supplierId, int $jobId, array $types): array
+    {
+        if ($types === []) {
+            return [];
+        }
+        $place = implode(',', array_fill(0, count($types), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT dl.entity_type, dl.entity_id
+               FROM document_links dl
+              WHERE dl.supplier_id = ? AND dl.entity_type IN ($place)
+                AND EXISTS (
+                    SELECT 1 FROM scan_batch_items i
+                     WHERE i.supplier_id = dl.supplier_id AND i.document_id = dl.document_id AND i.job_id <> ?
+                )"
+        );
+        $stmt->execute([$supplierId, ...$types, $jobId]);
+        return array_map(
+            static fn (array $r): string => $r['entity_type'] . ':' . $r['entity_id'],
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        );
     }
 
     /** @return array{ico:?string,name:?string} */

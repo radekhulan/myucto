@@ -4,7 +4,8 @@ REM  cron-cleanup.cmd — denní úklid DB a souborů
 REM  Frekvence: 1x denne, doporuceno 03:00
 REM
 REM  Smaze: login_attempts >24h, expirovane sessions, pouzite password_resets,
-REM         ARES/VIES cache >30 dni, PDF cache >90 dni, log files nad max_files.
+REM         ARES/VIES cache >30 dni, PDF cache >90 dni, log files nad max_files,
+REM         nahrane soubory davek skenu (opustene >48 h, skoncene >7 dni).
 REM
 REM  Task Scheduler:
 REM    schtasks /create /tn "MyUcto Cleanup" ^

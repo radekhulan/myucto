@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\ScanAttach;
 use MyInvoice\Action\Document\ScanAttachAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\NamedLockName;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\DocumentExtractionRepository;
@@ -21,7 +22,9 @@ use MyInvoice\Service\Document\ScanAttach\ScanExtractionService;
 use MyInvoice\Service\Document\ScanAttach\ScanMatcher;
 use MyInvoice\Service\Document\ScanAttach\ScanSourceFile;
 use MyInvoice\Service\Document\ScanAttach\ScanSourceInterface;
+use MyInvoice\Service\Document\ScanAttach\ScanStagingCleaner;
 use MyInvoice\Service\Document\ScanAttach\ScanTargetRegistry;
+use MyInvoice\Service\Document\ScanAttach\UploadedScanSource;
 use MyInvoice\Service\Import\ImageToPdfConverter;
 use MyInvoice\Service\Import\LlmGatewayInterface;
 use MyInvoice\Tests\Support\FakeLlmGateway;
@@ -51,6 +54,10 @@ final class ScanAttachJobTest extends TestCase
     private int $currencyId = 0;
     private string $tmp = '';
     private int $jobId = 0;
+    /** @var list<int> další dávky testu (souběh, navazující dávka) */
+    private array $extraJobs = [];
+    private ?string $restoreMode = null;
+    private int $periodId = 0;
     /** @var array<string,int> */
     private array $pi = [];
     private int $otherClientId = 0;
@@ -110,12 +117,16 @@ final class ScanAttachJobTest extends TestCase
             return;
         }
         $docIds = [];
-        if ($this->jobId > 0) {
-            $docIds = array_map('intval', $this->pdo->query("SELECT document_id FROM scan_batch_items WHERE job_id = {$this->jobId} AND document_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN));
-            $this->pdo->exec("DELETE FROM scan_matches WHERE job_id = {$this->jobId}");
-            $this->pdo->exec("DELETE FROM scan_batch_items WHERE job_id = {$this->jobId}");
-            $this->pdo->exec("DELETE FROM import_jobs WHERE id = {$this->jobId}");
+        $jobIds = array_values(array_filter([$this->jobId, ...$this->extraJobs]));
+        foreach ($jobIds as $jobId) {
+            $docIds = [...$docIds, ...array_map('intval', $this->pdo->query("SELECT document_id FROM scan_batch_items WHERE job_id = {$jobId} AND document_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN))];
+            $this->pdo->exec("DELETE FROM scan_matches WHERE job_id = {$jobId}");
+            $this->pdo->exec("DELETE FROM scan_batch_items WHERE job_id = {$jobId}");
+            $this->pdo->exec("DELETE FROM import_jobs WHERE id = {$jobId}");
+            (new UploadedScanSource(ScanAttachJobService::stagingDir($this->sid, $jobId)))->cleanup();
+            $this->pdo->exec("DELETE FROM document_folders WHERE supplier_id = {$this->sid} AND name = 'Dávka {$jobId}'");
         }
+        $docIds = array_values(array_unique($docIds));
         if ($docIds !== []) {
             $in = implode(',', $docIds);
             $shas = $this->pdo->query("SELECT sha256 FROM documents WHERE id IN ($in)")->fetchAll(PDO::FETCH_COLUMN);
@@ -137,6 +148,12 @@ final class ScanAttachJobTest extends TestCase
             @unlink($f);
         }
         @rmdir($this->tmp);
+        if ($this->periodId > 0) {
+            $this->pdo->exec("DELETE FROM accounting_periods WHERE id = {$this->periodId}");
+        }
+        if ($this->restoreMode !== null) {
+            $this->pdo->prepare('UPDATE supplier SET accounting_mode = ? WHERE id = ?')->execute([$this->restoreMode, $this->sid]);
+        }
         $this->db->close();
     }
 
@@ -252,8 +269,323 @@ final class ScanAttachJobTest extends TestCase
         self::assertFalse($this->c->get(ScanBatchService::class)->confirm($this->sid, $matchId, $this->userId)['ok'], 'rozhodnutý návrh nejde potvrdit znovu');
     }
 
-    private function jobService(): ScanAttachJobService
+    /**
+     * „Spustit znovu" u dokončené dávky nahrané přes UI: nahrané soubory jsou po
+     * dokončení uklizené, opakovaný běh musí navázat nad Dokumenty, ne spadnout
+     * na prázdném stagingu. Zdroj je skutečný upload (manifest + části).
+     */
+    public function testResumeOfCompletedUploadedBatchWorksAfterStagingCleanup(): void
     {
+        $this->jobId = $this->jobs()->create($this->sid, 'scan_attach', [
+            'mode' => 'files', 'targets' => ['purchase_invoice'],
+            'date_from' => '2090-01-01', 'date_to' => '2091-12-31',
+        ], $this->userId);
+        $this->stage($this->jobId, [
+            '9100000001.pdf' => $this->pdf('A'),
+            'sken-b.pdf' => $this->pdf('B'),
+        ]);
+        $staging = ScanAttachJobService::stagingDir($this->sid, $this->jobId);
+
+        $service = $this->jobService();
+        $service->run($this->jobId);
+        $job = $this->jobs()->find($this->jobId, $this->sid);
+        self::assertSame('completed', $job['status'], (string) ($job['last_error'] ?? $job['log_text'] ?? ''));
+        self::assertDirectoryDoesNotExist($staging, 'po dokončení se nahrané soubory uklidí');
+        self::assertArrayHasKey($this->pi['barcode'], $this->links());
+        self::assertArrayHasKey($this->pi['content'], $this->links());
+
+        self::assertTrue($this->c->get(ScanBatchRepository::class)->requeue($this->sid, $this->jobId));
+        $service->run($this->jobId);
+
+        $job = $this->jobs()->find($this->jobId, $this->sid);
+        self::assertSame('completed', $job['status'], 'navázání dokončené dávky nesmí selhat: ' . ($job['last_error'] ?? ''));
+        $outcomes = $this->outcomes();
+        ksort($outcomes);
+        self::assertSame(['9100000001.pdf' => 'attached', 'sken-b.pdf' => 'attached'], $outcomes);
+    }
+
+    /** Soubor, který se napoprvé nepodařilo uložit, se při opakovaném běhu uloží a spáruje. */
+    public function testFileThatFailedToStoreIsRetriedOnResume(): void
+    {
+        $this->jobId = $this->jobs()->create($this->sid, 'scan_attach', [
+            'mode' => 'files', 'targets' => ['purchase_invoice'],
+            'date_from' => '2090-01-01', 'date_to' => '2091-12-31',
+        ], $this->userId);
+        $service = $this->jobService();
+
+        // Obsah skenu je v pořádku, jen název s blokovanou příponou uložení odmítne.
+        $service->run($this->jobId, $this->source(['sken-b.exe' => $this->pdf('B')]));
+        self::assertSame(['sken-b.exe' => 'unreadable'], $this->outcomes());
+        self::assertArrayNotHasKey($this->pi['content'], $this->links());
+
+        self::assertTrue($this->c->get(ScanBatchRepository::class)->requeue($this->sid, $this->jobId));
+        $service->run($this->jobId, $this->source(['sken-b.pdf' => $this->pdf('B')]));
+
+        self::assertSame(['sken-b.exe' => 'attached'], $this->outcomes(), 'uložení se zopakovalo a sken se spároval');
+        self::assertArrayHasKey($this->pi['content'], $this->links());
+        $unstored = (int) $this->pdo->query("SELECT COUNT(*) FROM scan_batch_items WHERE job_id = {$this->jobId} AND document_id IS NULL")->fetchColumn();
+        self::assertSame(0, $unstored);
+    }
+
+    /**
+     * Nahraje soubory do stagingu dávky stejně jako chunkovaný upload z UI.
+     *
+     * @param array<string,string> $files
+     */
+    private function stage(int $jobId, array $files): void
+    {
+        $dir = ScanAttachJobService::stagingDir($this->sid, $jobId);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        foreach ($files as $name => $bytes) {
+            $part = $dir . '/p' . bin2hex(random_bytes(8));
+            file_put_contents($part, $bytes);
+            file_put_contents($dir . '/manifest.jsonl', json_encode(['f' => basename($part), 'n' => $name], JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
+        }
+    }
+
+    /**
+     * Dvě dávky téže firmy nesmí běžet souběžně (deduplikace obsahu a kontrola
+     * „doklad už sken má" jsou check-then-insert). Dávka, která zámek firmy
+     * nezíská, nic neuloží a skončí s výzvou spustit ji znovu.
+     */
+    public function testBatchDoesNotRunWhileAnotherBatchOfCompanyHoldsTheLock(): void
+    {
+        $this->jobId = $this->jobs()->create($this->sid, 'scan_attach', [
+            'mode' => 'files', 'targets' => ['purchase_invoice'],
+            'date_from' => '2090-01-01', 'date_to' => '2091-12-31',
+        ], $this->userId);
+        $holder = Connection::withoutSharedTestConnection(static fn (): PDO => Bootstrap::buildContainer()->get(Connection::class)->pdo());
+        $name = NamedLockName::for($this->db, 'scan_attach_batch', $this->sid);
+        $got = $holder->prepare('SELECT GET_LOCK(?, 0)');
+        $got->execute([$name]);
+        self::assertSame(1, (int) $got->fetchColumn(), 'druhá session drží zámek firmy');
+        try {
+            $this->jobService(0)->run($this->jobId, $this->source(['sken-b.pdf' => $this->pdf('B')]));
+            $job = $this->jobs()->find($this->jobId, $this->sid);
+            self::assertSame('failed', $job['status'], 'dávka nesmí běžet souběžně s jinou dávkou firmy');
+            self::assertSame([], $this->outcomes(), 'nic se neuložilo');
+            self::assertArrayNotHasKey($this->pi['content'], $this->links());
+        } finally {
+            $holder->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]);
+        }
+
+        self::assertTrue($this->c->get(ScanBatchRepository::class)->requeue($this->sid, $this->jobId));
+        $this->jobService(0)->run($this->jobId, $this->source(['sken-b.pdf' => $this->pdf('B')]));
+        self::assertSame('completed', $this->jobs()->find($this->jobId, $this->sid)['status']);
+        self::assertArrayHasKey($this->pi['content'], $this->links());
+    }
+
+    /**
+     * Doklad, který dostal sken v dřívější dávce, nedostane v další dávce podle
+     * obsahu druhý (jiný soubor se stejně vytěženým obsahem).
+     */
+    public function testDocumentWithScanFromEarlierBatchGetsNoSecondScanByContent(): void
+    {
+        $params = ['mode' => 'files', 'targets' => ['purchase_invoice'], 'date_from' => '2090-01-01', 'date_to' => '2091-12-31'];
+        $this->jobId = $this->jobs()->create($this->sid, 'scan_attach', $params, $this->userId);
+        $service = $this->jobService();
+        $service->run($this->jobId, $this->source(['sken-b.pdf' => $this->pdf('B')]));
+        self::assertSame(1, $this->linkCount($this->pi['content']));
+
+        $second = $this->jobs()->create($this->sid, 'scan_attach', $params, $this->userId);
+        $this->extraJobs[] = $second;
+        $service->run($second, $this->source(['sken-b-znovu.pdf' => $this->pdf('B2')]));
+
+        self::assertSame('completed', $this->jobs()->find($second, $this->sid)['status']);
+        self::assertSame(1, $this->linkCount($this->pi['content']), 'doklad už sken z první dávky má');
+        $outcome = (string) $this->pdo->query("SELECT outcome FROM scan_batch_items WHERE job_id = {$second}")->fetchColumn();
+        self::assertNotSame('attached', $outcome);
+    }
+
+    /** Celé číslo karty z odpovědi modelu se neuloží ani do úplné odpovědi (payload). */
+    public function testFullCardNumberFromModelIsNotStored(): void
+    {
+        $this->jobId = $this->jobs()->create($this->sid, 'scan_attach', [
+            'mode' => 'files', 'targets' => ['purchase_invoice'],
+            'date_from' => '2090-01-01', 'date_to' => '2091-12-31',
+        ], $this->userId);
+        $this->jobService()->run($this->jobId, $this->source(['uctenka-karta.pdf' => $this->pdf('CARD')]));
+
+        $row = $this->pdo->query(
+            "SELECT de.card_last4, de.payload FROM document_extractions de
+               JOIN scan_batch_items i ON i.sha256 = de.sha256 AND i.supplier_id = de.supplier_id
+              WHERE i.job_id = {$this->jobId}"
+        )->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($row);
+        self::assertSame('1111', $row['card_last4']);
+        self::assertStringNotContainsString('4111 1111 1111 1111', (string) $row['payload']);
+        self::assertStringNotContainsString('4111111111111111', (string) $row['payload']);
+    }
+
+    /**
+     * Doklad v uzavřeném období: sken se připojí jako vazba v Dokumentech, ale PDF
+     * slot dokladu zůstane beze změny — stejně jako při ručním nahrání PDF.
+     */
+    public function testScanDoesNotFillPdfSlotOfInvoiceInClosedPeriod(): void
+    {
+        $this->restoreMode = (string) $this->pdo->query("SELECT accounting_mode FROM supplier WHERE id = {$this->sid}")->fetchColumn();
+        $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$this->sid]);
+        $this->pdo->prepare(
+            "INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, status)
+             VALUES (?, 2091, '2091-01-01', '2091-12-31', 'closed')"
+        )->execute([$this->sid]);
+        $this->periodId = (int) $this->pdo->lastInsertId();
+
+        $this->jobId = $this->jobs()->create($this->sid, 'scan_attach', [
+            'mode' => 'files', 'targets' => ['purchase_invoice'],
+            'date_from' => '2090-01-01', 'date_to' => '2091-12-31',
+        ], $this->userId);
+        $this->jobService()->run($this->jobId, $this->source(['9100000001.pdf' => $this->pdf('A')]));
+
+        self::assertArrayHasKey($this->pi['barcode'], $this->links(), 'vazba v Dokumentech vznikne');
+        $pdfPath = (string) $this->pdo->query("SELECT pdf_path FROM purchase_invoices WHERE id = {$this->pi['barcode']}")->fetchColumn();
+        self::assertSame('', $pdfPath, 'PDF slot dokladu v uzavřeném období zůstane prázdný');
+    }
+
+    /** Firma nemůže založit neomezeně rozpracovaných dávek (každá až 2 GB na disku). */
+    public function testCompanyCannotQueueUnlimitedBatches(): void
+    {
+        $before = (int) $this->pdo->query('SELECT COALESCE(MAX(id), 0) FROM import_jobs')->fetchColumn();
+        for ($i = 0; $i < 3; $i++) {
+            $this->extraJobs[] = $this->jobs()->create($this->sid, 'scan_attach', ['mode' => 'files'], $this->userId);
+        }
+
+        $res = $this->c->get(ScanAttachAction::class)->start(
+            $this->request($this->sid)->withMethod('POST')->withParsedBody(['mode' => 'files', 'targets' => ['purchase_invoice']]),
+            new Psr7Response(),
+        );
+        foreach ($this->pdo->query("SELECT id FROM import_jobs WHERE id > {$before} AND source = 'scan_attach'")->fetchAll(PDO::FETCH_COLUMN) as $id) {
+            if (!in_array((int) $id, $this->extraJobs, true)) {
+                $this->extraJobs[] = (int) $id;
+            }
+        }
+
+        self::assertSame(409, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('too_many_batches', json_decode((string) $res->getBody(), true)['error']['code'] ?? null);
+    }
+
+    /** Režim jednotlivých souborů má strop celkové velikosti dávky, ne jen počtu souborů. */
+    public function testFilesModeHasTotalSizeCap(): void
+    {
+        $this->jobId = $this->uploadingBatch();
+        $dir = ScanAttachJobService::stagingDir($this->sid, $this->jobId);
+        file_put_contents($dir . '/manifest.jsonl', json_encode(['f' => 'pzzz', 'n' => 'velky.pdf', 's' => 2 * 1024 * 1024 * 1024 - 10]) . "\n");
+
+        $res = $this->c->get(ScanAttachAction::class)->chunkFiles(
+            $this->uploadRequest('dalsi.pdf', $this->pdf('B')), new Psr7Response(), ['id' => $this->jobId],
+        );
+
+        self::assertSame(413, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('batch_too_large', json_decode((string) $res->getBody(), true)['error']['code'] ?? null);
+        self::assertCount(1, file($dir . '/manifest.jsonl', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []);
+    }
+
+    /** Soubor nad strop jednoho souboru se neuloží na disk, v dávce zůstane jako chyba. */
+    public function testOversizedFileIsRecordedAsErrorWithoutStoring(): void
+    {
+        $this->jobId = $this->uploadingBatch();
+        $dir = ScanAttachJobService::stagingDir($this->sid, $this->jobId);
+
+        $res = $this->c->get(ScanAttachAction::class)->chunkFiles(
+            $this->uploadRequest('obri-sken.pdf', $this->pdf('B'), UploadedScanSource::MAX_FILE_BYTES + 1), new Psr7Response(), ['id' => $this->jobId],
+        );
+
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        $entry = json_decode((string) file_get_contents($dir . '/manifest.jsonl'), true);
+        self::assertSame('too_large', $entry['e'] ?? null);
+        self::assertSame([], glob($dir . '/p*') ?: [], 'soubor se na disk neuložil');
+    }
+
+    /** Nahrávání po částech je známka života — úklid neaktivních úloh dávku neukončí. */
+    public function testChunkUploadKeepsBatchAlive(): void
+    {
+        $this->jobId = $this->uploadingBatch();
+        $this->pdo->exec("UPDATE import_jobs SET updated_at = NOW() - INTERVAL 20 MINUTE WHERE id = {$this->jobId}");
+
+        $res = $this->c->get(ScanAttachAction::class)->chunkFiles(
+            $this->uploadRequest('sken.pdf', $this->pdf('B')), new Psr7Response(), ['id' => $this->jobId],
+        );
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+
+        $this->jobs()->reapStale($this->sid, 'scan_attach');
+        self::assertSame('queued', $this->jobs()->find($this->jobId, $this->sid)['status']);
+    }
+
+    /** Úklid nahraných souborů: opuštěné a dávno skončené dávky ano, rozpracovanou ne. */
+    public function testStagingCleanerRemovesOnlyAbandonedOrFinishedBatches(): void
+    {
+        $fresh = $this->jobs()->create($this->sid, 'scan_attach', ['mode' => 'files'], $this->userId);
+        $done = $this->jobs()->create($this->sid, 'scan_attach', ['mode' => 'files'], $this->userId);
+        $abandoned = $this->jobs()->create($this->sid, 'scan_attach', ['mode' => 'files'], $this->userId);
+        $this->extraJobs = [...$this->extraJobs, $fresh, $done, $abandoned];
+        foreach ([$fresh, $done, $abandoned] as $id) {
+            $this->stage($id, ['sken.pdf' => $this->pdf('B')]);
+        }
+        $this->pdo->exec("UPDATE import_jobs SET status = 'completed', finished_at = NOW() - INTERVAL 8 DAY, updated_at = NOW() - INTERVAL 8 DAY WHERE id = {$done}");
+        $this->pdo->exec("UPDATE import_jobs SET updated_at = NOW() - INTERVAL 3 DAY WHERE id = {$abandoned}");
+        $orphanJob = (int) $this->pdo->query('SELECT COALESCE(MAX(id), 0) + 1000 FROM import_jobs')->fetchColumn();
+        $this->stage($orphanJob, ['sken.pdf' => $this->pdf('B')]);
+
+        (new ScanStagingCleaner($this->db))->purge($this->sid);
+
+        self::assertDirectoryExists(ScanAttachJobService::stagingDir($this->sid, $fresh), 'rozpracovaná dávka zůstává');
+        self::assertDirectoryDoesNotExist(ScanAttachJobService::stagingDir($this->sid, $done));
+        self::assertDirectoryDoesNotExist(ScanAttachJobService::stagingDir($this->sid, $abandoned));
+        self::assertDirectoryDoesNotExist(ScanAttachJobService::stagingDir($this->sid, $orphanJob), 'soubory dávky bez záznamu');
+    }
+
+    /** Dávky, vytěžení i kontrola příloh nesou údaje protistran — při smazání firmy zmizí s ní. */
+    public function testScanTablesCascadeWithSupplier(): void
+    {
+        $rules = [];
+        foreach ($this->pdo->query(
+            "SELECT TABLE_NAME, DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS
+              WHERE CONSTRAINT_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'supplier'
+                AND TABLE_NAME IN ('scan_batch_items', 'scan_matches', 'document_extractions', 'attachment_checks')"
+        )->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $rules[(string) $r['TABLE_NAME']] = (string) $r['DELETE_RULE'];
+        }
+        ksort($rules);
+        self::assertSame([
+            'attachment_checks' => 'CASCADE',
+            'document_extractions' => 'CASCADE',
+            'scan_batch_items' => 'CASCADE',
+            'scan_matches' => 'CASCADE',
+        ], $rules);
+    }
+
+    /** Dávka ve stavu nahrávání (queued, režim souborů, staging existuje). */
+    private function uploadingBatch(): int
+    {
+        $jobId = $this->jobs()->create($this->sid, 'scan_attach', ['mode' => 'files', 'targets' => ['purchase_invoice']], $this->userId);
+        $dir = ScanAttachJobService::stagingDir($this->sid, $jobId);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        return $jobId;
+    }
+
+    private function uploadRequest(string $name, string $bytes, ?int $declaredSize = null): \Psr\Http\Message\ServerRequestInterface
+    {
+        $path = $this->tmp . '/up-' . bin2hex(random_bytes(6));
+        file_put_contents($path, $bytes);
+        return $this->request($this->sid)->withMethod('POST')->withUploadedFiles([
+            'file' => [new \Slim\Psr7\UploadedFile($path, $name, 'application/pdf', $declaredSize ?? strlen($bytes))],
+        ]);
+    }
+
+    private function linkCount(int $purchaseInvoiceId): int
+    {
+        return (int) $this->pdo->query(
+            "SELECT COUNT(*) FROM document_links WHERE entity_type = 'purchase_invoice' AND entity_id = {$purchaseInvoiceId}"
+        )->fetchColumn();
+    }
+
+    private function jobService(?int $lockWaitSeconds = null): ScanAttachJobService
+    {
+        $extra = $lockWaitSeconds !== null ? [$lockWaitSeconds] : [];
         $extraction = new ScanExtractionService(
             $this->llm,
             $this->c->get(DocumentExtractionRepository::class),
@@ -272,6 +604,7 @@ final class ScanAttachJobTest extends TestCase
             $this->c->get(ScanTargetRegistry::class),
             $this->c->get(ScanBatchService::class),
             $this->c->get(\MyInvoice\Repository\PaymentCardRepository::class),
+            ...$extra,
         );
     }
 
@@ -295,7 +628,10 @@ final class ScanAttachJobTest extends TestCase
         ];
         return match ($m[1]) {
             'A' => $received(1210.0, '2091-03-10'),
-            'B' => $received(2904.0, '2091-04-10'),
+            'B', 'B2' => $received(2904.0, '2091-04-10'),
+            // Model vrátil celé (veřejné testovací) číslo karty místo koncovky.
+            'CARD' => ['card_last4' => '4111 1111 1111 1111', 'notes' => 'Zaplaceno kartou 4111111111111111']
+                + $received(777.0, '2091-06-01'),
             'FOREIGN' => $received(1210.0, '2091-03-10', '99887766'),
             'ORPHAN' => $received(777.0, '2091-06-01'),
             'LIKELY' => $received(5555.0, '2091-08-20'),
@@ -327,6 +663,11 @@ final class ScanAttachJobTest extends TestCase
                     file_put_contents($path, $bytes);
                     yield new ScanSourceFile((string) $name, $path, strlen($bytes));
                 }
+            }
+
+            public function hasFiles(): bool
+            {
+                return $this->files !== [];
             }
 
             public function cleanup(): void {}
