@@ -133,6 +133,49 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         }
     }
 
+    public function testProvisionSourceAndClosingStateSurviveArchiveRoundTrip(): void
+    {
+        $invoice = $this->saleInvoice('TEST-PROVISION', $this->client(), 50000);
+        $period = (int) $this->periods->findByYear($this->supplierId, self::YEAR)['id'];
+        $next = (int) $this->periods->findByYear($this->supplierId, self::YEAR + 1)['id'];
+        $repository = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\ClosingRepository::class);
+        $this->posting->postDocument($this->supplierId, 'provision', $invoice, [
+            ['account_code' => '558', 'side' => 'debit', 'amount' => 10000],
+            ['account_code' => '391', 'side' => 'credit', 'amount' => 10000],
+        ], ['entry_date' => '2097-12-31', 'posted_by' => $this->userId]);
+        $source = $repository->provisionSourceId($this->supplierId, $next, $invoice);
+        $entry = $this->posting->postDocument($this->supplierId, 'provision', $source, [
+            ['account_code' => '558', 'side' => 'debit', 'amount' => 5000],
+            ['account_code' => '391', 'side' => 'credit', 'amount' => 5000],
+        ], ['entry_date' => '2098-12-31', 'posted_by' => $this->userId]);
+        $repository->upsertStep($this->supplierId, $next, 'provisions', 'done', ['entries' => [
+            ['invoice_id' => $invoice, 'entry_id' => $entry, 'legal_amount' => 15000, 'acct_amount' => 0, 'legal_section' => '8a'],
+        ]], null, $this->userId);
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $zip = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $zip;
+        $report = $this->restore->restore($zip);
+        $newSupplier = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSupplier;
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM accounting_receivable_provisions WHERE supplier_id = ?');
+        $stmt->execute([$newSupplier]);
+        $mapping = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($mapping);
+        self::assertNotEquals($invoice, $mapping['invoice_id']);
+        self::assertNotEquals($next, $mapping['period_id']);
+        $newSource = \MyInvoice\Service\Accounting\Closing\ClosingSourceId::PROVISION_BASE + (int) $mapping['id'];
+        $stmt = $this->db->pdo()->prepare("SELECT id FROM journal_entries WHERE supplier_id = ? AND source_type = 'provision' AND source_id = ?");
+        $stmt->execute([$newSupplier, $newSource]);
+        $newEntry = (int) $stmt->fetchColumn();
+        self::assertGreaterThan(0, $newEntry);
+        $stmt = $this->db->pdo()->prepare("SELECT payload FROM accounting_closing_steps WHERE supplier_id = ? AND step_key = 'provisions'");
+        $stmt->execute([$newSupplier]);
+        $state = json_decode((string) $stmt->fetchColumn(), true)['entries'][0];
+        self::assertSame((int) $mapping['invoice_id'], $state['invoice_id']);
+        self::assertSame($newEntry, $state['entry_id']);
+        self::assertSame(15000.0, $repository->provisionOpeningState($newSupplier, '2099-01-01', '2099-12-31')[(int) $mapping['invoice_id']]['legal_amount']);
+    }
+
     public function testStockWorkflowRoundTripPreservesRecipesClaimsAndPairedDocuments(): void
     {
         $pdo = $this->db->pdo();

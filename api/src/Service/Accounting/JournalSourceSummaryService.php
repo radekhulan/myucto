@@ -26,11 +26,11 @@ use PDO;
  * resolver by vrátil NÁHODNÝ CIZÍ ŘÁDEK (např. fakturu s id 1234 pro period_id 123,
  * slot 4). Obrana je proto WHITELIST: do DB se sáhne jen u typů v RESOLVABLE,
  * všechno ostatní končí `available:false` JEŠTĚ PŘED dotazem. Navíc druhá pojistka
- * SYNTHETIC_ID_FLOOR odmítne jakékoli source_id ≥ 1e12 bez ohledu na typ.
+ * SYNTHETIC_ID_FLOOR odmítne přímé použití source_id ≥ 1e12 jako ID dokladu.
  *
  * ── PAST 2: 'provision' ───────────────────────────────────────────────────────
- * U dohadných položek je source_id ID FAKTURY (otevřená pohledávka na 311), NE id
- * nějaké „provize"/dohadné položky — viz ClosingService::postDocument('provision', $invoiceId).
+ * U opravných položek je source_id ID faktury nebo klíč mapování
+ * accounting_receivable_provisions pro danou firmu, období a fakturu.
  * Renderovat fakturu jako by BYLA tím zápisem by lhalo, proto 'provision' vrací
  * `available:false` (žádné bloky), ale `route` na fakturu vyplněnou MÁ, aby
  * „Otevřít detail" fungovalo správně.
@@ -77,12 +77,20 @@ final class JournalSourceSummaryService
         $type     = (string) ($entry['source_type'] ?? 'manual');
         $sourceId = isset($entry['source_id']) && $entry['source_id'] !== null ? (int) $entry['source_id'] : null;
 
-        // 'provision' má reálné (fakturní) source_id, ale vlastní náhled nedává smysl —
-        // zápis je dohadná položka, ne ta faktura. Dáme jen proklik.
         if ($type === 'provision') {
             $out = $this->unavailable($type, $sourceId, 'no_preview');
-            if ($sourceId !== null && $sourceId > 0 && $sourceId < self::SYNTHETIC_ID_FLOOR) {
-                $out['route']   = ['name' => 'invoice-detail', 'params' => ['id' => $sourceId]];
+            $invoiceId = $sourceId;
+            if ($sourceId !== null && $sourceId >= ClosingSourceId::PROVISION_BASE) {
+                $mapped = $this->one(
+                    'SELECT i.id FROM accounting_receivable_provisions p
+                       JOIN invoices i ON i.id = p.invoice_id AND i.supplier_id = p.supplier_id
+                      WHERE p.id = ? AND p.supplier_id = ?',
+                    [$sourceId - ClosingSourceId::PROVISION_BASE, $supplierId],
+                );
+                $invoiceId = $mapped !== null ? (int) $mapped['id'] : null;
+            }
+            if ($invoiceId !== null && $invoiceId > 0 && $invoiceId < self::SYNTHETIC_ID_FLOOR) {
+                $out['route']   = ['name' => 'invoice-detail', 'params' => ['id' => $invoiceId]];
                 $out['actions'] = [$this->action('open_detail', 'invoices', $out['route'])];
             }
             return $out;

@@ -135,11 +135,19 @@ final class ClosingBalanceInventoryTest extends TestCase
      * před EP-6): buildWithSaved dopočte skutečný stav z účetního (counted = book,
      * resolved) — inventarizace se prezentuje jako dokončená, ne jako samá nevyřešená.
      */
-    public function testClosedPeriodBackFillsInventoryFromLedger(): void
+    public static function closedStatuses(): iterable
+    {
+        yield 'closed' => ['closed'];
+        yield 'reviewed' => ['reviewed'];
+        yield 'approved' => ['approved'];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('closedStatuses')]
+    public function testClosedPeriodBackFillsInventoryFromLedger(string $status): void
     {
         // Simulace uzavřeného období — bez uložené inventarizace.
-        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ? AND supplier_id = ?")
-            ->execute([$this->periodId, $this->supplierId]);
+        $this->db->pdo()->prepare('UPDATE accounting_periods SET status = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([$status, $this->periodId, $this->supplierId]);
 
         $preview = $this->closing->inventoryPreview($this->supplierId, $this->periodId);
 

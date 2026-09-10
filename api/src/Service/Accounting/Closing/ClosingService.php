@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Closing;
 
+use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Repository\AccountingPeriodRepository;
@@ -16,13 +17,13 @@ use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\SmallAssetRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxReturnRepository;
+use MyInvoice\Repository\SaldoRepository;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Tax\Return\LegalProvisionLedgerService;
 use MyInvoice\Service\Accounting\Reports\BalanceInventoryService;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
-use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Service\Accounting\Reports\SmallAssetReportService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\Match\PaymentMatchAuditChecker;
@@ -159,7 +160,7 @@ final class ClosingService
         private readonly EntityCategoryService $categories,
         private readonly AssetRepository $assets,
         private readonly VatCrossCheckService $vatCrossCheck,
-        private readonly SaldoService $saldo,
+        private readonly SaldoRepository $saldo,
         private readonly TaxReturnRepository $taxReturns,
         private readonly SmallAssetRepository $smallAssets,
         private readonly SmallAssetReportService $smallAssetReport,
@@ -220,11 +221,12 @@ final class ClosingService
         $prev = $this->previousPeriod($supplierId, (string) $period['starts_on']);
         $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
 
-        $prevOk = $prev === null || in_array($prev['status'], ['closed', 'approved'], true);
+        $prevOk = $prev === null || AccountingPeriodStatus::isClosed((string) $prev['status']);
         $requiredPreClose = $this->preCloseStepKeys($supplierId, $period);
         $preCloseDone = $this->stepsComplete($steps, $requiredPreClose);
         $hasClosingEntries = $this->closing->hasClosingEntries($supplierId, $periodId);
-        $nextNotApproved = $next === null || $next['status'] !== 'approved';
+        $nextAllowsRevert = $next === null || (!AccountingPeriodStatus::isClosed((string) $next['status'])
+            && !$this->closing->hasClosingEntries($supplierId, (int) $next['id']));
 
         $stepList = [];
         foreach (self::STEP_KEYS as $key) {
@@ -243,11 +245,11 @@ final class ClosingService
             'can_close' => $period['status'] === 'closing' && $preCloseDone,
             'stock_step_required' => in_array('stock', $requiredPreClose, true),
             'depreciation_step_required' => in_array('depreciation', $requiredPreClose, true),
-            'can_open_next' => in_array($period['status'], ['closed', 'approved'], true)
+            'can_open_next' => AccountingPeriodStatus::isClosed((string) $period['status'])
                 && $steps['close_books']['status'] === 'done'
                 && $steps['open_next']['status'] !== 'done',
             'can_revert_open_next' => $steps['open_next']['status'] === 'done'
-                && $period['status'] === 'closed' && $nextNotApproved,
+                && $period['status'] === 'closed' && $nextAllowsRevert,
             'can_revert_close_books' => $period['status'] === 'closed'
                 && $steps['close_books']['status'] === 'done'
                 && $steps['open_next']['status'] !== 'done',
@@ -277,7 +279,7 @@ final class ClosingService
                 );
             }
             $prev = $this->previousPeriod($supplierId, (string) $period['starts_on']);
-            if ($prev !== null && !in_array($prev['status'], ['closed', 'approved'], true)) {
+            if ($prev !== null && !AccountingPeriodStatus::isClosed((string) $prev['status'])) {
                 throw new ClosingException(
                     'previous_period_open',
                     'Předchozí období ' . $prev['fiscal_year'] . ' není uzavřené — uzavírej chronologicky (R5).',
@@ -1866,7 +1868,25 @@ final class ClosingService
      *
      * @return array<string,mixed>
      */
-    public function provisionsPreview(int $supplierId, int $periodId): array
+    public function provisionsPreview(int $supplierId, int $periodId, int $page = 1, int $perPage = 100): array
+    {
+        $pdo = $this->db->pdo();
+        $ownsSnapshot = !$pdo->inTransaction();
+        if ($ownsSnapshot) {
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $pdo->exec('SET TRANSACTION READ ONLY');
+            $pdo->beginTransaction();
+        }
+        try {
+            return $this->buildProvisionsPreview($supplierId, $periodId, $page, $perPage);
+        } finally {
+            if ($ownsSnapshot && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        }
+    }
+
+    private function buildProvisionsPreview(int $supplierId, int $periodId, int $page, int $perPage): array
     {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
@@ -1880,19 +1900,56 @@ final class ClosingService
         $limit8c = (float) ($c['bad_debt_provision_8c_limit'] ?? self::PROVISION_8C_LIMIT);
         $limitationMonths = (int) ($c['receivable_limitation_warning_months'] ?? self::PROVISION_LIMITATION_MONTHS);
 
-        $existingByInvoice = [];
+        $existingByInvoice = $this->closing->provisionOpeningState($supplierId, (string) $period['starts_on'], $endsOn);
         foreach (($this->stepsMap($supplierId, $periodId)['provisions']['payload']['entries'] ?? []) as $e) {
             $existingByInvoice[(int) ($e['invoice_id'] ?? 0)] = $e;
         }
 
-        $receivables = $this->openReceivables($supplierId, $periodId, $endsOn);
-
-        // §8c limit 30 000 Kč se posuzuje za AGREGÁT pohledávek za týmž dlužníkem, ne per
-        // doklad — sečti zbývající hodnoty na partnera dřív, než navrhneš pásmo OP.
+        $page = max(1, $page);
+        $perPage = min(200, max(1, $perPage));
+        $offset = ($page - 1) * $perPage;
+        $receivables = [];
+        $count = 0;
         $remainingByPartner = [];
-        foreach ($receivables as $r) {
-            $pid = $r['partner_id'] !== null ? (int) $r['partner_id'] : 0;
-            $remainingByPartner[$pid] = ($remainingByPartner[$pid] ?? 0.0) + $r['remaining'];
+        $allTotals = ['remaining' => 0.0, 'suggested_legal' => 0.0, 'existing_legal' => 0.0, 'existing_acct' => 0.0];
+        $debtor = null;
+        $debtorRemaining = $underLimit = $overLimit = 0.0;
+        foreach ($this->openReceivables($supplierId, $periodId, $endsOn) as $r) {
+            $pid = (int) ($r['partner_id'] ?? 0);
+            if ($debtor !== null && $debtor !== $pid) {
+                $allTotals['suggested_legal'] += round($debtorRemaining, 2) <= $limit8c ? $underLimit : $overLimit;
+                $debtorRemaining = $underLimit = $overLimit = 0.0;
+            }
+            $debtor = $pid;
+            $debtorRemaining += $r['remaining'];
+            $months = $r['due_date'] !== '' ? self::monthsOverdue($r['due_date'], $endsOn) : 0;
+            if ($months < $limitationMonths) {
+                [, $underPct] = self::suggestLegalProvision($r['remaining'], 0.0, $months, $months8a50, $months8a100, $months8c, $limit8c);
+                [, $overPct] = self::suggestLegalProvision($r['remaining'], $limit8c + 1.0, $months, $months8a50, $months8a100, $months8c, $limit8c);
+                $underLimit += round($r['remaining'] * $underPct, 2);
+                $overLimit += round($r['remaining'] * $overPct, 2);
+            }
+            $existing = $existingByInvoice[$r['invoice_id']] ?? [];
+            $allTotals['remaining'] += $r['remaining'];
+            $allTotals['existing_legal'] += (float) ($existing['legal_amount'] ?? 0);
+            $allTotals['existing_acct'] += (float) ($existing['acct_amount'] ?? 0);
+            if ($count >= $offset && count($receivables) < $perPage) {
+                $receivables[] = $r;
+                $remainingByPartner[(int) ($r['partner_id'] ?? 0)] = 0.0;
+            }
+            $count++;
+        }
+        $lastPage = max(1, (int) ceil($count / $perPage));
+        if ($page > $lastPage) {
+            return $this->buildProvisionsPreview($supplierId, $periodId, $lastPage, $perPage);
+        }
+        $allTotals['suggested_legal'] += round($debtorRemaining, 2) <= $limit8c ? $underLimit : $overLimit;
+        $allTotals = array_map(static fn ($v) => round((float) $v, 2), $allTotals);
+        foreach ($this->openReceivables($supplierId, $periodId, $endsOn) as $r) {
+            $pid = (int) ($r['partner_id'] ?? 0);
+            if (array_key_exists($pid, $remainingByPartner)) {
+                $remainingByPartner[$pid] += $r['remaining'];
+            }
         }
 
         $items = [];
@@ -1943,7 +2000,7 @@ final class ClosingService
                 'potentially_time_barred' => $potentiallyTimeBarred,
                 'warning' => $potentiallyTimeBarred ? 'receivable_may_be_time_barred' : null,
                 'existing' => $existing === null ? null : [
-                    'entry_id' => (int) ($existing['entry_id'] ?? 0),
+                    'entry_id' => isset($existing['entry_id']) ? (int) $existing['entry_id'] : null,
                     'legal_amount' => round((float) ($existing['legal_amount'] ?? 0), 2),
                     'acct_amount' => round((float) ($existing['acct_amount'] ?? 0), 2),
                     // Paragraf, pod kterým účetní zákonnou OP uplatnila — jediný podklad
@@ -1961,7 +2018,10 @@ final class ClosingService
             'as_of' => $endsOn,
             'period' => ['id' => (int) $period['id'], 'fiscal_year' => (int) $period['fiscal_year']],
             'items' => $items,
-            'totals' => $totals,
+            'totals' => $allTotals,
+            'page_totals' => $totals,
+            'pagination' => ['page' => $page, 'per_page' => $perPage, 'total' => $count],
+            'totals_scope' => 'all',
             // Návrh OP je POUZE orientační — systém nic neúčtuje automaticky. Zákonnou OP
             // (558) lze uplatnit až po ověření úplného checklistu podmínek §8a/§8c ZoR;
             // do té doby patří částka na 559 (účetní, daňově neúčinná OP).
@@ -1984,11 +2044,9 @@ final class ClosingService
 
     /**
      * Deklarativní zaúčtování OP k pohledávkám (POST steps/provisions/run). `$items`
-     * je úplný účetní-potvrzený seznam OP; per pohledávka jeden idempotentní zápis
-     * source ('provision', invoice_id) — MD 558 (zákonná/daňová) a/nebo MD 559 (účetní,
-     * neuznatelná) / D 391 (R7 flag, entry_date = ends_on). Re-run = in-place rewrite;
-     * pohledávka s nulovou (nebo chybějící) OP maže případný stale zápis (vzor FX/zásoby).
-     * Vazba source_id=invoice_id umožňuje pozdější rozpuštění OP (391/558|559) při úhradě.
+     * je úplný účetní-potvrzený konečný stav OP. Účtuje se změna proti dosavadnímu
+     * stavu na 558/559 proti 391, samostatně pro pohledávku a období. Opakování
+     * přepisuje jen pohyb aktuálního období, nulový stav rozpouští starší OP.
      *
      * Server-side strop (audit 2026-07 #1): per pohledávka se vždy znovu dotáhne AKTUÁLNÍ
      * zbývající hodnota (D6 saldokonto, ne klientem poslaná hodnota) a Σ(legal+acct) nesmí
@@ -2000,18 +2058,42 @@ final class ClosingService
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array<string,mixed>
      */
-    public function runProvisions(int $supplierId, int $periodId, array $items, int $rowVersion, array $meta = []): array
+    public function runProvisions(int $supplierId, int $periodId, array $items, int $rowVersion, array $meta = [], bool $partial = false): array
     {
-        return $this->tx(function () use ($supplierId, $periodId, $items, $rowVersion, $meta): array {
+        return $this->tx(function () use ($supplierId, $periodId, $items, $rowVersion, $meta, $partial): array {
             $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
             $this->assertStatus($period, ['closing']);
             $endsOn = (string) $period['ends_on'];
             $fiscalYear = (int) $period['fiscal_year'];
 
+            if ($partial && count($items) > 200) {
+                throw new ClosingException('validation_failed', 'Dávka opravných položek smí obsahovat nejvýše 200 položek.', 422);
+            }
+            $openingByInvoice = $this->closing->provisionOpeningState($supplierId, (string) $period['starts_on'], $endsOn);
+            $prevByInvoice = $openingByInvoice;
+            foreach (($this->stepsMap($supplierId, $periodId)['provisions']['payload']['entries'] ?? []) as $e) {
+                $prevByInvoice[(int) ($e['invoice_id'] ?? 0)] = $e;
+            }
+
+            $invoiceIds = array_map(static fn (array $r): int => (int) ($r['invoice_id'] ?? 0), $items);
+            $invoiceIds = array_merge($invoiceIds, array_keys($prevByInvoice));
+            $submitted = array_fill_keys(array_map(static fn (array $r): int => (int) ($r['invoice_id'] ?? 0), $items), true);
+            foreach ($prevByInvoice as $id => $previous) {
+                if (!isset($submitted[$id])) {
+                    $items[] = $partial ? $previous : ['invoice_id' => $id];
+                }
+            }
             $remainingByInvoice = [];
-            foreach ($this->openReceivables($supplierId, $periodId, $endsOn) as $r) {
+            foreach ($this->openReceivables($supplierId, $periodId, $endsOn, $invoiceIds) as $r) {
                 $remainingByInvoice[$r['invoice_id']] = $r['remaining'];
             }
+            foreach ($items as &$item) {
+                $id = (int) ($item['invoice_id'] ?? 0);
+                if (!isset($submitted[$id]) && !isset($remainingByInvoice[$id])) {
+                    $item['legal_amount'] = $item['acct_amount'] = 0;
+                }
+            }
+            unset($item);
 
             $legalRule = $this->rules->resolve($supplierId, 'allowance.receivable.legal.create');
             $acctRule = $this->rules->resolve($supplierId, 'allowance.receivable.acct.create');
@@ -2021,11 +2103,6 @@ final class ClosingService
             $acc558 = (string) ($legalRule['debit_account_code'] ?? '558');
             $acc559 = (string) ($acctRule['debit_account_code'] ?? '559');
             $acc391 = (string) ($legalRule['credit_account_code'] ?? '391');
-
-            $prevByInvoice = [];
-            foreach (($this->stepsMap($supplierId, $periodId)['provisions']['payload']['entries'] ?? []) as $e) {
-                $prevByInvoice[(int) ($e['invoice_id'] ?? 0)] = $e;
-            }
 
             $entries = [];
             $removed = [];
@@ -2039,30 +2116,38 @@ final class ClosingService
                     throw new ClosingException('validation_failed', 'Pohledávka #' . $invoiceId . ' je v seznamu vícekrát.');
                 }
                 $seen[$invoiceId] = true;
+                if ($partial && !isset($submitted[$invoiceId]) && isset($remainingByInvoice[$invoiceId])) {
+                    $entries[] = $raw + ['entry_id' => null, 'document_no' => null, 'legal_section' => null];
+                    continue;
+                }
                 $legal = round(max(0.0, (float) ($raw['legal_amount'] ?? 0)), 2);
                 $acct = round(max(0.0, (float) ($raw['acct_amount'] ?? 0)), 2);
                 $total = round($legal + $acct, 2);
+                $sourceId = $this->closing->provisionSourceId($supplierId, $periodId, $invoiceId);
+                $legalDelta = round($legal - (float) ($openingByInvoice[$invoiceId]['legal_amount'] ?? 0), 2);
+                $acctDelta = round($acct - (float) ($openingByInvoice[$invoiceId]['acct_amount'] ?? 0), 2);
+                $delta = round($legalDelta + $acctDelta, 2);
                 // Paragraf ZoR, pod kterým se zákonná OP uplatňuje. Bez něj je částka
                 // v tabulce C DPPO nezařaditelná (§8 / §8a / §8b / §8c mají vlastní řádky)
                 // a builder VetaG na to upozorní — proto se ukládá, ne dopočítává.
                 $legalSection = self::normalizeLegalSection($raw['legal_section'] ?? null);
 
-                if ((int) round($total * 100) === 0) {
-                    $dump = $this->closing->deleteClosingEntry($supplierId, 'provision', $invoiceId);
+                if ((int) round($total * 100) === 0 && (int) round($legalDelta * 100) === 0 && (int) round($acctDelta * 100) === 0) {
+                    $dump = $this->closing->deleteClosingEntry($supplierId, 'provision', $sourceId, $periodId);
                     if ($dump !== null) {
                         $removed[] = $invoiceId;
                     }
                     continue;
                 }
 
-                if (!array_key_exists($invoiceId, $remainingByInvoice)) {
+                if ($total > 0 && !array_key_exists($invoiceId, $remainingByInvoice)) {
                     throw new ClosingException(
                         'invoice_not_open_receivable',
                         'Pohledávka #' . $invoiceId . ' není otevřená pohledávka na účtu 311 této firmy.',
                         422,
                     );
                 }
-                $remaining = $remainingByInvoice[$invoiceId];
+                $remaining = $remainingByInvoice[$invoiceId] ?? 0;
                 if ((int) round($total * 100) > (int) round($remaining * 100)) {
                     throw new ClosingException(
                         'provision_exceeds_receivable',
@@ -2074,33 +2159,40 @@ final class ClosingService
                 }
 
                 $lines = [];
-                if ((int) round($legal * 100) > 0) {
-                    $lines[] = ['account_code' => $acc558, 'side' => 'debit', 'amount' => $legal];
+                if ((int) round($legalDelta * 100) !== 0) {
+                    $lines[] = ['account_code' => $acc558, 'side' => $legalDelta > 0 ? 'debit' : 'credit', 'amount' => abs($legalDelta)];
                 }
-                if ((int) round($acct * 100) > 0) {
-                    $lines[] = ['account_code' => $acc559, 'side' => 'debit', 'amount' => $acct];
+                if ((int) round($acctDelta * 100) !== 0) {
+                    $lines[] = ['account_code' => $acc559, 'side' => $acctDelta > 0 ? 'debit' : 'credit', 'amount' => abs($acctDelta)];
                 }
-                $lines[] = ['account_code' => $acc391, 'side' => 'credit', 'amount' => $total];
+                if ((int) round($delta * 100) !== 0) {
+                    $lines[] = ['account_code' => $acc391, 'side' => $delta > 0 ? 'credit' : 'debit', 'amount' => abs($delta)];
+                }
                 $this->assertKnownCodes($supplierId, $lines);
 
-                $existing = $this->journal->findBySource($supplierId, 'provision', $invoiceId);
-                $docNo = $existing !== null && $existing['document_no'] !== null
-                    ? (string) $existing['document_no']
-                    : $this->series->next($supplierId, 'manual', $fiscalYear);
-
+                $existing = $this->journal->findBySource($supplierId, 'provision', $sourceId);
                 $note = trim((string) ($raw['note'] ?? ''));
                 $receivableNo = trim((string) ($raw['document_no'] ?? ''));
-                $entryId = $this->posting->postDocument($supplierId, 'provision', $invoiceId, $lines, [
-                    'entry_date' => $endsOn,
-                    'document_no' => $docNo,
-                    'description' => 'Opravná položka k pohledávce ' . ($receivableNo !== '' ? $receivableNo : '#' . $invoiceId),
-                    'posted' => true,
-                    'posted_by' => $meta['posted_by'] ?? null,
-                    'user_id' => $meta['user_id'] ?? null,
-                    'ip' => $meta['ip'] ?? null,
-                    'user_agent' => $meta['user_agent'] ?? null,
-                    'allow_closing_period' => true,
-                ]);
+                if ($lines === []) {
+                    $this->closing->deleteClosingEntry($supplierId, 'provision', $sourceId, $periodId);
+                    $entryId = null;
+                    $docNo = null;
+                } else {
+                    $docNo = $existing !== null && $existing['document_no'] !== null
+                        ? (string) $existing['document_no']
+                        : $this->series->next($supplierId, 'manual', $fiscalYear);
+                    $entryId = $this->posting->postDocument($supplierId, 'provision', $sourceId, $lines, [
+                        'entry_date' => $endsOn,
+                        'document_no' => $docNo,
+                        'description' => 'Opravná položka k pohledávce ' . ($receivableNo !== '' ? $receivableNo : '#' . $invoiceId),
+                        'posted' => true,
+                        'posted_by' => $meta['posted_by'] ?? null,
+                        'user_id' => $meta['user_id'] ?? null,
+                        'ip' => $meta['ip'] ?? null,
+                        'user_agent' => $meta['user_agent'] ?? null,
+                        'allow_closing_period' => true,
+                    ]);
+                }
 
                 $entries[] = [
                     'invoice_id' => $invoiceId,
@@ -2116,17 +2208,6 @@ final class ClosingService
                 ];
             }
 
-            // Pohledávky z předchozího běhu, které v novém návrhu chybí → smaž jejich OP.
-            foreach (array_keys($prevByInvoice) as $invoiceId) {
-                if (isset($seen[$invoiceId])) {
-                    continue;
-                }
-                $dump = $this->closing->deleteClosingEntry($supplierId, 'provision', (int) $invoiceId);
-                if ($dump !== null) {
-                    $removed[] = (int) $invoiceId;
-                }
-            }
-
             $payload = ['entries' => $entries, 'ran_at' => date('Y-m-d H:i:s')];
             $this->closing->upsertStep($supplierId, $periodId, 'provisions', 'done', $payload, null, $meta['user_id'] ?? null);
             $this->bumpVersion($supplierId, $periodId, $rowVersion);
@@ -2137,43 +2218,43 @@ final class ClosingService
 
     /**
      * Otevřené pohledávky účtu 311 k datu (D9, D6 reuse) — plochý seznam napříč partnery.
-     * Tenant-scoped ({@see SaldoService::build} filtruje na $supplierId), proto slouží i
+     * Tenant-scoped ({@see SaldoRepository::iterateOpenInvoiceItems} filtruje na $supplierId), proto slouží i
      * jako whitelist v {@see runProvisions}: invoice_id, který tu není, buď firmě nepatří,
      * nebo už není otevřenou pohledávkou na 311 (audit 2026-07 #1).
      *
-     * @return list<array{invoice_id:int, document_no:string, partner_id:?int,
+     * @return \Generator<int, array{invoice_id:int, document_no:string, partner_id:?int,
      *     partner_name:string, issue_date:?string, due_date:string, days_overdue:int,
      *     remaining:float, currency_code:?string}>
      */
-    private function openReceivables(int $supplierId, int $periodId, string $asOf): array
+    private function openReceivables(int $supplierId, int $periodId, string $asOf, ?array $invoiceIds = null): \Generator
     {
-        $saldo = $this->saldo->build($supplierId, $periodId, $asOf, '311', null);
-        $out = [];
-        foreach (($saldo['accounts'] ?? []) as $account) {
-            foreach (($account['partners'] ?? []) as $partner) {
-                foreach (($partner['items'] ?? []) as $it) {
-                    if ((string) ($it['doc_type'] ?? '') !== 'invoice') {
-                        continue; // OP tvoříme jen k pohledávkám z vydaných faktur (311)
-                    }
-                    $remaining = round((float) ($it['remaining_czk'] ?? 0), 2);
-                    if ($remaining <= 0) {
-                        continue;
-                    }
-                    $out[] = [
-                        'invoice_id' => (int) ($it['doc_id'] ?? 0),
-                        'document_no' => (string) ($it['doc_no'] ?? ''),
-                        'partner_id' => $partner['partner_id'] ?? null,
-                        'partner_name' => (string) ($partner['partner_name'] ?? ''),
-                        'issue_date' => $it['issue_date'] ?? null,
-                        'due_date' => (string) ($it['due_date'] ?? ''),
-                        'days_overdue' => (int) ($it['days_overdue'] ?? 0),
-                        'remaining' => $remaining,
-                        'currency_code' => $it['currency_code'] ?? null,
-                    ];
-                }
-            }
+        $account = $this->saldo->resolveAccount($supplierId, '311');
+        if ($account === null) {
+            return;
         }
-        return $out;
+        $normalSide = $account['normal_side'] ?? (in_array($account['account_type'], ['asset', 'expense'], true) ? 'debit' : 'credit');
+        foreach ($this->saldo->iterateOpenInvoiceItems($supplierId, $account['id'], $asOf, $invoiceIds) as $it) {
+            $booked = $normalSide === 'debit' ? $it['booked_signed'] : -$it['booked_signed'];
+            $remaining = SaldoRepository::settlementAmounts($booked, (float) $it['paid_ratio'])['remaining'];
+            if ($remaining <= 0) {
+                continue;
+            }
+            $due = (string) ($it['due_date'] ?? '');
+            $days = $due !== '' && $asOf > $due
+                ? (int) (new \DateTimeImmutable($due))->diff(new \DateTimeImmutable($asOf))->days
+                : 0;
+            yield [
+                'invoice_id' => (int) $it['doc_id'],
+                'document_no' => (string) $it['doc_no'],
+                'partner_id' => $it['partner_id'] ?? null,
+                'partner_name' => (string) ($it['partner_name'] ?? ''),
+                'issue_date' => $it['issue_date'] ?? null,
+                'due_date' => $due,
+                'days_overdue' => $days,
+                'remaining' => $remaining,
+                'currency_code' => $it['currency_code'] ?? null,
+            ];
+        }
     }
 
     /** Počet celých měsíců mezi splatností a rozvahovým dnem (§8a/§8c pásma). */
@@ -3184,7 +3265,7 @@ final class ClosingService
             // nedotčen. Bez toho by se uživatel, který schválil dřív než otevřel nový rok,
             // zasekl (musel by ručně unapprove→open_next→approve). Období zůstává 'approved'
             // (openNext dělá jen bumpVersion, nikdy casStatus).
-            $this->assertStatus($period, ['closed', 'approved']);
+            $this->assertStatus($period, AccountingPeriodStatus::CLOSED);
             $steps = $this->stepsMap($supplierId, $periodId);
             if ($steps['close_books']['status'] !== 'done') {
                 throw new ClosingException('closing_steps_incomplete', 'Nejprve uzavři knihy (krok close_books).');
@@ -3473,7 +3554,7 @@ final class ClosingService
                     // opening jde smazat, jen dokud N+1 nemá vlastní uzávěrku
                     // (deleteClosingEntry jde mimo PostingService a jeho guardy).
                     if ($next !== null && (
-                        in_array($next['status'], ['approved', 'closed'], true)
+                        AccountingPeriodStatus::isClosed((string) $next['status'])
                         || $this->closing->hasClosingEntries($supplierId, (int) $next['id'])
                     )) {
                         throw new ClosingException(
@@ -3584,7 +3665,7 @@ final class ClosingService
                     }
                     foreach (($steps['provisions']['payload']['entries'] ?? []) as $e) {
                         $invId = (int) ($e['invoice_id'] ?? 0);
-                        $dump = $this->closing->deleteClosingEntry($supplierId, 'provision', $invId);
+                        $dump = $this->closing->deleteClosingEntry($supplierId, 'provision', $this->closing->provisionSourceId($supplierId, $periodId, $invId), $periodId);
                         if ($dump !== null) {
                             $dumps['provision_' . $invId] = $dump;
                         }
@@ -4639,7 +4720,7 @@ final class ClosingService
         $checks = [];
 
         $prev = $this->previousPeriod($supplierId, $startsOn);
-        $prevOk = $prev === null || in_array($prev['status'], ['closed', 'approved'], true);
+        $prevOk = $prev === null || AccountingPeriodStatus::isClosed((string) $prev['status']);
         $checks[] = [
             'key' => 'prior_period_open',
             'severity' => 'error',

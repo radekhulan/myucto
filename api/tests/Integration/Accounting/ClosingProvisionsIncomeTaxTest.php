@@ -94,6 +94,98 @@ final class ClosingProvisionsIncomeTaxTest extends TestCase
 
     // ── D9: opravné položky k pohledávkám ──────────────────────────────────────
 
+    public function testProvisionsCarryStateAcrossClosedYearAndBookOnlyMovements(): void
+    {
+        $invoice = $this->receivable(50000, self::YEAR . '-02-01', '2096-04-30');
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $first = $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $invoice, 'legal_amount' => 10000, 'acct_amount' => 5000, 'legal_section' => '8a'],
+        ], $this->rv(), $this->meta());
+        $firstEntry = $first['entries'][0]['entry_id'];
+        $firstLines = $this->entryLines($firstEntry);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$this->periodId]);
+        $this->periodId = $this->periods->create($this->supplierId, self::YEAR + 1, '2098-01-01', '2098-12-31');
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $unchanged = $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $invoice, 'legal_amount' => 10000, 'acct_amount' => 5000, 'legal_section' => '8a'],
+        ], $this->rv(), $this->meta());
+        self::assertNull($unchanged['entries'][0]['entry_id']);
+        self::assertSame($firstLines, $this->entryLines($firstEntry));
+        $next = $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $invoice, 'legal_amount' => 20000, 'acct_amount' => 2000, 'legal_section' => '8a'],
+        ], $this->rv(), $this->meta());
+        self::assertNotSame($firstEntry, $next['entries'][0]['entry_id']);
+        $lines = $this->entryLines($next['entries'][0]['entry_id']);
+        self::assertSame(10000.0, $this->sideAmount($lines, '558', 'debit'));
+        self::assertSame(3000.0, $this->sideAmount($lines, '559P', 'credit'));
+        self::assertSame(7000.0, $this->sideAmount($lines, '391', 'credit'));
+        $entry = $this->journal->find($next['entries'][0]['entry_id'], $this->supplierId);
+        $resolver = new \MyInvoice\Service\Accounting\JournalSourceSummaryService($this->db);
+        $summary = $resolver->summarize($this->supplierId, $entry);
+        self::assertSame(['name' => 'invoice-detail', 'params' => ['id' => $invoice]], $summary['route']);
+        self::assertFalse($summary['available']);
+        self::assertSame('open_detail', $summary['actions'][0]['key']);
+        self::assertNull($resolver->summarize(0, $entry)['route']);
+        $zero = $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $invoice, 'legal_amount' => 0, 'acct_amount' => 0],
+        ], $this->rv(), $this->meta());
+        $lines = $this->entryLines($zero['entries'][0]['entry_id']);
+        self::assertSame(15000.0, $this->sideAmount($lines, '391', 'debit'));
+        self::assertSame($firstLines, $this->entryLines($firstEntry));
+        $this->closing->revertStep($this->supplierId, $this->periodId, 'provisions', $this->rv(), $this->meta());
+        self::assertSame([], $this->entryLines($zero['entries'][0]['entry_id']));
+        self::assertSame($firstLines, $this->entryLines($firstEntry));
+    }
+
+    public function testZeroProvisionInNextYearNeverDeletesClosedYear(): void
+    {
+        $invoice = $this->receivable(50000, self::YEAR . '-02-01', '2096-04-30');
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $first = $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $invoice, 'acct_amount' => 10000],
+        ], $this->rv(), $this->meta());
+        $id = $first['entries'][0]['entry_id'];
+        $before = $this->entryLines($id);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$this->periodId]);
+        $this->periodId = $this->periods->create($this->supplierId, self::YEAR + 1, '2098-01-01', '2098-12-31');
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->runProvisions($this->supplierId, $this->periodId, [['invoice_id' => $invoice]], $this->rv(), $this->meta());
+        self::assertSame($before, $this->entryLines($id));
+    }
+
+    public function testRepositoryRejectsDeletingProvisionFromClosedPeriod(): void
+    {
+        $invoice = $this->receivable(50000, self::YEAR . '-02-01', '2096-04-30');
+        $this->posting->postDocument($this->supplierId, 'provision', $invoice, [
+            ['account_code' => '558', 'side' => 'debit', 'amount' => 10000],
+            ['account_code' => '391', 'side' => 'credit', 'amount' => 10000],
+        ], ['entry_date' => self::ENDS_ON, 'posted_by' => $this->userId]);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$this->periodId]);
+        $repository = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\ClosingRepository::class);
+        $this->expectException(ClosingException::class);
+        $repository->deleteClosingEntry($this->supplierId, 'provision', $invoice);
+    }
+
+    public function testPriorProvisionReversedInCurrentYearIsNotReleasedTwice(): void
+    {
+        $invoice = $this->receivable(50000, self::YEAR . '-02-01', '2096-04-30');
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $first = $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $invoice, 'legal_amount' => 10000, 'legal_section' => '8a'],
+        ], $this->rv(), $this->meta());
+        $id = $first['entries'][0]['entry_id'];
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$this->periodId]);
+        $this->periodId = $this->periods->create($this->supplierId, self::YEAR + 1, '2098-01-01', '2098-12-31');
+        $reversal = $this->posting->reverse($this->supplierId, $id, $this->meta() + ['entry_date' => '2098-06-01']);
+        $reversedLines = $this->entryLines($reversal);
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $zero = $this->closing->runProvisions($this->supplierId, $this->periodId, [['invoice_id' => $invoice]], $this->rv(), $this->meta());
+        self::assertSame([], $zero['entries']);
+        self::assertSame($reversedLines, $this->entryLines($reversal));
+        $repository = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\ClosingRepository::class);
+        self::assertSame(0.0, $repository->provisionOpeningState($this->supplierId, '2099-01-01', '2099-12-31')[$invoice]['legal_amount']);
+    }
+
     public function testProvisionsPreviewSuggests50PctFor20MonthsOverdue(): void
     {
         // Pohledávka 20 měsíců po splatnosti, nad 30 tis. → §8a 50 %.
@@ -107,6 +199,118 @@ final class ClosingProvisionsIncomeTaxTest extends TestCase
         self::assertSame('8a', $item['legal_section']);
         self::assertSame(0.5, $item['suggested_legal_pct']);
         self::assertEqualsWithDelta(25000.00, $item['suggested_legal_amount'], 0.001);
+    }
+
+    public function testProvisionPagesKeepFullDebtorAggregate(): void
+    {
+        $first = $this->receivable(20000.00, self::YEAR . '-02-01', '2096-11-30');
+        $second = $this->receivable(20000.00, self::YEAR . '-02-01', '2096-11-30');
+        $this->db->pdo()->prepare('UPDATE invoices SET client_id = (SELECT client_id FROM (SELECT client_id FROM invoices WHERE id = ?) x) WHERE id = ?')
+            ->execute([$first, $second]);
+        $page = $this->closing->provisionsPreview($this->supplierId, $this->periodId, 1, 1);
+        self::assertCount(1, $page['items']);
+        self::assertSame(2, $page['pagination']['total']);
+        self::assertEqualsWithDelta(40000.0, $page['totals']['remaining'], 0.001);
+        self::assertEqualsWithDelta(40000.0, $page['items'][0]['debtor_total_remaining'], 0.001);
+        self::assertNull($page['items'][0]['legal_section']);
+        $next = $this->closing->provisionsPreview($this->supplierId, $this->periodId, 2, 1);
+        self::assertNotSame($page['items'][0]['invoice_id'], $next['items'][0]['invoice_id']);
+        $pastEnd = $this->closing->provisionsPreview($this->supplierId, $this->periodId, 9, 1);
+        self::assertSame(2, $pastEnd['pagination']['page']);
+        self::assertCount(1, $pastEnd['items']);
+    }
+
+    public function testPartialProvisionRunPreservesOtherPagesAndRevertsAll(): void
+    {
+        $first = $this->receivable(50000.0, self::YEAR . '-02-01', '2096-04-30');
+        $second = $this->receivable(50000.0, self::YEAR . '-02-01', '2096-04-30');
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $first, 'acct_amount' => 1000],
+        ], $this->rv(), $this->meta(), true);
+        $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $second, 'acct_amount' => 2000],
+        ], $this->rv(), $this->meta(), true);
+        self::assertNotNull($this->journal->findBySource($this->supplierId, 'provision', $first));
+        self::assertNotNull($this->journal->findBySource($this->supplierId, 'provision', $second));
+        $this->closing->revertStep($this->supplierId, $this->periodId, 'provisions', $this->rv(), $this->meta());
+        self::assertNull($this->journal->findBySource($this->supplierId, 'provision', $first));
+        self::assertNull($this->journal->findBySource($this->supplierId, 'provision', $second));
+    }
+
+    public function testProvisionsRemainUsableAboveSaldoReportLimit(): void
+    {
+        $seed = $this->receivable(10.0, self::YEAR . '-02-01', '2096-11-30');
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO invoices (supplier_id, varsymbol, client_id, issue_date, due_date, currency_id, created_by, total_with_vat, status)
+             SELECT i.supplier_id, CONCAT("OPLIMIT", seq), i.client_id, i.issue_date, i.due_date, i.currency_id, i.created_by, i.total_with_vat, i.status
+               FROM invoices i CROSS JOIN seq_1_to_25000 WHERE i.id = ?'
+        )->execute([$seed]);
+        $pdo->prepare(
+            'INSERT INTO journal_entries (supplier_id, period_id, entry_date, source_type, source_id, posted_at, posted_by)
+             SELECT supplier_id, ?, issue_date, "invoice", id, NOW(), created_by FROM invoices
+              WHERE supplier_id = ? AND id <> ?'
+        )->execute([$this->periodId, $this->supplierId, $seed]);
+        $pdo->prepare(
+            'INSERT INTO journal_entry_lines (entry_id, supplier_id, account_id, side, amount, line_no)
+             SELECT e.id, e.supplier_id, ca.id, IF(ca.account_code = "311", "debit", "credit"), 10.0, IF(ca.account_code = "311", 1, 2)
+               FROM journal_entries e JOIN chart_of_accounts ca ON ca.supplier_id = e.supplier_id AND ca.account_code IN ("311", "602")
+              WHERE e.supplier_id = ? AND e.source_type = "invoice" AND e.source_id <> ?'
+        )->execute([$this->supplierId, $seed]);
+        $repository = new \MyInvoice\Repository\ClosingRepository($this->db);
+        $boundedState = function (string $startsOn, string $endsOn) use ($pdo, $repository): array {
+            $timeout = $pdo->query('SELECT @@SESSION.max_statement_time')->fetchColumn();
+            $pdo->exec('SET SESSION max_statement_time = 5');
+            try {
+                return $repository->provisionOpeningState($this->supplierId, $startsOn, $endsOn);
+            } finally {
+                $pdo->exec('SET SESSION max_statement_time = ' . sprintf('%.6F', (float) $timeout));
+            }
+        };
+        self::assertSame([], $boundedState(self::YEAR . '-01-01', self::ENDS_ON));
+        $preview = $this->closing->provisionsPreview($this->supplierId, $this->periodId);
+        self::assertCount(100, $preview['items']);
+        self::assertSame(25001, $preview['pagination']['total']);
+        self::assertEqualsWithDelta(250010.0, $preview['totals']['remaining'], 0.001);
+        self::assertEqualsWithDelta(250010.0, $preview['items'][0]['debtor_total_remaining'], 0.001);
+        self::assertNull($preview['items'][0]['legal_section']);
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $result = $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $seed, 'acct_amount' => 5],
+        ], $this->rv(), $this->meta(), true);
+        self::assertSame(1, $result['count']);
+        self::assertNotNull($this->journal->findBySource($this->supplierId, 'provision', $seed));
+        $next = $this->periods->create($this->supplierId, self::YEAR + 1, '2098-01-01', '2098-12-31');
+        $pdo->prepare(
+            "INSERT INTO journal_entries (supplier_id, period_id, entry_date, source_type, source_id, posted_at)
+             SELECT supplier_id, ?, '2098-12-31', 'provision', id, NOW()
+               FROM invoices WHERE supplier_id = ? AND id <> ?"
+        )->execute([$next, $this->supplierId, $seed]);
+        $pdo->prepare(
+            "INSERT INTO journal_entry_lines (entry_id, supplier_id, account_id, side, amount, line_no)
+             SELECT e.id, e.supplier_id, a.id, IF(a.account_code = '558', 'debit', 'credit'), 1, IF(a.account_code = '558', 1, 2)
+               FROM journal_entries e
+               JOIN chart_of_accounts a ON a.supplier_id = e.supplier_id AND a.account_code IN ('558', '391')
+              WHERE e.supplier_id = ? AND e.period_id = ? AND e.source_type = 'provision'"
+        )->execute([$this->supplierId, $next]);
+        $state = $boundedState('2099-01-01', '2099-12-31');
+        self::assertCount(25001, $state);
+        self::assertSame(25000.0, array_sum(array_column($state, 'legal_amount')));
+        self::assertSame(5.0, array_sum(array_column($state, 'acct_amount')));
+    }
+
+    public function testPartialProvisionRunRemovesPreviouslyOpenPaidInvoice(): void
+    {
+        $first = $this->receivable(50000.0, self::YEAR . '-02-01', '2096-04-30');
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->runProvisions($this->supplierId, $this->periodId, [
+            ['invoice_id' => $first, 'acct_amount' => 1000],
+        ], $this->rv(), $this->meta(), true);
+        $this->db->pdo()->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source) VALUES (?, ?, ?, 50000, "CZK", "manual")')
+            ->execute([$this->supplierId, $first, self::YEAR . '-06-30']);
+        $this->closing->runProvisions($this->supplierId, $this->periodId, [], $this->rv(), $this->meta(), true);
+        self::assertNull($this->journal->findBySource($this->supplierId, 'provision', $first));
     }
 
     public function testProvisionsPreviewSuggests100PctForSmallReceivableOver12Months(): void

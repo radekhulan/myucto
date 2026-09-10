@@ -215,13 +215,7 @@ final class TaxReturnApiTest extends TestCase
         self::assertNotNull($lastSub);
     }
 
-    /**
-     * P-1 — blokující nepodporovaný případ nesmí projít až k ostrému XML. Před touhle
-     * bránou se investičnímu fondu vygenerovalo a zarchivovalo přiznání s natvrdo
-     * zapsaným typem poplatníka „1" (ostatní), tedy podání tvrdící o poplatníkovi
-     * nepravdu — a nikdo se to nedozvěděl.
-     */
-    public function testBlockingUnsupportedCaseStopsXmlIssue(): void
+    public function testUnsupportedCaseWarnsWithoutPreventingXmlOrFinalize(): void
     {
         $pdo = $this->db->pdo();
         if ($pdo->query("SHOW COLUMNS FROM supplier LIKE 'epo_taxpayer_code'")->fetch() === false) {
@@ -237,12 +231,9 @@ final class TaxReturnApiTest extends TestCase
 
         [$req, $res] = $this->req('GET', '/api/tax-return/po/' . self::YEAR . '/xml');
         $r = $this->action->xml($req, $res, $args);
-        self::assertSame(422, $r->getStatusCode());
-        self::assertSame('unsupported_case_blocked', $this->json($r)['error']['code']);
+        self::assertSame(200, $r->getStatusCode());
+        self::assertStringContainsString('typ_popldpp="4"', (string) $r->getBody());
 
-        // Typ poplatníka z nastavení firmy se skutečně dostane do XML místo natvrdo
-        // zapsané „1" — podklad (náhled/uzávěrkový balíček) se staví i s nálezem,
-        // blokované je až vydání ostrého XML výše.
         $pdo->prepare("UPDATE supplier SET epo_taxpayer_code = '3' WHERE id = ?")->execute([$this->supplierId]);
         $built = $this->returns->buildXml($this->supplierId, self::YEAR, 'po');
         self::assertStringContainsString('typ_popldpp="3"', $built['xml']);
@@ -251,11 +242,12 @@ final class TaxReturnApiTest extends TestCase
             array_column($built['unsupported_cases'], 'key'),
         );
 
-        // Finalizace stojí na téže bráně.
         [$req, $res] = $this->req('POST', '/api/tax-return/po/' . self::YEAR . '/finalize', ['row_version' => 1]);
         $r = $this->action->finalize($req, $res, $args);
-        self::assertSame(422, $r->getStatusCode());
-        self::assertSame('prefinalize_blocked', $this->json($r)['error']['code']);
+        self::assertSame(200, $r->getStatusCode());
+        $body = $this->json($r);
+        self::assertSame('final', $body['return']['status']);
+        self::assertStringContainsString('Nepodporovaný případ:', implode(' ', $body['warnings']));
     }
 
     public function testReadonlyCannotWrite(): void

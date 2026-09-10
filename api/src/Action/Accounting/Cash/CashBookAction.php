@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Cash\CashException;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Tax\Return\JournalTaxOrigin;
 use MyInvoice\Service\Accounting\Reports\AccountStatementService;
 use MyInvoice\Service\Pdf\AccountStatementPdfRenderer;
 use PDO;
@@ -500,18 +501,19 @@ final class CashBookAction
     private function minRunningDelta(int $supplierId, int $accountId, string $from, string $to): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(MIN(t.running_delta), 0) FROM (
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(MIN(t.running_delta), 0) FROM (
                 SELECT SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END)
                          OVER (ORDER BY e.entry_date, e.id, l.line_no
                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
                   FROM journal_entry_lines l
                   JOIN journal_entries e    ON e.id = l.entry_id
+                  JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                  WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                    AND (l.account_id = ? OR ca.parent_id = ?)
                    AND e.entry_date BETWEEN ? AND ?
                    AND NOT (e.entry_date = ? AND e.source_type = 'opening')
-                   AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                   AND " . JournalTaxOrigin::includedSql() . "
             ) t"
         );
         $stmt->execute([

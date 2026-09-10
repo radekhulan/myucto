@@ -1594,27 +1594,28 @@ final class DppoXmlBuilder
             foreach ($balanceAttr as $section => $attr) {
                 $set($attr, (float) ($bySection[$section] ?? 0.0));
             }
-            if (($p['allowance_created_split_reliable'] ?? false) === true) {
-                foreach ($createdAttr as $section => $attr) {
-                    $set($attr, (float) ($bySection[$section] ?? 0.0));
-                }
-            } elseif ((float) ($p['legal_allowance_created'] ?? 0.0) > 0.0) {
-                $warnings[] = 'Zákonné opravné položky k pohledávkám se v období tvořily '
-                    . number_format((float) $p['legal_allowance_created'], 0, ',', ' ') . ' Kč, ale to neodpovídá '
-                    . 'evidenci uzávěrkového kroku „Opravné položky" (' . number_format((float) ($p['allowance_declared_legal'] ?? 0), 0, ',', ' ') . ' Kč) — '
-                    . 'řádky TVORBY tabulky C (ř. 3/6/8/10) zůstaly nevyplněné. Doplňte je v přiznání ručně.';
-            }
         } elseif ((float) ($p['allowance_balance'] ?? 0.0) > 0.0 || (float) ($p['legal_allowance_created'] ?? 0.0) > 0.0) {
             $unassigned = (float) ($p['allowance_unassigned'] ?? 0.0);
             $warnings[] = $unassigned > 0.0
                 ? 'Zákonné opravné položky k pohledávkám za ' . number_format($unassigned, 0, ',', ' ') . ' Kč nemají '
-                    . 'určený paragraf zákona o rezervách — do tabulky C přílohy č. 1 II. oddílu (VetaG) se rozpad '
+                    . 'určený paragraf zákona o rezervách; do tabulky C přílohy č. 1 II. oddílu (VetaG) se rozpad konečného stavu '
                     . 'nedostal. Doplňte §8 / §8a / §8b / §8c u položek v uzávěrkovém kroku „Opravné položky".'
                 : 'Zůstatek opravných položek k pohledávkám (účet 391) je '
                     . number_format((float) ($p['allowance_balance'] ?? 0), 0, ',', ' ') . ' Kč, ale evidence uzávěrkového '
                     . 'kroku „Opravné položky" vysvětluje jen ' . number_format((float) ($p['allowance_declared_total'] ?? 0), 0, ',', ' ') . ' Kč — '
-                    . 'rozpad podle paragrafů do tabulky C přílohy č. 1 II. oddílu (VetaG) se nevygeneroval. '
+                    . 'rozpad konečného stavu podle paragrafů do tabulky C přílohy č. 1 II. oddílu (VetaG) se nevygeneroval. '
                     . 'Projděte opravné položky v uzávěrce, nebo tabulku C vyplňte ručně.';
+        }
+
+        if (($p['allowance_created_split_reliable'] ?? false) === true) {
+            foreach ($createdAttr as $section => $attr) {
+                $set($attr, (float) (($p['allowance_created_by_section'] ?? $bySection)[$section] ?? 0.0));
+            }
+        } elseif ((float) ($p['legal_allowance_created'] ?? 0.0) > 0.0) {
+            $warnings[] = 'Zákonné opravné položky k pohledávkám se v období tvořily '
+                . number_format((float) $p['legal_allowance_created'], 0, ',', ' ') . ' Kč, ale jejich úplný rozpad podle paragrafu chybí v '
+                . 'evidenci uzávěrkového kroku „Opravné položky"; '
+                . 'řádky TVORBY tabulky C (ř. 3/6/8/10) zůstaly nevyplněné. Doplňte je v přiznání ručně.';
         }
 
         // ř. 12 — odpis pohledávek uplatněný podle § 24 odst. 2 písm. y) ZDP (účet 546
@@ -1946,13 +1947,8 @@ final class DppoXmlBuilder
         }
         $vetaO->setAttribute('kc_ii270_280', (string) (int) round($rate * 100));
 
-        // kc_ii320_330 — daň (shodná s kc_ii280_290/ř.290). XSD kritická kontrola: nesmí
-        // být vyplněna, je-li na ř. 220 vykázána daňová ztráta — proto jen když daň > 0.
-        if (array_key_exists(290, $values)) {
-            $danRadek290 = max(0, (int) round($values[290]));
-            if ($danRadek290 > 0) {
-                $vetaO->setAttribute('kc_ii320_330', (string) $danRadek290);
-            }
+        if (array_key_exists(310, $values) && ($values[200] ?? 0) >= 0) {
+            $vetaO->setAttribute('kc_ii320_330', (string) max(0, (int) round($values[310])));
         }
         // d_hospvysl — datum, ke kterému se vztahuje výsledek hospodaření (konec ZO).
         if ($zdobdDo !== '') {

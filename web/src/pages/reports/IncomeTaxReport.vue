@@ -102,7 +102,8 @@ function switchTab(tab: TabKey) {
 
 const isFinal = computed(() => state.value?.return.status === 'final')
 const computed_ = computed(() => state.value?.computed)
-const warnings = computed(() => state.value?.warnings ?? [])
+const exportWarning = ref('')
+const warnings = computed(() => [...(state.value?.warnings ?? []), ...(exportWarning.value ? [exportWarning.value] : [])])
 const taxLosses = computed(() => (state.value as any)?.tax_losses ?? { losses: [], available_total: 0, suggested: 0, carry_years: 5 })
 
 // Feature 1 — projekce závěrkových operací do VH (jen DPPO; null, když nic nezaúčtovaného nečeká).
@@ -145,13 +146,12 @@ const prefinalize = computed(() => state.value?.prefinalize_check ?? null)
 function checkTone(c: { ok: boolean; severity: string; na?: boolean }): string {
   if (c.na) return 'bg-neutral-50 text-neutral-500 border-neutral-200'
   if (c.ok) return 'bg-success-50 text-success-700 border-success-500/30'
-  if (c.severity === 'blocker') return 'bg-danger-50 text-danger-600 border-danger-500/40'
   return 'bg-warning-50 text-warning-700 border-warning-500/40'
 }
 function checkStatusLabel(c: { ok: boolean; severity: string; na?: boolean }): string {
   if (c.na) return t('taxReturn.check_na')
   if (c.ok) return t('taxReturn.check_ok')
-  return c.severity === 'blocker' ? t('taxReturn.check_blocker') : t('taxReturn.check_warning')
+  return t('taxReturn.check_warning')
 }
 
 // P-1 — nepodporované/neúplné situace (typ poplatníka, likvidace, ATAD/CFC, atypické
@@ -163,10 +163,6 @@ const regularChecks = computed(() =>
   (prefinalize.value?.checks ?? []).filter((c) => !c.key.startsWith(UNSUPPORTED_PREFIX)))
 const unsupportedCases = computed(() =>
   (prefinalize.value?.checks ?? []).filter((c) => c.key.startsWith(UNSUPPORTED_PREFIX)))
-const unsupportedBlockers = computed(() =>
-  unsupportedCases.value.filter((c) => c.severity === 'blocker'))
-const unsupportedWarnings = computed(() =>
-  unsupportedCases.value.filter((c) => c.severity !== 'blocker'))
 // Souhrn v hlavičce checklistu musí počítat jen to, co je pod ním vidět. Serverové
 // `summary` zahrnuje i nálezy `unsupported_*`, které mají vlastní blok nad seznamem —
 // bez přepočtu hlásila hlavička „3 blokující" nad seznamem s jediným řádkem.
@@ -174,8 +170,7 @@ const regularSummary = computed(() => ({
   // Stejná pravidla jako v PreFinalizeCheckService::run(): rozhoduje `ok`, ne závažnost.
   // Nerelevantní kontroly (`na`) se do souhrnu nepočítají vůbec.
   ok: regularChecks.value.filter((c) => c.ok).length,
-  warning: regularChecks.value.filter((c) => !c.ok && c.severity !== 'blocker').length,
-  blocker: regularChecks.value.filter((c) => !c.ok && c.severity === 'blocker').length,
+  warning: regularChecks.value.filter((c) => !c.ok && !c.na).length,
 }))
 function caseText(c: PreFinalizeCheck, field: 'message' | 'action'): string {
   return String(c.value?.[field] ?? '')
@@ -260,6 +255,7 @@ async function loadClosing() {
 async function load() {
   loading.value = true
   error.value = ''
+  exportWarning.value = ''
   try {
     const s = await taxReturnApi.get(type.value, year.value, variant.value, seqParam())
     state.value = s
@@ -350,8 +346,11 @@ async function downloadXml() {
     ? taxReturnApi.previewXmlUrl(year.value, variant.value, seqParam())
     : taxReturnApi.xmlUrl(type.value, year.value, variant.value, seqParam())
   try {
-    await downloadApiFile(url)
-    if (type.value === 'po' || isFinal.value) {
+    const headers = await downloadApiFile(url)
+    exportWarning.value = headers['x-validation-status'] === 'failed'
+      ? t('taxReturn.xml_validation_warning')
+      : Number(headers['x-business-errors'] ?? 0) > 0 ? t('taxReturn.xml_business_warning') : ''
+    if ((type.value === 'po' || isFinal.value) && warnings.value.length === 0 && !prefinalize.value?.checks.some(c => !c.ok && !c.na)) {
       await router.push('/reports/submissions')
     }
   } catch (e) {
@@ -652,7 +651,7 @@ const actions = computed<ActionItem[]>(() => {
     a.push({ key: 'save', label: t('taxReturn.save'), icon: 'check', tier: 'primary', variant: 'primary',
       show: auth.canWrite('reports'), disabled: (!dirty.value && !profileDirty.value) || saving.value, loading: saving.value, run: save })
     a.push({ key: 'finalize', label: t('taxReturn.finalize'), icon: 'clipboardCheck', tier: 'secondary', variant: 'success',
-      show: auth.canWrite('reports.finalize'), disabled: saving.value || prefinalize.value?.can_finalize === false, run: finalize })
+      show: auth.canWrite('reports.finalize'), disabled: saving.value, run: finalize })
   } else {
     a.push({ key: 'reopen', label: t('taxReturn.reopen'), icon: 'doc', tier: 'secondary', variant: 'warning',
       show: auth.canWrite('reports.reopen'), disabled: saving.value, run: reopen })
@@ -724,27 +723,18 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
 
     <ActionBar v-if="state" :actions="actions" class="mb-4" />
 
-    <!-- P-1 — situace, které aplikace u přiznání neumí (blokující × jen na vědomí) -->
-    <div v-if="state && unsupportedCases.length" class="bg-surface border rounded-lg p-4 mb-4"
-      :class="unsupportedBlockers.length ? 'border-danger-500/40' : 'border-warning-500/40'">
+    <div v-if="state && unsupportedCases.length" class="bg-surface border border-warning-500/40 rounded-lg p-4 mb-4">
       <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
         <span class="text-sm font-semibold">{{ t('taxReturn.unsupported_title') }}</span>
         <span class="text-xs">
-          <span v-if="unsupportedBlockers.length" class="text-danger-600">{{ t('taxReturn.unsupported_blocking_count', { n: unsupportedBlockers.length }) }}</span>
-          <span v-if="unsupportedWarnings.length" class="text-warning-700 ml-2">{{ t('taxReturn.unsupported_warning_count', { n: unsupportedWarnings.length }) }}</span>
+          <span v-if="unsupportedCases.length" class="text-warning-700 ml-2">{{ t('taxReturn.unsupported_warning_count', { n: unsupportedCases.length }) }}</span>
         </span>
       </div>
       <p class="text-xs text-neutral-500 mb-3">
-        {{ unsupportedBlockers.length ? t('taxReturn.unsupported_blocking_hint') : t('taxReturn.unsupported_warning_hint') }}
+        {{ t('taxReturn.unsupported_warning_hint') }}
       </p>
       <ul class="space-y-2">
-        <li v-for="c in unsupportedBlockers" :key="c.key"
-          class="border border-danger-500/40 bg-danger-50 text-danger-600 rounded-md p-2.5 text-sm">
-          <div class="text-xs font-semibold uppercase mb-1">{{ t('taxReturn.unsupported_blocking_badge') }}</div>
-          <div>{{ caseText(c, 'message') }}</div>
-          <div class="text-xs mt-1 opacity-90"><strong>{{ t('taxReturn.unsupported_action') }}:</strong> {{ caseText(c, 'action') }}</div>
-        </li>
-        <li v-for="c in unsupportedWarnings" :key="c.key"
+        <li v-for="c in unsupportedCases" :key="c.key"
           class="border border-warning-500/40 bg-warning-50 text-warning-700 rounded-md p-2.5 text-sm">
           <div class="text-xs font-semibold uppercase mb-1">{{ t('taxReturn.unsupported_warning_badge') }}</div>
           <div>{{ caseText(c, 'message') }}</div>
@@ -755,13 +745,12 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
 
     <!-- E10 — předfinalizační kontrolní checklist („závěrková kontrola účetní") -->
     <div v-if="state && prefinalize" class="bg-surface border rounded-lg p-4 mb-4"
-      :class="regularSummary.blocker > 0 ? 'border-danger-500/40' : (regularSummary.warning > 0 ? 'border-warning-500/40' : 'border-neutral-200')">
+      :class="regularSummary.warning > 0 ? 'border-warning-500/40' : 'border-neutral-200'">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
         <span class="text-sm font-semibold">{{ t('taxReturn.prefinalize_title') }}</span>
         <span class="text-xs">
           <span class="text-success-700">{{ regularSummary.ok }} {{ t('taxReturn.check_ok') }}</span>
           <span v-if="regularSummary.warning" class="text-warning-700 ml-2">{{ regularSummary.warning }} {{ t('taxReturn.check_warning') }}</span>
-          <span v-if="regularSummary.blocker" class="text-danger-600 ml-2">{{ regularSummary.blocker }} {{ t('taxReturn.check_blocker') }}</span>
         </span>
       </div>
       <ul class="space-y-2">
@@ -800,6 +789,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                 <span v-if="!c.ok"> · {{ t('taxReturn.check_vat_missing') }}: {{ ((c.value?.missing as any[]) || []).join(', ') }}</span>
               </span>
             </template>
+            <template v-else-if="c.value?.message">{{ c.value.message }}</template>
           </div>
         </li>
       </ul>

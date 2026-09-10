@@ -372,7 +372,8 @@ final class ClosingAction
         $periodId = (int) ($args['id'] ?? 0);
 
         try {
-            $data = $this->closing->provisionsPreview($supplierId, $periodId);
+            $query = $request->getQueryParams();
+            $data = $this->closing->provisionsPreview($supplierId, $periodId, (int) ($query['page'] ?? 1), (int) ($query['per_page'] ?? 100));
         } catch (\Throwable $e) {
             return $this->mapError($response, $e, 'Náhled opravných položek selhal');
         }
@@ -692,7 +693,7 @@ final class ClosingAction
                     $data = $this->closing->confirmStep($supplierId, $periodId, 'provisions', 'skipped', $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
                 } else {
                     $items = is_array($body['items'] ?? null) ? array_values($body['items']) : [];
-                    $data = $this->closing->runProvisions($supplierId, $periodId, $items, $rowVersion, $meta);
+                    $data = $this->closing->runProvisions($supplierId, $periodId, $items, $rowVersion, $meta, ($body['partial'] ?? false) === true);
                 }
             } elseif ($step === 'income_tax') {
                 // D11 — předpis splatné daně (591/341). skip = confirmStep, jinak zaúčtování částky.

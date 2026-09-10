@@ -71,6 +71,7 @@ final class ArchiveRestoreService
         'bank_statements',
         'bank_transactions',
         'client_bank_accounts',
+        'accounting_receivable_provisions',
         'journal_entries',
         'journal_entry_lines',
         'accounting_closing_steps',
@@ -581,6 +582,20 @@ final class ArchiveRestoreService
         $nonFk = self::NONFK_REFS[$table] ?? [];
 
         foreach ($row as $col => $val) {
+            if ($table === 'accounting_closing_steps' && ($row['step_key'] ?? null) === 'provisions' && $col === 'payload' && $val !== null) {
+                $payload = json_decode((string) $val, true, 512, JSON_THROW_ON_ERROR);
+                foreach ($payload['entries'] ?? [] as $index => $entry) {
+                    foreach (['invoice_id' => 'invoices', 'entry_id' => 'journal_entries'] as $key => $reference) {
+                        if (!empty($entry[$key])) {
+                            $payload['entries'][$index][$key] = $this->maps[$reference][(int) $entry[$key]]
+                                ?? throw new RestoreException('snapshot_reference', 'Chybí mapování opravné položky.');
+                        }
+                    }
+                }
+                $cols[] = $col;
+                $vals[] = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+                continue;
+            }
             if ($table === 'product_variants' && $col === 'option_signature') {
                 continue;
             }
@@ -742,6 +757,7 @@ final class ArchiveRestoreService
             return null;
         }
         $old = (int) $val;
+
         $nullable = $this->nullable[$table][$col] ?? true;
 
         if ($refTable === 'supplier') {
@@ -839,6 +855,11 @@ final class ArchiveRestoreService
             return null;
         }
         $old = (int) $val;
+
+        if ($sourceType === 'provision' && $old >= ClosingSourceId::PROVISION_BASE) {
+            $mapped = $this->maps['accounting_receivable_provisions'][$old - ClosingSourceId::PROVISION_BASE] ?? null;
+            return $mapped === null ? null : ClosingSourceId::PROVISION_BASE + $mapped;
+        }
 
         $docMap = [
             'invoice' => 'invoices',

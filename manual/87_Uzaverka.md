@@ -75,7 +75,10 @@ změna stavu na ně skončí chybou „Použijte průvodce uzávěrkou". Ve slou
 proto u období, které ještě není `approved`, zobrazuje odkaz **„Uzávěrka"** vedoucí do
 průvodce.
 
-Přímo ze seznamu (jen administrátor) lze provést tyto samostatné přechody:
+Interně zkontrolované období má uzavřené knihy. Umožňuje otevření dalšího roku
+a zahájení jeho uzávěrky; zámky dokladů i daňové kontroly jej považují za uzavřené.
+
+Stavový automat podporuje tyto samostatné administrátorské přechody:
 
 - **Zahájit interní kontrolu** (`closed → reviewed`) — označí závěrku jako procházející
   interní kontrolou / review. Jde o **vratný** pracovní stav, žádná zákonná data
@@ -302,11 +305,18 @@ pohledávek s dny/měsíci po splatnosti a s **návrhem zákonné opravné polo�
 
 Návrh systém pouze **nabízí** — u každé pohledávky zadáš skutečnou částku **zákonné
 OP (účet 558**, daňově uznatelná) a/nebo **účetní OP nad rámec zákona (účet 559**,
-daňově neúčinná); nulová hodnota pohledávku z tvorby vynechá. Tlačítkem **„Zaúčtovat
-opravné položky"** se per pohledávka vytvoří zápis **MD 558/559 / D 391**. Opakované
-spuštění je idempotentní (přepíše zápis téže pohledávky), takže návrh můžeš postupně
-ladit. Vazba zápisu na fakturu umožňuje pozdější rozpuštění OP (391/558, resp. 391/559)
-při úhradě nebo odpisu pohledávky.
+daňově neúčinná). Zadáváš **požadovaný konečný stav**, nikoli částku nové tvorby.
+Systém přenese dosavadní OP a zaúčtuje pouze změnu: navýšení **MD 558/559 / D 391**,
+snížení opačně. Při nezměněném stavu nový účetní zápis nevzniká. Opakovaný běh
+upravuje pouze pohyb v právě uzavíraném roce; zápisy uzavřených let zachovává.
+
+Pohledávky se zobrazují po 100 položkách. Součty v tabulce patří k zobrazené
+stránce; limit § 8c se přesto vyhodnocuje ze všech otevřených pohledávek za daným
+dlužníkem. Tlačítko **„Zaúčtovat položky stránky“** mění pouze zobrazené položky,
+OP z jiných stránek zachovává. Nulová částka rozpustí přenesenou OP v aktuálním roce,
+případně odstraní její tvorbu v témže roce. Historické zápisy nemaže.
+Před přechodem na jinou stránku změny zaúčtujte, nebo je zahoďte opětovným načtením.
+Vrácení celého kroku ruší pohyby aktuálního roku ze všech stránek.
 
 Ve sloupci **Paragraf ZoR** u každé zákonné OP vyber ustanovení, podle kterého se
 uplatňuje — **§ 8** (pohledávky za dlužníky v insolvenčním řízení), **§ 8a**

@@ -22,6 +22,8 @@ namespace MyInvoice\Service\Accounting\Closing;
  */
 final class ClosingSourceId
 {
+    public const PROVISION_BASE = 4_000_000_000_000;
+
     /** Odsazení skladových slotů mimo rozsah period_id (close_books) a FX slotů. */
     public const STOCK_SLOT_BASE = 1_000_000_000_000;
 

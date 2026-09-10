@@ -404,10 +404,18 @@ final class DocumentLockTest extends TestCase
     }
 
     /** Scénář 5 (H1): create/issue/přesun data do zavřeného období. */
-    public function testH1CreateIssueAndDateMoveIntoClosedPeriod(): void
+    public static function closedStatuses(): iterable
+    {
+        yield 'closed' => ['closed'];
+        yield 'reviewed' => ['reviewed'];
+        yield 'approved' => ['approved'];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('closedStatuses')]
+    public function testH1CreateIssueAndDateMoveIntoClosedPeriod(string $status): void
     {
         $sid = $this->mkSupplier('double_entry');
-        $this->mkPeriod($sid, 2024, 'closed');
+        $this->mkPeriod($sid, 2024, $status);
         $this->mkPeriod($sid, 2026, 'open');
 
         $client = $this->mkUserWithToken('client', $sid);

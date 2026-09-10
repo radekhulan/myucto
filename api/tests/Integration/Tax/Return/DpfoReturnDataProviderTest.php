@@ -103,7 +103,7 @@ final class DpfoReturnDataProviderTest extends CashJournalTestCase
         self::assertStringContainsString('výsledku hospodaření', implode("\n", $result['warnings']));
     }
 
-    public function testExpenseModeChangeEmitsSection23BlockingCalculation(): void
+    public function testExpenseModeChangeEmitsSection23Warning(): void
     {
         $profiles = $this->container->get(\MyInvoice\Repository\TaxProfileRepository::class);
         $profiles->upsert($this->supplierId, self::YEAR - 1, [
@@ -115,7 +115,7 @@ final class DpfoReturnDataProviderTest extends CashJournalTestCase
 
         $result = $this->provider->gather($this->supplierId, self::YEAR);
         $warnings = implode("\n", $result['warnings']);
-        self::assertStringContainsString('BLOKUJÍCÍ KONTROLA §23 odst. 8 ZDP', $warnings);
+        self::assertStringContainsString('VAROVÁNÍ §23 odst. 8 ZDP', $warnings);
         self::assertStringContainsString('otevřené pohledávky', $warnings);
         self::assertStringContainsString('zásoby', $warnings);
     }

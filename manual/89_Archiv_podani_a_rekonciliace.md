@@ -93,10 +93,14 @@ hlášení a OSS, druhý pro DPFO a DPPO. Pod kořenem vzniká automaticky strom
 **rok → měsíc/čtvrtletí → druh formuláře**. Bez vlastního nastavení aplikace
 založí výchozí kořeny **DPH a hlášení** a **Daň z příjmů**.
 
-U DPFO vzniká ostré XML jen z finalizovaného neměnného snapshotu. Změna živých
-dokladů po finalizaci proto nesmí tiše změnit dříve vytvořené podání; oprava se řeší
+Finalizované DPFO i DPPO uchovávají neměnný výpočet a XML. Změna živých
+dokladů po finalizaci proto nemění dříve vytvořené podání; oprava se řeší
 novou revizí, opravným nebo dodatečným přiznáním. Pracovní XML z náhledu není
 podáním a nearchivuje se jako finální daňový výstup.
+
+Starší finální DPPO bez uloženého XML lze exportovat rekonstrukcí. Použije uložený
+výpočet a aktuální identifikační údaje a přílohy; chybí-li výpočet, aktuální podklady.
+Na rekonstrukci i neúspěšnou kontrolu XML aplikace upozorní, export však dokončí.
 
 U DPHDP3, KH a souhrnného hlášení je archivovaný soubor technickým obrazem
 vygenerovaného výkazu. Před odesláním vždy porovnej období, typ podání, identifikační

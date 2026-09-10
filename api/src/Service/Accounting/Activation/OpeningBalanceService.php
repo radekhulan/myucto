@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Activation;
 
+use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
@@ -98,7 +99,7 @@ final class OpeningBalanceService
         $previousDay = (new \DateTimeImmutable($startsOn))->modify('-1 day')->format('Y-m-d');
         $stmt = $this->db->pdo()->prepare(
             "SELECT 1 FROM accounting_periods
-              WHERE supplier_id = ? AND ends_on = ? AND status IN ('closing','closed','approved') LIMIT 1"
+              WHERE supplier_id = ? AND ends_on = ? AND status IN ('closing', " . AccountingPeriodStatus::closedSqlList() . ") LIMIT 1"
         );
         $stmt->execute([$supplierId, $previousDay]);
         if ($stmt->fetchColumn() !== false) {

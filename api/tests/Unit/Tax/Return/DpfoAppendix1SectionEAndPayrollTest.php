@@ -157,6 +157,60 @@ final class DpfoAppendix1SectionEAndPayrollTest extends TestCase
         ));
     }
 
+    public function testSectionEOverflowPreservesAmountsWithinSchemaLimit(): void
+    {
+        foreach (['increase' => ['VetaC', 'kc_uprzvys_235'], 'decrease' => ['VetaE', 'kc_uprsniz_235']] as $direction => [$element, $attribute]) {
+            foreach ([100, 99, 150] as $count) {
+                $result = $this->build([
+                    's7_' . $direction => $count * 100.49,
+                    's7_' . $direction . '_items' => array_fill(0, $count, ['amount' => 100.49, 'description' => 'Syntetická úprava']),
+                ]);
+                $dom = new \DOMDocument();
+                $dom->loadXML($result['xml']);
+                $xpath = new \DOMXPath($dom);
+                self::assertSame(min(99, $count), $dom->getElementsByTagName($element)->length);
+                self::assertSame((float) round($count * 100.49), $xpath->evaluate('sum(//' . $element . '/@' . $attribute . ')'));
+                self::assertTrue($dom->schemaValidate(dirname(__DIR__, 4) . '/xsd/dpfdp7_epo2.xsd'));
+                if ($count > 99) {
+                    self::assertStringContainsString('Souhrn ' . ($count - 98) . ' dalších úprav', $result['xml']);
+                    self::assertNotEmpty(array_filter($result['warnings'], static fn (string $w): bool => str_contains($w, 'limit 99')));
+                }
+            }
+        }
+    }
+
+    public function testSectionERoundingMatchesRoundedActualItemSum(): void
+    {
+        foreach (['increase' => 'kc_uprzvys_235', 'decrease' => 'kc_uprsniz_235'] as $direction => $attribute) {
+            foreach ([100.49, 100.51, 0.49, 0.51] as $amount) {
+                $result = $this->build([
+                    's7_' . $direction => $amount * 10,
+                    's7_' . $direction . '_items' => array_fill(0, 10, ['amount' => $amount, 'description' => 'Syntetická úprava']),
+                ]);
+                $dom = new \DOMDocument();
+                $dom->loadXML($result['xml']);
+                self::assertSame((float) round($amount * 10), (new \DOMXPath($dom))->evaluate('sum(//@' . $attribute . ')'));
+                foreach ($dom->getElementsByTagName($direction === 'increase' ? 'VetaC' : 'VetaE') as $row) {
+                    self::assertGreaterThanOrEqual(0, (int) $row->getAttribute($attribute));
+                    self::assertLessThanOrEqual(1.0, abs((float) $row->getAttribute($attribute) - $amount));
+                }
+                self::assertEmpty(array_filter($result['warnings'], static fn (string $w): bool => str_contains($w, 'neodpovídá částce')));
+            }
+        }
+    }
+
+    public function testSectionERoundingDoesNotHideActualMismatch(): void
+    {
+        $result = $this->build([
+            's7_increase' => 1005.5,
+            's7_increase_items' => array_fill(0, 10, ['amount' => 100.49, 'description' => 'Syntetická úprava']),
+        ]);
+        $dom = new \DOMDocument();
+        $dom->loadXML($result['xml']);
+        self::assertSame(1005.0, (new \DOMXPath($dom))->evaluate('sum(//VetaC/@kc_uprzvys_235)'));
+        self::assertNotEmpty(array_filter($result['warnings'], static fn (string $w): bool => str_contains($w, 'neodpovídá částce na ř. 105')));
+    }
+
     // ── P-8: kc_dpfmz18 ─────────────────────────────────────────────────────
 
     public function testPayrollGrossReachesVetaU(): void

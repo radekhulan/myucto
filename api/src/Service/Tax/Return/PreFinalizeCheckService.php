@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Tax\Return;
 
+use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
@@ -13,7 +14,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 /**
  * Předfinalizační kontrolní checklist přiznání k dani z příjmů („závěrková kontrola
  * účetní", Fáze E audit 2026-07, návrh E10). Vzor {@see \MyInvoice\Service\Accounting\Closing\ClosingService::buildChecks}
- * (D8 Měsíční kontrola) — každá kontrola má klíč, závažnost (info|warning|blocker),
+ * (D8 Měsíční kontrola) — každá kontrola má klíč, závažnost (info|warning),
  * příznak ok a proklikatelný `value`. Kalkulátor slepě věří deníku; tyto kontroly
  * odhalí nezaúčtované odpisy, dary mimo účet 543, rozjetý VH, neuzavřené období,
  * nedaňové účty s obratem a nepodaná DPH přiznání DŘÍV, než se přiznání zmrazí.
@@ -77,8 +78,6 @@ final class PreFinalizeCheckService
                 $summary['na']++;
             } elseif ($c['ok']) {
                 $summary['ok']++;
-            } elseif (($c['severity'] ?? 'warning') === 'blocker') {
-                $summary['blocker']++;
             } else {
                 $summary['warning']++;
             }
@@ -87,15 +86,15 @@ final class PreFinalizeCheckService
         return [
             'checks' => $checks,
             'summary' => $summary,
-            'can_finalize' => $summary['blocker'] === 0,
+            'can_finalize' => true,
         ];
     }
 
     /**
      * P-1 — nepodporované/neúplné situace ({@see UnsupportedCaseDetector}) jako kontroly
-     * checklistu. Blokující nález sráží `can_finalize` na false, takže se přiznání
-     * nefinalizuje a nevydá; varovný jen svítí. Ruční `unsupported_cases` z roční
-     * uzávěrky daňové evidence detektor slévá do stejného seznamu, aby měla účetní
+     * checklistu. Nálezy zůstávají varováním a finalizace i export pokračují.
+     * Ruční `unsupported_cases` z roční uzávěrky daňové evidence detektor slévá
+     * do stejného seznamu, aby měla účetní
      * jeden soupis nálezů, ne dva.
      *
      * @param array<string,mixed> $podklady
@@ -133,7 +132,7 @@ final class PreFinalizeCheckService
             }
             $checks[] = [
                 'key' => (string) ($issue['key'] ?? 'dpfo_source'),
-                'severity' => 'blocker',
+                'severity' => 'warning',
                 'ok' => false,
                 'overrideable' => false,
                 'value' => ['message' => (string) ($issue['message'] ?? 'Neúplný podklad DPFO.')],
@@ -156,7 +155,7 @@ final class PreFinalizeCheckService
                 break;
             }
         }
-        $checks[] = ['key' => 'dpfo_children', 'severity' => 'blocker', 'ok' => $childrenOk,
+        $checks[] = ['key' => 'dpfo_children', 'severity' => 'warning', 'ok' => $childrenOk,
             'overrideable' => false, 'value' => ['count' => count($children)]];
 
         // Limit vlastního příjmu manžela/ky (§ 35ba odst. 1 písm. b) se bere z ročníkových
@@ -184,7 +183,7 @@ final class PreFinalizeCheckService
                 && !empty($spouse['child_under_three_proved'])
                 && (float) ($spouse['own_income'] ?? PHP_INT_MAX) <= $spouseIncomeLimit;
         }
-        $checks[] = ['key' => 'dpfo_spouse', 'severity' => 'blocker', 'ok' => $spouseOk,
+        $checks[] = ['key' => 'dpfo_spouse', 'severity' => 'warning', 'ok' => $spouseOk,
             'overrideable' => false, 'value' => [
                 'claimed'        => $legacySpouse || $spouse !== null,
                 'income_limit'   => $spouseIncomeLimit,
@@ -203,13 +202,13 @@ final class PreFinalizeCheckService
         if ($activities === [] && (float) ($podklady['s7_income'] ?? 0) > 0) {
             $activitiesOk = false;
         }
-        $checks[] = ['key' => 'dpfo_activities', 'severity' => 'blocker', 'ok' => $activitiesOk,
+        $checks[] = ['key' => 'dpfo_activities', 'severity' => 'warning', 'ok' => $activitiesOk,
             'overrideable' => false, 'value' => ['count' => count($activities)]];
 
         $closing = is_array($podklady['closing'] ?? null) ? $podklady['closing'] : null;
         $closingOk = ($podklady['accounting_mode'] ?? '') !== 'tax_evidence'
             || ($closing !== null && ($closing['status'] ?? '') === 'final' && (array) ($closing['unsupported_cases'] ?? []) === []);
-        $checks[] = ['key' => 'tax_evidence_closing', 'severity' => 'blocker', 'ok' => $closingOk,
+        $checks[] = ['key' => 'tax_evidence_closing', 'severity' => 'warning', 'ok' => $closingOk,
             'overrideable' => false, 'value' => $closing];
 
         $months = (array) ($profile['osvc_months'] ?? []);
@@ -229,7 +228,7 @@ final class PreFinalizeCheckService
             }
             $monthsOk = $monthsOk && count($seen) === 12;
         }
-        $checks[] = ['key' => 'osvc_month_statuses', 'severity' => 'blocker', 'ok' => $monthsOk,
+        $checks[] = ['key' => 'osvc_month_statuses', 'severity' => 'warning', 'ok' => $monthsOk,
             'overrideable' => false, 'value' => ['months' => count($months)]];
 
         return $checks;
@@ -248,7 +247,7 @@ final class PreFinalizeCheckService
         return [
             'key' => 'period_status',
             'severity' => 'warning',
-            'ok' => in_array($status, ['closed', 'approved'], true),
+            'ok' => AccountingPeriodStatus::isClosed($status),
             'value' => ['status' => $status, 'fiscal_year' => (int) $period['fiscal_year']],
         ];
     }
@@ -312,7 +311,7 @@ final class PreFinalizeCheckService
         $diff = round($returnVh - $statementVh, 2);
         return [
             'key' => 'vh_vs_statement',
-            'severity' => 'blocker',
+            'severity' => 'warning',
             'ok' => abs($diff) < self::EPS,
             'value' => ['return_vh' => $returnVh, 'statement_vh' => $statementVh, 'diff' => $diff],
         ];
@@ -324,14 +323,15 @@ final class PreFinalizeCheckService
             return ['key' => 'non_deductible_accounts', 'severity' => 'info', 'ok' => true, 'na' => true, 'value' => null];
         }
         $stmt = $this->db->pdo()->prepare(
-            "SELECT a.id AS account_id, a.account_code, a.name,
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT a.id AS account_id, a.account_code, a.name,
                     ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2) AS turnover
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 AND a.account_type = 'expense'
                 AND a.account_code NOT LIKE '59%'
                 AND a.tax_deductibility = 'non_deductible'
@@ -436,12 +436,13 @@ final class PreFinalizeCheckService
     private function checkExpenseModeTransition(array $warnings): array
     {
         foreach ($warnings as $warning) {
-            if (str_starts_with($warning, 'BLOKUJÍCÍ KONTROLA §23 odst. 8 ZDP:')) {
+            if (str_starts_with($warning, 'BLOKUJÍCÍ KONTROLA §23 odst. 8 ZDP:')
+                || str_starts_with($warning, 'VAROVÁNÍ §23 odst. 8 ZDP:')) {
                 return [
                     'key' => 'expense_mode_transition_23_8',
-                    'severity' => 'blocker',
+                    'severity' => 'warning',
                     'ok' => false,
-                    'value' => ['message' => $warning],
+                    'value' => ['message' => str_replace('BLOKUJÍCÍ KONTROLA §23 odst. 8 ZDP:', 'VAROVÁNÍ §23 odst. 8 ZDP:', $warning)],
                 ];
             }
         }
@@ -460,13 +461,14 @@ final class PreFinalizeCheckService
     private function accountTurnover(int $supplierId, string $codePrefix, string $startsOn, string $endsOn): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 AND a.account_code LIKE ?"
         );
         $stmt->execute([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE, $codePrefix . '%']);

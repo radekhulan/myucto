@@ -56,6 +56,7 @@ final class LegalProvisionLedgerService
      *   allowance_declared_legal: float,
      *   allowance_declared_acct: float,
      *   allowance_by_section: array<string,float>,
+     *   allowance_created_by_section: array<string,float>,
      *   allowance_unassigned: float,
      *   allowance_split_reliable: bool,
      *   allowance_created_split_reliable: bool,
@@ -72,12 +73,13 @@ final class LegalProvisionLedgerService
         $allowanceBalance = $this->creditBalance($supplierId, $periodId, self::ACC_ALLOWANCE, $endsOn);
         $legalReserveBalance = $this->creditBalance($supplierId, $periodId, self::ACC_LEGAL_RESERVE, $endsOn);
 
-        $legalAllowanceCreated = $this->expenseCreated($supplierId, self::ACC_LEGAL_ALLOWANCE_EXPENSE, $startsOn, $endsOn);
+        $creationByEntry = $this->expenseCreationByEntry($supplierId, self::ACC_LEGAL_ALLOWANCE_EXPENSE, $startsOn, $endsOn);
+        $legalAllowanceCreated = max(0.0, round(array_sum($creationByEntry), 2));
         $acctAllowanceCreated = $this->expenseCreated($supplierId, self::ACC_ACCT_ALLOWANCE_EXPENSE, $startsOn, $endsOn);
         $legalReserveCreated = $this->expenseCreated($supplierId, self::ACC_LEGAL_RESERVE_EXPENSE, $startsOn, $endsOn);
         $writeOff = $this->expenseCreated($supplierId, self::ACC_RECEIVABLE_WRITEOFF, $startsOn, $endsOn, true);
 
-        [$bySection, $unassigned, $declaredLegal, $declaredAcct] = $this->declaredAllowances($supplierId, $periodId);
+        [$bySection, $unassigned, $declaredLegal, $declaredAcct, $sectionsByEntry] = $this->declaredAllowances($supplierId, $periodId);
         $declaredTotal = round($declaredLegal + $declaredAcct, 2);
 
         // Rozpad podle paragrafu je použitelný, jen když deklarace kroku `provisions`
@@ -87,12 +89,15 @@ final class LegalProvisionLedgerService
         $splitReliable = $unassigned === 0.0
             && (int) round($declaredTotal * 100) === (int) round($allowanceBalance * 100);
 
-        // Řádky TVORBY (ř. 3/6/8/10) smí nést § rozpad jen tehdy, když se celá zákonná
-        // OP deklarovaná v kroku `provisions` skutečně vytvořila v TOMTO období — tedy
-        // když tvorba na 558 sedí na deklaraci. Provize z minulých let, které
-        // v období nikdo nepřeúčtoval, do tvorby nepatří.
-        $createdSplitReliable = $splitReliable
-            && (int) round($legalAllowanceCreated * 100) === (int) round($declaredLegal * 100);
+        $createdBySection = array_fill_keys(self::SECTIONS, 0.0);
+        foreach ($creationByEntry as $entryId => $amount) {
+            $section = $sectionsByEntry[$entryId] ?? null;
+            if ($section !== null) {
+                $createdBySection[$section] = round($createdBySection[$section] + $amount, 2);
+            }
+        }
+        $createdSplitReliable = (int) round(array_sum($createdBySection) * 100)
+            === (int) round($legalAllowanceCreated * 100);
 
         $hasActivity = $allowanceBalance !== 0.0
             || $legalReserveBalance !== 0.0
@@ -107,6 +112,7 @@ final class LegalProvisionLedgerService
             'allowance_declared_legal' => $declaredLegal,
             'allowance_declared_acct' => $declaredAcct,
             'allowance_by_section' => $bySection,
+            'allowance_created_by_section' => $createdBySection,
             'allowance_unassigned' => $unassigned,
             'allowance_split_reliable' => $splitReliable,
             'allowance_created_split_reliable' => $createdSplitReliable,
@@ -128,6 +134,7 @@ final class LegalProvisionLedgerService
             'allowance_declared_legal' => 0.0,
             'allowance_declared_acct' => 0.0,
             'allowance_by_section' => array_fill_keys(self::SECTIONS, 0.0),
+            'allowance_created_by_section' => array_fill_keys(self::SECTIONS, 0.0),
             'allowance_unassigned' => 0.0,
             'allowance_split_reliable' => false,
             'allowance_created_split_reliable' => false,
@@ -157,14 +164,15 @@ final class LegalProvisionLedgerService
     private function creditBalance(int $supplierId, int $periodId, string $accountCode, string $asOf): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0)
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.period_id = ? AND e.entry_date <= ?
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 AND (a.account_code LIKE CONCAT(?, '%')
                      OR COALESCE(p.account_code, a.account_code) LIKE CONCAT(?, '%'))"
         );
@@ -184,40 +192,21 @@ final class LegalProvisionLedgerService
     private function expenseCreated(int $supplierId, string $accountCode, string $startsOn, string $endsOn, bool $deductibleOnly = false): float
     {
         if (!$deductibleOnly) {
-            $stmt = $this->db->pdo()->prepare(
-                "WITH RECURSIVE creation_entries AS (
-                    SELECT e.id, e.reversed_by, l.amount, 1 AS direction
-                      FROM journal_entry_lines l
-                      JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
-                      JOIN chart_of_accounts a ON a.id = l.account_id
-                      LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
-                     WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
-                       AND e.entry_date BETWEEN ? AND ? AND l.side = 'debit'
-                       AND NOT (e.source_type = 'closing' AND e.source_id < ?)
-                       AND NOT EXISTS (SELECT 1 FROM journal_entries original WHERE original.supplier_id = e.supplier_id AND original.reversed_by = e.id)
-                       AND (a.account_code LIKE CONCAT(?, '%') OR COALESCE(p.account_code, a.account_code) LIKE CONCAT(?, '%'))
-                    UNION ALL
-                    SELECT reversal.id, reversal.reversed_by, c.amount, -c.direction
-                      FROM creation_entries c
-                      JOIN journal_entries reversal ON reversal.id = c.reversed_by
-                     WHERE reversal.supplier_id = ? AND reversal.posted_at IS NOT NULL AND reversal.entry_date <= ?
-                ) SELECT COALESCE(SUM(amount * direction), 0) FROM creation_entries"
-            );
-            $stmt->execute([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE, $accountCode, $accountCode, $supplierId, $endsOn]);
-            return max(0.0, round((float) $stmt->fetchColumn(), 2));
+            return max(0.0, round(array_sum($this->expenseCreationByEntry($supplierId, $accountCode, $startsOn, $endsOn)), 2));
         }
         $deductible = $deductibleOnly
             ? "AND COALESCE(a.tax_deductibility, 'deductible') <> 'non_deductible'"
             : '';
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 {$deductible}
                 AND (a.account_code LIKE CONCAT(?, '%')
                      OR COALESCE(p.account_code, a.account_code) LIKE CONCAT(?, '%'))"
@@ -227,11 +216,41 @@ final class LegalProvisionLedgerService
         return max(0.0, round((float) $stmt->fetchColumn(), 2));
     }
 
+    private function expenseCreationByEntry(int $supplierId, string $accountCode, string $startsOn, string $endsOn): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . ", creation_entries AS (
+                SELECT e.id AS root_entry_id, e.id, e.reversed_by, l.amount, 1 AS direction
+                  FROM journal_entry_lines l
+                  JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+                  JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+                  JOIN chart_of_accounts a ON a.id = l.account_id
+                  LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
+                 WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
+                   AND e.entry_date BETWEEN ? AND ? AND l.side = 'debit'
+                   AND " . JournalTaxOrigin::includedSql() . "
+                   AND NOT EXISTS (SELECT 1 FROM journal_entries original WHERE original.supplier_id = e.supplier_id AND original.reversed_by = e.id)
+                   AND (a.account_code LIKE CONCAT(?, '%') OR COALESCE(p.account_code, a.account_code) LIKE CONCAT(?, '%'))
+                UNION ALL
+                SELECT c.root_entry_id, reversal.id, reversal.reversed_by, c.amount, -c.direction
+                  FROM creation_entries c
+                  JOIN journal_entries reversal ON reversal.id = c.reversed_by
+                 WHERE reversal.supplier_id = ? AND reversal.posted_at IS NOT NULL AND reversal.entry_date <= ?
+            ) SELECT root_entry_id, SUM(amount * direction) AS amount FROM creation_entries GROUP BY root_entry_id"
+        );
+        $stmt->execute([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE, $accountCode, $accountCode, $supplierId, $endsOn]);
+        $result = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['root_entry_id']] = round((float) $row['amount'], 2);
+        }
+        return $result;
+    }
+
     /**
      * Rozpad deklarovaných opravných položek podle paragrafu z payloadu uzávěrkového
      * kroku `provisions` daného období.
      *
-     * @return array{0: array<string,float>, 1: float, 2: float, 3: float}
+     * @return array{0: array<string,float>, 1: float, 2: float, 3: float, 4: array<int,?string>}
      *         [podle paragrafu, nezařazená zákonná OP, Σ zákonných, Σ účetních]
      */
     private function declaredAllowances(int $supplierId, int $periodId): array
@@ -240,6 +259,7 @@ final class LegalProvisionLedgerService
         $unassigned = 0.0;
         $legal = 0.0;
         $acct = 0.0;
+        $sectionsByEntry = [];
 
         $stmt = $this->db->pdo()->prepare(
             "SELECT payload FROM accounting_closing_steps
@@ -248,11 +268,11 @@ final class LegalProvisionLedgerService
         $stmt->execute([$supplierId, $periodId]);
         $raw = $stmt->fetchColumn();
         if (!is_string($raw) || $raw === '') {
-            return [$bySection, $unassigned, $legal, $acct];
+            return [$bySection, $unassigned, $legal, $acct, $sectionsByEntry];
         }
         $payload = json_decode($raw, true);
         if (!is_array($payload)) {
-            return [$bySection, $unassigned, $legal, $acct];
+            return [$bySection, $unassigned, $legal, $acct, $sectionsByEntry];
         }
 
         foreach ((array) ($payload['entries'] ?? []) as $entry) {
@@ -263,10 +283,15 @@ final class LegalProvisionLedgerService
             $entryAcct = round(max(0.0, (float) ($entry['acct_amount'] ?? 0)), 2);
             $legal = round($legal + $entryLegal, 2);
             $acct = round($acct + $entryAcct, 2);
+            $entryId = (int) ($entry['entry_id'] ?? 0);
+            $section = (string) ($entry['legal_section'] ?? '');
+            if ($entryId > 0 && in_array($section, self::SECTIONS, true)) {
+                $sectionsByEntry[$entryId] = array_key_exists($entryId, $sectionsByEntry) && $sectionsByEntry[$entryId] !== $section
+                    ? null : $section;
+            }
             if ($entryLegal === 0.0) {
                 continue;
             }
-            $section = (string) ($entry['legal_section'] ?? '');
             if (in_array($section, self::SECTIONS, true)) {
                 $bySection[$section] = round($bySection[$section] + $entryLegal, 2);
             } else {
@@ -274,6 +299,6 @@ final class LegalProvisionLedgerService
             }
         }
 
-        return [$bySection, $unassigned, $legal, $acct];
+        return [$bySection, $unassigned, $legal, $acct, $sectionsByEntry];
     }
 }

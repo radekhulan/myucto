@@ -77,7 +77,7 @@ final class DppoXmlBuilderXsdTest extends TestCase
         self::assertStringContainsString('kc_ii_360="75450"', $xml);
         self::assertStringContainsString('kc_v_1="20000"', $xml);
         self::assertStringContainsString('kc_v_4="-55450"', $xml);
-        self::assertStringContainsString('kc_ii320_330="93450"', $xml); // shodné s kc_ii280_290 (ř.290 daň)
+        self::assertStringContainsString('kc_ii320_330="75450"', $xml);
         self::assertStringContainsString('d_hospvysl="31.12.2025"', $xml); // fallback konec ZO
         self::assertStringContainsString('<VetaM', $xml);
         self::assertStringContainsString('kc_dpp_f1="18000"', $xml);

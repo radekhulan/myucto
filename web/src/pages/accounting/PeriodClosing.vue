@@ -33,6 +33,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -531,18 +532,23 @@ function applyEstimateSuggestion(it: EstimateSuggestItem) {
 // ── D9: opravné položky k pohledávkám ──────────────────────────────────────
 const provisionsPreview = ref<ProvisionsPreview | null>(null)
 const provisionsLoading = ref(false)
+const provisionsPage = ref(1)
+const provisionsBaseline = ref('{}')
 /** Paragrafy zákona o rezervách, které mají v tabulce C DPPO vlastní řádek. */
 const LEGAL_SECTIONS = ['8', '8a', '8b', '8c'] as const
 
 const provisionInputs = reactive<Record<number, { legal: number | null; acct: number | null; section: LegalProvisionSection }>>({})
 
-async function loadProvisions() {
+const provisionsDirty = computed(() => JSON.stringify(provisionInputs) !== provisionsBaseline.value)
+
+async function loadProvisions(page = provisionsPage.value) {
   provisionsLoading.value = true
   try {
-    const p = await closingApi.provisionsPreview(periodId)
+    const p = await closingApi.provisionsPreview(periodId, page)
+    provisionsPage.value = p.pagination.page
     provisionsPreview.value = p
+    for (const key of Object.keys(provisionInputs)) delete provisionInputs[Number(key)]
     for (const it of p.items) {
-      if (provisionInputs[it.invoice_id]) continue
       provisionInputs[it.invoice_id] = {
         legal: it.existing ? it.existing.legal_amount : it.suggested_legal_amount,
         acct: it.existing ? it.existing.acct_amount : it.suggested_acct_amount,
@@ -550,6 +556,7 @@ async function loadProvisions() {
         section: it.existing?.legal_section ?? it.legal_section ?? null,
       }
     }
+    provisionsBaseline.value = JSON.stringify(provisionInputs)
   } catch (e: any) {
     handleApiError(e)
   } finally {
@@ -565,7 +572,7 @@ function runProvisions() {
     acct_amount: Number(provisionInputs[it.invoice_id]?.acct ?? 0) || 0,
     legal_section: provisionInputs[it.invoice_id]?.section ?? null,
   }))
-  mutate(() => closingApi.runStep(periodId, 'provisions', { row_version: rowVersion.value, items }),
+  mutate(() => closingApi.runStep(periodId, 'provisions', { row_version: rowVersion.value, items, partial: true }),
     t('accounting.closing.provisions.booked')).then(ok => { if (ok) loadProvisions() })
 }
 
@@ -734,7 +741,7 @@ const isClosing = computed(() => state.value?.period.status === 'closing')
 // Past #37: „Otevřít nový rok" jde i nad schváleným (approved) obdobím — je to technický
 // přenos zůstatků do N+1, do knih schváleného období nezasahuje. Serverová brána is
 // state.can_open_next; tady jen povolíme oba stavy pro disabled tlačítka.
-const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.value?.period.status ?? ''))
+const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].includes(state.value?.period.status ?? ''))
 </script>
 
 <template>
@@ -1249,7 +1256,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
           </div>
           <template v-else>
             <div class="flex flex-wrap items-center gap-2">
-              <button @click="loadProvisions" :disabled="busy || provisionsLoading" :class="btnOutline('neutral')">
+              <button @click="loadProvisions()" :disabled="busy || provisionsLoading" :class="btnOutline('neutral')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
                 {{ t('accounting.closing.provisions.reload') }}
               </button>
@@ -1312,12 +1319,12 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                     </td>
                   </tr>
                 </tbody>
-                <tfoot v-if="provisionsPreview.totals" class="text-xs text-neutral-600 border-t-2 border-neutral-200">
+                <tfoot v-if="provisionsPreview.page_totals" class="text-xs text-neutral-600 border-t-2 border-neutral-200">
                   <tr>
-                    <td class="px-2 py-2 font-medium" colspan="4">{{ t('accounting.closing.provisions.total') }}</td>
-                    <td class="px-2 py-2 text-right font-mono">{{ formatMoney(provisionsPreview.totals.remaining) }}</td>
+                    <td class="px-2 py-2 font-medium" colspan="4">{{ t('accounting.closing.provisions.page_total') }}</td>
+                    <td class="px-2 py-2 text-right font-mono">{{ formatMoney(provisionsPreview.page_totals.remaining) }}</td>
                     <td></td>
-                    <td class="px-2 py-2 text-right font-mono">{{ formatMoney(provisionsPreview.totals.suggested_legal) }}</td>
+                    <td class="px-2 py-2 text-right font-mono">{{ formatMoney(provisionsPreview.page_totals.suggested_legal) }}</td>
                     <td></td>
                     <td></td>
                   </tr>
@@ -1325,11 +1332,15 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
               </table>
             </div>
             <EmptyState v-else-if="provisionsPreview" dense accent="neutral" icon="coin" :title="t('accounting.closing.provisions.none')" />
+            <p v-if="provisionsDirty" class="text-sm text-warning-700">{{ t('accounting.closing.provisions.save_before_page') }}</p>
+            <fieldset v-if="provisionsPreview" :disabled="busy || provisionsLoading || provisionsDirty">
+              <PaginationBar :page="provisionsPage" :per-page="provisionsPreview.pagination.per_page" :total="provisionsPreview.pagination.total" embedded @update:page="loadProvisions" />
+            </fieldset>
 
             <div class="flex flex-wrap gap-2 border-t border-neutral-200 pt-3">
-              <button v-if="isClosing" @click="runProvisions" :disabled="busy" :class="btnFilled('primary')">
+              <button v-if="isClosing" @click="runProvisions" :disabled="busy || provisionsLoading || !provisionsPreview" :class="btnFilled('primary')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
-                {{ t('accounting.closing.provisions.book') }}
+                {{ t('accounting.closing.provisions.book_page') }}
               </button>
               <button v-if="isClosing && step('provisions')?.status === 'pending'" @click="confirmStep('provisions', 'skipped')" :disabled="busy" :class="btnOutline('neutral')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>

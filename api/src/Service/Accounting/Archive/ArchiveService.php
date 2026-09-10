@@ -43,6 +43,7 @@ final class ArchiveService
         'cost_centers',
         'accounting_supplier_settings',
         'accounting_closing_steps',
+        'accounting_receivable_provisions',
         'accounting_document_series',
         'journal_entries',
         'journal_entry_lines',

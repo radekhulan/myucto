@@ -18,10 +18,8 @@ use MyInvoice\Infrastructure\Database\Connection;
  * nedozvěděl. Zásada projektu zní: aplikace nikdy nesmí vydat podání, o kterém ví,
  * že je neúplné, a mlčet u toho.
  *
- * Závažnost:
- * - `blocker` — finalizace přiznání se zastaví ({@see PreFinalizeCheckService::run()}
- *   sčítá blokující kontroly do `can_finalize`).
- * - `warning` — přiznání se vydá, ale nález je vidět v UI i ve výstupu exportu.
+ * Nálezy mají závažnost `warning`: finalizace i export pokračují a účetní
+ * dostane popis chybějících podkladů nebo nepodporované situace.
  *
  * Vědomý příznak na firmě s výchozí hodnotou „ne" (migrace 1782) NENÍ tichý
  * předpoklad: kde jde podezření poznat z dat (NACE finančního sektoru, právní
@@ -83,7 +81,7 @@ final class UnsupportedCaseDetector
         $findings = [];
         $nace = preg_replace('/\D/', '', (string) ($supplier['cz_nace_code'] ?? '')) ?? '';
 
-        self::checkEntityStatus($supplier, $findings);
+        self::checkEntityStatus($supplier, $type, $podklady, $findings);
         self::checkForeignSeat($supplier, $type, $findings);
 
         if ($type === 'po') {
@@ -143,7 +141,7 @@ final class UnsupportedCaseDetector
         if ($code !== null && !TaxpayerTypeCodebook::isValidTaxpayerType($code)) {
             $findings[] = [
                 'key' => 'taxpayer_type_invalid',
-                'severity' => self::SEVERITY_BLOCKER,
+                'severity' => self::SEVERITY_WARNING,
                 'message' => 'Typ poplatníka „' . $code . '" není v číselníku atributu typ_popldpp '
                     . '(přípustné hodnoty 0-9). EPO takové podání odmítne kritickou kontrolou.',
                 'action' => 'Opravte typ poplatníka v nastavení firmy (Nastavení → Účetnictví → Daně a EPO).',
@@ -155,7 +153,7 @@ final class UnsupportedCaseDetector
         if ($code !== null && $code !== TaxpayerTypeCodebook::DEFAULT_CODE) {
             $findings[] = [
                 'key' => 'taxpayer_type_unsupported',
-                'severity' => self::SEVERITY_BLOCKER,
+                'severity' => self::SEVERITY_WARNING,
                 'message' => 'Poplatník je vedený jako typ ' . $code . ' — '
                     . TaxpayerTypeCodebook::taxpayerTypeLabel($code) . '. Aplikace sestavuje přiznání '
                     . 'pouze pro typ 1 (ostatní): pro ostatní typy neplní povinné atributy formuláře '
@@ -171,7 +169,7 @@ final class UnsupportedCaseDetector
         if ($code === null && $financialSector) {
             $findings[] = [
                 'key' => 'taxpayer_type_undeclared',
-                'severity' => self::SEVERITY_BLOCKER,
+                'severity' => self::SEVERITY_WARNING,
                 'message' => 'Hlavní činnost firmy (CZ-NACE ' . $nace . ') spadá do finančního sektoru, '
                     . 'kde poplatníkem bývá banka, investiční fond, investiční nebo penzijní společnost '
                     . 'anebo pojišťovna. Ty mají v přiznání vlastní typ poplatníka (kódy 4, 5, 6, 7) '
@@ -206,7 +204,7 @@ final class UnsupportedCaseDetector
         }
         $findings[] = [
             'key' => 'accounting_decree_unsupported',
-            'severity' => self::SEVERITY_BLOCKER,
+            'severity' => self::SEVERITY_WARNING,
             'message' => 'Účetní závěrka se podle nastavení firmy sestavuje podle vyhlášky '
                 . TaxpayerTypeCodebook::accountingDecreeLabel($decree) . '. Aplikace umí rozvahu '
                 . 'a výkaz zisku a ztráty pouze podle vyhlášky 500/2002 Sb. a do přiznání zapisuje '
@@ -216,10 +214,22 @@ final class UnsupportedCaseDetector
     }
 
     /** @param list<array{key:string,severity:string,message:string,action:string}> $findings */
-    private static function checkEntityStatus(array $supplier, array &$findings): void
+    private static function checkEntityStatus(array $supplier, string $type, array $podklady, array &$findings): void
     {
         $status = trim((string) ($supplier['tax_entity_status'] ?? 'normal'));
         if ($status === '' || $status === 'normal') {
+            return;
+        }
+        $date = trim((string) ($supplier['tax_entity_status_date'] ?? ''));
+        $endsOn = (string) ($podklady['period']['ends_on'] ?? '');
+        if ($type === 'fo' && $endsOn === '' && isset($podklady['year'])) {
+            $endsOn = sprintf('%04d-12-31', (int) $podklady['year']);
+        }
+        $statusDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+        $periodEnd = \DateTimeImmutable::createFromFormat('!Y-m-d', $endsOn);
+        if ($statusDate !== false && $statusDate->format('Y-m-d') === $date
+            && $periodEnd !== false && $periodEnd->format('Y-m-d') === $endsOn
+            && $statusDate > $periodEnd) {
             return;
         }
         $types = TaxpayerTypeCodebook::STATUS_RETURN_TYPES[$status] ?? [];
@@ -227,10 +237,9 @@ final class UnsupportedCaseDetector
         foreach ($types as $t) {
             $typeList[] = $t . ' (' . TaxpayerTypeCodebook::returnTypeLabel($t) . ')';
         }
-        $date = trim((string) ($supplier['tax_entity_status_date'] ?? ''));
         $findings[] = [
             'key' => 'entity_status_unsupported',
-            'severity' => self::SEVERITY_BLOCKER,
+            'severity' => self::SEVERITY_WARNING,
             'message' => 'Poplatník je vedený ve stavu „' . TaxpayerTypeCodebook::entityStatusLabel($status) . '"'
                 . ($date !== '' ? ' od ' . $date : ' (rozhodný den není vyplněn)') . '. Takový stav mění '
                 . 'typ přiznání i zdaňovací období: úřad očekává '
@@ -267,7 +276,7 @@ final class UnsupportedCaseDetector
         if (!empty($supplier['tax_public_benefit'])) {
             $findings[] = [
                 'key' => 'public_benefit',
-                'severity' => self::SEVERITY_BLOCKER,
+                'severity' => self::SEVERITY_WARNING,
                 'message' => 'Firma je vedená jako veřejně prospěšný poplatník (§ 17a ZDP). '
                     . 'Přiznání takového poplatníka stojí na dělení příjmů z hlavní a doplňkové '
                     . 'činnosti a na snížení základu daně podle § 20 odst. 7 (ř. 251); aplikace ani '
@@ -298,7 +307,7 @@ final class UnsupportedCaseDetector
         }
         $findings[] = [
             'key' => 'investment_incentive',
-            'severity' => self::SEVERITY_BLOCKER,
+            'severity' => self::SEVERITY_WARNING,
             'message' => 'Firma je vedená jako nositel příslibu investiční pobídky (§ 35a/§ 35b ZDP). '
                 . 'Sleva na dani se u ní počítá ze zvláštního výpočtu a její podmínky se sledují roky '
                 . 'zpětně mimo účetnictví; aplikace pobídku neeviduje, do přiznání ji nepromítá '
@@ -315,7 +324,7 @@ final class UnsupportedCaseDetector
         }
         $findings[] = [
             'key' => 'atad_cfc',
-            'severity' => self::SEVERITY_BLOCKER,
+            'severity' => self::SEVERITY_WARNING,
             'message' => 'Firma je vedená jako dotčená pravidly ATAD/CFC. Omezení uznatelnosti '
                 . 'nadměrných výpůjčních výdajů (§ 23e-23h ZDP) ani zahrnutí příjmů ovládané '
                 . 'zahraniční společnosti (§ 38fa ZDP) aplikace nepočítá — základ daně by byl podhodnocený.',
@@ -390,7 +399,7 @@ final class UnsupportedCaseDetector
 
         $findings[] = [
             'key' => 'tax_period_atypical',
-            'severity' => self::SEVERITY_BLOCKER,
+            'severity' => self::SEVERITY_WARNING,
             'message' => 'Účetní období ' . $period['starts_on'] . ' - ' . $period['ends_on']
                 . ' neodpovídá kalendářnímu ani hospodářskému roku'
                 . ($shape === TaxPeriodShape::LONG ? ' a je delší než dvanáct měsíců' : '')
@@ -433,7 +442,7 @@ final class UnsupportedCaseDetector
         }
         $findings[] = [
             'key' => 'fo_double_entry_statements',
-            'severity' => self::SEVERITY_BLOCKER,
+            'severity' => self::SEVERITY_WARNING,
             'message' => 'Fyzická osoba vede podvojné účetnictví (do přiznání jde uc_soust=2). '
                 . 'K takovému přiznání patří účetní výkazy (věty VetaUA-UE formuláře DPFDP7), '
                 . 'jenže rozvahu a výkaz zisku a ztráty pro fyzickou osobu aplikace nikde nesestavuje '
@@ -450,7 +459,7 @@ final class UnsupportedCaseDetector
         }
         $findings[] = [
             'key' => 'cooperating_person_13',
-            'severity' => self::SEVERITY_BLOCKER,
+            'severity' => self::SEVERITY_WARNING,
             'message' => 'Poplatník rozděluje příjmy a výdaje na spolupracující osobu (§ 13 ZDP). '
                 . 'Vazbu mezi poplatníky aplikace nevede: dílčí základ § 7 se počítá z celého '
                 . 'peněžního deníku, podíl převedený na spolupracující osobu se z něj neodečte '
@@ -469,7 +478,7 @@ final class UnsupportedCaseDetector
         if (!empty($supplier['tax_foreign_income_credit'])) {
             $findings[] = [
                 'key' => 'foreign_income_credit_38f',
-                'severity' => self::SEVERITY_BLOCKER,
+                'severity' => self::SEVERITY_WARNING,
                 'message' => 'Poplatník má zahraniční příjmy se zápočtem daně zaplacené v zahraničí '
                     . '(§ 38f ZDP). Zápočet se vyčísluje v Příloze č. 3 přiznání po jednotlivých '
                     . 'státech a aplikace evidenci příjmů a daní po státech nevede — Příloha č. 3 '
@@ -518,7 +527,7 @@ final class UnsupportedCaseDetector
         }
         $findings[] = [
             'key' => 'manual_unsupported_cases',
-            'severity' => self::SEVERITY_BLOCKER,
+            'severity' => self::SEVERITY_WARNING,
             'message' => 'Roční uzávěrka daňové evidence obsahuje situace označené účetní jako '
                 . 'vyžadující ruční zpracování'
                 . ($labels === [] ? '.' : ': ' . implode('; ', $labels) . '.'),

@@ -103,13 +103,21 @@ final class TaxReturnService
         }
 
         $stored = is_array($row['computed'] ?? null) ? (array) $row['computed'] : [];
-        $computation = $row['status'] === 'final' && $type === 'fo' && isset($stored['computed'])
+        if ($row['status'] === 'final' && $type !== 'po' && !is_array($stored['computed'] ?? null)) {
+            throw new TaxReturnException('final_snapshot_required', 'Finální přiznání nemá uložený výpočet. Vraťte ho do rozpracovaného stavu, ověřte a znovu finalizujte.', 409);
+        }
+        $computation = $row['status'] === 'final' && isset($stored['computed'])
             ? [
                 'result' => (array) $stored['computed'],
                 'podklady' => (array) ($stored['podklady'] ?? []),
                 'warnings' => (array) ($stored['warnings'] ?? []),
             ]
             : $this->compute($supplierId, $year, $type, (array) $row['inputs'], $variant);
+
+        if ($type === 'po' && $row['status'] === 'final'
+            && ($row['final_snapshot_id'] === null || $this->returns->snapshot($supplierId, (int) $row['final_snapshot_id']) === null)) {
+            $computation = $this->legacyDppoComputation($supplierId, $year, $row, $variant);
+        }
 
         // Předfinalizační kontrola (E10): u finálního přiznání vrať uložený snapshot,
         // u draftu ji spočítej živě, aby FE panel ukázal aktuální stav před finalizací.
@@ -220,6 +228,28 @@ final class TaxReturnService
      */
     public function finalize(int $supplierId, int $year, string $type, int $expectedRowVersion, ?int $userId, string $variant = 'radne', int $variantSeq = 1): array
     {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $pdo->beginTransaction();
+        }
+        try {
+            $result = $this->finalizeInTransaction($supplierId, $year, $type, $expectedRowVersion, $userId, $variant, $variantSeq);
+            if ($ownTx) {
+                $pdo->commit();
+            }
+            return $result;
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function finalizeInTransaction(int $supplierId, int $year, string $type, int $expectedRowVersion, ?int $userId, string $variant, int $variantSeq): array
+    {
         $this->assertType($type);
         $this->assertSupplierType($supplierId, $type);
         $this->assertVariant($variant);
@@ -234,13 +264,6 @@ final class TaxReturnService
         }
         $computation = $this->compute($supplierId, $year, $type, (array) $row['inputs'], $variant);
         $preFinalize = $this->preFinalizeChecks->run($supplierId, $year, $type, (array) $row['inputs'], $computation);
-        if (empty($preFinalize['can_finalize'])) {
-            throw new TaxReturnException(
-                'prefinalize_blocked',
-                'Přiznání nelze finalizovat, dokud nejsou vyřešeny všechny blokující kontroly.',
-                422,
-            );
-        }
         $snapshot = [
             'computed' => $computation['result'],
             'podklady' => $computation['podklady'],
@@ -255,25 +278,31 @@ final class TaxReturnService
         $businessErrors = [];
         if ($type === 'fo') {
             $businessErrors = $this->dpfoBusinessValidator->validate($computation['result'], $computation['podklady']);
-            if ($businessErrors !== []) {
-                throw new TaxReturnException('epo_business_validation_failed', implode(' ', $businessErrors), 422);
-            }
             $supplier = $this->loadSupplier($supplierId);
             // Finalizace probíhá PRÁVĚ TEĎ (finalized_at = NOW() níže) — zastoupení
             // se čte k dnešku, ne k datu žádného předchozího řádku.
             $meta = ['verze_sw' => $this->loadAppVersion() ?? '0']
                 + $this->amendmentXmlMeta($type, $variant, $computation['result'])
                 + $this->representationMeta($supplierId, null);
-            $snapshotXml = $this->dpfoXml->build($supplier, $year, $computation['result'], $meta)['xml'];
+            $built = $this->dpfoXml->build($supplier, $year, $computation['result'], $meta);
+            $snapshotXml = $built['xml'];
+            $snapshot['warnings'] = array_values(array_unique(array_merge($snapshot['warnings'], $built['warnings'])));
             $xsd = $this->xmlValidator->validate($snapshotXml, 'dpfdp7');
-            if ($xsd['status'] !== 'passed') {
-                throw new TaxReturnException(
-                    'epo_xsd_validation_failed',
-                    $xsd['errors'] !== [] ? implode(' ', $xsd['errors']) : 'Schéma DPFO není dostupné pro povinnou validaci ostrého XML.',
-                    422,
-                );
-            }
+        } else {
+            $built = $this->buildDppoXml($supplierId, $year, (array) $row['inputs'], $computation, $variant, $seq);
+            $snapshotXml = $built['xml'];
+            $snapshot['warnings'] = array_values(array_unique($built['warnings']));
+            $xsd = $this->xmlValidator->validate($snapshotXml, 'dppdp9');
         }
+        $snapshot['xml_validation'] = $xsd;
+        $validationErrors = array_merge($businessErrors, (array) $xsd['errors']);
+        $snapshot['warnings'] = array_values(array_unique(array_merge(
+            $snapshot['warnings'],
+            $businessErrors,
+            $xsd['status'] === 'passed' ? [] : ['Kontrola XSD: ' . ($xsd['errors'] !== []
+                ? implode(' ', $xsd['errors'])
+                : 'Schéma není dostupné, XML před podáním ověřte v portálu EPO.')],
+        )));
         $effectiveResult = $computation['result'];
         $effectiveReturnId = (int) ($row['id'] ?? 0) ?: null;
         $lastBefore = $this->returns->findLastFinalized($supplierId, $year, $type);
@@ -289,49 +318,34 @@ final class TaxReturnService
         } catch (\DomainException $e) {
             throw new TaxReturnException('loss_already_applied', $e->getMessage(), 409);
         }
-        $pdo = $this->db->pdo();
-        $ownTx = !$pdo->inTransaction();
-        if ($ownTx) {
-            $pdo->beginTransaction();
-        }
-        try {
-            $snapshotId = null;
-            if ($type === 'fo' && $snapshotXml !== null) {
-                $snapshotId = $this->returns->createSnapshot(
-                    (int) $row['id'],
-                    $supplierId,
-                    $snapshot,
-                    (array) ($computation['podklady']['source_manifest'] ?? []),
-                    $snapshotXml,
-                    'passed',
-                    $businessErrors,
-                    $userId ?? 0,
-                );
-            }
-            $updated = $this->returns->finalize(
+        $snapshotId = null;
+        if ($snapshotXml !== null) {
+            $snapshotId = $this->returns->createSnapshot(
+                (int) $row['id'],
                 $supplierId,
-                $year,
-                $type,
                 $snapshot,
-                $expectedRowVersion,
-                $variant,
-                $seq,
-                $snapshotId,
-                $userId,
+                (array) ($computation['podklady']['source_manifest'] ?? []),
+                $snapshotXml,
+                $businessErrors === [] && $xsd['status'] === 'passed' ? 'passed' : 'failed',
+                $validationErrors,
+                $userId ?? 0,
             );
-            if ($updated === null) {
-                throw new TaxReturnException('version_conflict', 'Přiznání bylo mezitím změněno — načtěte znovu.', 409);
-            }
-            $this->losses->reconcileFinalize($supplierId, $type, $year, $yearLoss, $appliedLoss, $effectiveReturnId);
-            if ($ownTx) {
-                $pdo->commit();
-            }
-        } catch (\Throwable $e) {
-            if ($ownTx && $pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            throw $e;
         }
+        $updated = $this->returns->finalize(
+            $supplierId,
+            $year,
+            $type,
+            $snapshot,
+            $expectedRowVersion,
+            $variant,
+            $seq,
+            $snapshotId,
+            $userId,
+        );
+        if ($updated === null) {
+            throw new TaxReturnException('version_conflict', 'Přiznání bylo mezitím změněno — načtěte znovu.', 409);
+        }
+        $this->losses->reconcileFinalize($supplierId, $type, $year, $yearLoss, $appliedLoss, $effectiveReturnId);
 
         if ($variant === 'radne') {
             // E9 — z finalizovaného řádného přiznání vygeneruj předpisy záloh na příští rok
@@ -395,7 +409,9 @@ final class TaxReturnService
         }
         $result = [];
         if ($row !== null) {
-            $result = $this->compute($supplierId, $sourceYear, $type, (array) $row['inputs'], 'radne')['result'];
+            $result = $row['status'] === 'final'
+                ? (array) ($row['computed']['computed'] ?? [])
+                : $this->compute($supplierId, $sourceYear, $type, (array) $row['inputs'], 'radne')['result'];
         }
         return $this->advanceSchedules->generateFromReturn(
             $supplierId, $sourceYear, $type, $row !== null ? ((int) ($row['id'] ?? 0) ?: null) : null, $result
@@ -804,13 +820,20 @@ final class TaxReturnService
         $this->assertVariant($variant);
         $seq = $this->resolveSeq($supplierId, $year, $type, $variant, $variantSeq);
         $row = $this->returns->find($supplierId, $year, $type, $variant, $seq);
-        if ($type === 'fo') {
+        if ($type === 'po' && $row !== null && $row['status'] === 'final'
+            && ($row['final_snapshot_id'] === null || $this->returns->snapshot($supplierId, (int) $row['final_snapshot_id']) === null)) {
+            return $this->buildDppoXml(
+                $supplierId, $year, (array) $row['inputs'],
+                $this->legacyDppoComputation($supplierId, $year, $row, $variant), $variant, $seq,
+            );
+        }
+        if ($type === 'fo' || ($row !== null && $row['status'] === 'final')) {
             if ($row === null || $row['status'] !== 'final' || $row['final_snapshot_id'] === null) {
-                throw new TaxReturnException('final_snapshot_required', 'Ostré XML DPFO lze vytvořit pouze z finalizovaného snapshotu.', 409);
+                throw new TaxReturnException('final_snapshot_required', 'Finální XML nemá uložený snapshot. Použijte původní XML v archivu podání, nebo přiznání vraťte do rozpracovaného stavu, ověřte a znovu finalizujte.', 409);
             }
             $stored = $this->returns->snapshot($supplierId, (int) $row['final_snapshot_id']);
             if ($stored === null) {
-                throw new TaxReturnException('snapshot_not_found', 'Finální snapshot DPFO nebyl nalezen.', 409);
+                throw new TaxReturnException('snapshot_not_found', 'Finální snapshot přiznání nebyl nalezen.', 409);
             }
             $snapshot = (array) $stored['snapshot_json'];
             $summary = (array) (($snapshot['computed']['summary'] ?? []));
@@ -819,8 +842,8 @@ final class TaxReturnService
             $suffix = $variant === 'radne' ? '' : '-' . $variant . ($variant === 'dodatecne' && $seq > 1 ? '-' . $seq : '');
             return [
                 'xml' => (string) $stored['xml_content'],
-                'form_code' => 'dpfdp7',
-                'filename' => sprintf('dpfdp7-%04d%s.xml', $year, $suffix),
+                'form_code' => $type === 'po' ? 'dppdp9' : 'dpfdp7',
+                'filename' => sprintf('%s-%04d%s.xml', $type === 'po' ? 'dppdp9' : 'dpfdp7', $year, $suffix),
                 'summary' => $summary,
                 'warnings' => $summary['warnings'],
                 'variant' => $variant,
@@ -830,38 +853,48 @@ final class TaxReturnService
         $inputs = $row !== null ? (array) $row['inputs'] : [];
 
         $computation = $this->compute($supplierId, $year, $type, $inputs, $variant);
+        return $this->buildDppoXml($supplierId, $year, $inputs, $computation, $variant, $seq);
+    }
+
+    private function legacyDppoComputation(int $supplierId, int $year, array $row, string $variant): array
+    {
+        $stored = (array) ($row['computed'] ?? []);
+        $hasComputed = is_array($stored['computed'] ?? null);
+        $computation = $hasComputed
+            ? ['result' => $stored['computed'], 'podklady' => (array) ($stored['podklady'] ?? []), 'warnings' => (array) ($stored['warnings'] ?? [])]
+            : $this->compute($supplierId, $year, 'po', (array) $row['inputs'], $variant);
+        $computation['warnings'][] = $hasComputed
+            ? 'Starší finální DPPO nemá uložené původní XML. Daň zůstává podle uloženého výpočtu, údaje firmy a přílohy se sestavují z aktuálních dat. Před podáním export ověřte.'
+            : 'Starší finální DPPO nemá uložené původní XML ani výpočet. Náhled i export se sestavují z aktuálních dat. Před podáním ověřte výpočet a přílohy.';
+        $computation['warnings'] = array_values(array_unique($computation['warnings']));
+        return $computation;
+    }
+
+    private function buildDppoXml(int $supplierId, int $year, array $inputs, array $computation, string $variant, int $seq): array
+    {
+        $type = 'po';
         $supplier = $this->loadSupplier($supplierId);
         $appVersion = $this->loadAppVersion();
         $amendMeta = $this->amendmentXmlMeta($type, $variant, $computation['result']);
 
-        $appendixWarnings = [];
-        if ($type === 'po') {
-            // DPPO se na rozdíl od DPFO nezmrazuje do snapshotu (regeneruje se z $row['inputs']
-            // vždy znovu) — u finálního přiznání proto zastoupení čteme K DATU FINALIZACE
-            // ($row['finalized_at']), ne k dnešku, ať přegenerování starého přiznání nezmění
-            // dan_por podle toho, jestli firma dnes zastoupení má/nemá (viz representationMeta()).
-            $finalizedAt = ($row !== null && $row['status'] === 'final' && !empty($row['finalized_at']))
-                ? (string) $row['finalized_at']
-                : null;
-            $meta = ['verze_sw' => $appVersion ?? '0']
-                + $this->periodMeta($computation['podklady']['period'] ?? null, $year)
-                + $amendMeta
-                + $this->representationMeta($supplierId, $finalizedAt)
-                // Žádost o předání Přílohy do sbírky listin (pr11_puz) — výchozí ANO, viz
-                // sanitizeInputs()/DppoXmlBuilder::buildVetaUZ. Nikdy neuložený draft ($inputs
-                // == []) čte klíč jako chybějící → default true stejně jako po sanitizaci.
-                + ['puz_to_registry' => (bool) ($inputs['puz_to_registry'] ?? true)]
-                // Typ poplatníka (typ_popldpp) z nastavení firmy místo dřívější natvrdo
-                // zapsané „1". Nepotvrzený typ zůstává „1" jako dřív, ale detektor
-                // nepodporovaných případů na to u rizikové firmy upozorní.
-                + ['typ_popldpp' => TaxpayerTypeCodebook::normalize($supplier['epo_taxpayer_code'] ?? null)
-                    ?? TaxpayerTypeCodebook::DEFAULT_CODE];
-            $appendix = $this->buildDppoAppendix($supplierId, (array) ($computation['podklady']['period'] ?? []), $year);
-            $appendixWarnings = (array) ($appendix['warnings'] ?? []);
-            unset($appendix['warnings']);
-            $built = $this->dppoXml->build($supplier, $year, $computation['result'], $meta, $appendix);
-            $formCode = 'dppdp9';
-        }
+        $meta = ['verze_sw' => $appVersion ?? '0']
+            + $this->periodMeta($computation['podklady']['period'] ?? null, $year)
+            + $amendMeta
+            + $this->representationMeta($supplierId, null)
+            // Žádost o předání Přílohy do sbírky listin (pr11_puz) — výchozí ANO, viz
+            // sanitizeInputs()/DppoXmlBuilder::buildVetaUZ. Nikdy neuložený draft ($inputs
+            // == []) čte klíč jako chybějící → default true stejně jako po sanitizaci.
+            + ['puz_to_registry' => (bool) ($inputs['puz_to_registry'] ?? true)]
+            // Typ poplatníka (typ_popldpp) z nastavení firmy místo dřívější natvrdo
+            // zapsané „1". Nepotvrzený typ zůstává „1" jako dřív, ale detektor
+            // nepodporovaných případů na to u rizikové firmy upozorní.
+            + ['typ_popldpp' => TaxpayerTypeCodebook::normalize($supplier['epo_taxpayer_code'] ?? null)
+                ?? TaxpayerTypeCodebook::DEFAULT_CODE];
+        $appendix = $this->buildDppoAppendix($supplierId, (array) ($computation['podklady']['period'] ?? []), $year);
+        $appendixWarnings = (array) ($appendix['warnings'] ?? []);
+        unset($appendix['warnings']);
+        $built = $this->dppoXml->build($supplier, $year, $computation['result'], $meta, $appendix);
+        $formCode = 'dppdp9';
 
         $unsupported = UnsupportedCaseDetector::detectForSupplier(
             $supplier, $type, $computation['podklady'], $computation['result'], $inputs
@@ -893,11 +926,6 @@ final class TaxReturnService
     }
 
     /**
-     * Nálezy detektoru jako věty do `warnings`. Blokující se označí předponou,
-     * protože `warnings` je plochý seznam řetězců a bez ní by v UI splynuly
-     * s nezávaznými poznámkami — stejná konvence jako u blokující kontroly
-     * § 23 odst. 8 ({@see PreFinalizeCheckService::checkExpenseModeTransition()}).
-     *
      * @param list<array{key:string,severity:string,message:string,action:string}> $findings
      * @return list<string>
      */
@@ -905,9 +933,7 @@ final class TaxReturnService
     {
         $out = [];
         foreach ($findings as $finding) {
-            $prefix = ($finding['severity'] ?? '') === UnsupportedCaseDetector::SEVERITY_BLOCKER
-                ? 'BLOKUJÍCÍ NEPODPOROVANÝ PŘÍPAD: '
-                : 'Nepodporovaný případ: ';
+            $prefix = 'Nepodporovaný případ: ';
             $out[] = $prefix . $finding['message'] . ' ' . $finding['action'];
         }
 
@@ -923,22 +949,6 @@ final class TaxReturnService
     public function generateXml(int $supplierId, int $year, string $type, ?int $userId, string $variant = 'radne', int $variantSeq = 1): array
     {
         $built = $this->buildXml($supplierId, $year, $type, $variant, $variantSeq);
-        // P-1 — ostré XML je „vydání" podání. Blokující nepodporovaný případ ho zastaví:
-        // finalizace stojí na téže bráně ({@see PreFinalizeCheckService}), ale DPPO se
-        // dá exportovat i z draftu, takže by tudy nepodporovaný poplatník prošel.
-        // Náhled ani uzávěrkový balíček ({@see buildXml()}) blokované nejsou — tam nález
-        // jen svítí ve `warnings`, aby si účetní mohla podklad prohlédnout.
-        $blocking = array_values(array_filter(
-            (array) ($built['unsupported_cases'] ?? []),
-            static fn (array $f): bool => ($f['severity'] ?? '') === UnsupportedCaseDetector::SEVERITY_BLOCKER,
-        ));
-        if ($blocking !== []) {
-            throw new TaxReturnException(
-                'unsupported_case_blocked',
-                'Přiznání nelze vydat: ' . implode(' ', self::unsupportedCaseWarnings($blocking)),
-                422,
-            );
-        }
         $seq = (int) $built['variant_seq'];
         $row = $this->returns->find($supplierId, $year, $type, $variant, $seq);
 
@@ -1518,6 +1528,7 @@ final class TaxReturnService
             $result = $this->dpfoCalc->compute($data, $inputs, (array) $data['profile'], $const);
             $newTax = (float) ($result['tax'] ?? 0);
             $podklady = [
+                'year' => $year,
                 's7_income' => $data['s7_income'],
                 's7_expenses' => $data['s7_expenses'],
                 's7_base' => $data['s7_base'],

@@ -136,21 +136,27 @@ final class UnsupportedCaseGateTest extends TestCase
         self::assertSame([], $this->unsupportedKeys($result));
     }
 
-    /** Typ poplatníka mimo „ostatní" zastaví finalizaci (dřív se natvrdo posílala 1). */
-    public function testInvestmentFundTaxpayerTypeBlocksFinalization(): void
+    /** Typ poplatníka mimo „ostatní" varováním doprovodí finalizaci (dřív se natvrdo posílala 1). */
+    public function testInvestmentFundTaxpayerTypeWarnsWithoutBlockingFinalization(): void
     {
         $this->setSupplierFlags(['epo_taxpayer_code' => '4']);
         $result = $this->service->run($this->supplierId, self::YEAR, 'po', [], $this->computationPo());
 
         self::assertContains('unsupported_taxpayer_type_unsupported', $this->unsupportedKeys($result));
-        self::assertFalse($result['can_finalize']);
+        self::assertTrue($result['can_finalize']);
+        self::assertSame(0, $result['summary']['blocker']);
+        foreach ($result['checks'] as $check) {
+            if (!$check['ok']) {
+                self::assertSame('warning', $check['severity']);
+            }
+        }
         $byKey = array_column($result['checks'], null, 'key');
-        self::assertSame('blocker', $byKey['unsupported_taxpayer_type_unsupported']['severity']);
+        self::assertSame('warning', $byKey['unsupported_taxpayer_type_unsupported']['severity']);
         self::assertNotSame('', $byKey['unsupported_taxpayer_type_unsupported']['value']['action']);
     }
 
     /** Likvidace/insolvence/přeměna mění typ přiznání — aplikace posílá vždy „A". */
-    public function testLiquidationBlocksFinalization(): void
+    public function testLiquidationWarnsWithoutBlockingFinalization(): void
     {
         $this->setSupplierFlags([
             'tax_entity_status' => 'liquidation',
@@ -159,11 +165,17 @@ final class UnsupportedCaseGateTest extends TestCase
         $result = $this->service->run($this->supplierId, self::YEAR, 'po', [], $this->computationPo());
 
         self::assertContains('unsupported_entity_status_unsupported', $this->unsupportedKeys($result));
-        self::assertFalse($result['can_finalize']);
+        self::assertTrue($result['can_finalize']);
+        self::assertSame(0, $result['summary']['blocker']);
+        foreach ($result['checks'] as $check) {
+            if (!$check['ok']) {
+                self::assertSame('warning', $check['severity']);
+            }
+        }
     }
 
     /** ATAD/CFC a investiční pobídky — příznaky, které aplikace z dat odvodit neumí. */
-    public function testAtadAndIncentiveFlagsBlockFinalization(): void
+    public function testAtadAndIncentiveFlagsWarnWithoutBlockingFinalization(): void
     {
         $this->setSupplierFlags(['tax_atad_cfc' => 1, 'tax_investment_incentive' => 1]);
         $result = $this->service->run($this->supplierId, self::YEAR, 'po', [], $this->computationPo());
@@ -171,28 +183,46 @@ final class UnsupportedCaseGateTest extends TestCase
 
         self::assertContains('unsupported_atad_cfc', $keys);
         self::assertContains('unsupported_investment_incentive', $keys);
-        self::assertFalse($result['can_finalize']);
+        self::assertTrue($result['can_finalize']);
+        self::assertSame(0, $result['summary']['blocker']);
+        foreach ($result['checks'] as $check) {
+            if (!$check['ok']) {
+                self::assertSame('warning', $check['severity']);
+            }
+        }
     }
 
     /** Atypické zkrácené období: dřív tichý fallback na typ_zo „A" bez jediného slova. */
-    public function testAtypicalPeriodBlocksFinalization(): void
+    public function testAtypicalPeriodWarnsWithoutBlockingFinalization(): void
     {
         $computation = $this->computationPo();
         $computation['podklady']['period'] = ['starts_on' => self::YEAR . '-01-01', 'ends_on' => self::YEAR . '-07-31'];
         $result = $this->service->run($this->supplierId, self::YEAR, 'po', [], $computation);
 
         self::assertContains('unsupported_tax_period_atypical', $this->unsupportedKeys($result));
-        self::assertFalse($result['can_finalize']);
+        self::assertTrue($result['can_finalize']);
+        self::assertSame(0, $result['summary']['blocker']);
+        foreach ($result['checks'] as $check) {
+            if (!$check['ok']) {
+                self::assertSame('warning', $check['severity']);
+            }
+        }
     }
 
     /** Brána nově platí i pro DPFO: podvojné účetnictví FO bez účetních výkazů. */
-    public function testFoDoubleEntryBlocksFinalization(): void
+    public function testFoDoubleEntryWarnsWithoutBlockingFinalization(): void
     {
         $this->setSupplierFlags(['taxpayer_type' => 'fo']);
         $result = $this->service->run($this->supplierId, self::YEAR, 'fo', [], $this->computationFo('double_entry'));
 
         self::assertContains('unsupported_fo_double_entry_statements', $this->unsupportedKeys($result));
-        self::assertFalse($result['can_finalize']);
+        self::assertTrue($result['can_finalize']);
+        self::assertSame(0, $result['summary']['blocker']);
+        foreach ($result['checks'] as $check) {
+            if (!$check['ok']) {
+                self::assertSame('warning', $check['severity']);
+            }
+        }
     }
 
     /** OSVČ v daňové evidenci bez příznaků prochází — kontrolní vzorek pro FO větev. */
@@ -204,7 +234,7 @@ final class UnsupportedCaseGateTest extends TestCase
     }
 
     /** § 13 spolupracující osoba a § 38f zápočet — příznaky jen u FO. */
-    public function testFoFlagsBlockFinalization(): void
+    public function testFoFlagsWarnWithoutBlockingFinalization(): void
     {
         $this->setSupplierFlags([
             'taxpayer_type' => 'fo',
@@ -216,7 +246,13 @@ final class UnsupportedCaseGateTest extends TestCase
 
         self::assertContains('unsupported_cooperating_person_13', $keys);
         self::assertContains('unsupported_foreign_income_credit_38f', $keys);
-        self::assertFalse($result['can_finalize']);
+        self::assertTrue($result['can_finalize']);
+        self::assertSame(0, $result['summary']['blocker']);
+        foreach ($result['checks'] as $check) {
+            if (!$check['ok']) {
+                self::assertSame('warning', $check['severity']);
+            }
+        }
     }
 
     /** Ruční `unsupported_cases` z roční uzávěrky se slévá do stejného seznamu nálezů. */
@@ -228,6 +264,12 @@ final class UnsupportedCaseGateTest extends TestCase
         $result = $this->service->run($this->supplierId, self::YEAR, 'fo', [], $computation);
 
         self::assertContains('unsupported_manual_unsupported_cases', $this->unsupportedKeys($result));
-        self::assertFalse($result['can_finalize']);
+        self::assertTrue($result['can_finalize']);
+        self::assertSame(0, $result['summary']['blocker']);
+        foreach ($result['checks'] as $check) {
+            if (!$check['ok']) {
+                self::assertSame('warning', $check['severity']);
+            }
+        }
     }
 }

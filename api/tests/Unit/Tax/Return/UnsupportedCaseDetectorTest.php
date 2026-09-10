@@ -70,7 +70,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
     {
         return array_values(array_filter(
             $findings,
-            static fn (array $f): bool => $f['severity'] === UnsupportedCaseDetector::SEVERITY_BLOCKER,
+            static fn (array $f): bool => $f['severity'] === 'blocker',
         ));
     }
 
@@ -107,8 +107,8 @@ final class UnsupportedCaseDetectorTest extends TestCase
 
     // ── Typ poplatníka (typ_popldpp) ──────────────────────────────────────────
 
-    /** Každý kód číselníku mimo „1" aplikace neumí — blokuje. */
-    public function testEveryNonDefaultTaxpayerTypeBlocks(): void
+    /** Každý kód číselníku mimo „1" aplikace neumí, ale umožní pokračovat s varováním. */
+    public function testEveryNonDefaultTaxpayerTypeWarns(): void
     {
         foreach (['0', '2', '3', '4', '5', '6', '7', '8', '9'] as $code) {
             $findings = UnsupportedCaseDetector::detectForSupplier(
@@ -118,14 +118,14 @@ final class UnsupportedCaseDetectorTest extends TestCase
             );
             self::assertContains('taxpayer_type_unsupported', $this->keys($findings), "typ poplatníka $code");
             self::assertSame(
-                UnsupportedCaseDetector::SEVERITY_BLOCKER,
+                UnsupportedCaseDetector::SEVERITY_WARNING,
                 $this->severity($findings, 'taxpayer_type_unsupported'),
             );
         }
     }
 
     /** Hodnota mimo číselník (EPO ji odmítne kritickou kontrolou). */
-    public function testTaxpayerTypeOutsideCodebookBlocks(): void
+    public function testTaxpayerTypeOutsideCodebookWarns(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryPo(['epo_taxpayer_code' => 'X']),
@@ -133,13 +133,13 @@ final class UnsupportedCaseDetectorTest extends TestCase
             $this->calendarPeriod(),
         );
         self::assertContains('taxpayer_type_invalid', $this->keys($findings));
-        self::assertSame(UnsupportedCaseDetector::SEVERITY_BLOCKER, $this->severity($findings, 'taxpayer_type_invalid'));
+        self::assertSame(UnsupportedCaseDetector::SEVERITY_WARNING, $this->severity($findings, 'taxpayer_type_invalid'));
     }
 
     // ── Investiční fond, penzijní společnost, zdravotní pojišťovna, banka ─────
 
-    /** Podezření z dat (NACE finančního sektoru) při nepotvrzeném typu poplatníka blokuje. */
-    public function testFinancialSectorNaceWithUndeclaredTaxpayerTypeBlocks(): void
+    /** Podezření z dat (NACE finančního sektoru) při nepotvrzeném typu poplatníka vyvolá varování. */
+    public function testFinancialSectorNaceWithUndeclaredTaxpayerTypeWarns(): void
     {
         foreach (['64190', '64300', '65110', '65300', '66300'] as $nace) {
             $findings = UnsupportedCaseDetector::detectForSupplier(
@@ -149,7 +149,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
             );
             self::assertContains('taxpayer_type_undeclared', $this->keys($findings), "NACE $nace");
             self::assertSame(
-                UnsupportedCaseDetector::SEVERITY_BLOCKER,
+                UnsupportedCaseDetector::SEVERITY_WARNING,
                 $this->severity($findings, 'taxpayer_type_undeclared'),
             );
         }
@@ -181,7 +181,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
     }
 
     /** Účetní vyhláška 501/502/503 — aplikace umí jen 500 a do přiznání píše uv_vyhl=500. */
-    public function testForeignAccountingDecreeBlocks(): void
+    public function testForeignAccountingDecreeWarns(): void
     {
         foreach (['501', '502', '503', '504', '325', '410'] as $decree) {
             $findings = UnsupportedCaseDetector::detectForSupplier(
@@ -191,7 +191,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
             );
             self::assertContains('accounting_decree_unsupported', $this->keys($findings), "vyhláška $decree");
             self::assertSame(
-                UnsupportedCaseDetector::SEVERITY_BLOCKER,
+                UnsupportedCaseDetector::SEVERITY_WARNING,
                 $this->severity($findings, 'accounting_decree_unsupported'),
             );
         }
@@ -199,7 +199,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
 
     // ── Veřejně prospěšný poplatník (§ 17a) ───────────────────────────────────
 
-    public function testPublicBenefitTaxpayerBlocks(): void
+    public function testPublicBenefitTaxpayerWarns(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryPo(['tax_public_benefit' => 1]),
@@ -207,7 +207,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
             $this->calendarPeriod(),
         );
         self::assertContains('public_benefit', $this->keys($findings));
-        self::assertSame(UnsupportedCaseDetector::SEVERITY_BLOCKER, $this->severity($findings, 'public_benefit'));
+        self::assertSame(UnsupportedCaseDetector::SEVERITY_WARNING, $this->severity($findings, 'public_benefit'));
     }
 
     /** Vypnutý příznak není tichý předpoklad — NACE organizací sdružujících osoby varuje. */
@@ -227,7 +227,38 @@ final class UnsupportedCaseDetectorTest extends TestCase
 
     // ── Likvidace, insolvence, fúze (typ_dapdpp) ──────────────────────────────
 
-    public function testEntityStatusBlocksBothReturnTypes(): void
+    public function testLaterEntityStatusDoesNotBlockEarlierReturn(): void
+    {
+        foreach (['liquidation', 'insolvency', 'transformation'] as $status) {
+            foreach (['po', 'fo'] as $type) {
+                $findings = UnsupportedCaseDetector::detectForSupplier(
+                    $this->ordinaryPo(['tax_entity_status' => $status, 'tax_entity_status_date' => '2026-01-01']),
+                    $type,
+                    $type === 'po' ? $this->calendarPeriod() : ['year' => 2025, 'accounting_mode' => 'tax_evidence'],
+                );
+                self::assertNotContains('entity_status_unsupported', $this->keys($findings), "$status / $type");
+            }
+        }
+    }
+
+    public function testEntityStatusAtPeriodEndAndUnknownDatesStillBlock(): void
+    {
+        foreach (['2025-12-31', '2025-01-01', '', '2026-02-30'] as $date) {
+            $findings = UnsupportedCaseDetector::detectForSupplier(
+                $this->ordinaryPo(['tax_entity_status' => 'liquidation', 'tax_entity_status_date' => $date]),
+                'po',
+                $this->calendarPeriod(),
+            );
+            self::assertContains('entity_status_unsupported', $this->keys($findings), $date);
+        }
+        $findings = UnsupportedCaseDetector::detectForSupplier(
+            $this->ordinaryPo(['tax_entity_status' => 'liquidation', 'tax_entity_status_date' => '2026-01-01']),
+            'po',
+        );
+        self::assertContains('entity_status_unsupported', $this->keys($findings));
+    }
+
+    public function testEntityStatusWarnsBothReturnTypes(): void
     {
         foreach (['liquidation', 'insolvency', 'transformation'] as $status) {
             foreach (['po', 'fo'] as $type) {
@@ -239,7 +270,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
                 );
                 self::assertContains('entity_status_unsupported', $this->keys($findings), "$status / $type");
                 self::assertSame(
-                    UnsupportedCaseDetector::SEVERITY_BLOCKER,
+                    UnsupportedCaseDetector::SEVERITY_WARNING,
                     $this->severity($findings, 'entity_status_unsupported'),
                 );
             }
@@ -267,7 +298,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
 
     // ── ATAD / CFC a investiční pobídky ───────────────────────────────────────
 
-    public function testAtadCfcBlocks(): void
+    public function testAtadCfcWarns(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryPo(['tax_atad_cfc' => 1]),
@@ -275,10 +306,10 @@ final class UnsupportedCaseDetectorTest extends TestCase
             $this->calendarPeriod(),
         );
         self::assertContains('atad_cfc', $this->keys($findings));
-        self::assertSame(UnsupportedCaseDetector::SEVERITY_BLOCKER, $this->severity($findings, 'atad_cfc'));
+        self::assertSame(UnsupportedCaseDetector::SEVERITY_WARNING, $this->severity($findings, 'atad_cfc'));
     }
 
-    public function testInvestmentIncentiveBlocks(): void
+    public function testInvestmentIncentiveWarns(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryPo(['tax_investment_incentive' => 1]),
@@ -286,7 +317,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
             $this->calendarPeriod(),
         );
         self::assertContains('investment_incentive', $this->keys($findings));
-        self::assertSame(UnsupportedCaseDetector::SEVERITY_BLOCKER, $this->severity($findings, 'investment_incentive'));
+        self::assertSame(UnsupportedCaseDetector::SEVERITY_WARNING, $this->severity($findings, 'investment_incentive'));
     }
 
     // ── Sídlo mimo ČR (DPPO i DPFO) ───────────────────────────────────────────
@@ -314,7 +345,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
     // ── Hospodářský rok / zkrácené a atypické období ──────────────────────────
 
     /** Tichá díra P-1: atypické zkrácené období spadlo na „A" bez jediného slova. */
-    public function testAtypicalShortPeriodBlocks(): void
+    public function testAtypicalShortPeriodWarns(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryPo(),
@@ -322,11 +353,11 @@ final class UnsupportedCaseDetectorTest extends TestCase
             ['period' => ['starts_on' => '2025-01-01', 'ends_on' => '2025-06-30']],
         );
         self::assertContains('tax_period_atypical', $this->keys($findings));
-        self::assertSame(UnsupportedCaseDetector::SEVERITY_BLOCKER, $this->severity($findings, 'tax_period_atypical'));
+        self::assertSame(UnsupportedCaseDetector::SEVERITY_WARNING, $this->severity($findings, 'tax_period_atypical'));
     }
 
     /** Období delší než dvanáct měsíců — typ přiznání A ho popsat nesmí. */
-    public function testOverlongPeriodBlocks(): void
+    public function testOverlongPeriodWarns(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryPo(),
@@ -399,7 +430,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
     // ── DPFO ──────────────────────────────────────────────────────────────────
 
     /** FO v podvojném účetnictví: VetaUA-UE (účetní výkazy) aplikace nesestavuje. */
-    public function testFoInDoubleEntryBookkeepingBlocks(): void
+    public function testFoInDoubleEntryBookkeepingWarns(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryFo(),
@@ -408,12 +439,12 @@ final class UnsupportedCaseDetectorTest extends TestCase
         );
         self::assertContains('fo_double_entry_statements', $this->keys($findings));
         self::assertSame(
-            UnsupportedCaseDetector::SEVERITY_BLOCKER,
+            UnsupportedCaseDetector::SEVERITY_WARNING,
             $this->severity($findings, 'fo_double_entry_statements'),
         );
     }
 
-    public function testCooperatingPersonBlocks(): void
+    public function testCooperatingPersonWarns(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryFo(['tax_cooperating_person' => 1]),
@@ -422,12 +453,12 @@ final class UnsupportedCaseDetectorTest extends TestCase
         );
         self::assertContains('cooperating_person_13', $this->keys($findings));
         self::assertSame(
-            UnsupportedCaseDetector::SEVERITY_BLOCKER,
+            UnsupportedCaseDetector::SEVERITY_WARNING,
             $this->severity($findings, 'cooperating_person_13'),
         );
     }
 
-    public function testForeignIncomeCreditBlocks(): void
+    public function testForeignIncomeCreditWarns(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryFo(['tax_foreign_income_credit' => 1]),
@@ -436,7 +467,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
         );
         self::assertContains('foreign_income_credit_38f', $this->keys($findings));
         self::assertSame(
-            UnsupportedCaseDetector::SEVERITY_BLOCKER,
+            UnsupportedCaseDetector::SEVERITY_WARNING,
             $this->severity($findings, 'foreign_income_credit_38f'),
         );
     }
@@ -459,7 +490,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
     }
 
     /** Ruční `unsupported_cases` z roční uzávěrky se slévá do stejného seznamu. */
-    public function testManualUnsupportedCasesFromAnnualClosingBlock(): void
+    public function testManualUnsupportedCasesFromAnnualClosingWarn(): void
     {
         $findings = UnsupportedCaseDetector::detectForSupplier(
             $this->ordinaryFo(),
@@ -474,7 +505,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
         );
         self::assertContains('manual_unsupported_cases', $this->keys($findings));
         self::assertSame(
-            UnsupportedCaseDetector::SEVERITY_BLOCKER,
+            UnsupportedCaseDetector::SEVERITY_WARNING,
             $this->severity($findings, 'manual_unsupported_cases'),
         );
         $message = '';
@@ -508,7 +539,7 @@ final class UnsupportedCaseDetectorTest extends TestCase
             self::assertNotSame('', trim($f['action']), $f['key']);
             self::assertContains(
                 $f['severity'],
-                [UnsupportedCaseDetector::SEVERITY_BLOCKER, UnsupportedCaseDetector::SEVERITY_WARNING],
+                [UnsupportedCaseDetector::SEVERITY_WARNING],
             );
         }
     }

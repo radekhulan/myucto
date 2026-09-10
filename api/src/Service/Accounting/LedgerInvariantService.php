@@ -191,7 +191,7 @@ final class LedgerInvariantService
                         AND e.posted_at IS NOT NULL
                        JOIN journal_entry_lines l ON l.entry_id = e.id
                        JOIN chart_of_accounts a ON a.id = l.account_id
-                      WHERE p.status IN ('closed', 'approved')
+                      WHERE p.status IN (" . AccountingPeriodStatus::closedSqlList() . ")
                         AND (a.account_code LIKE '5%' OR a.account_code LIKE '6%')
                    GROUP BY p.supplier_id, p.fiscal_year, a.account_code
                      HAVING ABS(balance) > 0.005) t
@@ -244,7 +244,7 @@ final class LedgerInvariantService
                                  AND e.entry_date BETWEEN p.starts_on AND p.ends_on)
                        JOIN journal_entry_lines l ON l.entry_id = e.id
                        JOIN chart_of_accounts a ON a.id = l.account_id
-                      WHERE p.status IN ('closed', 'approved')
+                      WHERE p.status IN (" . AccountingPeriodStatus::closedSqlList() . ")
                         AND a.is_clearing = 1
                    GROUP BY p.supplier_id, p.fiscal_year, a.account_code
                      HAVING ABS(balance) > 0.005) t

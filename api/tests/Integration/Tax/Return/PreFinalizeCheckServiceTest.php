@@ -146,17 +146,27 @@ final class PreFinalizeCheckServiceTest extends TestCase
         self::assertContains(4, $byKey['vat_returns_filed']['value']['missing']);
     }
 
-    public function testExpenseModeTransitionIsPreFinalizeBlocker(): void
+    public function testExpenseModeTransitionAndMissingFoSourcesWarnWithoutBlocking(): void
     {
         $computation = $this->computation(0.0);
         $computation['podklady']['accounting_mode'] = 'tax_evidence';
+        $computation['podklady']['blocking_issues'] = [['key' => 'missing_source', 'message' => 'Chybí podklad pro příjem.']];
         $computation['warnings'][] = 'BLOKUJÍCÍ KONTROLA §23 odst. 8 ZDP: změna režimu.';
 
         $result = $this->service->run($this->supplierId, self::YEAR, 'fo', [], $computation);
         $byKey = array_column($result['checks'], null, 'key');
+        self::assertFalse($byKey['missing_source']['ok']);
+        self::assertSame('Chybí podklad pro příjem.', $byKey['missing_source']['value']['message']);
         self::assertFalse($byKey['expense_mode_transition_23_8']['ok']);
-        self::assertSame('blocker', $byKey['expense_mode_transition_23_8']['severity']);
-        self::assertFalse($result['can_finalize']);
+        self::assertStringStartsWith('VAROVÁNÍ §23 odst. 8 ZDP:', $byKey['expense_mode_transition_23_8']['value']['message']);
+        self::assertSame('warning', $byKey['expense_mode_transition_23_8']['severity']);
+        self::assertTrue($result['can_finalize']);
+        self::assertSame(0, $result['summary']['blocker']);
+        foreach ($result['checks'] as $check) {
+            if (!$check['ok']) {
+                self::assertSame('warning', $check['severity']);
+            }
+        }
     }
 
     // ── fixtures ───────────────────────────────────────────────────────────

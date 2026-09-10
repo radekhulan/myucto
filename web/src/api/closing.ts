@@ -264,6 +264,7 @@ export interface RunStepPayload {
   bank_rows?: { account_code: string; currency_code: string; foreign_balance: number }[]
   /** D9 provisions — účetní-potvrzený seznam OP per pohledávka. */
   items?: ProvisionInput[]
+  partial?: boolean
   /** D11 income_tax — částka splatné daně (591/341). */
   amount?: number
   /** §DM / Task 11 — časové rozlišení drobného majetku (deferrals): režim + volitelné %. */
@@ -362,13 +363,16 @@ export interface ProvisionItem {
   suggested_acct_amount: number
   potentially_time_barred: boolean
   warning: string | null
-  existing: { entry_id: number; legal_amount: number; acct_amount: number; legal_section: LegalProvisionSection } | null
+  existing: { entry_id: number | null; legal_amount: number; acct_amount: number; legal_section: LegalProvisionSection } | null
 }
 
 export interface ProvisionsPreview {
   as_of: string
   period: { id: number; fiscal_year: number }
   items: ProvisionItem[]
+  pagination: { page: number; per_page: number; total: number }
+  totals_scope: 'all'
+  page_totals: { remaining: number; suggested_legal: number; existing_legal: number; existing_acct: number }
   totals: { remaining: number; suggested_legal: number; existing_legal: number; existing_acct: number }
   rules: { legal_8a_50_months: number; legal_8a_100_months: number; legal_8c_months: number; legal_8c_limit: number; limitation_warning_months: number }
 }
@@ -591,8 +595,8 @@ export const closingApi = {
     return api.get<FxPreview>(`/accounting/periods/${periodId}/closing/fx-preview`, { params }).then(r => r.data)
   },
   // D9 — náhled OP k pohledávkám (aging 311 + návrh §8a/§8c).
-  provisionsPreview: (periodId: number) =>
-    api.get<ProvisionsPreview>(`/accounting/periods/${periodId}/closing/provisions-preview`).then(r => r.data),
+  provisionsPreview: (periodId: number, page = 1) =>
+    api.get<ProvisionsPreview>(`/accounting/periods/${periodId}/closing/provisions-preview`, { params: { page } }).then(r => r.data),
   // K10 — návrh dohadných položek pasivních (opakující se náklad bez faktury k rozvahovému dni).
   estimatesSuggest: (periodId: number) =>
     api.get<EstimatesSuggest>(`/accounting/periods/${periodId}/closing/estimates-suggest`).then(r => r.data),

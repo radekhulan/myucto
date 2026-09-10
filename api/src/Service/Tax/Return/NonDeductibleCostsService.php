@@ -30,16 +30,17 @@ final class NonDeductibleCostsService
     public function sum(int $supplierId, string $startsOn, string $endsOn): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS c
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS c
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
-          LEFT JOIN purchase_invoices pi ON e.source_type = 'purchase_invoice'
-                                         AND pi.id = e.source_id
+          LEFT JOIN purchase_invoices pi ON tax_origin.source_type = 'purchase_invoice'
+                                         AND pi.id = tax_origin.source_id
                                          AND pi.supplier_id = e.supplier_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 AND a.account_type = 'expense'
                 AND a.account_code NOT LIKE '59%'
                 AND (a.tax_deductibility = 'non_deductible' OR COALESCE(pi.tax_deductible, 1) = 0)"

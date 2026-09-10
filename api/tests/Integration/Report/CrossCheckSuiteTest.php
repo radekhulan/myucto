@@ -92,7 +92,7 @@ final class CrossCheckSuiteTest extends TestCase
     {
         $expected = array_map('intval', $this->db->pdo()->query(
             "SELECT fiscal_year FROM accounting_periods
-              WHERE supplier_id = 1 AND status IN ('closed','approved') ORDER BY fiscal_year"
+              WHERE supplier_id = 1 AND status IN ('closed','reviewed','approved') ORDER BY fiscal_year"
         )->fetchAll(\PDO::FETCH_COLUMN));
 
         self::assertSame($expected, $this->suite->closedYears(1));

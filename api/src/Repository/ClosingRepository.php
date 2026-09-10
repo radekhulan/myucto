@@ -29,6 +29,74 @@ final class ClosingRepository
 
     public function __construct(private readonly Connection $db) {}
 
+    public function provisionSourceId(int $supplierId, int $periodId, int $invoiceId): int
+    {
+        $pdo = $this->db->pdo();
+        $mapped = $pdo->prepare('SELECT id FROM accounting_receivable_provisions WHERE supplier_id = ? AND period_id = ? AND invoice_id = ?');
+        $mapped->execute([$supplierId, $periodId, $invoiceId]);
+        $mappedId = $mapped->fetchColumn();
+        if ($mappedId !== false) {
+            return ClosingSourceId::PROVISION_BASE + (int) $mappedId;
+        }
+        $legacy = $pdo->prepare("SELECT period_id FROM journal_entries WHERE supplier_id = ? AND source_type = 'provision' AND source_id = ? LIMIT 1");
+        $legacy->execute([$supplierId, $invoiceId]);
+        $legacyPeriod = $legacy->fetchColumn();
+        if ($legacyPeriod === false || (int) $legacyPeriod === $periodId) {
+            return $invoiceId;
+        }
+        $pdo->prepare('INSERT INTO accounting_receivable_provisions (supplier_id, period_id, invoice_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE id = id')
+            ->execute([$supplierId, $periodId, $invoiceId]);
+        $stmt = $pdo->prepare('SELECT id FROM accounting_receivable_provisions WHERE supplier_id = ? AND period_id = ? AND invoice_id = ?');
+        $stmt->execute([$supplierId, $periodId, $invoiceId]);
+        return ClosingSourceId::PROVISION_BASE + (int) $stmt->fetchColumn();
+    }
+
+    public function provisionOpeningState(int $supplierId, string $startsOn, string $endsOn): array
+    {
+        $origin = \MyInvoice\Service\Tax\Return\JournalTaxOrigin::provisionsBeforeCte($supplierId);
+        $stmt = $this->db->pdo()->prepare(
+            "WITH RECURSIVE {$origin}
+             SELECT COALESCE(pr.invoice_id, tax_origin.source_id) AS invoice_id,
+                    SUM(CASE WHEN a.account_code LIKE '558%' OR parent.account_code LIKE '558%' THEN IF(l.side = 'debit', l.amount, -l.amount) ELSE 0 END) AS legal_amount,
+                    SUM(CASE WHEN a.account_code LIKE '559%' OR parent.account_code LIKE '559%' THEN IF(l.side = 'debit', l.amount, -l.amount) ELSE 0 END) AS acct_amount
+               FROM journal_entries e
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = e.supplier_id
+               LEFT JOIN chart_of_accounts parent ON parent.id = a.parent_id AND parent.supplier_id = a.supplier_id
+               LEFT JOIN accounting_receivable_provisions pr
+                      ON pr.id = CASE WHEN tax_origin.source_id >= ? THEN tax_origin.source_id - ? ELSE NULL END
+                     AND pr.supplier_id = e.supplier_id
+              WHERE e.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date <= ?
+                AND tax_origin.source_type = 'provision' AND tax_origin.source_id IS NOT NULL
+              GROUP BY COALESCE(pr.invoice_id, tax_origin.source_id)"
+        );
+        $stmt->execute([$startsOn, ClosingSourceId::PROVISION_BASE, ClosingSourceId::PROVISION_BASE, $supplierId, $endsOn]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['invoice_id']] = [
+                'invoice_id' => (int) $row['invoice_id'],
+                'legal_amount' => round((float) $row['legal_amount'], 2),
+                'acct_amount' => round((float) $row['acct_amount'], 2),
+            ];
+        }
+        $sections = $this->db->pdo()->prepare(
+            "SELECT s.payload FROM accounting_closing_steps s
+               JOIN accounting_periods p ON p.id = s.period_id AND p.supplier_id = s.supplier_id
+              WHERE s.supplier_id = ? AND s.step_key = 'provisions' AND p.ends_on < ? ORDER BY p.ends_on"
+        );
+        $sections->execute([$supplierId, $startsOn]);
+        foreach ($sections->fetchAll(PDO::FETCH_COLUMN) as $raw) {
+            foreach ((json_decode((string) $raw, true)['entries'] ?? []) as $entry) {
+                $id = (int) ($entry['invoice_id'] ?? 0);
+                if (isset($result[$id])) {
+                    $result[$id]['legal_section'] = $entry['legal_section'] ?? null;
+                }
+            }
+        }
+        return $result;
+    }
+
     /**
      * Zůstatky výsledkových účtů za období (R9), per účet vč. analytik,
      * jen nenulové. `bal` je signed netto (MD kladně).
@@ -609,7 +677,7 @@ final class ClosingRepository
      *
      * @return array{entry: array<string,mixed>, lines: list<array<string,mixed>>}|null
      */
-    public function deleteClosingEntry(int $supplierId, string $sourceType, int $sourceId): ?array
+    public function deleteClosingEntry(int $supplierId, string $sourceType, int $sourceId, ?int $periodId = null): ?array
     {
         // Tvrdě mazat lze jen zápisy generované uzávěrkovým průvodcem / asistenty (revert
         // kroku = čistý úklid s auditním dumpem, ne §35 storno externího dokladu):
@@ -632,6 +700,16 @@ final class ClosingRepository
         $entry = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($entry === false) {
             return null;
+        }
+        if ($periodId !== null && (int) $entry['period_id'] !== $periodId) {
+            return null;
+        }
+        $status = $pdo->prepare('SELECT status FROM accounting_periods WHERE supplier_id = ? AND id = ? FOR UPDATE');
+        $status->execute([$supplierId, $entry['period_id']]);
+        $periodStatus = $status->fetchColumn();
+        if (!in_array($periodStatus, ['open', 'closing'], true)
+            && !($sourceType === 'closing' && $sourceId === (int) $entry['period_id'] && $periodStatus === 'closed')) {
+            throw new \MyInvoice\Service\Accounting\Closing\ClosingException('period_not_open', 'Zápis uzavřeného období nelze smazat.', 409);
         }
         $entryId = (int) $entry['id'];
 

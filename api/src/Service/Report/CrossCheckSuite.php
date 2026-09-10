@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Report;
 
+use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
@@ -66,7 +67,7 @@ final class CrossCheckSuite
         $results[] = $this->assetSalesVsCoefficientExclusion($supplierId, $year);
 
         $status = (string) ($period['status'] ?? '');
-        if (!in_array($status, ['closed', 'approved'], true)) {
+        if (!AccountingPeriodStatus::isClosed($status)) {
             $results[] = $this->skip(
                 'accounting',
                 'Účetní křížové kontroly ' . $year,
@@ -126,7 +127,7 @@ final class CrossCheckSuite
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT fiscal_year FROM accounting_periods
-              WHERE supplier_id = ? AND status IN ('closed', 'approved')
+              WHERE supplier_id = ? AND status IN (" . AccountingPeriodStatus::closedSqlList() . ")
            ORDER BY fiscal_year"
         );
         $stmt->execute([$supplierId]);

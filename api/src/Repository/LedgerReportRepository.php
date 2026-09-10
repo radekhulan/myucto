@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Tax\Return\JournalTaxOrigin;
 use PDO;
 
 /**
@@ -49,14 +50,14 @@ final class LedgerReportRepository
         // převádí rozvahové účty na 702/710 a jinak by je vynuloval. Otevírací
         // (source_type='opening') a slotované skladové zápisy §3.4 (112/132/501/504,
         // source_id >= STOCK_SLOT_BASE) zůstávají — reálné zůstatky zásob k rozvahovému dni.
-        $closingSql = $excludeClosing ? " AND NOT (e.source_type = 'closing' AND e.source_id < ?)" : '';
+        $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
         $turnoverOpeningSql = $excludeAllOpenings
             ? "e.source_type <> 'opening'"
             : "NOT (e.entry_date = ? AND e.source_type = 'opening')";
         $turnoverOpeningParams = $excludeAllOpenings ? [] : [$from];
         $stmt = $this->db->pdo()->prepare(
-            "WITH agg AS (
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . ", " : "WITH ") . "agg AS (
                 SELECT
                     CASE WHEN ? = 1 THEN a.id ELSE COALESCE(a.parent_id, a.id) END AS acc_id,
                     -- Otevírací zápis je datovaný na PRVNÍ den období, takže při
@@ -79,6 +80,7 @@ final class LedgerReportRepository
                               AND l.side = 'credit' THEN l.amount ELSE 0 END) AS to_d
                 FROM journal_entry_lines l
                 JOIN journal_entries e   ON e.id = l.entry_id
+                " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
                 JOIN chart_of_accounts a ON a.id = l.account_id
                 WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date <= ?{$filterSql}{$closingSql}
                 GROUP BY acc_id
@@ -134,19 +136,20 @@ final class LedgerReportRepository
     public function monthlyTurnovers(int $supplierId, string $from, string $to, bool $analytics, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
         [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
-        $closingSql = $excludeClosing ? " AND NOT (e.source_type = 'closing' AND e.source_id < ?)" : '';
+        $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
         $openingSql = $excludeAllOpenings
             ? " AND e.source_type <> 'opening'"
             : " AND NOT (e.entry_date = ? AND e.source_type = 'opening')";
         $openingParams = $excludeAllOpenings ? [] : [$from];
         $stmt = $this->db->pdo()->prepare(
-            "SELECT CASE WHEN ? = 1 THEN a.id ELSE COALESCE(a.parent_id, a.id) END AS acc_id,
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT CASE WHEN ? = 1 THEN a.id ELSE COALESCE(a.parent_id, a.id) END AS acc_id,
                     DATE_FORMAT(e.entry_date, '%Y-%m') AS ym,
                     SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END) AS md,
                     SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END) AS d
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?
                 {$openingSql}{$filterSql}{$closingSql}
@@ -181,7 +184,7 @@ final class LedgerReportRepository
         $offset = max(0, $offset);
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT * FROM (
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT * FROM (
                 SELECT e.id AS entry_id, e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
                        ca.id AS line_account_id, ca.account_code, ca.name AS line_account_name,
                        l.side, l.amount, l.line_no,
@@ -197,6 +200,7 @@ final class LedgerReportRepository
                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
                   FROM journal_entry_lines l
                   JOIN journal_entries e    ON e.id = l.entry_id
+                  " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
              LEFT JOIN bank_transactions bt ON e.source_type = 'bank' AND bt.id = e.source_id
              LEFT JOIN cash_documents cd    ON e.source_type = 'cash' AND cd.id = e.source_id
@@ -265,7 +269,7 @@ final class LedgerReportRepository
         }
         return [
             " AND e.source_type <> 'opening'"
-            . " AND NOT (e.source_type = 'closing' AND e.source_id < ?)",
+            . " AND " . JournalTaxOrigin::includedSql(),
             [ClosingSourceId::STOCK_SLOT_BASE],
         ];
     }
@@ -277,11 +281,12 @@ final class LedgerReportRepository
     public function accountOpening(int $supplierId, int $accountId, string $from, string $periodStart, bool $excludeClosing = false): float
     {
         $anchor = $this->openingAnchor($supplierId, $from);
-        $closingSql = $excludeClosing ? " AND NOT (e.source_type = 'closing' AND e.source_id < ?)" : '';
+        $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
+               " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
                JOIN chart_of_accounts ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
@@ -306,9 +311,10 @@ final class LedgerReportRepository
     {
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COUNT(*)
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COUNT(*)
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
+               " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
                JOIN chart_of_accounts ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
@@ -327,10 +333,11 @@ final class LedgerReportRepository
     {
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS md,
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS md,
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS d
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
+               " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
                JOIN chart_of_accounts ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
@@ -359,13 +366,14 @@ final class LedgerReportRepository
      */
     public function journalTotals(int $supplierId, string $from, string $to, bool $excludeClosing = false): array
     {
-        $closingSql = $excludeClosing ? " AND NOT (e.source_type = 'closing' AND e.source_id < ?)" : '';
+        $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS md,
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.amount ELSE 0 END), 0) AS md,
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END), 0) AS d
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id
+              " . ($excludeClosing ? "JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id" : "") . "
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?
                 AND NOT (e.entry_date = ? AND e.source_type = 'opening'){$closingSql}"
         );
@@ -427,7 +435,7 @@ final class LedgerReportRepository
         // Agregace per LIST účet (a.id) + jeho syntetika — roll-up i případný D2 split
         // (kladné/záporné saldo per analytika) se dopočítá v PHP.
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(p.id, a.id) AS account_id,
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(p.id, a.id) AS account_id,
                     COALESCE(p.account_code, a.account_code) AS code,
                     COALESCE(p.name, a.name) AS name,
                     a.account_type,
@@ -438,11 +446,12 @@ final class LedgerReportRepository
                     SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE 0 END) AS d
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND a.account_type NOT IN ('offbalance','closing')
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 AND e.entry_date <= ?{$plCond}
                 AND (a.account_type NOT IN ('asset','liability','equity') OR ? IS NULL OR e.entry_date >= ?)
               GROUP BY COALESCE(p.id, a.id), COALESCE(p.account_code, a.account_code),
@@ -583,13 +592,14 @@ final class LedgerReportRepository
         // (source_id >= STOCK_SLOT_BASE, 501/504/648) do obratu PATŘÍ a počítají se. Chrání
         // freeze() po uzavření i fallback přepočet closed období.
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0)
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 AND e.entry_date BETWEEN ? AND ?
                 AND ({$like})"
         );

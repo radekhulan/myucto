@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Reports;
 
+use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\LedgerReportRepository;
@@ -110,7 +111,7 @@ final class BalanceInventoryService
         // účet jako „nevyřešený" a v read-only období by to nešlo opravit. Proto
         // u uzavřeného období, kde účetní nic neuložila, odvodíme skutečný stav
         // z účetního (counted = book, resolved). Otevřené období se nebackfilluje.
-        $periodClosed = $period !== null && in_array((string) $period['status'], ['closed', 'approved'], true);
+        $periodClosed = $period !== null && AccountingPeriodStatus::isClosed((string) $period['status']);
 
         $header = $this->loadHeader($supplierId, $periodId);
         $saved = $this->loadItems($supplierId, $periodId);

@@ -241,7 +241,7 @@ final class DocumentLockService
         }
         $status = (string) $period['status'];
         return [
-            in_array($status, ['closed', 'approved'], true),
+            AccountingPeriodStatus::isClosed($status),
             $status === 'closing',
             $status,
         ];

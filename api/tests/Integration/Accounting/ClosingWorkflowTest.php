@@ -147,6 +147,44 @@ final class ClosingWorkflowTest extends TestCase
         );
     }
 
+    public function testReviewedPeriodAllowsOpeningAndFollowingClosing(): void
+    {
+        $this->seedScenario();
+        $this->runStepsUntilCloseReady();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertTrue($this->periods->setStatusCas(
+            $this->periodId, $this->supplierId, 'reviewed', $this->rv(), $this->userId,
+        ));
+        self::assertTrue($this->closing->state($this->supplierId, $this->periodId)['can_open_next']);
+        $opened = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertSame('reviewed', $this->period()['status']);
+        $nextId = (int) $opened['next_period_id'];
+        $state = $this->closing->state($this->supplierId, $nextId);
+        self::assertTrue($state['can_start']);
+        $this->manual([self::l('431', 'debit', 6000), self::l('428', 'credit', 6000)], (self::YEAR + 1) . '-01-02');
+        $this->closing->start($this->supplierId, $nextId, $state['row_version'], $this->meta());
+        $period = $this->periods->findById($this->supplierId, $nextId);
+        self::assertSame('closing', $period['status']);
+        $checks = new \ReflectionMethod(ClosingService::class, 'buildErrorChecks');
+        $results = $checks->invoke($this->closing, $this->supplierId, $period);
+        $prior = array_values(array_filter($results, static fn (array $check): bool => $check['key'] === 'prior_period_open'));
+        self::assertCount(1, $prior);
+        self::assertTrue($prior[0]['ok']);
+    }
+
+    public function testReviewedNextYearDoesNotOfferRevertingItsOpening(): void
+    {
+        $this->seedScenario();
+        $this->runStepsUntilCloseReady();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $opened = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $next = $this->periods->findById($this->supplierId, (int) $opened['next_period_id']);
+        self::assertTrue($this->periods->setStatusCas(
+            (int) $next['id'], $this->supplierId, 'reviewed', (int) $next['row_version'], $this->userId,
+        ));
+        self::assertFalse($this->closing->state($this->supplierId, $this->periodId)['can_revert_open_next']);
+    }
+
     // ── I2: bilanční kontinuita 702↔701 ─────────────────────────────────────
 
     public function testI2OpenNextMirrorsClosingIntoOpening(): void

@@ -39,7 +39,7 @@ Automaticky načtená data ze systému:
   mimoúčetní úpravy základu (nedaňové náklady, rozdíl odpisů) je nutné případně doplnit ručně.
   Osobní odpočty (§ 15), měsíční nároky na děti a manžela/manželku, invalidita,
   ZTP/P a měsíční režim OSVČ se spravují přímo v daňovém profilu. U dítěte se
-  eviduje identita, pořadí, oprávněné měsíce a ZTP/P; neúplný nárok finalizaci zablokuje.
+  eviduje identita, pořadí, oprávněné měsíce a ZTP/P; neúplný nárok vyvolá varování.
 
 ### 38.1.2 2. Úpravy a odpočty
 
@@ -132,13 +132,16 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
 - **Náhled XML** — pracovní XML rozpracovaného přiznání; nearchivuje se a není určeno
   k podání.
 - **Stáhnout XML** — ostré DPPDP9 / DPFDP7 ověřené proti XSD a obsahovým kontrolám.
-  U **DPFO** je ostrý export dostupný jen z finalizovaného neměnného snapshotu a
-  opakované stažení vrátí stejné uložené XML. U **DPPO** se XML sestavuje z aktuálních
-  účetních dat i po finalizaci; po uzavření účetnictví proto data neměň a podávanou
-  kopii vždy archivuj. Soubor nahraješ na
+  Finalizované **DPFO i DPPO** uchovávají neměnný výpočet a XML včetně příloh.
+  Opakované stažení vrátí stejné uložené XML. Pokud starší finální DPPO uložené XML
+  nemá, export jej sestaví z uloženého výpočtu a aktuálních identifikačních údajů
+  a příloh. Chybí-li i výpočet, použije aktuální podklady. Obrazovka na tuto
+  rekonstrukci upozorní. Nová finalizace vytvoří další
+  revizi; původní uložené XML zůstává zachované. Soubor nahraješ na
   [mojedane.gov.cz](https://mojedane.gov.cz) přes „Načtení souboru". Ostrý export se
-  **archivuje** a po dokončení stažení aplikace otevře **Nástroje → EPO podání
-  a archív**. Tam lze snapshot předat do
+  **archivuje**. Pokud jsou nalezeny nesrovnalosti, stránka po stažení zůstane
+  otevřená s varováním; jinak aplikace otevře **Nástroje → EPO podání a archív**.
+  Selhání kontroly XSD ani obsahové kontroly stažení nezakáže. V archivu lze snapshot předat do
   předvyplněného formuláře EPO a po odeslání k němu přetáhnout XML a potvrzení.
   Dokumenty DPFO a DPPO se ukládají pod samostatně konfigurovatelný kořen
   **Daň z příjmů** a dále podle roku a typu formuláře.
@@ -163,7 +166,7 @@ movitých věcí, cenných papírů, převod podle písm. c), jiné ostatní př
 příjmy, loterie a tomboly), volitelný **kód** P/S/Z/N (zemědělská výroba s výdaji procentem
 z příjmů, majetek ve společném jmění manželů, zdroj v zahraničí, bezúplatný příjem, který
 je nemovitostí) a slovní popis. Druh příjmu je povinný — bez něj finanční úřad podání
-vytkne a přiznání nejde finalizovat.
+vytkne; aplikace zobrazí varování a finalizaci umožní.
 
 V Příloze č. 1 se u daňové evidence vykazuje také údaj **Mzdy**, tedy celkový objem
 zúčtovaných mezd za období. Předvyplní se ze mzdové agendy (mzdové běhy modulu Mzdy
@@ -182,13 +185,21 @@ dolů na celé stokoruny, daň v pásmech 15/23 % se zaokrouhlí nahoru na celé
 Sleva na poplatníka je roční. Manžel/manželka, invalidita, ZTP/P a děti se posuzují
 podle zadaných měsíců a podmínek; ZTP/P zdvojnásobuje příslušný nárok. U dětí záleží
 také na pořadí a daňový bonus má vlastní příjmový test. Systém nekontroluje pravost
-doložených potvrzení — jejich existenci pouze vyžaduje jako podklad finalizace.
+doložených potvrzení; na chybějící podklady upozorní při finalizaci.
 
 U daňové evidence vstupují do § 7 příjmy a skutečné výdaje peněžního deníku,
 potvrzené daňové odpisy a nepeněžní zvýšení či snížení z roční uzávěrky. Pokud deník
-selže, náhled může zobrazit nouzový fakturační součet, ale finalizace je zablokovaná.
+selže, náhled může zobrazit nouzový fakturační součet. Na neúplné podklady upozorní
+varování, které finalizaci ani export nezakáže.
 U podvojného účetnictví FO vychází § 7 z účtovaných výnosů a nákladů; rozdíl účetních
 a daňových odpisů a neobvyklé mimoúčetní úpravy je nutné prověřit ručně.
+
+Nepeněžní úpravy se v oddílu E přílohy č. 1 rozepisují jednotlivě. Pokud je v jednom
+směru více než 99 úprav, export zachová prvních 98 samostatně a ostatní sloučí do
+posledního označeného souhrnného řádku. Na sloučení upozorní varování; úplný rozpis
+zůstává v roční uzávěrce daňové evidence. Částky se rozdělují na celé koruny tak,
+aby jejich součet odpovídal zaokrouhlenému součtu podkladů. Skutečný nesoulad
+podkladů s úhrnem na řádku 105 nebo 106 se hlásí samostatně.
 
 ## 38.3 Jak se počítá DPPO
 
@@ -198,12 +209,8 @@ rozdíl daňových a účetních odpisů a rozdíl zůstatkových cen vyřazené
 Následují ztráty, dary a slevy. Základ se před sazbou zaokrouhluje dolů na celé tisíce
 Kč; jednotlivé zálohy na další období se zaokrouhlují nahoru na celé stokoruny.
 
-> [!WARNING]
-> Současný filtr nerozlišuje vlastní technické uzavření knih od ostatních zápisů se
-> zdrojem `closing`: vyloučí i výsledkové zápisy skladové uzávěrky. Firma se zapnutým
-> skladem proto musí před finalizací DPPO i DPFO v podvojném účetnictví porovnat řádek
-> výsledku hospodaření s výsledovkou a daňový dopad skladu doplnit nebo vysvětlit
-> ručně. Úspěšná XSD validace tuto obsahovou mezeru neodhalí.
+Výsledkové zápisy skladové uzávěrky se do výpočtu zahrnují. Technický zápis
+uzavření knih se vylučuje, aby převod na uzávěrkové účty nevynuloval výsledek.
 
 Panel uzávěrkových návrhů může upozornit na neodpisovaný drobný majetek, časové rozlišení,
 kurzové rozdíly, rezervy nebo dohadné položky. Je pouze projekcí: do DPPO vstoupí až
@@ -243,7 +250,7 @@ Zálohy se **nepárují na doklady**, jen na bankovní pohyby — proto je nutn�
 
 Než přiznání **finalizuješ**, systém nad kartami zobrazí panel **Předfinalizační kontrola** — sadu
 kontrol, které dělá zkušená účetní ručně, aby se do XML nedostala tichá chyba. Každá kontrola má
-stav **OK / upozornění / bloker** (nebo **nerelevantní** tam, kde se netýká daného typu poplatníka),
+stav **OK / upozornění** (nebo **nerelevantní** tam, kde se netýká daného typu poplatníka),
 u problémů rovnou ukáže **částky a prokliknutelný rozpad**:
 
 - **Účetní období uzavřeno** — období roku má být `uzavřené`/`schválené`, ne otevřené.
@@ -259,23 +266,18 @@ u problémů rovnou ukáže **částky a prokliknutelný rozpad**:
   čtvrtletní období existuje archivní záznam DPH. Současná kontrola nerozlišuje stažené
   a skutečně odeslané XML, proto je jen upozorněním a nenahrazuje doručenky z EPO.
 
-U DPFO jsou chyby, které by vedly k neúplnému nebo nesprávnému podání, skutečnými
-**blokery**: nedokončená roční uzávěrka daňové evidence, nezařazený příjem, bankovní
+U DPFO se jako **varování** zobrazují také nedokončená roční uzávěrka daňové evidence,
+nezařazený příjem, bankovní
 úhrada mimo vlastněný výpis, chyba peněžního deníku, nevyřešený přechod § 23 odst. 8,
 neúplné osoby, činnosti nebo měsíce OSVČ. Výsledek kontrol se ukládá do neměnného
-snapshotu. Informativní kontroly a upozornění, která neovlivňují zákonnou úplnost,
-zůstávají poradní.
+snapshotu. Nálezy finalizaci ani export nezakazují; před podáním je ověř.
 
 ### 38.5.1 Situace, které aplikace v přiznání neumí
 
 Nad předfinalizační kontrolou se u obou přiznání zobrazuje panel **Situace, které
-aplikace v přiznání neumí**. Vzniká z povahy poplatníka a z účetních dat a dělí nálezy
-na dvě skupiny:
-
-- **Přiznání se nevydá** (červeně) — dokud nález trvá, přiznání nejde finalizovat ani
-  vygenerovat. Aplikace by o poplatníkovi tvrdila nepravdu, a to je horší než chybějící
-  podání: špatně vyplněný údaj projde tiše, kdežto chybějící úřad vytkne.
-- **Jen na vědomí** (žlutě) — přiznání se vydá, ale údaj si před podáním ověř.
+aplikace v přiznání neumí**. Vzniká z povahy poplatníka a z účetních dat.
+Všechny nálezy jsou žlutá **varování**. Finalizace i export jsou povolené;
+údaje si před podáním ověř.
 
 Ke každému nálezu je napsané, **co s tím** — typicky „podejte přiznání za toto období
 v portálu EPO ručně" nebo „opravte údaj v nastavení firmy".
@@ -295,10 +297,12 @@ v **Nastavení → Daně a účetnictví → Přiznání k dani z příjmů — 
 | Zahraniční příjmy se zápočtem (§ 38f) — OSVČ | Zápočet daně zaplacené v zahraničí, Příloha č. 3. |
 
 Výchozí hodnoty odpovídají běžné firmě a OSVČ, takže je nechej být, pokud se tě netýkají.
+Je-li rozhodný den změny stavu až po konci období přiznání, tento stav starší
+přiznání neovlivňuje. Při chybějícím nebo neplatném datu se zobrazí varování.
 Vypnutý příznak ale **není tichý předpoklad**: kde jde podezření poznat z dat, aplikace se
 ozve sama — u firmy s převažující činností z **finančního sektoru** (banky, investiční
-fondy, pojišťovny, penzijní společnosti) se přiznání zastaví, dokud typ poplatníka
-nepotvrdíš, u **organizací sdružujících osoby** varuje na veřejně prospěšného poplatníka
+fondy, pojišťovny, penzijní společnosti) upozorní na nepotvrzený typ poplatníka,
+u **organizací sdružujících osoby** varuje na veřejně prospěšného poplatníka
 a u **výroby elektřiny** upozorní na odpisy fotovoltaiky podle § 30b.
 
 Ruční seznam nepodporovaných situací z [roční uzávěrky daňové evidence](90_Danova_evidence.md)
@@ -378,7 +382,8 @@ skutečně podaného DPFO, DPHDP3 a KH není k dispozici.
 
 ## 38.9 Roční uzávěrka daňové evidence a snapshot DPFO
 
-DPFO ze skutečných výdajů nelze finalizovat bez dokončené roční uzávěrky podle § 7b.
+DPFO ze skutečných výdajů upozorní na nedokončenou roční uzávěrku podle § 7b.
+Přiznání lze finalizovat i exportovat s tímto varováním.
 Kontrolní seznam pokrývá deník, nepeněžní operace, majetek, zásoby, pohledávky,
 závazky, vysoké nákupy, změny režimu a cizí měny. Zadávají se počáteční a konečné
 stavy majetku, hotovosti, banky, zásob, pohledávek, ostatních aktiv, dluhů a rezerv.

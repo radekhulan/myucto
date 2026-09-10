@@ -167,6 +167,44 @@ final class TaxReturnFoApiTest extends TestCase
         self::assertSame(2, $subCount, 'Každý ze dvou exportů se archivuje jako samostatné stažení.');
     }
 
+    public function testLaterEntityStatusDoesNotBlockEarlierFoFinalization(): void
+    {
+        $this->db->pdo()->prepare('UPDATE supplier SET tax_entity_status = ?, tax_entity_status_date = ? WHERE id = ?')
+            ->execute(['insolvency', (self::YEAR + 1) . '-01-01', $this->supplierId]);
+        $args = ['type' => 'fo', 'year' => (string) self::YEAR];
+        [$req, $res] = $this->req('GET');
+        $body = $this->json($this->action->get($req, $res, $args));
+        [$req, $res] = $this->req('POST', ['row_version' => $body['return']['row_version']]);
+        $response = $this->action->finalize($req, $res, $args);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('final', $this->json($response)['return']['status']);
+    }
+
+    public function testSectionEOverflowWarningSurvivesFinalization(): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "INSERT INTO tax_evidence_non_cash_adjustments
+                 (supplier_id, closing_id, adjustment_on, kind, direction, amount, description)
+             SELECT supplier_id, id, ?, 'section23_other', 'increase', 100.49, 'Syntetická úprava'
+               FROM tax_evidence_closings WHERE supplier_id = ? AND year = ?"
+        );
+        for ($i = 0; $i < 100; ++$i) {
+            $stmt->execute([self::YEAR . '-12-31', $this->supplierId, self::YEAR]);
+        }
+        $args = ['type' => 'fo', 'year' => (string) self::YEAR];
+        [$req, $res] = $this->req('GET');
+        $body = $this->json($this->action->get($req, $res, $args));
+        [$req, $res] = $this->req('POST', ['row_version' => $body['return']['row_version']]);
+        $response = $this->action->finalize($req, $res, $args);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $final = $this->json($response);
+        self::assertNotEmpty(array_filter($final['warnings'], static fn (string $warning): bool => str_contains($warning, 'limit 99')));
+        $service = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Tax\Return\TaxReturnService::class);
+        $export = $service->buildXml($this->supplierId, self::YEAR, 'fo');
+        self::assertNotEmpty(array_filter($export['warnings'], static fn (string $warning): bool => str_contains($warning, 'limit 99')));
+        self::assertSame(99, substr_count($export['xml'], '<VetaC'));
+    }
+
     public function testInsuranceSummaryAndPdf(): void
     {
         $args = ['type' => 'fo', 'year' => (string) self::YEAR];

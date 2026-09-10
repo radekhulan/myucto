@@ -213,14 +213,15 @@ final class DpfoReturnDataProvider
         $startsOn = sprintf('%04d-01-01', $year);
         $endsOn = sprintf('%04d-12-31', $year);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT a.account_type,
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT a.account_type,
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0) AS bal
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 AND a.account_type IN ('revenue','expense')
                 AND a.account_code NOT LIKE '59%'
               GROUP BY a.account_type"
@@ -460,7 +461,7 @@ final class DpfoReturnDataProvider
         $payableTotal = round((float) $payables->fetchColumn(), 2);
 
         $direction = $useActual ? 'z výdajového paušálu na skutečné výdaje' : 'ze skutečných výdajů na výdajový paušál';
-        return 'BLOKUJÍCÍ KONTROLA §23 odst. 8 ZDP: zjistili jsme přechod ' . $direction . '. '
+        return 'VAROVÁNÍ §23 odst. 8 ZDP: zjistili jsme přechod ' . $direction . '. '
             . 'K ' . $asOf . ' evidujeme otevřené pohledávky ' . number_format($receivableTotal, 2, ',', ' ')
             . ' Kč a závazky ' . number_format($payableTotal, 2, ',', ' ') . ' Kč. Před finalizací ověřte dodatečné '
             . 'přiznání předchozího roku, zásoby a další povinné úpravy základu; automatický výpočet není úplný.';

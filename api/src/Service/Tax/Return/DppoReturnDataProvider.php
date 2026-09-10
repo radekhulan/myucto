@@ -243,14 +243,15 @@ final class DppoReturnDataProvider
         $likeSql = implode(' OR ', array_fill(0, count($prefixes), 'a.account_code LIKE ?'));
         $params = array_merge([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE], array_map(static fn (string $p): string => $p . '%', $prefixes));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT a.account_code, a.name, a.tax_deductibility,
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT a.account_code, a.name, a.tax_deductibility,
                     COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS turnover
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 AND a.account_type = 'expense'
                 AND (" . $likeSql . ")
               GROUP BY a.account_code, a.name, a.tax_deductibility
@@ -364,13 +365,14 @@ final class DppoReturnDataProvider
     private function accountGroupExpense(int $supplierId, string $startsOn, string $endsOn, string $groupPrefix): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS c
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0) AS c
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 AND a.account_type = 'expense'
                 AND a.account_code LIKE ?"
         );
@@ -392,13 +394,14 @@ final class DppoReturnDataProvider
     private function profitBeforeTax(int $supplierId, string $startsOn, string $endsOn): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0) AS vh
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END), 0) AS vh
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN tax_journal_origins tax_origin ON tax_origin.id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
-                AND NOT (e.source_type = 'closing' AND e.source_id < ?)
+                AND " . JournalTaxOrigin::includedSql() . "
                 AND a.account_type IN ('revenue','expense')
                 AND a.account_code NOT LIKE '59%'"
         );

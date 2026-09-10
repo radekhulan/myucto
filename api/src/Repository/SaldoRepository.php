@@ -311,31 +311,61 @@ final class SaldoRepository
      */
     private function fetchDefinitiveOpenRows(string $sql, callable $params, callable $map, ?int $limit): array
     {
+        return iterator_to_array($this->iterateDefinitiveOpenRows($sql, $params, $map, $limit), false);
+    }
+
+    private function iterateDefinitiveOpenRows(string $sql, callable $params, callable $map, ?int $limit): \Generator
+    {
         $pageSize = $limit === null
             ? self::CANDIDATE_PAGE_SIZE
             : min(self::CANDIDATE_PAGE_SIZE, max(1, $limit));
         $offset = 0;
-        $result = [];
-
+        $count = 0;
         do {
             $pageSql = $sql . self::limitSql($pageSize, $offset);
             $stmt = $this->db->pdo()->prepare($pageSql);
             $stmt->execute($params($pageSql));
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $stmt->closeCursor();
             foreach ($rows as $row) {
                 $item = $map($row);
                 if (!self::settlementAmounts((float) $item['booked_signed'], (float) $item['paid_ratio'])['open']) {
                     continue;
                 }
-                $result[] = $item;
-                if ($limit !== null && count($result) >= $limit) {
-                    return $result;
+                yield $item;
+                if ($limit !== null && ++$count >= $limit) {
+                    return;
                 }
             }
             $offset += count($rows);
         } while (count($rows) === $pageSize);
+    }
 
-        return $result;
+    public function iterateOpenInvoiceItems(int $supplierId, int $accountId, string $asOf, ?array $invoiceIds = null): \Generator
+    {
+        if ($invoiceIds === []) {
+            return;
+        }
+        $pdo = $this->db->pdo();
+        $ownsSnapshot = !$pdo->inTransaction();
+        if ($ownsSnapshot) {
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $pdo->exec('SET TRANSACTION READ ONLY');
+            $pdo->beginTransaction();
+        }
+        try {
+            if ($invoiceIds === null) {
+                yield from $this->fetchOpenInvoices($supplierId, $accountId, $asOf, null, stream: true);
+            } else {
+                foreach (array_chunk(array_values(array_unique(array_map('intval', $invoiceIds))), 500) as $chunk) {
+                    yield from $this->fetchOpenInvoices($supplierId, $accountId, $asOf, null, stream: true, invoiceIds: $chunk);
+                }
+            }
+        } finally {
+            if ($ownsSnapshot && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        }
     }
 
     /**
@@ -683,8 +713,11 @@ final class SaldoRepository
         ?int $partnerId = null,
         ?string $dueBefore = null,
         bool $orderByDue = false,
-    ): array
+        bool $stream = false,
+        ?array $invoiceIds = null,
+    ): array|\Generator
     {
+        $invoiceFilter = $invoiceIds === null ? '' : ' AND d.id IN (' . implode(',', array_map('intval', $invoiceIds)) . ')';
         $advanceCte = $this->advanceOnAccountCte('credit', $supplierId, $accountId);
 
         $paidExpr    = 'COALESCE(paid.paid_sum, 0)';
@@ -739,14 +772,15 @@ final class SaldoRepository
                AND (ca.id = {$accountId} OR ca.parent_id = {$accountId})
                AND d.status <> 'draft'
                AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)
-               " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . "
+               " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . $invoiceFilter . "
              GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status,
                       cl.id, cl.company_name, cur.code, d.amount_to_pay,
                       paid.paid_sum, adv.advance_sum
             HAVING " . self::openFilterSql($bookedExpr, $ratio) . "
-             " . self::orderSql('d', $orderByDue);
+             " . ($stream ? ' ORDER BY cl.id, d.due_date, d.id' : self::orderSql('d', $orderByDue));
 
-        return $this->fetchDefinitiveOpenRows(
+        $fetch = $stream ? 'iterateDefinitiveOpenRows' : 'fetchDefinitiveOpenRows';
+        return $this->$fetch(
             $sql,
             static fn (string $pageSql): array => self::asOfParams($pageSql, $asOf),
             function (array $r): array {

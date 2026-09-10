@@ -11297,11 +11297,15 @@ paths:
         Systém návrh jen nabízí — účetní ho per pohledávka potvrdí/upraví v /steps/provisions/run.
         U již zaúčtované OP nese `existing.legal_section` paragraf zvolený účetní (podklad
         rozpadu tabulky C přílohy č. 1 II. oddílu DPPO); `null` = nezařazeno.
+        Výsledek je stránkovaný. `totals` obsahuje úplné součty, `page_totals` součty stránky. Limit §8c
+        zahrnuje všechny otevřené pohledávky za dlužníkem bez ohledu na stránku.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
       responses:
-        '200': { description: "OK {as_of, items, totals, rules}", content: { application/json: { schema: { type: object } } } }
+        '200': { description: "OK", content: { application/json: { schema: { $ref: '#/components/schemas/ClosingProvisionsPreview' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
@@ -11364,6 +11368,7 @@ paths:
                 status: { type: string, enum: [done, skipped], description: "Checklist kroky + skip u provisions/income_tax" }
                 note: { type: string, maxLength: 500 }
                 amount: { type: number, description: "Jen income_tax — splatná daň (591/341)" }
+                partial: { type: boolean, default: false, description: "Jen provisions. true mění zaslané položky (nejvýše 200), ostatní otevřené OP zachová a plně uhrazené odstraní; false nahrazuje celý seznam." }
                 items:
                   type: array
                   description: "Jen provisions — účetní-potvrzený seznam OP per pohledávka (§8a/§8c)"
@@ -11372,8 +11377,8 @@ paths:
                     required: [invoice_id]
                     properties:
                       invoice_id: { type: integer }
-                      legal_amount: { type: number, description: "Zákonná OP (558)" }
-                      acct_amount: { type: number, description: "Účetní OP nad rámec (559)" }
+                      legal_amount: { type: number, description: "Požadovaný konečný stav zákonné OP (558); účtuje se změna oproti přenesenému stavu." }
+                      acct_amount: { type: number, description: "Požadovaný konečný stav účetní OP nad rámec zákona (559)." }
                       legal_section:
                         type: string
                         nullable: true
@@ -18153,6 +18158,10 @@ paths:
       tags: [TaxReturn]
       summary: Řádky, ruční vstupy a upozornění přiznání
       description: >-
+        Finální DPFO i DPPO vracejí uložený výpočet a podklady bez přepočtu.
+        `snapshot` obsahuje metadata neměnného XML; u starších finálních přiznání
+        bez uloženého XML může být null. U staršího DPPO bez uloženého výpočtu
+        se vrátí aktuální výpočet a výslovné varování o rekonstrukci.
         U DPFO (`type=fo`) nese `podklady.section10_codebook` číselník druhů ostatních
         příjmů podle § 10 odst. 1 zákona (`kinds`, A–H) a volitelných kódů (`codes`,
         P/S/Z/N) pro položky `inputs.s10_items[]`; `podklady.payroll_gross` je úhrn
@@ -18160,7 +18169,23 @@ paths:
         (null = agenda za rok nic nevykazuje). Zrušený jednořádkový vstup `inputs.s10_other`
         se při čtení i uložení převádí na jednu položku `inputs.s10_items[]`.
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  computed: { type: object, description: Výpočet; u final uložený bez přepočtu s výjimkou rekonstrukce staršího DPPO. }
+                  warnings: { type: array, items: { type: string }, description: Poradní nálezy včetně rekonstrukce nebo neúspěšné validace; finalizaci ani export nezakazují. }
+                  podklady:
+                    type: object
+                    properties:
+                      legal_provisions: { $ref: '#/components/schemas/LegalProvisionLedgerSummary' }
+                  snapshot:
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/TaxReturnSnapshotMetadata'
         '400': { description: Neplatný typ/rok/variant }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -18201,7 +18226,11 @@ paths:
     post:
       tags: [TaxReturn]
       summary: Finalizuje přiznání (zmrazí draft)
-      description: Vyžaduje oprávnění `reports.finalize`.
+      description: >-
+        Vyžaduje oprávnění `reports.finalize`. Pro DPFO i DPPO uloží neměnný výpočet
+        a XML včetně příloh s výsledkem XSD kontroly. Neúspěšné XSD a obsahové
+        kontroly se uloží jako varování a finalizaci nezakazují. Nová finalizace
+        po znovuotevření vytváří další revizi snapshotu.
       requestBody:
         required: true
         content:
@@ -18253,6 +18282,7 @@ paths:
     get:
       tags: [TaxReturn]
       summary: Předfinalizační kontrolní checklist (E10, audit 2026-07)
+      description: Nálezy jsou poradní; can_finalize je true a summary.blocker je 0. Neúspěšné kontroly mají severity warning.
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '400': { description: Neplatný typ/rok/variant }
@@ -18286,11 +18316,18 @@ paths:
     get:
       tags: [TaxReturn]
       summary: Stáhne validované EPO XML přiznání (DPFO/DPPO)
-      description: Vyžaduje oprávnění `reports.export`. Vrací hlavičku `X-Validation-Status`.
+      description: >-
+        Vyžaduje oprávnění `reports.export`. Vrací hlavičku `X-Validation-Status`.
+        Finální přiznání vrací neměnné uložené XML. Starší finální DPPO bez XML
+        snapshotu sestaví XML z uloženého výpočtu a aktuálních identifikačních údajů
+        a příloh; chybí-li i výpočet, použije aktuální podklady. Detail přiznání
+        tuto rekonstrukci uvádí ve warnings. Neúspěšná validace XML export nezakazuje.
+        DPFO vyžaduje finalizaci; z konceptu lze stáhnout pracovní náhled.
       responses:
         '200': { description: XML download, content: { application/xml: {} } }
         '400': { description: Neplatný typ/rok/variant }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: DPFO chybí finální XML snapshot, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '500': { description: Build XML selhal, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/tax-return/{type}/{year}/reconcile:
@@ -19639,6 +19676,86 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    LegalProvisionLedgerSummary:
+      type: object
+      description: Podklady tabulky C DPPO; tvorba za období se rozlišuje od konečného stavu.
+      properties:
+        allowance_balance: { type: number }
+        allowance_declared_legal: { type: number }
+        allowance_declared_acct: { type: number }
+        legal_allowance_created: { type: number }
+        allowance_by_section:
+          type: object
+          description: Konečný stav zákonných OP podle paragrafu.
+          additionalProperties: { type: number }
+        allowance_created_by_section:
+          type: object
+          description: Skutečná tvorba v období podle paragrafu; klíče 8, 8a, 8b, 8c.
+          additionalProperties: { type: number }
+        allowance_split_reliable: { type: boolean }
+        allowance_created_split_reliable: { type: boolean }
+    TaxReturnSnapshotMetadata:
+      type: object
+      description: Neměnná revize finalizovaného DPFO nebo DPPO včetně XML.
+      properties:
+        id: { type: integer }
+        revision_no: { type: integer }
+        source_sha256: { type: string }
+        xml_sha256: { type: string }
+        business_status: { type: string }
+        finalized_at: { type: string }
+        finalized_by: { type: integer, nullable: true }
+    ClosingProvisionsPreview:
+      type: object
+      required: [as_of, period, items, totals, page_totals, pagination, totals_scope, rules]
+      properties:
+        as_of: { type: string, format: date }
+        period:
+          type: object
+          properties:
+            id: { type: integer }
+            fiscal_year: { type: integer }
+        items:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            properties:
+              invoice_id: { type: integer }
+              existing:
+                type: object
+                nullable: true
+                properties:
+                  entry_id: { type: integer, nullable: true, description: Bez pohybu v tomto období je null. }
+                  legal_amount: { type: number }
+                  acct_amount: { type: number }
+                  legal_section: { type: string, nullable: true, enum: ['8', '8a', '8b', '8c', null] }
+        totals:
+          type: object
+          description: Úplné součty všech pohledávek.
+          properties:
+            remaining: { type: number }
+            suggested_legal: { type: number }
+            existing_legal: { type: number }
+            existing_acct: { type: number }
+        pagination:
+          type: object
+          required: [page, per_page, total]
+          properties:
+            page: { type: integer, minimum: 1 }
+            per_page: { type: integer, minimum: 1, maximum: 200 }
+            total: { type: integer, minimum: 0 }
+        page_totals:
+          type: object
+          description: Součty zobrazené stránky ve stejném tvaru jako totals.
+          properties:
+            remaining: { type: number }
+            suggested_legal: { type: number }
+            existing_legal: { type: number }
+            existing_acct: { type: number }
+        totals_scope: { type: string, enum: [all] }
+        rules: { type: object }
+
     SalesOrder:
       type: object
       required: [id, order_uuid, order_number, commercial_status, payment_status, fulfillment_status, currency_code, prices_include_vat, total_with_vat, row_version]

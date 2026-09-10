@@ -584,11 +584,42 @@ final class DpfoXmlBuilder
                 . 'zda finanční úřad nevyžaduje rozepsání na víc řádků.';
         } else {
             $sum = round(array_sum(array_column($rows, 'amount')), 2);
-            if (abs($sum - $total) > 1.0) {
+            if ((int) round($sum * 100) !== (int) round($total * 100)) {
                 $warnings[] = 'Součet položek oddílu E (' . $element . ', ' . number_format($sum, 0, ',', ' ')
                     . ' Kč) neodpovídá částce na ř. ' . $line . ' (' . number_format($total, 0, ',', ' ')
                     . ' Kč) — ověřte podklady před podáním.';
             }
+        }
+
+        if (count($rows) > 99) {
+            $overflow = array_splice($rows, 98);
+            $rows[] = [
+                'amount' => round(array_sum(array_column($overflow, 'amount')), 2),
+                'label' => 'Souhrn ' . count($overflow) . ' dalších úprav podle § 23',
+            ];
+            $warnings[] = 'Oddíl E (' . $element . ') má limit 99 řádků. Prvních 98 úprav je rozepsáno '
+                . 'samostatně, zbývajících ' . count($overflow) . ' je sloučeno do posledního souhrnného řádku '
+                . 'bez změny celkové částky. Podrobný rozpis zůstává v roční uzávěrce daňové evidence.';
+        }
+
+        $sumMinor = 0;
+        $sumWhole = 0;
+        $remainders = [];
+        foreach ($rows as $index => $row) {
+            $minor = (int) round($row['amount'] * 100);
+            $rows[$index]['amount'] = intdiv($minor, 100);
+            $sumMinor += $minor;
+            $sumWhole += $rows[$index]['amount'];
+            $remainders[$index] = $minor % 100;
+        }
+        arsort($remainders, SORT_NUMERIC);
+        $remaining = (int) round($sumMinor / 100) - $sumWhole;
+        foreach (array_keys($remainders) as $index) {
+            if ($remaining <= 0) {
+                break;
+            }
+            ++$rows[$index]['amount'];
+            --$remaining;
         }
 
         foreach ($rows as $row) {
