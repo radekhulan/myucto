@@ -2997,6 +2997,13 @@ final class Routes
         $app->delete('/api/logbook/trips/{id:[0-9]+}',    [\MyInvoice\Action\Logbook\TripsAction::class, 'delete']);
 
         $app->get   ('/api/logbook/fuelings/export',      \MyInvoice\Action\Logbook\ExportFuelingsAction::class);
+        $app->post  ('/api/logbook/fuelings/import',      \MyInvoice\Action\Logbook\ImportFuelingsAction::class);
+        $app->get   ('/api/logbook/fuelings/warnings',    [\MyInvoice\Action\Logbook\FuelingsAction::class, 'warnings']);
+        $app->get   ('/api/logbook/fuelings/link-candidates', [\MyInvoice\Action\Logbook\FuelingsAction::class, 'linkCandidates']);
+        $app->get   ('/api/logbook/drivers',              \MyInvoice\Action\Logbook\LogbookDriversAction::class);
+        $app->get   ('/api/logbook/fuel-cash-documents',                    [\MyInvoice\Action\Logbook\FuelCashDocumentsAction::class, 'list']);
+        $app->post  ('/api/logbook/fuel-cash-documents/backfill',           [\MyInvoice\Action\Logbook\FuelCashDocumentsAction::class, 'backfill']);
+        $app->post  ('/api/logbook/fuel-cash-documents/{id:[0-9]+}/assign', [\MyInvoice\Action\Logbook\FuelCashDocumentsAction::class, 'assign']);
         $app->get   ('/api/logbook/fuelings',             [\MyInvoice\Action\Logbook\FuelingsAction::class, 'list']);
         $app->post  ('/api/logbook/fuelings',             [\MyInvoice\Action\Logbook\FuelingsAction::class, 'create']);
         $app->get   ('/api/logbook/fuelings/{id:[0-9]+}', [\MyInvoice\Action\Logbook\FuelingsAction::class, 'get']);

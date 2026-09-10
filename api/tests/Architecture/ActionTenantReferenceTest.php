@@ -61,7 +61,9 @@ final class ActionTenantReferenceTest extends TestCase
         'CreatePurchaseInvoiceAction.php' => ['expense_category_id', 'currency_id', 'payment_currency_id'],
         'UpdatePurchaseInvoiceAction.php' => ['expense_category_id', 'currency_id', 'payment_currency_id'],
         // R2 #6 / sweep F1 — POST + PUT /api/logbook/fuelings
-        'FuelingsAction.php' => ['vendor_id', 'source_purchase_invoice_id'],
+        'FuelingsAction.php' => ['vendor_id', 'source_purchase_invoice_id', 'source_cash_document_id', 'source_journal_entry_id'],
+        // Kniha jízd (migrace 1802) — řidič vozidla z těla requestu.
+        'CarsAction.php' => ['driver_employee_id'],
         // R2 #7 / sweep F3 — POST + PUT /api/logbook/trips
         'TripsAction.php' => ['category_id'],
         // R2 #8 / sweep F2 — POST /api/reports/related-parties/adjustments
@@ -90,6 +92,9 @@ final class ActionTenantReferenceTest extends TestCase
 
         // Sweep S099: FuelInvoicesAction::assign — cars->find($carId, $supplierId) na ř. ~94.
         'FuelInvoicesAction.php:car_id' => 'cars->find($carId, $supplierId)',
+        // Tankování z pokladních dokladů — stejný idiom jako FuelInvoicesAction::assign
+        // (FuelCashDocumentsAction::assign, cars->find($carId, $supplierId) → 404).
+        'FuelCashDocumentsAction.php:car_id' => 'cars->find($carId, $supplierId) v assign()',
 
         // Kniha jízd — `car_id` má vlastní kontrolu odjakživa (a byl to jediný vázaný FK
         // v obou Action, viz sweep F1/F3): TripsAction::prepare() a FuelingsAction::validate()

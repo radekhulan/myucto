@@ -109,6 +109,11 @@ final class TenantReferenceGuard
         'source_purchase_invoice_id' => ['purchase_invoices',  self::VIA_SUPPLIER],
         'asset_id'                   => ['assets',             self::VIA_SUPPLIER],
         'cash_register_id'           => ['cash_registers',     self::VIA_SUPPLIER],
+        // Kniha jízd (migrace 1801/1802). `source_bank_transaction_id` tu není —
+        // bank_transactions nemá supplier_id, vlastníka ověřuje FuelingsAction přes výpis.
+        'source_cash_document_id'    => ['cash_documents',     self::VIA_SUPPLIER],
+        'source_journal_entry_id'    => ['journal_entries',    self::VIA_SUPPLIER],
+        'driver_employee_id'         => ['payroll_employees',  self::VIA_SUPPLIER],
         'project_id'                 => ['projects',           self::VIA_CLIENT],
     ];
 

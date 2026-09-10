@@ -6,10 +6,12 @@ namespace MyInvoice\Action\Logbook;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\CarRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Logbook\VehicleVatPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -21,14 +23,21 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   PUT    /api/logbook/cars/{id}           — update
  *   DELETE /api/logbook/cars/{id}           — hard pokud nepoužito, jinak archivace
  *
+ * Řidič (`driver_employee_id`) a režim užívání / odpočtu DPH (`usage_mode`, `vat_deduction_mode`,
+ * `vat_deduction_percent`) se mění jen tehdy, když je klient pošle — starší klient API,
+ * který je nezná, nastavení vozidla nevynuluje.
+ *
  * RBAC řeší PermissionMiddleware (readonly GET, accountant+ CRUD).
  */
 final class CarsAction
 {
+    private const USAGE_KEYS = ['usage_mode', 'vat_deduction_mode', 'vat_deduction_percent'];
+
     public function __construct(
         private readonly CarRepository $repo,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly TenantReferenceGuard $tenantRefs,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -52,6 +61,14 @@ final class CarsAction
         $body = (array) ($request->getParsedBody() ?? []);
         $err = $this->validate($body);
         if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
+        try {
+            $usage = $this->usagePatch($body, null);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+        if ($bad = $this->tenantRefs->violations($supplierId, $body, ['driver_employee_id'])) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($bad), 400);
+        }
 
         try {
             $id = $this->repo->create($supplierId, $body, $this->userId($request));
@@ -61,6 +78,7 @@ final class CarsAction
             }
             return Json::error($response, 'create_failed', $e->getMessage(), 500);
         }
+        $this->repo->updateUsage($id, $supplierId, $usage);
         $this->log($request, 'car.created', $id, $body);
         return Json::ok($response, $this->repo->find($id, $supplierId), 201);
     }
@@ -72,8 +90,17 @@ final class CarsAction
         $body = (array) ($request->getParsedBody() ?? []);
         $err = $this->validate($body);
         if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
-        if ($this->repo->find($id, $supplierId) === null) {
+        $current = $this->repo->find($id, $supplierId);
+        if ($current === null) {
             return Json::error($response, 'not_found', 'Auto nenalezeno.', 404);
+        }
+        try {
+            $usage = $this->usagePatch($body, $current);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+        if ($bad = $this->tenantRefs->violations($supplierId, $body, ['driver_employee_id'])) {
+            return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($bad), 400);
         }
         try {
             $this->repo->update($id, $supplierId, $body);
@@ -83,6 +110,7 @@ final class CarsAction
             }
             return Json::error($response, 'update_failed', $e->getMessage(), 500);
         }
+        $this->repo->updateUsage($id, $supplierId, $usage);
         $this->log($request, 'car.updated', $id, $body);
         return Json::ok($response, $this->repo->find($id, $supplierId));
     }
@@ -113,6 +141,36 @@ final class CarsAction
             return 'Neplatný typ paliva.';
         }
         return null;
+    }
+
+    /**
+     * Změny řidiče a režimu užívání z těla requestu — jen poslané klíče, sloučené s dosavadním
+     * nastavením a ověřené {@see VehicleVatPolicy::normalize()}.
+     *
+     * @param array<string,mixed>|null $current uložené vozidlo (null = nové)
+     * @return array<string,mixed>
+     */
+    private function usagePatch(array $body, ?array $current): array
+    {
+        $patch = [];
+        if (array_key_exists('driver_employee_id', $body)) {
+            $driver = $body['driver_employee_id'];
+            $patch['driver_employee_id'] = $driver === null || $driver === '' ? null : (int) $driver;
+        }
+        $sent = array_intersect_key($body, array_flip(self::USAGE_KEYS));
+        if ($sent === []) {
+            return $patch;
+        }
+        $usage = array_key_exists('usage_mode', $sent) ? (string) $sent['usage_mode'] : ($current['usage_mode'] ?? 'business');
+        // Změní-li se jen režim užívání, odpočet se odvodí z něj (výchozí pro režim).
+        $deduction = array_key_exists('vat_deduction_mode', $sent)
+            ? (string) $sent['vat_deduction_mode']
+            : (array_key_exists('usage_mode', $sent) ? null : ($current['vat_deduction_mode'] ?? null));
+        $percent = array_key_exists('vat_deduction_percent', $sent)
+            ? $sent['vat_deduction_percent']
+            : ($current['vat_deduction_percent'] ?? null);
+
+        return $patch + VehicleVatPolicy::normalize($usage, $deduction, $percent);
     }
 
     private function userId(Request $request): ?int

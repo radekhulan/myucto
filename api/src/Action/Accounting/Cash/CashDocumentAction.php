@@ -46,7 +46,20 @@ final class CashDocumentAction
         // Registr cizích vazeb, které smazání blokují — bez něj končila
         // `payroll_payment_matches.cash_document_id` (RESTRICT) jako HTTP 500.
         private readonly CashDocumentDeletionGuard $deletionGuard,
+        private readonly \MyInvoice\Service\Logbook\CashFuelingService $cashFuelings,
     ) {}
+
+    /**
+     * Zaúčtovaná účtenka za PHM → tankování v knize jízd (evidenční vrstva, nic neúčtuje).
+     * Selhání nesmí shodit pokladní doklad — ten už je zaúčtovaný.
+     */
+    private function autoFueling(int $supplierId, int $id, ?int $userId): void
+    {
+        try {
+            $this->cashFuelings->autoFromCashDocument($supplierId, $id, $userId);
+        } catch (\Throwable) {
+        }
+    }
 
     /**
      * GET /api/accounting/cash-documents/rule-presets?doc_type=in|out
@@ -120,6 +133,9 @@ final class CashDocumentAction
             $result = $this->service->create($supplierId, $body, $this->userId($request));
             $this->log($request, $result['status'] === 'posted' ? 'cash.document_posted' : 'cash.document_created',
                 (int) $result['id'], ['doc_number' => $result['doc_number']]);
+            if ($result['status'] === 'posted') {
+                $this->autoFueling($supplierId, (int) $result['id'], $this->userId($request));
+            }
             return Json::ok($response, $result, 201);
         } catch (\Throwable $e) {
             return $this->mapCashError($response, $e);
@@ -215,6 +231,7 @@ final class CashDocumentAction
         try {
             $result = $this->service->post($supplierId, $id, $this->userId($request));
             $this->log($request, 'cash.document_posted', $id, ['doc_number' => $result['doc_number']]);
+            $this->autoFueling($supplierId, $id, $this->userId($request));
             return Json::ok($response, $result);
         } catch (\Throwable $e) {
             return $this->mapCashError($response, $e);

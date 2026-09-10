@@ -26,6 +26,25 @@ nebo **Hybrid** — podle toho aplikace pozná, že vozidlo se **nabíjí v kWh*
 tankování v litrech, a tomu přizpůsobí jednotky a spotřebu. Příznak **Výchozí auto**
 určuje, na které vozidlo se nové záznamy a tankování navážou automaticky, když máš aut víc.
 
+### 32.1.1 Řidič, režim užívání a odpočet DPH
+
+- **Řidič** je zaměstnanec, jemuž je vozidlo svěřené. Vybírá se ze zaměstnanců firmy
+  (Mzdy → Zaměstnanci); kniha jízd z nich vidí jen jméno.
+- **Režim užívání** říká, k čemu vozidlo slouží: **jen firemní**, **firemní i soukromé**
+  (smíšené), nebo **soukromé vozidlo** použité pro firmu.
+- **Odpočet DPH** určuje, jaký nárok na odpočet mají doklady za provoz vozidla:
+  **plný**, **poměrný (§ 75)** s podílem v procentech, nebo **bez odpočtu**.
+
+Režimy spolu souvisejí: smíšené užívání vyžaduje **poměrný** odpočet (podíl odpovídá
+podnikatelskému užití, které doložíš knihou jízd — poměr služebních a soukromých km
+najdeš v Souhrnech), soukromé vozidlo odpočet nemá. Formulář nabízí jen povolené
+kombinace. Koeficient krácení podle § 76 se u vozidla nenastavuje — je celofiremní
+a počítá se v [Daních](36_Vykazy_DPH.md).
+
+Nastavení odpočtu nic neúčtuje — odpočet uplatňuje doklad. Kniha jízd ale u každého
+tankování porovná odpočet navázaného dokladu s nastavením vozidla a nesoulad ukáže
+jako upozornění (viz 32.3.6).
+
 Auto, které má navázané jízdy nebo tankování, nelze smazat (jen archivovat při
 úpravě) — historie zůstane zachována.
 
@@ -74,14 +93,20 @@ a celkovým počtem km — vhodné jako příloha k daňové evidenci.
 
 ## 32.3 Tankování a nabíjení
 
-Tankování (u elektromobilů **nabíjení**) můžeš vést **ručně**, nebo je nechat
-**vytěžit z přijatých faktur** od čerpacích a nabíjecích stanic. Seznam je opět
-po měsících s měsíčním součtem částek, s filtrem a stránkováním; export do
-XLSX/PDF funguje stejně jako u jízd.
+Tankování (u elektromobilů **nabíjení**) můžeš vést **ručně**, **importovat** ze
+souboru, nebo ho nechat vzniknout **z dokladu**, kterým bylo zaplaceno — z přijaté
+faktury od čerpací či nabíjecí stanice, z pokladního dokladu, nebo ho navázat na
+bankovní pohyb či účetní zápis. Seznam je po měsících s měsíčním součtem částek,
+s filtrem a stránkováním.
 
-Tankování je čistě **evidenční vrstva** nad přijatou fakturou — náklad účtuje
-sama [přijatá faktura](23_Prijate_faktury.md), tankování ho jen rozpadá na
-jednotlivá čerpání/nabití a auta. Do DPH ani [nákladů](13_Naklady.md) nevstupuje dvakrát.
+Akce záložky jsou v liště vpravo nahoře: **Nové tankování**, **Import**,
+**Načíst z faktur**, **Z pokladny** a v nabídce „…" **Export** (XLSX/PDF, stejně
+jako u jízd).
+
+Tankování je čistě **evidenční vrstva** nad dokladem — náklad a DPH účtuje sám
+doklad ([přijatá faktura](23_Prijate_faktury.md), [pokladní doklad](30_Pokladna.md)),
+tankování ho jen rozpadá na jednotlivá čerpání/nabití a auta. Do DPH ani
+[nákladů](13_Naklady.md) nevstupuje dvakrát.
 
 ### 32.3.1 Ruční záznam
 
@@ -92,7 +117,20 @@ přepínač necháváš na sobě: tankování benzínu zadáš v litrech, dobíj
 Pole **Tachometr** se dá nechat prázdné — aplikace doplní *orientační* stav z knihy
 jízd (zobrazí se jako `≈`), pro přesnost ho ale raději vyplň.
 
-### 32.3.2 Načíst z faktur od stanic
+### 32.3.2 Vazba na doklad
+
+Ve formuláři tankování je sekce **Vazba na doklad**. Vybereš druh dokladu —
+**pokladní doklad**, **bankovní pohyb** (typicky platba kartou) nebo **účetní
+zápis** — a aplikace nabídne doklady kolem data tankování; ty se **shodnou částkou**
+jsou nahoře a označené. Seznam zúžíš hledáním (číslo dokladu, partner, popis).
+Vazbu zrušíš tlačítkem **Zrušit vazbu**.
+
+Tankování vytěžené z přijaté faktury má vazbu na fakturu pevnou (vznikla vytěžením).
+V seznamu tankování je u každé vazby **proklik**: na přijatou fakturu, na tisk
+pokladního dokladu, na bankovní výpis nebo na účetní zápis v deníku. Navázat lze jen
+doklad vlastní firmy.
+
+### 32.3.3 Načíst z faktur od stanic
 
 1. V detailu dodavatele zaškrtni **Čerpací / nabíjecí stanice** (sekce dodavatele).
    Tím se jeho faktury začnou nabízet ke zpracování — funguje jak pro benzínky,
@@ -108,17 +146,80 @@ Tlačítko **Vytěžit historii** projede zpětně **jen dosud nezpracované** f
 od stanic a hromadně z nich vytvoří záznamy. Každá faktura se zpracuje jen
 jednou, opakované spuštění nic nezdvojí.
 
-### 32.3.3 Detailní výpisy (Axigon a další)
-
 U dokladů s detailním rozpisem (např. **Axigon**) se aplikace pokusí dohledat
 **jednotlivá tankování** včetně data, času, druhu paliva a ceny. Děje se to
 **interně** přímo z PDF; když to u staršího/zhuštěného formátu nevyjde a máš
 zapnutou [AI extrakci](25_AI_extrakce.md), použije se jako záloha AI (přes tvůj
 vlastní API klíč — viz upozornění v okně). Když ani to není možné, uloží se jeden
 souhrnný záznam s datem vystavení, popisem a částkou z faktury.
-
 Architektura parserů je rozšiřitelná — další karetní společnost s jiným formátem
 výpisu lze doplnit bez zásahu do zbytku.
+
+### 32.3.4 Tankování z pokladních dokladů
+
+Účtenku za PHM zaplacenou hotově zaúčtuješ v [Pokladně](30_Pokladna.md) jako výdajový
+doklad. Když firma vede knihu jízd (má aspoň jedno vozidlo), vznikne ze
+**zaúčtovaného** dokladu tankování **samo**, pokud:
+
+- partner dokladu je dodavatel označený jako **čerpací stanice** (podle IČO), nebo
+- popis dokladu zní na pohonné hmoty („Nafta", „Natural 95", „Nabíjení vozidla"…).
+
+Mytí, dálniční známka, parkování a podobné služby tankováním nejsou. Úhrada přijaté
+faktury se tu nepočítá — tankování té faktury se vytěží z faktury, jinak by bylo
+v knize dvakrát.
+
+Z popisu dokladu aplikace přečte, co v něm je: **litry** (nebo kWh), **cenu za litr**
+(chybí-li, dopočítá ji z částky), **druh paliva**, **SPZ** a **stav tachometru**
+(„Nafta 42,5 l, tach. 98 765, 1AB 2345"). Částka a DPH se převezmou z dokladu.
+**Vozidlo** se přiřadí podle SPZ (bez ohledu na mezery a velikost písmen), jinak
+podle SPZ uvedené kdekoli v popisu, jinak výchozí vozidlo.
+
+Tlačítko **Z pokladny** ukáže všechny takové doklady s odznakem **Nová** /
+**Zpracováno**. U každého můžeš zvolit vozidlo (nebo nechat **automaticky**)
+a kliknout **Rozpoznat**, resp. **Přiřadit** pro změnu vozidla u již vytvořeného
+tankování. **Vytěžit historii** zpracuje dosud nezpracované doklady. Jeden pokladní
+doklad dá vždy nejvýš jedno tankování — opakované vytěžení jen doplní chybějící údaje.
+
+### 32.3.5 Import tankování z CSV / XLSX
+
+Tlačítko **Import** nahraje tankování ze souboru (třeba výpis od karetní společnosti
+nebo převod z jiné evidence). Po výběru souboru se nejdřív ukáže **náhled** — každý
+řádek s tím, co by se stalo (**nové**, **už evidováno**, **chyba** s důvodem).
+Teprve tlačítko **Importovat** tankování založí.
+
+Podporované sloupce (hlavička určuje pořadí, CZ i EN názvy):
+
+```
+datum, cas, spz, palivo, litry, jednotka, cena_za_litr, celkem,
+bez_dph, dph, mena, tachometr, stanice, cislo_uctenky, karta, poznamka
+```
+
+- **datum** a **celkem** (částka vč. DPH) jsou povinné; chybí-li částka, spočítá se
+  z litrů a ceny za litr,
+- **spz** přiřadí vozidlo (bez ohledu na mezery a pomlčky); neznámá SPZ je chyba řádku,
+  prázdná znamená výchozí vozidlo,
+- **jednotka** l / kWh; u elektromobilu je výchozí kWh.
+
+**Opakovaný import nic nezdvojí.** Každý řádek má otisk z data, času, SPZ, částky,
+litrů a čísla účtenky; řádek, který už v knize je, se jen **doplní** o dříve chybějící
+údaje (litry, cenu, tachometr, vozidlo) — nikdy se nepřepíše. Stejně se pozná i řádek
+uvedený v souboru dvakrát. Tlačítkem **Stáhnout vzor** získáš prázdnou šablonu CSV.
+
+### 32.3.6 Upozornění
+
+Nad seznamem tankování se zobrazí žlutý panel **Upozornění k tankování**, když
+u některého vozidla:
+
+- **chybí stav tachometru** — bez něj nejde doložit spotřebu ani návaznost stavů,
+- je **nesouvislá řada tachometru** — tankování má nižší stav než předchozí tankování
+  téhož vozidla (nebo nižší než počáteční stav vozidla); typicky překlep nebo tankování
+  přiřazené jinému autu,
+- **odpočet DPH dokladu nesedí s nastavením vozidla** — např. doklad uplatňuje plný
+  odpočet u vozidla se smíšeným užíváním (viz 32.1.1).
+
+Řada tachometru se posuzuje z celé historie vozidla, filtr roku jen zúží, co se
+vypíše. Tlačítko **Detail** rozbalí konkrétní data a stavy. U dotčených řádků seznamu
+je odznak **⚠ tachometr** / **⚠ DPH** s vysvětlením po najetí myší.
 
 ## 32.4 Kategorie cest
 
@@ -151,6 +252,9 @@ přehledem jsou grafy najetých km po měsících a kumulativně; vše vyexportu
   finanční úřad může vyžadovat bližší popis.
 - **Soukromé jízdy** veď taky — při krácení odpočtu (např. paušál na PHM)
   je užitečné mít poměr služebních a soukromých km.
+- **SPZ a tachometr do popisu účtenky** — napíšeš-li do popisu pokladního dokladu
+  „Nafta 40 l, tach. 123 456, 1AB 2345", tankování se přiřadí správnému vozu
+  i se stavem tachometru bez další práce.
 - **Elektromobil** nastav v Automobilech jako **Elektro** — nové záznamy pak
   rovnou nabízí jednotku **kWh** a spotřeba se počítá v kWh/100 km. Dobíjení
   doma na domovní elektřinu, které nejde oddělit od fakturace za domácnost,

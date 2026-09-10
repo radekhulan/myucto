@@ -6,10 +6,13 @@ import { useDemoMode } from '@/composables/useDemoMode'
 import { formatDate, formatMonth, formatMoney } from '@/composables/useFormat'
 import {
   logbookApi, type Car, type Fueling, type FuelingPayload,
-  type FuelInvoice, type FuelInvoiceItem,
+  type FuelInvoice, type FuelInvoiceItem, type FuelingWarnings, type FuelingImportReport,
+  type FuelingImportRow, type FuelCashDocument, type FuelingLinkCandidate, type FuelingLinkType,
 } from '@/api/logbook'
+import { cashApi } from '@/api/cash'
 import { useAuthStore } from '@/stores/auth'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
@@ -86,6 +89,18 @@ function resetFilters() {
   monthFilter.value = ''
 }
 
+// ── Akce záložky (ActionBar: 1 plná primární, sekundární outline, export v „…") ──
+const canWrite = computed(() => auth.canWrite('logbook.write'))
+const toolbarActions = computed<ActionItem[]>(() => [
+  { key: 'new', label: t('logbook.fueling_new'), icon: 'plus', tier: 'primary', variant: 'primary',
+    show: canWrite.value || auth.isDemo, run: newFueling },
+  { key: 'import', label: t('logbook_fuel.import'), icon: 'upload', variant: 'neutral', show: canWrite.value, run: openImport },
+  { key: 'invoices', label: t('logbook.from_invoices'), icon: 'doc', variant: 'neutral', show: canWrite.value, run: openInvoices },
+  { key: 'cash', label: t('logbook_fuel.from_cash'), icon: 'coin', variant: 'neutral', show: canWrite.value, run: openCash },
+  { key: 'export', label: t('logbook.export'), icon: 'download', tier: 'overflow', variant: 'primary',
+    disabled: total.value === 0, run: openExport },
+])
+
 async function load() {
   loading.value = true
   try {
@@ -103,6 +118,7 @@ async function load() {
     years.value = fuelingsRes.years
     cars.value = carsRes
   } finally { loading.value = false; maybeOpenNew() }
+  loadWarnings()
 }
 // Reset na 1. stranu (změna filtru / po uložení). goToPage = navigace v rámci pageru.
 function reload() { page.value = 1; load() }
@@ -124,6 +140,55 @@ function maybeOpenNew() {
 
 watch(() => props.resetToken, () => { resetFilters() })
 
+// ── Upozornění (tachometr, odpočet DPH) ─────────────────────────
+const warnings = ref<FuelingWarnings | null>(null)
+const warningsOpen = ref(false)
+const warningTotal = computed(() => warnings.value
+  ? warnings.value.totals.missing + warnings.value.totals.regressions + warnings.value.totals.vat_mismatches
+  : 0)
+async function loadWarnings() {
+  const params: Record<string, string | number> = {}
+  if (filterCar.value) params.car_id = filterCar.value
+  if (yearFilter.value) params.year = yearFilter.value
+  try { warnings.value = await logbookApi.fuelingWarnings(params) } catch { warnings.value = null }
+}
+function warningParts(c: FuelingWarnings['cars'][number]): string {
+  const parts: string[] = []
+  if (c.missing.length) parts.push(t('logbook_fuel.warnings_missing', { n: c.missing.length }))
+  if (c.regressions.length) parts.push(t('logbook_fuel.warnings_regression', { n: c.regressions.length }))
+  if (c.vat_mismatches.length) parts.push(t('logbook_fuel.warnings_vat', { n: c.vat_mismatches.length }))
+  return parts.join(' · ')
+}
+
+// ── Vazby na doklad (proklik v seznamu) ─────────────────────────
+interface RowLink { key: string; to?: string; href?: string; label: string; title: string }
+function rowLinks(f: Fueling): RowLink[] {
+  const out: RowLink[] = []
+  if (f.source_purchase_invoice_id) {
+    out.push({ key: 'pi', to: `/purchase-invoices/${f.source_purchase_invoice_id}`, title: t('logbook.open_invoice'),
+      label: f.source_invoice_number ? `${t('logbook.invoice_link')} ${f.source_invoice_number}` : t('logbook.invoice_link') })
+  }
+  if (f.source_cash_document_id) {
+    out.push({ key: 'cash', href: cashApi.documentPdfUrl(f.source_cash_document_id), title: t('logbook_fuel.open_cash_document'),
+      label: t('logbook_fuel.cash_label', { n: f.source_cash_document_number ?? f.source_cash_document_id }) })
+  }
+  if (f.source_bank_transaction_id && f.source_bank_statement_id) {
+    out.push({ key: 'bank', to: `/bank/${f.source_bank_statement_id}`, title: t('logbook_fuel.open_bank'),
+      label: t('logbook_fuel.bank_label', { date: f.source_bank_posted_at ? formatDate(f.source_bank_posted_at) : '' }) })
+  }
+  if (f.source_journal_entry_id) {
+    out.push({ key: 'je', to: `/accounting/journal?entry_id=${f.source_journal_entry_id}`, title: t('logbook_fuel.open_journal'),
+      label: t('logbook_fuel.journal_label', { n: f.source_journal_entry_number ?? f.source_journal_entry_id }) })
+  }
+  return out
+}
+function odometerWarningText(f: Fueling): string {
+  return f.odometer_warning === 'missing' ? t('logbook_fuel.row_missing') : t('logbook_fuel.row_regression')
+}
+function vatWarningText(f: Fueling): string {
+  return f.vat_warning === 'over' ? t('logbook_fuel.row_vat_over') : t('logbook_fuel.row_vat_under')
+}
+
 // ── Export XLSX / PDF ───────────────────────────────────────────
 const exportOpen = ref(false)
 const exporting = ref(false)
@@ -133,6 +198,15 @@ const exportTo = ref(`${_y}-12-31`)
 const exportCar = ref<number | ''>('')
 
 function openExport() { exportCar.value = filterCar.value; exportOpen.value = true }
+
+function saveBlob(data: Blob, filename: string) {
+  const url = URL.createObjectURL(data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 async function downloadExport(format: 'xlsx' | 'pdf') {
   exporting.value = true
@@ -144,13 +218,7 @@ async function downloadExport(format: 'xlsx' | 'pdf') {
     const r = await logbookApi.exportFuelings(format, params)
     const cd = (r.headers['content-disposition'] as string) || ''
     const m = /filename="?([^"]+)"?/.exec(cd)
-    const filename = m ? m[1] : `tankovani.${format}`
-    const url = URL.createObjectURL(r.data as Blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(url)
+    saveBlob(r.data as Blob, m ? m[1] : `tankovani.${format}`)
   } catch {
     toast.error(t('logbook.export_failed'))
   } finally { exporting.value = false }
@@ -166,6 +234,60 @@ const draft = reactive<FuelingPayload & { id: number }>({
   odometer: null, station: '', note: '',
 })
 
+// Vazba na doklad v editoru — přijatá faktura se jen zobrazuje (vzniká vytěžením faktury).
+type LinkKind = '' | Exclude<FuelingLinkType, 'purchase_invoice'>
+const linkKinds: Exclude<LinkKind, ''>[] = ['cash_document', 'bank_transaction', 'journal_entry']
+const linkKind = ref<LinkKind>('')
+const linkId = ref<number | null>(null)
+const linkLabel = ref('')
+const invoiceLinkLabel = ref<string | null>(null)
+const candidates = ref<FuelingLinkCandidate[]>([])
+const candidatesLoading = ref(false)
+const candidateQuery = ref('')
+
+function initLinks(f: Fueling | null) {
+  invoiceLinkLabel.value = f?.source_purchase_invoice_id
+    ? (f.source_invoice_number ?? `#${f.source_purchase_invoice_id}`) : null
+  candidates.value = []
+  candidateQuery.value = ''
+  linkKind.value = ''
+  linkId.value = null
+  linkLabel.value = ''
+  if (!f) return
+  const link = rowLinks(f).find(l => l.key === 'cash' || l.key === 'bank' || l.key === 'je')
+  if (f.source_cash_document_id) { linkKind.value = 'cash_document'; linkId.value = f.source_cash_document_id }
+  else if (f.source_bank_transaction_id) { linkKind.value = 'bank_transaction'; linkId.value = f.source_bank_transaction_id }
+  else if (f.source_journal_entry_id) { linkKind.value = 'journal_entry'; linkId.value = f.source_journal_entry_id }
+  linkLabel.value = link?.label ?? ''
+}
+function onLinkKindChange() {
+  linkId.value = null
+  linkLabel.value = ''
+  candidates.value = []
+  if (linkKind.value) searchCandidates()
+}
+async function searchCandidates() {
+  if (!linkKind.value || !draft.fueled_date) return
+  candidatesLoading.value = true
+  try {
+    candidates.value = await logbookApi.fuelingLinkCandidates({
+      type: linkKind.value, date: draft.fueled_date,
+      amount: Number(draft.amount_with_vat) > 0 ? Number(draft.amount_with_vat) : undefined,
+      q: candidateQuery.value.trim() || undefined,
+    })
+  } catch { candidates.value = [] } finally { candidatesLoading.value = false }
+}
+function pickCandidate(c: FuelingLinkCandidate) {
+  linkId.value = c.id
+  linkLabel.value = [c.label, formatDate(c.date), c.amount != null ? fmtMoney(c.amount, c.currency || 'CZK') : '']
+    .filter(Boolean).join(' · ')
+}
+function clearLink() {
+  linkId.value = null
+  linkLabel.value = ''
+  if (linkKind.value) searchCandidates()
+}
+
 // Výchozí jednotka dle auta: elektromobil nabíjí v kWh, ostatní tankují v litrech.
 function unitForCar(carId: number | null): string {
   const c = cars.value.find(x => x.id === carId)
@@ -180,6 +302,7 @@ function newFueling() {
     odometer: null, station: '', note: '',
   })
   odometerHint.value = null
+  initLinks(null)
   open.value = true
 }
 
@@ -193,6 +316,7 @@ function editFueling(f: Fueling) {
     amount_with_vat: f.amount_with_vat, currency: f.currency, odometer: f.odometer, station: f.station ?? '', note: f.note ?? '',
   })
   odometerHint.value = f.odometer_estimated ?? null
+  initLinks(f)
   open.value = true
 }
 
@@ -210,6 +334,9 @@ async function save() {
       amount_with_vat: Number(draft.amount_with_vat), currency: draft.currency || 'CZK',
       odometer: draft.odometer != null && draft.odometer !== ('' as any) ? Number(draft.odometer) : null,
       station: draft.station || null, note: draft.note || null,
+      source_cash_document_id: linkKind.value === 'cash_document' ? linkId.value : null,
+      source_bank_transaction_id: linkKind.value === 'bank_transaction' ? linkId.value : null,
+      source_journal_entry_id: linkKind.value === 'journal_entry' ? linkId.value : null,
     }
     const wasNew = !draft.id
     if (draft.id) await logbookApi.updateFueling(draft.id, payload)
@@ -232,6 +359,61 @@ async function removeFueling(f: Fueling) {
     // Smazání poslední položky na poslední straně → posuň se o stranu zpět.
     if (fuelings.value.length === 0 && page.value > 1) goToPage(page.value - 1)
   } catch (e: any) { toast.error(e?.response?.data?.error?.message ?? t('common.error')) }
+}
+
+// ── Import CSV / XLSX (náhled → potvrzení) ──────────────────────
+const importOpen = ref(false)
+const importing = ref(false)
+const importFile = ref<File | null>(null)
+const importPreview = ref<FuelingImportReport | null>(null)
+const importResult = ref<FuelingImportReport | null>(null)
+const importInput = ref<HTMLInputElement | null>(null)
+
+function openImport() {
+  importFile.value = null
+  importPreview.value = null
+  importResult.value = null
+  importOpen.value = true
+}
+async function onImportFile(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  importFile.value = file
+  importResult.value = null
+  importing.value = true
+  try {
+    importPreview.value = await logbookApi.importFuelings(file, true)
+  } catch (err: any) {
+    importPreview.value = null
+    toast.error(err?.response?.data?.error?.message ?? t('logbook_fuel.import_failed'))
+  } finally {
+    importing.value = false
+    if (importInput.value) importInput.value.value = ''
+  }
+}
+async function confirmImport() {
+  if (!importFile.value || blockDemoMutation()) return
+  importing.value = true
+  try {
+    importResult.value = await logbookApi.importFuelings(importFile.value, false)
+    importPreview.value = null
+    toast.success(t('logbook_fuel.import_done', { n: importResult.value.created }))
+    reload()
+  } catch (err: any) {
+    toast.error(err?.response?.data?.error?.message ?? t('logbook_fuel.import_failed'))
+  } finally { importing.value = false }
+}
+function downloadImportTemplate() {
+  const header = 'datum;cas;spz;palivo;litry;cena_za_litr;celkem;tachometr;stanice;cislo_uctenky'
+  saveBlob(new Blob(['﻿' + header + '\r\n'], { type: 'text/csv;charset=utf-8' }), 'tankovani-vzor.csv')
+}
+function importCarLabel(r: FuelingImportRow): string {
+  if (r.car_id) return cars.value.find(c => c.id === r.car_id)?.registration ?? (r.car_label || '')
+  return r.car_label || t('logbook.no_car')
+}
+const importStatusClass: Record<string, string> = {
+  preview: 'text-neutral-700', created: 'text-success-600', updated: 'text-primary-700',
+  duplicate: 'text-neutral-400', failed: 'text-danger-600',
 }
 
 // ── Načíst z faktur (benzínky) ──────────────────────────────────
@@ -308,6 +490,56 @@ async function backfillHistory() {
   } finally { backfilling.value = false }
 }
 
+// ── Z pokladny (účtenky placené hotově) ─────────────────────────
+const cashOpen = ref(false)
+const cashLoading = ref(false)
+const cashDocs = ref<FuelCashDocument[]>([])
+const cashCars = ref<Car[]>([])
+const cashAssignCar = reactive<Record<number, number | ''>>({})
+const cashAssigning = ref<number | null>(null)
+const cashBackfilling = ref(false)
+
+async function loadCashDocs() {
+  cashLoading.value = true
+  try {
+    const data = await logbookApi.listFuelCashDocuments()
+    cashDocs.value = data.documents
+    cashCars.value = data.cars
+    for (const d of data.documents) if (!(d.id in cashAssignCar)) cashAssignCar[d.id] = ''
+  } finally { cashLoading.value = false }
+}
+function openCash() { cashOpen.value = true; loadCashDocs() }
+
+async function assignCash(d: FuelCashDocument) {
+  cashAssigning.value = d.id
+  try {
+    const carId = cashAssignCar[d.id] ? Number(cashAssignCar[d.id]) : null
+    const r = await logbookApi.assignFuelCashDocument(d.id, carId)
+    toast.success(r.created > 0 ? t('logbook_fuel.cash_scan_done') : t('logbook_fuel.cash_scan_updated'))
+    await loadCashDocs()
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message ?? t('common.error'))
+  } finally { cashAssigning.value = null }
+}
+
+async function backfillCash() {
+  cashBackfilling.value = true
+  let created = 0
+  try {
+    for (let guard = 0; guard < 200; guard++) {
+      const r = await logbookApi.backfillFuelCashDocuments(25)
+      created += r.created
+      if (r.remaining <= 0 || r.processed === 0) break
+    }
+    toast.success(t('logbook_fuel.cash_backfill_done', { n: created }))
+    await loadCashDocs()
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message ?? t('common.error'))
+  } finally { cashBackfilling.value = false }
+}
+
 function fmtMoney(n: number, ccy: string): string {
   return formatMoney(n, ccy)
 }
@@ -315,7 +547,9 @@ function fmtMoney(n: number, ccy: string): string {
 const sourceBadge: Record<string, string> = {
   manual: 'bg-neutral-100 text-neutral-600', import: 'bg-neutral-100 text-neutral-600',
   invoice: 'bg-primary-50 text-primary-700', axigon: 'bg-purple-50 text-purple-700', axigon_ai: 'bg-amber-50 text-amber-700',
+  cash: 'bg-primary-50 text-primary-700',
 }
+const WARN_ICON = 'M12 9v4m0 4h.01M10.29 3.86l-8.48 14.7A1 1 0 0 0 2.67 20h18.66a1 1 0 0 0 .86-1.5l-8.48-14.7a1 1 0 0 0-1.74 0z'
 </script>
 
 <template>
@@ -333,23 +567,43 @@ const sourceBadge: Record<string, string> = {
           <option :value="''">{{ t('logbook.all_months') }}</option>
           <option v-for="(label, i) in monthOptions" :key="i + 1" :value="i + 1">{{ label }}</option>
         </select>
-        <button @click="openExport" :disabled="total === 0"
-          :class="btnOutline('primary')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-          {{ t('logbook.export') }}
-        </button>
-        <button v-if="auth.canWrite('logbook.write')" @click="openInvoices"
-          :class="btnOutline('neutral')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
-          {{ t('logbook.from_invoices') }}
-        </button>
       <template #actions>
-        <button v-if="auth.canWrite('logbook.write') || auth.isDemo" @click="newFueling" :class="btnFilled('primary')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-          {{ t('logbook.fueling_new') }}
-        </button>
+        <ActionBar :actions="toolbarActions" />
       </template>
     </FilterBar>
+
+    <!-- Upozornění: chybějící / nesouvislý tachometr, nesoulad odpočtu DPH -->
+    <div v-if="warnings && warningTotal > 0" class="mb-4 rounded-lg border border-warning-500/40 bg-warning-50 px-4 py-3 text-sm text-warning-700">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2 font-medium">
+          <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="WARN_ICON"/></svg>
+          {{ t('logbook_fuel.warnings_title') }}
+        </div>
+        <button type="button" @click="warningsOpen = !warningsOpen"
+          class="cursor-pointer h-7 px-2 text-xs border border-warning-500/40 rounded-md hover:bg-warning-50 inline-flex items-center gap-1 whitespace-nowrap">
+          <svg class="w-3.5 h-3.5 transition-transform" :class="warningsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+          {{ t('logbook.detail') }}
+        </button>
+      </div>
+      <ul class="mt-1 space-y-0.5 text-xs">
+        <li v-for="c in warnings.cars" :key="c.car_id"><span class="font-mono font-medium">{{ c.registration }}</span> — {{ warningParts(c) }}</li>
+      </ul>
+      <div v-if="warningsOpen" class="mt-2 space-y-2 text-xs">
+        <p>{{ t('logbook_fuel.warnings_hint') }}</p>
+        <div v-for="c in warnings.cars" :key="`d-${c.car_id}`">
+          <div class="font-mono font-medium">{{ c.registration }}</div>
+          <ul class="ml-3 list-disc">
+            <li v-for="r in c.regressions" :key="`r-${r.id}`">
+              {{ t('logbook_fuel.regression_detail', { date: formatDate(r.date), odometer: r.odometer.toLocaleString('cs-CZ'), prev: r.prev_odometer.toLocaleString('cs-CZ') }) }}
+            </li>
+            <li v-for="m in c.vat_mismatches" :key="`v-${m.id}`">
+              {{ t('logbook_fuel.vat_detail', { date: formatDate(m.date), doc: m.doc_percent, car: m.car_percent }) }}
+            </li>
+            <li v-if="c.missing.length">{{ t('logbook_fuel.warnings_missing', { n: c.missing.length }) }}: {{ c.missing.slice(0, 12).map(m => formatDate(m.date)).join(', ') }}{{ c.missing.length > 12 ? ' …' : '' }}</li>
+          </ul>
+        </div>
+      </div>
+    </div>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
     <EmptyState v-else-if="total === 0" icon="coin" :title="t('logbook.no_fuelings')" dense boxed />
@@ -393,10 +647,12 @@ const sourceBadge: Record<string, string> = {
                 <td class="px-3 py-2">
                   {{ f.fuel_type || '—' }}
                   <span class="ml-1 text-xs px-1.5 py-0.5 rounded" :class="sourceBadge[f.source] || 'bg-neutral-100 text-neutral-600'">{{ t(`logbook.source.${f.source}`) }}</span>
-                  <router-link v-if="f.source_purchase_invoice_id" :to="`/purchase-invoices/${f.source_purchase_invoice_id}`"
-                    class="ml-1 text-xs text-primary-600 hover:text-primary-700 hover:underline" :title="t('logbook.open_invoice')">
-                    {{ f.source_invoice_number ? `č. ${f.source_invoice_number}` : t('logbook.invoice_link') }} ↗
-                  </router-link>
+                  <span v-if="f.odometer_warning" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700" :title="odometerWarningText(f)">⚠ {{ t('logbook_fuel.badge_odometer') }}</span>
+                  <span v-if="f.vat_warning" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700" :title="vatWarningText(f)">⚠ {{ t('logbook_fuel.badge_vat') }}</span>
+                  <template v-for="l in rowLinks(f)" :key="l.key">
+                    <router-link v-if="l.to" :to="l.to" class="ml-1 text-xs text-primary-600 hover:text-primary-700 hover:underline" :title="l.title">{{ l.label }} ↗</router-link>
+                    <a v-else :href="l.href" target="_blank" rel="noopener" class="ml-1 text-xs text-primary-600 hover:text-primary-700 hover:underline" :title="l.title">{{ l.label }} ↗</a>
+                  </template>
                 </td>
                 <td class="px-3 py-2 text-right font-mono">{{ f.quantity != null ? `${f.quantity.toLocaleString('cs-CZ')} ${f.unit}` : '—' }}</td>
                 <td class="px-3 py-2 text-right font-mono">{{ fmtMoney(f.amount_with_vat, f.currency) }}</td>
@@ -433,10 +689,16 @@ const sourceBadge: Record<string, string> = {
               <span class="truncate">{{ f.station || f.vendor_name || '—' }}</span>
               <span class="font-mono shrink-0">{{ f.car_registration || t('logbook.no_car') }}</span>
             </div>
-            <router-link v-if="f.source_purchase_invoice_id" :to="`/purchase-invoices/${f.source_purchase_invoice_id}`"
-              class="inline-block mt-1 text-xs text-primary-600 hover:underline">
-              {{ f.source_invoice_number ? `Doklad č. ${f.source_invoice_number}` : t('logbook.invoice_link') }} ↗
-            </router-link>
+            <div v-if="f.odometer_warning || f.vat_warning" class="flex flex-wrap gap-1 mt-1">
+              <span v-if="f.odometer_warning" class="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">⚠ {{ odometerWarningText(f) }}</span>
+              <span v-if="f.vat_warning" class="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">⚠ {{ vatWarningText(f) }}</span>
+            </div>
+            <div v-if="rowLinks(f).length" class="flex flex-wrap gap-x-3 mt-1">
+              <template v-for="l in rowLinks(f)" :key="`m-${l.key}`">
+                <router-link v-if="l.to" :to="l.to" class="text-xs text-primary-600 hover:underline">{{ l.label }} ↗</router-link>
+                <a v-else :href="l.href" target="_blank" rel="noopener" class="text-xs text-primary-600 hover:underline">{{ l.label }} ↗</a>
+              </template>
+            </div>
             <div v-if="auth.canWrite('logbook.write')" class="flex gap-2 mt-2">
               <button @click="editFueling(f)" class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-xs border border-neutral-300 rounded-md hover:bg-neutral-50">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5m-1.414-9.414a2 2 0 1 1 2.828 2.828L11.828 15H9v-2.828z"/></svg>
@@ -513,18 +775,131 @@ const sourceBadge: Record<string, string> = {
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.station') }}</label>
               <input v-model="draft.station" type="text" maxlength="150" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
+
+            <!-- Vazba na doklad, kterým bylo tankování zaplaceno -->
+            <div class="col-span-2 border-t border-neutral-100 pt-3 space-y-2">
+              <div class="text-sm font-medium text-neutral-700">{{ t('logbook_fuel.link_section') }}</div>
+              <p v-if="invoiceLinkLabel" class="text-xs text-neutral-500">{{ t('logbook_fuel.link_invoice_readonly', { label: invoiceLinkLabel }) }}</p>
+              <div class="flex flex-wrap gap-2">
+                <select v-model="linkKind" @change="onLinkKindChange" :aria-label="t('logbook_fuel.link_type')"
+                  class="h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm flex-1 min-w-[10rem]">
+                  <option value="">{{ t('logbook_fuel.link_none') }}</option>
+                  <option v-for="k in linkKinds" :key="k" :value="k">{{ t(`logbook_fuel.link_types.${k}`) }}</option>
+                </select>
+                <template v-if="linkKind && !linkId">
+                  <input v-model="candidateQuery" type="text" :placeholder="t('logbook_fuel.link_search')" @keydown.enter.prevent="searchCandidates"
+                    class="h-10 px-3 border border-neutral-300 rounded-md text-sm flex-1 min-w-[8rem]" />
+                  <button type="button" @click="searchCandidates" :class="btnOutline('neutral')">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.search" /></svg>
+                    {{ t('logbook_fuel.link_search') }}
+                  </button>
+                </template>
+              </div>
+              <div v-if="linkId" class="flex flex-wrap items-center gap-2 text-xs">
+                <span class="px-2 py-1 rounded bg-primary-50 text-primary-700">{{ t('logbook_fuel.link_selected', { label: linkLabel || `#${linkId}` }) }}</span>
+                <button type="button" @click="clearLink" class="cursor-pointer text-danger-600 hover:underline">{{ t('logbook_fuel.link_remove') }}</button>
+              </div>
+              <template v-else-if="linkKind">
+                <p class="text-xs text-neutral-500">{{ t('logbook_fuel.link_candidates_hint') }}</p>
+                <div v-if="candidatesLoading" class="text-xs text-neutral-500">{{ t('common.loading') }}</div>
+                <p v-else-if="candidates.length === 0" class="text-xs text-neutral-400">{{ t('logbook_fuel.link_no_candidates') }}</p>
+                <ul v-else class="max-h-40 overflow-y-auto border border-neutral-200 rounded-md divide-y divide-neutral-100">
+                  <li v-for="c in candidates" :key="c.id">
+                    <button type="button" @click="pickCandidate(c)" class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-50 cursor-pointer flex flex-wrap justify-between gap-2">
+                      <span class="min-w-0 truncate"><span class="font-medium">{{ c.label }}</span> · {{ formatDate(c.date) }} <span class="text-neutral-400">{{ c.description }}</span></span>
+                      <span class="font-mono whitespace-nowrap">
+                        {{ c.amount != null ? fmtMoney(c.amount, c.currency || 'CZK') : '' }}
+                        <span v-if="c.exact" class="ml-1 px-1 rounded bg-success-50 text-success-600">{{ t('logbook_fuel.link_exact') }}</span>
+                      </span>
+                    </button>
+                  </li>
+                </ul>
+              </template>
+            </div>
           </div>
-          <div class="flex justify-end gap-2 pt-2">
-            <button type="button" @click="open = false" class="cursor-pointer h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 inline-flex items-center gap-1.5">
+          <div class="flex flex-wrap justify-end gap-2 pt-2">
+            <button type="button" @click="open = false" class="cursor-pointer h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 inline-flex items-center gap-1.5 whitespace-nowrap">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               {{ t('common.cancel') }}
             </button>
-            <button type="submit" :disabled="saving" class="cursor-pointer h-9 px-4 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50 inline-flex items-center gap-1.5">
+            <button type="submit" :disabled="saving" class="cursor-pointer h-9 px-4 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50 inline-flex items-center gap-1.5 whitespace-nowrap">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
               {{ t('common.save') }}
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Modal: import -->
+    <div v-if="importOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-surface rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 space-y-4">
+        <h2 class="text-lg font-semibold">{{ t('logbook_fuel.import_title') }}</h2>
+        <p class="text-sm text-neutral-500">{{ t('logbook_fuel.import_hint') }}</p>
+        <p class="text-xs text-neutral-500">{{ t('logbook_fuel.import_dedup_hint') }}</p>
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" @click="importInput?.click()" :disabled="importing" :class="btnFilled('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ importing ? t('common.loading') : t('logbook_fuel.choose_file') }}
+          </button>
+          <button type="button" @click="downloadImportTemplate" :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ t('logbook_fuel.download_template') }}
+          </button>
+          <span v-if="importFile" class="text-xs text-neutral-500 truncate">{{ importFile.name }}</span>
+          <input ref="importInput" type="file" accept=".csv,.xlsx,.xls,.ods" class="hidden" @change="onImportFile" />
+        </div>
+
+        <div v-if="importPreview" class="space-y-2">
+          <p class="text-sm font-medium">{{ t('logbook_fuel.preview_summary', { created: importPreview.created, duplicates: importPreview.duplicates, failed: importPreview.failed }) }}</p>
+          <div class="overflow-x-auto max-h-64 overflow-y-auto border border-neutral-200 rounded-md">
+            <table class="w-full text-xs">
+              <thead class="bg-neutral-50 text-neutral-500">
+                <tr>
+                  <th class="px-2 py-1 text-left font-medium">{{ t('logbook_fuel.row') }}</th>
+                  <th class="px-2 py-1 text-left font-medium"></th>
+                  <th class="px-2 py-1 text-left font-medium">{{ t('logbook.date') }}</th>
+                  <th class="px-2 py-1 text-left font-medium">{{ t('logbook.car') }}</th>
+                  <th class="px-2 py-1 text-left font-medium">{{ t('logbook.fuel') }}</th>
+                  <th class="px-2 py-1 text-right font-medium">{{ t('logbook.quantity') }}</th>
+                  <th class="px-2 py-1 text-right font-medium">{{ t('logbook.amount') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="r in importPreview.rows.slice(0, 300)" :key="r.line" :class="importStatusClass[r.status]">
+                  <td class="px-2 py-1">{{ r.line }}</td>
+                  <td class="px-2 py-1 whitespace-nowrap">{{ t(`logbook_fuel.status.${r.status}`) }}</td>
+                  <td v-if="r.status === 'failed'" colspan="5" class="px-2 py-1">{{ r.reason }}</td>
+                  <template v-else>
+                    <td class="px-2 py-1 whitespace-nowrap">{{ r.fueled_date ? formatDate(r.fueled_date) : '' }}</td>
+                    <td class="px-2 py-1 font-mono">{{ importCarLabel(r) }}</td>
+                    <td class="px-2 py-1">{{ r.fuel_type || '—' }}</td>
+                    <td class="px-2 py-1 text-right font-mono">{{ r.quantity != null ? `${r.quantity.toLocaleString('cs-CZ')} ${r.unit}` : '—' }}</td>
+                    <td class="px-2 py-1 text-right font-mono">{{ r.amount_with_vat != null ? fmtMoney(r.amount_with_vat, r.currency || 'CZK') : '' }}</td>
+                  </template>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div v-if="importResult" class="text-sm border border-neutral-200 rounded-md p-3 max-h-60 overflow-y-auto">
+          <p class="font-medium">{{ t('logbook_fuel.result_summary', { created: importResult.created, updated: importResult.updated, duplicates: importResult.duplicates, failed: importResult.failed }) }}</p>
+          <ul v-if="importResult.failed > 0" class="text-xs text-danger-600 space-y-0.5 mt-1">
+            <li v-for="r in importResult.rows.filter(r => r.status === 'failed')" :key="r.line">{{ t('logbook_fuel.row') }} {{ r.line }}: {{ r.reason }}</li>
+          </ul>
+        </div>
+
+        <div class="flex flex-wrap justify-end gap-2 pt-2 border-t border-neutral-100">
+          <button type="button" @click="importOpen = false" :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.close') }}
+          </button>
+          <button v-if="importPreview" type="button" @click="confirmImport" :disabled="importing || importPreview.created === 0" :class="btnFilled('success')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('logbook_fuel.confirm_import') }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -588,7 +963,7 @@ const sourceBadge: Record<string, string> = {
         </div>
         <p class="text-sm text-neutral-500">{{ t('logbook.from_invoices_hint') }}</p>
         <div class="flex items-start gap-2 text-xs text-warning-700 bg-warning-50 border border-warning-500/40 rounded-md px-3 py-2">
-          <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86l-8.48 14.7A1 1 0 0 0 2.67 20h18.66a1 1 0 0 0 .86-1.5l-8.48-14.7a1 1 0 0 0-1.74 0z"/></svg>
+          <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="WARN_ICON"/></svg>
           <span>{{ t('logbook.ai_notice') }}</span>
         </div>
 
@@ -653,6 +1028,55 @@ const sourceBadge: Record<string, string> = {
                 </a>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: fuel cash documents -->
+    <div v-if="cashOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-surface rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-lg font-semibold">{{ t('logbook_fuel.from_cash_title') }}</h2>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" @click="backfillCash" :disabled="cashBackfilling || cashDocs.every(d => d.scanned)" :class="btnOutline('neutral')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+              {{ cashBackfilling ? t('logbook.backfill_running') : t('logbook.backfill') }}
+            </button>
+            <button type="button" @click="cashOpen = false" :title="t('common.close')" :aria-label="t('common.close')"
+              class="cursor-pointer h-9 w-9 shrink-0 flex items-center justify-center text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 rounded-md">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <p class="text-sm text-neutral-500">{{ t('logbook_fuel.from_cash_hint') }}</p>
+
+        <div v-if="cashLoading" class="text-center text-neutral-500 py-8 text-sm">{{ t('common.loading') }}</div>
+        <EmptyState v-else-if="cashDocs.length === 0" icon="coin" :title="t('logbook_fuel.no_fuel_cash_docs')" dense />
+
+        <div v-else class="divide-y divide-neutral-100 border border-neutral-200 rounded-md">
+          <div v-for="d in cashDocs" :key="d.id" class="px-3 py-2.5 flex flex-wrap items-center gap-2 text-sm" :class="d.scanned ? 'bg-success-50/40' : ''">
+            <div class="min-w-0 flex-1">
+              <div class="font-medium text-neutral-900 flex flex-wrap items-center gap-2">
+                <span class="truncate">{{ d.doc_number || `#${d.id}` }} · {{ d.partner_name || d.description }}</span>
+                <span v-if="d.is_fuel_station" class="shrink-0 text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700">{{ t('logbook_fuel.fuel_station_badge') }}</span>
+                <span v-if="d.scanned" class="shrink-0 text-xs px-1.5 py-0.5 rounded bg-success-50 text-success-600">{{ t('logbook.scanned_badge', { n: d.fuelings_count }) }}</span>
+                <span v-else class="shrink-0 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">{{ t('logbook.new_badge') }}</span>
+              </div>
+              <div class="text-xs text-neutral-500 truncate">{{ formatDate(d.issue_date) }} · {{ fmtMoney(d.total_amount, d.currency) }} · {{ d.description }}</div>
+            </div>
+            <a :href="cashApi.documentPdfUrl(d.id)" target="_blank" rel="noopener" :title="t('logbook_fuel.open_cash_document')" :class="btnOutline('neutral')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+              {{ t('logbook.detail') }}
+            </a>
+            <select v-model="cashAssignCar[d.id]" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm max-w-[14rem]">
+              <option value="">{{ t('logbook_fuel.auto_vehicle') }}</option>
+              <option v-for="c in cashCars" :key="c.id" :value="c.id">{{ c.registration }}</option>
+            </select>
+            <button type="button" @click="assignCash(d)" :disabled="cashAssigning === d.id" :class="btnFilled('primary')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="d.scanned ? ICONS.link : ICONS.check" /></svg>
+              {{ cashAssigning === d.id ? t('common.loading') : (d.scanned ? t('logbook.reassign') : t('logbook.recognize')) }}
+            </button>
           </div>
         </div>
       </div>

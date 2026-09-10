@@ -27,8 +27,10 @@ final class CarRepository
         $sql = 'SELECT c.*,
                        (SELECT COUNT(*) FROM trips    t WHERE t.car_id = c.id) AS trips_count,
                        (SELECT COUNT(*) FROM fuelings f WHERE f.car_id = c.id) AS fuelings_count,
-                       (SELECT MAX(t2.odometer_end) FROM trips t2 WHERE t2.car_id = c.id) AS last_trip_odometer
+                       (SELECT MAX(t2.odometer_end) FROM trips t2 WHERE t2.car_id = c.id) AS last_trip_odometer,
+                       pe.full_name AS driver_name
                   FROM cars c
+             LEFT JOIN payroll_employees pe ON pe.id = c.driver_employee_id AND pe.supplier_id = c.supplier_id
                  WHERE c.supplier_id = ?';
         if (!$includeArchived) $sql .= ' AND c.is_archived = 0';
         $sql .= ' ORDER BY c.is_default DESC, c.is_archived ASC, c.registration ASC';
@@ -39,10 +41,39 @@ final class CarRepository
 
     public function find(int $id, int $supplierId): ?array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT * FROM cars WHERE id = ? AND supplier_id = ?');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT c.*, pe.full_name AS driver_name
+               FROM cars c
+          LEFT JOIN payroll_employees pe ON pe.id = c.driver_employee_id AND pe.supplier_id = c.supplier_id
+              WHERE c.id = ? AND c.supplier_id = ?'
+        );
         $stmt->execute([$id, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : $this->cast($row);
+    }
+
+    /**
+     * Řidič a režim užívání / odpočtu DPH (migrace 1802). Zvlášť od update(), aby klient
+     * API, který nová pole neposílá, nastavení vozidla nevynuloval.
+     * Hodnoty musí projít VehicleVatPolicy::normalize() — CHECK v DB je jen pojistka.
+     *
+     * @param array{driver_employee_id?:int|null, usage_mode?:string, vat_deduction_mode?:string, vat_deduction_percent?:float} $usage
+     */
+    public function updateUsage(int $id, int $supplierId, array $usage): void
+    {
+        $set = [];
+        $params = [];
+        foreach (['driver_employee_id', 'usage_mode', 'vat_deduction_mode', 'vat_deduction_percent'] as $col) {
+            if (array_key_exists($col, $usage)) {
+                $set[] = $col . ' = ?';
+                $params[] = $usage[$col];
+            }
+        }
+        if ($set === []) return;
+        $params[] = $id;
+        $params[] = $supplierId;
+        $this->db->pdo()->prepare('UPDATE cars SET ' . implode(', ', $set) . ' WHERE id = ? AND supplier_id = ?')
+            ->execute($params);
     }
 
     /** Počet aktivních (nearchivovaných) aut tenantu — pro default-car logiku ve frontendu/scanneru. */
@@ -210,6 +241,12 @@ final class CarRepository
             'is_default'          => (bool) $r['is_default'],
             'is_archived'         => (bool) $r['is_archived'],
             'note'                => $r['note'] !== null ? (string) $r['note'] : null,
+            // Řidič a režim užívání / odpočtu DPH (migrace 1802, VehicleVatPolicy).
+            'driver_employee_id'    => isset($r['driver_employee_id']) ? (int) $r['driver_employee_id'] : null,
+            'driver_name'           => isset($r['driver_name']) ? (string) $r['driver_name'] : null,
+            'usage_mode'            => (string) ($r['usage_mode'] ?? 'business'),
+            'vat_deduction_mode'    => (string) ($r['vat_deduction_mode'] ?? 'full'),
+            'vat_deduction_percent' => isset($r['vat_deduction_percent']) ? (float) $r['vat_deduction_percent'] : 100.0,
             'created_at'          => (string) $r['created_at'],
             'trips_count'         => isset($r['trips_count']) ? (int) $r['trips_count'] : null,
             'fuelings_count'      => isset($r['fuelings_count']) ? (int) $r['fuelings_count'] : null,

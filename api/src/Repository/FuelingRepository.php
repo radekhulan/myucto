@@ -13,7 +13,23 @@ use PDO;
  */
 final class FuelingRepository
 {
-    private const SOURCES = ['manual', 'invoice', 'axigon', 'axigon_ai', 'import'];
+    private const SOURCES = ['manual', 'invoice', 'axigon', 'axigon_ai', 'import', 'cash'];
+
+    /**
+     * Vazby na doklad, kterým bylo tankování zaplaceno (migrace 1801) — pokladní doklad,
+     * bankovní pohyb, účetní zápis. Každý JOIN nese tenant predikát (vazby hlídá
+     * i trigger, ale read-back nesmí spoléhat jen na něj).
+     */
+    private const LINK_COLUMNS = ',
+                       lcd.doc_number AS source_cash_document_number,
+                       lbt.statement_id AS source_bank_statement_id, lbt.posted_at AS source_bank_posted_at,
+                       lbt.amount AS source_bank_amount,
+                       lje.document_no AS source_journal_entry_number';
+    private const LINK_JOINS = '
+             LEFT JOIN cash_documents lcd ON lcd.id = f.source_cash_document_id AND lcd.supplier_id = f.supplier_id
+             LEFT JOIN bank_transactions lbt ON lbt.id = f.source_bank_transaction_id
+                   AND lbt.statement_id IN (SELECT lbs.id FROM bank_statements lbs WHERE lbs.supplier_id = f.supplier_id)
+             LEFT JOIN journal_entries lje ON lje.id = f.source_journal_entry_id AND lje.supplier_id = f.supplier_id';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -26,11 +42,11 @@ final class FuelingRepository
         [$where, $params] = $this->buildWhere($supplierId, $filters);
         $sql = 'SELECT f.*, c.registration AS car_registration, c.name AS car_name,
                        cl.company_name AS vendor_name,
-                       pi.vendor_invoice_number AS source_invoice_number
+                       pi.vendor_invoice_number AS source_invoice_number' . self::LINK_COLUMNS . '
                   FROM fuelings f
              LEFT JOIN cars c     ON c.id  = f.car_id AND c.supplier_id = f.supplier_id
              LEFT JOIN clients cl ON cl.id = f.vendor_id AND cl.supplier_id = f.supplier_id
-             LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id AND pi.supplier_id = f.supplier_id
+             LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id AND pi.supplier_id = f.supplier_id' . self::LINK_JOINS . '
                  WHERE ' . implode(' AND ', $where) . '
               ORDER BY f.fueled_date DESC, f.fueled_time DESC, f.id DESC';
         $stmt = $this->db->pdo()->prepare($sql);
@@ -57,11 +73,11 @@ final class FuelingRepository
         // DocumentRepository::search) — native prepared statements neumí LIMIT/OFFSET jako parametr.
         $sql = 'SELECT f.*, c.registration AS car_registration, c.name AS car_name,
                        cl.company_name AS vendor_name,
-                       pi.vendor_invoice_number AS source_invoice_number
+                       pi.vendor_invoice_number AS source_invoice_number' . self::LINK_COLUMNS . '
                   FROM fuelings f
              LEFT JOIN cars c     ON c.id  = f.car_id AND c.supplier_id = f.supplier_id
              LEFT JOIN clients cl ON cl.id = f.vendor_id AND cl.supplier_id = f.supplier_id
-             LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id AND pi.supplier_id = f.supplier_id
+             LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id AND pi.supplier_id = f.supplier_id' . self::LINK_JOINS . '
                  WHERE ' . $whereSql . '
               ORDER BY f.fueled_date DESC, f.fueled_time DESC, f.id DESC
                  LIMIT ' . max(1, $perPage) . ' OFFSET ' . max(0, $offset);
@@ -112,11 +128,11 @@ final class FuelingRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT f.*, c.registration AS car_registration, c.name AS car_name, cl.company_name AS vendor_name,
-                    pi.vendor_invoice_number AS source_invoice_number
+                    pi.vendor_invoice_number AS source_invoice_number' . self::LINK_COLUMNS . '
                FROM fuelings f
           LEFT JOIN cars c     ON c.id  = f.car_id AND c.supplier_id = f.supplier_id
           LEFT JOIN clients cl ON cl.id = f.vendor_id AND cl.supplier_id = f.supplier_id
-          LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id AND pi.supplier_id = f.supplier_id
+          LEFT JOIN purchase_invoices pi ON pi.id = f.source_purchase_invoice_id AND pi.supplier_id = f.supplier_id' . self::LINK_JOINS . '
               WHERE f.id = ? AND f.supplier_id = ?'
         );
         $stmt->execute([$id, $supplierId]);
@@ -144,7 +160,12 @@ final class FuelingRepository
         $sql = $this->insertSql()
             . ' ON DUPLICATE KEY UPDATE
                   quantity   = COALESCE(quantity, VALUES(quantity)),
-                  unit_price = COALESCE(unit_price, VALUES(unit_price))';
+                  unit_price = COALESCE(unit_price, VALUES(unit_price)),
+                  odometer   = COALESCE(odometer, VALUES(odometer)),
+                  car_id     = COALESCE(car_id, VALUES(car_id)),
+                  source_cash_document_id    = COALESCE(source_cash_document_id, VALUES(source_cash_document_id)),
+                  source_bank_transaction_id = COALESCE(source_bank_transaction_id, VALUES(source_bank_transaction_id)),
+                  source_journal_entry_id    = COALESCE(source_journal_entry_id, VALUES(source_journal_entry_id))';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($this->bind($supplierId, $data, $userId));
         $rc = $stmt->rowCount();
@@ -190,14 +211,68 @@ final class FuelingRepository
         return $stmt->rowCount();
     }
 
+    /** Přiřadí tankování z pokladního dokladu na auto (NULL = bez přiřazení). Vrací počet. */
+    public function reassignByCashDocument(int $supplierId, int $cashDocumentId, ?int $carId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE fuelings SET car_id = ? WHERE supplier_id = ? AND source_cash_document_id = ?'
+        );
+        $stmt->execute([$carId, $supplierId, $cashDocumentId]);
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Přepíše vazby na doklad — jen klíče, které v $links jsou (null = zrušit vazbu).
+     * Vlastnictví dokladů ověřuje volající (TenantReferenceGuard) i trigger 1802.
+     *
+     * @param array{source_purchase_invoice_id?:int|null, source_cash_document_id?:int|null,
+     *              source_bank_transaction_id?:int|null, source_journal_entry_id?:int|null} $links
+     */
+    public function setLinks(int $id, int $supplierId, array $links): void
+    {
+        $set = [];
+        $params = [];
+        foreach (['source_purchase_invoice_id', 'source_cash_document_id', 'source_bank_transaction_id', 'source_journal_entry_id'] as $col) {
+            if (array_key_exists($col, $links)) {
+                $set[] = $col . ' = ?';
+                $params[] = $this->nullableInt($links[$col]);
+            }
+        }
+        if ($set === []) return;
+        $params[] = $id;
+        $params[] = $supplierId;
+        $this->db->pdo()->prepare('UPDATE fuelings SET ' . implode(', ', $set) . ' WHERE id = ? AND supplier_id = ?')
+            ->execute($params);
+    }
+
+    /** Existuje už tankování s tímto dedup otiskem? (náhled importu) */
+    public function existsByDedup(int $supplierId, string $dedupHash): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM fuelings WHERE supplier_id = ? AND dedup_hash = ? LIMIT 1');
+        $stmt->execute([$supplierId, $dedupHash]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /** Patří bankovní pohyb firmě? (bank_transactions nemá supplier_id — vlastníka určuje výpis) */
+    public function bankTransactionBelongs(int $supplierId, int $transactionId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
+              WHERE bt.id = ? LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $transactionId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     private function insertSql(): string
     {
         return 'INSERT INTO fuelings
                   (supplier_id, car_id, fueled_date, fueled_time, fuel_type, quantity, unit, unit_price,
                    amount_without_vat, amount_vat, amount_with_vat, currency, odometer, station, vendor_id,
                    source, source_purchase_invoice_id, source_item_id, receipt_number, raw_text, dedup_hash,
-                   note, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+                   note, created_by, source_cash_document_id, source_bank_transaction_id, source_journal_entry_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
     }
 
     /** @return list<mixed> Pořadí přesně dle insertSql(). */
@@ -229,6 +304,9 @@ final class FuelingRepository
             $this->nullableStr($data['dedup_hash'] ?? null, 64),     // 20
             $this->nullableStr($data['note'] ?? null),               // 21
             $userId,                                                 // 22
+            $this->nullableInt($data['source_cash_document_id'] ?? null),    // 23
+            $this->nullableInt($data['source_bank_transaction_id'] ?? null), // 24
+            $this->nullableInt($data['source_journal_entry_id'] ?? null),    // 25
         ];
     }
 
@@ -277,6 +355,14 @@ final class FuelingRepository
             'source'                     => (string) $r['source'],
             'source_purchase_invoice_id' => $r['source_purchase_invoice_id'] !== null ? (int) $r['source_purchase_invoice_id'] : null,
             'source_invoice_number'      => isset($r['source_invoice_number']) && $r['source_invoice_number'] !== null ? (string) $r['source_invoice_number'] : null,
+            'source_cash_document_id'     => isset($r['source_cash_document_id']) ? (int) $r['source_cash_document_id'] : null,
+            'source_cash_document_number' => isset($r['source_cash_document_number']) ? (string) $r['source_cash_document_number'] : null,
+            'source_bank_transaction_id'  => isset($r['source_bank_transaction_id']) ? (int) $r['source_bank_transaction_id'] : null,
+            'source_bank_statement_id'    => isset($r['source_bank_statement_id']) ? (int) $r['source_bank_statement_id'] : null,
+            'source_bank_posted_at'       => isset($r['source_bank_posted_at']) ? (string) $r['source_bank_posted_at'] : null,
+            'source_bank_amount'          => isset($r['source_bank_amount']) ? (float) $r['source_bank_amount'] : null,
+            'source_journal_entry_id'     => isset($r['source_journal_entry_id']) ? (int) $r['source_journal_entry_id'] : null,
+            'source_journal_entry_number' => isset($r['source_journal_entry_number']) ? (string) $r['source_journal_entry_number'] : null,
             'receipt_number'             => $r['receipt_number'] !== null ? (string) $r['receipt_number'] : null,
             'raw_text'                   => $r['raw_text'] !== null ? (string) $r['raw_text'] : null,
             'note'                       => $r['note'] !== null ? (string) $r['note'] : null,

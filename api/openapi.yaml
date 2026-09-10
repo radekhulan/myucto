@@ -17529,6 +17529,128 @@ paths:
             application/pdf:
               schema: { type: string, format: binary }
         '400': { description: 'Chybí supplier kontext nebo neplatný format' }
+  /api/v1/logbook/fuelings/import:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Logbook]
+      summary: Import tankování z CSV/XLSX
+      description: |
+        Multipart upload souboru (max 10 MB). Povinné sloupce datum a částka (nebo množství
+        a cena za jednotku). Idempotentní: řádek s týmž otiskem (datum, čas, SPZ, částka,
+        množství, číslo účtenky) se nezdvojí, jen doplní dříve chybějící údaje.
+        `dry_run=1` nic nezapíše a vrátí náhled (status preview / duplicate / failed).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                dry_run: { type: string, enum: ['0', '1'] }
+      responses:
+        '200': { description: 'Report importu (created/updated/duplicates/failed + řádky)' }
+        '400': { description: 'Chybí soubor nebo povinné sloupce' }
+        '413': { description: 'Soubor příliš velký (max 10 MB)' }
+  /api/v1/logbook/fuelings/warnings:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Logbook]
+      summary: Upozornění k tankování per vozidlo
+      description: |
+        Chybějící stav tachometru, nesouvislá řada stavů (nižší než u předchozího tankování
+        nebo pod počátečním stavem vozidla) a nesoulad odpočtu DPH navázaného dokladu
+        s nastavením vozidla. Řada se posuzuje z celé historie, `year` jen filtruje výpis.
+      parameters:
+        - { in: query, name: car_id, schema: { type: integer } }
+        - { in: query, name: year, schema: { type: integer } }
+      responses:
+        '200': { description: 'cars[] (missing, regressions, vat_mismatches) + totals' }
+  /api/v1/logbook/fuelings/link-candidates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Logbook]
+      summary: Doklady k navázání tankování
+      description: |
+        Pokladní doklady, bankovní pohyby (výdaje) nebo účetní zápisy firmy kolem data
+        tankování (±10 dní), seřazené podle shody částky a vzdálenosti data.
+      parameters:
+        - in: query
+          name: type
+          required: true
+          schema: { type: string, enum: [cash_document, bank_transaction, journal_entry] }
+        - { in: query, name: date, required: true, schema: { type: string, format: date } }
+        - { in: query, name: amount, schema: { type: number } }
+        - { in: query, name: q, schema: { type: string } }
+      responses:
+        '200': { description: 'Seznam návrhů (id, label, date, amount, currency, description, exact)' }
+  /api/v1/logbook/drivers:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Logbook]
+      summary: Zaměstnanci k výběru řidiče vozidla
+      description: Jen id, jméno a příznak aktivity — žádné mzdové údaje.
+      responses:
+        '200': { description: 'Seznam (id, full_name, is_active)' }
+  /api/v1/logbook/fuel-cash-documents:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Logbook]
+      summary: Pokladní doklady za pohonné hmoty
+      description: |
+        Zaúčtované výdajové pokladní doklady (nákup / jiný výdaj, ne úhrada přijaté faktury),
+        jejichž partner je čerpací stanice (podle IČO) nebo popis zní na palivo.
+      parameters:
+        - { in: query, name: year, schema: { type: integer } }
+        - { in: query, name: only_unscanned, schema: { type: boolean } }
+      responses:
+        '200': { description: 'Doklady + seznam aut tenanta + has_cars' }
+  /api/v1/logbook/fuel-cash-documents/{id}/assign:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [Logbook]
+      summary: Vytěží pokladní doklad do tankování
+      description: |
+        Z popisu dokladu vytáhne litry, cenu za litr, druh paliva, SPZ a tachometr; vozidlo
+        určí explicitní `car_id`, jinak SPZ, jinak výchozí vůz. Jeden doklad = jedno tankování
+        (idempotentně); explicitní `car_id` přepíše vozidlo i u dříve vytěženého tankování.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                car_id: { type: [integer, "null"] }
+      responses:
+        '200': { description: 'Výsledek (created/updated/duplicates, car_id, car_method)' }
+        '400': { description: 'Doklad nenalezen nebo není tankováním' }
+        '404': { description: 'Auto neexistuje' }
+  /api/v1/logbook/fuel-cash-documents/backfill:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Logbook]
+      summary: Zpětné vytěžení tankování z pokladních dokladů
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200': { description: 'Report (processed/created/updated/remaining)' }
   /api/v1/logbook/fuel-invoices/backfill:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -26026,6 +26148,11 @@ components:
         last_odometer: { type: [integer, "null"], description: Poslední známý stav tachometru (z jízd) }
         trips_count: { type: [integer, "null"] }
         fuelings_count: { type: [integer, "null"] }
+        driver_employee_id: { type: [integer, "null"], description: Řidič — zaměstnanec firmy }
+        driver_name: { type: [string, "null"] }
+        usage_mode: { type: string, enum: [business, private, mixed], description: 'Režim užívání: jen firemní / soukromé vozidlo / smíšené' }
+        vat_deduction_mode: { type: string, enum: [full, proportional, none], description: 'Režim odpočtu DPH vozidla (private ⇒ none, mixed ⇒ proportional); bez reduced — koeficient § 76 je celofiremní' }
+        vat_deduction_percent: { type: number, description: 'Podíl odpočtu v % (full = 100, none = 0)' }
         created_at: { type: string, format: date-time }
     CarInput:
       type: object
@@ -26042,6 +26169,10 @@ components:
         is_default: { type: boolean }
         is_archived: { type: boolean }
         note: { type: [string, "null"] }
+        driver_employee_id: { type: [integer, "null"], description: 'Zaměstnanec téže firmy; vynechané pole = beze změny' }
+        usage_mode: { type: string, enum: [business, private, mixed], description: 'Vynechané pole = beze změny' }
+        vat_deduction_mode: { type: string, enum: [full, proportional, none], description: 'Vynechané = výchozí pro režim užívání' }
+        vat_deduction_percent: { type: [number, "null"], description: 'Povinné u proportional (0 < % < 100)' }
     Trip:
       type: object
       properties:
@@ -26098,11 +26229,21 @@ components:
         station: { type: [string, "null"] }
         vendor_id: { type: [integer, "null"] }
         vendor_name: { type: [string, "null"] }
-        source: { type: string, enum: [manual, invoice, axigon, axigon_ai, import] }
+        source: { type: string, enum: [manual, invoice, axigon, axigon_ai, import, cash] }
         source_purchase_invoice_id: { type: [integer, "null"] }
         source_invoice_number: { type: [string, "null"] }
+        source_cash_document_id: { type: [integer, "null"], description: Pokladní doklad, kterým bylo zaplaceno }
+        source_cash_document_number: { type: [string, "null"] }
+        source_bank_transaction_id: { type: [integer, "null"], description: Bankovní pohyb, kterým bylo zaplaceno }
+        source_bank_statement_id: { type: [integer, "null"] }
+        source_bank_posted_at: { type: [string, "null"], format: date }
+        source_bank_amount: { type: [number, "null"] }
+        source_journal_entry_id: { type: [integer, "null"], description: Obecná vazba na účetní zápis }
+        source_journal_entry_number: { type: [string, "null"] }
         receipt_number: { type: [string, "null"] }
         note: { type: [string, "null"] }
+        odometer_warning: { type: [string, "null"], enum: [missing, regression, null], description: 'Chybějící tachometr / nižší než u předchozího tankování vozidla' }
+        vat_warning: { type: [string, "null"], enum: [over, under, null], description: 'Doklad uplatňuje vyšší / nižší odpočet DPH, než dovoluje nastavení vozidla' }
         created_at: { type: string, format: date-time }
     FuelingInput:
       type: object
@@ -26121,6 +26262,9 @@ components:
         station: { type: [string, "null"] }
         vendor_id: { type: [integer, "null"] }
         note: { type: [string, "null"] }
+        source_cash_document_id: { type: [integer, "null"], description: 'Doklad téže firmy; u PUT vynechané pole = beze změny, null = zrušit vazbu' }
+        source_bank_transaction_id: { type: [integer, "null"], description: 'Pohyb z výpisu téže firmy; u PUT vynechané = beze změny' }
+        source_journal_entry_id: { type: [integer, "null"], description: 'Účetní zápis téže firmy; u PUT vynechané = beze změny' }
     TripCategory:
       type: object
       properties:

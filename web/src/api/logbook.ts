@@ -20,6 +20,20 @@ export interface Car {
   fuelings_count?: number | null
   /** Poslední známý konečný tachometr (pro předvyplnění nového záznamu). */
   last_odometer?: number | null
+  driver_employee_id?: number | null
+  driver_name?: string | null
+  usage_mode?: CarUsageMode
+  vat_deduction_mode?: CarVatDeduction
+  vat_deduction_percent?: number
+}
+
+export type CarUsageMode = 'business' | 'private' | 'mixed'
+export type CarVatDeduction = 'full' | 'proportional' | 'none'
+
+export interface LogbookDriver {
+  id: number
+  full_name: string
+  is_active: boolean
 }
 
 export interface CarPayload {
@@ -34,6 +48,10 @@ export interface CarPayload {
   is_default?: boolean
   is_archived?: boolean
   note?: string | null
+  driver_employee_id?: number | null
+  usage_mode?: CarUsageMode
+  vat_deduction_mode?: CarVatDeduction
+  vat_deduction_percent?: number | null
 }
 
 export interface TripCategory {
@@ -93,7 +111,10 @@ export interface TripPayload {
   note?: string | null
 }
 
-export type FuelingSource = 'manual' | 'invoice' | 'axigon' | 'axigon_ai' | 'import'
+export type FuelingSource = 'manual' | 'invoice' | 'axigon' | 'axigon_ai' | 'import' | 'cash'
+
+/** Varianty vazby tankování na doklad, kterým bylo zaplaceno. */
+export type FuelingLinkType = 'purchase_invoice' | 'cash_document' | 'bank_transaction' | 'journal_entry'
 
 export interface Fueling {
   id: number
@@ -118,13 +139,118 @@ export interface Fueling {
   source: FuelingSource
   source_purchase_invoice_id: number | null
   source_invoice_number: string | null
+  source_cash_document_id?: number | null
+  source_cash_document_number?: string | null
+  source_bank_transaction_id?: number | null
+  source_bank_statement_id?: number | null
+  source_bank_posted_at?: string | null
+  source_bank_amount?: number | null
+  source_journal_entry_id?: number | null
+  source_journal_entry_number?: string | null
   receipt_number: string | null
   raw_text: string | null
   note: string | null
   created_at: string
+  /** Chybějící stav tachometru / nižší než u předchozího tankování vozidla. */
+  odometer_warning?: 'missing' | 'regression' | null
+  /** Doklad uplatňuje vyšší / nižší odpočet DPH, než dovoluje nastavení vozidla. */
+  vat_warning?: 'over' | 'under' | null
 }
 
-export interface FuelingPayload {
+export interface FuelingLinks {
+  source_purchase_invoice_id?: number | null
+  source_cash_document_id?: number | null
+  source_bank_transaction_id?: number | null
+  source_journal_entry_id?: number | null
+}
+
+export interface FuelingLinkCandidate {
+  id: number
+  statement_id?: number
+  label: string
+  date: string
+  amount: number | null
+  currency: string | null
+  description: string
+  exact: boolean
+}
+
+export interface FuelingWarningCar {
+  car_id: number
+  registration: string
+  name: string | null
+  fuelings: number
+  missing: Array<{ id: number; date: string }>
+  regressions: Array<{ id: number; date: string; odometer: number; prev_id: number | null; prev_date: string | null; prev_odometer: number }>
+  vat_mismatches: Array<{ id: number; date: string; direction: 'over' | 'under'; doc_percent: number; car_percent: number }>
+}
+
+export interface FuelingWarnings {
+  cars: FuelingWarningCar[]
+  totals: { missing: number; regressions: number; vat_mismatches: number }
+}
+
+export interface FuelingImportRow {
+  line: number
+  status: 'preview' | 'created' | 'updated' | 'duplicate' | 'failed'
+  reason?: string
+  fueling_id?: number
+  car_id?: number | null
+  car_label?: string
+  fueled_date?: string
+  fuel_type?: string | null
+  quantity?: number | null
+  unit?: string
+  amount_with_vat?: number
+  currency?: string
+  odometer?: number | null
+  station?: string | null
+}
+
+export interface FuelingImportReport {
+  ok: boolean
+  dry_run: boolean
+  created: number
+  updated: number
+  duplicates: number
+  failed: number
+  rows: FuelingImportRow[]
+  error?: string
+}
+
+export interface FuelCashDocument {
+  id: number
+  doc_number: string | null
+  issue_date: string
+  partner_name: string | null
+  description: string
+  total_amount: number
+  currency: string
+  is_fuel_station: boolean
+  fuelings_count: number
+  scanned: boolean
+}
+
+export interface FuelCashDocumentsList {
+  documents: FuelCashDocument[]
+  cars: Car[]
+  has_cars: boolean
+}
+
+export interface CashScanResult {
+  ok: boolean
+  cash_document_id: number
+  created: number
+  updated: number
+  duplicates: number
+  fueling_id: number | null
+  car_id: number | null
+  car_method: string
+  reassigned?: number
+  error?: string
+}
+
+export interface FuelingPayload extends FuelingLinks {
   car_id?: number | null
   fueled_date: string
   fueled_time?: string | null
@@ -341,6 +467,28 @@ export const logbookApi = {
   deleteFueling: (id: number) => api.delete<{ deleted: boolean }>(`/logbook/fuelings/${id}`).then(r => r.data),
   exportFuelings: (format: 'xlsx' | 'pdf', params: Record<string, string | number>) =>
     api.get('/logbook/fuelings/export', { params: { format, ...params }, responseType: 'blob' }),
+  importFuelings: (file: File, dryRun: boolean) => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    if (dryRun) fd.append('dry_run', '1')
+    return api.post<FuelingImportReport>('/logbook/fuelings/import', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+  fuelingWarnings: (params?: Record<string, string | number>) =>
+    api.get<FuelingWarnings>('/logbook/fuelings/warnings', { params }).then(r => r.data),
+  fuelingLinkCandidates: (params: { type: Exclude<FuelingLinkType, 'purchase_invoice'>; date: string; amount?: number; q?: string }) =>
+    api.get<FuelingLinkCandidate[]>('/logbook/fuelings/link-candidates', { params }).then(r => r.data),
+  listDrivers: () => api.get<LogbookDriver[]>('/logbook/drivers').then(r => r.data),
+
+  // Fuel cash documents (účtenky placené hotově)
+  listFuelCashDocuments: (params?: Record<string, string | number>) =>
+    api.get<FuelCashDocumentsList>('/logbook/fuel-cash-documents', { params }).then(r => r.data),
+  assignFuelCashDocument: (id: number, carId: number | null) =>
+    api.post<CashScanResult>(`/logbook/fuel-cash-documents/${id}/assign`, { car_id: carId }).then(r => r.data),
+  backfillFuelCashDocuments: (limit = 25) =>
+    api.post<{ ok: boolean; processed: number; created: number; updated: number; remaining: number }>(
+      '/logbook/fuel-cash-documents/backfill', { limit }).then(r => r.data),
 
   // Fuel invoices (from gas stations)
   listFuelInvoices: (params?: Record<string, string | number>) =>

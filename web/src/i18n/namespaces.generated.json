@@ -68,6 +68,7 @@
     "linked_documents",
     "lock",
     "logbook",
+    "logbook_fuel",
     "manualQueue",
     "markdown_editor",
     "mcp_server_page",
@@ -156,6 +157,7 @@
       "linked_documents",
       "lock",
       "logbook",
+      "logbook_fuel",
       "manualQueue",
       "markdown_editor",
       "mcp_server_page",
@@ -697,7 +699,9 @@
       "stock"
     ],
     "logbook": [
-      "logbook"
+      "cash",
+      "logbook",
+      "logbook_fuel"
     ],
     "stats": [
       "dashboard",
