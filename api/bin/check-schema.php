@@ -51,12 +51,12 @@ if ($json) {
                 printf("         očekáváno: %s\n", $f['expected']);
             }
             if ($f['actual'] !== '') {
-                printf($f['severity'] === SchemaIntegrityService::SEVERITY_INFO
+                printf(str_ends_with($f['code'], '_leftover')
                     ? "         odstranění: %s\n"
                     : "         v databázi: %s\n", $f['actual']);
             }
         }
-        printf("%sNálezů: %d chyb, %d varování, %d pozůstatků starší verze → %s\n",
+        printf("%sNálezů: %d chyb, %d varování, %d informací → %s\n",
             $report['findings'] === [] ? '' : "\n",
             $report['counts']['fail'], $report['counts']['warn'], $report['counts']['info'],
             match ($report['status']) {

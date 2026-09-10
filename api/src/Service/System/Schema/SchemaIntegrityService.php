@@ -25,10 +25,10 @@ use PDO;
  * Závažnost:
  *   - fail — chybí něco, na čem stojí správnost dat: tabulka, sloupec, jiný typ
  *     nebo NULL, unikátní index, cizí klíč, CHECK, trigger, rutina, auditní historie,
- *   - warn — odchylka, která funkci nebere: collation, výchozí hodnota, engine,
- *     neunikátní index, jiné tělo triggeru, objekty navíc,
- *   - info — známý pozůstatek starší verze ({@see self::KNOWN_LEFTOVERS}); nic
- *     nezvedá, jen nabízí SQL pro ruční úklid.
+ *   - warn — odchylka, která funkci nebere: collation tabulky nebo sloupce, výchozí
+ *     hodnota, engine, neunikátní index, jiné tělo triggeru, objekty navíc,
+ *   - info — nic nezvedá: známý pozůstatek starší verze ({@see self::KNOWN_LEFTOVERS})
+ *     s SQL pro ruční úklid a jiná výchozí collation databáze.
  */
 final class SchemaIntegrityService
 {
@@ -208,8 +208,12 @@ final class SchemaIntegrityService
 
         $expectedDbCollation = (string) ($expected['database_collation'] ?? '');
         $actualDbCollation = (string) ($actual['database_collation'] ?? '');
+        // Výchozí collation databáze je jen informace: tabulky, sloupce i proměnné triggerů
+        // a rutin nesou collation výslovně (hlídá MigrationDeclaredCollationTest), takže na
+        // výchozí hodnotě nic nestojí. Hostingy ji určují samy (MariaDB 11.8 zakládá
+        // utf8mb4 s utf8mb4_uca1400_ai_ci). Odchylka tabulky nebo sloupce varuje dál.
         if ($expectedDbCollation !== '' && $expectedDbCollation !== $actualDbCollation) {
-            $findings[] = self::finding(self::STATUS_WARN, 'database_collation', '(databáze)', $expectedDbCollation, $actualDbCollation);
+            $findings[] = self::finding(self::SEVERITY_INFO, 'database_collation', '(databáze)', $expectedDbCollation, $actualDbCollation);
         }
 
         $expectedTables = (array) ($expected['tables'] ?? []);

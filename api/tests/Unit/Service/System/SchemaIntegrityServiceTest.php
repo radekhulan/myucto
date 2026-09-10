@@ -151,6 +151,29 @@ final class SchemaIntegrityServiceTest extends TestCase
         self::assertStringContainsString("'-- není komentář'", SchemaSnapshot::normalizeSql($withComments));
     }
 
+    public function testDifferentDatabaseDefaultCollationIsOnlyInformation(): void
+    {
+        $actual = self::snapshot();
+        $actual['database_collation'] = 'utf8mb4_uca1400_ai_ci';
+
+        $findings = SchemaIntegrityService::compare(self::snapshot(), $actual);
+
+        self::assertCount(1, $findings);
+        self::assertSame('database_collation', $findings[0]['code']);
+        self::assertSame(SchemaIntegrityService::SEVERITY_INFO, $findings[0]['severity']);
+    }
+
+    public function testDifferentTableCollationStillWarns(): void
+    {
+        $actual = self::snapshot();
+        $actual['tables']['journal_entries']['collation'] = 'utf8mb4_uca1400_ai_ci';
+
+        $findings = SchemaIntegrityService::compare(self::snapshot(), $actual);
+
+        self::assertSame(['table_collation'], array_column($findings, 'code'));
+        self::assertSame(SchemaIntegrityService::STATUS_WARN, $findings[0]['severity']);
+    }
+
     /** @return array<string,mixed> */
     private static function snapshot(): array
     {

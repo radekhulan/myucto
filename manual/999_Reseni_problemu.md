@@ -564,8 +564,14 @@ Typické příčiny odchylky:
 | Závažnost | Co znamená |
 |---|---|
 | **Nevyhovuje** | chybí tabulka, sloupec, unikátní index, cizí klíč, kontrola CHECK, trigger, uložená procedura nebo auditní historie, případně má sloupec jiný typ |
-| **S výhradami** | jiná collation, výchozí hodnota nebo engine, obyčejný index, jiné tělo triggeru, objekty navíc |
-| **Informace** | známý pozůstatek starší verze, stav kontroly nezhoršuje |
+| **S výhradami** | jiná collation tabulky nebo sloupce, výchozí hodnota nebo engine, obyčejný index, jiné tělo triggeru, objekty navíc |
+| **Informace** | známý pozůstatek starší verze nebo jiná výchozí collation databáze, stav kontroly nezhoršuje |
+
+**Výchozí collation databáze.** Hostingy zakládají databázi s vlastní výchozí
+collation (MariaDB 11.8 například `utf8mb4_uca1400_ai_ci`). Aplikaci to nevadí:
+tabulky, sloupce i proměnné triggerů a procedur mají collation určenou výslovně
+migracemi, takže se výchozí hodnota databáze nikde nepoužije. Kontrola ji proto
+ukáže jen jako informaci.
 
 **Pozůstatky starších verzí.** Některé objekty po sobě nechala dřívější historie
 migrací a současná verze je nepoužívá. Kontrola je zná jménem a místo varování
