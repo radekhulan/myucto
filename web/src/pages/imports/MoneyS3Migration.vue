@@ -267,10 +267,10 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
   <div class="mx-auto max-w-6xl space-y-5">
     <div>
       <h1 class="text-2xl font-semibold">{{ t('money_s3.title') }}</h1>
-      <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('money_s3.subtitle') }}</p>
+      <p class="mt-1 text-sm text-neutral-500">{{ t('money_s3.subtitle') }}</p>
     </div>
 
-    <div class="max-w-3xl rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="money-s3-support-notice">
+    <div class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="money-s3-support-notice">
       <p>{{ t('money_s3.support_notice') }}</p>
       <RouterLink to="/admin/support" class="mt-1 inline-block font-medium underline hover:no-underline">{{ t('money_s3.support_notice_link') }}</RouterLink>
     </div>
@@ -290,8 +290,8 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
 
       <template v-else-if="currentStep === 1">
         <h2 class="mb-1 text-lg font-semibold">{{ t('money_s3.upload_title') }}</h2>
-        <p class="mb-4 max-w-3xl text-sm text-neutral-500">{{ t('money_s3.upload_hint') }}</p>
-        <div class="mb-5 max-w-3xl rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm" data-testid="backup-file-help">
+        <p class="mb-4 text-sm text-neutral-500">{{ t('money_s3.upload_hint') }}</p>
+        <div class="mb-5 rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm" data-testid="backup-file-help">
           <h3 class="mb-2 font-medium text-neutral-700">{{ t('money_s3.file_help_title') }}</h3>
           <ul class="list-disc space-y-1 pl-5 text-neutral-600">
             <li v-for="(item, i) in fileHelpItems" :key="i">{{ item }}</li>
@@ -367,10 +367,10 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
         <label class="mb-1 block max-w-xs text-sm font-medium">{{ t('money_s3.first_period_start') }}
           <DateInput v-model="firstPeriodStart" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3" />
         </label>
-        <p class="mb-5 max-w-3xl text-sm text-neutral-500">{{ t('money_s3.first_period_start_hint') }}</p>
+        <p class="mb-5 text-sm text-neutral-500">{{ t('money_s3.first_period_start_hint') }}</p>
 
         <h3 class="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('money_s3.reports_title') }}</h3>
-        <p class="mb-3 max-w-3xl text-sm text-neutral-500">{{ t('money_s3.reports_hint') }}</p>
+        <p class="mb-3 text-sm text-neutral-500">{{ t('money_s3.reports_hint') }}</p>
         <div class="flex flex-wrap gap-3">
           <label v-for="y in agenda.years.filter(y => y.fiscal_year !== null)" :key="y.dir"
             class="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm whitespace-nowrap"
@@ -383,8 +383,8 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
 
       <template v-else-if="currentStep === 3">
         <h2 class="mb-1 text-lg font-semibold">{{ t('money_s3.dry_run_title') }}</h2>
-        <p class="mb-2 max-w-3xl text-sm text-neutral-500">{{ t('money_s3.dry_run_hint') }}</p>
-        <p class="mb-4 max-w-3xl rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700">{{ t('money_s3.dry_run_locks_hint') }}</p>
+        <p class="mb-2 text-sm text-neutral-500">{{ t('money_s3.dry_run_hint') }}</p>
+        <p class="mb-4 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700">{{ t('money_s3.dry_run_locks_hint') }}</p>
         <ImportJobProgress v-if="jobRunning" :job="job" :percent="null" :cancelling="false" :show-cancel="false"
           counts-key="money_s3.job_counts" background-hint-key="money_s3.background_hint" running-key="money_s3.dry_run_running" />
         <MoneyS3Protocol v-if="run && run.mode === 'dry_run'" :run="run" />
