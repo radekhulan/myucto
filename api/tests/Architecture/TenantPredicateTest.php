@@ -161,6 +161,10 @@ final class TenantPredicateTest extends TestCase
         'payroll_sickness_case_work_days',
         // Platební karty firmy (1799_payment_cards.sql).
         'payment_cards',
+        // Připojení skenů k dokladům (1804, 1805) — uložená vytěžení a dávky.
+        'document_extractions',
+        'scan_batch_items',
+        'scan_matches',
     ];
 
     /**

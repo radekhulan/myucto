@@ -92,6 +92,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // AiExtractPdfAction; readonly/client roli položka nesvítí a route ji nepustí.
   'purchase-invoice-ai-import': ['purchase_invoices.scan', 'write'],
   documents: ['documents'], 'document-detail': ['documents'], 'document-requests': ['documents.requests'],
+  'scan-attach': ['documents.upload', 'write'],
   'accounting-accounts': ['accounting'], 'accounting-account-detail': ['accounting'],
   'accounting-journal': ['accounting'], 'accounting-journal-new': ['accounting.journal.write', 'write'],
   // Čtení = zobrazení rozpadu mzdy; samotné zaúčtování hlídá server (accounting.journal.post).

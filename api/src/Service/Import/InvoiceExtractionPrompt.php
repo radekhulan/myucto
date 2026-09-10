@@ -95,7 +95,11 @@ JSON schema:
   ],
   "already_paid": boolean,
   "advance_reference": string|null,
-  "supply_nature": "goods"|"services"|"mixed"|null
+  "supply_nature": "goods"|"services"|"mixed"|null,
+  "barcode": string|null,
+  "license_plate": string|null,
+  "card_last4": string|null,
+  "company_role": "buyer"|"vendor"|"both"|"none"|null
 }
 
 DŮLEŽITÉ k DATŮM (`issue_date`, `tax_date`, `due_date`):
@@ -314,6 +318,30 @@ DŮLEŽITÉ k poli `total_with_vat`:
 - NIKDY ze subtotalu sekce/skupiny. Pokud si nejsi jistý → NULL.
 - Když doklad finální "K úhradě" NEUVÁDÍ VŮBEC (typicky souhrnný doklad hrazený
   inkasem nebo kartou), ale MÁ daňovou rekapitulaci → vezmi celkem s DPH z rekapitulace.
+EOT . "\n\n" . self::scanFieldRules();
+    }
+
+    /**
+     * Pravidla pro pole, podle kterých se sken přiřazuje k existujícímu dokladu.
+     * Sdílí je všichni provideři včetně inline promptu {@see AnthropicClient}.
+     */
+    public static function scanFieldRules(): string
+    {
+        return <<<'EOT'
+DŮLEŽITÉ k polím pro přiřazení dokladu (`barcode`, `license_plate`, `card_last4`, `company_role`):
+- `barcode` = číslo z NÁLEPKY nebo tisku čárového kódu na dokladu (číslice pod čárovým kódem,
+  typicky nálepka podatelny nebo účetního systému). Opiš jen znaky pod kódem. QR platbu, číslo
+  dokladu ani variabilní symbol sem NEDÁVEJ. Když čárový kód není nebo pod ním není čitelné
+  číslo → null.
+- `license_plate` = registrační značka (SPZ) vozidla uvedená na dokladu (účtenka za PHM,
+  parkování, servis vozidla), velkými písmeny bez mezer. Jinak null.
+- `card_last4` = poslední 4 číslice platební karty z účtenky nebo výpisu terminálu (maskované
+  „**** 1234" → "1234"). NIKDY celé číslo karty. Když na dokladu není → null.
+- `company_role` = role firmy z úvodního kontextu na TOMTO dokladu: "buyer" (firma je
+  odběratel), "vendor" (firma doklad vystavila), "both" (je na obou stranách), "none" (firma
+  na dokladu není nebo to nelze určit). Když úvodní kontext žádnou firmu neuvádí → "none".
+- Odběratele vrať v poli `customer` (název, IČO, DIČ) vždy, když je na dokladu uvedený, i u
+  účtenky a pokladního dokladu.
 EOT;
     }
 
@@ -488,6 +516,11 @@ EOT;
                 'already_paid'      => ['type' => 'boolean'],
                 'advance_reference' => ['type' => ['string', 'null']],
                 'supply_nature'     => ['type' => ['string', 'null']],
+                // Přiřazení skenu k existujícímu dokladu (viz scanFieldRules()).
+                'barcode'           => ['type' => ['string', 'null']],
+                'license_plate'     => ['type' => ['string', 'null']],
+                'card_last4'        => ['type' => ['string', 'null']],
+                'company_role'      => ['type' => ['string', 'null'], 'enum' => ['buyer', 'vendor', 'both', 'none', null]],
             ],
         ]);
     }
@@ -515,7 +548,7 @@ EOT;
      * odběratel (customer), NIKDY dodavatel. 1:1 zrcadlo
      * {@see AnthropicClient::buildTenantContextBlock()}; při chybě DB vrací ''.
      */
-    public static function tenantContext(Connection $db, int $supplierId): string
+    public static function tenantContext(Connection $db, int $supplierId, string $tenantRole = LlmGatewayInterface::TENANT_ROLE_BUYER): string
     {
         try {
             $stmt = $db->pdo()->prepare('SELECT company_name, ic, dic, ai_extraction_notes FROM supplier WHERE id = ?');
@@ -541,6 +574,10 @@ EOT;
         if ($dic !== '')  $hint[] = "DIČ \"{$dic}\"";
         $tenantHint = implode(', ', $hint);
 
+        if ($tenantRole === LlmGatewayInterface::TENANT_ROLE_ANY) {
+            return self::roleNeutralContext($tenantHint) . $notes;
+        }
+
         return sprintf(
             "DŮLEŽITÝ KONTEXT (čti jako první, předchází všechna ostatní pravidla):\n"
             . "- Toto je extrakce PŘIJATÉ faktury pro firmu: %s.\n"
@@ -549,6 +586,23 @@ EOT;
             . "- Dodavatel (vendor) je VŽDY ta druhá strana — ten, kdo fakturu vystavil.\n\n",
             $tenantHint,
         ) . $notes;
+    }
+
+    /**
+     * Kontext pro sken k EXISTUJÍCÍMU dokladu: firma může být odběratel i dodavatel,
+     * takže ji model nesmí natlačit do `customer`. Strany určí podle dokladu a roli
+     * firmy vrátí v `company_role`.
+     */
+    public static function roleNeutralContext(string $tenantHint): string
+    {
+        return sprintf(
+            "DŮLEŽITÝ KONTEXT (čti jako první, předchází všechna ostatní pravidla):\n"
+            . "- Doklad se přiřazuje k účetnictví firmy: %s.\n"
+            . "- Firma může být na dokladu odběratel (přijatý doklad) i dodavatel (vydaný doklad).\n"
+            . "- Strany urči podle dokladu: `vendor` je VŽDY ten, kdo doklad vystavil, `customer` ten, komu byl vystaven.\n"
+            . "- Roli firmy na tomto dokladu vrať v poli `company_role`.\n\n",
+            $tenantHint,
+        );
     }
 
     /** Strop délky poznámek firmy v promptu (znaky). */

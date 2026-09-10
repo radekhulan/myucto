@@ -25791,6 +25791,7 @@ components:
         vendor_id: { type: integer }
         varsymbol: { type: [string, "null"] }
         vendor_invoice_number: { type: string }
+        external_barcode: { type: [string, "null"], description: "Čárový kód dokladu z předchozího systému (nálepka na papírovém dokladu). Plní ho převod dat; slouží jako jistý klíč při připojování skenů." }
         document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document] }
         advance_purchase_invoice_id: { type: [integer, "null"], description: "FK na zálohovou fakturu, kterou tento doklad vyúčtovává (párování zálohy)" }
         advance_link_suggested_id: { type: [integer, "null"], description: "AI/auto návrh na propojení zálohy (čeká na potvrzení)" }

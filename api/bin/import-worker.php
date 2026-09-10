@@ -98,6 +98,8 @@ try {
         $container->get(AccountingSetupAnalysisService::class)->run($jobId);
     } elseif ($source === 'accounting_history_reclassification') {
         $container->get(AccountingHistoryReclassificationService::class)->run($jobId);
+    } elseif ($source === 'scan_attach') {
+        $container->get(\MyInvoice\Service\Document\ScanAttach\ScanAttachJobService::class)->run($jobId);
     } else {
         $jobs->appendLog($jobId, "Source '{$source}' není zatím podporován workerem.");
         $jobs->markFailed($jobId, "Source '{$source}' není podporován.");

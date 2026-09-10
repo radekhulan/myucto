@@ -148,7 +148,7 @@ final class AnthropicClient implements LlmGatewayInterface
      *
      * @return array{ok:bool, data?:array<string,mixed>, error?:string, model?:string, usage?:array<string,int>}
      */
-    public function extractInvoice(int $supplierId, string $pdfBytes, ?string $modelOverride = null): array
+    public function extractInvoice(int $supplierId, string $pdfBytes, ?string $modelOverride = null, string $tenantRole = self::TENANT_ROLE_BUYER): array
     {
         $creds = $this->getCredentials($supplierId);
         if ($creds === null) {
@@ -168,7 +168,7 @@ final class AnthropicClient implements LlmGatewayInterface
         // že tenant je odběratel (customer), NIKDY dodavatel. Bez tohoto AI občas
         // zamění vendor↔customer u faktur kde má dodavatel velkou vlastní hlavičku
         // (NC Auto / BMW Service / mobilní operátoři) a tenanta dá do vendor pozice.
-        $tenantBlock = $this->buildTenantContextBlock($supplierId);
+        $tenantBlock = $this->buildTenantContextBlock($supplierId, $tenantRole);
 
         $systemPrompt = $tenantBlock . <<<'EOT'
 Jsi expert na extrakci dat z českých a slovenských faktur. Z PDF přílohy vytáhneš strukturovaná data ve striktním JSON formátu.
@@ -241,7 +241,11 @@ JSON schema:
   ],
   "already_paid": boolean,
   "advance_reference": string|null,
-  "supply_nature": "goods"|"services"|"mixed"|null
+  "supply_nature": "goods"|"services"|"mixed"|null,
+  "barcode": string|null,
+  "license_plate": string|null,
+  "card_last4": string|null,
+  "company_role": "buyer"|"vendor"|"both"|"none"|null
 }
 
 DŮLEŽITÉ k DATŮM (`issue_date`, `tax_date`, `due_date`) — NEJDŮLEŽITĚJŠÍ, ČTI POZORNĚ:
@@ -599,7 +603,7 @@ Příklad — faktura NC Auto s.r.o. (BMW Service), struktura:
   DPH 21 %                     483.00 Kč
   K úhradě                   2 783.00 Kč      →  total_with_vat = 2783.00
 Výsledek: items = 4 řádky (NE 6 a NE 7); total_with_vat = 2783.00.
-EOT;
+EOT . "\n\n" . InvoiceExtractionPrompt::scanFieldRules();
 
         try {
             ['code' => $code, 'body' => $body] = $this->postWithRetry([
@@ -950,8 +954,11 @@ EOT;
      * Pokud tenant info nelze načíst (DB error / chybějící data), vrátí prázdný
      * string a prompt zůstane v původní podobě — žádný hard fail.
      */
-    private function buildTenantContextBlock(int $supplierId): string
+    private function buildTenantContextBlock(int $supplierId, string $tenantRole = self::TENANT_ROLE_BUYER): string
     {
+        if ($tenantRole === self::TENANT_ROLE_ANY) {
+            return InvoiceExtractionPrompt::tenantContext($this->db, $supplierId, $tenantRole);
+        }
         try {
             $stmt = $this->db->pdo()->prepare(
                 'SELECT company_name, ic, dic, ai_extraction_notes FROM supplier WHERE id = ?'

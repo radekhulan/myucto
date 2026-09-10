@@ -119,10 +119,10 @@ final class OpenAiClient implements LlmGatewayInterface
         }
     }
 
-    public function extractInvoice(int $supplierId, string $pdfBytes, ?string $modelOverride = null): array
+    public function extractInvoice(int $supplierId, string $pdfBytes, ?string $modelOverride = null, string $tenantRole = self::TENANT_ROLE_BUYER): array
     {
         $r = $this->chat($supplierId, $pdfBytes, $modelOverride,
-            InvoiceExtractionPrompt::tenantContext($this->db, $supplierId) . InvoiceExtractionPrompt::invoiceSystem(),
+            InvoiceExtractionPrompt::tenantContext($this->db, $supplierId, $tenantRole) . InvoiceExtractionPrompt::invoiceSystem(),
             'Vytáhni strukturovaná data z této faktury podle JSON schema. Odpověz JEN samotným JSON.',
             16384, InvoiceExtractionPrompt::invoiceJsonSchema());
         if (!$r['ok']) return $r;

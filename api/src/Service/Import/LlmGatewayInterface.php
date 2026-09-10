@@ -14,12 +14,25 @@ namespace MyInvoice\Service\Import;
  */
 interface LlmGatewayInterface
 {
+    /** Firma je na dokladu odběratel (přijatá faktura) — výchozí režim extrakce. */
+    public const TENANT_ROLE_BUYER = 'buyer';
+
+    /**
+     * Role firmy není předem daná — sken k existujícímu dokladu může být přijatý
+     * i vydaný doklad. Model strany neurčuje podle firmy a roli vrátí v `company_role`.
+     */
+    public const TENANT_ROLE_ANY = 'any';
+
     /**
      * Hlavní extrakce faktury.
      *
+     * Vedle údajů pro založení dokladu vrací i pole pro přiřazení skenu
+     * k existujícímu dokladu: `barcode`, `license_plate`, `card_last4`,
+     * `company_role` (buyer|vendor|both|none) a odběratele v `customer`.
+     *
      * @return array{ok:bool, data?:array<string,mixed>, error?:string, model?:string, usage?:array<string,int>}
      */
-    public function extractInvoice(int $supplierId, string $pdfBytes, ?string $modelOverride = null): array;
+    public function extractInvoice(int $supplierId, string $pdfBytes, ?string $modelOverride = null, string $tenantRole = self::TENANT_ROLE_BUYER): array;
 
     /**
      * Řádky výpisu palivové karty.

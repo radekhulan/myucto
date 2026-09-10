@@ -499,6 +499,10 @@ final class RoutePermissionMap
         ['GET', '#^/api/(bank-statements|bank-transactions)(/|$)#', 'bank', AccessLevel::READ],
         ['*', '#^/api/(bank-statements|bank-transactions)(/|$)#', 'bank', AccessLevel::WRITE],
 
+        // Připojení skenů k dokladům: nahrání dávky = zápis do Dokumentů; oprávnění
+        // k cílovému typu dokladu (přijatá/vydaná faktura, pokladna) kontroluje akce.
+        ['GET', '#^/api/scan-attach(/|$)#', 'documents', AccessLevel::READ],
+        ['*', '#^/api/scan-attach(/|$)#', 'documents.upload', AccessLevel::WRITE],
         ['GET', '#^/api/document-requests(/|$)#', 'documents.requests', AccessLevel::READ],
         ['*', '#^/api/document-requests(/|$)#', 'documents.requests', AccessLevel::WRITE],
         ['*', '#^/api/documents/[0-9]+/(move|links)(/|$)#', 'documents.move', AccessLevel::WRITE],

@@ -69,6 +69,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'purchase-invoices/:id(\\d+)/edit',  name: 'purchase-invoice-edit',    component: () => import('@/pages/purchase-invoices/InvoiceEditor.vue'), meta: { requiresSupplier: true } },
       // Dokumenty (sekce Dokumenty — plán source/11)
       { path: 'documents',              name: 'documents',        component: () => import('@/pages/documents/DocumentsBrowser.vue') },
+      // Připojení skenů k existujícím dokladům (dávky na pozadí).
+      { path: 'documents/scan-attach',  name: 'scan-attach',      component: () => import('@/pages/documents/ScanAttach.vue'), meta: { requiresSupplier: true } },
       { path: 'documents/:id(\\d+)',    name: 'document-detail',  component: () => import('@/pages/documents/DocumentDetail.vue') },
       // Vyžádání chybějících dokladů (Fáze F, audit 2026-07) — účetní pohled.
       { path: 'document-requests',      name: 'document-requests', component: () => import('@/pages/documents/DocumentRequests.vue') },

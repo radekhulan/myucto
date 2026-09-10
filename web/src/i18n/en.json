@@ -430,6 +430,118 @@
     "job_status_failed": "Failed",
     "job_status_cancelled": "Cancelled"
   },
+  "scan_attach": {
+    "nav": "Scans to documents",
+    "title": "Attach scans to documents",
+    "subtitle": "Upload a batch of scans and the app attaches them to documents that already exist in the system.",
+    "manual_link": "Guide",
+    "action_new": "Upload scans",
+    "action_resume": "Run again",
+    "action_resume_hint": "Continues after a failure or cancellation and matches again. Finished files and your decisions are kept.",
+    "action_cancel": "Cancel processing",
+    "action_refresh": "Refresh",
+    "action_delete": "Delete batch",
+    "delete_confirm": "Delete the batch? Files in Documents and their links to documents are kept.",
+    "form_title": "New batch",
+    "form_files": "Scan files",
+    "form_files_hint": "PDFs and images, or a single ZIP. Hundreds to thousands of files are processed in the background.",
+    "form_selected": "Files selected: {n} ({size})",
+    "form_targets": "Attach to",
+    "form_date_from": "Documents issued from",
+    "form_date_to": "To",
+    "form_extract": "Extract scan content with AI",
+    "form_extract_hint": "Without extraction, matching uses only the barcode and the document number in the file name.",
+    "form_accept_likely": "Attach likely matches without confirmation",
+    "form_trust_doc_no": "Trust the document number in the file name even without content confirmation",
+    "form_submit": "Upload and process",
+    "uploading": "Uploading {done} / {total}",
+    "started": "The batch is being processed in the background",
+    "done": "Done: {attached} attached, {candidates} to confirm",
+    "no_targets_allowed": "You are not allowed to attach files to any document type.",
+    "target_unavailable": "unavailable",
+    "target": {
+      "purchase_invoice": "Received invoices",
+      "invoice": "Issued invoices",
+      "cash_document": "Cash documents"
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Processing",
+      "completed": "Done",
+      "completed_with_warnings": "Done with warnings",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "background_hint": "Processing runs on the server, you can close this page.",
+    "log": "Progress log",
+    "batch_title": "Batch #{id}",
+    "running_overview": "The overview will be available once processing finishes.",
+    "list_limited": "Showing the first {n} rows.",
+    "history_title": "Batches",
+    "history_empty": "No batch yet.",
+    "stat": {
+      "files": "Files"
+    },
+    "tab": {
+      "attached": "Attached",
+      "candidates": "To review",
+      "missing": "Documents without scan",
+      "orphans": "Scans without document",
+      "unrecognized": "Unrecognized",
+      "discrepancies": "Discrepancies"
+    },
+    "empty": {
+      "attached": "Nothing was attached.",
+      "candidates": "Nothing is waiting for confirmation.",
+      "missing": "All documents in the range have an attachment.",
+      "orphans": "No company scans without a document.",
+      "unrecognized": "All scans were assigned."
+    },
+    "col_file": "Scan",
+    "col_scan": "From scan",
+    "col_document": "Document",
+    "col_method": "By",
+    "col_level": "Certainty",
+    "col_type": "Type",
+    "col_counterparty": "Counterparty",
+    "col_date": "Date",
+    "col_amount": "Amount",
+    "col_result": "Result",
+    "col_actions": "Actions",
+    "col_created": "Batch",
+    "col_status": "Status",
+    "col_files": "Files",
+    "col_attached": "Attached",
+    "col_proposed": "To confirm",
+    "method": {
+      "barcode": "barcode",
+      "doc_no": "number in name",
+      "content": "content"
+    },
+    "level": {
+      "certain": "Certain",
+      "likely": "Likely",
+      "candidate": "Candidate"
+    },
+    "note": {
+      "amount_mismatch": "Amount on the scan differs from the document",
+      "doc_no_confirmed": "Number confirmed by content",
+      "doc_no_unconfirmed": "Number in the name not confirmed by content",
+      "ambiguous": "Several equally good matches",
+      "attach_failed": "Attaching failed"
+    },
+    "outcome": {
+      "foreign": "Another company's document",
+      "unknown": "Cannot determine",
+      "unreadable": "Not extracted"
+    },
+    "confirm": "Attach",
+    "reject": "Reject",
+    "confirmed": "Scan attached",
+    "rejected": "Proposal rejected",
+    "scan_none": "not extracted",
+    "discrepancies_pending": "Comparing attached scans with document data (date, amount, tax point) will be provided by the document-versus-attachment check."
+  },
   "search": {
     "placeholder": "Search… (menu, clients, invoices)",
     "no_results": "Nothing found",

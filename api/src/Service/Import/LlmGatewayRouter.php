@@ -36,9 +36,9 @@ final class LlmGatewayRouter implements LlmGatewayInterface
         private readonly LoggerInterface $logger,
     ) {}
 
-    public function extractInvoice(int $supplierId, string $pdfBytes, ?string $modelOverride = null): array
+    public function extractInvoice(int $supplierId, string $pdfBytes, ?string $modelOverride = null, string $tenantRole = self::TENANT_ROLE_BUYER): array
     {
-        return $this->dispatch($supplierId, fn (LlmGatewayInterface $c) => $c->extractInvoice($supplierId, $pdfBytes, $modelOverride));
+        return $this->dispatch($supplierId, fn (LlmGatewayInterface $c) => $c->extractInvoice($supplierId, $pdfBytes, $modelOverride, $tenantRole));
     }
 
     public function extractFuelTransactions(int $supplierId, string $pdfBytes, ?string $modelOverride = null): array

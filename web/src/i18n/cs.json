@@ -430,6 +430,118 @@
     "job_status_failed": "Chyba",
     "job_status_cancelled": "Zrušeno"
   },
+  "scan_attach": {
+    "nav": "Skeny k dokladům",
+    "title": "Připojení skenů k dokladům",
+    "subtitle": "Nahrajte hromadu skenů a aplikace je připojí k dokladům, které už v systému jsou.",
+    "manual_link": "Návod",
+    "action_new": "Nahrát skeny",
+    "action_resume": "Spustit znovu",
+    "action_resume_hint": "Naváže po pádu nebo zrušení a spáruje znovu. Hotové soubory i vaše rozhodnutí zůstanou.",
+    "action_cancel": "Zrušit zpracování",
+    "action_refresh": "Obnovit",
+    "action_delete": "Smazat dávku",
+    "delete_confirm": "Smazat dávku? Soubory v Dokumentech i připojení k dokladům zůstanou.",
+    "form_title": "Nová dávka",
+    "form_files": "Soubory skenů",
+    "form_files_hint": "PDF a obrázky, nebo jeden ZIP. Stovky až tisíce souborů se zpracují na pozadí.",
+    "form_selected": "Vybráno souborů: {n} ({size})",
+    "form_targets": "Připojovat k",
+    "form_date_from": "Doklady vystavené od",
+    "form_date_to": "Do",
+    "form_extract": "Vytěžit obsah skenů pomocí AI",
+    "form_extract_hint": "Bez vytěžení se páruje jen podle čárového kódu a čísla dokladu v názvu souboru.",
+    "form_accept_likely": "Pravděpodobné shody připojit bez potvrzení",
+    "form_trust_doc_no": "Číslu dokladu v názvu souboru věřit i bez potvrzení obsahem",
+    "form_submit": "Nahrát a zpracovat",
+    "uploading": "Nahrávám {done} / {total}",
+    "started": "Dávka se zpracovává na pozadí",
+    "done": "Hotovo: připojeno {attached}, k potvrzení {candidates}",
+    "no_targets_allowed": "Nemáte oprávnění připojovat přílohy k žádnému typu dokladů.",
+    "target_unavailable": "nedostupné",
+    "target": {
+      "purchase_invoice": "Přijaté faktury",
+      "invoice": "Vydané faktury",
+      "cash_document": "Pokladní doklady"
+    },
+    "status": {
+      "queued": "Ve frontě",
+      "running": "Zpracovává se",
+      "completed": "Hotovo",
+      "completed_with_warnings": "Hotovo s upozorněním",
+      "failed": "Chyba",
+      "cancelled": "Zrušeno"
+    },
+    "background_hint": "Zpracování běží na serveru, stránku můžete zavřít.",
+    "log": "Záznam průběhu",
+    "batch_title": "Dávka #{id}",
+    "running_overview": "Přehled bude k dispozici po dokončení zpracování.",
+    "list_limited": "Zobrazeno prvních {n} řádků.",
+    "history_title": "Dávky",
+    "history_empty": "Zatím žádná dávka.",
+    "stat": {
+      "files": "Souborů"
+    },
+    "tab": {
+      "attached": "Připojeno",
+      "candidates": "Ke kontrole",
+      "missing": "Doklady bez skenu",
+      "orphans": "Skeny bez dokladu",
+      "unrecognized": "Nerozpoznané",
+      "discrepancies": "Rozpory"
+    },
+    "empty": {
+      "attached": "Nic se nepřipojilo.",
+      "candidates": "Nic nečeká na potvrzení.",
+      "missing": "Všechny doklady v rozsahu mají přílohu.",
+      "orphans": "Žádné skeny firmy bez dokladu.",
+      "unrecognized": "Všechny skeny se podařilo přiřadit."
+    },
+    "col_file": "Sken",
+    "col_scan": "Ze skenu",
+    "col_document": "Doklad",
+    "col_method": "Podle",
+    "col_level": "Jistota",
+    "col_type": "Typ",
+    "col_counterparty": "Protistrana",
+    "col_date": "Datum",
+    "col_amount": "Částka",
+    "col_result": "Výsledek",
+    "col_actions": "Akce",
+    "col_created": "Dávka",
+    "col_status": "Stav",
+    "col_files": "Soubory",
+    "col_attached": "Připojeno",
+    "col_proposed": "K potvrzení",
+    "method": {
+      "barcode": "čárového kódu",
+      "doc_no": "čísla v názvu",
+      "content": "obsahu"
+    },
+    "level": {
+      "certain": "Jistá",
+      "likely": "Pravděpodobná",
+      "candidate": "Kandidát"
+    },
+    "note": {
+      "amount_mismatch": "Částka na skenu nesedí s dokladem",
+      "doc_no_confirmed": "Číslo potvrzené obsahem",
+      "doc_no_unconfirmed": "Číslo v názvu bez potvrzení obsahem",
+      "ambiguous": "Víc stejně dobrých shod",
+      "attach_failed": "Připojení se nepovedlo"
+    },
+    "outcome": {
+      "foreign": "Doklad jiné firmy",
+      "unknown": "Nelze určit",
+      "unreadable": "Nevytěženo"
+    },
+    "confirm": "Připojit",
+    "reject": "Odmítnout",
+    "confirmed": "Sken připojen",
+    "rejected": "Návrh odmítnut",
+    "scan_none": "nevytěženo",
+    "discrepancies_pending": "Porovnání připojených skenů s údaji dokladů (datum, částka, DUZP) doplní kontrola dokladů proti přílohám."
+  },
   "search": {
     "placeholder": "Hledat… (menu, klienti, faktury)",
     "no_results": "Nic nenalezeno",

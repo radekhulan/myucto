@@ -2935,6 +2935,19 @@ final class Routes
         $app->get   ('/api/documents/jobs/{id:[0-9]+}/download', [DocumentJobsAction::class, 'download']);
         $app->post  ('/api/documents/jobs/{id:[0-9]+}/cancel',   [DocumentJobsAction::class, 'cancel']);
         $app->delete('/api/documents/jobs/{id:[0-9]+}',          [DocumentJobsAction::class, 'delete']);
+        // Připojení skenů k existujícím dokladům (dávky na pozadí)
+        $app->get   ('/api/scan-attach/targets',                          [\MyInvoice\Action\Document\ScanAttachAction::class, 'targets']);
+        $app->get   ('/api/scan-attach/batches',                          [\MyInvoice\Action\Document\ScanAttachAction::class, 'list']);
+        $app->post  ('/api/scan-attach/batches',                          [\MyInvoice\Action\Document\ScanAttachAction::class, 'start']);
+        $app->post  ('/api/scan-attach/batches/{id:[0-9]+}/chunk-bytes',  [\MyInvoice\Action\Document\ScanAttachAction::class, 'chunkBytes']);
+        $app->post  ('/api/scan-attach/batches/{id:[0-9]+}/chunk-files',  [\MyInvoice\Action\Document\ScanAttachAction::class, 'chunkFiles']);
+        $app->post  ('/api/scan-attach/batches/{id:[0-9]+}/finish',       [\MyInvoice\Action\Document\ScanAttachAction::class, 'finish']);
+        $app->post  ('/api/scan-attach/batches/{id:[0-9]+}/resume',       [\MyInvoice\Action\Document\ScanAttachAction::class, 'resume']);
+        $app->post  ('/api/scan-attach/batches/{id:[0-9]+}/cancel',       [\MyInvoice\Action\Document\ScanAttachAction::class, 'cancel']);
+        $app->get   ('/api/scan-attach/batches/{id:[0-9]+}',              [\MyInvoice\Action\Document\ScanAttachAction::class, 'show']);
+        $app->delete('/api/scan-attach/batches/{id:[0-9]+}',              [\MyInvoice\Action\Document\ScanAttachAction::class, 'delete']);
+        $app->post  ('/api/scan-attach/matches/{id:[0-9]+}/confirm',      [\MyInvoice\Action\Document\ScanAttachAction::class, 'confirm']);
+        $app->post  ('/api/scan-attach/matches/{id:[0-9]+}/reject',       [\MyInvoice\Action\Document\ScanAttachAction::class, 'reject']);
         $app->get   ('/api/documents/tags',           [DocumentsAction::class, 'listTags']);
         $app->get   ('/api/documents/trash',          [DocumentsAction::class, 'trash']);
         $app->post  ('/api/documents/trash/empty',    [DocumentsAction::class, 'emptyTrash']);

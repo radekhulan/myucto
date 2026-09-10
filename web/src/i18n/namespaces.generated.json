@@ -16,6 +16,7 @@
     "nav",
     "passkeys",
     "payment_cards",
+    "scan_attach",
     "search",
     "session_lock",
     "status",

@@ -62,6 +62,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 ### Dokumenty
 
 31. [Dokumenty](31_Dokumenty.md)
+31a. [Připojení skenů k dokladům](31a_Pripojeni_skenu.md)
 32. [Kniha jízd](32_Kniha_jizd.md)
 
 ### Sklad
