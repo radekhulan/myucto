@@ -202,7 +202,13 @@ final class ScanAttachJobTest extends TestCase
         self::assertContains($this->pi['older'], $missingIds);
         self::assertContains($this->pi['proposal'], $missingIds);
         self::assertNotContains($this->pi['barcode'], $missingIds);
-        self::assertFalse($overview['discrepancies']['available']);
+        self::assertTrue($overview['discrepancies']['available']);
+        self::assertSame(0, $overview['counts']['discrepancies'], 'připojené skeny sedí na doklady');
+        self::assertSame(
+            'match',
+            $this->pdo->query("SELECT status FROM attachment_checks WHERE entity_type = 'purchase_invoice' AND entity_id = {$this->pi['content']}")->fetchColumn(),
+            'připojený sken se hned porovnal s dokladem',
+        );
 
         // Opakovaný běh (navázání po pádu): nic se nezdvojí a nic se znovu nevytěžuje.
         $calls = $this->llm->invoiceCalls;

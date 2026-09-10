@@ -90,6 +90,7 @@ final class AiPdfExtractorUnitTest extends TestCase
             $this->createMock(PurchaseInvoicePdfArchiver::class),
             new ExpenseKindClassifier(), // pure, bez DB — mock by nic nepřidal
             $planner,
+            null, // uložení vytěžení importu — helpery ho nepotřebují
             new NullLogger(),
         );
     }

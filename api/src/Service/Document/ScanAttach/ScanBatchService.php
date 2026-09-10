@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Document\ScanAttach;
 
 use MyInvoice\Repository\DocumentExtractionRepository;
 use MyInvoice\Repository\ScanBatchRepository;
+use MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService;
 use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\Logbook\FuelingFromScan;
 
@@ -25,6 +26,7 @@ final class ScanBatchService
         private readonly DocumentExtractionRepository $extractions,
         private readonly DocumentStorage $storage,
         private readonly FuelingFromScan $fuelingFromScan,
+        private readonly AttachmentCheckService $attachmentChecks,
     ) {}
 
     /**
@@ -59,6 +61,12 @@ final class ScanBatchService
         // se jen doplní). Evidenční vrstva: její chyba nesmí zvrátit připojení skenu.
         try {
             $this->fuelingFromScan->afterAttach($supplierId, $targetType, $targetId, (int) $item['document_id']);
+        } catch (\Throwable) {
+        }
+        // Připojený sken se hned porovná s dokladem (sekce Rozpory). Selhání kontroly
+        // nesmí vrátit připojení — to už proběhlo.
+        try {
+            $this->attachmentChecks->recheckEntity($supplierId, $targetType, $targetId);
         } catch (\Throwable) {
         }
     }
@@ -126,7 +134,7 @@ final class ScanBatchService
 
     /**
      * Přehled dávky pro UI: připojeno, návrhy k potvrzení, doklady bez skenu,
-     * skeny firmy bez dokladu, nerozpoznané skeny a (zatím prázdné) rozpory.
+     * skeny firmy bez dokladu, nerozpoznané skeny a rozpory připojených dokladů.
      *
      * @param array<string,mixed> $job řádek import_jobs
      * @return array<string,mixed>
@@ -208,6 +216,13 @@ final class ScanBatchService
             }
         }
 
+        // Rozpory: otevřené rozdíly dokladů, ke kterým dávka připojila sken.
+        $attachedEntities = [];
+        foreach ($attached as $a) {
+            $attachedEntities[$a['target_type'] . ':' . $a['target_id']] = [$a['target_type'], $a['target_id']];
+        }
+        $discrepancies = $this->attachmentChecks->listMismatches($supplierId, 'open', array_values($attachedEntities), self::LIST_LIMIT);
+
         $byOutcome = $this->batches->countItemsByOutcome($supplierId, $jobId);
         return [
             'targets' => $types,
@@ -220,16 +235,14 @@ final class ScanBatchService
                 'missing' => $missingTotal,
                 'orphans' => count($orphans),
                 'unrecognized' => count($unrecognized),
-                'discrepancies' => 0,
+                'discrepancies' => $discrepancies['total'],
             ],
             'attached' => array_slice($attached, 0, self::LIST_LIMIT),
             'candidates' => array_slice($candidates, 0, self::LIST_LIMIT),
             'missing' => array_slice($missing, 0, self::LIST_LIMIT),
             'orphans' => array_slice($orphans, 0, self::LIST_LIMIT),
             'unrecognized' => array_slice($unrecognized, 0, self::LIST_LIMIT),
-            // Porovnání připojeného skenu s údaji dokladu doplní kontrola dokladů
-            // proti přílohám; do té doby je sekce prázdná a UI ukáže vysvětlení.
-            'discrepancies' => ['available' => false, 'rows' => []],
+            'discrepancies' => ['available' => true, 'rows' => $discrepancies['rows']],
             'list_limit' => self::LIST_LIMIT,
         ];
     }

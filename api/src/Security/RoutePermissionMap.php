@@ -503,6 +503,10 @@ final class RoutePermissionMap
         // k cílovému typu dokladu (přijatá/vydaná faktura, pokladna) kontroluje akce.
         ['GET', '#^/api/scan-attach(/|$)#', 'documents', AccessLevel::READ],
         ['*', '#^/api/scan-attach(/|$)#', 'documents.upload', AccessLevel::WRITE],
+        // Přehled rozporů dokladů s přílohami (stránka Skeny k dokladům) a hromadný přepočet.
+        // Odznak a potvrzení jednoho dokladu visí pod cestou dokladu a řídí se jeho oprávněním.
+        ['GET', '#^/api/attachment-checks(/|$)#', 'documents', AccessLevel::READ],
+        ['*', '#^/api/attachment-checks(/|$)#', 'documents.upload', AccessLevel::WRITE],
         ['GET', '#^/api/document-requests(/|$)#', 'documents.requests', AccessLevel::READ],
         ['*', '#^/api/document-requests(/|$)#', 'documents.requests', AccessLevel::WRITE],
         ['*', '#^/api/documents/[0-9]+/(move|links)(/|$)#', 'documents.move', AccessLevel::WRITE],

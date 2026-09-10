@@ -2,9 +2,16 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { CashDocument } from '@/api/cash'
 
-const m = vi.hoisted(() => ({ canRead: vi.fn() }))
+const m = vi.hoisted(() => ({ canRead: vi.fn(), canWrite: vi.fn() }))
 
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: m.canRead }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: m.canRead, canWrite: m.canWrite }) }))
+vi.mock('@/components/documents/AttachmentCheckBadge.vue', () => ({
+  default: {
+    name: 'AttachmentCheckBadge',
+    props: { entityType: String, entityId: Number, canAcknowledge: Boolean },
+    template: '<span />',
+  },
+}))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
@@ -35,6 +42,19 @@ describe('CashDocumentDetail — přílohy', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canRead.mockReturnValue(true)
+    m.canWrite.mockReturnValue(true)
+  })
+
+  it('ukáže odznak porovnání s vytěženou přílohou tohoto dokladu', () => {
+    m.canWrite.mockReturnValue(false)
+    const wrapper = mount(CashDocumentDetail, { props: { doc: doc(), purposeLabel: (p: string) => p } })
+
+    const badge = wrapper.findComponent({ name: 'AttachmentCheckBadge' })
+    expect(badge.exists()).toBe(true)
+    expect(badge.props('entityType')).toBe('cash_document')
+    expect(badge.props('entityId')).toBe(42)
+    expect(badge.props('canAcknowledge')).toBe(false)
+    expect(m.canWrite).toHaveBeenCalledWith('cash.document.write')
   })
 
   it('ukáže sekci Přílohy navázanou na tento pokladní doklad s nahráváním', () => {

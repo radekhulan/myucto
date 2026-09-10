@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PurchaseDmsDocumentsPanel from '@/components/purchase/PurchaseDmsDocumentsPanel.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
@@ -816,6 +817,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
             class="text-xs px-2 py-0.5 rounded font-normal bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
             :title="t('purchase_invoice.source.badge_title')"
           >{{ invoice.source_format.toUpperCase() }}</a>
+          <!-- Doklad proti vytěžené příloze (skenu nebo PDF z importu); bez vytěžení se nezobrazí. -->
+          <AttachmentCheckBadge entity-type="purchase_invoice" :entity-id="invoice.id"
+            :can-acknowledge="auth.canWrite('purchase_invoices')" />
         </h1>
         <ActionBar :actions="purchaseActions" />
       </div>

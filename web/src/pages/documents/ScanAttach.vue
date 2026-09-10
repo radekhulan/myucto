@@ -4,8 +4,8 @@
  *
  * Nahrání dávky (ZIP nebo víc souborů) → zpracování na pozadí → přehled:
  * co se připojilo, co čeká na potvrzení, které doklady sken nemají a které
- * skeny firmy k žádnému dokladu nesedí. Sekce „Rozpory" je připravená pro
- * porovnání skenu s údaji dokladu.
+ * skeny firmy k žádnému dokladu nesedí a které připojené doklady se liší od
+ * vytěženého skenu. Pod dávkou je přehled rozporů celé firmy.
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -22,6 +22,10 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import AttachmentDiscrepancyTable from '@/components/documents/AttachmentDiscrepancyTable.vue'
+import AttachmentDiscrepanciesPanel from '@/components/documents/AttachmentDiscrepanciesPanel.vue'
+import AttachmentCheckReview from '@/components/documents/AttachmentCheckReview.vue'
+import type { AttachmentCheckRow } from '@/api/attachmentChecks'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -42,6 +46,13 @@ const error = ref('')
 const showForm = ref(false)
 const tab = ref<Tab>('candidates')
 const deciding = ref<number | null>(null)
+const review = ref<AttachmentCheckRow | null>(null)
+const firmPanel = ref<InstanceType<typeof AttachmentDiscrepanciesPanel> | null>(null)
+
+async function onReviewed() {
+  if (detail.value) detail.value = await scanAttachApi.batch(detail.value.id)
+  void firmPanel.value?.reload()
+}
 
 const picked = ref<File[]>([])
 const selectedTargets = ref<ScanTargetType[]>(['purchase_invoice'])
@@ -430,7 +441,7 @@ onUnmounted(stopPolling)
               <div class="text-xl font-semibold"
                 :class="{
                   'text-success-600': k === 'attached' && tabCount(k) > 0,
-                  'text-warning-600': (k === 'candidates' || k === 'orphans' || k === 'missing') && tabCount(k) > 0,
+                  'text-warning-600': (k === 'candidates' || k === 'orphans' || k === 'missing' || k === 'discrepancies') && tabCount(k) > 0,
                   'text-neutral-400': tabCount(k) === 0,
                 }">{{ tabCount(k) }}</div>
               <div class="text-neutral-500">{{ t('scan_attach.tab.' + k) }}</div>
@@ -592,8 +603,10 @@ onUnmounted(stopPolling)
           </div>
 
           <!-- Rozpory -->
-          <div v-else class="rounded-md border border-dashed border-neutral-200 p-4 text-sm text-neutral-500">
-            {{ t('scan_attach.discrepancies_pending') }}
+          <div v-else>
+            <p class="text-xs text-neutral-500 mb-2">{{ t('attachment_check.batch_hint') }}</p>
+            <p v-if="overview.discrepancies.rows.length === 0" class="text-sm text-neutral-500">{{ t('attachment_check.batch_empty') }}</p>
+            <AttachmentDiscrepancyTable v-else :rows="overview.discrepancies.rows" @review="review = $event" />
           </div>
         </template>
 
@@ -604,6 +617,9 @@ onUnmounted(stopPolling)
           <pre class="mt-2 max-h-72 overflow-auto bg-neutral-900 text-neutral-100 rounded p-3 text-[11px] leading-relaxed">{{ detail.log_text }}</pre>
         </details>
       </div>
+
+      <!-- Rozpory celé firmy (i doklady z AI importu PDF, které v žádné dávce nejsou) -->
+      <AttachmentDiscrepanciesPanel ref="firmPanel" class="mb-4" :can-recheck="canUpload" />
 
       <!-- Historie dávek -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
@@ -634,5 +650,8 @@ onUnmounted(stopPolling)
         </div>
       </div>
     </template>
+
+    <AttachmentCheckReview v-if="review" :entity-type="review.entity_type" :entity-id="review.entity_id"
+      @close="review = null" @changed="onReviewed" />
   </div>
 </template>

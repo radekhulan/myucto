@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { AttachmentCheckRow } from './attachmentChecks'
 
 /**
  * Připojení skenů k dokladům, které už v systému jsou. Dávka se nahraje po
@@ -115,7 +116,7 @@ export interface ScanOverview {
   missing: ScanMissingRow[]
   orphans: ScanItemRow[]
   unrecognized: ScanItemRow[]
-  discrepancies: { available: boolean; rows: unknown[] }
+  discrepancies: { available: boolean; rows: AttachmentCheckRow[] }
   list_limit: number
 }
 

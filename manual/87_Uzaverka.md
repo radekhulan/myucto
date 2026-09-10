@@ -621,7 +621,12 @@ zůstatků**:
 - **Saldo 343 vs. přiznání DPH** — porovná zaúčtovaný obrat účtu **343** s daní
   vypočtenou z přiznání za **shodné zdaňovací období** (viz [Křížová kontrola §
   34](36_Vykazy_DPH.md)); dává smysl jen když je zvolený rozsah přesně jeden kalendářní
-  měsíc nebo kvartál — jinak se zobrazí jen informativní poznámka.
+  měsíc nebo kvartál — jinak se zobrazí jen informativní poznámka,
+- **DUZP proti příloze** (varování) — doklady, u kterých AI vyčetla z přílohy DUZP
+  v jiném měsíci, než je DUZP dokladu, a doklad vstupuje do DPH. Doklad se ukáže
+  v kontrole obou dotčených měsíců. **Rozdíly proti příloze** (informativně) hlásí
+  rozdílnou částku, IČO, VS nebo den DUZP. Potvrzené rozdíly se nehlásí; podrobnosti
+  v kapitole [Připojení skenů k dokladům](31a_Pripojeni_skenu.md#rozpory-dokladu-s-prilohami).
 
 Každý řádek má **zelenou fajfku** (v pořádku) nebo **červený křížek** s počtem nálezů a
 je **proklikatelný**: nezaúčtované doklady vedou do seznamu faktur/PF, zůstatkové

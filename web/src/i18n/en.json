@@ -539,8 +539,73 @@
     "reject": "Reject",
     "confirmed": "Scan attached",
     "rejected": "Proposal rejected",
-    "scan_none": "not extracted",
-    "discrepancies_pending": "Comparing attached scans with document data (date, amount, tax point) will be provided by the document-versus-attachment check."
+    "scan_none": "not extracted"
+  },
+  "attachment_check": {
+    "badge_title": "Document compared with its extracted attachment",
+    "badge_ok": "Matches attachment",
+    "badge_acknowledged": "Difference confirmed",
+    "badge_warning": "Conflicts with attachment ({n})",
+    "badge_info": "Differs from attachment ({n})",
+    "modal_title": "Document versus attachment",
+    "loading": "Comparing…",
+    "attachment": "Attachment",
+    "pdf_slot": "Document PDF",
+    "status": {
+      "match": "Matches",
+      "mismatch": "Difference",
+      "skipped": "Cannot compare"
+    },
+    "severity": {
+      "warning": "Affects VAT",
+      "info": "Informative"
+    },
+    "field": {
+      "tax_date_period": "Tax point (another month)",
+      "tax_date": "Tax point",
+      "amount": "Amount",
+      "counterparty_ico": "Counterparty company ID",
+      "variable_symbol": "Variable symbol"
+    },
+    "doc_type": {
+      "purchase_invoice": "Received invoice",
+      "invoice": "Issued invoice",
+      "cash_document": "Cash document"
+    },
+    "col_document": "Document",
+    "col_counterparty": "Counterparty",
+    "col_field": "Field",
+    "col_doc": "On document",
+    "col_attachment": "On attachment",
+    "col_differences": "Differences",
+    "col_state": "State",
+    "col_actions": "Actions",
+    "vat_hint": "A tax point in another month moves the document into another VAT period and control statement. Check the date against the original document.",
+    "match_text": "Document data match the extracted attachment.",
+    "skipped_text": "No data that could be compared with the document were extracted from the attachment.",
+    "acknowledged_note": "Confirmed as correct: {reason}",
+    "previous_ack": "Previously confirmed (“{reason}”), but the document or attachment has changed since.",
+    "reason_label": "Why the document is correct",
+    "reason_placeholder": "E.g. the attachment is a delivery note, the tax point follows the contract's supply date.",
+    "acknowledge": "Confirm it is correct",
+    "acknowledged": "Difference confirmed",
+    "reason_required": "Enter a reason (at least 3 characters).",
+    "review": "Review",
+    "panel_title": "Documents conflicting with attachments",
+    "panel_hint": "Documents whose data differ from the extracted attachment (a scan or the PDF the document was created from). A tax point in another month affects the VAT period, other differences are informative.",
+    "filter": {
+      "open": "Open",
+      "acknowledged": "Confirmed",
+      "all": "All"
+    },
+    "recheck": "Recheck",
+    "recheck_hint": "Compares all company documents with their extracted attachments again.",
+    "recheck_done": "Documents checked: {checked}, open conflicts: {open}.",
+    "empty_open": "No open conflicts.",
+    "empty": "No conflicts.",
+    "batch_hint": "Differences of documents this batch attached a scan to. All company conflicts are in the overview below.",
+    "batch_empty": "Attached scans match their documents.",
+    "list_limited": "Showing the first {n} of {total}."
   },
   "search": {
     "placeholder": "Search… (menu, clients, invoices)",
@@ -12764,7 +12829,9 @@
         "small_asset_cards_incomplete": "Small-asset cards do not match the 501.200 turnover (missing cards)",
         "cnb_rate_deviation": "Document exchange rate deviates from the daily CNB rate",
         "payment_match_audit": "Matched payments that don't add up (currency, amount, FX difference, counterparty)",
-        "inventory_unresolved": "Balance-sheet account stocktaking (§29–30 of the Accounting Act) is not completed or has unresolved differences"
+        "inventory_unresolved": "Balance-sheet account stocktaking (§29–30 of the Accounting Act) is not completed or has unresolved differences",
+        "attachment_vat_period": "Document tax point does not match its attachment and falls into another month — the document may be in the wrong VAT period and control statement",
+        "attachment_mismatch": "Documents that differ from their extracted attachment (amount, company ID, variable symbol or tax point day) — informative"
       },
       "payment_match_audit": {
         "currency_mismatch": "Payment currency does not match the document currency",
@@ -14786,7 +14853,12 @@
       "counterparty_mismatch": "counterparty does not match",
       "currency_mismatch": "currency does not match",
       "fx_on_czk_czk": "FX difference on a CZK payment",
-      "marked_paid_unposted": "marked paid manually — no payment posted (e.g. set-off)"
+      "marked_paid_unposted": "marked paid manually — no payment posted (e.g. set-off)",
+      "attachment_tax_date_period": "tax point on the attachment in another month",
+      "attachment_tax_date": "tax point on the attachment on another day",
+      "attachment_amount": "amount on the attachment differs",
+      "attachment_counterparty_ico": "counterparty company ID on the attachment differs",
+      "attachment_variable_symbol": "variable symbol on the attachment differs"
     },
     "open_list": "Open in list",
     "field": {

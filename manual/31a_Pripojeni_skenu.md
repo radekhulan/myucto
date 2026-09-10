@@ -89,10 +89,60 @@ Po dokončení ukáže stránka souhrn a záložky:
 | **Doklady bez skenu** | Doklady ve zvoleném rozsahu, ke kterým není připojená žádná příloha |
 | **Skeny bez dokladu** | Skeny, které podle obsahu patří firmě, ale žádný doklad v aplikaci jim neodpovídá. Typicky chybějící zaúčtování nebo špatně přečtený údaj. |
 | **Nerozpoznané** | Doklady jiné firmy, skeny, u kterých nejde určit komu patří, a soubory, které se nepodařilo vytěžit |
-| **Rozpory** | Místo pro porovnání připojeného skenu s údaji dokladu (datum, částka, DUZP) |
+| **Rozpory** | Doklady, ke kterým dávka připojila sken a jejichž údaje se od skenu liší (viz níže) |
 
 Potvrzením jednoho kandidáta se ostatní návrhy pro stejný doklad i stejný sken
 odmítnou.
+
+## Rozpory dokladů s přílohami
+
+Aplikace porovná zaúčtovaný doklad s tím, co AI vyčetla z jeho přílohy. Příloha je
+buď připojený sken, nebo PDF, ze kterého doklad vznikl [AI extrakcí](25_AI_extrakce.md).
+Porovnává se:
+
+| Údaj | Kdy je rozdíl | Význam |
+|---|---|---|
+| DUZP | DUZP na příloze padá do jiného kalendářního měsíce | **Varování**: doklad může být v nesprávném období DPH i kontrolním hlášení. Platí u dokladu, který vstupuje do DPH, a jen když je firma k DUZP plátce. |
+| DUZP | jiný den téhož měsíce | informativně |
+| Částka | celková částka nebo částka k úhradě se liší | informativně |
+| IČO protistrany | u přijatého dokladu IČO dodavatele, u vydaného IČO odběratele | informativně |
+| Variabilní symbol | VS na příloze je jiný | informativně |
+
+Aby kontrola nehlásila zbytečné rozdíly, nehodnotí se:
+
+- údaj, který AI z přílohy nevyčetla,
+- zaokrouhlení dokladu a zaokrouhlení na celé koruny,
+- záloha proti skenu konečného dokladu (a naopak) a u zálohové faktury nikdy DUZP,
+- znaménko dobropisu,
+- příloha v jiné měně než doklad (částka),
+- IČO, když AI firmu na příloze posadila na opačnou stranu, než odpovídá dokladu.
+
+Doklad bez vytěžené přílohy se nekontroluje.
+
+**Kde rozpory uvidíte**
+
+- V detailu přijaté faktury a u pokladního dokladu (v sekci příloh) je odznak:
+  **Sedí s přílohou**, **Rozpor s přílohou** (dopad na DPH), **Rozdíl proti příloze**
+  (informativní) nebo **Rozdíl potvrzen**. Kliknutím otevřete porovnání údajů.
+- Na stránce **Dokumenty → Skeny k dokladům** je v přehledu dávky záložka **Rozpory**
+  a pod dávkou přehled **Rozpory dokladů s přílohami** za celou firmu, včetně dokladů
+  z AI importu. Filtr přepíná otevřené, potvrzené a všechny rozpory.
+- V [měsíční kontrole](87_Uzaverka.md#877-mesicni-kontrola) a v předběžných
+  kontrolách uzávěrky.
+
+**Potvrzení „v pořádku"**
+
+Když je rozdíl oprávněný (například příloha je dodací list a DUZP odpovídá smlouvě),
+otevřete porovnání, napište důvod a klikněte na **Potvrdit, že je v pořádku**. Důvod
+je povinný a potvrzení se zapíše do historie aktivit. Potvrzený rozdíl se v kontrolách
+nehlásí, dokud se nezmění doklad ani vytěžení přílohy. Jakmile se některý z porovnávaných
+údajů změní, rozdíl se ukáže znovu i s původním důvodem.
+
+**Přepočet**
+
+Porovnání se obnoví samo po připojení skenu, po AI importu faktury a po uložení přijaté
+faktury nebo pokladního dokladu. Tlačítko **Přepočítat** v přehledu rozporů projde
+všechny doklady firmy znovu. Měsíční kontrola a odznak porovnávají vždy aktuální stav.
 
 ## Opakované spuštění
 

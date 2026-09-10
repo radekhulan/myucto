@@ -607,6 +607,8 @@ final class Routes
         $app->post   ('/api/invoices',              CreateInvoiceAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}',  GetInvoiceAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/activity', InvoiceActivityAction::class);
+        $app->get    ('/api/invoices/{id:[0-9]+}/attachment-check',             [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'showInvoice']);
+        $app->post   ('/api/invoices/{id:[0-9]+}/attachment-check/acknowledge', [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'acknowledgeInvoice']);
         // Epic SKLAD (§7.3 Detail FV) — výdejky/vratky vzniklé k této faktuře.
         $app->get    ('/api/invoices/{id:[0-9]+}/stock-documents', [\MyInvoice\Action\Stock\StockDocumentAction::class, 'forInvoice']);
         $app->put    ('/api/invoices/{id:[0-9]+}',  UpdateInvoiceAction::class);
@@ -690,6 +692,9 @@ final class Routes
         // Zakázka (issue #29) — smí i u zaúčtovaného dokladu, je to analytická dimenze.
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/project',         SetPurchaseInvoiceProjectAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/dismiss-extraction-warning', DismissExtractionWarningAction::class);
+        // Kontrola dokladu proti vytěžení přílohy (odznak v detailu) a potvrzení „v pořádku"
+        $app->get    ('/api/purchase-invoices/{id:[0-9]+}/attachment-check',             [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'showPurchaseInvoice']);
+        $app->post   ('/api/purchase-invoices/{id:[0-9]+}/attachment-check/acknowledge', [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'acknowledgePurchaseInvoice']);
         // Propojení se zálohovou fakturou (advance) — proti dvojímu započtení nákladu
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/advance-candidates', AdvanceCandidatesAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/settlement-candidates', SettlementCandidatesAction::class);
@@ -2268,6 +2273,8 @@ final class Routes
             $g->post  ('/cash-documents/{id:[0-9]+}/post',     [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'post']);
             $g->post  ('/cash-documents/{id:[0-9]+}/reverse',  [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'reverse']);
             $g->get   ('/cash-documents/{id:[0-9]+}/pdf',      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'pdf']);
+            $g->get   ('/cash-documents/{id:[0-9]+}/attachment-check',             [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'showCashDocument']);
+            $g->post  ('/cash-documents/{id:[0-9]+}/attachment-check/acknowledge', [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'acknowledgeCashDocument']);
             // Automatizace (mini-epic) — pravidla účtování + fronta návrhů.
             $g->get   ('/bank-accounts',                              [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'list']);
             $g->patch ('/bank-accounts/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'update']);
@@ -2955,6 +2962,9 @@ final class Routes
         $app->delete('/api/scan-attach/batches/{id:[0-9]+}',              [\MyInvoice\Action\Document\ScanAttachAction::class, 'delete']);
         $app->post  ('/api/scan-attach/matches/{id:[0-9]+}/confirm',      [\MyInvoice\Action\Document\ScanAttachAction::class, 'confirm']);
         $app->post  ('/api/scan-attach/matches/{id:[0-9]+}/reject',       [\MyInvoice\Action\Document\ScanAttachAction::class, 'reject']);
+        // Kontrola zaúčtovaných dokladů proti vytěžení příloh — přehled a hromadný přepočet
+        $app->get   ('/api/attachment-checks',          [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'list']);
+        $app->post  ('/api/attachment-checks/recheck',  [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'recheck']);
         $app->get   ('/api/documents/tags',           [DocumentsAction::class, 'listTags']);
         $app->get   ('/api/documents/trash',          [DocumentsAction::class, 'trash']);
         $app->post  ('/api/documents/trash/empty',    [DocumentsAction::class, 'emptyTrash']);

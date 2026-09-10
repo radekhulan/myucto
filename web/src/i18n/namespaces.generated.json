@@ -35,6 +35,7 @@
     "api_tokens",
     "app",
     "approval_inbox",
+    "attachment_check",
     "automation",
     "bank",
     "bank_accounts",
@@ -125,6 +126,7 @@
       "api_tokens",
       "app",
       "approval_inbox",
+      "attachment_check",
       "automation",
       "bank",
       "bank_accounts",
@@ -402,6 +404,7 @@
     ],
     "purchase-invoice-detail": [
       "activation",
+      "attachment_check",
       "automation",
       "bank",
       "cash",
@@ -427,6 +430,9 @@
     ],
     "documents": [
       "documents"
+    ],
+    "scan-attach": [
+      "attachment_check"
     ],
     "document-detail": [
       "documents"
@@ -567,6 +573,7 @@
       "reports"
     ],
     "accounting-cash": [
+      "attachment_check",
       "cash",
       "documents",
       "linked_documents"

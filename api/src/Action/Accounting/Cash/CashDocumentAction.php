@@ -47,6 +47,7 @@ final class CashDocumentAction
         // `payroll_payment_matches.cash_document_id` (RESTRICT) jako HTTP 500.
         private readonly CashDocumentDeletionGuard $deletionGuard,
         private readonly \MyInvoice\Service\Logbook\CashFuelingService $cashFuelings,
+        private readonly \MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService $attachmentChecks,
     ) {}
 
     /**
@@ -153,6 +154,10 @@ final class CashDocumentAction
         try {
             $this->service->updateDraft($supplierId, $id, $body);
             $this->log($request, 'cash.document_updated', $id, []);
+            try {
+                $this->attachmentChecks->recheckEntity($supplierId, 'cash_document', $id);
+            } catch (\Throwable) {
+            }
             return Json::ok($response, $this->service->get($supplierId, $id));
         } catch (\Throwable $e) {
             return $this->mapCashError($response, $e);

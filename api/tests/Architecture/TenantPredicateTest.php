@@ -165,6 +165,8 @@ final class TenantPredicateTest extends TestCase
         'document_extractions',
         'scan_batch_items',
         'scan_matches',
+        // Kontrola zaúčtovaných dokladů proti vytěžení příloh — výsledky a potvrzení.
+        'attachment_checks',
     ];
 
     /**

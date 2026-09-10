@@ -539,8 +539,73 @@
     "reject": "Odmítnout",
     "confirmed": "Sken připojen",
     "rejected": "Návrh odmítnut",
-    "scan_none": "nevytěženo",
-    "discrepancies_pending": "Porovnání připojených skenů s údaji dokladů (datum, částka, DUZP) doplní kontrola dokladů proti přílohám."
+    "scan_none": "nevytěženo"
+  },
+  "attachment_check": {
+    "badge_title": "Porovnání dokladu s vytěženou přílohou",
+    "badge_ok": "Sedí s přílohou",
+    "badge_acknowledged": "Rozdíl potvrzen",
+    "badge_warning": "Rozpor s přílohou ({n})",
+    "badge_info": "Rozdíl proti příloze ({n})",
+    "modal_title": "Doklad proti příloze",
+    "loading": "Porovnávám…",
+    "attachment": "Příloha",
+    "pdf_slot": "PDF dokladu",
+    "status": {
+      "match": "Sedí",
+      "mismatch": "Rozdíl",
+      "skipped": "Nelze porovnat"
+    },
+    "severity": {
+      "warning": "Dopad na DPH",
+      "info": "Informativně"
+    },
+    "field": {
+      "tax_date_period": "DUZP (jiný měsíc)",
+      "tax_date": "DUZP",
+      "amount": "Částka",
+      "counterparty_ico": "IČO protistrany",
+      "variable_symbol": "Variabilní symbol"
+    },
+    "doc_type": {
+      "purchase_invoice": "Přijatá faktura",
+      "invoice": "Vydaná faktura",
+      "cash_document": "Pokladní doklad"
+    },
+    "col_document": "Doklad",
+    "col_counterparty": "Protistrana",
+    "col_field": "Údaj",
+    "col_doc": "Na dokladu",
+    "col_attachment": "Na příloze",
+    "col_differences": "Rozdíly",
+    "col_state": "Stav",
+    "col_actions": "Akce",
+    "vat_hint": "DUZP v jiném měsíci přesune doklad do jiného zdaňovacího období DPH i kontrolního hlášení. Ověřte datum proti originálu dokladu.",
+    "match_text": "Údaje dokladu odpovídají vytěžené příloze.",
+    "skipped_text": "Z přílohy se nepodařilo vytěžit údaje, které by šlo s dokladem porovnat.",
+    "acknowledged_note": "Potvrzeno jako v pořádku: {reason}",
+    "previous_ack": "Dříve potvrzeno („{reason}“), doklad nebo příloha se ale od té doby změnily.",
+    "reason_label": "Proč je doklad v pořádku",
+    "reason_placeholder": "Např. příloha je dodací list, DUZP odpovídá datu uskutečnění plnění ze smlouvy.",
+    "acknowledge": "Potvrdit, že je v pořádku",
+    "acknowledged": "Rozdíl potvrzen",
+    "reason_required": "Uveďte důvod (aspoň 3 znaky).",
+    "review": "Zkontrolovat",
+    "panel_title": "Rozpory dokladů s přílohami",
+    "panel_hint": "Doklady, jejichž údaje se liší od vytěžené přílohy (skenu nebo PDF, ze kterého doklad vznikl). DUZP v jiném měsíci ovlivňuje období DPH, ostatní rozdíly jsou informativní.",
+    "filter": {
+      "open": "Otevřené",
+      "acknowledged": "Potvrzené",
+      "all": "Vše"
+    },
+    "recheck": "Přepočítat",
+    "recheck_hint": "Znovu porovná všechny doklady firmy s vytěženými přílohami.",
+    "recheck_done": "Zkontrolováno dokladů: {checked}, otevřených rozporů: {open}.",
+    "empty_open": "Žádné otevřené rozpory.",
+    "empty": "Žádné rozpory.",
+    "batch_hint": "Rozdíly dokladů, ke kterým tato dávka připojila sken. Všechny rozpory firmy jsou v přehledu níže.",
+    "batch_empty": "Připojené skeny odpovídají dokladům.",
+    "list_limited": "Zobrazeno prvních {n} z {total}."
   },
   "search": {
     "placeholder": "Hledat… (menu, klienti, faktury)",
@@ -12764,7 +12829,9 @@
         "estimates_unreleased": "Dohadné položky z minulého období se nerozpustily (ČÚS 019) — náklad může být v knihách dvakrát",
         "related_party_price_deviation": "Ceny účtované spojeným osobám se liší od cen pro nespojené (§ 36a ZDPH, § 23/7 ZDP) — rozdíl je nutné doložit",
         "related_party_transactions": "Transakce se spojenými osobami v období — ceny musí odpovídat cenám obvyklým (§ 36a ZDPH, § 23/7 ZDP)",
-        "inventory_unresolved": "Inventarizace rozvahových účtů (§29–30 ZoÚ) není dokončená nebo má nevyřešené inventurní rozdíly"
+        "inventory_unresolved": "Inventarizace rozvahových účtů (§29–30 ZoÚ) není dokončená nebo má nevyřešené inventurní rozdíly",
+        "attachment_vat_period": "DUZP dokladu nesedí na přílohu a padá do jiného měsíce — doklad může být v nesprávném období DPH a kontrolním hlášení",
+        "attachment_mismatch": "Doklady, které se liší od vytěžené přílohy (částka, IČO, VS nebo den DUZP) — informativně"
       },
       "payment_match_audit": {
         "currency_mismatch": "Měna platby neodpovídá měně dokladu",
@@ -14786,7 +14853,12 @@
       "counterparty_mismatch": "protistrana nesedí",
       "currency_mismatch": "měna nesedí",
       "fx_on_czk_czk": "kurzový rozdíl na korunové platbě",
-      "marked_paid_unposted": "označeno jako uhrazené ručně — úhrada není zaúčtovaná (např. zápočet)"
+      "marked_paid_unposted": "označeno jako uhrazené ručně — úhrada není zaúčtovaná (např. zápočet)",
+      "attachment_tax_date_period": "DUZP na příloze v jiném měsíci",
+      "attachment_tax_date": "DUZP na příloze jiný den",
+      "attachment_amount": "částka na příloze jiná",
+      "attachment_counterparty_ico": "IČO protistrany na příloze jiné",
+      "attachment_variable_symbol": "VS na příloze jiný"
     },
     "open_list": "Otevřít v seznamu",
     "field": {

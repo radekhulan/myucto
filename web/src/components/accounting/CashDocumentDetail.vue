@@ -5,6 +5,7 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
 import type { CashDocument } from '@/api/cash'
 
 /**
@@ -61,6 +62,11 @@ const auth = useAuthStore()
     <!-- Sken účtenky / pokladního dokladu. @click.stop: na mobilu leží detail
          v kartě, jejíž klik rozbalení zavírá. -->
     <div v-if="auth.canRead('documents')" class="mt-3" data-testid="cash-attachments" @click.stop>
+      <!-- Porovnání s vytěženou přílohou — zobrazí se jen u dokladu s vytěženým skenem. -->
+      <div class="mb-2 flex flex-wrap gap-2">
+        <AttachmentCheckBadge entity-type="cash_document" :entity-id="doc.id"
+          :can-acknowledge="auth.canWrite('cash.document.write')" />
+      </div>
       <LinkedDocumentsPanel entity-type="cash_document" :entity-id="doc.id" uploadable
         :title="t('linked_documents.title')" />
     </div>

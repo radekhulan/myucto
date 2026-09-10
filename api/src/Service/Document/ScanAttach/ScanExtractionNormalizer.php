@@ -51,7 +51,7 @@ final class ScanExtractionNormalizer
             'amount_due'      => self::amount($data['total_with_vat_rounded'] ?? null),
             'currency'        => self::currency($data['currency'] ?? null),
             'license_plate'   => self::plate($data['license_plate'] ?? null),
-            'card_last4'      => self::card($data['card_last4'] ?? null),
+            'card_last4'      => self::cardLast4($data['card_last4'] ?? null),
         ];
     }
 
@@ -139,9 +139,10 @@ final class ScanExtractionNormalizer
 
     /**
      * Uloží se jen koncovka — ani omylem vrácené celé číslo karty se neukládá.
-     * Číslu karty rozumí jediné místo v aplikaci, {@see CardNumberMask}.
+     * Číslu karty rozumí jediné místo v aplikaci, {@see CardNumberMask}. Veřejné, aby
+     * koncovku z vytěžení četl stejně i AI import přijaté faktury.
      */
-    private static function card(mixed $v): ?string
+    public static function cardLast4(mixed $v): ?string
     {
         if (!is_scalar($v)) {
             return null;

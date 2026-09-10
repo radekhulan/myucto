@@ -202,6 +202,8 @@ final class ClosingService
         // Migrace 1332 — aktuálnost interního dokladu zúčtování DPH. Read-only: kontrola
         // nikdy sama nepřeúčtovává (do zavřeného ani zamčeného období se nesahá), jen hlásí.
         private readonly \MyInvoice\Service\Accounting\Vat\VatClearingService $vatClearing,
+        // Zaúčtované doklady proti vytěžení příloh — read-only, porovnává živě.
+        private readonly \MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService $attachmentChecks,
     ) {}
 
     // ── stav pro FE ───────────────────────────────────────────────────────────
@@ -4256,6 +4258,31 @@ final class ClosingService
 
         if ($wants('payment_match_audit')) {
             $checks[] = $this->checkPaymentMatchAudit($supplierId, $rangeFrom, $rangeTo);
+        }
+
+        // Doklad × vytěžení jeho přílohy. DUZP přílohy v jiném měsíci než DUZP dokladu, který
+        // vstupuje do DPH, posouvá doklad do jiného zdaňovacího období i kontrolního hlášení
+        // → warning. Rozdíl částky, IČO nebo VS je informativní. Potvrzené „v pořádku" se
+        // nehlásí, dokud se doklad ani vytěžení nezmění. Porovnává se živě, ne z uloženého
+        // výsledku — brána nad obdobím nesmí záviset na tom, zda proběhl přepočet.
+        if ($wants('attachment_vat_period', 'attachment_mismatch')) {
+            $attachment = $this->attachmentChecks->closingFindings($supplierId, $rangeFrom, $rangeTo);
+            if ($wants('attachment_vat_period')) {
+                $checks[] = [
+                    'key' => 'attachment_vat_period',
+                    'severity' => 'warning',
+                    'ok' => $attachment['vat_period'] === [],
+                    'value' => ['count' => count($attachment['vat_period']), 'items' => $attachment['vat_period']],
+                ];
+            }
+            if ($wants('attachment_mismatch')) {
+                $checks[] = [
+                    'key' => 'attachment_mismatch',
+                    'severity' => 'info',
+                    'ok' => $attachment['other'] === [],
+                    'value' => ['count' => count($attachment['other']), 'items' => $attachment['other']],
+                ];
+            }
         }
 
         // § 99a — nárok na čtvrtletní zdaňovací období. `supplier.vat_period` byl ruční

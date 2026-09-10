@@ -60,6 +60,7 @@ final class UpdatePurchaseInvoiceAction
         private readonly TenantReferenceGuard $tenantRefs,
         private readonly PurchaseInvoiceRateReloader $rateReloader,
         private readonly CashSettlementService $cashSettlement,
+        private readonly \MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService $attachmentChecks,
     ) {}
 
     /**
@@ -337,6 +338,12 @@ final class UpdatePurchaseInvoiceAction
         } catch (\Throwable $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
+        }
+
+        // Změna dokladu → nové porovnání s vytěžením přílohy (přehled rozporů).
+        try {
+            $this->attachmentChecks->recheckEntity($supplierId, 'purchase_invoice', $id);
+        } catch (\Throwable) {
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

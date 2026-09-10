@@ -56,6 +56,9 @@ final class AiPdfExtractor
         private readonly ExpenseKindClassifier $expenseClassifier,
         // Jen kvůli párování sazby (`resolveDomesticRate`) — přijatá strana OSS nemá.
         private readonly \MyInvoice\Service\Oss\OssItemPlanner $planner,
+        // Uložení vytěžení zdrojového PDF pro kontrolu dokladů proti přílohám. Nullable
+        // jen kvůli unit testům čistých helperů, které import nespouštějí.
+        private readonly ?\MyInvoice\Service\Document\AttachmentCheck\ImportedPdfExtractionRecorder $extractionRecorder,
         ?LoggerInterface $logger = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
@@ -295,6 +298,10 @@ final class AiPdfExtractor
         }
         $resolved = $this->clientResolver->resolveVendor($vendorData, $supplierId);
 
+        // Vytěžení tak, jak ho model z PDF přečetl (po opravě prohozených stran), ještě
+        // před doplněním náhradního čísla dokladu — ukládá se ke kontrole proti příloze.
+        $extractedData = $data;
+
         // Číslo dokladu chybí (typicky účtenka/paragon bez čísla) → doplň unikátní
         // fallback z PDF hashe. Musí být unikátní per (vendor, datum), jinak by dvě
         // účtenky od stejného vendora ve stejný den kolidovaly na uq_pi_vendor_invoice
@@ -310,6 +317,14 @@ final class AiPdfExtractor
             // Attach PDF — uložit do archive a updatnout pdf_path/hash/size na faktuře
             $this->attachPdf($invoiceId, $supplierId, $pdfBytes, $originalFilename);
             $this->tagImportBatch($invoiceId, $supplierId, $importBatchId);
+            $this->extractionRecorder?->record(
+                $supplierId,
+                $invoiceId,
+                $sha256,
+                $extractedData,
+                isset($extracted['provider']) ? (string) $extracted['provider'] : null,
+                isset($extracted['model']) ? (string) $extracted['model'] : null,
+            );
             return [
                 'ok'                  => true,
                 'purchase_invoice_id' => $invoiceId,
@@ -921,6 +936,14 @@ final class AiPdfExtractor
             return $existingId;
         }
         $id = $this->repo->createDraft($payload, $userId, $supplierId);
+        // Koncovka karty z účtenky / výpisu terminálu (migrace 1800) je silný signál pro
+        // párování platby kartou. Čte se přes týž SSOT jako u skenů; ruční hodnotu nepřepíše.
+        $cardLast4 = \MyInvoice\Service\Document\ScanAttach\ScanExtractionNormalizer::cardLast4($data['card_last4'] ?? null);
+        if ($cardLast4 !== null) {
+            $this->db->pdo()->prepare(
+                'UPDATE purchase_invoices SET card_last4 = ? WHERE id = ? AND supplier_id = ? AND card_last4 IS NULL'
+            )->execute([$cardLast4, $id, $supplierId]);
+        }
         $this->repo->replaceItems($id, $items);
         $this->calc->recompute($id);
         // Naseeduj ruční rekapitulaci DPH dle dokladu (§ 73) — uloží základ/DPH dle

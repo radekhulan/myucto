@@ -217,6 +217,10 @@ function issueText(f: Finding): string {
     if (code === 'fx_on_czk_czk' && typeof d.amount === 'number') {
       return `${base}: ${money.format(d.amount as number)}`
     }
+    // Rozdíly proti vytěžené příloze: hodnota na dokladu × hodnota na příloze.
+    if ('doc' in d && 'attachment' in d) {
+      return `${base}: ${fmtDetailValue(d.doc)} × ${fmtDetailValue(d.attachment)}`
+    }
     return base
   }).join(' · ')
 }
@@ -260,6 +264,13 @@ function legacyIssueCodes(note?: string | null): string[] {
   if (!note) return []
   const parts = note.split(',').map(p => p.trim()).filter(Boolean)
   return parts.length > 0 && parts.every(p => KNOWN_ISSUE_CODES.has(p)) ? parts : []
+}
+
+function fmtDetailValue(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '—'
+  if (typeof v === 'number') return money.format(v)
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return fmtDate(v)
+  return String(v)
 }
 
 /** Datum bez času. Payloady nesou i `2026-07-19 01:01:16` — ořízne se na den. */

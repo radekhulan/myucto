@@ -238,6 +238,8 @@ function checkExportUrl(key: string): string | undefined {
 const DOC_CHECK_LIST: Record<string, RouteLocationRaw> = {
   unposted_invoices:  { path: '/invoices', query: { booked: '0', year: 'all' } },
   unposted_purchases: { path: '/purchase-invoices', query: { booked: '0' } },
+  attachment_vat_period: { name: 'scan-attach', hash: '#attachment-discrepancies' },
+  attachment_mismatch: { name: 'scan-attach', hash: '#attachment-discrepancies' },
 }
 
 function docListLink(key: string): RouteLocationRaw | null {
