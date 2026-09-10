@@ -80,6 +80,31 @@ final class BankHttpClientFactoryTest extends TestCase
         self::assertStringNotContainsString('private-', json_encode($context, JSON_THROW_ON_ERROR));
     }
 
+    public function testKbPlusErrorDiagnosticsLogMaskedBankReasonOnlyForErrors(): void
+    {
+        $log = new TestHandler();
+        $factory = new BankHttpClientFactory(new Config(['app' => ['env' => 'development']]), new Logger('test', [$log]));
+        $jwt = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJzeW50aGV0aWMifQ.c2lnbmF0dXJlLXN5bnRoZXRpYy12YWx1ZQ';
+        $secret = str_repeat('A', 40);
+        $body = '{"error":"FORBIDDEN","message":"Client certificate is not registered","apiKey":"' . $jwt . '","secret":"' . $secret . '"}';
+        $response = new Response(403, ['Content-Type' => 'application/json', 'x-correlation-id' => '11111111-2222-4333-8444-555555555555'], $body);
+        $response->getBody()->seek(5);
+        $client = $factory->create('kb_plus_registration', new MockHandler([$response, new Response(201, [], $jwt)]));
+
+        $result = $client->request('POST', 'https://client-registration.api-gateway.kb.cz/v3/software-statements', ['http_errors' => false]);
+        $client->request('POST', 'https://client-registration.api-gateway.kb.cz/v3/software-statements', ['http_errors' => false]);
+
+        self::assertSame(5, $result->getBody()->tell());
+        $context = $log->getRecords()[0]->context;
+        self::assertStringContainsString('Client certificate is not registered', $context['error_body']);
+        self::assertSame('application/json', $context['response_content_type']);
+        self::assertSame('11111111-2222-4333-8444-555555555555', $context['response_x-correlation-id']);
+        $logged = json_encode($log->getRecords(), JSON_THROW_ON_ERROR);
+        self::assertStringNotContainsString($jwt, $logged);
+        self::assertStringNotContainsString($secret, $logged);
+        self::assertArrayNotHasKey('error_body', $log->getRecords()[1]->context);
+    }
+
     #[DataProvider('failures')]
     public function testTransportDiagnosticsPreserveCallbackAndNeverLogSecrets(bool $synchronous): void
     {

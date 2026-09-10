@@ -67,7 +67,9 @@ final class BankHttpClientFactory
                         $this->logger->log($status >= 200 && $status < 300 ? 'info' : 'warning', 'bank_http_completed', $context + [
                             'http_status' => $status,
                             'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
-                        ] + $this->transportDiagnostic($transport) + ($context['provider'] === 'raiffeisenbank' && $status >= 400 ? $this->rbErrorDiagnostic($response) : []));
+                        ] + $this->transportDiagnostic($transport)
+                            + ($context['provider'] === 'raiffeisenbank' && $status >= 400 ? $this->rbErrorDiagnostic($response) : [])
+                            + (str_starts_with($context['provider'], 'kb_plus') && $status >= 400 ? $this->kbPlusErrorDiagnostic($response) : []));
                         return $response;
                     }, $failed);
                 };
@@ -106,6 +108,34 @@ final class BankHttpClientFactory
                 break;
             }
         }
+        return $result;
+    }
+
+    /** Chybové odpovědi KB+ nenesou tajemství, tokeny a klíče se přesto před zápisem maskují. */
+    private function kbPlusErrorDiagnostic(ResponseInterface $response): array
+    {
+        $result = ['response_content_type' => substr($response->getHeaderLine('Content-Type'), 0, 100)];
+        foreach (['x-correlation-id', 'x-request-id'] as $header) {
+            $value = $response->getHeaderLine($header);
+            if (preg_match('/^[A-Za-z0-9-]{8,64}$/D', $value) === 1) {
+                $result['response_' . $header] = $value;
+            }
+        }
+        $body = $response->getBody();
+        if (!$body->isSeekable()) return $result;
+        $position = $body->tell();
+        try {
+            $body->rewind();
+            $content = $body->read(2049);
+        } finally {
+            $body->seek($position);
+        }
+        $result['error_body_truncated'] = strlen($content) > 2048;
+        $result['error_body'] = (string) preg_replace(
+            ['/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/', '/[A-Za-z0-9+\/_=]{32,}/', '/[\x00-\x1F\x7F]+/'],
+            ['[jwt]', '[redacted]', ' '],
+            mb_scrub(substr($content, 0, 2048), 'UTF-8'),
+        );
         return $result;
     }
 

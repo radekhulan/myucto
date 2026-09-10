@@ -242,6 +242,75 @@ final class KbPlusOnboardingServiceTest extends TestCase
         self::assertSame(11, $this->service->completeOAuth(7, 5, $state, 'synthetic_authorization_code_001'));
     }
 
+    /** @param list<string> $scopes */
+    #[\PHPUnit\Framework\Attributes\DataProvider('batchScopes')]
+    public function testRegistrationScopesFollowBatchKey(string $batchKey, array $scopes): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->oauth->method('client')->willReturn(null);
+        $this->registrationClient->method('createSoftwareStatement')->willReturn('eyJhbGciOiJIUzI1NiJ9.e30.c2lnbmF0dXJl');
+        $this->registration->expects(self::once())->method('begin')
+            ->with(self::anything(), self::callback(static fn (array $application): bool => $application['scopes'] === $scopes), self::anything())
+            ->willReturnCallback(static fn (string $statement, array $application, string $state): array => [
+                'url' => 'https://api-gateway.kb.cz/client-registration-ui/v2/saml/register?state=' . $state,
+                'state' => $state,
+                'encryption_key' => base64_encode(str_repeat('K', 32)),
+            ]);
+        $this->secrets->method('encryptFor')->willReturn('enc:v2:synthetic');
+
+        $result = $this->service->start(7, 11, 5, ['batchda_api_key' => $batchKey] + $this->registrationInput());
+
+        self::assertSame('registration_pending', $result['status']);
+    }
+
+    public static function batchScopes(): iterable
+    {
+        yield 'bez BATCHDA jen čtení' => ['  ', ['adaa']];
+        yield 's BATCHDA i dávky' => ['synthetic-batchda-key', ['adaa', 'bpisp']];
+    }
+
+    public function testRegistrationCallbackWithoutBatchKeyExpectsReadOnlyScope(): void
+    {
+        $state = str_repeat('r', 43);
+        $this->oauth->method('currencyForState')->willReturn(11);
+        $this->oauth->method('claim')->willReturn(['stage' => 'registration'] + $this->session($state));
+        $this->secrets->method('decryptFor')->willReturn(json_encode([
+            'state' => $state, 'encryption_key' => base64_encode(str_repeat('K', 32)),
+            'oauth_api_key' => 'synthetic-oauth-key', 'adaa_api_key' => 'synthetic-adaa-key',
+            'batchda_api_key' => '', 'redirect_uri' => 'https://example.invalid/callback',
+        ], JSON_THROW_ON_ERROR));
+        $this->registration->expects(self::once())->method('complete')
+            ->with(self::anything(), $state, 'https://example.invalid/callback', ['adaa'], self::anything())
+            ->willReturn([
+                'client_id' => 'synthetic-client', 'client_secret' => 'synthetic-client-secret',
+                'scope' => 'adaa', 'client_id_issued_at' => 1,
+            ]);
+        $this->secrets->method('encryptFor')->willReturn('enc:v2:synthetic');
+        $this->api->method('authorizationUrl')->willReturn('https://login.kb.cz/autfe/ssologin?state=synthetic');
+        $this->oauth->expects(self::once())->method('finish')->with(hash('sha256', $state), true);
+
+        $result = $this->service->completeRegistration(7, 5, $state, ['salt' => 'synthetic', 'encryptedData' => 'synthetic']);
+
+        self::assertSame('authorization_pending', $result['status']);
+    }
+
+    public function testRegisteredClientWithoutBatchKeyReportsReadOnlyCapabilityAndAllowsReentry(): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->connections->method('findPublicByCurrency')->willReturn(null);
+        $this->oauth->method('client')->willReturn(['credentials_ciphertext' => 'enc:v2:client']);
+        $this->oauth->method('publicStatus')->willReturn(null);
+        $this->secrets->method('decryptFor')->willReturn(json_encode(['batchda_api_key' => ''], JSON_THROW_ON_ERROR));
+
+        $status = $this->service->status(7, 11);
+
+        self::assertSame('registered', $status['status']);
+        self::assertSame([], $status['required_fields']);
+        self::assertContains('batchda_api_key', $status['registration_fields']);
+        self::assertContains('batchda_api_key', $status['optional_fields']);
+        self::assertFalse($status['capabilities']['payment_batch_submission']);
+    }
+
     /** @return array<string,mixed> */
     private function account(): array
     {

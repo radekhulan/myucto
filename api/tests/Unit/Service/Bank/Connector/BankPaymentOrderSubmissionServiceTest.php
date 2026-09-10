@@ -13,6 +13,7 @@ use MyInvoice\Service\Bank\Connector\BankConnectorCallGuard;
 use MyInvoice\Service\Bank\Connector\BankConnectorException;
 use MyInvoice\Service\Bank\Connector\BankConnectorOperationException;
 use MyInvoice\Service\Bank\Connector\BankConnectorRegistry;
+use MyInvoice\Service\Bank\Connector\BankPaymentCapabilityProvider;
 use MyInvoice\Service\Bank\Connector\BankPaymentOrderSubmissionService;
 use MyInvoice\Service\Bank\Connector\BankPaymentSubmissionService;
 use MyInvoice\Service\Payment\PaymentOrderService;
@@ -209,6 +210,24 @@ final class BankPaymentOrderSubmissionServiceTest extends TestCase
         self::assertSame(0, $connector->submitCalls);
     }
 
+    public function testConnectionWithoutPaymentServiceCreatesNoAttemptAndCallsNoBank(): void
+    {
+        $connector = new SubmissionConnector();
+        $connector->canSubmit = false;
+        $h = $this->readyHarness($connector);
+        $this->executeCredentialCallback($h['calls']);
+        $h['submissions']->method('find')->willReturn(null);
+        $h['submissions']->expects(self::never())->method('begin');
+
+        try {
+            $h['service']->submit(1, 501, 101, 7);
+            self::fail('Napojení bez platební služby nesmí založit pokus o odeslání.');
+        } catch (BankConnectorOperationException $e) {
+            self::assertSame('payment_submission_unavailable', $e->errorCode);
+        }
+        self::assertSame(0, $connector->submitCalls);
+    }
+
     /** @return array<string,mixed> */
     private function readyHarness(SubmissionConnector $connector): array
     {
@@ -323,11 +342,17 @@ final class BankPaymentOrderSubmissionServiceTest extends TestCase
     }
 }
 
-final class SubmissionConnector implements BankConnector
+final class SubmissionConnector implements BankConnector, BankPaymentCapabilityProvider
 {
     public int $submitCalls = 0;
+    public bool $canSubmit = true;
 
     public function __construct(private readonly ?\Closure $submit = null) {}
+
+    public function canSubmitPaymentOrder(#[\SensitiveParameter] string $credential): bool
+    {
+        return $this->canSubmit;
+    }
 
     public function provider(): string
     {

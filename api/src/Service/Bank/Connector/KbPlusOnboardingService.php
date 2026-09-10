@@ -14,7 +14,11 @@ final class KbPlusOnboardingService
 {
     private const REGISTRATION_TTL = 1800;
     private const OAUTH_TTL = 300;
-    private const SCOPES = ['adaa', 'bpisp'];
+    private const REGISTRATION_FIELDS = [
+        'client_registration_api_key', 'oauth_api_key', 'adaa_api_key', 'batchda_api_key',
+        'certificate_p12', 'certificate_password',
+    ];
+    private const OPTIONAL_FIELDS = ['batchda_api_key', 'certificate_password'];
 
     public function __construct(
         private readonly KbPlusOAuthRepository $oauth,
@@ -47,11 +51,13 @@ final class KbPlusOnboardingService
             'status' => $status,
             'server_ready' => $blockers === [],
             'blockers' => $blockers,
-            'required_fields' => $client === null ? [
-                'client_registration_api_key', 'oauth_api_key', 'adaa_api_key', 'batchda_api_key',
-                'certificate_p12', 'certificate_password',
-            ] : [],
-            'capabilities' => ['statement_import' => true, 'payment_batch_submission' => true],
+            'required_fields' => $client === null ? self::REGISTRATION_FIELDS : [],
+            'registration_fields' => self::REGISTRATION_FIELDS,
+            'optional_fields' => self::OPTIONAL_FIELDS,
+            'capabilities' => [
+                'statement_import' => true,
+                'payment_batch_submission' => $this->batchSubmissionAvailable($supplierId, $client),
+            ],
             'expires_at' => in_array($status, ['registration_pending', 'authorization_pending'], true)
                 ? $this->isoDateTime($flow['expires_at'] ?? null) : null,
             'account' => ['currency_id' => $account['id']],
@@ -89,7 +95,7 @@ final class KbPlusOnboardingService
                     'client_name' => 'MyÚčto.cz',
                     'client_name_en' => 'MyUcto.cz',
                     'redirect_uris' => [$this->oauthCallback($supplierId)],
-                    'scopes' => self::SCOPES,
+                    'scopes' => $this->scopes($credentials),
                 ], $state);
                 $secret = $this->encodeSecret([
                     'state' => $state,
@@ -129,7 +135,7 @@ final class KbPlusOnboardingService
                     (string) $secret['encryption_key'],
                     (string) $secret['state'],
                     (string) $secret['redirect_uri'],
-                    self::SCOPES,
+                    $this->scopes($secret),
                     $callback + ['state' => $state],
                 ) + [
                     'oauth_api_key' => $secret['oauth_api_key'],
@@ -311,24 +317,46 @@ final class KbPlusOnboardingService
     /** @param array<string,mixed> $input @return array<string,string> */
     private function registrationInput(#[\SensitiveParameter] array $input): array
     {
-        $keys = [
-            'client_registration_api_key', 'oauth_api_key', 'adaa_api_key', 'batchda_api_key',
-            'certificate_p12', 'certificate_password',
-        ];
+        $keys = self::REGISTRATION_FIELDS;
         if (array_diff(array_keys($input), $keys) !== [] || array_diff($keys, array_keys($input)) !== []) {
             throw new BankConnectorOperationException('kb_plus_registration_input_invalid');
         }
         $result = [];
         foreach ($keys as $key) {
             if (!is_string($input[$key])
-                || ($key !== 'certificate_password' && $input[$key] === '')
+                || (!in_array($key, self::OPTIONAL_FIELDS, true) && $input[$key] === '')
                 || strlen($input[$key]) > ($key === 'certificate_p12' ? 32768 : 16384)
             ) {
                 throw new BankConnectorOperationException('kb_plus_registration_input_invalid');
             }
-            $result[$key] = $input[$key];
+            $result[$key] = $key === 'batchda_api_key' && trim($input[$key]) === '' ? '' : $input[$key];
         }
         return $result;
+    }
+
+    /**
+     * KB+ zatím BATCHDA nenabízí všem; bez jeho klíče se registruje jen čtení,
+     * jinak by KB odmítla scope bpisp a registrace by nešla dokončit.
+     *
+     * @param array<string,mixed> $keys
+     * @return list<string>
+     */
+    private function scopes(#[\SensitiveParameter] array $keys): array
+    {
+        return trim((string) ($keys['batchda_api_key'] ?? '')) === '' ? ['adaa'] : ['adaa', 'bpisp'];
+    }
+
+    private function batchSubmissionAvailable(int $supplierId, ?array $client): bool
+    {
+        if ($client === null) {
+            return false;
+        }
+        try {
+            $credentials = $this->decryptClient($supplierId, (string) $client['credentials_ciphertext']);
+        } catch (BankConnectorOperationException) {
+            return false;
+        }
+        return trim((string) ($credentials['batchda_api_key'] ?? '')) !== '';
     }
 
     /** @return array<string,mixed> */

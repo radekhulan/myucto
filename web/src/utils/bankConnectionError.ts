@@ -42,6 +42,7 @@ export function bankConnectionErrorMessage(error: unknown, t: (key: string) => s
     statement_account_mismatch: 'account', provider_account_mismatch: 'account', account_changed_revalidation_required: 'account',
     statement_too_large: 'period', period_invalid: 'period', period_incomplete: 'period',
     payment_order_items_not_payable: 'payable', payment_order_date_expired: 'date',
+    payment_submission_unavailable: 'payment_unavailable',
   }
   const key = keys[apiErrorCode(error)]
   return key ? t(`bank_connection.error_${key}`) : apiErrorMessage(error, fallback)

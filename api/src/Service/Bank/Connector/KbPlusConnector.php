@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Bank\Connector;
 
-final class KbPlusConnector implements StructuredBankConnector, BankConnectorCredentialKeyProvider
+final class KbPlusConnector implements StructuredBankConnector, BankConnectorCredentialKeyProvider, BankPaymentCapabilityProvider
 {
     public function __construct(
         private readonly KbPlusApiClient $api,
@@ -84,6 +84,9 @@ final class KbPlusConnector implements StructuredBankConnector, BankConnectorCre
 
     public function submitPaymentOrder(#[\SensitiveParameter] string $token, #[\SensitiveParameter] string $abo): array
     {
+        if (!$this->canSubmitPaymentOrder($token)) {
+            throw new BankConnectorException('payment_submission_unavailable', 'Připojení KB+ nemá klíč BATCHDA.');
+        }
         $access = $this->vault->access($token);
         $batch = $this->batchMapper->map($abo, (string) $access['credentials']['account_iban']);
         return $this->api->submitPaymentBatch($access['credentials'], $access['access_token'], $batch);
@@ -92,5 +95,10 @@ final class KbPlusConnector implements StructuredBankConnector, BankConnectorCre
     public function callGuardCredential(#[\SensitiveParameter] string $credential): string
     {
         return (string) $this->vault->decode($credential)['call_guard_key'];
+    }
+
+    public function canSubmitPaymentOrder(#[\SensitiveParameter] string $credential): bool
+    {
+        return trim((string) $this->vault->decode($credential)['batchda_api_key']) !== '';
     }
 }

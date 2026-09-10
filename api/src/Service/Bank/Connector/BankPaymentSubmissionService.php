@@ -47,9 +47,10 @@ final class BankPaymentSubmissionService
                 }
                 $this->assertConnection($connection);
 
-                $abo = $prepare($connection);
                 $token = $this->decryptToken($connection);
                 $connector = $this->connectors->get((string) $connection['provider']);
+                $this->assertPaymentCapability($connector, $token);
+                $abo = $prepare($connection);
                 $submissionId = null;
                 try {
                     $callResult = $this->calls->call(
@@ -129,6 +130,21 @@ final class BankPaymentSubmissionService
                 ];
             },
         );
+    }
+
+    private function assertPaymentCapability(BankConnector $connector, #[\SensitiveParameter] string $token): void
+    {
+        if (!$connector instanceof BankPaymentCapabilityProvider) {
+            return;
+        }
+        try {
+            $available = $connector->canSubmitPaymentOrder($token);
+        } catch (BankConnectorException) {
+            throw new BankConnectorOperationException('submission_failed');
+        }
+        if (!$available) {
+            throw new BankConnectorOperationException('payment_submission_unavailable');
+        }
     }
 
     private function assertConnection(array $connection): void

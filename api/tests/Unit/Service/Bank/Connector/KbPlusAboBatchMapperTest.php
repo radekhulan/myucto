@@ -15,7 +15,7 @@ final class KbPlusAboBatchMapperTest extends TestCase
     {
         $batch = (new KbPlusAboBatchMapper())->map($this->abo(), 'CZ0401000000191000000005');
 
-        self::assertSame('BATCH', $batch['processing_mode']);
+        self::assertSame('ONLINE', $batch['processing_mode']);
         self::assertMatchesRegularExpression('/^[a-f0-9]{14}$/', $batch['exchange_identification']);
         self::assertCount(1, $batch['payments']);
         $payment = $batch['payments'][0];

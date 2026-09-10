@@ -29,6 +29,7 @@ export function kbPlusErrorKey(code: string): string {
     bank_remote_unavailable: 'remote', remote_unavailable: 'remote',
     certificate_invalid: 'certificate', certificate_runtime_unavailable: 'certificate_runtime',
     bank_rate_limited: 'cooldown', rate_limited: 'cooldown', bank_connection_busy: 'busy',
+    invalid_token: 'credentials_rejected',
   }
   return `kb_plus.error_${Object.hasOwn(keys, code) ? keys[code] : 'generic'}`
 }

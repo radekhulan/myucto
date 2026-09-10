@@ -215,9 +215,14 @@ pohybů do evidence výpisů není stažení originálního souboru přes **STAT
 STATDA ani notifikace **NOTDA** zde nejsou implementované.
 Registrace aplikace a následné udělení přístupu k účtu probíhá přes OAuth.
 Technické klíče nenahrazují smlouvu o API službě ani souhlas majitele účtu.
-Před prvním připojením správce připraví čtyři API klíče pro příslušné
-služby: **Client Registration**, **OAuth**, **ADAA** (účty a pohyby)
-a **BATCHDA** (platební dávky). Potřebuješ také kvalifikovaný certifikát
+Před prvním připojením správce na developer portálu KB připraví API klíče
+pro služby **Client Registration**, **OAuth** a **ADAA** (účty a pohyby).
+Klíč **BATCHDA** (platební dávky) je nepovinný. Pokud portál BATCHDA
+pro KB+ nenabízí, nech jeho pole prázdné: připojení pak slouží jen
+k načítání pohybů a odeslání příkazu aplikace odmítne dřív, než cokoli
+předá bance, takže příkaz nahraješ do banky ručně. Až bude BATCHDA
+k dispozici, zvol u účtu **Zadat klíče znovu**, vyplň všechny klíče
+a uděl nový souhlas. Potřebuješ také kvalifikovaný certifikát
 v souboru `.p12` nebo `.pfx` včetně soukromého klíče a jeho heslo, pokud
 je chráněný. Samotné číslo účtu nebo jeden API klíč k připojení nestačí.
 

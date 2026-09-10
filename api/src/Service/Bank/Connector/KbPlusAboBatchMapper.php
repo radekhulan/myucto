@@ -78,7 +78,9 @@ final class KbPlusAboBatchMapper
         }
         return [
             'exchange_identification' => substr(hash('sha256', $abo), 0, 14),
-            'processing_mode' => 'BATCH',
+            // KB+ (New Era) zvolený režim ignoruje a dávku zpracuje vždy ONLINE; jiný režim
+            // by neprošel kontrolou batchProcessingMode v odpovědi a přijatá dávka by skončila jako nejistá.
+            'processing_mode' => 'ONLINE',
             'instruction_name' => 'MyUcto ' . $executionDate,
             'payments' => $payments,
         ];

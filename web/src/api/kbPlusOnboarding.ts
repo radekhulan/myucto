@@ -12,6 +12,8 @@ export interface KbPlusOnboardingStatus {
   server_ready: boolean
   blockers: string[]
   required_fields: KbPlusCredentialField[]
+  registration_fields?: KbPlusCredentialField[]
+  optional_fields?: KbPlusCredentialField[]
   capabilities: { statement_import: boolean; payment_batch_submission: boolean }
   expires_at?: string | null
 }

@@ -86,6 +86,20 @@ final class KbPlusCredentialVaultTest extends TestCase
         }
     }
 
+    public function testConnectionWithoutBatchKeyIsValidButOtherKeysStayRequired(): void
+    {
+        $vault = new KbPlusCredentialVault(
+            $this->createMock(KbPlusApiClient::class),
+            $this->createMock(KbPlusOAuthRepository::class),
+            $this->createMock(SecretEncryption::class),
+        );
+        $readOnly = $vault->encode($this->credentials(['batchda_api_key' => '', 'scope' => 'adaa']));
+
+        self::assertSame('', $vault->decode($readOnly)['batchda_api_key']);
+        $this->expectException(BankConnectorException::class);
+        $vault->encode($this->credentials(['adaa_api_key' => '']));
+    }
+
     /** @param array<string,mixed> $override @return array<string,mixed> */
     private function credentials(array $override = []): array
     {

@@ -17,7 +17,9 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 const registration: KbPlusOnboardingStatus = {
   provider: 'kb_plus', status: 'not_registered', server_ready: true, blockers: [],
   required_fields: ['client_registration_api_key', 'oauth_api_key', 'adaa_api_key', 'batchda_api_key', 'certificate_p12', 'certificate_password'],
-  capabilities: { statement_import: true, payment_batch_submission: true },
+  registration_fields: ['client_registration_api_key', 'oauth_api_key', 'adaa_api_key', 'batchda_api_key', 'certificate_p12', 'certificate_password'],
+  optional_fields: ['batchda_api_key', 'certificate_password'],
+  capabilities: { statement_import: true, payment_batch_submission: false },
 }
 async function open(status: Partial<KbPlusOnboardingStatus> = {}, canWrite = true) {
   m.status.mockResolvedValue({ ...registration, ...status })
@@ -25,8 +27,8 @@ async function open(status: Partial<KbPlusOnboardingStatus> = {}, canWrite = tru
   await flushPromises()
   return wrapper
 }
-async function fill(wrapper: VueWrapper) {
-  for (const key of ['client_registration_api_key', 'oauth_api_key', 'adaa_api_key', 'batchda_api_key']) {
+async function fill(wrapper: VueWrapper, keys = ['client_registration_api_key', 'oauth_api_key', 'adaa_api_key', 'batchda_api_key']) {
+  for (const key of keys) {
     await wrapper.find(`input[name="${key}"]`).setValue(`synthetic-${key}`)
   }
   const input = wrapper.find('input[type="file"]')
@@ -167,5 +169,24 @@ describe('KB+ onboarding', () => {
     await flushPromises()
     expect(wrapper.emitted('changed')).toHaveLength(1)
     expect(m.status).toHaveBeenCalledTimes(2)
+  })
+  it('lets the BatchDA key stay empty for read-only access', async () => {
+    const wrapper = await open()
+    await fill(wrapper, ['client_registration_api_key', 'oauth_api_key', 'adaa_api_key'])
+    expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(m.start).toHaveBeenCalledExactlyOnceWith(3, {
+      client_registration_api_key: 'synthetic-client_registration_api_key', oauth_api_key: 'synthetic-oauth_api_key',
+      adaa_api_key: 'synthetic-adaa_api_key', batchda_api_key: '', certificate_p12: 'AQID', certificate_password: '',
+    })
+  })
+  it('explains missing batch submission and offers re-entering keys', async () => {
+    const wrapper = await open({ status: 'connected', required_fields: [] })
+    expect(wrapper.text()).toContain('kb_plus.batch_unavailable')
+    expect(wrapper.find('input[name="batchda_api_key"]').exists()).toBe(false)
+    await wrapper.findAll('button').find(item => item.text() === 'kb_plus.reenter_keys')!.trigger('click')
+    expect(wrapper.find('input[name="batchda_api_key"]').exists()).toBe(true)
+    expect(wrapper.find('input[type="file"]').exists()).toBe(true)
   })
 })

@@ -19,6 +19,7 @@ const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
 const submitted = ref(false)
+const reenter = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const certificateName = ref('')
 const certificateReading = ref(false)
@@ -26,13 +27,14 @@ const fields = ref<KbPlusCredentials>(emptyFields())
 const apiKeyFields = kbPlusCredentialFields.filter(field => field.endsWith('_api_key'))
 let requestVersion = 0
 let certificateVersion = 0
-const required = computed(() => state.value?.required_fields ?? [])
+const required = computed(() => (reenter.value ? state.value?.registration_fields : state.value?.required_fields) ?? [])
+const optional = computed(() => state.value?.optional_fields ?? ['certificate_password'])
 const needsCertificate = computed(() => required.value.includes('certificate_p12'))
 const pending = computed(() => ['registration_pending', 'authorization_pending'].includes(state.value?.status ?? ''))
 const knownRequirements = computed(() => required.value.every(field => kbPlusCredentialFields.includes(field)))
 const canStart = computed(() => props.canWrite && !loading.value && !busy.value && !submitted.value && !certificateReading.value
   && state.value?.server_ready === true && state.value.blockers.length === 0 && knownRequirements.value
-  && required.value.every(field => field === 'certificate_password' || !!fields.value[field]?.trim()))
+  && required.value.every(field => optional.value.includes(field) || !!fields.value[field]?.trim()))
 const callbackResult = computed(() => String(route.query.currency_id ?? '') === String(props.currencyId)
   && ['connected', 'error'].includes(String(route.query.kb_plus ?? '')) ? String(route.query.kb_plus) : '')
 const callbackError = computed(() => callbackResult.value === 'error' ? t(kbPlusErrorKey(String(route.query.code ?? ''))) : '')
@@ -122,6 +124,7 @@ watch(() => props.currencyId, () => {
   state.value = null
   busy.value = false
   submitted.value = false
+  reenter.value = false
   void load()
 }, { immediate: true })
 watch(() => props.canWrite, value => { if (!value) clearCredentials() })
@@ -158,6 +161,7 @@ onBeforeUnmount(() => { requestVersion++; clearCredentials() })
       </div>
       <p v-if="!knownRequirements" class="text-sm text-danger-600" role="alert">{{ t('kb_plus.error_generic') }}</p>
       <p v-if="pending" class="text-sm text-warning-700">{{ t('kb_plus.pending_hint') }}</p>
+      <p v-if="state.status !== 'not_registered' && !state.capabilities.payment_batch_submission" class="text-sm text-neutral-600">{{ t('kb_plus.batch_unavailable') }}</p>
       <form v-if="canWrite && state.server_ready && !state.blockers.length && knownRequirements && !submitted" class="space-y-3" @submit.prevent="start">
         <div v-if="required.length" class="grid sm:grid-cols-2 gap-3">
           <label v-for="field in apiKeyFields.filter(value => required.includes(value))" :key="field" class="text-sm">
@@ -180,7 +184,13 @@ onBeforeUnmount(() => { requestVersion++; clearCredentials() })
           </label>
           <p class="text-xs text-neutral-500 sm:col-span-2">{{ t('kb_plus.credentials_hint') }}</p>
         </div>
-        <p v-else class="text-sm text-neutral-600">{{ t('kb_plus.existing_client_hint') }}</p>
+        <div v-else class="space-y-2">
+          <p class="text-sm text-neutral-600">{{ t('kb_plus.existing_client_hint') }}</p>
+          <button v-if="state.registration_fields?.length" type="button" :class="btnOutline('neutral')" :disabled="busy" @click="reenter = true">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
+            {{ t('kb_plus.reenter_keys') }}
+          </button>
+        </div>
         <button type="submit" :class="btnFilled('primary')" :disabled="!canStart">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>
           {{ busy ? t('common.loading') : t(pending || state.status === 'connected' ? 'kb_plus.restart' : 'kb_plus.start') }}

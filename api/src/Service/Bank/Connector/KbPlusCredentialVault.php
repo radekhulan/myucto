@@ -67,7 +67,7 @@ final class KbPlusCredentialVault
             throw $this->invalid();
         }
         foreach (array_diff($required, ['version', 'supplier_id', 'connection_id', 'access_expires_at']) as $key) {
-            if (!is_string($data[$key]) || $data[$key] === '' || strlen($data[$key]) > 16384) {
+            if (!is_string($data[$key]) || ($data[$key] === '' && $key !== 'batchda_api_key') || strlen($data[$key]) > 16384) {
                 throw $this->invalid();
             }
         }
