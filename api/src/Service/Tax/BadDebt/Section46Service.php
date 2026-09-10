@@ -95,10 +95,11 @@ final class Section46Service
     public function previewCandidates(int $supplierId, string $asOf): array
     {
         $candidates = $this->fetchCandidates($supplierId, $asOf);
-        $net = $this->ledger->netCorrectedByInvoice(
-            $supplierId,
-            array_map(static fn ($r) => (int) $r['id'], $candidates),
-        );
+        $candidateIds = array_map(static fn ($r) => (int) $r['id'], $candidates);
+        $net = $this->ledger->netCorrectedByInvoice($supplierId, $candidateIds);
+        // Právní důvody jedním dotazem místo jednoho na doklad — sestava kandidátů
+        // nemá horní hranici počtu řádků.
+        $grounds = $this->ledger->legalGroundsFor($supplierId, $candidateIds);
 
         $rows = [];
         foreach ($candidates as $c) {
@@ -113,7 +114,7 @@ final class Section46Service
 
             $target = round($outputVat * $unpaidRatio, 2);
             $rows[] = $this->row($c, $outputVat, $unpaidRatio, $netCorrected, $target,
-                $this->ledger->legalGroundFor($supplierId, $invoiceId));
+                $grounds[$invoiceId] ?? null);
         }
 
         return $rows;

@@ -69,6 +69,24 @@ final class ClosingService
     public const STEP_KEYS = ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next'];
 
     /**
+     * Klíče kontrol, které staví {@see buildErrorChecks} v jednom průchodu.
+     *
+     * Existuje proto, aby {@see buildChecks} poznal, že se ta metoda vůbec nemusí volat,
+     * když si volající vyžádal jinou kontrolu — je to jeden ze čtyř nejdražších bloků
+     * (822 ms nad milionem řádků deníku). Seznam MUSÍ zůstat shodný s tím, co metoda
+     * skutečně vrací; hlídá to `ClosingChecksSelectiveTest`, který porovnává selektivní
+     * běh s plným pro každý klíč.
+     */
+    private const ERROR_CHECK_KEYS = [
+        'prior_period_open',
+        'pl_balance_before_period',
+        'drafts_in_period',
+        'journal_unbalanced',
+        'vh_431_undistributed',
+        'inventory_unresolved',
+    ];
+
+    /**
      * Povolené kontace asistenta (R22) per krok.
      *
      * Krok `provisions` nabízí REZERVY. Opravné položky k pohledávkám (§ 8a/§ 8c ZoR)
@@ -410,6 +428,7 @@ final class ClosingService
             $rangeFrom,
             $rangeTo,
             CheckFindingNormalizer::DETAIL_CAP,
+            [$key],
         );
 
         foreach ($checks as $c) {
@@ -3635,6 +3654,7 @@ final class ClosingService
         ?string $rangeFrom = null,
         ?string $rangeTo = null,
         int $cap = CheckFindingNormalizer::CAP,
+        ?array $onlyKeys = null,
     ): array {
         $startsOn = (string) $period['starts_on'];
         $endsOn = (string) $period['ends_on'];
@@ -3642,50 +3662,76 @@ final class ClosingService
         $periodId = (int) $period['id'];
         $rangeFrom ??= $startsOn;
         $rangeTo ??= $endsOn;
-        $checks = $this->buildErrorChecks($supplierId, $period);
 
-        $unpostedInvoices = $this->closing->unpostedInvoices($supplierId, $rangeFrom, $rangeTo);
-        $checks[] = [
-            'key' => 'unposted_invoices',
-            'severity' => 'warning',
-            'ok' => $unpostedInvoices === [],
-            // Celé řádky, ne holá ID — detail kontroly jinak nemá co zobrazit než „#123".
-            'value' => ['count' => count($unpostedInvoices), 'items' => $unpostedInvoices],
-        ];
-        $unpostedPurchases = $this->closing->unpostedPurchases($supplierId, $rangeFrom, $rangeTo);
-        $checks[] = [
-            'key' => 'unposted_purchases',
-            'severity' => 'warning',
-            'ok' => $unpostedPurchases === [],
-            'value' => ['count' => count($unpostedPurchases), 'items' => $unpostedPurchases],
-        ];
+        // Chce volající tuhle kontrolu? Při `$onlyKeys === null` (precheck, měsíční
+        // kontrola, CSV export) je odpověď vždy ano a chování je beze změny. Detail
+        // jednoho nálezu si vyžádá jeden klíč a nezaplatí za zbylých 38 kontrol —
+        // nad milionem řádků deníku to je rozdíl mezi 13 s a desítkami milisekund.
+        // Filtr na konci metody navíc zaručuje, že volající nikdy neuvidí polovičatě
+        // spočítanou sadu: vrátí se přesně vyžádané klíče, ne to, co zbylo neošetřené.
+        $wants = static function (string ...$keys) use ($onlyKeys): bool {
+            return $onlyKeys === null || array_intersect($keys, $onlyKeys) !== [];
+        };
 
-        $checks[] = $this->checkTransit261($supplierId, $rangeTo);
+        $checks = $wants(...self::ERROR_CHECK_KEYS)
+            ? $this->buildErrorChecks($supplierId, $period)
+            : [];
+
+        if ($wants('unposted_invoices')) {
+            $unpostedInvoices = $this->closing->unpostedInvoices($supplierId, $rangeFrom, $rangeTo);
+            $checks[] = [
+                'key' => 'unposted_invoices',
+                'severity' => 'warning',
+                'ok' => $unpostedInvoices === [],
+                // Celé řádky, ne holá ID — detail kontroly jinak nemá co zobrazit než „#123".
+                'value' => ['count' => count($unpostedInvoices), 'items' => $unpostedInvoices],
+            ];
+        }
+        if ($wants('unposted_purchases')) {
+            $unpostedPurchases = $this->closing->unpostedPurchases($supplierId, $rangeFrom, $rangeTo);
+            $checks[] = [
+                'key' => 'unposted_purchases',
+                'severity' => 'warning',
+                'ok' => $unpostedPurchases === [],
+                'value' => ['count' => count($unpostedPurchases), 'items' => $unpostedPurchases],
+            ];
+        }
+
+        if ($wants('transit_261_open')) {
+            $checks[] = $this->checkTransit261($supplierId, $rangeTo);
+        }
         foreach ([
             'internal_395_open' => '395',
         ] as $key => $code) {
+            if (!$wants($key)) {
+                continue;
+            }
             $bal = round($this->closing->accountBalance($supplierId, $code, $rangeTo), 2);
             $checks[] = ['key' => $key, 'severity' => 'warning', 'ok' => abs($bal) < 0.005, 'value' => ['account' => $code, 'balance' => $bal]];
         }
-        $bal041 = round($this->closing->accountBalance($supplierId, '041', $rangeTo), 2);
-        $bal042 = round($this->closing->accountBalance($supplierId, '042', $rangeTo), 2);
-        $checks[] = [
-            'key' => 'acquisition_04x_open',
-            'severity' => 'warning',
-            'ok' => abs($bal041) < 0.005 && abs($bal042) < 0.005,
-            'value' => ['041' => $bal041, '042' => $bal042],
-        ];
+        if ($wants('acquisition_04x_open')) {
+            $bal041 = round($this->closing->accountBalance($supplierId, '041', $rangeTo), 2);
+            $bal042 = round($this->closing->accountBalance($supplierId, '042', $rangeTo), 2);
+            $checks[] = [
+                'key' => 'acquisition_04x_open',
+                'severity' => 'warning',
+                'ok' => abs($bal041) < 0.005 && abs($bal042) < 0.005,
+                'value' => ['041' => $bal041, '042' => $bal042],
+            ];
+        }
 
         // Nedočerpané zálohy na pořízení materiálu/zboží (audit 2026-07 D8 — auditor
         // uváděl 111/131 mezi kontrolami F4, ve skutečnosti chyběly úplně).
-        $bal111 = round($this->closing->accountBalance($supplierId, '111', $rangeTo), 2);
-        $bal131 = round($this->closing->accountBalance($supplierId, '131', $rangeTo), 2);
-        $checks[] = [
-            'key' => 'procurement_111_131_open',
-            'severity' => 'warning',
-            'ok' => abs($bal111) < 0.005 && abs($bal131) < 0.005,
-            'value' => ['111' => $bal111, '131' => $bal131],
-        ];
+        if ($wants('procurement_111_131_open')) {
+            $bal111 = round($this->closing->accountBalance($supplierId, '111', $rangeTo), 2);
+            $bal131 = round($this->closing->accountBalance($supplierId, '131', $rangeTo), 2);
+            $checks[] = [
+                'key' => 'procurement_111_131_open',
+                'severity' => 'warning',
+                'ok' => abs($bal111) < 0.005 && abs($bal131) < 0.005,
+                'value' => ['111' => $bal111, '131' => $bal131],
+            ];
+        }
 
         // Zálohové účty 314 (poskytnuté zálohy) / 324 (přijaté zálohy) k rozvahovému
         // dni (audit 2026-07 K1). Na rozdíl od ryze průběžných účtů (261/395/111/131)
@@ -3693,14 +3739,16 @@ final class ClosingService
         // WARNING (ne error): účetní ověří, že jde o skutečně nevypořádané zálohy,
         // ne o zapomenutý průběžný zůstatek. Účty jsou saldokontní (per partner),
         // takže drobný haléřový zbytek po vypořádání není chyba.
-        $bal314 = round($this->closing->accountBalance($supplierId, '314', $rangeTo), 2);
-        $bal324 = round($this->closing->accountBalance($supplierId, '324', $rangeTo), 2);
-        $checks[] = [
-            'key' => 'deposits_314_324_open',
-            'severity' => 'warning',
-            'ok' => abs($bal314) < 0.005 && abs($bal324) < 0.005,
-            'value' => ['314' => $bal314, '324' => $bal324],
-        ];
+        if ($wants('deposits_314_324_open')) {
+            $bal314 = round($this->closing->accountBalance($supplierId, '314', $rangeTo), 2);
+            $bal324 = round($this->closing->accountBalance($supplierId, '324', $rangeTo), 2);
+            $checks[] = [
+                'key' => 'deposits_314_324_open',
+                'severity' => 'warning',
+                'ok' => abs($bal314) < 0.005 && abs($bal324) < 0.005,
+                'value' => ['314' => $bal314, '324' => $bal324],
+            ];
+        }
 
         // K1: generická kontrola zůstatku VŠECH zúčtovacích (průběžných) účtů nad
         // příznakem chart_of_accounts.is_clearing — rozšiřuje ad-hoc kontroly výše
@@ -3708,13 +3756,15 @@ final class ClosingService
         // průběžné, i pro firmy s vlastní osnovou. Otevřený zůstatek MŮŽE být legitimní
         // (nedočerpaná záloha, pořízení na cestě) → warning, ne error. Zůstatek počítán
         // BEZ filtru na reversed_by (originál + storno se v SUM vyruší).
-        $clearingOpen = $this->closing->clearingAccountsWithBalance($supplierId, $rangeTo);
-        $checks[] = [
-            'key' => 'clearing_accounts_open',
-            'severity' => 'warning',
-            'ok' => $clearingOpen === [],
-            'value' => ['count' => count($clearingOpen), 'accounts' => $clearingOpen],
-        ];
+        if ($wants('clearing_accounts_open')) {
+            $clearingOpen = $this->closing->clearingAccountsWithBalance($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'clearing_accounts_open',
+                'severity' => 'warning',
+                'ok' => $clearingOpen === [],
+                'value' => ['count' => count($clearingOpen), 'accounts' => $clearingOpen],
+            ];
+        }
 
         // Chybějící účetní odpis hlásit JEN u majetku, který v daném období skutečně odpisovat šel.
         // `status` je dnešní stav, ale kontrola se ptá na minulé období — bez omezení datem by karta
@@ -3723,240 +3773,286 @@ final class ClosingService
         // tax_method='none') se neodpisuje nikdy.
         // Vrací SEZNAM karet, ne jen počet: kontrola hlásící „1 nález" s prázdným popupem
         // je horší než žádná — uživatel ví, že něco je špatně, a nemá jak zjistit co.
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT a.id, a.inventory_number, a.name, a.put_into_use_date, a.input_price
-               FROM assets a
-              WHERE a.supplier_id = ? AND a.status = \'in_use\'
-                AND a.accumulated_account_code IS NOT NULL
-                AND a.put_into_use_date IS NOT NULL AND a.put_into_use_date <= ?
-                AND (a.disposal_date IS NULL OR a.disposal_date >= ?)
-                AND NOT EXISTS (SELECT 1 FROM depreciation_entries de
-                                 WHERE de.asset_id = a.id AND de.kind = \'accounting\' AND de.fiscal_year = ?)
-              ORDER BY a.put_into_use_date, a.id'
-        );
-        $stmt->execute([$supplierId, $rangeTo, $rangeFrom, $fiscalYear]);
-        $missingDepRows = array_map(static fn (array $r): array => [
-            'doc_type'  => 'asset',
-            'doc_id'    => (int) $r['id'],
-            'doc_no'    => (string) ($r['inventory_number'] ?? ''),
-            'doc_date'  => (string) $r['put_into_use_date'],
-            'partner'   => (string) ($r['name'] ?? ''),
-            'amount'    => round((float) $r['input_price'], 2),
-        ], $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: []);
-        $checks[] = [
-            'key' => 'depreciation_missing',
-            'severity' => 'warning',
-            'ok' => $missingDepRows === [],
-            'value' => ['count' => count($missingDepRows), 'items' => $missingDepRows],
-        ];
+        if ($wants('depreciation_missing')) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT a.id, a.inventory_number, a.name, a.put_into_use_date, a.input_price
+                   FROM assets a
+                  WHERE a.supplier_id = ? AND a.status = \'in_use\'
+                    AND a.accumulated_account_code IS NOT NULL
+                    AND a.put_into_use_date IS NOT NULL AND a.put_into_use_date <= ?
+                    AND (a.disposal_date IS NULL OR a.disposal_date >= ?)
+                    AND NOT EXISTS (SELECT 1 FROM depreciation_entries de
+                                     WHERE de.asset_id = a.id AND de.kind = \'accounting\' AND de.fiscal_year = ?)
+                  ORDER BY a.put_into_use_date, a.id'
+            );
+            $stmt->execute([$supplierId, $rangeTo, $rangeFrom, $fiscalYear]);
+            $missingDepRows = array_map(static fn (array $r): array => [
+                'doc_type'  => 'asset',
+                'doc_id'    => (int) $r['id'],
+                'doc_no'    => (string) ($r['inventory_number'] ?? ''),
+                'doc_date'  => (string) $r['put_into_use_date'],
+                'partner'   => (string) ($r['name'] ?? ''),
+                'amount'    => round((float) $r['input_price'], 2),
+            ], $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: []);
+            $checks[] = [
+                'key' => 'depreciation_missing',
+                'severity' => 'warning',
+                'ok' => $missingDepRows === [],
+                'value' => ['count' => count($missingDepRows), 'items' => $missingDepRows],
+            ];
+        }
 
         // Otevřené cizoměnové položky nesou i SEZNAM. Dřív se posílal jen `count`, takže
         // kontrola hlásila „1 nález" a popup byl prázdný — uživatel věděl, že něco k
         // přecenění je, a neměl jak zjistit co. Jeden doklad může mít víc cizoměnových
         // řádků (např. 311 a 343), proto se řádky slučují na doklad; jinak by se počet
         // nálezů rozcházel s počtem dokladů v tabulce.
-        $fxItems = $this->closing->openFxItems($supplierId, $rangeTo);
-        $fxByDoc = [];
-        foreach ($fxItems as $it) {
-            $docKey = $it['doc_type'] . '#' . $it['doc_id'];
-            if (isset($fxByDoc[$docKey])) {
-                $fxByDoc[$docKey]['amount_foreign'] += (float) $it['amount_foreign'];
-                continue;
+        if ($wants('fx_open_items')) {
+            $fxItems = $this->closing->openFxItems($supplierId, $rangeTo);
+            $fxByDoc = [];
+            foreach ($fxItems as $it) {
+                $docKey = $it['doc_type'] . '#' . $it['doc_id'];
+                if (isset($fxByDoc[$docKey])) {
+                    $fxByDoc[$docKey]['amount_foreign'] += (float) $it['amount_foreign'];
+                    continue;
+                }
+                $fxByDoc[$docKey] = [
+                    'doc_type'     => $it['doc_type'],
+                    'doc_id'       => $it['doc_id'],
+                    'doc_no'       => (string) ($it['varsymbol'] ?? ''),
+                    'doc_date'     => $it['doc_date'] ?? null,
+                    'partner_name' => $it['partner_name'] ?? null,
+                    'amount'       => round((float) $it['total_with_vat'], 2),
+                    'currency'     => (string) $it['currency_code'],
+                    'amount_foreign' => (float) $it['amount_foreign'],
+                ];
             }
-            $fxByDoc[$docKey] = [
-                'doc_type'     => $it['doc_type'],
-                'doc_id'       => $it['doc_id'],
-                'doc_no'       => (string) ($it['varsymbol'] ?? ''),
-                'doc_date'     => $it['doc_date'] ?? null,
-                'partner_name' => $it['partner_name'] ?? null,
-                'amount'       => round((float) $it['total_with_vat'], 2),
-                'currency'     => (string) $it['currency_code'],
-                'amount_foreign' => (float) $it['amount_foreign'],
+            $fxRows = array_values($fxByDoc);
+            $checks[] = [
+                'key' => 'fx_open_items',
+                'severity' => 'info',
+                'ok' => true,
+                'value' => ['count' => count($fxRows), 'items' => $fxRows],
             ];
         }
-        $fxRows = array_values($fxByDoc);
-        $checks[] = [
-            'key' => 'fx_open_items',
-            'severity' => 'info',
-            'ok' => true,
-            'value' => ['count' => count($fxRows), 'items' => $fxRows],
-        ];
 
         // K6: invariant cizoměnové stopy — řádek na devizovém účtu (221/211/261…) deklarující
         // cizí měnu MUSÍ nést amount_foreign a naopak (XOR = rozbitá stopa). Bez úplné stopy
         // FxRevaluationService nerealizované přecenění k rozvahovému dni tiše zkreslí. Jen
         // surfacing — nic nepřepisuje.
-        $fxFootprint = $this->closing->foreignCurrencyFootprintMissing($supplierId, $rangeTo);
-        $checks[] = [
-            'key' => 'fx_footprint_missing',
-            'severity' => 'warning',
-            'ok' => $fxFootprint === [],
-            'value' => ['count' => count($fxFootprint), 'accounts' => $fxFootprint],
-        ];
+        if ($wants('fx_footprint_missing')) {
+            $fxFootprint = $this->closing->foreignCurrencyFootprintMissing($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'fx_footprint_missing',
+                'severity' => 'warning',
+                'ok' => $fxFootprint === [],
+                'value' => ['count' => count($fxFootprint), 'accounts' => $fxFootprint],
+            ];
+        }
 
-        $checks[] = [
-            'key' => 'estimates_balances',
-            'severity' => 'info',
-            'ok' => true,
-            'value' => [
-                '388' => round($this->closing->accountBalance($supplierId, '388', $rangeTo), 2),
-                '389' => round($this->closing->accountBalance($supplierId, '389', $rangeTo), 2),
-            ],
-        ];
+        if ($wants('estimates_balances')) {
+            $checks[] = [
+                'key' => 'estimates_balances',
+                'severity' => 'info',
+                'ok' => true,
+                'value' => [
+                    '388' => round($this->closing->accountBalance($supplierId, '388', $rangeTo), 2),
+                    '389' => round($this->closing->accountBalance($supplierId, '389', $rangeTo), 2),
+                ],
+            ];
 
+        }
         // § 36a ZDPH / § 23 odst. 7 ZDP — ceny mezi spojenými osobami. Hlásí se jen
         // MĚŘITELNÉ odchylky: položka fakturovaná spojené osobě proti mediánu cen téže
         // položky fakturovaných nespojeným. Kde srovnání není, odchylka se netvrdí —
         // podložit daňové tvrzení odhadem by bylo horší než mlčet. Samotný seznam
         // transakcí se spojenými osobami je v `related_party_transactions` (info).
-        $rpDeviations = $this->relatedParties->priceDeviations($supplierId, $rangeFrom, $rangeTo);
-        $checks[] = [
-            'key' => 'related_party_price_deviation',
-            'severity' => 'warning',
-            'ok' => $rpDeviations === [],
-            'value' => ['count' => count($rpDeviations), 'items' => $rpDeviations],
-        ];
+        if ($wants('related_party_price_deviation')) {
+            $rpDeviations = $this->relatedParties->priceDeviations($supplierId, $rangeFrom, $rangeTo);
+            $checks[] = [
+                'key' => 'related_party_price_deviation',
+                'severity' => 'warning',
+                'ok' => $rpDeviations === [],
+                'value' => ['count' => count($rpDeviations), 'items' => $rpDeviations],
+            ];
+        }
 
-        $rpTransactions = $this->relatedParties->transactions($supplierId, $rangeFrom, $rangeTo);
-        $checks[] = [
-            'key' => 'related_party_transactions',
-            'severity' => 'info',
-            'ok' => true,
-            'value' => ['count' => count($rpTransactions), 'items' => $rpTransactions],
-        ];
+        if ($wants('related_party_transactions')) {
+            $rpTransactions = $this->relatedParties->transactions($supplierId, $rangeFrom, $rangeTo);
+            $checks[] = [
+                'key' => 'related_party_transactions',
+                'severity' => 'info',
+                'ok' => true,
+                'value' => ['count' => count($rpTransactions), 'items' => $rpTransactions],
+            ];
+        }
 
         // ČÚS 019 — dohad PŘENESENÝ z minulého období, který se letos nerozpustil. Jakmile
         // doklad dorazí, dohad musí zmizet; když nezmizí, knihy nesou náklad dvakrát (dohad
         // z loňska + letošní faktura). Rozpuštění je ruční úkon a `estimates_balances` výš
         // je jen `info` s ok => true, takže zůstatek dosud procházel tiše.
-        $unreleasedEstimates = $this->closing->unreleasedEstimates($supplierId, $rangeFrom, $rangeTo);
-        $checks[] = [
-            'key' => 'estimates_unreleased',
-            'severity' => 'warning',
-            'ok' => $unreleasedEstimates === [],
-            'value' => ['count' => count($unreleasedEstimates), 'accounts' => $unreleasedEstimates],
-        ];
-        $deferrals = [];
-        foreach (['381', '382', '383', '384', '385'] as $code) {
-            $deferrals[$code] = round($this->closing->accountBalance($supplierId, $code, $rangeTo), 2);
+        if ($wants('estimates_unreleased')) {
+            $unreleasedEstimates = $this->closing->unreleasedEstimates($supplierId, $rangeFrom, $rangeTo);
+            $checks[] = [
+                'key' => 'estimates_unreleased',
+                'severity' => 'warning',
+                'ok' => $unreleasedEstimates === [],
+                'value' => ['count' => count($unreleasedEstimates), 'accounts' => $unreleasedEstimates],
+            ];
         }
-        $checks[] = ['key' => 'deferrals_balances', 'severity' => 'info', 'ok' => true, 'value' => $deferrals];
+        if ($wants('deferrals_balances')) {
+            $deferrals = [];
+            foreach (['381', '382', '383', '384', '385'] as $code) {
+                $deferrals[$code] = round($this->closing->accountBalance($supplierId, $code, $rangeTo), 2);
+            }
+            $checks[] = ['key' => 'deferrals_balances', 'severity' => 'info', 'ok' => true, 'value' => $deferrals];
+        }
 
-        $checks[] = $this->checkAccountsOnUnusualSide($supplierId, $periodId, $rangeTo);
-        $checks[] = $this->checkAssetsWithoutAccumulatedDepreciation($supplierId, $rangeTo);
-        $checks[] = $this->checkAccount343VsReturn($supplierId, $rangeFrom, $rangeTo);
+        if ($wants('accounts_unusual_side')) {
+            $checks[] = $this->checkAccountsOnUnusualSide($supplierId, $periodId, $rangeTo);
+        }
+        if ($wants('assets_without_accumulated_depreciation')) {
+            $checks[] = $this->checkAssetsWithoutAccumulatedDepreciation($supplierId, $rangeTo);
+        }
+        if ($wants('vat_343_vs_return')) {
+            $checks[] = $this->checkAccount343VsReturn($supplierId, $rangeFrom, $rangeTo);
+        }
 
         // K3: doklad říká „zaplaceno", ale deník o úhradě neví — zaplacené faktury
         // s nevynulovaným saldem na svém saldokontním účtu (FV 311 / FP 321) k rangeTo.
         // Tolerance 0,50 Kč, detail per doklad viz ClosingRepository::paid*OpenSaldo.
-        $paidInvoicesSaldo = $this->closing->paidInvoicesOpenSaldo($supplierId, $rangeTo);
-        $checks[] = [
-            'key' => 'paid_invoices_open_saldo',
-            'severity' => 'warning',
-            'ok' => $paidInvoicesSaldo === [],
-            'value' => ['count' => count($paidInvoicesSaldo), 'items' => $paidInvoicesSaldo],
-        ];
-        $paidPurchasesSaldo = $this->closing->paidPurchasesOpenSaldo($supplierId, $rangeTo);
-        $checks[] = [
-            'key' => 'paid_purchases_open_saldo',
-            'severity' => 'warning',
-            'ok' => $paidPurchasesSaldo === [],
-            'value' => ['count' => count($paidPurchasesSaldo), 'items' => $paidPurchasesSaldo],
-        ];
+        if ($wants('paid_invoices_open_saldo')) {
+            $paidInvoicesSaldo = $this->closing->paidInvoicesOpenSaldo($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'paid_invoices_open_saldo',
+                'severity' => 'warning',
+                'ok' => $paidInvoicesSaldo === [],
+                'value' => ['count' => count($paidInvoicesSaldo), 'items' => $paidInvoicesSaldo],
+            ];
+        }
+        if ($wants('paid_purchases_open_saldo')) {
+            $paidPurchasesSaldo = $this->closing->paidPurchasesOpenSaldo($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'paid_purchases_open_saldo',
+                'severity' => 'warning',
+                'ok' => $paidPurchasesSaldo === [],
+                'value' => ['count' => count($paidPurchasesSaldo), 'items' => $paidPurchasesSaldo],
+            ];
+        }
 
         // K3 (proformy): proforma 'paid', ale přijatá záloha na 324 v deníku chybí.
-        $paidProformas = $this->closing->paidProformasWithoutAdvance($supplierId, $rangeTo);
-        $checks[] = [
-            'key' => 'paid_proformas_no_advance',
-            'severity' => 'warning',
-            'ok' => $paidProformas === [],
-            'value' => ['count' => count($paidProformas), 'items' => $paidProformas],
-        ];
+        if ($wants('paid_proformas_no_advance')) {
+            $paidProformas = $this->closing->paidProformasWithoutAdvance($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'paid_proformas_no_advance',
+                'severity' => 'warning',
+                'ok' => $paidProformas === [],
+                'value' => ['count' => count($paidProformas), 'items' => $paidProformas],
+            ];
 
+        }
         // K3 zrcadlově na přijaté straně: zálohová PF 'paid', ale úhrada na 314 v deníku
         // chybí. Zálohová faktura nemá předpis na 321 — do deníku vstupuje až peněžní
         // nohou 314 MD, takže prázdné 314 znamená, že o zaplacené záloze deník neví.
-        $paidAdvances = $this->closing->paidAdvancesWithoutBookedPayment($supplierId, $rangeTo);
-        $checks[] = [
-            'key' => 'paid_advances_no_payment',
-            'severity' => 'warning',
-            'ok' => $paidAdvances === [],
-            'value' => ['count' => count($paidAdvances), 'items' => $paidAdvances],
-        ];
+        if ($wants('paid_advances_no_payment')) {
+            $paidAdvances = $this->closing->paidAdvancesWithoutBookedPayment($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'paid_advances_no_payment',
+                'severity' => 'warning',
+                'ok' => $paidAdvances === [],
+                'value' => ['count' => count($paidAdvances), 'items' => $paidAdvances],
+            ];
 
+        }
         // § 11 odst. 1 písm. b) ZoÚ — zaúčtovaný zápis bez OBSAHU účetního případu. Částky
         // i účty sedí, ale z deníku nejde poznat, čeho se případ týkal; auditní stopa pak
         // doloží jen kdy a kolik, ne co. Nové zápisy sem spadnout nemůžou (PostingService
         // si popis dopočítá ze zdroje), takže jde o historii a data vzniklá mimo aplikaci —
         // proto varování, ne blokující chyba: uzávěrku to zastavit nemá, doplnit popis ano.
-        $noDescription = $this->closing->entriesWithoutDescription($supplierId, $rangeFrom, $rangeTo);
-        $checks[] = [
-            'key' => 'entries_without_description',
-            'severity' => 'warning',
-            'ok' => $noDescription === [],
-            'value' => ['count' => count($noDescription), 'items' => $noDescription],
-        ];
+        if ($wants('entries_without_description')) {
+            $noDescription = $this->closing->entriesWithoutDescription($supplierId, $rangeFrom, $rangeTo);
+            $checks[] = [
+                'key' => 'entries_without_description',
+                'severity' => 'warning',
+                'ok' => $noDescription === [],
+                'value' => ['count' => count($noDescription), 'items' => $noDescription],
+            ];
+        }
 
         // Stornovaný doklad s AKTIVNÍM zápisem v uzavíraném období. Účtuje se podle deníku,
         // takže knihy nesou náklad/výnos a saldokonto dokladu, o kterém evidence tvrdí, že
         // neexistuje — uzávěrka by ten rozpor zabetonovala do schváleného období.
         // Vzniká stornem mimo DocumentJournalSync (import, přímý zásah do DB, migrace).
-        $cancelledWithEntry = $this->closing->cancelledDocumentsWithActiveEntry($supplierId, $rangeFrom, $rangeTo);
-        $checks[] = [
-            'key' => 'cancelled_with_entry',
-            'severity' => 'warning',
-            'ok' => $cancelledWithEntry === [],
-            'value' => ['count' => count($cancelledWithEntry), 'items' => $cancelledWithEntry],
-        ];
+        if ($wants('cancelled_with_entry')) {
+            $cancelledWithEntry = $this->closing->cancelledDocumentsWithActiveEntry($supplierId, $rangeFrom, $rangeTo);
+            $checks[] = [
+                'key' => 'cancelled_with_entry',
+                'severity' => 'warning',
+                'ok' => $cancelledWithEntry === [],
+                'value' => ['count' => count($cancelledWithEntry), 'items' => $cancelledWithEntry],
+            ];
+        }
 
         // K3 (opačný směr): doklad se stavem 'sent', ale úhrada na 311/321 už je v deníku
         // („zaplaceno v deníku, doklad pořád issued") — neaktualizovaný stav dokladu.
-        $settledUnpaid = array_merge(
-            array_map(static fn (array $r): array => $r + ['doc_type' => 'invoice'], $this->closing->settledButUnpaidInvoices($supplierId, $rangeTo)),
-            array_map(static fn (array $r): array => $r + ['doc_type' => 'purchase_invoice'], $this->closing->settledButUnpaidPurchases($supplierId, $rangeTo)),
-        );
-        $checks[] = [
-            'key' => 'settled_but_unpaid',
-            'severity' => 'warning',
-            'ok' => $settledUnpaid === [],
-            'value' => ['count' => count($settledUnpaid), 'items' => $settledUnpaid],
-        ];
+        if ($wants('settled_but_unpaid')) {
+            $settledUnpaid = array_merge(
+                array_map(static fn (array $r): array => $r + ['doc_type' => 'invoice'], $this->closing->settledButUnpaidInvoices($supplierId, $rangeTo)),
+                array_map(static fn (array $r): array => $r + ['doc_type' => 'purchase_invoice'], $this->closing->settledButUnpaidPurchases($supplierId, $rangeTo)),
+            );
+            $checks[] = [
+                'key' => 'settled_but_unpaid',
+                'severity' => 'warning',
+                'ok' => $settledUnpaid === [],
+                'value' => ['count' => count($settledUnpaid), 'items' => $settledUnpaid],
+            ];
+        }
 
         // Realizovaný kurzový rozdíl NEZAÚČTOVANÝ na 563/663 (audit — VF 2405007):
         // cizoměnový plně zaplacený doklad, jehož úhrada vypořádala saldokonto jiným
         // kurzem než doklad, ale rozdíl nikdo nepřeúčtoval na kurzový výsledek. Odlišné
         // od NErealizovaných rozdílů k rozvahovému dni (krok fx_revaluation). Detail a
         // guard proti dvojímu hlášení viz ClosingRepository::realizedFxUnbooked.
-        $realizedFx = $this->closing->realizedFxUnbooked($supplierId, $rangeTo);
-        $checks[] = [
-            'key' => 'realized_fx_unbooked',
-            'severity' => 'warning',
-            'ok' => $realizedFx === [],
-            'value' => ['count' => count($realizedFx), 'items' => $realizedFx],
-        ];
+        if ($wants('realized_fx_unbooked')) {
+            $realizedFx = $this->closing->realizedFxUnbooked($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'realized_fx_unbooked',
+                'severity' => 'warning',
+                'ok' => $realizedFx === [],
+                'value' => ['count' => count($realizedFx), 'items' => $realizedFx],
+            ];
+        }
 
-        $checks[] = $this->checkSmallAssetCards($supplierId, $rangeFrom, $rangeTo);
+        if ($wants('small_asset_cards_incomplete')) {
+            $checks[] = $this->checkSmallAssetCards($supplierId, $rangeFrom, $rangeTo);
+        }
 
-        $checks[] = $this->checkCnbRateDeviation($supplierId, $rangeFrom, $rangeTo);
+        if ($wants('cnb_rate_deviation')) {
+            $checks[] = $this->checkCnbRateDeviation($supplierId, $rangeFrom, $rangeTo);
+        }
 
-        $checks[] = $this->checkPaymentMatchAudit($supplierId, $rangeFrom, $rangeTo);
+        if ($wants('payment_match_audit')) {
+            $checks[] = $this->checkPaymentMatchAudit($supplierId, $rangeFrom, $rangeTo);
+        }
 
         // § 99a — nárok na čtvrtletní zdaňovací období. `supplier.vat_period` byl ruční
         // přepínač bez kontroly; nesprávné nastavení znamená celoročně pozdě podávaná
         // přiznání, ne jednu chybu. `ok=false` kryje obrat nad limitem (odst. 1)
         // i rok registrace a rok následující (odst. 3, EPIC VH-04) — obojí je error.
-        $vatPeriod = $this->vatPeriodEntitlement->evaluate($supplierId, $fiscalYear);
-        $checks[] = [
-            'key' => 'vat_period_entitlement',
-            'severity' => $vatPeriod['ok'] ? 'info' : 'error',
-            'ok' => $vatPeriod['ok'],
-            'value' => [
-                'vat_period' => $vatPeriod['vat_period'],
-                'prior_year' => $vatPeriod['prior_year'],
-                'prior_year_turnover' => $vatPeriod['prior_year_turnover'],
-                'limit' => $vatPeriod['limit'],
-            ],
-        ];
+        if ($wants('vat_period_entitlement')) {
+            $vatPeriod = $this->vatPeriodEntitlement->evaluate($supplierId, $fiscalYear);
+            $checks[] = [
+                'key' => 'vat_period_entitlement',
+                'severity' => $vatPeriod['ok'] ? 'info' : 'error',
+                'ok' => $vatPeriod['ok'],
+                'value' => [
+                    'vat_period' => $vatPeriod['vat_period'],
+                    'prior_year' => $vatPeriod['prior_year'],
+                    'prior_year_turnover' => $vatPeriod['prior_year_turnover'],
+                    'limit' => $vatPeriod['limit'],
+                ],
+            ];
+        }
 
         // § 18 odst. 2 ZoÚ — velká a střední ÚJ (a každá s povinným auditem) musí mít
         // v závěrce i přehled o peněžních tocích a o změnách vlastního kapitálu. Balíček
@@ -3969,9 +4065,12 @@ final class ClosingService
         // kdy se výkazy nedaly vygenerovat a účetní je musela přiložit ručně. Nově se
         // ptá na to, co jediné může být špatně: SEDÍ oba výkazy? Nesedící přehled je vada
         // v datech (typicky pohyb, jehož protiúčet nejde zařadit) a takhle se odevzdat nedá.
-        $category = $this->categories->evaluate($supplierId, $periodId);
-        $needsSection18 = in_array((string) $category['category'], ['large', 'medium'], true)
-            || ($category['scope_override'] === null && (string) $category['scope'] === 'full');
+        $category = $wants('section18_statements_required')
+            ? $this->categories->evaluate($supplierId, $periodId)
+            : null;
+        $needsSection18 = $category !== null
+            && (in_array((string) $category['category'], ['large', 'medium'], true)
+                || ($category['scope_override'] === null && (string) $category['scope'] === 'full'));
         if ($needsSection18) {
             $cashFlow = $this->cashFlowStatement->build($supplierId, $periodId);
             $equityReconciles = $this->equityStatement->build($supplierId, $periodId)['reconciles'];
@@ -3996,43 +4095,62 @@ final class ClosingService
         // `error`, když plátcovství už VZNIKLO a firma plátcem není — to je stav, ve
         // kterém se každý další doklad vystavuje špatně. Překročení dolního limitu je
         // `warning`: povinnost nastane teprve od 1. ledna, je čas se registrovat.
-        $vatReg = $this->vatRegistration->evaluate($supplierId, $fiscalYear);
-        if ($vatReg['applicable'] && !$vatReg['is_vat_payer'] && $vatReg['status'] !== 'below') {
-            $alreadyPayer = $vatReg['becomes_payer_on'] !== null
-                && $vatReg['becomes_payer_on'] <= date('Y-m-d');
+        if ($wants('vat_registration_due')) {
+            $vatReg = $this->vatRegistration->evaluate($supplierId, $fiscalYear);
+            if ($vatReg['applicable'] && !$vatReg['is_vat_payer'] && $vatReg['status'] !== 'below') {
+                $alreadyPayer = $vatReg['becomes_payer_on'] !== null
+                    && $vatReg['becomes_payer_on'] <= date('Y-m-d');
+                $checks[] = [
+                    'key' => 'vat_registration_due',
+                    'severity' => $alreadyPayer ? 'error' : 'warning',
+                    'ok' => false,
+                    'value' => [
+                        'turnover'         => $vatReg['turnover'],
+                        'limit_low'        => $vatReg['limit_low'],
+                        'limit_high'       => $vatReg['limit_high'],
+                        'status'           => $vatReg['status'],
+                        'crossed_on'       => $vatReg['crossed_on'],
+                        'becomes_payer_on' => $vatReg['becomes_payer_on'],
+                    ],
+                ];
+            }
+
+            // § 79 / § 79a ZDPH (EPIC VH-07) — přechod plátcovství v uzavíraném období
+            // bez evidované korekce odpočtu na ř. 45. Warning, ne error: nárok (§ 79)
+            // i povinnost snížení (§ 79a) závisí na obchodním majetku ke dni přechodu,
+        }
+        // což systém z dokladů nevidí — rozhodnout musí účetní v agendě Opravy DPH.
+        if ($wants('vat_status_s79_missing')) {
+            $s79Check = $this->checkVatStatusS79Missing($supplierId, $startsOn, $endsOn);
+            if ($s79Check !== null) {
+                $checks[] = $s79Check;
+            }
+        }
+
+        if ($wants('vat_clearing_stale')) {
+            $checks[] = $this->checkVatClearingFresh($supplierId, $rangeFrom, $rangeTo);
+        }
+
+        if ($wants('income_tax_hint')) {
             $checks[] = [
-                'key' => 'vat_registration_due',
-                'severity' => $alreadyPayer ? 'error' : 'warning',
-                'ok' => false,
-                'value' => [
-                    'turnover'         => $vatReg['turnover'],
-                    'limit_low'        => $vatReg['limit_low'],
-                    'limit_high'       => $vatReg['limit_high'],
-                    'status'           => $vatReg['status'],
-                    'crossed_on'       => $vatReg['crossed_on'],
-                    'becomes_payer_on' => $vatReg['becomes_payer_on'],
-                ],
+                'key' => 'income_tax_hint',
+                'severity' => 'info',
+                'ok' => true,
+                'value' => 'Splatnou daň z příjmů (MD 591 / D 341) zaúčtuj krokem uzávěrky „Daň z příjmů" — '
+                    . 'podklad z DPPO přiznání / reportu úprav základu daně (R19).',
             ];
         }
 
-        // § 79 / § 79a ZDPH (EPIC VH-07) — přechod plátcovství v uzavíraném období
-        // bez evidované korekce odpočtu na ř. 45. Warning, ne error: nárok (§ 79)
-        // i povinnost snížení (§ 79a) závisí na obchodním majetku ke dni přechodu,
-        // což systém z dokladů nevidí — rozhodnout musí účetní v agendě Opravy DPH.
-        $s79Check = $this->checkVatStatusS79Missing($supplierId, $startsOn, $endsOn);
-        if ($s79Check !== null) {
-            $checks[] = $s79Check;
+        // Vyžádal-li si volající konkrétní klíče, vrátí se PŘESNĚ ony. Guardy výš jsou
+        // jen optimalizace — bez tohohle filtru by detail jednoho nálezu dostal navíc
+        // i všechny kontroly, které se guardovat nevyplatilo, a kontrakt metody by
+        // závisel na tom, které bloky jsou zrovna ošetřené.
+        if ($onlyKeys !== null) {
+            $checks = array_values(array_filter(
+                $checks,
+                static fn (array $c): bool => in_array((string) ($c['key'] ?? ''), $onlyKeys, true),
+            ));
         }
-
-        $checks[] = $this->checkVatClearingFresh($supplierId, $rangeFrom, $rangeTo);
-
-        $checks[] = [
-            'key' => 'income_tax_hint',
-            'severity' => 'info',
-            'ok' => true,
-            'value' => 'Splatnou daň z příjmů (MD 591 / D 341) zaúčtuj krokem uzávěrky „Daň z příjmů" — '
-                . 'podklad z DPPO přiznání / reportu úprav základu daně (R19).',
-        ];
 
         // Sjednocení tvaru nálezů + strop. Bez toho měl renderer na FE podobu whitelistu
         // podle klíče kontroly a každá nová kontrola tiše spadla do `JSON.stringify`;

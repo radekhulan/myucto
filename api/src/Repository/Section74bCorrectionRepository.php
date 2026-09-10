@@ -15,6 +15,9 @@ use MyInvoice\Infrastructure\Database\Connection;
  */
 final class Section74bCorrectionRepository
 {
+    /** Kolik id se vejde do jednoho `IN (…)` — viz {@see Section46CorrectionRepository::IN_CHUNK}. */
+    private const IN_CHUNK = 1000;
+
     public function __construct(private readonly Connection $db) {}
 
     /**
@@ -30,18 +33,22 @@ final class Section74bCorrectionRepository
         if ($invoiceIds === []) {
             return [];
         }
-        $ph = implode(',', array_fill(0, count($invoiceIds), '?'));
-        $sql =
-            "SELECT purchase_invoice_id,
-                    SUM(CASE WHEN movement = 'reduction' THEN vat_amount ELSE -vat_amount END) AS net_corrected
-               FROM vat_s74b_corrections
-              WHERE supplier_id = ? AND purchase_invoice_id IN ({$ph})
-           GROUP BY purchase_invoice_id";
-        $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute(array_merge([$supplierId], $invoiceIds));
         $out = [];
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
-            $out[(int) $r['purchase_invoice_id']] = round((float) $r['net_corrected'], 2);
+        // Po dávkách — jeden placeholder na doklad naráží na tvrdý strop MariaDB
+        // (65 535 parametrů na příkaz), viz {@see Section46CorrectionRepository::IN_CHUNK}.
+        foreach (array_chunk($invoiceIds, self::IN_CHUNK) as $chunk) {
+            $ph = implode(',', array_fill(0, count($chunk), '?'));
+            $sql =
+                "SELECT purchase_invoice_id,
+                        SUM(CASE WHEN movement = 'reduction' THEN vat_amount ELSE -vat_amount END) AS net_corrected
+                   FROM vat_s74b_corrections
+                  WHERE supplier_id = ? AND purchase_invoice_id IN ({$ph})
+               GROUP BY purchase_invoice_id";
+            $stmt = $this->db->pdo()->prepare($sql);
+            $stmt->execute(array_merge([$supplierId], $chunk));
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+                $out[(int) $r['purchase_invoice_id']] = round((float) $r['net_corrected'], 2);
+            }
         }
         return $out;
     }

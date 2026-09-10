@@ -16,6 +16,16 @@ use MyInvoice\Infrastructure\Database\Connection;
  */
 final class Section46CorrectionRepository
 {
+    /**
+     * Kolik `invoice_id` se vejde do jednoho `IN (…)`.
+     *
+     * MariaDB má tvrdý strop 65 535 parametrů na příkaz a sestava kandidátů § 46 nemá
+     * horní hranici počtu dokladů — nad tím limitem se sypala `PDOException`, ne pomalá
+     * odpověď. Tisíc je bezpečně pod stropem a zároveň dost velké na to, aby se počet
+     * round-tripů nezvedl citelně.
+     */
+    private const IN_CHUNK = 1000;
+
     public function __construct(private readonly Connection $db) {}
 
     /**
@@ -31,18 +41,63 @@ final class Section46CorrectionRepository
         if ($invoiceIds === []) {
             return [];
         }
-        $ph = implode(',', array_fill(0, count($invoiceIds), '?'));
-        $sql =
-            "SELECT invoice_id,
-                    SUM(CASE WHEN movement = 'correction' THEN vat_amount ELSE -vat_amount END) AS net_corrected
-               FROM vat_s46_corrections
-              WHERE supplier_id = ? AND invoice_id IN ({$ph})
-           GROUP BY invoice_id";
-        $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute(array_merge([$supplierId], $invoiceIds));
         $out = [];
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
-            $out[(int) $r['invoice_id']] = round((float) $r['net_corrected'], 2);
+        // Po dávkách, protože jeden placeholder na kandidáta naráží na tvrdý strop
+        // MariaDB (65 535 parametrů na příkaz). Firma s víc než 65 tisíci otevřenými
+        // pohledávkami nedostala pomalou odpověď, ale `PDOException` — sestava
+        // kandidátů § 46 pro ni prostě přestala existovat.
+        foreach (array_chunk($invoiceIds, self::IN_CHUNK) as $chunk) {
+            $ph = implode(',', array_fill(0, count($chunk), '?'));
+            $sql =
+                "SELECT invoice_id,
+                        SUM(CASE WHEN movement = 'correction' THEN vat_amount ELSE -vat_amount END) AS net_corrected
+                   FROM vat_s46_corrections
+                  WHERE supplier_id = ? AND invoice_id IN ({$ph})
+               GROUP BY invoice_id";
+            $stmt = $this->db->pdo()->prepare($sql);
+            $stmt->execute(array_merge([$supplierId], $chunk));
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+                $out[(int) $r['invoice_id']] = round((float) $r['net_corrected'], 2);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Právní důvody první evidované opravy pro víc dokladů naráz.
+     *
+     * Volající je dřív zjišťoval {@see legalGroundFor} v cyklu přes kandidáty, tedy
+     * jedním dotazem na doklad. Sestava kandidátů má u velké firmy desítky tisíc řádků,
+     * takže to samo o sobě byly desítky tisíc round-tripů.
+     *
+     * @param list<int> $invoiceIds
+     * @return array<int,string> invoice_id => legal_ground
+     */
+    public function legalGroundsFor(int $supplierId, array $invoiceIds): array
+    {
+        $invoiceIds = array_values(array_unique(array_map('intval', $invoiceIds)));
+        if ($invoiceIds === []) {
+            return [];
+        }
+        $out = [];
+        foreach (array_chunk($invoiceIds, self::IN_CHUNK) as $chunk) {
+            $ph = implode(',', array_fill(0, count($chunk), '?'));
+            // Nejstarší `correction` na doklad — shodně s legalGroundFor (ORDER BY id LIMIT 1).
+            $sql =
+                "SELECT c.invoice_id, c.legal_ground
+                   FROM vat_s46_corrections c
+                   JOIN (SELECT invoice_id, MIN(id) AS first_id
+                           FROM vat_s46_corrections
+                          WHERE supplier_id = ? AND movement = 'correction'
+                            AND invoice_id IN ({$ph})
+                       GROUP BY invoice_id) f ON f.first_id = c.id";
+            $stmt = $this->db->pdo()->prepare($sql);
+            $stmt->execute(array_merge([$supplierId], $chunk));
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+                if ($r['legal_ground'] !== null) {
+                    $out[(int) $r['invoice_id']] = (string) $r['legal_ground'];
+                }
+            }
         }
         return $out;
     }

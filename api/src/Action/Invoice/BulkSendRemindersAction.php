@@ -22,6 +22,17 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class BulkSendRemindersAction
 {
+    /**
+     * Kolik upomínek smí jeden požadavek odeslat.
+     *
+     * Strop dosud žádný nebyl, přitom každá upomínka znamená SMTP doručení (timeout
+     * 30 s) a případný IMAP append. Pár pomalých doručení tedy stačilo na vyčerpání
+     * `max_execution_time` — a to je nejhorší možný konec: část klientů upomínku
+     * dostane, část ne, a volající se nedozví, kde se to zlomilo. Radši odmítnout
+     * předem, než odeslat půlku.
+     */
+    private const MAX_PER_REQUEST = 50;
+
     public function __construct(
         private readonly ReminderService $reminders,
         private readonly InvoiceRepository $repo,
@@ -36,6 +47,16 @@ final class BulkSendRemindersAction
 
         if (empty($ids)) {
             return Json::error($response, 'no_invoices', 'Není vybrána žádná faktura.', 400);
+        }
+        if (count($ids) > self::MAX_PER_REQUEST) {
+            return Json::error(
+                $response,
+                'too_many_invoices',
+                'Najednou lze odeslat nejvýš ' . self::MAX_PER_REQUEST . ' upomínek (vybráno '
+                    . count($ids) . '). Rozdělte výběr — každá upomínka je samostatné odeslání e-mailu '
+                    . 'a delší dávka by skončila uprostřed.',
+                422,
+            );
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
