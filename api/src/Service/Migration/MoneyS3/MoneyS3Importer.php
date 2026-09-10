@@ -98,6 +98,11 @@ final class MoneyS3Importer
             // izolace na úrovni obsahu, ne jen oprávnění.
             $add('error', 'ico_mismatch', "Záloha je agenda IČO {$agendaIco}, firma v MyÚčtu má IČO {$supplierIco}.", ['agenda' => $agendaIco, 'supplier' => $supplierIco]);
         }
+        if (($agendaIco === '' || $supplierIco === '') && !$options->isDryRun() && !$options->confirmedIco) {
+            // Bez IČO na jedné ze stran nejde ověřit, že agenda patří téhle firmě. Ostrý
+            // převod by cizí účetnictví vmíchal natrvalo — spustí se jen s potvrzením.
+            $add('error', 'ico_unverified', 'Nelze ověřit, že záloha patří této firmě (chybí IČO). Ostrý převod vyžaduje výslovné potvrzení.');
+        }
 
         foreach ($agenda->warnings as $w) {
             $add('warning', $w['code'], $w['message']);
@@ -108,6 +113,9 @@ final class MoneyS3Importer
             $add('error', 'no_journal', 'Záloha neobsahuje účetní deník — není co převést.');
         }
         foreach ($plan as $item) {
+            if (!$item['calendar']) {
+                $add('error', 'fiscal_year_not_calendar', "Účetní rok {$item['year']} (adresář {$item['dir']}) nevede Money jako kalendářní — velká část deníku leží mimo rok {$item['year']}. Převod podporuje jen kalendářní účetní rok.", ['year' => $item['year']]);
+            }
             $period = $this->periods->findByYear($supplierId, $item['year']);
             if ($period === null) {
                 continue;
@@ -174,11 +182,20 @@ final class MoneyS3Importer
             $pdo->beginTransaction();
         }
         try {
-            // Stav před PRVNÍM ostrým během, který automatiku nechal vypnutou — jinak
-            // by se „obnovilo" vypnuto, které po sobě zanechal neúspěšný běh.
+            // Stav před PRVNÍM ostrým během, po kterém se automatika neobnovila (neúspěšný
+            // nebo spadlý běh ji nechal vypnutou) — jinak by se „obnovilo" vypnuto. K běhu
+            // se ukládá PŘED vypnutím: kdyby spadl i tenhle běh, další snímek najde.
             $snapshot = ($dryRun ? null : $this->map->pendingAutomationSnapshot($supplierId)) ?? $this->unit->snapshot($supplierId);
-            $this->unit->disableAutomation($supplierId, $userId > 0 ? $userId : null);
-            $automation = ['before' => $snapshot, 'during' => $this->unit->automationLevel($supplierId), 'restored' => false, 'after' => null];
+            if (!$dryRun && $runId !== null) {
+                $this->map->saveAutomationSnapshot($runId, $supplierId, $snapshot);
+            }
+            // Zkouška nanečisto vypnutí automatiky jen ohlásí. Zápis do řádku firmy by v její
+            // jediné transakci držel zámek až do konce a každý nový doklad firmy (cizí klíč
+            // na firmu) by na něj čekal; převod sám automatiku ke své práci nepotřebuje.
+            if (!$dryRun) {
+                $this->unit->disableAutomation($supplierId, $userId > 0 ? $userId : null);
+            }
+            $automation = ['before' => $snapshot, 'during' => $dryRun ? 'off' : $this->unit->automationLevel($supplierId), 'restored' => false, 'after' => null];
             $protocol->set('automation', $automation);
 
             $steps = $this->steps($ctx);
@@ -217,6 +234,7 @@ final class MoneyS3Importer
 
             if (!$dryRun && !$protocol->hasErrors()) {
                 $this->unit->restoreAutomation($supplierId, $snapshot, $userId > 0 ? $userId : null);
+                $this->map->markAutomationRestored($supplierId);
                 $automation['restored'] = true;
                 $automation['after'] = $this->unit->automationLevel($supplierId);
             }
@@ -258,7 +276,8 @@ final class MoneyS3Importer
             return;
         }
         sort($starts);
-        $this->unit->switchToDoubleEntry($ctx->supplierId, $starts[0]);
+        $ends = array_map(static fn (array $p): string => $p['ends_on'], $ctx->periods);
+        $this->unit->switchToDoubleEntry($ctx->supplierId, $starts[0], !$ctx->options->isDryRun(), max($ends));
         $ctx->protocol->info(self::STEP_ACCOUNTING_MODE, 'double_entry', 'Podvojné účetnictví od ' . $starts[0] . '.');
     }
 

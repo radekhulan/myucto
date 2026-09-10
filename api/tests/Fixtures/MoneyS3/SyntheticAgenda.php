@@ -17,7 +17,12 @@ namespace MyInvoice\Tests\Fixtures\MoneyS3;
  *   - zápis k 1. 1. 2025 (epocha dat — o den dřív by spadl do roku 2024),
  *   - přijatá i vydaná faktura uhrazená bankou (`UDoklad`), pokladní doklad, bankovní
  *     pohyby včetně vratky poplatku,
- *   - počáteční stavy 2025 = konečné stavy 2024 + VH na 431 (uzávěrka bez zdvojení).
+ *   - počáteční stavy 2025 = konečné stavy 2024 + VH na 431 (uzávěrka bez zdvojení),
+ *   - doklady 2025, které se nesmí převzít naslepo jako tuzemská faktura: zálohová
+ *     přijatá i vydaná (jiný `Druh` než `N`) vedle konečné faktury, dobropis, doklad
+ *     s členěním DPH přenesené daňové povinnosti a faktura v cizí měně,
+ *   - číslo dokladu z roku 2024 znovu v roce 2025 (Money čísluje řadu každý rok od
+ *     začátku) a úhrada kartou (`Uhrada`).
  *
  * Hodnoty v {@see trialBalanceCsv()} jsou spočtené ručně, ne z definice níže —
  * rekonciliace proti nim proto kontroluje celý řetěz nezávisle.
@@ -36,18 +41,24 @@ final class SyntheticAgenda
     ];
     private const CHART_FIELDS = [['Ucet', 'C', 6], ['Nazev', 'C', 50]];
     private const PURCHASE_FIELDS = [
-        ['Doklad', 'C', 10], ['PrijatDokl', 'C', 20], ['VarSymbol', 'C', 10], ['D_ICO', 'C', 12], ['D_DIC', 'C', 14],
+        ['Doklad', 'C', 10], ['Storno', 'B', 1], ['PrijatDokl', 'C', 20], ['VarSymbol', 'C', 10], ['D_ICO', 'C', 12], ['D_DIC', 'C', 14],
         ['D_Nazev', 'C', 60], ['D_Ulice', 'C', 40], ['D_Mesto', 'C', 40], ['D_Psc', 'C', 10],
         ['Vystaveno', 'D', 2], ['DatUcPr', 'D', 2], ['PlnenoDPH', 'D', 2], ['Splatno', 'D', 2], ['Doruceno', 'D', 2],
+        ['KodDPH', 'C', 12], ['Druh', 'C', 1], ['Dobropis', 'B', 1], ['Uhrada', 'C', 20],
         ['Zaklad_0', 'E', 10], ['Zaklad_1', 'E', 10], ['Zaklad_2', 'E', 10], ['SazbaDPH1', 'E', 10], ['SazbaDPH2', 'E', 10],
+        ['DPH_1', 'E', 10], ['DPH_2', 'E', 10],
         ['CelkemSDPH', 'E', 10], ['Uhrazeno', 'D', 2], ['UDoklad', 'C', 10], ['Popis', 'C', 50], ['BarCode', 'C', 20],
+        ['Mena', 'C', 3], ['PocetJedn', 'L', 4], ['Kurs', 'E', 10], ['Neuctovat', 'B', 1],
     ];
     private const ISSUED_FIELDS = [
-        ['Doklad', 'C', 10], ['VarSymbol', 'C', 10], ['O_ICO', 'C', 12], ['O_DIC', 'C', 14], ['O_Nazev', 'C', 60],
+        ['Doklad', 'C', 10], ['Storno', 'B', 1], ['VarSymbol', 'C', 10], ['O_ICO', 'C', 12], ['O_DIC', 'C', 14], ['O_Nazev', 'C', 60],
         ['O_Ulice', 'C', 40], ['O_Mesto', 'C', 40], ['O_Psc', 'C', 10],
         ['Vystaveno', 'D', 2], ['DatUcPr', 'D', 2], ['PlnenoDPH', 'D', 2], ['Splatno', 'D', 2],
+        ['KodDPH', 'C', 12], ['Druh', 'C', 1], ['Dobropis', 'B', 1], ['Uhrada', 'C', 20],
         ['Zaklad_0', 'E', 10], ['Zaklad_1', 'E', 10], ['Zaklad_2', 'E', 10], ['SazbaDPH1', 'E', 10], ['SazbaDPH2', 'E', 10],
+        ['DPH_1', 'E', 10], ['DPH_2', 'E', 10],
         ['CelkemSDPH', 'E', 10], ['Uhrazeno', 'D', 2], ['UDoklad', 'C', 10], ['Popis', 'C', 50],
+        ['Mena', 'C', 3], ['PocetJedn', 'L', 4], ['Kurs', 'E', 10], ['Neuctovat', 'B', 1],
     ];
     private const REGISTER_FIELDS = [
         ['Zkrat', 'C', 6], ['Popis', 'C', 40], ['UcPokl', 'C', 1], ['PrimUcet', 'C', 6], ['Ucet', 'C', 20], ['BKod', 'C', 4], ['IBAN', 'C', 34],
@@ -63,6 +74,13 @@ final class SyntheticAgenda
     ];
     private const RULE_FIELDS = [['Zkrat', 'C', 6], ['Popis', 'C', 40], ['UcMD', 'C', 6], ['UcD', 'C', 6]];
 
+    /** Členění DPH tuzemského přijatého plnění s nárokem na odpočet (řádky 40 a 41 přiznání). */
+    public const KOD_DPH_PURCHASE = '19Ř40,41';
+    /** Členění DPH tuzemského uskutečněného plnění (řádky 1 a 2 přiznání). */
+    public const KOD_DPH_SALE = '19Ř01,02';
+    /** Členění DPH přenesené daňové povinnosti na straně příjemce (řádky 10 a 43). */
+    public const KOD_DPH_REVERSE_CHARGE = '19Ř10,43';
+
     /**
      * Celá agenda jako soubory: relativní cesta => obsah.
      *
@@ -73,10 +91,23 @@ final class SyntheticAgenda
         $vendor = [
             'D_ICO' => self::VENDOR_ICO, 'D_DIC' => 'CZ' . self::VENDOR_ICO, 'D_Nazev' => 'Dodavatel Alfa s.r.o.',
             'D_Ulice' => 'Vzorová 1', 'D_Mesto' => 'Praha', 'D_Psc' => '110 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_PURCHASE, 'Uhrada' => 'převodem',
+        ];
+        $customer = [
+            'O_ICO' => self::CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::CUSTOMER_ICO,
+            'O_Nazev' => 'Odběratel Beta a.s.', 'O_Ulice' => 'Ukázková 7', 'O_Mesto' => 'Ostrava', 'O_Psc' => '702 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+        ];
+        $purchaseDates = static fn (string $date): array => [
+            'Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => $date, 'Doruceno' => $date,
+        ];
+        $issuedDates = static fn (string $date): array => [
+            'Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => $date,
         ];
         $chart = [
             ['Ucet' => '211000', 'Nazev' => 'Pokladna'],
             ['Ucet' => '221001', 'Nazev' => 'Běžný účet'],
+            ['Ucet' => '221002', 'Nazev' => 'Druhý běžný účet'],
             ['Ucet' => '311000', 'Nazev' => 'Odběratelé'],
             ['Ucet' => '321000', 'Nazev' => 'Dodavatelé'],
             ['Ucet' => '325000', 'Nazev' => 'Ostatní závazky'],
@@ -93,6 +124,7 @@ final class SyntheticAgenda
         $registers = [
             ['Zkrat' => 'PO', 'Popis' => 'Hlavní pokladna', 'UcPokl' => 'P', 'PrimUcet' => '211000'],
             ['Zkrat' => 'BU', 'Popis' => 'Běžný účet', 'UcPokl' => 'U', 'PrimUcet' => '221001', 'Ucet' => '3000000004', 'BKod' => '0100'],
+            ['Zkrat' => 'BU2', 'Popis' => 'Druhý běžný účet', 'UcPokl' => 'U', 'PrimUcet' => '221002', 'Ucet' => '1000000005', 'BKod' => '0100'],
         ];
         $rules = [
             ['Zkrat' => 'PF001', 'Popis' => 'Nákup služeb', 'UcMD' => '518000', 'UcD' => '321000'],
@@ -151,16 +183,15 @@ final class SyntheticAgenda
                 $vendor + [
                     'Doklad' => 'FP24001', 'PrijatDokl' => 'DF-2024-017', 'VarSymbol' => '2024017',
                     'Vystaveno' => '2024-02-08', 'DatUcPr' => '2024-02-10', 'PlnenoDPH' => '2024-02-10', 'Splatno' => '2024-02-22', 'Doruceno' => '2024-02-10',
-                    'Zaklad_2' => 10000.0, 'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'CelkemSDPH' => 12100.0,
+                    'Zaklad_2' => 10000.0, 'DPH_2' => 2100.0, 'CelkemSDPH' => 12100.0,
                     'Uhrazeno' => '2024-02-20', 'UDoklad' => 'BV24001', 'Popis' => 'Účetní služby', 'BarCode' => '90000101',
                 ],
             ]),
             'ROK.001/VFaktury.DAT' => Ms3FixtureWriter::table(self::ISSUED_FIELDS, [
-                [
-                    'Doklad' => 'FV24001', 'VarSymbol' => '2024001', 'O_ICO' => self::CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::CUSTOMER_ICO,
-                    'O_Nazev' => 'Odběratel Beta a.s.', 'O_Ulice' => 'Ukázková 7', 'O_Mesto' => 'Ostrava', 'O_Psc' => '702 00',
+                $customer + [
+                    'Doklad' => 'FV24001', 'VarSymbol' => '2024001',
                     'Vystaveno' => '2024-03-05', 'DatUcPr' => '2024-03-05', 'PlnenoDPH' => '2024-03-05', 'Splatno' => '2024-03-19',
-                    'Zaklad_2' => 20000.0, 'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'CelkemSDPH' => 24200.0,
+                    'Zaklad_2' => 20000.0, 'DPH_2' => 4200.0, 'CelkemSDPH' => 24200.0,
                     'Uhrazeno' => '2024-03-20', 'UDoklad' => 'BP24002', 'Popis' => 'Poradenství',
                 ],
             ]),
@@ -189,20 +220,55 @@ final class SyntheticAgenda
                 ['Cislo' => 3, 'Zdroj' => 'FP', 'Doklad' => 'FP25001', 'Datum' => '2025-01-15', 'DatPlnDPH' => '2025-01-15', 'Popis' => 'Účetní služby', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => 1050.0],
                 ['Cislo' => 4, 'Zdroj' => 'PK', 'Doklad' => 'PV25001', 'Datum' => '2025-02-01', 'Popis' => 'Kancelářské potřeby', 'UcMD' => '501100', 'UcD' => '211000', 'Castka' => 800.0],
                 ['Cislo' => 5, 'Zdroj' => 'BK', 'Doklad' => 'BV25001', 'Datum' => '2025-12-31', 'Popis' => 'Poplatek za vedení účtu', 'UcMD' => '568000', 'UcD' => '221001', 'Castka' => 100.0],
+                // Zálohové faktury ZF25001 / ZV25001 Money nezaúčtovává — v deníku nejsou.
+                ['Cislo' => 6, 'Zdroj' => 'FP', 'Doklad' => 'FP25002', 'Datum' => '2025-03-10', 'DatPlnDPH' => '2025-03-10', 'Popis' => 'Vyúčtování služeb', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 1000.0],
+                ['Cislo' => 7, 'Zdroj' => 'FP', 'Doklad' => 'FP25002', 'Datum' => '2025-03-10', 'DatPlnDPH' => '2025-03-10', 'Popis' => 'Vyúčtování služeb', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => 210.0],
+                ['Cislo' => 8, 'Zdroj' => 'FP', 'Doklad' => 'DP25001', 'Datum' => '2025-03-20', 'DatPlnDPH' => '2025-03-20', 'Popis' => 'Dobropis služeb', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => -500.0],
+                ['Cislo' => 9, 'Zdroj' => 'FP', 'Doklad' => 'DP25001', 'Datum' => '2025-03-20', 'DatPlnDPH' => '2025-03-20', 'Popis' => 'Dobropis služeb', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => -105.0],
+                ['Cislo' => 10, 'Zdroj' => 'FP', 'Doklad' => 'FP25003', 'Datum' => '2025-04-05', 'DatPlnDPH' => '2025-04-05', 'Popis' => 'Stavební práce', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 2000.0],
+                ['Cislo' => 11, 'Zdroj' => 'FP', 'Doklad' => 'FP25003', 'Datum' => '2025-04-05', 'DatPlnDPH' => '2025-04-05', 'Popis' => 'Stavební práce', 'UcMD' => '343100', 'UcD' => '343200', 'Castka' => 420.0],
+                ['Cislo' => 12, 'Zdroj' => 'FP', 'Doklad' => 'FP25004', 'Datum' => '2025-04-15', 'DatPlnDPH' => '2025-04-15', 'Popis' => 'Licence v cizí měně', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 2500.0],
+                ['Cislo' => 13, 'Zdroj' => 'FP', 'Doklad' => 'FP25004', 'Datum' => '2025-04-15', 'DatPlnDPH' => '2025-04-15', 'Popis' => 'Licence v cizí měně', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => 525.0],
+                ['Cislo' => 14, 'Zdroj' => 'FP', 'Doklad' => 'FP24001', 'Datum' => '2025-05-06', 'DatPlnDPH' => '2025-05-06', 'Popis' => 'Drobné služby', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 300.0],
+                ['Cislo' => 15, 'Zdroj' => 'FP', 'Doklad' => 'FP24001', 'Datum' => '2025-05-06', 'DatPlnDPH' => '2025-05-06', 'Popis' => 'Drobné služby', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => 63.0],
+                ['Cislo' => 16, 'Zdroj' => 'FV', 'Doklad' => 'FV25001', 'Datum' => '2025-05-20', 'DatPlnDPH' => '2025-05-20', 'Popis' => 'Poradenství', 'UcMD' => '311000', 'UcD' => '602000', 'Castka' => 1000.0],
+                ['Cislo' => 17, 'Zdroj' => 'FV', 'Doklad' => 'FV25001', 'Datum' => '2025-05-20', 'DatPlnDPH' => '2025-05-20', 'Popis' => 'Poradenství', 'UcMD' => '311000', 'UcD' => '343200', 'Castka' => 210.0],
+                // Číselná řada druhého účtu má stejné číslo dokladu jako řada prvního účtu.
+                ['Cislo' => 18, 'Zdroj' => 'BK', 'Doklad' => 'BV25001', 'Datum' => '2025-11-30', 'Popis' => 'Poplatek druhého účtu', 'UcMD' => '568000', 'UcD' => '221002', 'Castka' => 40.0],
             ]),
             'ROK.002/PFaktury.DAT' => Ms3FixtureWriter::table(self::PURCHASE_FIELDS, [
                 $vendor + [
                     'Doklad' => 'FP25001', 'PrijatDokl' => 'DF-2025-003', 'VarSymbol' => '2025003',
                     'Vystaveno' => '2025-01-14', 'DatUcPr' => '2025-01-15', 'PlnenoDPH' => '2025-01-15', 'Splatno' => '2025-01-28', 'Doruceno' => '2025-01-15',
-                    'Zaklad_2' => 5000.0, 'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'CelkemSDPH' => 6050.0, 'Popis' => 'Účetní služby',
+                    'Zaklad_2' => 5000.0, 'DPH_2' => 1050.0, 'CelkemSDPH' => 6050.0, 'Popis' => 'Účetní služby',
                 ],
+                // Zálohová faktura (jiný druh než běžná `N`) — daňový doklad je až konečná FP25002.
+                ['Druh' => 'Z', 'Doklad' => 'ZF25001', 'PrijatDokl' => 'ZF-2025-001', 'VarSymbol' => '2025101',
+                    'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Záloha na služby'] + $purchaseDates('2025-03-01') + $vendor,
+                ['Uhrada' => 'kartou', 'Doklad' => 'FP25002', 'PrijatDokl' => 'DF-2025-010', 'VarSymbol' => '2025010',
+                    'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Vyúčtování služeb'] + $purchaseDates('2025-03-10') + $vendor,
+                ['Dobropis' => 1, 'Doklad' => 'DP25001', 'PrijatDokl' => 'DB-2025-001', 'VarSymbol' => '2025011',
+                    'Zaklad_2' => -500.0, 'DPH_2' => -105.0, 'CelkemSDPH' => -605.0, 'Popis' => 'Dobropis služeb'] + $purchaseDates('2025-03-20') + $vendor,
+                ['KodDPH' => self::KOD_DPH_REVERSE_CHARGE, 'Doklad' => 'FP25003', 'PrijatDokl' => 'RC-2025-001', 'VarSymbol' => '2025012',
+                    'Zaklad_2' => 2000.0, 'DPH_2' => 0.0, 'CelkemSDPH' => 2000.0, 'Popis' => 'Stavební práce'] + $purchaseDates('2025-04-05') + $vendor,
+                ['Mena' => 'EUR', 'PocetJedn' => 1, 'Kurs' => 25.0, 'Doklad' => 'FP25004', 'PrijatDokl' => 'EU-2025-001', 'VarSymbol' => '2025013',
+                    'Zaklad_2' => 2500.0, 'DPH_2' => 525.0, 'CelkemSDPH' => 3025.0, 'Popis' => 'Licence v cizí měně'] + $purchaseDates('2025-04-15') + $vendor,
+                // Money čísluje řadu každý rok od začátku: FP24001 je i v roce 2024.
+                ['Doklad' => 'FP24001', 'PrijatDokl' => 'DF-2025-020', 'VarSymbol' => '2025020',
+                    'Zaklad_2' => 300.0, 'DPH_2' => 63.0, 'CelkemSDPH' => 363.0, 'Popis' => 'Drobné služby'] + $purchaseDates('2025-05-06') + $vendor,
             ]),
-            'ROK.002/VFaktury.DAT' => Ms3FixtureWriter::table(self::ISSUED_FIELDS, []),
+            'ROK.002/VFaktury.DAT' => Ms3FixtureWriter::table(self::ISSUED_FIELDS, [
+                ['Druh' => 'Z', 'Doklad' => 'ZV25001', 'VarSymbol' => '2025101',
+                    'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Záloha na poradenství'] + $issuedDates('2025-05-02') + $customer,
+                ['Doklad' => 'FV25001', 'VarSymbol' => '2025001',
+                    'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Poradenství'] + $issuedDates('2025-05-20') + $customer,
+            ]),
             'ROK.002/PoklKnih.DAT' => Ms3FixtureWriter::table(self::CASH_FIELDS, [
                 ['Doklad' => 'PV25001', 'Pokl' => 'PO', 'Vydej' => 1, 'PrKont' => 'PV001', 'DatVyst' => '2025-02-01', 'DatUcPr' => '2025-02-01', 'Popis' => 'Kancelářské potřeby', 'Celkem' => 800.0],
             ]),
             'ROK.002/BankKnih.DAT' => Ms3FixtureWriter::table(self::BANK_FIELDS, [
                 ['Doklad' => 'BV25001', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-12-31', 'DatPlat' => '2025-12-31', 'Celkem' => 100.0, 'Popis' => 'Poplatek za vedení účtu'],
+                ['Doklad' => 'BV25001', 'Ucet' => 'BU2', 'Vydej' => 1, 'DatUcPr' => '2025-11-30', 'DatPlat' => '2025-11-30', 'Celkem' => 40.0, 'Popis' => 'Poplatek druhého účtu'],
             ]),
         ];
         // Indexy a šifrovaný archiv jsou v každé záloze; převod je nesmí potřebovat.

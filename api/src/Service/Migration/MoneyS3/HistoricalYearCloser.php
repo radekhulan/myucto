@@ -57,7 +57,15 @@ final class HistoricalYearCloser
             }
             $state = $this->closing->state($ctx->supplierId, $periodId);
             if (in_array((string) $state['period']['status'], ['closed', 'approved', 'reviewed'], true)) {
-                $results[] = ['year' => $year, 'status' => 'already_closed'];
+                if (empty($state['can_open_next'])) {
+                    $results[] = ['year' => $year, 'status' => 'already_closed'];
+                    continue;
+                }
+                // Knihy se uzavřely, ale otevření dalšího roku selhalo (nebo neproběhlo) —
+                // bez dotažení by se další rok nikdy neotevřel.
+                $row = $this->finishOpenNext($ctx, $year, $periodId, $ctx->periods[$next]['id'], (int) $state['row_version']);
+                $results[] = $row;
+                $blocked = $blocked || $row['status'] !== 'next_opened';
                 continue;
             }
             $takeover = (array) ($state['opening_takeover'] ?? []);
@@ -113,6 +121,42 @@ final class HistoricalYearCloser
         }
         $p->set('closing', $results);
         $p->finish(self::STEP);
+    }
+
+    /**
+     * Dotažení otevření dalšího roku u roku, jehož knihy už jsou uzavřené. Stejná
+     * kontrola jako po uzávěrce: převzatý otevírací zápis zůstane jediný a počáteční
+     * stavy se nezmění.
+     *
+     * @return array<string,mixed>
+     */
+    private function finishOpenNext(ImportContext $ctx, int $year, int $periodId, int $nextPeriodId, int $rowVersion): array
+    {
+        $pdo = $this->db->pdo();
+        $before = $this->repo->openingBalancesInPeriod($ctx->supplierId, $nextPeriodId);
+        $savepoint = $pdo->inTransaction();
+        if ($savepoint) {
+            $pdo->exec('SAVEPOINT money_s3_open_next');
+        }
+        try {
+            $meta = ['user_id' => $ctx->userId > 0 ? $ctx->userId : null, 'posted_by' => $ctx->userId > 0 ? $ctx->userId : null];
+            $this->closing->openNext($ctx->supplierId, $periodId, $rowVersion, $meta);
+            $after = $this->repo->openingBalancesInPeriod($ctx->supplierId, $nextPeriodId);
+            if (count($this->repo->openingEntriesInPeriod($ctx->supplierId, $nextPeriodId)) !== 1 || self::differs($before, $after)) {
+                throw new MoneyS3Exception('opening_changed', 'po otevření dalšího roku se počáteční stavy liší od převzatých z Money.');
+            }
+            if ($savepoint) {
+                $pdo->exec('RELEASE SAVEPOINT money_s3_open_next');
+            }
+            $ctx->protocol->count(self::STEP, 'closed');
+            return ['year' => $year, 'status' => 'next_opened'];
+        } catch (\Throwable $e) {
+            if ($savepoint) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT money_s3_open_next');
+            }
+            $ctx->protocol->warn(self::STEP, 'open_next_failed', "Rok {$year} je uzavřený, ale další rok se nepodařilo otevřít: " . $e->getMessage() . ' Otevřete ho v Uzávěrce ručně.', ['year' => $year]);
+            return ['year' => $year, 'status' => 'failed', 'error' => $e->getMessage()];
+        }
     }
 
     /** @return array<string,mixed> výsledek closeBooks */

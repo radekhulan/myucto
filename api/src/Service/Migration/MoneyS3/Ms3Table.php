@@ -45,8 +45,18 @@ final class Ms3Table
     {
     }
 
-    public static function open(string $path): self
+    /**
+     * Strop velikosti jedné tabulky: čte se celá do paměti. Deník velké firmy má desítky
+     * MB; větší soubor je podvrh nebo agenda, kterou převod v jednom běhu nezvládne.
+     */
+    public const MAX_TABLE_BYTES = 512 * 1024 * 1024;
+
+    public static function open(string $path, int $maxBytes = self::MAX_TABLE_BYTES): self
     {
+        $size = @filesize($path);
+        if ($size !== false && $size > $maxBytes) {
+            throw new MoneyS3Exception('table_too_large', 'Soubor ' . basename($path) . ' je na převod příliš velký.');
+        }
         $raw = @file_get_contents($path);
         if ($raw === false) {
             throw new MoneyS3Exception('table_unreadable', 'Soubor ' . basename($path) . ' nelze přečíst.');

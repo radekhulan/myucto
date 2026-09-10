@@ -16,6 +16,10 @@ use MyInvoice\Repository\MoneyS3ImportRepository;
  * Zkouška nanečisto běží v jedné transakci, která se vrací. Průběh do řádku jobu během
  * ní nezapisuje: zápis by držel zámek řádku až do konce a požadavek na zrušení z UI by
  * na něm visel. UI proto u zkoušky ukazuje jen „běží".
+ *
+ * Běh drží po celou dobu zámek firmy ({@see MoneyS3ImportRepository::acquireLock()}).
+ * Job bez hlášení průběhu (zkouška nanečisto) by jinak po čtvrthodině vypadal jako
+ * mrtvý, úklid by ho ukončil a mohl by se spustit druhý převod nad toutéž mapou.
  */
 final class MoneyS3ImportJobService
 {
@@ -51,6 +55,20 @@ final class MoneyS3ImportJobService
             return;
         }
         $supplierId = (int) $job['supplier_id'];
+        if (!$this->runs->acquireLock($supplierId)) {
+            $this->jobs->markFailed($jobId, 'Převod této firmy už běží v jiném procesu, druhý se nespouští.');
+            return;
+        }
+        try {
+            $this->runLocked($jobId, $job, $supplierId);
+        } finally {
+            $this->runs->releaseLock($supplierId);
+        }
+    }
+
+    /** @param array<string,mixed> $job */
+    private function runLocked(int $jobId, array $job, int $supplierId): void
+    {
         $userId = (int) ($job['created_by'] ?? 0);
         $params = is_array($job['params'] ?? null) ? $job['params'] : [];
         $token = (string) ($params['token'] ?? '');
@@ -58,6 +76,10 @@ final class MoneyS3ImportJobService
         $runId = null;
 
         try {
+            $interrupted = $this->runs->closeInterruptedRuns($supplierId);
+            if ($interrupted > 0) {
+                $this->jobs->appendLog($jobId, "Uzavřeno {$interrupted} přerušených běhů převodu.");
+            }
             $meta = MoneyS3Uploads::meta($supplierId, $token);
             $backup = Ms3Backup::open(MoneyS3Uploads::agendaDir($supplierId, $token));
             $options = new ImportOptions(
@@ -66,6 +88,7 @@ final class MoneyS3ImportJobService
                 isset($params['first_period_start']) && $params['first_period_start'] !== '' ? (string) $params['first_period_start'] : null,
                 array_values(array_map('strval', (array) ($params['related_party_icos'] ?? []))),
                 MoneyS3Uploads::reports($supplierId, $token),
+                (bool) ($params['confirm_ico'] ?? false),
             );
             $agenda = (array) ($meta['agenda'] ?? []);
             $runId = $this->runs->startRun($supplierId, $jobId, $mode, [

@@ -182,20 +182,39 @@ final class MoneyS3MigrationAction
         }
         $supplierId = SupplierGuard::currentId($request);
         $token = (string) ($args['token'] ?? '');
+        $body = (array) ($request->getParsedBody() ?? []);
+        $mode = (string) ($body['mode'] ?? ImportOptions::MODE_DRY_RUN);
+        $firstPeriodStart = trim((string) ($body['first_period_start'] ?? ''));
+        try {
+            $options = new ImportOptions(
+                $mode,
+                filter_var($body['close_history'] ?? true, FILTER_VALIDATE_BOOL),
+                $firstPeriodStart !== '' ? $firstPeriodStart : null,
+                [],
+                [],
+                filter_var($body['confirm_ico'] ?? false, FILTER_VALIDATE_BOOL),
+            );
+        } catch (MoneyS3Exception $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 422);
+        }
+        if (!$options->isDryRun()) {
+            $missing = self::missingLiveImportRights($request, $options->closeHistory);
+            if ($missing !== []) {
+                return Json::error($response, 'forbidden', 'Ostrý převod zapisuje účetní deník, mění nastavení firmy a uzavírá roky — chybí oprávnění: '
+                    . implode(', ', $missing) . '.', 403, ['missing_permissions' => $missing]);
+            }
+        }
         try {
             MoneyS3Uploads::meta($supplierId, $token);
         } catch (MoneyS3Exception $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 404);
         }
-        $body = (array) ($request->getParsedBody() ?? []);
-        $mode = (string) ($body['mode'] ?? ImportOptions::MODE_DRY_RUN);
-        $firstPeriodStart = trim((string) ($body['first_period_start'] ?? ''));
-        try {
-            $options = new ImportOptions($mode, filter_var($body['close_history'] ?? true, FILTER_VALIDATE_BOOL), $firstPeriodStart !== '' ? $firstPeriodStart : null);
-        } catch (MoneyS3Exception $e) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), 422);
-        }
 
+        // Živý worker drží zámek firmy i tehdy, když job dlouho nehlásí průběh (zkouška
+        // nanečisto) — takový job se za mrtvý považovat nesmí.
+        if (!$this->runs->isLockFree($supplierId)) {
+            return Json::error($response, 'already_running', 'Převod této firmy právě běží.', 409);
+        }
         $this->jobs->reapStale($supplierId, MoneyS3ImportJobService::SOURCE);
         foreach ($this->jobs->listForTenant($supplierId, MoneyS3ImportJobService::SOURCE, limit: 5) as $existing) {
             if (in_array($existing['status'], ['queued', 'running'], true)) {
@@ -211,6 +230,7 @@ final class MoneyS3MigrationAction
             'mode' => $options->mode,
             'close_history' => $options->closeHistory,
             'first_period_start' => $options->firstPeriodStart,
+            'confirm_ico' => $options->confirmedIco,
         ], $userId);
         $stored = $this->jobs->find($jobId, $supplierId);
         if ($stored === null || ($stored['source'] ?? '') !== MoneyS3ImportJobService::SOURCE) {
@@ -252,6 +272,22 @@ final class MoneyS3MigrationAction
             return Json::error($response, 'not_found', 'Protokol převodu nenalezen.', 404);
         }
         return Json::ok($response, $run);
+    }
+
+    /**
+     * Práva, která ostrý převod navíc potřebuje: zapisuje účetní deník, přepíná režim
+     * účetnictví a automatiku (nastavení firmy) a volitelně uzavírá historické roky.
+     * Zkouška nanečisto nic nezanechá, ta stačí s `utilities.import`.
+     *
+     * @return list<string>
+     */
+    public static function missingLiveImportRights(Request $request, bool $closeHistory): array
+    {
+        $required = ['accounting.journal.write', 'settings.company.write'];
+        if ($closeHistory) {
+            $required[] = 'accounting.periods.close';
+        }
+        return array_values(array_filter($required, static fn (string $key): bool => !RequestAuthorization::allows($request, $key, AccessLevel::WRITE)));
     }
 
     private function deny(Request $request, Response $response, AccessLevel $level): ?Response

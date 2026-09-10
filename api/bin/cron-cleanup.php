@@ -5,7 +5,8 @@ declare(strict_types=1);
 /**
  * Denní cleanup — login_attempts (>24h), expirované a staré odvolané sessions,
  * použité password_resets, login_otps + trusted_devices, WebAuthn flow/proofy,
- * expirované jednorázové granty a log files >90 dní.
+ * expirované jednorázové granty, log files >90 dní a nahrané zálohy agend Money S3
+ * po týdnu bez práce s nimi.
  *
  * POZN: PDF se NEMAŽE. Aktivní cache může pominout (renderer ji znovu vytvoří),
  * ale archivovaná historie (storage/invoices/sup-N/_archive) obsahuje verze
@@ -174,6 +175,9 @@ $report['monthly_export_files'] = $exportFilesDeleted;
 // 7) Nahrané soubory dávek skenů — dávka bez záznamu hned, opuštěné nahrávání
 //    po 48 h bez známky života, skončená dávka po 7 dnech (viz ScanStagingCleaner).
 $report['scan_attach_staging'] = (new ScanStagingCleaner($connection))->purge();
+
+// 8) Nahrané zálohy agend Money S3 — rozbalené účetnictví firmy, týden bez práce s ní.
+$report['money_s3_uploads'] = \MyInvoice\Service\Migration\MoneyS3\MoneyS3Uploads::purgeStaleAll();
 
 // Pročisti cron_runs — drž max 500 posledních záznamů na skript.
 $report['cron_runs_purged'] = CronRun::purgeOld($pdo, 500);

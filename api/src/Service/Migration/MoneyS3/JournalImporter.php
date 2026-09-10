@@ -37,7 +37,7 @@ final class JournalImporter
      * Rozvrh období: rok a jeho hranice pro každý adresář ROK.nnn. Bez zápisu — používá
      * ho i kontrola před převodem.
      *
-     * @return list<array{dir:string,year:int,starts_on:string,ends_on:string,has_opening:bool}>
+     * @return list<array{dir:string,year:int,starts_on:string,ends_on:string,has_opening:bool,calendar:bool}>
      */
     public function plan(Ms3Backup $backup, ImportOptions $options): array
     {
@@ -70,6 +70,7 @@ final class JournalImporter
                 'starts_on' => sprintf('%04d-01-01', $year),
                 'ends_on' => sprintf('%04d-12-31', $year),
                 'has_opening' => $hasOpening,
+                'calendar' => Ms3Journal::isCalendarYear($rows, $year),
                 'first_entry' => $min,
             ];
         }

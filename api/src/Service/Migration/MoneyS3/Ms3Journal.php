@@ -85,6 +85,31 @@ final class Ms3Journal
         return null;
     }
 
+    /** Podíl zápisů mimo kalendářní rok, nad kterým agenda vede hospodářský rok. */
+    private const NON_CALENDAR_SHARE = 0.1;
+
+    /**
+     * Vede agenda kalendářní účetní rok? Převod jiný nezná (období jsou 1. 1. – 31. 12.).
+     * Pár zápisů mimo rok je běžná chyba dokladu a převod je ohlásí po jednom; hospodářský
+     * rok (třeba červenec–červen) má mimo kalendářní rok velkou část deníku.
+     *
+     * @param list<array<string,mixed>> $rows
+     */
+    public static function isCalendarYear(array $rows, int $year): bool
+    {
+        $total = 0;
+        $outside = 0;
+        foreach ($rows as $r) {
+            $date = (string) ($r['Datum'] ?? '');
+            if (self::isOpening($r) || $date === '') {
+                continue;
+            }
+            $total++;
+            $outside += (int) substr($date, 0, 4) !== $year ? 1 : 0;
+        }
+        return $total === 0 || $outside / $total <= self::NON_CALENDAR_SHARE;
+    }
+
     /**
      * Čistý účetní účinek řádku deníku: kladná částka jde na MD `UcMD` a D `UcD`,
      * záporná obráceně. `null` = řádek nemá účinek (nulová částka, chybějící účet

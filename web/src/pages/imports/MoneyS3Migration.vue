@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { moneyS3Api, type MoneyS3Run, type MoneyS3Upload } from '@/api/moneyS3'
 import { cancelImportJob, fetchImportJob, type FileImportJob } from '@/api/imports'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
+import type { PermissionKey } from '@/security/permissions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -18,6 +20,7 @@ const TOKEN_KEY = 'myucto.moneyS3.token'
 
 const { t } = useI18n()
 const toast = useToast()
+const auth = useAuthStore()
 
 const currentStep = ref(1)
 const upload = ref<MoneyS3Upload | null>(null)
@@ -31,6 +34,7 @@ const runs = ref<MoneyS3Run[]>([])
 const busy = ref(false)
 const cancelling = ref(false)
 const confirmed = ref(false)
+const confirmIco = ref(false)
 const dryRunPassed = ref(false)
 const reportBusy = ref<number | null>(null)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
@@ -57,6 +61,14 @@ const jobRunning = computed(() => job.value?.status === 'queued' || job.value?.s
 const percent = computed(() => {
   if (jobMode.value !== 'import' || !job.value?.total_items) return null
   return Math.min(100, Math.round(job.value.processed / job.value.total_items * 100))
+})
+// IČO chybí v záloze nebo ve firmě — ostrý převod potřebuje výslovné potvrzení (BE ico_unverified).
+const icoUnverified = computed(() => (upload.value?.preflight ?? []).some(m => m.code === 'agenda_ico_missing' || m.code === 'supplier_ico_missing'))
+// Stejná práva jako BE MoneyS3MigrationAction::missingLiveImportRights().
+const missingRights = computed(() => {
+  const required: PermissionKey[] = ['accounting.journal.write', 'settings.company.write']
+  if (closeHistory.value) required.push('accounting.periods.close')
+  return required.filter(key => !auth.canWrite(key))
 })
 const importDone = computed(() => jobMode.value === 'import' && !jobRunning.value && run.value?.mode === 'import'
   && (run.value.status === 'completed' || run.value.status === 'completed_with_warnings'))
@@ -85,6 +97,7 @@ async function doUpload(): Promise<void> {
     writeToken(upload.value.token)
     dryRunPassed.value = false
     confirmed.value = false
+    confirmIco.value = false
     run.value = null
     currentStep.value = 2
   } catch (error: any) {
@@ -129,6 +142,7 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
       mode,
       close_history: closeHistory.value,
       first_period_start: firstPeriodStart.value || null,
+      confirm_ico: confirmIco.value,
     })
     jobMode.value = mode
     run.value = null
@@ -235,8 +249,12 @@ const actions = computed<ActionItem[]>(() => {
     { key: 'journal', label: t('money_s3.open_journal'), icon: 'doc', tier: 'primary', variant: 'primary', to: { name: 'accounting-journal' } },
     { key: 'trial', label: t('money_s3.open_trial_balance'), icon: 'chart', tier: 'secondary', variant: 'neutral', to: { name: 'accounting-trial-balance' } },
   ]
+  const icoPending = icoUnverified.value && !confirmIco.value
+  const importReason = missingRights.value.length
+    ? t('money_s3.rights_missing', { rights: missingRights.value.join(', ') })
+    : icoPending ? t('money_s3.ico_confirm_first') : t('money_s3.import_confirm_first')
   return [
-    { key: 'import', label: t('money_s3.import_start'), icon: 'play', tier: 'primary', variant: 'warning', disabled: !confirmed.value || jobRunning.value || blocked, disabledReason: t('money_s3.import_confirm_first'), loading: busy.value, run: () => { void start('import') } },
+    { key: 'import', label: t('money_s3.import_start'), icon: 'play', tier: 'primary', variant: 'warning', disabled: !confirmed.value || jobRunning.value || blocked || icoPending || missingRights.value.length > 0, disabledReason: importReason, loading: busy.value, run: () => { void start('import') } },
   ]
 })
 
@@ -353,7 +371,8 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
 
       <template v-else-if="currentStep === 3">
         <h2 class="mb-1 text-lg font-semibold">{{ t('money_s3.dry_run_title') }}</h2>
-        <p class="mb-4 max-w-3xl text-sm text-neutral-500">{{ t('money_s3.dry_run_hint') }}</p>
+        <p class="mb-2 max-w-3xl text-sm text-neutral-500">{{ t('money_s3.dry_run_hint') }}</p>
+        <p class="mb-4 max-w-3xl rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700">{{ t('money_s3.dry_run_locks_hint') }}</p>
         <ImportJobProgress v-if="jobRunning" :job="job" :percent="null" :cancelling="false" :show-cancel="false"
           counts-key="money_s3.job_counts" background-hint-key="money_s3.background_hint" running-key="money_s3.dry_run_running" />
         <MoneyS3Protocol v-if="run && run.mode === 'dry_run'" :run="run" />
@@ -365,6 +384,13 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
           <input v-model="confirmed" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" />
           <span class="text-sm text-warning-700">{{ t('money_s3.import_confirm', { company: agenda?.name ?? '' }) }}</span>
         </label>
+        <label v-if="!importDone && !jobRunning && icoUnverified" class="my-4 flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/30 bg-warning-50 p-4">
+          <input v-model="confirmIco" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="confirm-ico" />
+          <span class="text-sm text-warning-700">{{ t('money_s3.ico_confirm') }}</span>
+        </label>
+        <p v-if="!importDone && !jobRunning && missingRights.length" class="my-4 rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-600">
+          {{ t('money_s3.rights_missing', { rights: missingRights.join(', ') }) }}
+        </p>
         <ImportJobProgress v-if="jobRunning" :job="job" :percent="percent" :cancelling="cancelling" :show-cancel="true"
           counts-key="money_s3.job_counts" background-hint-key="money_s3.background_hint" running-key="money_s3.import_running"
           cancel-key="money_s3.cancel" cancelling-key="money_s3.cancelling" @cancel="cancel" />

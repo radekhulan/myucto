@@ -6,8 +6,9 @@
 --
 -- money_s3_import_map: co už z které agendy v MyÚčtu vzniklo. Na tom stojí
 -- idempotence — opakovaný import téže (nebo novější) zálohy založí jen to, co
--- ještě chybí, a nic nezdvojí. Klíč je tenantový: stejná agenda nahraná do jiné
--- firmy má vlastní mapu.
+-- ještě chybí, a nic nezdvojí. Už převedené záznamy se nepřepisují; změnu
+-- dokladu v Money po převodu protokol jen ohlásí. Klíč je tenantový: stejná
+-- agenda nahraná do jiné firmy má vlastní mapu.
 --
 -- Idempotence migrace: CREATE TABLE IF NOT EXISTS.
 

@@ -52,13 +52,19 @@ final class CashBankImporter
                  rule_key, external_barcode, status, created_by)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "none", ?, "CZK", ?, ?, "posted", ?)'
         );
+        // Každá pokladna má vlastní číselnou řadu — stejné číslo v další pokladně téhož
+        // roku dostane klíč s kódem pokladny (první si ponechá „rok|číslo").
+        $owner = [];
         foreach ($ctx->backup->rowsAcrossYears('PoklKnih') as $r) {
             $year = $ctx->yearOf($r);
             $docNo = trim((string) ($r['Doklad'] ?? ''));
             if ($year === null || $docNo === '') {
                 continue;
             }
-            $key = $year . '|' . $docNo;
+            $registerCode = trim((string) ($r['Pokl'] ?? ''));
+            $plain = $year . '|' . $docNo;
+            $owner[$plain] ??= $registerCode;
+            $key = $owner[$plain] === $registerCode ? $plain : $plain . '|' . $registerCode;
             if (isset($existing[$key])) {
                 $ctx->cashDocuments[$key] = $existing[$key];
                 $p->count(self::STEP_CASH, 'existing');
@@ -126,7 +132,11 @@ final class CashBankImporter
                 ];
             }
         }
-        $this->fillOwnAccount($ctx->supplierId, $accounts);
+        // Zkouška nanečisto účet firmy nedoplňuje: zámek řádku měny by v její transakci
+        // blokoval vystavování dokladů firmy (cizí klíč na měnu) až do konce zkoušky.
+        if (!$ctx->options->isDryRun()) {
+            $this->fillOwnAccount($ctx->supplierId, $accounts);
+        }
 
         $byStatement = [];
         foreach ($ctx->backup->rowsAcrossYears('BankKnih') as $r) {
@@ -137,6 +147,9 @@ final class CashBankImporter
             $code = trim((string) ($r['Ucet'] ?? '')) ?: ((string) (array_key_first($accounts) ?? 'BANKA'));
             $byStatement[$year . '|' . $code][] = $r;
         }
+
+        ksort($byStatement);
+        $txKeys = self::documentKeys($byStatement);
 
         $existingStatements = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_STATEMENT);
         $existingTx = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_TRANSACTION);
@@ -162,8 +175,8 @@ final class CashBankImporter
             $year = (int) $yearText;
             if ($ctx->isLocked($year)) {
                 $p->info(self::STEP_BANK, 'year_locked', "Bankovní pohyby účtu {$code} za rok {$year}: rok je uzavřený, nepřebírají se.");
-                foreach ($rows as $r) {
-                    $txKey = $year . '|' . trim((string) $r['Doklad']);
+                foreach (array_keys($rows) as $i) {
+                    $txKey = $txKeys[$statementKey][$i];
                     if (isset($existingTx[$txKey])) {
                         $ctx->bankTransactions[$txKey] = $existingTx[$txKey];
                     }
@@ -201,9 +214,9 @@ final class CashBankImporter
             }
 
             $added = 0;
-            foreach ($rows as $r) {
+            foreach ($rows as $i => $r) {
                 $docNo = trim((string) $r['Doklad']);
-                $txKey = $year . '|' . $docNo;
+                $txKey = $txKeys[$statementKey][$i];
                 if (isset($existingTx[$txKey])) {
                     $ctx->bankTransactions[$txKey] = $existingTx[$txKey];
                     $p->count(self::STEP_BANK, 'existing');
@@ -238,6 +251,33 @@ final class CashBankImporter
             }
         }
         $p->finish(self::STEP_BANK);
+    }
+
+    /**
+     * Klíč bankovního dokladu v mapě převodu. Každý účet má v Money vlastní číselnou řadu,
+     * takže stejné číslo dokladu na dalším účtu téhož roku je běžné: první účet (podle
+     * kódu) si ponechá klíč „rok|číslo" — mapy dřívějších převodů platí dál — další účet
+     * dostane „rok|číslo|kód účtu".
+     *
+     * @param array<string,list<array<string,mixed>>> $byStatement "rok|kód účtu" => řádky
+     * @return array<string,array<int,string>>
+     */
+    private static function documentKeys(array $byStatement): array
+    {
+        $owner = [];
+        $used = [];
+        $keys = [];
+        foreach ($byStatement as $statementKey => $rows) {
+            [$year, $code] = explode('|', $statementKey, 2);
+            foreach ($rows as $i => $r) {
+                $plain = $year . '|' . trim((string) $r['Doklad']);
+                $owner[$plain] ??= $code;
+                $key = $owner[$plain] === $code ? $plain : $plain . '|' . $code;
+                $used[$key] = ($used[$key] ?? 0) + 1;
+                $keys[$statementKey][$i] = $used[$key] === 1 ? $key : $key . '#' . $used[$key];
+            }
+        }
+        return $keys;
     }
 
     /**

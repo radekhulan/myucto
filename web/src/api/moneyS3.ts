@@ -117,6 +117,8 @@ export interface MoneyS3StartParams {
   mode: 'dry_run' | 'import'
   close_history: boolean
   first_period_start: string | null
+  /** Záloha patří firmě, i když to IČO ověřit nejde (chybí v záloze nebo ve firmě). */
+  confirm_ico?: boolean
 }
 
 const BASE = '/admin/imports/money-s3'

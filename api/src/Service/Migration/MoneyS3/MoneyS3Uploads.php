@@ -13,7 +13,8 @@ use MyInvoice\Infrastructure\Config\RuntimePaths;
  * nanečisto i ostrý převod — worker běží až po skončení requestu, takže data musí
  * ležet na disku. Token je náhodný a adresář je pod firmou: cizí firma na nahranou
  * zálohu nedosáhne ani se znalostí tokenu. Po úspěšném ostrém převodu se adresář
- * smaže, neukončené nahrávky se uklidí po týdnu.
+ * smaže. Záloha po zkoušce nanečisto nebo po neúspěšném převodu zůstává pro další běh
+ * a denní úklid ji smaže po týdnu bez práce s ní ({@see purgeStaleAll()}).
  */
 final class MoneyS3Uploads
 {
@@ -92,14 +93,47 @@ final class MoneyS3Uploads
         self::removeTree($dir, $supplierId);
     }
 
-    public static function purgeStale(int $supplierId): void
+    /** @return int kolik nahraných záloh firmy se smazalo */
+    public static function purgeStale(int $supplierId): int
     {
         $limit = time() - self::STALE_DAYS * 86400;
+        $removed = 0;
         foreach (glob(self::base($supplierId) . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
-            if (preg_match(self::TOKEN_PATTERN, basename($dir)) === 1 && (int) filemtime($dir) < $limit) {
+            if (preg_match(self::TOKEN_PATTERN, basename($dir)) === 1 && self::lastActivity($dir) < $limit) {
                 self::removeTree($dir, $supplierId);
+                $removed++;
             }
         }
+        return $removed;
+    }
+
+    /**
+     * Denní úklid ({@see api/bin/cron-cleanup.php}) nahraných záloh všech firem.
+     * Rozbalená agenda je celé účetnictví firmy — nesmí na disku čekat, až ji uklidí
+     * další upload téže firmy, který nemusí přijít nikdy.
+     */
+    public static function purgeStaleAll(): int
+    {
+        $removed = 0;
+        foreach (glob(RuntimePaths::storage('money-s3') . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
+            if (preg_match('/^[1-9]\d*$/', basename($dir)) === 1) {
+                $removed += self::purgeStale((int) basename($dir));
+            }
+        }
+        return $removed;
+    }
+
+    /**
+     * Poslední práce se zálohou: nahrání (meta.json) nebo připojená sestava z Money.
+     * Čas adresáře nestačí — Windows ho u adresářů změnou obsahu podadresářů neposouvá.
+     */
+    private static function lastActivity(string $dir): int
+    {
+        $latest = 0;
+        foreach (array_merge([$dir . '/meta.json'], glob($dir . '/reports/*.csv') ?: []) as $file) {
+            $latest = max($latest, is_file($file) ? (int) filemtime($file) : 0);
+        }
+        return $latest > 0 ? $latest : (int) filemtime($dir);
     }
 
     /**

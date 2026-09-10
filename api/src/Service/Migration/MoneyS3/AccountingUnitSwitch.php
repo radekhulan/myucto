@@ -88,9 +88,26 @@ final class AccountingUnitSwitch
      * Podvojné účetnictví od začátku prvního převáděného období — jinak by historické
      * roky spadly do daňové evidence. Začátek účetnictví se jen posouvá dozadu, nikdy
      * dopředu (firma mohla v MyÚčtu účtovat už dřív).
+     *
+     * `$onSupplier = false` (zkouška nanečisto) zapíše jen historii režimů, ze které čtou
+     * výkazy a uzávěrka — řádek firmy by v transakci zkoušky zůstal zamčený.
+     *
+     * Záznam jiného režimu, který v historii leží uvnitř převáděných let (`$since` až
+     * `$until`), by je pro výkazy a daně vrátil do daňové evidence — v Money byly
+     * podvojné, takový záznam se proto odstraní. Pozdější záznamy zůstávají.
      */
-    public function switchToDoubleEntry(int $supplierId, string $since): void
+    public function switchToDoubleEntry(int $supplierId, string $since, bool $onSupplier = true, ?string $until = null): void
     {
+        if ($until !== null) {
+            $this->db->pdo()->prepare(
+                "DELETE FROM supplier_accounting_modes
+                  WHERE supplier_id = ? AND effective_from > ? AND effective_from <= ? AND accounting_mode <> 'double_entry'"
+            )->execute([$supplierId, $since, $until]);
+        }
+        if (!$onSupplier) {
+            $this->modes->record($supplierId, $since, 'double_entry');
+            return;
+        }
         $this->db->pdo()->prepare(
             "UPDATE supplier
                 SET accounting_mode = 'double_entry',

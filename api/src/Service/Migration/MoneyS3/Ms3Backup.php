@@ -19,7 +19,17 @@ final class Ms3Backup
     /** Strop rozbalených dat — obrana proti ZIP bombě. Reálná agenda má jednotky až stovky MB. */
     public const MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024;
 
-    private const ENTRY_PATTERN = '#^(?:(rok\.\d{3})/)?([a-z0-9_$]{1,40}\.dat|agendainfo\.ini)$#i';
+    /**
+     * Strop rozbalených souborů (inody) a položek archivu vůbec. Agenda má pár desítek
+     * tabulek na rok; tisíce drobných položek jsou útok, ne záloha.
+     */
+    public const MAX_ENTRIES = 5000;
+    private const MAX_ARCHIVE_ENTRIES = 100000;
+
+    private const ENTRY_PATTERN = '#^(?:(rok\.\d{3})/)?([a-z0-9_]{1,40}\.dat|agendainfo\.ini)$#i';
+
+    /** Jména zařízení Windows — platí i s příponou (`con.dat` je konzole, ne soubor). */
+    private const RESERVED_NAMES = '/^(con|prn|aux|nul|com\d|lpt\d)$/i';
 
     private string $dir;
 
@@ -28,7 +38,25 @@ final class Ms3Backup
         $this->dir = rtrim($dir, '/\\');
     }
 
-    public static function extract(string $lzPath, string $targetDir): self
+    /**
+     * Kam se položka archivu rozbalí: [podadresář roku (nebo ''), jméno souboru], nebo
+     * null = položka se nerozbaluje.
+     *
+     * @return array{0:string,1:string}|null
+     */
+    public static function entryTarget(string $zipName): ?array
+    {
+        $name = str_replace('\\', '/', $zipName);
+        if (preg_match(self::ENTRY_PATTERN, $name, $m) !== 1) {
+            return null;
+        }
+        if (preg_match(self::RESERVED_NAMES, pathinfo($m[2], PATHINFO_FILENAME)) === 1) {
+            return null;
+        }
+        return [($m[1] ?? '') !== '' ? strtoupper($m[1]) : '', $m[2]];
+    }
+
+    public static function extract(string $lzPath, string $targetDir, int $maxEntries = self::MAX_ENTRIES): self
     {
         if (!is_file($lzPath)) {
             throw new MoneyS3Exception('backup_missing', 'Záloha agendy nebyla nalezena.');
@@ -41,6 +69,9 @@ final class Ms3Backup
             throw new MoneyS3Exception('backup_not_zip', 'Soubor není záloha agendy Money S3 (očekává se .lz, tedy ZIP).');
         }
         try {
+            if ($zip->numFiles > self::MAX_ARCHIVE_ENTRIES) {
+                throw new MoneyS3Exception('backup_too_many_files', 'Záloha obsahuje příliš mnoho souborů.');
+            }
             $plan = [];
             $total = 0;
             for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -48,12 +79,14 @@ final class Ms3Backup
                 if ($stat === false) {
                     continue;
                 }
-                $name = str_replace('\\', '/', (string) $stat['name']);
-                if (preg_match(self::ENTRY_PATTERN, $name, $m) !== 1) {
+                $target = self::entryTarget((string) $stat['name']);
+                if ($target === null) {
                     continue;
                 }
-                $sub = ($m[1] ?? '') !== '' ? strtoupper($m[1]) : '';
-                $plan[] = [$i, $sub, $m[2]];
+                $plan[] = [$i, $target[0], $target[1]];
+                if (count($plan) > $maxEntries) {
+                    throw new MoneyS3Exception('backup_too_many_files', 'Záloha obsahuje příliš mnoho datových souborů.');
+                }
                 $total += (int) $stat['size'];
             }
             if ($total > self::MAX_UNCOMPRESSED_BYTES) {

@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Migration\MoneyS3;
 use MyInvoice\Service\Migration\MoneyS3\AgendaInfo;
 use MyInvoice\Service\Migration\MoneyS3\MoneyS3Exception;
 use MyInvoice\Service\Migration\MoneyS3\Ms3Backup;
+use MyInvoice\Service\Migration\MoneyS3\Ms3Table;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
 use PHPUnit\Framework\TestCase;
 
@@ -51,6 +52,47 @@ final class Ms3BackupTest extends TestCase
         self::assertFileExists($this->tmp . '/out/ROK.001/UcDenik.DAT');
         self::assertDirectoryExists($this->tmp . '/out/ROK.003');
         self::assertCount(3, $backup->yearDirs());
+    }
+
+    /**
+     * Na Windows jsou `con`, `aux`, `nul`, `comN`, `lptN` zařízení i s příponou — zápis
+     * do `con.dat` by nešel do souboru. Money tabulky s `$` (přístupová práva) převod
+     * nepotřebuje.
+     */
+    public function testReservedWindowsNamesAndDollarTablesAreNotExtracted(): void
+    {
+        foreach (['con.dat', 'AUX.DAT', 'ROK.001/nul.dat', 'com1.dat', 'lpt9.DAT', '$DSPristup.DAT', 'ROK.001/$x.dat'] as $name) {
+            self::assertNull(Ms3Backup::entryTarget($name), $name);
+        }
+        self::assertSame(['ROK.001', 'UcDenik.DAT'], Ms3Backup::entryTarget('rok.001/UcDenik.DAT'));
+        self::assertSame(['', 'Agenda.DAT'], Ms3Backup::entryTarget('Agenda.DAT'));
+        self::assertSame(['', 'console.dat'], Ms3Backup::entryTarget('console.dat'));
+
+        $lz = $this->tmp . '/agenda.lz';
+        SyntheticAgenda::writeLz($lz, ['$DSPristup.DAT' => 'práva uživatelů']);
+        Ms3Backup::extract($lz, $this->tmp . '/out');
+        self::assertFileDoesNotExist($this->tmp . '/out/$DSPristup.DAT');
+    }
+
+    /** Strop počtu rozbalených souborů — archiv s tisíci drobných položek vyčerpá inody. */
+    public function testRejectsArchiveWithTooManyEntries(): void
+    {
+        $lz = $this->tmp . '/agenda.lz';
+        SyntheticAgenda::writeLz($lz);
+
+        $this->expectException(MoneyS3Exception::class);
+        $this->expectExceptionMessageMatches('/příliš mnoho/u');
+        Ms3Backup::extract($lz, $this->tmp . '/out', 5);
+    }
+
+    /** Tabulka se čte celá do paměti — přerostlý soubor se odmítne dřív, než se načte. */
+    public function testRefusesOversizedTable(): void
+    {
+        SyntheticAgenda::writeDir($this->tmp . '/a');
+        $path = $this->tmp . '/a/ROK.001/UcDenik.DAT';
+
+        $this->expectException(MoneyS3Exception::class);
+        Ms3Table::open($path, 100);
     }
 
     public function testRejectsArchiveWithoutAgenda(): void
