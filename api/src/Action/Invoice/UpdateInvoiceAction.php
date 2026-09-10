@@ -229,32 +229,31 @@ final class UpdateInvoiceAction
                 }
             }
 
-            // 1) Uvolni staré číslo z původní řady (jen je-li poslední v counteru).
-            //    Kategorie tržby je další osa scope counteru (migrace 1333) — uvolňovat
-            //    se musí ze STEJNÉ scope, ve které se číslo přidělilo, tedy z té staré.
+            // Staré číslo se uvolní z původní řady a nové přidělí v řadě cílového typu
+            // až v transakci se zápisem dokladu (u updateDraft níž). Odmítnutí mezi tím
+            // (validace, cizí reference, zámek) nesmí po sobě nechat spálené nové číslo
+            // ani uvolnit staré, které doklad dál drží.
+            //
+            // Kategorie tržby je další osa scope counteru (migrace 1333) — uvolňovat
+            // se musí ze STEJNÉ scope, ve které se číslo přidělilo, tedy z té staré.
             $oldDate     = !empty($existing['issue_date']) ? new \DateTimeImmutable((string) $existing['issue_date']) : null;
             $oldClient   = (int) ($existing['client_id'] ?? 0);
             $oldCategory = (int) ($existing['revenue_category_id'] ?? 0);
-            if ($supplierId > 0 && $oldVs !== '') {
-                $this->varsymbol->releaseIfLatest($supplierId, $existingType, $oldVs, $oldDate, $oldClient, $oldCategory);
-            }
 
-            // 2) Přiděl nové číslo v řadě cílového typu (datum/klient/kategorie z payloadu,
-            //    fallback na staré). Změna kategorie sama o sobě NENÍ důvod k přečíslování —
-            //    tady jen bereme aktuální hodnotu, protože přečíslování už nastalo kvůli
-            //    změně typu dokladu.
+            // Datum/klient/kategorie cílové řady z payloadu, fallback na staré. Změna
+            // kategorie sama o sobě NENÍ důvod k přečíslování — tady jen bereme aktuální
+            // hodnotu, protože přečíslování už nastalo kvůli změně typu dokladu.
             $newDate     = !empty($body['issue_date']) ? new \DateTimeImmutable((string) $body['issue_date']) : ($oldDate ?? new \DateTimeImmutable('today'));
             $newClient   = isset($body['client_id']) ? (int) $body['client_id'] : $oldClient;
             $newCategory = array_key_exists('revenue_category_id', $body) ? (int) $body['revenue_category_id'] : $oldCategory;
-            try {
-                $newVs = $this->varsymbol->next($supplierId, $requestedType, $newDate, $newClient, $newCategory);
-            } catch (\InvalidArgumentException | \RuntimeException $e) {
-                return Json::error($response, 'varsymbol_failed', $e->getMessage(), 500);
-            }
 
             $body['invoice_type'] = $requestedType;
-            $body['varsymbol']    = $newVs;
-            $renumber = ['from' => $oldVs, 'to' => $newVs, 'from_type' => $existingType, 'to_type' => $requestedType];
+            $renumber = ['from' => $oldVs, 'to' => null, 'from_type' => $existingType, 'to_type' => $requestedType];
+            $renumberScope = [
+                'supplier_id' => $supplierId,
+                'old'         => [$oldDate, $oldClient, $oldCategory],
+                'new'         => [$newDate, $newClient, $newCategory],
+            ];
         } else {
             // Bez přečíslování: typ je u vystavené faktury immutable (číslo + auditní stopa),
             // u draftu lze přepnout mezi invoice/proforma/dobropis (ne na storno/cancellation).
@@ -330,11 +329,43 @@ final class UpdateInvoiceAction
             $body['items'] = $items;
         }
 
+        // Přečíslování při změně typu: nové číslo se přidělí ve stejné transakci, která
+        // ho zapíše na doklad, a staré se uvolní až po úspěšném zápisu. Odmítnutí
+        // zápisu vrátí rollback vše do původního stavu.
+        $pdo = $this->db->pdo();
+        $renumberTx = false;
+        $abortRenumber = static function (): void {};
+        if ($renumber !== null) {
+            $renumberTx = !$pdo->inTransaction();
+            if ($renumberTx) {
+                // Viz NumberSeriesGapGuard: zámek počítadla pod REPEATABLE READ by po
+                // souběžném vystavení skončil chybou 1020.
+                $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+                $pdo->beginTransaction();
+            }
+            [$newDate, $newClient, $newCategory] = $renumberScope['new'];
+            try {
+                $newVs = $this->varsymbol->next($renumberScope['supplier_id'], $requestedType, $newDate, $newClient, $newCategory);
+            } catch (\InvalidArgumentException | \RuntimeException $e) {
+                if ($renumberTx && $pdo->inTransaction()) $pdo->rollBack();
+                return Json::error($response, 'varsymbol_failed', $e->getMessage(), 500);
+            }
+            $body['varsymbol'] = $newVs;
+            $renumber['to'] = $newVs;
+            $abortRenumber = function () use ($pdo, $renumberTx, $renumberScope, $requestedType, $newVs, $newDate, $newClient, $newCategory): void {
+                if ($renumberTx) {
+                    if ($pdo->inTransaction()) $pdo->rollBack();
+                    return;
+                }
+                $this->varsymbol->releaseIfLatest($renumberScope['supplier_id'], $requestedType, $newVs, $newDate, $newClient, $newCategory);
+            };
+        }
         try {
             // Optimistický zámek (L1): pro klienta UPDATE podmíněný booked_at IS NULL —
             // účetní mohla doklad zaúčtovat mezi guard-checkem a zápisem.
             $requireUnbooked = RequestAuthorization::isClientType($request);
             if (!$this->repo->updateDraft($id, $body, $requireUnbooked)) {
+                $abortRenumber();
                 return Json::error(
                     $response,
                     'document_locked',
@@ -343,12 +374,21 @@ final class UpdateInvoiceAction
                 );
             }
         } catch (\InvalidArgumentException $e) {
+            $abortRenumber();
             return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
         } catch (\PDOException $e) {
+            $abortRenumber();
             if ($dupMsg = self::varsymbolDuplicateMessage($e, $body['varsymbol'] ?? null)) {
                 return Json::error($response, 'varsymbol_duplicate', $dupMsg, 409);
             }
             throw $e;
+        }
+        if ($renumber !== null) {
+            [$oldDate, $oldClient, $oldCategory] = $renumberScope['old'];
+            if ($renumberScope['supplier_id'] > 0 && $renumber['from'] !== '') {
+                $this->varsymbol->releaseIfLatest($renumberScope['supplier_id'], $existingType, $renumber['from'], $oldDate, $oldClient, $oldCategory);
+            }
+            if ($renumberTx) $pdo->commit();
         }
         try {
             if (DocumentItemsPayload::replaces($body)) {

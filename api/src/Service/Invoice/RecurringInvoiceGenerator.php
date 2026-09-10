@@ -701,13 +701,6 @@ final class RecurringInvoiceGenerator
 
         $supplierId = (int) $invoice['supplier_id'];
         $issueDate = new \DateTimeImmutable((string) $invoice['issue_date']);
-        $varsymbol = $this->varsymbol->next(
-            $supplierId,
-            (string) $invoice['invoice_type'],
-            $issueDate,
-            (int) $invoice['client_id'],
-            (int) ($invoice['revenue_category_id'] ?? 0),
-        );
         $snaps = $this->snapshots->build(
             (int) $invoice['client_id'],
             (int) $invoice['currency_id'],
@@ -724,7 +717,7 @@ final class RecurringInvoiceGenerator
                 status            = "issued"
              WHERE id = ? AND status = "draft"';
         $issueParams = [
-            $varsymbol,
+            null, // varsymbol, přidělí se až uvnitř transakce vystavení
             json_encode($snaps['client'], JSON_UNESCAPED_UNICODE),
             json_encode($snaps['supplier'], JSON_UNESCAPED_UNICODE),
             $snaps['bank'] !== null ? json_encode($snaps['bank'], JSON_UNESCAPED_UNICODE) : null,
@@ -734,9 +727,21 @@ final class RecurringInvoiceGenerator
         $stockEnabled = $this->stockIssue->isStockEnabled($supplierId);
         $pdo = $this->db->pdo();
         $ownTransaction = $stockEnabled || !$pdo->inTransaction();
-        if ($stockEnabled && $ownTransaction) $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+        // READ COMMITTED i bez skladu kvůli přidělení čísla (viz NumberSeriesGapGuard).
+        if ($ownTransaction) $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         if ($ownTransaction) $pdo->beginTransaction();
+        $varsymbol = null;
         try {
+            // Číslo se čerpá ve stejné transakci jako vystavení: když vystavení zablokuje
+            // sklad, rollback vrátí do řady i číslo (dřív v ní zůstala díra).
+            $varsymbol = $this->varsymbol->next(
+                $supplierId,
+                (string) $invoice['invoice_type'],
+                $issueDate,
+                (int) $invoice['client_id'],
+                (int) ($invoice['revenue_category_id'] ?? 0),
+            );
+            $issueParams[0] = $varsymbol;
             $issue = $pdo->prepare($issueSql);
             $issue->execute($issueParams);
             if ($issue->rowCount() === 0) {
@@ -754,6 +759,17 @@ final class RecurringInvoiceGenerator
             // v draftu; performIssue → failIssueOnStock zapíše last_error (A15).
             if ($pdo->inTransaction()) {
                 if ($ownTransaction) $pdo->rollBack();
+            }
+            // Cizí transakce běží dál a číslo by v ní zůstalo spotřebované.
+            if (!$ownTransaction && $varsymbol !== null) {
+                $this->varsymbol->releaseIfLatest(
+                    $supplierId,
+                    (string) $invoice['invoice_type'],
+                    $varsymbol,
+                    $issueDate,
+                    (int) $invoice['client_id'],
+                    (int) ($invoice['revenue_category_id'] ?? 0),
+                );
             }
             throw $e;
         }

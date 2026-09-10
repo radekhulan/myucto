@@ -217,9 +217,12 @@ final class DeleteInvoiceAction
 
             // 1c. Pokud je tato faktura "poslední" ve své counter scope (a stejně tak
             // její cascade-deleted credit_note potomci), uvolni counter — další vystavená
-            // dostane stejné číslo. Drafty nemají counter-derived varsymbol; cancellation
+            // dostane stejné číslo. Týká se i konceptu: žádost o schválení výkazu mu číslo
+            // přidělí předem (AutoIssueAndSendService::allocateVarsymbolAndSnapshots) a bez
+            // uvolnění by po smazání zůstala v řadě díra. Ručně zadané číslo konceptu counter
+            // nepotká (releaseIfLatest porovnává s aktuální hodnotou counteru). Cancellation
             // nedostává varsymbol z counteru vůbec (IssueInvoiceAction).
-            if ($supplierId > 0 && $status !== 'draft') {
+            if ($supplierId > 0) {
                 $parentType = (string) ($existing['invoice_type'] ?? '');
                 $parentVs   = (string) ($existing['varsymbol'] ?? '');
                 if ($parentVs !== '' && in_array($parentType, ['invoice', 'proforma', 'credit_note'], true)) {

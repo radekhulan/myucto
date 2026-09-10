@@ -38,6 +38,7 @@ final class PurchaseInvoiceRepository
         private readonly TaxConstantsRepository $taxConstants,
         private readonly AccountingModeRepository $accountingModes,
         private readonly OverduePolicy $overduePolicy,
+        private readonly \MyInvoice\Service\Invoice\NumberSeriesGapGuard $gapGuard,
     ) {}
 
     /** @var array<int,bool> currency_id → je to CZK; viz isCzkCurrency() */
@@ -2589,6 +2590,13 @@ final class PurchaseInvoiceRepository
         $template = $this->purchaseTemplate($supplierId);
         $counterPeriod = $this->purchaseCounterPeriod($template, $period);
 
+        // Stejná pojistka proti díře na konci řady jako u vydaných dokladů.
+        $this->gapGuard?->clamp(
+            'purchase_invoice_counters',
+            ['supplier_id' => $supplierId, 'period' => $counterPeriod],
+            fn (): int => $this->highestUsedPurchaseCounter($supplierId, $template, $period),
+        );
+
         $n        = $this->bumpPurchaseCounter($supplierId, $counterPeriod);
         $rendered = $this->renderPurchaseNumber($template, $prefix, $period, $n);
 
@@ -2871,10 +2879,23 @@ final class PurchaseInvoiceRepository
 
         $period = date('Ym', strtotime((string) $row['issue_date']));
         $prefix = self::varsymbolPrefix((string) ($row['vat_deduction'] ?? 'full'), (bool) ($row['tax_deductible'] ?? 1));
-        $varsymbol = $this->nextVarsymbol($supplierId, $period, $prefix);
 
-        $pdo->prepare('UPDATE purchase_invoices SET varsymbol = ? WHERE id = ? AND supplier_id = ?')
-            ->execute([$varsymbol, $id, $supplierId]);
+        // Číslo se čerpá ve stejné transakci, která ho zapíše na doklad (viz
+        // NumberSeriesGapGuard): selhání zápisu ho vrátí do řady.
+        $ownTransaction = !$pdo->inTransaction();
+        if ($ownTransaction) {
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+            $pdo->beginTransaction();
+        }
+        try {
+            $varsymbol = $this->nextVarsymbol($supplierId, $period, $prefix);
+            $pdo->prepare('UPDATE purchase_invoices SET varsymbol = ? WHERE id = ? AND supplier_id = ?')
+                ->execute([$varsymbol, $id, $supplierId]);
+            if ($ownTransaction) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
         return $varsymbol;
     }
 

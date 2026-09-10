@@ -70,7 +70,11 @@ final class VarsymbolGenerator
     public function __construct(
         private readonly Config $config,
         private readonly Connection $db,
-        private readonly ?LoggerInterface $logger = null,
+        // Povinné parametry: autowiring PHP-DI volitelné parametry přeskakuje. S výchozím
+        // null by pojistka v produkci nikdy neběžela a warning „counter byl pozadu"
+        // se nikdy nezapsal.
+        private readonly NumberSeriesGapGuard $gapGuard,
+        private readonly LoggerInterface $logger,
     ) {}
 
     /**
@@ -78,6 +82,11 @@ final class VarsymbolGenerator
      *
      * Pokud má faktura už ručně zadaný varsymbol (override), volající ho použije přímo
      * a tuto metodu nezavolá — viz IssueInvoiceAction.
+     *
+     * Volej ve STEJNÉ transakci, která číslo zapíše na doklad. Rollback pak číslo vrátí
+     * do řady sám a {@see NumberSeriesGapGuard} může bezpečně srovnat počítadlo, které
+     * utíká před vydanými čísly. Mimo transakci se číslo přidělí jako dřív, jen bez
+     * srovnání.
      *
      * `$clientId` = 0 znamená "supplier-wide counter" (per-client template není
      * nastavený, použije se supplier-level template + jeho counter). Totéž platí pro
@@ -112,6 +121,15 @@ final class VarsymbolGenerator
 
         $for       = $for ?? new \DateTimeImmutable('today');
         $periodKey = $this->makePeriodKey($period, $for);
+        if ($this->hasCounterPlaceholder($template)) {
+            $this->gapGuard?->clamp('invoice_counters', [
+                'supplier_id'         => $supplierId,
+                'client_id'           => $counterClientId,
+                'revenue_category_id' => $counterCategoryId,
+                'invoice_type'        => $invoiceType,
+                'period'              => $periodKey,
+            ], fn (): int => $this->highestUsedCounter($supplierId, $template, $for));
+        }
         $next      = $this->incrementCounter($supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey);
         $rendered  = $this->render($template, $for, $next);
 
@@ -240,12 +258,23 @@ final class VarsymbolGenerator
         $for       = $for ?? new \DateTimeImmutable('today');
         $periodKey = $this->makePeriodKey($period, $for);
 
-        $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number)
-             VALUES (?, 0, 0, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE last_number = VALUES(last_number)'
-        );
-        $stmt->execute([$supplierId, $invoiceType, $periodKey, $nextNumber - 1]);
+        // Ruční začátek řady je záměrné přeskočení, ne díra. floor_number drží hodnotu,
+        // pod kterou pojistka v next() počítadlo nesrovná (NumberSeriesGapGuard).
+        if ($this->db->hasColumn('invoice_counters', 'floor_number')) {
+            $stmt = $this->db->pdo()->prepare(
+                'INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number, floor_number)
+                 VALUES (?, 0, 0, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE last_number = VALUES(last_number), floor_number = VALUES(floor_number)'
+            );
+            $stmt->execute([$supplierId, $invoiceType, $periodKey, $nextNumber - 1, $nextNumber - 1]);
+        } else {
+            $stmt = $this->db->pdo()->prepare(
+                'INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number)
+                 VALUES (?, 0, 0, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE last_number = VALUES(last_number)'
+            );
+            $stmt->execute([$supplierId, $invoiceType, $periodKey, $nextNumber - 1]);
+        }
 
         return [
             'counter' => $nextNumber - 1,
@@ -434,10 +463,13 @@ final class VarsymbolGenerator
             return false;
         }
 
+        // Pod ručně nastavený začátek řady (floor_number) se neuvolňuje — číslo pod ním
+        // counter nikdy nevydal.
+        $floorCondition = $this->db->hasColumn('invoice_counters', 'floor_number') ? ' AND last_number > floor_number' : '';
         $upd = $pdo->prepare(
             'UPDATE invoice_counters SET last_number = last_number - 1
               WHERE supplier_id = ? AND client_id = ? AND revenue_category_id = ? AND invoice_type = ? AND period = ?
-                AND last_number = ?'
+                AND last_number = ?' . $floorCondition
         );
         $upd->execute([$supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey, $current]);
 

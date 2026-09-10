@@ -10,6 +10,7 @@ use MyInvoice\Repository\RecurringTemplateRepository;
 use MyInvoice\Service\Invoice\PaymentDueResolver;
 use MyInvoice\Service\Invoice\RecurringDraftReminder;
 use MyInvoice\Service\Invoice\RecurringInvoiceGenerator;
+use MyInvoice\Service\Invoice\VarsymbolGenerator;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -49,6 +50,9 @@ final class RecurringGeneratorTest extends TestCase
     private ?array $origVatFlags = null;
     /** Původní registrace do OSS — nastavuje ji jen část testů (viz setSupplierOss()). */
     private ?array $origOssFlags = null;
+    private VarsymbolGenerator $varsymbol;
+    /** @var array<string,int>|null počítadla řad dodavatele před testem (viz counterDrift()) */
+    private ?array $counterSnapshot = null;
 
     protected function setUp(): void
     {
@@ -67,6 +71,7 @@ final class RecurringGeneratorTest extends TestCase
             $this->generator = $container->get(RecurringInvoiceGenerator::class);
             $this->repo = $container->get(RecurringTemplateRepository::class);
             $this->reminder = $container->get(RecurringDraftReminder::class);
+            $this->varsymbol = $container->get(VarsymbolGenerator::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI unavailable: ' . $e->getMessage());
         }
@@ -79,6 +84,7 @@ final class RecurringGeneratorTest extends TestCase
             $this->markTestSkipped('Žádný supplier s auto_generate_recurring=1');
         }
         $this->supplierId = (int) $row['id'];
+        $this->counterSnapshot = $this->counterRows();
 
         $row = $this->db->pdo()->prepare(
             "SELECT id FROM clients WHERE supplier_id = ? AND archived_at IS NULL LIMIT 1"
@@ -174,13 +180,30 @@ final class RecurringGeneratorTest extends TestCase
                 ->prepare('DELETE FROM supplier_vat_status_history WHERE supplier_id = ? AND effective_from = CURDATE()')
                 ->execute([$this->supplierId]);
         }
-        if (empty($this->createdInvoiceIds) && empty($this->createdTemplateIds)) {
-            if (isset($this->db)) $this->db->close();
+        if (!isset($this->db)) {
             return;
         }
         $pdo = $this->db->pdo();
         // Faktury smazat dřív než šablonu (kvůli FK fk_inv_recurring SET NULL by to
         // teoreticky zvládlo, ale chceme řízený cleanup).
+        // Číslo vystavené faktury vrať do řady, od poslední vystavené. Jinak zůstane
+        // v řadě existujícího dodavatele spotřebované (viz counterDrift()).
+        foreach (array_reverse($this->createdInvoiceIds) as $id) {
+            $row = $pdo->query(
+                'SELECT supplier_id, invoice_type, varsymbol, issue_date, client_id, revenue_category_id
+                   FROM invoices WHERE id = ' . (int) $id
+            )->fetch(PDO::FETCH_ASSOC);
+            if (isset($this->varsymbol) && $row !== false && (string) ($row['varsymbol'] ?? '') !== '') {
+                $this->varsymbol->releaseIfLatest(
+                    (int) $row['supplier_id'],
+                    (string) $row['invoice_type'],
+                    (string) $row['varsymbol'],
+                    new \DateTimeImmutable((string) $row['issue_date']),
+                    (int) $row['client_id'],
+                    (int) ($row['revenue_category_id'] ?? 0),
+                );
+            }
+        }
         foreach ($this->createdInvoiceIds as $id) {
             $pdo->prepare('DELETE FROM invoice_items WHERE invoice_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM invoices WHERE id = ?')->execute([$id]);
@@ -189,7 +212,41 @@ final class RecurringGeneratorTest extends TestCase
             $pdo->prepare('DELETE FROM recurring_invoice_template_items WHERE template_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM recurring_invoice_templates WHERE id = ?')->execute([$id]);
         }
+        $drift = $this->counterDrift();
         $this->db->close();
+        // Test pracuje nad řadou existujícího dodavatele. Číslo, které si vystavená
+        // faktura vzala a úklid nevrátil, zůstane v řadě jako díra a první skutečná
+        // faktura období dostane číslo posunuté o počet běhů testu.
+        if ($drift !== []) {
+            self::fail('Test nechal posunuté počítadlo číselné řady: ' . implode(', ', $drift));
+        }
+    }
+
+    /** @return array<string,int> klíč řady => last_number */
+    private function counterRows(): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT CONCAT_WS('|', client_id, revenue_category_id, invoice_type, period) AS k, last_number
+               FROM invoice_counters WHERE supplier_id = ?"
+        );
+        $stmt->execute([$this->supplierId]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+    }
+
+    /** @return list<string> řady, jejichž počítadlo je výš než před testem */
+    private function counterDrift(): array
+    {
+        if ($this->counterSnapshot === null || $this->supplierId <= 0) {
+            return [];
+        }
+        $drift = [];
+        foreach ($this->counterRows() as $key => $value) {
+            $before = $this->counterSnapshot[$key] ?? 0;
+            if ($value > $before) {
+                $drift[] = "{$key}: {$before} → {$value}";
+            }
+        }
+        return $drift;
     }
 
     public function testGeneratorCreatesIssuedInvoiceWithLinkBack(): void

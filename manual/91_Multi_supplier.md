@@ -226,6 +226,20 @@ s chybou „Chybí counter".
 > 409 chybu při Vystavení, ale doporučujeme spolu s změnou cyklu **upravit
 > i šablonu** (pro `year` vyhoď `{MM}`, pro `none` vyhoď `{YY}` i `{MM}`).
 
+**Počítadlo řady a mezery v číslování:**
+
+Pořadové číslo se čerpá až vystavením dokladu. Když vystavení neprojde (například
+ho zablokuje sklad), číslo se vrátí do řady. Vrací ho také smazaný koncept, kterému
+už bylo číslo přidělené (žádost o schválení výkazu), a smazaný poslední doklad řady.
+
+Kdyby počítadlo přesto stálo výš než poslední vydané číslo, aplikace ho při dalším
+vystavení srovná a doklad dostane číslo hned za posledním vydaným. Srovnání se
+zapíše do auditní historie i s původní hodnotou počítadla. Ručně nastavený začátek
+řady („příští faktura bude č. 100") tím zůstává nedotčený. Mezeru po smazaném
+dokladu uprostřed řady aplikace nezaplňuje, tu ukáže sestava
+[Úplnost číselné řady](79_Ucetni_kontroly_a_inventarizace.md#798-uplnost-ciselne-rady-vydanych-dokladu).
+Stejně se chová i interní číslování přijatých faktur.
+
 **Vlastní řada mimo dodavatele:**
 
 Šablonu lze přebít i na nižší úrovni. Uplatní se první vyplněná v tomto pořadí:

@@ -313,17 +313,9 @@ final class IssueInvoiceAction
             }
             $varsymbol = $manualVarsymbol;
         } else {
-            try {
-                $varsymbol = $this->varsymbol->next(
-                    $supplierId,
-                    $invoice['invoice_type'],
-                    $issueDate,
-                    (int) $invoice['client_id'],
-                    (int) ($invoice['revenue_category_id'] ?? 0),
-                );
-            } catch (\InvalidArgumentException | \RuntimeException $e) {
-                return Json::error($response, 'varsymbol_failed', $e->getMessage(), 500);
-            }
+            // Číslo z řady se přidělí až v transakci vystavení níž. Každé odmítnutí
+            // mezi tím (souběh, sklad, duplicita) by jinak nechalo v řadě díru.
+            $varsymbol = null;
         }
 
         try {
@@ -385,12 +377,47 @@ final class IssueInvoiceAction
 
         $stockEnabled = $this->stockIssue->isStockEnabled($supplierId);
         $ownTransaction = $stockEnabled || !$pdo->inTransaction();
-        if ($stockEnabled && $ownTransaction) $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+        // READ COMMITTED i bez skladu: v téhle transakci se přiděluje číslo z řady a pod
+        // REPEATABLE READ by zámek počítadla po souběžném vystavení skončil chybou 1020
+        // (snapshot isolation MariaDB), viz NumberSeriesGapGuard.
+        if ($ownTransaction) $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         if ($ownTransaction) $pdo->beginTransaction();
+        // Ve vlastní transakci vrátí číslo do řady rollback. V cizí by zůstalo
+        // spotřebované, proto ho odmítnutí vrací ručně.
+        $allocated = false;
+        $releaseAllocated = function () use (&$allocated, &$varsymbol, $ownTransaction, $supplierId, $invoice, $issueDate): void {
+            if ($allocated && !$ownTransaction) {
+                $this->varsymbol->releaseIfLatest(
+                    $supplierId,
+                    (string) $invoice['invoice_type'],
+                    (string) $varsymbol,
+                    $issueDate,
+                    (int) $invoice['client_id'],
+                    (int) ($invoice['revenue_category_id'] ?? 0),
+                );
+            }
+        };
         try {
+            if ($varsymbol === null) {
+                try {
+                    $varsymbol = $this->varsymbol->next(
+                        $supplierId,
+                        $invoice['invoice_type'],
+                        $issueDate,
+                        (int) $invoice['client_id'],
+                        (int) ($invoice['revenue_category_id'] ?? 0),
+                    );
+                } catch (\InvalidArgumentException | \RuntimeException $e) {
+                    if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                    return Json::error($response, 'varsymbol_failed', $e->getMessage(), 500);
+                }
+                $allocated = true;
+                $issueParams[0] = $varsymbol;
+            }
             $stmt->execute($issueParams);
             if ($stmt->rowCount() === 0) {
                 if ($ownTransaction) $pdo->rollBack();
+                $releaseAllocated();
                 return Json::error($response, 'race_condition', 'Faktura byla mezitím změněna.', 409);
             }
             if ($stockEnabled) $this->stockIssue->issueForInvoice(
@@ -404,6 +431,7 @@ final class IssueInvoiceAction
             // Typicky insufficient_stock (409 + výčet chybějících položek) —
             // rollback vrátí fakturu do draftu, nic se nevystavilo.
             if ($ownTransaction) $pdo->rollBack();
+            $releaseAllocated();
             return Json::error(
                 $response,
                 'stock.error.' . $e->errorCode,
@@ -416,14 +444,17 @@ final class IssueInvoiceAction
                 if ($ownTransaction) $pdo->rollBack();
             }
             // Zachovaná pojistka proti porušení unique indexu (supplier_id, varsymbol).
+            // Duplicitní číslo drží jiný doklad, do řady se nevrací.
             if ($dupMsg = self::varsymbolDuplicateMessage($e, $varsymbol)) {
                 return Json::error($response, 'varsymbol_duplicate', $dupMsg, 409);
             }
+            $releaseAllocated();
             throw $e;
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
                 if ($ownTransaction) $pdo->rollBack();
             }
+            $releaseAllocated();
             throw $e;
         }
 

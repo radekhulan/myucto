@@ -214,13 +214,6 @@ final class AutoIssueAndSendService
 
         $issueDate  = new \DateTimeImmutable($invoice['issue_date']);
         $supplierId = (int) $invoice['supplier_id'];
-        $varsymbol  = $this->varsymbol->next(
-            $supplierId,
-            $invoice['invoice_type'],
-            $issueDate,
-            (int) $invoice['client_id'],
-            (int) ($invoice['revenue_category_id'] ?? 0),
-        );
         $snapshots  = $this->snapshots->build(
             (int) $invoice['client_id'],
             (int) $invoice['currency_id'],
@@ -229,21 +222,60 @@ final class AutoIssueAndSendService
             (string) (($invoice['tax_date'] ?? null) ?: $invoice['issue_date']),
         );
 
-        $stmt = $this->db->pdo()->prepare(
-            'UPDATE invoices SET
-                varsymbol         = ?,
-                client_snapshot   = ?,
-                supplier_snapshot = ?,
-                bank_snapshot     = ?
-             WHERE id = ? AND status = "draft" AND varsymbol IS NULL'
-        );
-        $stmt->execute([
-            $varsymbol,
-            json_encode($snapshots['client'],   JSON_UNESCAPED_UNICODE),
-            json_encode($snapshots['supplier'], JSON_UNESCAPED_UNICODE),
-            $snapshots['bank'] !== null ? json_encode($snapshots['bank'], JSON_UNESCAPED_UNICODE) : null,
-            $invoiceId,
-        ]);
+        // Číslo se přiděluje ve stejné transakci, která ho zapíše na koncept. Když zápis
+        // neprojde (koncept mezitím vystavil nebo očísloval někdo jiný), rollback vrátí
+        // číslo do řady. Běží-li už transakce volajícího, vrací ho releaseIfLatest().
+        $pdo = $this->db->pdo();
+        $ownTransaction = !$pdo->inTransaction();
+        if ($ownTransaction) {
+            // Viz NumberSeriesGapGuard: zámek počítadla pod REPEATABLE READ by po
+            // souběžném vystavení skončil chybou 1020.
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+            $pdo->beginTransaction();
+        }
+        try {
+            $varsymbol = $this->varsymbol->next(
+                $supplierId,
+                $invoice['invoice_type'],
+                $issueDate,
+                (int) $invoice['client_id'],
+                (int) ($invoice['revenue_category_id'] ?? 0),
+            );
+            $stmt = $pdo->prepare(
+                'UPDATE invoices SET
+                    varsymbol         = ?,
+                    client_snapshot   = ?,
+                    supplier_snapshot = ?,
+                    bank_snapshot     = ?
+                 WHERE id = ? AND status = "draft" AND varsymbol IS NULL'
+            );
+            $stmt->execute([
+                $varsymbol,
+                json_encode($snapshots['client'],   JSON_UNESCAPED_UNICODE),
+                json_encode($snapshots['supplier'], JSON_UNESCAPED_UNICODE),
+                $snapshots['bank'] !== null ? json_encode($snapshots['bank'], JSON_UNESCAPED_UNICODE) : null,
+                $invoiceId,
+            ]);
+            if ($stmt->rowCount() === 0) {
+                if ($ownTransaction) {
+                    $pdo->rollBack();
+                } else {
+                    $this->varsymbol->releaseIfLatest(
+                        $supplierId,
+                        (string) $invoice['invoice_type'],
+                        $varsymbol,
+                        $issueDate,
+                        (int) $invoice['client_id'],
+                        (int) ($invoice['revenue_category_id'] ?? 0),
+                    );
+                }
+                return $this->repo->find($invoiceId) ?? $invoice;
+            }
+            if ($ownTransaction) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
         // Cache invalidace: dosavadní pdf_path mířil na "Faktura-draft-NN.pdf",
         // nový cachePath bude "Faktura-VS.pdf". Stará kopie je jen draft preview
         // (žádný odeslaný doklad) — smaž ji bez archive entry, ať historie
