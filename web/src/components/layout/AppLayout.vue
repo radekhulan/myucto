@@ -269,6 +269,7 @@ const ICONS = {
   // Sklad (Epic SKLAD)
   stock_items:      'M20 7.5l-8-4-8 4m16 0l-8 4m8-4v9l-8 4m0-9L4 7.5m8 4v9M4 7.5v9l8 4',
   stock_documents:  'M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z',
+  stock_fulfillment:'M3 7l9-4 9 4-9 4-9-4m0 0v10l9 4 9-4V7m-9 4v10m-4-8h8',
   stock_takes:      'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-7 9l2 2 4-4',
   stock_warehouses: 'M3 21h18M4 21V8l8-5 8 5v13M9 21v-6h6v6M9 11h.01M15 11h.01M12 8h.01',
   factory:          'M3 21h18M3 10l5 3V10l5 3V10l5 3v8H3V10z',
@@ -411,6 +412,7 @@ const navSections = computed<NavSection[]>(() => {
       accent: 'primary',
       items: [
         { to: '/invoices',         label: t('nav.invoices'),   icon: ICONS.invoices,  newTo: '/invoices/new' },
+        ...(isStockEnabled ? [{ to: '/stock/sales-orders', label: t('nav.stock_sales_orders'), icon: ICONS.stock_documents, newTo: '/stock/sales-orders/new', newPermission: 'stock.orders.write' as PermissionKey }] : []),
         { to: '/recurring',        label: t('nav.recurring'),  icon: ICONS.recurring, newTo: '/recurring/new' },
         ...(auth.isCompanyAdminRole && !isStockEnabled ? [{
           to: '/admin/price-list',
@@ -488,6 +490,7 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         { to: '/stock/items',      label: t('nav.stock_items'),      icon: ICONS.stock_items,      newTo: '/stock/items/new' },
         { to: '/stock/documents',  label: t('nav.stock_documents'),  icon: ICONS.stock_documents,  newTo: '/stock/documents/new' },
+        { to: '/stock/fulfillment', label: t('nav.stock_fulfillment'), icon: ICONS.stock_fulfillment, permission: 'stock' as PermissionKey },
         // Objednávky dodavatelům (fáze 4 epicu SKLAD).
         { to: '/stock/purchase-orders', label: t('nav.stock_purchase_orders'), icon: ICONS.purchase, newTo: '/stock/purchase-orders/new', newPermission: 'stock.orders.write' },
         // „U dodavatele" — kdo zboží nabízí, za kolik a kolik kusů (fáze 3 epicu SKLAD).
@@ -498,6 +501,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/stock/takes',      label: t('nav.stock_takes'),      icon: ICONS.stock_takes },
         { to: '/stock/reports',    label: t('nav.stock_reports'),    icon: ICONS.reports },
         { to: '/eshop/jobs',        label: t('nav.eshop_jobs'),       icon: ICONS.reports },
+        { to: '/eshop/integrations', label: t('nav.eshop_integrations'), icon: ICONS.tools, permission: 'eshop.integrations' as PermissionKey },
       ],
     } as NavSection] : []),
     {

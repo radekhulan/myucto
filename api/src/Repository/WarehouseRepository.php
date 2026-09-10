@@ -15,7 +15,7 @@ use PDO;
 final class WarehouseRepository
 {
     private const COLUMNS =
-        'id, supplier_id, code, name, is_default, is_active, note, created_at, updated_at';
+        'id, supplier_id, code, name, is_default, is_active, is_sellable, note, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -87,7 +87,7 @@ final class WarehouseRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . self::COLUMNS . ' FROM warehouses
-              WHERE supplier_id = ? AND is_default = 1 AND is_active = 1
+              WHERE supplier_id = ? AND is_default = 1 AND is_active = 1 AND is_sellable = 1
               LIMIT 1'
         );
         $stmt->execute([$supplierId]);
@@ -98,7 +98,7 @@ final class WarehouseRepository
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . self::COLUMNS . ' FROM warehouses
-              WHERE supplier_id = ? AND is_active = 1
+              WHERE supplier_id = ? AND is_active = 1 AND is_sellable = 1
               ORDER BY code ASC
               LIMIT 1'
         );
@@ -108,32 +108,33 @@ final class WarehouseRepository
     }
 
     /**
-     * @param array{code:string, name:string, is_default?:bool, is_active?:bool, note?:?string} $data
+     * @param array{code:string, name:string, is_default?:bool, is_active?:bool, is_sellable?:bool, note?:?string} $data
      */
     public function insert(int $supplierId, array $data): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
-            'INSERT INTO warehouses (supplier_id, code, name, is_default, is_active, note)
-             VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO warehouses (supplier_id, code, name, is_default, is_active, is_sellable, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             (string) $data['code'],
             (string) $data['name'],
             (int) ($data['is_default'] ?? false),
             (int) ($data['is_active'] ?? true),
+            (int) ($data['is_sellable'] ?? true),
             $data['note'] ?? null,
         ]);
         return (int) $pdo->lastInsertId();
     }
 
     /**
-     * @param array{code:string, name:string, is_default?:bool, is_active?:bool, note?:?string} $data
+     * @param array{code:string, name:string, is_default?:bool, is_active?:bool, is_sellable?:bool, note?:?string} $data
      */
     public function update(int $supplierId, int $id, array $data): bool
     {
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE warehouses SET code = ?, name = ?, is_default = ?, is_active = ?, note = ?
+            'UPDATE warehouses SET code = ?, name = ?, is_default = ?, is_active = ?, is_sellable = ?, note = ?
               WHERE id = ? AND supplier_id = ?'
         );
         $stmt->execute([
@@ -141,6 +142,7 @@ final class WarehouseRepository
             (string) $data['name'],
             (int) ($data['is_default'] ?? false),
             (int) ($data['is_active'] ?? true),
+            (int) ($data['is_sellable'] ?? true),
             $data['note'] ?? null,
             $id,
             $supplierId,
@@ -204,6 +206,7 @@ final class WarehouseRepository
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['is_default'] = (bool) $r['is_default'];
         $r['is_active'] = (bool) $r['is_active'];
+        $r['is_sellable'] = (bool) $r['is_sellable'];
         return $r;
     }
 }

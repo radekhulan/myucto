@@ -7,8 +7,8 @@ Modul **E-shop** rozšiřuje skladovou kartu zboží (`Zboží → Skladové kar
 co potřebuješ pro **prodej přes e-shop**: vícejazyčný popis a SEO, zařazení do
 kategorií a označení štítky, typované parametry/atributy, poplatky (autorský,
 recyklační…), cenotvorbu odvozenou z nákupní ceny ve více měnách, dodavatele zboží
-a hromadný import. Stránka `/eshop` sama o sobě **needituje jednotlivé
-zboží** — je to sada **číselníků a nastavení**, které pak využiješ na kartě
+a hromadný import. Stránka `/eshop` obsahuje číselníky, nastavení a správu
+hlavních produktů s variantami. Obsah jednotlivého zboží upravuješ na kartě
 konkrétní položky v editoru skladové karty (záložky „Jazyky", „Kategorie &
 štítky", „Parametry", „Ceny", „Dodavatelé", „Přílohy").
 
@@ -812,3 +812,66 @@ s takovým překladem jde dál uložit.
 > už nějaký překlad existuje. Nová firma, která si sklad zapne později, začíná
 > s prázdným číselníkem. První uložení českého překladu do něj češtinu doplní;
 > další jazyky přidáš v číselníku.
+## 34.14 Varianty a vztahy produktů
+
+Na stránce E-shop v záložce **Hlavní produkty** vytvoříš společný produkt a
+připojíš k němu existující skladové karty jako varianty. Hlavní produkt nemá
+vlastní SKU ani skladovou zásobu. Každá varianta si ponechá své SKU, ceny,
+skladové pohyby a externí identitu.
+
+Osy variant vybereš z jednohodnotových výčtových parametrů, například velikost
+a barva. Pro každou variantu zadáš jednu možnost každé osy. Dvě varianty
+stejného produktu nemohou mít stejnou kombinaci. Parametry určující variantu
+měň přes hlavní produkt; běžná záložka Parametry jejich změnu odmítne.
+
+Varianta standardně přebírá výrobce a obsah překladů hlavního produktu.
+V záložce **Hlavní produkt** na kartě můžeš jednotlivá pole přepnout na vlastní
+hodnotu. Náhled ukazuje výsledný obsah. Slug zůstává vlastní pro každé SKU.
+Před odpojením varianty aplikace ukáže obsah, který na kartě zachová, aby
+odpojením nezmizel převzatý popis ani výrobce.
+
+V záložce **Vztahy** propojíš příslušenství, náhrady a související zboží.
+Kopírování obsahových částí mezi více kartami běží jako trvalá úloha s průběhem
+a výsledkem jednotlivých položek. Změněné karty se nepřepíší potichu, jejich
+konflikty uvidíš ve výsledku.
+
+## 34.15 Virtuální sety
+
+Na kartě bez vlastní skladové zásoby otevři **Složení setu**. Set může obsahovat
+pevné komponenty i další sety. Konfigurátor navíc nabízí povinné a volitelné
+skupiny s omezením počtu voleb a měnovými příplatky. Cyklus ve složení systém
+odmítne. Pro každou měnu lze použít součet cen komponent, procentní slevu nebo
+pevnou cenu. Výpočet používá aktuální ceny komponent a zvolenou konfiguraci.
+Set s různými sazbami DPH komponent nelze takto ocenit.
+
+Virtuální set nemá vlastní zásobu a nelze jej přepnout na skladovanou kartu.
+Pro předem vyrobené balení použij samostatnou kartu výrobku a **Kompletaci**
+v modulu Sklad. Kompletace jednou transakcí vydá komponenty a přijme výrobek
+ve stejné celkové hodnotě. Storno se provádí společně přes kompletaci.
+Zpětný pohyb, který by změnil ocenění již zkompletovaných komponent, systém
+odmítne; nejprve stornuj kompletaci nebo proveď korekci po ní.
+
+## 34.16 Integrační centrum
+
+**Cesta: `Zboží → Integrace`**
+
+Integrační centrum spravuje obecná připojení e-shopů a dalších externích
+systémů. U každého připojení nastavíš typ konektoru, provozní stav, mapování
+skladu, měny a jazyka, vlastnictví jednotlivých polí, limit požadavků a dobu
+uchování provozních záznamů. Přístupové údaje se ukládají šifrovaně a po
+uložení se ve formuláři znovu nezobrazí.
+
+Sekce **Webhook** vytvoří nový podpisový klíč a ukáže ho právě jednou. Externí
+systém jím podepisuje tělo zprávy spolu s časovým razítkem. Otočením klíče se
+předchozí klíč okamžitě zneplatní.
+
+Přehled provozu ukazuje stáří poslední synchronizace, počty čekajících,
+zpracovaných a chybových zpráv a bezpečné diagnostické kódy. Nezobrazuje obsah
+zpráv ani přístupové údaje. Událost ve stavu trvalé chyby lze po odstranění
+příčiny vrátit do fronty tlačítkem **Opakovat**.
+
+Tlačítko **Spustit kontrolu** porovná mapované identity s místními daty. Kontrola
+běží na pozadí po dávkách a její průběh zůstává v historii úloh. Stejná kontrola
+se pro aktivní připojení spouští také pravidelně. Pokud se změnový kurzor
+externího systému dostane mimo uchovávanou historii, systém výslovně vyžádá
+nový úplný snapshot katalogu.

@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { StockItemPayload } from './stock'
+import type { StockItemPayload, StockTrackingMode } from './stock'
 
 /**
  * E-shop číselníky (Epic ESHOP).
@@ -226,6 +226,7 @@ export interface Product {
   name: string
   item_type: 'material' | 'goods' | 'product'
   unit: string
+  tracking_mode: StockTrackingMode
   ean: string | null
   vat_rate_id: number | null
   sale_price_without_vat: string | null
@@ -420,6 +421,81 @@ export interface ProductEditorPayload {
   vendors: ProductVendorPayload[]
 }
 
+// ── Virtuální sety (SK-09, SK-16) ─────────────────────────────────────────
+export interface ProductSetComponent {
+  item_id: number
+  quantity: string
+}
+
+export interface ProductSetOption extends ProductSetComponent {
+  code: string
+  name: string
+  surcharges: Record<string, string>
+}
+
+export interface ProductSetGroup {
+  code: string
+  name: string
+  min: number
+  max: number
+  options: ProductSetOption[]
+}
+
+export interface ProductSetPrice {
+  mode: 'sum' | 'discount' | 'fixed'
+  discount_pct?: string | null
+  fixed_price?: string | null
+}
+
+export interface ProductSetDefinition {
+  components: ProductSetComponent[]
+  groups: ProductSetGroup[]
+  prices: Record<string, ProductSetPrice>
+}
+
+export interface ProductSet {
+  stock_item_id: number
+  supplier_id: number
+  row_version: number
+  definition: ProductSetDefinition
+}
+
+export interface ProductSetCard {
+  id: number
+  sku: string
+  name: string
+  unit: string
+  vat_rate_id: number | null
+  is_active: boolean
+  is_stocked: boolean
+}
+
+export interface ProductSetReadResponse {
+  set: ProductSet | null
+  definitions: Record<string, ProductSetDefinition>
+  cards: ProductSetCard[]
+}
+
+export interface ProductSetQuoteComponent {
+  item_id: number
+  quantity: string
+  unit_price: string
+  amount: string
+}
+
+export interface ProductSetQuoteResponse {
+  stock_item_id: number
+  row_version: number
+  currency_code: string
+  quantity: string
+  prices_include_vat: boolean
+  vat_rate_id: number
+  selections: Record<string, Record<string, string[]>>
+  definition_snapshot: Record<string, ProductSetDefinition>
+  component_snapshot: ProductSetCard[]
+  quote: { amount: string; components: ProductSetQuoteComponent[] }
+}
+
 function toParams<T extends object>(f: T = {} as T): Record<string, string | number> {
   const out: Record<string, string | number> = {}
   for (const [k, v] of Object.entries(f)) {
@@ -508,6 +584,16 @@ export const eshopApi = {
   saveProductEditor: (id: number, payload: ProductEditorPayload) =>
     api.put<Product>(`/eshop/products/${id}/editor`, payload).then(r => r.data),
   getProductI18n: (id: number) => api.get<ProductI18nRow[]>(`/eshop/products/${id}/i18n`).then(r => r.data),
+
+  // ── Virtuální sety ───────────────────────────────────────────────────────
+  getProductSet: (id: number) => api.get<ProductSetReadResponse>(`/eshop/sets/${id}`).then(r => r.data),
+  saveProductSet: (id: number, rowVersion: number, definition: ProductSetDefinition) =>
+    api.put<ProductSet>(`/eshop/sets/${id}`, { row_version: rowVersion, definition }).then(r => r.data),
+  quoteProductSet: (id: number, payload: {
+    currency_code: string
+    quantity: string
+    selections: Record<string, Record<string, string[]>>
+  }) => api.post<ProductSetQuoteResponse>(`/eshop/sets/${id}/quote`, payload).then(r => r.data),
 
   // ── Import zboží (Epic ESHOP F3) ─────────────────────────────────────────
   importProducts: (file: File, dryRun: boolean) => {

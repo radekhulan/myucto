@@ -603,9 +603,14 @@ final class RoutePermissionMap
         // Objednávky dodavatelům. MUSÍ být před `^/api/stock/.*/close$` — jinak by
         // „zavřít nedodaný zbytek objednávky" spadlo pod skladovou uzávěrku
         // (`stock.close`), což je úplně jiné oprávnění — i před catch-all `^/api/stock`.
+        ['*', '#^/api/stock/sales-orders(/|$)#', 'stock.orders.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/purchase-orders(/|$)#', 'stock.orders.write', AccessLevel::WRITE],
         ['POST', '#^/api/stock/items/[0-9]+/neighbors$#', 'stock', AccessLevel::READ],
         ['GET', '#^/api/stock/item-templates$#', 'stock', AccessLevel::READ],
+        ['GET', '#^/api/stock/fulfillment(/|$)#', 'stock', AccessLevel::READ],
+        ['GET', '#^/api/stock/assemblies(/|$)#', 'stock', AccessLevel::READ],
+        ['*', '#^/api/stock/assemblies(/|$)#', 'stock.documents.write', AccessLevel::WRITE],
+        ['*', '#^/api/stock/fulfillment(/|$)#', 'stock.fulfillment.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/item-templates(/|$)#', 'stock.items.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/items(/|$)#', 'stock.items.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/documents(/|$)#', 'stock.documents.write', AccessLevel::WRITE],
@@ -615,9 +620,12 @@ final class RoutePermissionMap
         // ^/api/stock, jinak by zápis spadl pod obecné právo `stock`.
         ['*', '#^/api/stock/vendor-offers(/|$)#', 'stock.vendors.write', AccessLevel::WRITE],
         ['*', '#^/api/stock(/|$)#', 'stock', AccessLevel::WRITE],
+        ['GET', '#^/api/eshop/integrations(/|$)#', 'eshop.integrations', AccessLevel::READ],
+        ['*', '#^/api/eshop/integrations(/|$)#', 'eshop.integrations', AccessLevel::WRITE],
         ['GET', '#^/api/eshop(/|$)#', 'eshop', AccessLevel::READ],
         ['POST', '#^/api/catalog/(products|prices)/batch$#', 'eshop', AccessLevel::READ],
         ['GET', '#^/api/catalog/facets$#', 'eshop', AccessLevel::READ],
+        ['GET', '#^/api/catalog/changes$#', 'eshop', AccessLevel::READ],
         ['POST', '#^/api/catalog/exports$#', 'eshop', AccessLevel::READ],
         ['GET', '#^/api/catalog/exports/[0-9]+/download$#', 'eshop', AccessLevel::READ],
         ['*', '#^/api/eshop(/|$)#', 'eshop.write', AccessLevel::WRITE],

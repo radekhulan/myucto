@@ -15,6 +15,8 @@ final class CatalogJobDispatcher
     public const HANDLERS = [
         'price_recompute' => CatalogPriceJobService::class,
         'stock_valuation' => StockValuationJobService::class,
+        'stock_cycle_prepare' => \MyInvoice\Service\Stock\CycleCountService::class,
+        'sales_order_expiry' => \MyInvoice\Service\Stock\SalesOrderExpiryJobService::class,
         'catalog_bulk_preview' => CatalogBulkWorker::class,
         'catalog_bulk_apply' => CatalogBulkWorker::class,
         'catalog_bulk_restore' => CatalogBulkWorker::class,
@@ -23,12 +25,18 @@ final class CatalogJobDispatcher
         'catalog_import_apply' => Import\CatalogImportWorker::class,
         'price_matrix_preview' => PriceMatrixWorker::class,
         'price_matrix_apply' => PriceMatrixWorker::class,
+        'product_content_transfer_preview' => ProductContentTransferWorker::class,
+        'product_content_transfer_apply' => ProductContentTransferWorker::class,
+        'integration_reconcile' => \MyInvoice\Service\Integration\IntegrationReconcileWorker::class,
     ];
 
     public function __construct(private readonly Connection $db, private readonly ContainerInterface $container) {}
 
     public function tick(int $maxBatches = 10): array
     {
+        $this->container->get(\MyInvoice\Service\Integration\IntegrationChangeFeedService::class)->purgeExpired();
+        $this->container->get(\MyInvoice\Service\Integration\IntegrationDiagnosticsService::class)->purgeExpired();
+        $this->container->get(\MyInvoice\Service\Integration\IntegrationReconcileService::class)->enqueueDue();
         $kinds = array_keys(self::HANDLERS);
         $stmt = $this->db->pdo()->prepare("SELECT DISTINCT supplier_id, kind FROM catalog_jobs
             WHERE kind IN (" . implode(',', array_fill(0, count($kinds), '?')) . ") AND status IN ('queued','running') ORDER BY supplier_id, kind");

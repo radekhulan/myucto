@@ -133,6 +133,149 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         }
     }
 
+    public function testStockWorkflowRoundTripPreservesRecipesClaimsAndPairedDocuments(): void
+    {
+        $pdo = $this->db->pdo();
+        $sid = $this->supplierId;
+        $pdo->prepare('UPDATE supplier SET stock_enabled = 1 WHERE id = ?')->execute([$sid]);
+        $container = Bootstrap::buildApp()->getContainer();
+        $warehouse = $container->get(\MyInvoice\Repository\WarehouseRepository::class)->insert($sid, ['code' => 'ARCHIVE', 'name' => 'Archiv', 'is_active' => true, 'is_default' => true]);
+        $items = [];
+        foreach (['COMPONENT', 'PRODUCT', 'SET', 'TRACKED'] as $sku) {
+            $pdo->prepare("INSERT INTO stock_items (supplier_id, sku, name, unit, item_type, is_stocked) VALUES (?, ?, ?, 'ks', 'product', ?)")->execute([$sid, $sku, $sku, (int) ($sku !== 'SET')]);
+            $items[$sku] = (int) $pdo->lastInsertId();
+        }
+        $documents = $container->get(\MyInvoice\Service\Stock\StockDocumentService::class);
+        $pdo->prepare("UPDATE stock_items SET tracking_mode = 'serial' WHERE id = ?")->execute([$items['TRACKED']]);
+        $location = $container->get(\MyInvoice\Repository\StockTrackingRepository::class)->saveLocation($sid, $warehouse, null, 'A-01', 'Regál A', true);
+        $tracked = $documents->create($sid, ['doc_type' => 'receipt', 'origin' => 'manual', 'description' => 'Syntetická série', 'warehouse_id' => $warehouse, 'doc_date' => date('Y-m-d', strtotime('-2 days')),
+            'lines' => [['stock_item_id' => $items['TRACKED'], 'qty' => '1', 'unit_cost' => '7', 'tracking_allocations' => [['serial_number' => 'ARCHIVE-SN', 'quantity' => '1', 'location_id' => $location]]]]], $this->userId);
+        $documents->post($sid, $tracked['id'], $this->userId);
+        $documents->reverse($sid, $tracked['id'], [], $this->userId);
+        $receipt = $documents->create($sid, ['doc_type' => 'receipt', 'origin' => 'manual', 'description' => 'Syntetický archivní příjem', 'warehouse_id' => $warehouse, 'doc_date' => date('Y-m-d', strtotime('-2 days')),
+            'lines' => [['stock_item_id' => $items['COMPONENT'], 'qty' => '10', 'unit_cost' => '5']]], $this->userId);
+        $documents->post($sid, $receipt['id'], $this->userId);
+        $definition = ['components' => [['item_id' => $items['COMPONENT'], 'quantity' => '2']]];
+        $container->get(\MyInvoice\Service\Eshop\Sets\ProductSetService::class)->save($sid, $items['SET'], 0, $definition);
+        $assembly = $container->get(\MyInvoice\Service\Eshop\Sets\ProductAssemblyService::class)->create($sid, [
+            'operation_key' => 'archive-assembly-001', 'stock_item_id' => $items['PRODUCT'], 'warehouse_id' => $warehouse,
+            'quantity' => '1', 'doc_date' => date('Y-m-d', strtotime('-1 day')), 'definition' => $definition,
+        ], $this->userId);
+        $pdo->prepare("INSERT INTO invoices (supplier_id, client_id, invoice_type, issue_date, due_date, currency_id, created_by, status) VALUES (?, ?, 'invoice', ?, ?, ?, ?, 'draft')")
+            ->execute([$sid, $this->client(), date('Y-m-d'), date('Y-m-d'), $this->currencyId, $this->userId]);
+        $invoiceId = (int) $pdo->lastInsertId();
+        $vatRateId = (int) $pdo->query('SELECT default_vat_rate_id FROM supplier WHERE id = ' . $sid)->fetchColumn();
+        $pdo->prepare('INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_without_vat, total_without_vat, total_vat, total_with_vat, stock_item_id, warehouse_id, vat_rate_id, vat_rate_snapshot) VALUES (?, ?, 1, 10, 10, 0, 10, ?, ?, ?, 0)')
+            ->execute([$invoiceId, 'Syntetická archivní položka', $items['COMPONENT'], $warehouse, $vatRateId]);
+        $invoiceItemId = (int) $pdo->lastInsertId();
+        $source = $documents->create($sid, ['doc_type' => 'issue', 'origin' => 'manual', 'description' => 'Syntetický archivní výdej', 'warehouse_id' => $warehouse, 'doc_date' => date('Y-m-d'), 'invoice_id' => $invoiceId,
+            'lines' => [['stock_item_id' => $items['COMPONENT'], 'qty' => '1', 'invoice_item_id' => $invoiceItemId]]], $this->userId);
+        $fulfillment = $container->get(\MyInvoice\Service\Stock\FulfillmentService::class);
+        $task = $fulfillment->createTask($sid, 'stock_issue_draft', (string) $source['id'], $this->userId);
+        $fulfillment->scan($sid, $task['id'], ['client_operation_id' => 'archive-scan-001', 'code' => 'COMPONENT', 'quantity' => '1'], $this->userId, false);
+        $shipment = $fulfillment->createShipment($sid, $task['id'], ['carrier' => 'Synthetic', 'tracking_number' => 'TEST-ARCHIVE',
+            'items' => [['task_line_id' => $task['lines'][0]['id'], 'quantity' => '1']]], $this->userId);
+        $fulfillment->dispatch($sid, $shipment['id'], $this->userId);
+        $orderUuid = '10000000-0000-4000-8000-000000000001';
+        $lineUuid = '20000000-0000-4000-8000-000000000001';
+        $pdo->prepare("INSERT INTO sales_orders (supplier_id, order_uuid, client_id, order_number, commercial_status, fulfillment_status, currency_id, currency_code, customer_snapshot) VALUES (?, ?, ?, 'TEST-ARCHIVE-ORDER', 'confirmed', 'reserved', ?, 'CZK', '{}')")
+            ->execute([$sid, $orderUuid, $this->client(), $this->currencyId]);
+        $orderId = (int) $pdo->lastInsertId();
+        $component = [['stock_item_id' => $items['COMPONENT'], 'quantity' => '3', 'sku' => 'COMPONENT']];
+        $pdo->prepare("INSERT INTO sales_order_lines (supplier_id, line_uuid, order_id, line_no, stock_item_id, warehouse_id, description, quantity, unit_price, total_without_vat, total_vat, total_with_vat, product_snapshot, component_snapshot) VALUES (?, ?, ?, 1, ?, ?, 'Archivní objednávka', 3, 10, 30, 0, 30, ?, ?)")
+            ->execute([$sid, $lineUuid, $orderId, $items['COMPONENT'], $warehouse, json_encode(['kind' => 'stock_item', 'id' => $items['COMPONENT']]), json_encode($component)]);
+        $orderLineId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO sales_order_reservations (supplier_id, order_id, order_line_id, component_no, warehouse_id, stock_item_id, qty_reserved) VALUES (?, ?, ?, 0, ?, ?, 3)')
+            ->execute([$sid, $orderId, $orderLineId, $warehouse, $items['COMPONENT']]);
+        $orderTask = $fulfillment->createTask($sid, 'sales_order', $orderUuid, $this->userId);
+        $fulfillment->scan($sid, $orderTask['id'], ['client_operation_id' => 'archive-order-scan', 'code' => 'COMPONENT', 'quantity' => '2'], $this->userId, false);
+        $orderShipment = $fulfillment->createShipment($sid, $orderTask['id'], ['carrier' => 'Synthetic', 'tracking_number' => 'TEST-ORDER', 'items' => [['task_line_id' => $orderTask['lines'][0]['id'], 'quantity' => '2']]], $this->userId);
+        $fulfillment->dispatch($sid, $orderShipment['id'], $this->userId);
+        $returnUuid = '30000000-0000-4000-8000-000000000001';
+        $pdo->prepare('INSERT INTO sales_order_returns (supplier_id, return_uuid, order_id, lines_json) VALUES (?, ?, ?, ?)')
+            ->execute([$sid, $returnUuid, $orderId, json_encode([['line_uuid' => $lineUuid, 'quantity' => '1']])]);
+        $meta = $this->archive->export($sid, $this->userId);
+        $path = $this->archive->filePath($sid, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+        $restoredItems = $pdo->query('SELECT sku, id FROM stock_items WHERE supplier_id = ' . $newSid)->fetchAll(PDO::FETCH_KEY_PAIR);
+        $restoredOrder = $container->get(\MyInvoice\Service\Stock\SalesOrderService::class)->detail($newSid, $orderUuid);
+        self::assertNotNull($restoredOrder);
+        self::assertSame('1.000', $restoredOrder['reservations'][0]['remaining_qty']);
+        self::assertSame((int) $restoredItems['COMPONENT'], $restoredOrder['lines'][0]['product_snapshot']['id']);
+        self::assertSame((int) $restoredItems['COMPONENT'], $restoredOrder['lines'][0]['component_snapshot'][0]['stock_item_id']);
+        $returnQuery = $pdo->prepare('SELECT order_id FROM sales_order_returns WHERE supplier_id = ? AND return_uuid = ?');
+        $returnQuery->execute([$newSid, $returnUuid]);
+        self::assertSame((int) $restoredOrder['id'], (int) $returnQuery->fetchColumn());
+        $trackingRows = $pdo->query('SELECT a.id, a.original_allocation_id, a.warehouse_id, a.location_id, u.stock_item_id, u.serial_number FROM stock_tracking_allocations a JOIN stock_tracking_units u ON u.id = a.stock_tracking_unit_id AND u.supplier_id = a.supplier_id WHERE a.supplier_id = ' . $newSid . ' ORDER BY a.id')->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(2, $trackingRows);
+        self::assertSame((int) $restoredItems['TRACKED'], (int) $trackingRows[0]['stock_item_id']);
+        self::assertSame('ARCHIVE-SN', $trackingRows[0]['serial_number']);
+        self::assertSame((int) $trackingRows[0]['id'], (int) $trackingRows[1]['original_allocation_id']);
+        self::assertNotSame($warehouse, (int) $trackingRows[0]['warehouse_id']);
+        self::assertNotSame($location, (int) $trackingRows[0]['location_id']);
+        $restoredSet = $container->get(\MyInvoice\Service\Eshop\Sets\ProductSetService::class)->get($newSid, (int) $restoredItems['SET']);
+        self::assertSame((int) $restoredItems['COMPONENT'], $restoredSet['definition']['components'][0]['item_id']);
+        $newTask = $pdo->query("SELECT * FROM fulfillment_tasks WHERE source_type = 'stock_issue_draft' AND supplier_id = " . $newSid)->fetch(PDO::FETCH_ASSOC);
+        self::assertSame('shipped', $newTask['status']);
+        self::assertNotSame((string) $source['id'], $newTask['source_id']);
+        self::assertSame((string) $newTask['claimed_stock_document_id'], $newTask['source_id']);
+        $restoredTask = $fulfillment->find($newSid, (int) $newTask['id']);
+        self::assertSame((int) $restoredItems['COMPONENT'], $restoredTask['lines'][0]['component_snapshot']['stock_item_id']);
+        $restoredInvoiceItem = $pdo->query('SELECT ii.id FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.supplier_id = ' . $newSid)->fetchColumn();
+        self::assertNotSame($invoiceItemId, (int) $restoredInvoiceItem);
+        self::assertSame((int) $restoredInvoiceItem, (int) $restoredTask['lines'][0]['component_snapshot']['invoice_item_id']);
+        $newAssembly = $pdo->query('SELECT * FROM product_assemblies WHERE supplier_id = ' . $newSid)->fetch(PDO::FETCH_ASSOC);
+        self::assertSame($assembly['value_total'], $newAssembly['value_total']);
+        foreach ([[(int) $newTask['claimed_stock_document_id'], 'post', 'fulfillment_source_claimed'], [(int) $newAssembly['issue_document_id'], 'reverse', 'assembly_reversal_required']] as [$documentId, $operation, $code]) {
+            try {
+                if ($operation === 'post') $documents->post($newSid, $documentId, $this->userId);
+                else $documents->reverse($newSid, $documentId, [], $this->userId);
+                self::fail('Obnovený doklad ztratil ochranu workflow.');
+            } catch (\MyInvoice\Service\Stock\StockException $error) {
+                self::assertSame($code, $error->errorCode);
+            }
+        }
+    }
+
+    public function testProductVariantRoundTripRemapsAxesAndRegeneratesSignature(): void
+    {
+        $pdo = $this->db->pdo();
+        $sid = $this->supplierId;
+        $pdo->prepare('UPDATE supplier SET stock_enabled = 1 WHERE id = ?')->execute([$sid]);
+        $pdo->prepare("INSERT INTO stock_attributes (supplier_id, code, name, data_type) VALUES (?, 'ARCHIVE-SIZE', 'Velikost', 'enum')")->execute([$sid]);
+        $attribute = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO stock_attribute_options (supplier_id, attribute_id, code, label) VALUES (?, ?, 'S', 'S')")->execute([$sid, $attribute]);
+        $option = (int) $pdo->lastInsertId();
+        $container = Bootstrap::buildApp()->getContainer();
+        $masters = $container->get(\MyInvoice\Service\Eshop\ProductMasterService::class);
+        $master = $masters->create($sid, ['name' => 'Archiv variant', 'axis_attribute_ids' => [$attribute], 'i18n' => [['locale' => 'cs', 'name' => 'Sdílený název']]]);
+        $pdo->prepare("INSERT INTO stock_items (supplier_id, sku, name, unit) VALUES (?, 'ARCHIVE-VARIANT', 'Varianta', 'ks')")->execute([$sid]);
+        $item = (int) $pdo->lastInsertId();
+        $masters->attach($sid, $master['id'], ['master_row_version' => $master['row_version'], 'variants' => [[
+            'stock_item_id' => $item, 'row_version' => 1, 'options' => [['attribute_id' => $attribute, 'option_id' => $option]],
+            'inheritance' => ['i18n' => ['cs' => ['description' => false]]],
+        ]]]);
+        $meta = $this->archive->export($sid, $this->userId);
+        $path = $this->archive->filePath($sid, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+        $row = $pdo->query('SELECT v.master_id, v.stock_item_id, HEX(v.option_signature) signature, o.attribute_id, o.option_id FROM product_variants v JOIN product_variant_options o USING (supplier_id, master_id, stock_item_id) WHERE v.supplier_id = ' . $newSid)->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($row);
+        self::assertNotSame($master['id'], (int) $row['master_id']);
+        self::assertNotSame($item, (int) $row['stock_item_id']);
+        self::assertNotSame($attribute, (int) $row['attribute_id']);
+        self::assertNotSame($option, (int) $row['option_id']);
+        self::assertSame(strtoupper(\MyInvoice\Service\Eshop\ProductMasterService::optionSignature([$row])), $row['signature']);
+        $restored = $masters->detail($newSid, (int) $row['master_id']);
+        self::assertFalse($restored['variants'][0]['inheritance']['i18n']['cs']['description']);
+        self::assertSame('Sdílený název', $restored['variants'][0]['effective']['i18n'][0]['name']);
+    }
+
     public function testExportRestoreRoundTripPreservesAccounting(): void
     {
         $sid = $this->supplierId;

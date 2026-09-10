@@ -74,8 +74,13 @@ final class ArchiveService
      */
     private const STOCK_TABLES = [
         'warehouses'                  => 'id',
+        'warehouse_locations'         => 'id',
         'stock_items'                 => 'id',
+        'stock_item_units'            => 'id',
+        'stock_tracking_units'        => 'id',
         'manufacturers'               => 'id',
+        'product_masters'              => 'id',
+        'product_master_i18n'          => 'id',
         'stock_media'                 => 'id',
         'stock_categories'            => 'id',
         'stock_category_i18n'         => 'id',
@@ -85,7 +90,12 @@ final class ArchiveService
         'stock_attributes'            => 'id',
         'stock_attribute_options'     => 'id',
         'stock_attribute_i18n'        => 'id',
+        'product_master_axes'          => 'master_id, attribute_id',
+        'product_variants'             => 'master_id, stock_item_id',
+        'product_variant_options'      => 'master_id, stock_item_id, attribute_id',
+        'product_variant_i18n_inheritance' => 'master_id, stock_item_id, locale',
         'stock_item_attribute_values' => 'id',
+        'stock_item_relations'         => 'id',
         'stock_fee_types'             => 'id',
         'stock_item_fees'             => 'id',
         'stock_item_prices'           => 'id',
@@ -94,14 +104,36 @@ final class ArchiveService
         'stock_levels'                => 'warehouse_id, stock_item_id',
         'stock_documents'             => 'id',
         'stock_document_lines'        => 'id',
+        'stock_tracking_allocations'  => 'id',
+        'stock_cycle_counts'          => 'id',
+        'stock_cycle_count_lines'     => 'id',
+        'stock_cycle_count_documents' => 'cycle_count_id',
         'stock_landed_costs'          => 'id',
         'stock_takes'                 => 'id',
         'stock_take_lines'            => 'id',
+        'product_sets'                => 'stock_item_id',
+        'product_set_revisions'       => 'id',
+        'product_assemblies'          => 'id',
+        'sales_orders'               => 'id',
+        'sales_order_lines'           => 'id',
+        'sales_order_reservations'    => 'id',
+        'sales_order_operation_keys'  => 'operation, idempotency_key',
+        'sales_order_invoice_links'   => 'order_id',
+        'sales_order_fulfillment_links' => 'order_id, shipment_id',
+        'sales_order_returns'         => 'id',
+        'fulfillment_tasks'           => 'id',
+        'fulfillment_task_lines'      => 'id',
+        'fulfillment_scan_operations' => 'id',
+        'fulfillment_shipments'       => 'id',
+        'fulfillment_shipment_items'  => 'id',
+        'fulfillment_returns'         => 'id',
+        'fulfillment_return_items'    => 'id',
     ];
 
     /** BLOB sloupce mimo export (binárky kryje celoinstanční backup, R15). */
     private const EXCLUDED_COLUMNS = [
         'bank_statements' => ['file_content', 'pdf_content'],
+        'product_variants' => ['option_signature'],
     ];
 
     /**

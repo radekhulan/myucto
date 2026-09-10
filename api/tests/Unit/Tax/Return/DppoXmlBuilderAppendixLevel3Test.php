@@ -197,10 +197,10 @@ final class DppoXmlBuilderAppendixLevel3Test extends TestCase
     }
 
     /**
-     * A.I./A.III. (pasiva, 3/15) — úroveň 3, čistá mapa. A.IV. (18) nese v datech jen
-     * A.IV.1. (19) — A.IV.2. (21, „Jiný výsledek hospodaření minulých let") v
-     * `statement_rows` chybí (skupina (b), viz DANE-PLAN.md dodatek 11), takže se
-     * neposílá vůbec — chybějící přispívá součtu nulou, ne chybou.
+     * A.I./A.III. (pasiva, 3/15) — úroveň 3, čistá mapa. A.IV. (18) nese v TĚCHTO datech
+     * jen A.IV.1. (19); firma bez zůstatku na 426 žádnou A.IV.2. nemá a řádek 21 se pak
+     * neposílá — chybějící přispívá součtu nulou, ne chybou. (Že se pošle, jakmile data
+     * jsou, hlídá {@see testPasivaAIVIncludesJinyVysledekHospodareni}.)
      */
     public function testPasivaAIAndAIIIAndAIVGroupsLevel3Mapped(): void
     {
@@ -228,6 +228,111 @@ final class DppoXmlBuilderAppendixLevel3Test extends TestCase
         self::assertStringContainsString('<VetaUD kc_sled="80" c_radku="17" kc_min="0"/>', $xml);  // P.A.III.2.
         self::assertStringContainsString('<VetaUD kc_sled="200" c_radku="19" kc_min="0"/>', $xml); // P.A.IV.1.
         self::assertStringNotContainsString('c_radku="21"', $xml); // A.IV.2. — chybí v datech, neposílá se
+    }
+
+    /**
+     * P-6 — A.IV.2. „Jiný výsledek hospodaření minulých let" (ř. 21) se do přílohy DPPO
+     * DOSTANE, jakmile firma má zůstatek na účtu 426 (řádek výkazu doplnila migrace 1780).
+     *
+     * Bez doplnění `P.A.IV.` mapy v PASIVA_DETAIL_C_RADKU tenhle test padá na chybějícím
+     * `c_radku="21"` — a hlavně na křížové kontrole EPO „Hodnota řádku A.IV. rozvahy-pasiv
+     * není rovna součtu": A.IV. by šlo v XML jako 300, ale jediný poslaný podřádek by
+     * nesl 200.
+     *
+     * Čísla řádků 19 a 21 jsou z číselníku MF ČR (tabulka 24810 „Rozvaha-pasiva",
+     * platnost=2026); číslo 20 v číselníku není obsazené, takže je NELZE odvodit
+     * z pořadí — proto tvrdá hodnota, ne výpočet.
+     */
+    public function testPasivaAIVIncludesJinyVysledekHospodareni(): void
+    {
+        $appendix = [
+            'balance_sheet' => ['liabilities' => [
+                self::liability('P.A.', 300000.0),
+                self::liability('P.A.IV.', 300000.0),
+                self::liability('P.A.IV.1.', 200000.0),
+                self::liability('P.A.IV.2.', 100000.0),
+            ]],
+            'income_statement' => ['rows' => [['row_code' => 'I.', 'amount' => 1000.0, 'prev_amount' => 0.0]]],
+        ];
+        $xml = $this->build($appendix)['xml'];
+
+        self::assertStringContainsString('<VetaUD kc_sled="300" c_radku="18" kc_min="0"/>', $xml); // P.A.IV.
+        self::assertStringContainsString('<VetaUD kc_sled="200" c_radku="19" kc_min="0"/>', $xml); // P.A.IV.1.
+        self::assertStringContainsString('<VetaUD kc_sled="100" c_radku="21" kc_min="0"/>', $xml); // P.A.IV.2.
+        self::assertSame(300, 200 + 100, 'Křížová kontrola EPO: A.IV. = A.IV.1. + A.IV.2.');
+    }
+
+    /**
+     * Zaokrouhlovací absorpce uvnitř A.IV.: rozvaha se posílá v TISÍCÍCH, takže nezávisle
+     * zaokrouhlený rodič se se součtem nezávisle zaokrouhlených dětí rozejít MUSÍ. Rozdíl
+     * se absorbuje do dítěte s největší absolutní hodnotou (buildPasivaDetailElements →
+     * absorbRoundingDiff), aby A.IV. = A.IV.1. + A.IV.2. platilo i po zaokrouhlení.
+     *
+     * A.IV. 101 200 → 101; A.IV.1. 80 600 → 81; A.IV.2. 20 600 → 21; 81 + 21 = 102,
+     * rozdíl −1 padne do A.IV.1. (větší absolutní hodnota) → 80 + 21 = 101.
+     */
+    public function testPasivaAIVRoundingDiffAbsorbedIntoLargestChild(): void
+    {
+        $appendix = [
+            'balance_sheet' => ['liabilities' => [
+                self::liability('P.A.', 101200.0),
+                self::liability('P.A.IV.', 101200.0),
+                self::liability('P.A.IV.1.', 80600.0),
+                self::liability('P.A.IV.2.', 20600.0),
+            ]],
+            'income_statement' => ['rows' => [['row_code' => 'I.', 'amount' => 1000.0, 'prev_amount' => 0.0]]],
+        ];
+        $xml = $this->build($appendix)['xml'];
+
+        self::assertStringContainsString('<VetaUD kc_sled="101" c_radku="18" kc_min="0"/>', $xml); // P.A.IV.
+        self::assertStringContainsString('<VetaUD kc_sled="80" c_radku="19" kc_min="0"/>', $xml);  // P.A.IV.1. po absorpci
+        self::assertStringContainsString('<VetaUD kc_sled="21" c_radku="21" kc_min="0"/>', $xml);  // P.A.IV.2. beze změny
+    }
+
+    /**
+     * Řádky, které do `statement_rows` doplnila migrace 1664, ale do přílohy DPPO se
+     * nedostávaly, protože chyběly v PASIVA_DETAIL_C_RADKU / PASIVA_B_C_RADKU: zůstatek
+     * účtů 478 (C.I.5.), 472 (C.I.7.), 474/479 (C.I.9.3.) a 362 (C.II.7.) se v součtu
+     * C.I./C.II. objevil, ale žádný poslaný podřádek ho nevysvětlil → křížová kontrola
+     * EPO „Hodnota řádku C.I./C.II. rozvahy-pasiv není rovna součtu" musela padnout.
+     *
+     * Čísla řádků z téhož číselníku (tabulka 24810, platnost=2026): C.I.4.=37, C.I.5.=38,
+     * C.I.7.=40, C.I.9.1.=43, C.I.9.2.=44, C.I.9.3.=45, C.II.7.=55, B.1.=26.
+     */
+    public function testPasivaRowsAddedByMigration1664ReachAppendix(): void
+    {
+        $appendix = [
+            'balance_sheet' => ['liabilities' => [
+                self::liability('P.B.', 40000.0),
+                self::liability('P.B.1.', 10000.0),
+                self::liability('P.B.2.', 10000.0),
+                self::liability('P.B.3.', 10000.0),
+                self::liability('P.B.4.', 10000.0),
+                self::liability('P.C.', 500000.0),
+                self::liability('P.C.I.', 300000.0),
+                self::liability('P.C.I.4.', 60000.0),
+                self::liability('P.C.I.5.', 60000.0),
+                self::liability('P.C.I.7.', 60000.0),
+                self::liability('P.C.I.9.', 120000.0),
+                self::liability('P.C.I.9.1.', 40000.0),
+                self::liability('P.C.I.9.2.', 40000.0),
+                self::liability('P.C.I.9.3.', 40000.0),
+                self::liability('P.C.II.', 200000.0),
+                self::liability('P.C.II.7.', 200000.0),
+            ]],
+            'income_statement' => ['rows' => [['row_code' => 'I.', 'amount' => 1000.0, 'prev_amount' => 0.0]]],
+        ];
+        $xml = $this->build($appendix)['xml'];
+
+        self::assertStringContainsString('<VetaUD kc_sled="10" c_radku="26" kc_min="0"/>', $xml);  // P.B.1.
+        self::assertStringContainsString('<VetaUD kc_sled="60" c_radku="37" kc_min="0"/>', $xml);  // P.C.I.4.
+        self::assertStringContainsString('<VetaUD kc_sled="60" c_radku="38" kc_min="0"/>', $xml);  // P.C.I.5.
+        self::assertStringContainsString('<VetaUD kc_sled="60" c_radku="40" kc_min="0"/>', $xml);  // P.C.I.7.
+        self::assertStringContainsString('<VetaUD kc_sled="120" c_radku="42" kc_min="0"/>', $xml); // P.C.I.9.
+        self::assertStringContainsString('<VetaUD kc_sled="40" c_radku="43" kc_min="0"/>', $xml);  // P.C.I.9.1.
+        self::assertStringContainsString('<VetaUD kc_sled="40" c_radku="44" kc_min="0"/>', $xml);  // P.C.I.9.2.
+        self::assertStringContainsString('<VetaUD kc_sled="40" c_radku="45" kc_min="0"/>', $xml);  // P.C.I.9.3.
+        self::assertStringContainsString('<VetaUD kc_sled="200" c_radku="55" kc_min="0"/>', $xml); // P.C.II.7.
     }
 
     /** A.II. (7) — úroveň 3 (A.II.1./A.II.2., 8/9) i vnořená úroveň 4 pod A.II.2. (10/11). */

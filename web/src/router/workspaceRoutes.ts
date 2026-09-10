@@ -216,6 +216,10 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'stock/documents',            name: 'stock-documents',        component: () => import('@/pages/stock/DocumentList.vue'),   meta: { requiresStock: true } },
       { path: 'stock/documents/new',        name: 'stock-document-new',     component: () => import('@/pages/stock/DocumentEditor.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       { path: 'stock/documents/:id(\\d+)',  name: 'stock-document-detail',  component: () => import('@/pages/stock/DocumentEditor.vue'), meta: { requiresStock: true } },
+      { path: 'stock/sales-orders',            name: 'stock-sales-orders',        component: () => import('@/pages/stock/SalesOrderList.vue'),   meta: { requiresStock: true } },
+      { path: 'stock/sales-orders/new',        name: 'stock-sales-order-new',     component: () => import('@/pages/stock/SalesOrderDetail.vue'), meta: { requiresStock: true, requiresSupplier: true } },
+      { path: 'stock/sales-orders/:id(\\d+)', name: 'stock-sales-order-detail',  component: () => import('@/pages/stock/SalesOrderDetail.vue'), meta: { requiresStock: true } },
+      { path: 'stock/fulfillment',           name: 'stock-fulfillment',       component: () => import('@/pages/stock/Fulfillment.vue'),    meta: { requiresStock: true } },
       // Objednávky dodavatelům (Epic SKLAD, fáze 4) — koncept/odeslání/potvrzení/příjem.
       { path: 'stock/purchase-orders',            name: 'stock-purchase-orders',        component: () => import('@/pages/stock/PurchaseOrderList.vue'),   meta: { requiresStock: true } },
       { path: 'stock/purchase-orders/new',        name: 'stock-purchase-order-new',     component: () => import('@/pages/stock/PurchaseOrderDetail.vue'), meta: { requiresStock: true, requiresSupplier: true } },
@@ -228,7 +232,12 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'stock/takes',            name: 'stock-takes',           component: () => import('@/pages/stock/TakeWizard.vue'),   meta: { requiresStock: true } },
       { path: 'stock/takes/:id(\\d+)',  name: 'stock-take-detail',     component: () => import('@/pages/stock/TakeWizard.vue'),   meta: { requiresStock: true } },
       { path: 'stock/reports',          name: 'stock-reports',         component: () => import('@/pages/stock/Reports.vue'),      meta: { requiresStock: true } },
+      { path: 'stock/assemblies',       name: 'stock-assemblies',      component: () => import('@/pages/stock/ProductAssemblies.vue'), meta: { requiresStock: true, requiresSupplier: true } },
+      { path: 'eshop/sets/:id(\\d+)',  name: 'eshop-set-editor',      component: () => import('@/pages/eshop/ProductSetEditor.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       { path: 'eshop/jobs',             name: 'eshop-jobs',            component: () => import('@/pages/stock/CatalogJobs.vue'),  meta: { requiresStock: true, requiresSupplier: true } },
+      { path: 'eshop/product-masters/new', name: 'eshop-product-master-new', component: () => import('@/pages/eshop/ProductMasterEditor.vue'), meta: { requiresStock: true, requiresSupplier: true, additionalPermissions: ['stock.items.write'] } },
+      { path: 'eshop/product-masters/:id(\\d+)', name: 'eshop-product-master-detail', component: () => import('@/pages/eshop/ProductMasterEditor.vue'), meta: { requiresStock: true, requiresSupplier: true } },
+      { path: 'eshop/integrations',      name: 'eshop-integrations',    component: () => import('@/pages/eshop/IntegrationCenter.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       // E-shop — číselníky (Výrobci/Kategorie/Atributy/Tagy/Poplatky/Sklady) + import
       // jako záložky jedné stránky (?tab=…). Poslední položka sekce „Zboží".
       { path: 'eshop',               name: 'eshop',               component: () => import('@/pages/eshop/EshopPage.vue'),     meta: { requiresStock: true, requiresSupplier: true } },

@@ -25,7 +25,11 @@ final class CatalogReadRepository
     {
         $ids = $request['ids'];
         $fields = $request['fields'];
+        $internalManufacturer = in_array('effective', $fields, true) && !in_array('manufacturer_id', $fields, true);
         $columns = ['id', 'row_version', ...array_intersect(self::BASE_FIELDS, $fields)];
+        if ($internalManufacturer) {
+            $columns[] = 'manufacturer_id';
+        }
         $rows = $this->query('SELECT ' . implode(', ', $columns) . ' FROM stock_items WHERE supplier_id = ? AND id IN (' . self::placeholders($ids) . ')', [$supplierId, ...$ids]);
         $products = [];
         foreach ($rows as $row) {
@@ -65,10 +69,156 @@ final class CatalogReadRepository
                 $products[$id][$field][] = $field === 'tag_ids' ? $row['tag_id'] : $row;
             }
         }
+        if (array_intersect(['master', 'variant', 'effective'], $fields) !== []) {
+            $this->addMasterProjection($supplierId, $products, $request);
+        }
+        if (in_array('relations', $fields, true)) {
+            $this->addRelations($supplierId, $products);
+        }
         if (in_array('availability', $fields, true) || in_array('costs', $fields, true)) {
             $this->addLevels($supplierId, $products, $request);
         }
+        if ($internalManufacturer) {
+            foreach ($products as &$product) {
+                unset($product['manufacturer_id']);
+            }
+            unset($product);
+        }
         return $products;
+    }
+
+    private function addMasterProjection(int $supplierId, array &$products, array $request): void
+    {
+        $fields = $request['fields'];
+        foreach ($products as &$product) {
+            if (in_array('master', $fields, true)) {
+                $product['master'] = null;
+            }
+            if (in_array('variant', $fields, true)) {
+                $product['variant'] = null;
+            }
+            if (in_array('effective', $fields, true)) {
+                $product['effective'] = ['manufacturer_id' => $product['manufacturer_id'] ?? null, 'i18n' => []];
+            }
+        }
+        unset($product);
+        $ids = array_keys($products);
+        $ph = self::placeholders($ids);
+        $rows = $this->query('SELECT v.stock_item_id, v.master_id, v.row_version AS link_row_version,
+            v.inherit_manufacturer, HEX(v.option_signature) AS option_signature,
+            m.name AS master_name, m.status AS master_status, m.row_version AS master_row_version, m.manufacturer_id AS master_manufacturer_id
+            FROM product_variants v JOIN product_masters m ON m.id = v.master_id AND m.supplier_id = v.supplier_id
+            WHERE v.supplier_id = ? AND v.stock_item_id IN (' . $ph . ')', [$supplierId, ...$ids]);
+        $masterIds = [];
+        $linked = [];
+        foreach ($rows as $row) {
+            $itemId = (int) $row['stock_item_id'];
+            $linked[$itemId] = true;
+            $masterId = (int) $row['master_id'];
+            $masterIds[$masterId] = $masterId;
+            if (in_array('master', $fields, true)) {
+                $products[$itemId]['master'] = ['id' => $masterId, 'name' => $row['master_name'],
+                    'status' => $row['master_status'], 'row_version' => (int) $row['master_row_version']];
+            }
+            if (in_array('variant', $fields, true)) {
+                $products[$itemId]['variant'] = ['master_id' => $masterId, 'link_row_version' => (int) $row['link_row_version'],
+                    'option_signature' => strtolower((string) $row['option_signature']), 'options' => [],
+                    'inheritance' => ['manufacturer' => (bool) $row['inherit_manufacturer'], 'i18n' => []]];
+            }
+            if (in_array('effective', $fields, true) && (bool) $row['inherit_manufacturer']) {
+                $products[$itemId]['effective']['manufacturer_id'] = $row['master_manufacturer_id'] === null ? null : (int) $row['master_manufacturer_id'];
+            }
+        }
+        if (in_array('variant', $fields, true)) {
+            foreach ($this->query('SELECT stock_item_id, attribute_id, option_id FROM product_variant_options
+                WHERE supplier_id = ? AND stock_item_id IN (' . $ph . ') ORDER BY stock_item_id, display_order, attribute_id', [$supplierId, ...$ids]) as $row) {
+                if ($products[(int) $row['stock_item_id']]['variant'] !== null) {
+                    $products[(int) $row['stock_item_id']]['variant']['options'][] = [
+                        'attribute_id' => (int) $row['attribute_id'], 'option_id' => (int) $row['option_id'],
+                    ];
+                }
+            }
+        }
+        if (!in_array('effective', $fields, true) && !in_array('variant', $fields, true)) {
+            return;
+        }
+        $inheritance = [];
+        foreach ($this->query('SELECT stock_item_id, locale, inherit_name, inherit_short_desc, inherit_description,
+            inherit_seo_title, inherit_seo_description FROM product_variant_i18n_inheritance
+            WHERE supplier_id = ? AND stock_item_id IN (' . $ph . ')', [$supplierId, ...$ids]) as $row) {
+            $flags = [];
+            foreach (['name', 'short_desc', 'description', 'seo_title', 'seo_description'] as $field) {
+                $flags[$field] = (bool) $row['inherit_' . $field];
+            }
+            $inheritance[(int) $row['stock_item_id']][$row['locale']] = $flags;
+            if (in_array('variant', $fields, true) && $products[(int) $row['stock_item_id']]['variant'] !== null) {
+                $products[(int) $row['stock_item_id']]['variant']['inheritance']['i18n'][$row['locale']] = $flags;
+            }
+        }
+        if (!in_array('effective', $fields, true)) {
+            return;
+        }
+        $own = [];
+        foreach ($this->query('SELECT stock_item_id, locale, name, short_desc, description, seo_title, seo_description
+            FROM stock_item_i18n WHERE supplier_id = ? AND stock_item_id IN (' . $ph . ')
+            AND locale IN (' . self::placeholders($request['locales']) . ')', [$supplierId, ...$ids, ...$request['locales']]) as $row) {
+            $own[(int) $row['stock_item_id']][$row['locale']] = $row;
+        }
+        $masterI18n = [];
+        if ($masterIds !== []) {
+            foreach ($this->query('SELECT master_id, locale, name, short_desc, description, seo_title, seo_description
+                FROM product_master_i18n WHERE supplier_id = ? AND master_id IN (' . self::placeholders($masterIds) . ')
+                AND locale IN (' . self::placeholders($request['locales']) . ')', [$supplierId, ...array_values($masterIds), ...$request['locales']]) as $row) {
+                $masterI18n[(int) $row['master_id']][$row['locale']] = $row;
+            }
+        }
+        foreach ($rows as $variant) {
+            $itemId = (int) $variant['stock_item_id'];
+            $masterId = (int) $variant['master_id'];
+            foreach ($request['locales'] as $locale) {
+                $flags = $inheritance[$itemId][$locale] ?? array_fill_keys(['name', 'short_desc', 'description', 'seo_title', 'seo_description'], true);
+                $effective = ['locale' => $locale];
+                foreach (['name', 'short_desc', 'description', 'seo_title', 'seo_description'] as $field) {
+                    $effective[$field] = ($flags[$field] ?? true)
+                        ? ($masterI18n[$masterId][$locale][$field] ?? null)
+                        : ($own[$itemId][$locale][$field] ?? null);
+                }
+                $products[$itemId]['effective']['i18n'][] = $effective;
+            }
+        }
+        foreach ($products as $itemId => &$product) {
+            if (isset($linked[$itemId]) || !isset($own[$itemId])) {
+                continue;
+            }
+            foreach ($request['locales'] as $locale) {
+                if (isset($own[$itemId][$locale])) {
+                    $row = $own[$itemId][$locale];
+                    unset($row['stock_item_id']);
+                    $product['effective']['i18n'][] = $row;
+                }
+            }
+        }
+        unset($product);
+    }
+
+    private function addRelations(int $supplierId, array &$products): void
+    {
+        foreach ($products as &$product) {
+            $product['relations'] = [];
+        }
+        unset($product);
+        $ids = array_keys($products);
+        foreach ($this->query('SELECT r.source_stock_item_id, r.target_stock_item_id, r.relation_type AS type,
+            r.display_order, target.sku AS target_sku, target.name AS target_name
+            FROM stock_item_relations r JOIN stock_items target ON target.id = r.target_stock_item_id AND target.supplier_id = r.supplier_id
+            WHERE r.supplier_id = ? AND r.source_stock_item_id IN (' . self::placeholders($ids) . ')
+            ORDER BY r.source_stock_item_id, FIELD(r.relation_type, \'accessory\', \'replacement\', \'related\'), r.display_order, r.id', [$supplierId, ...$ids]) as $row) {
+            $sourceId = (int) $row['source_stock_item_id'];
+            unset($row['source_stock_item_id']);
+            $row['target_stock_item_id'] = (int) $row['target_stock_item_id'];
+            $row['display_order'] = (int) $row['display_order'];
+            $products[$sourceId]['relations'][] = $row;
+        }
     }
 
     private function addLevels(int $supplierId, array &$products, array $request): void
@@ -84,17 +234,17 @@ final class CatalogReadRepository
             }
         }
         unset($product);
-        $columns = 'stock_item_id, warehouse_id, qty' . ($costs ? ', value_total, avg_unit_cost' : '');
+        $columns = 'l.stock_item_id, l.warehouse_id, l.qty, w.is_active, w.is_sellable' . ($costs ? ', l.value_total, l.avg_unit_cost' : '');
         $params = [$supplierId, ...array_keys($products)];
         $where = '';
         if ($request['warehouse_ids'] !== []) {
             $where = ' AND warehouse_id IN (' . self::placeholders($request['warehouse_ids']) . ')';
             array_push($params, ...$request['warehouse_ids']);
         }
-        foreach ($this->query('SELECT ' . $columns . ' FROM stock_levels WHERE supplier_id = ? AND stock_item_id IN ('
+        foreach ($this->query('SELECT ' . $columns . ' FROM stock_levels l JOIN warehouses w ON w.id = l.warehouse_id AND w.supplier_id = l.supplier_id WHERE l.supplier_id = ? AND stock_item_id IN ('
             . self::placeholders($products) . ')' . $where . ' ORDER BY stock_item_id, warehouse_id', $params) as $row) {
             $product = &$products[(int) $row['stock_item_id']];
-            if ($availability) {
+            if ($availability && (bool) $row['is_active'] && (bool) $row['is_sellable']) {
                 $product['availability']['qty'] = bcadd($product['availability']['qty'], $row['qty'], 3);
                 $product['availability']['warehouses'][] = ['warehouse_id' => (int) $row['warehouse_id'], 'qty' => $row['qty']];
             }

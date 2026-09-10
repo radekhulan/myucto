@@ -814,7 +814,8 @@ jedinečný.
 ## 92.14 Systém → Sazby a číselníky
 
 **Cesta: `Systém → Sazby a číselníky`**. Stránka sdružuje systémové
-číselníky **Sazby DPH**, **Klasifikace DPH**, **Země** a **Jednotky**.
+číselníky **Sazby DPH**, **Klasifikace DPH**, **Sazby států OSS**,
+**Státní svátky**, **Země** a **Jednotky**.
 Sazby, země a jednotky popisuje [§ 92.1](#921-ciselniky); pro výkazy je
 zásadní také následující klasifikace DPH.
 
@@ -836,7 +837,17 @@ i kompletní tabulka vestavěných kódů.
 **Kód předmětu plnění** (`kod_pred_pl`, jde do vět KH A.1 a B.1) přijímá jednu až dvě
 číslice s volitelným písmenem — číselník MFČR obsahuje i hodnoty jako `1a` nebo `3a`.
 Hodnotový výčet se záměrně nevaliduje: vlastní seznam by se s číselníkem rozešel
-a odmítal by legitimní kódy.
+a odmítal by legitimní kódy. Text, který nezačíná číslicí, se neuloží vůbec (dřív
+se z něj tiše stalo číslo).
+
+> [!WARNING]
+> **Kód klasifikace není číslo řádku přiznání.** Většina vestavěných kódů se sice
+> jmenuje číslem svého řádku (`1` → ř. 1, `40` → ř. 40), ale ne všechny: kód **42**
+> znamená *přijaté plnění bez nároku na odpočet* a do přiznání nepatří vůbec, kdežto
+> **řádek 42** je odpočet při dovozu zboží vyměřeném celním úřadem. Podobně kód `3`
+> patří na ř. 50, kód `22` na ř. 21 a kód `26` na ř. 22. Řádek přiznání se proto
+> vybírá ze seznamu s popisky, ne opisuje jako text, a uložení dvojice, která tyhle
+> záměny reprodukuje, aplikace odmítne s vysvětlením.
 
 **Vlastní kód přidávej pro režim, který vestavěné nepokrývají**, ne pro překlopení
 existujícího na jiný řádek. Vestavěné varianty už pokrývají tuzemský přenos podle
@@ -844,6 +855,32 @@ režimu (§ 92c odpad, § 92d nemovitost, § 92e stavební práce), zvláštní 
 a § 90 i rozlišení vývozu zboží od služby do 3. země. Pokud přesto namapuješ kód na
 jiný řádek přiznání, respektuje se to — přemapování podle skutečné sazby se spouští
 jen při rozporu sazby kódu se sazbou řádku, ne proti tvému mapování.
+
+### 92.14.2 Státní svátky
+
+Záložka **Státní svátky** je číselník státních a ostatních svátků podle zákona
+č. 245/2000 Sb. Není to jen kalendář: svátek posouvá podle § 33 odst. 4 daňového
+řádu **všechny** lhůty podání — přiznání k DPH, kontrolní i souhrnné hlášení,
+přehledy OSVČ i odvody ze mzdy — a stejnou sadu používá fond pracovní doby ve
+mzdách. Novela zákona se tak řeší řádkem v číselníku, ne novou verzí aplikace.
+
+Řádek není konkrétní datum, ale **pravidlo s datovanou platností**:
+
+- **Pevné datum v roce** — den se zadá ve tvaru `MM-DD` (například `07-05`).
+- **Posun od Velikonoční neděle** — zadá se počet dnů (Velký pátek −2,
+  Velikonoční pondělí +1). Datum Velikonoc aplikace dopočítá, protože ho
+  neurčuje zákon, ale výpočet.
+
+Platnost od / do říká, ve kterém období svátek platí. Zrušený svátek se proto
+nemaže — omezí se mu platnost, aby starší období počítala termíny správně.
+
+Vedle tabulky je **náhled roku**: číselník rozpočítaný na konkrétní datumy.
+Slouží ke kontrole, protože překlep v pravidle by se jinak poznal až podle
+propásnutého termínu.
+
+Číselník je společný pro celou instanci, takže ho může měnit jen její správce.
+Je-li tabulka prázdná (instalace bez spuštěných migrací), počítá aplikace lhůty
+ze seznamu zapečeného v kódu a napíše to červeně přímo na stránce.
 
 **Daňové konstanty** už nejsou záložkou této stránky. Jsou samostatný bod
 menu hned pod Sazbami a číselníky; podrobnosti popisuje kapitola

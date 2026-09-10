@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Eshop;
 
 final class CatalogReadRequest
 {
-    public const FIELDS = ['sku', 'name', 'item_type', 'unit', 'ean', 'manufacturer_id', 'vat_rate_id', 'is_active', 'is_stocked', 'export_eshop', 'min_qty', 'weight_g', 'warranty_months', 'delivery_days', 'i18n', 'categories', 'tag_ids', 'attributes', 'fees', 'media', 'prices', 'availability', 'costs'];
+    public const FIELDS = ['sku', 'name', 'item_type', 'unit', 'ean', 'manufacturer_id', 'vat_rate_id', 'is_active', 'is_stocked', 'export_eshop', 'min_qty', 'weight_g', 'warranty_months', 'delivery_days', 'i18n', 'categories', 'tag_ids', 'attributes', 'fees', 'media', 'prices', 'availability', 'costs', 'master', 'variant', 'effective', 'relations'];
 
     public static function products(array $body): array
     {

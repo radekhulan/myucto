@@ -20,7 +20,7 @@ final class StockItemRepository
     public const MISSING_FIELDS = ['manufacturer', 'category', 'image', 'price', 'ean'];
 
     private const COLUMNS =
-        'id, supplier_id, sku, name, item_type, manufacturer_id, unit, ean, vat_rate_id,
+        'id, supplier_id, sku, name, item_type, manufacturer_id, unit, tracking_mode, ean, vat_rate_id,
          sale_price_without_vat, min_qty, warranty_months, delivery_days, export_eshop,
          is_stocked, weight_g, pricing_base, is_active, lifecycle_status, retired_at, note, row_version, created_at, updated_at';
 
@@ -423,7 +423,7 @@ final class StockItemRepository
         $like = '%' . addcslashes($q, '%_\\') . '%';
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, sku, name, unit, vat_rate_id, sale_price_without_vat
+            'SELECT id, sku, name, unit, tracking_mode, vat_rate_id, sale_price_without_vat
                FROM stock_items
               WHERE supplier_id = ? AND is_active = 1 AND lifecycle_status = \'ready\'
                 AND (sku LIKE ? OR name LIKE ? OR ean LIKE ?)
@@ -437,6 +437,7 @@ final class StockItemRepository
                 'sku'                    => (string) $r['sku'],
                 'name'                   => (string) $r['name'],
                 'unit'                   => (string) $r['unit'],
+                'tracking_mode'          => (string) $r['tracking_mode'],
                 'vat_rate_id'            => $r['vat_rate_id'] !== null ? (int) $r['vat_rate_id'] : null,
                 'sale_price_without_vat' => $r['sale_price_without_vat'],
             ];
@@ -477,15 +478,16 @@ final class StockItemRepository
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO stock_items
-                (supplier_id, sku, name, item_type, unit, ean, vat_rate_id,
+                (supplier_id, sku, name, item_type, unit, tracking_mode, ean, vat_rate_id,
                  sale_price_without_vat, min_qty, is_active, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             (string) $data['sku'],
             (string) $data['name'],
             (string) ($data['item_type'] ?? 'goods'),
             (string) ($data['unit'] ?? 'ks'),
+            (string) ($data['tracking_mode'] ?? 'none'),
             $data['ean'] ?? null,
             isset($data['vat_rate_id']) ? (int) $data['vat_rate_id'] : null,
             isset($data['sale_price_without_vat']) ? (string) $data['sale_price_without_vat'] : null,
@@ -505,7 +507,7 @@ final class StockItemRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'UPDATE stock_items SET
-                sku = ?, name = ?, item_type = ?, unit = ?, ean = ?, vat_rate_id = ?,
+                sku = ?, name = ?, item_type = ?, unit = ?, tracking_mode = COALESCE(?, tracking_mode), ean = ?, vat_rate_id = ?,
                 sale_price_without_vat = ?, min_qty = ?,
                 is_active = CASE WHEN lifecycle_status = \'ready\' THEN ? ELSE 0 END, note = ?,
                 row_version = row_version + 1
@@ -516,6 +518,7 @@ final class StockItemRepository
             (string) $data['name'],
             (string) ($data['item_type'] ?? 'goods'),
             (string) ($data['unit'] ?? 'ks'),
+            isset($data['tracking_mode']) ? (string) $data['tracking_mode'] : null,
             $data['ean'] ?? null,
             isset($data['vat_rate_id']) ? (int) $data['vat_rate_id'] : null,
             isset($data['sale_price_without_vat']) ? (string) $data['sale_price_without_vat'] : null,
@@ -533,7 +536,7 @@ final class StockItemRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'UPDATE stock_items SET
-                sku = ?, name = ?, item_type = ?, unit = ?, ean = ?, vat_rate_id = ?,
+                sku = ?, name = ?, item_type = ?, unit = ?, tracking_mode = COALESCE(?, tracking_mode), ean = ?, vat_rate_id = ?,
                 sale_price_without_vat = ?, min_qty = ?,
                 is_active = CASE WHEN lifecycle_status = \'ready\' THEN ? ELSE 0 END, note = ?,
                 row_version = row_version + 1
@@ -544,6 +547,7 @@ final class StockItemRepository
             (string) $data['name'],
             (string) ($data['item_type'] ?? 'goods'),
             (string) ($data['unit'] ?? 'ks'),
+            isset($data['tracking_mode']) ? (string) $data['tracking_mode'] : null,
             $data['ean'] ?? null,
             isset($data['vat_rate_id']) ? (int) $data['vat_rate_id'] : null,
             isset($data['sale_price_without_vat']) ? (string) $data['sale_price_without_vat'] : null,

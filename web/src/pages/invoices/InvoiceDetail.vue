@@ -2,7 +2,7 @@
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type InvoicePayment, type PenaltyPreview, type RelatedBankTransaction } from '@/api/invoices'
@@ -24,6 +24,7 @@ import { useToast } from '@/composables/useToast'
 import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
@@ -64,7 +65,9 @@ const invoice = ref<Invoice | null>(null)
 const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
 const wrModalOpen = ref(false)
 const loading = ref(true)
+const error = ref('')
 const busy = ref<string | null>(null)
+let loadGeneration = 0
 
 // V režimu „ceny s DPH" nese unit_price_without_vat brutto (kvůli haléřově přesnému
 // výpočtu DPH koeficientem). Pro zobrazení proto ukazujeme skutečné NETTO dopočtené
@@ -180,46 +183,86 @@ const signatureSelectionRows = computed(() => {
 })
 
 async function load() {
+  const generation = ++loadGeneration
+  const invoiceId = Number(route.params.id)
   loading.value = true
-  invoice.value = await invoicesApi.get(Number(route.params.id))
-  loading.value = false
+  error.value = ''
+  invoice.value = null
+  activity.value = []
+  workReport.value = null
+  pdfHistory.value = []
+  attachments.value = []
+  payments.value = []
+  bankTransactions.value = []
+  paymentsLoaded.value = false
+  stockDocuments.value = []
+  stockDocumentsError.value = ''
+  stockDocumentsLoading.value = stockIntegrationVisible.value
+  try {
+    const loadedInvoice = await invoicesApi.get(invoiceId)
+    if (generation !== loadGeneration) return
+    invoice.value = loadedInvoice
+  } catch (e) {
+    if (generation !== loadGeneration) return
+    error.value = apiErrorMessage(e)
+    stockDocumentsLoading.value = false
+    return
+  } finally {
+    if (generation === loadGeneration) loading.value = false
+  }
   if (auth.canWrite('invoices')) {
     await loadSignatureProfiles()
+    if (generation !== loadGeneration) return
     if (hasPdfSigningProfiles.value) loadSignatureSelection('invoice')
   }
   // Activity log + work report + PDF historie (parallel, ne blokuje UI)
-  invoicesApi.activity(Number(route.params.id))
-    .then(a => { activity.value = a })
+  invoicesApi.activity(invoiceId)
+    .then(a => { if (generation === loadGeneration) activity.value = a })
     .catch(() => {})
-  invoicesApi.getWorkReport(Number(route.params.id))
+  invoicesApi.getWorkReport(invoiceId)
     .then(wr => {
+      if (generation !== loadGeneration) return
       workReport.value = wr
       if (wr && canManageSignatureSelection.value) loadSignatureSelection('work_report')
     })
     .catch(() => {})
-  invoicesApi.listPdfs(Number(route.params.id))
-    .then(items => { pdfHistory.value = items })
+  invoicesApi.listPdfs(invoiceId)
+    .then(items => { if (generation === loadGeneration) pdfHistory.value = items })
     .catch(() => {})
   // SMTP analýza — jen pro admina; levný probe, zda je log analýza zapnutá.
   if (auth.isSuperadmin) {
     adminApi.smtpLogStatus()
-      .then(s => { smtpEnabled.value = s.enabled })
-      .catch(() => { smtpEnabled.value = false })
+      .then(s => { if (generation === loadGeneration) smtpEnabled.value = s.enabled })
+      .catch(() => { if (generation === loadGeneration) smtpEnabled.value = false })
   }
-  invoicesApi.listAttachments(Number(route.params.id))
-    .then(items => { attachments.value = items })
+  invoicesApi.listAttachments(invoiceId)
+    .then(items => { if (generation === loadGeneration) attachments.value = items })
     .catch(() => {})
-  loadPayments()
-  // Sklad (Epic SKLAD) — karta „Sklad" s výdejkami/vratkami; jen když je modul zapnutý.
-  if (stockEnabled.value) {
-    stockApi.documentsForInvoice(Number(route.params.id))
-      .then(docs => { stockDocuments.value = docs })
-      .catch(() => { stockDocuments.value = [] })
-  }
+  loadPayments(invoiceId, generation)
+  if (stockIntegrationVisible.value) void loadStockDocuments(invoiceId, generation)
 }
 
 // ───── Sklad (Epic SKLAD) — karta „Sklad" ──────────────────────────────
 const stockDocuments = ref<StockDocument[]>([])
+const stockDocumentsLoading = ref(false)
+const stockDocumentsError = ref('')
+const stockIntegrationVisible = computed(() => stockEnabled.value && auth.canRead('stock'))
+
+async function loadStockDocuments(invoiceId = Number(route.params.id), generation = loadGeneration) {
+  stockDocumentsLoading.value = true
+  stockDocumentsError.value = ''
+  try {
+    const docs = await stockApi.documentsForInvoice(invoiceId)
+    if (generation !== loadGeneration) return
+    stockDocuments.value = docs
+  } catch (e) {
+    if (generation !== loadGeneration) return
+    stockDocuments.value = []
+    stockDocumentsError.value = apiErrorMessage(e)
+  } finally {
+    if (generation === loadGeneration) stockDocumentsLoading.value = false
+  }
+}
 
 // ───── Evidence plateb / částečné úhrady (#89) ─────────────────────────
 const payments = ref<InvoicePayment[]>([])
@@ -233,20 +276,22 @@ function paymentsRelevant(): boolean {
     && inv.status !== 'draft' && inv.status !== 'cancelled'
 }
 
-function loadPayments() {
+function loadPayments(invoiceId = invoice.value?.id ?? 0, generation = loadGeneration) {
   paymentsLoaded.value = false
-  if (!invoice.value || !paymentsRelevant()) {
+  if (!invoiceId || !invoice.value || !paymentsRelevant()) {
     payments.value = []
     bankTransactions.value = []
     return
   }
-  invoicesApi.listPayments(invoice.value.id)
+  invoicesApi.listPayments(invoiceId)
     .then(r => {
+      if (generation !== loadGeneration) return
       payments.value = r.payments
       bankTransactions.value = r.bank_transactions ?? []
       paymentsLoaded.value = true
     })
     .catch(() => {
+      if (generation !== loadGeneration) return
       payments.value = []
       bankTransactions.value = []
     })
@@ -576,6 +621,7 @@ onMounted(() => {
 // Detail se recykluje při navigaci /invoices/:id → :id (proklik na související doklad,
 // dobropis/parent) → onMounted se znovu nespustí, proto přenačtení řídí watch.
 watch(() => route.params.id, load)
+onBeforeUnmount(() => { loadGeneration++ })
 
 function actionLabel(a: string): string {
   const map: Record<string, string> = {
@@ -739,8 +785,9 @@ async function issue() {
     invoicesApi.listPdfs(invoice.value.id).then(items => { pdfHistory.value = items }).catch(() => {})
     // Sklad (Epic SKLAD, B5): auto-výdejka vznikla v téže transakci co issue —
     // dotáhni ji, ať uživatel vidí číslo výdejky rovnou po vystavení.
-    if (stockEnabled.value) {
+    if (stockIntegrationVisible.value) {
       stockApi.documentsForInvoice(invoice.value.id).then(docs => {
+        stockDocuments.value = docs
         const issueDoc = docs.find(d => d.doc_type === 'issue' && d.status === 'posted')
         if (issueDoc?.doc_number) toast.success(t('invoice.issued_stock_document', { number: issueDoc.doc_number }))
       }).catch(() => {})
@@ -1535,6 +1582,9 @@ const invoiceActions = computed<ActionItem[]>(() => {
 
 <template>
   <div v-if="loading" class="text-center text-neutral-500 py-12">{{ t('common.loading') }}</div>
+  <div v-else-if="error" class="max-w-5xl rounded-md border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-500">
+    {{ error }}
+  </div>
 
   <!-- Nad prahem (useSidePreview) jde náhled zdrojového PDF do sloupce vpravo, jinak
        zůstává rozbalený pod dokladem. Bez PDF se sloupec nevykreslí a doklad má
@@ -3002,12 +3052,28 @@ const invoiceActions = computed<ActionItem[]>(() => {
 
 
       <!-- Karta Sklad (Epic SKLAD) — výdejky/vratky vzniklé z této faktury -->
-      <div v-if="invoice && stockEnabled && stockDocuments.length > 0"
+      <div v-if="invoice && stockIntegrationVisible"
         class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mt-4">
         <div class="px-5 py-3 border-b border-neutral-200">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.invoice_card.title') }}</h3>
         </div>
-        <div class="divide-y divide-neutral-100">
+        <div v-if="stockDocumentsLoading" class="px-5 py-4 text-sm text-neutral-500">
+          {{ t('common.loading') }}
+        </div>
+        <div v-else-if="stockDocumentsError" class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+          <span class="text-sm text-danger-600">{{ stockDocumentsError }}</span>
+          <button type="button" :class="btnOutline('neutral')" class="!h-8 !px-2.5 !text-xs"
+            @click="loadStockDocuments()">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" />
+            </svg>
+            {{ t('stock.invoice_card.retry') }}
+          </button>
+        </div>
+        <div v-else-if="stockDocuments.length === 0" class="px-5 py-4 text-sm text-neutral-500">
+          {{ t('stock.invoice_card.empty') }}
+        </div>
+        <div v-else class="divide-y divide-neutral-100">
           <RouterLink v-for="d in stockDocuments" :key="d.id" :to="`/stock/documents/${d.id}`"
             class="flex items-center justify-between gap-2 px-5 py-2.5 text-sm hover:bg-neutral-50">
             <span class="flex items-center gap-2">

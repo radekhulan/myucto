@@ -61,6 +61,16 @@ final class AttributeValueService
         }
 
         $this->tx(function () use ($supplierId, $stockItemId, $prepared): void {
+            $lock = $this->db->pdo()->prepare('SELECT id FROM stock_items WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $lock->execute([$supplierId, $stockItemId]);
+            $axes = $this->db->pdo()->prepare('SELECT attribute_id, option_id FROM product_variant_options WHERE supplier_id = ? AND stock_item_id = ?');
+            $axes->execute([$supplierId, $stockItemId]);
+            foreach ($axes->fetchAll(\PDO::FETCH_ASSOC) as $axis) {
+                $matches = array_values(array_filter($prepared, static fn (array $row): bool => $row['attribute_id'] === (int) $axis['attribute_id']));
+                if (count($matches) !== 1 || $matches[0]['option_id'] !== (int) $axis['option_id']) {
+                    throw new EshopException('variant_axis_change_required', 'Parametry určující variantu upravte u hlavního produktu.', 422);
+                }
+            }
             $this->values->deleteForItem($supplierId, $stockItemId);
             foreach ($prepared as $row) {
                 $this->values->add($supplierId, $stockItemId, $row);

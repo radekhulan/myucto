@@ -13,6 +13,7 @@ use MyInvoice\Repository\StockItemTagRepository;
 use MyInvoice\Repository\StockLocaleRepository;
 use MyInvoice\Repository\StockMediaRepository;
 use MyInvoice\Repository\StockAttributeValueRepository;
+use MyInvoice\Repository\ProductMasterRepository;
 use MyInvoice\Service\Eshop\Pricing\PriceRecomputeDispatcher;
 
 /**
@@ -37,6 +38,7 @@ final class ProductCardService
         private readonly StockMediaRepository $media,
         private readonly AttributeValueService $attributeService,
         private readonly PriceRecomputeDispatcher $priceDispatcher,
+        private readonly ProductMasterRepository $masters,
     ) {}
 
     /**
@@ -56,6 +58,25 @@ final class ProductCardService
         $base['attributes']  = $this->attributeValues->listForItem($supplierId, $id);
         $base['fees']        = $this->itemFees->listForItem($supplierId, $id);
         $base['media']       = $this->media->listForItem($supplierId, $id);
+        $variant = $this->masters->variantContext($supplierId, $id);
+        $base['master'] = null;
+        $base['variant'] = null;
+        $base['effective'] = ['manufacturer_id' => $base['manufacturer_id'], 'i18n' => $base['i18n']];
+        if ($variant !== null) {
+            $master = $this->masters->detail($supplierId, $variant['master_id']);
+            $base['master'] = $master === null ? null : [
+                'id' => $master['id'], 'name' => $master['name'], 'status' => $master['status'], 'row_version' => $master['row_version'],
+            ];
+            if ($master !== null) {
+                foreach ($master['variants'] as $masterVariant) {
+                    if ($masterVariant['stock_item_id'] === $id) {
+                        $base['variant'] = $masterVariant + ['master_id' => $master['id'], 'master_name' => $master['name']];
+                        $base['effective'] = $masterVariant['effective'];
+                        break;
+                    }
+                }
+            }
+        }
         return $base;
     }
 
@@ -80,6 +101,7 @@ final class ProductCardService
         $prepared = $this->prepareWrite($supplierId, $base, $payload);
 
         $this->tx(function () use ($supplierId, $id, $payload, $expectedVersion, $prepared): void {
+            $this->assertSetStockFlag($supplierId, $id, $prepared['eshop_fields']);
             if (!$this->items->updateEshopFieldsVersioned(
                 $supplierId,
                 $id,
@@ -114,6 +136,7 @@ final class ProductCardService
             throw new \LogicException('Editor produktu musí zapisovat v aktivní transakci.');
         }
         $prepared = $this->prepareWrite($supplierId, $base, $payload);
+        $this->assertSetStockFlag($supplierId, $id, $prepared['eshop_fields']);
         $this->items->updateEshopFields($supplierId, $id, array_replace([
             'manufacturer_id' => $base['manufacturer_id'] ?? null,
             'warranty_months' => $base['warranty_months'] ?? null,
@@ -125,6 +148,18 @@ final class ProductCardService
         ], $prepared['eshop_fields']));
         $this->writeSatellites($supplierId, $id, $payload, $prepared);
         return $prepared['pricing_base_changed'];
+    }
+
+    private function assertSetStockFlag(int $supplierId, int $id, array $fields): void
+    {
+        if (empty($fields['is_stocked'])) return;
+        $query = $this->db->pdo()->prepare('SELECT id FROM stock_items WHERE supplier_id = ? AND id = ? FOR UPDATE');
+        $query->execute([$supplierId, $id]);
+        $query = $this->db->pdo()->prepare('SELECT stock_item_id FROM product_sets WHERE supplier_id = ? AND stock_item_id = ?');
+        $query->execute([$supplierId, $id]);
+        if ($query->fetchColumn() !== false) {
+            throw new EshopException('set_cannot_be_stocked', 'Virtuální set nemůže mít vlastní skladovou zásobu. Pro kompletaci použijte samostatnou kartu výrobku.', 422);
+        }
     }
 
     /**

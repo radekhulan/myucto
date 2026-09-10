@@ -49,6 +49,13 @@ function syncSupplierStore(s: Supplier) {
 
 const supplier = ref<Supplier | null>(null)
 const loading = ref(true)
+
+// Přiznání k dani z příjmů — číselníky odpovídají PHP SSOT
+// (MyInvoice\Service\Tax\Return\TaxpayerTypeCodebook, migrace 1782). Popisky
+// jednotlivých kódů jsou v i18n pod `settings.income_tax_profile.*`.
+const TAXPAYER_CODES = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
+const ACCOUNTING_DECREES = ['500', '501', '502', '503', '504', '325', '410'] as const
+const ENTITY_STATUSES = ['normal', 'liquidation', 'insolvency', 'transformation'] as const
 type SettingsTab = 'company' | 'documents' | 'accounting'
 const tabs: SettingsTab[] = ['company', 'documents', 'accounting']
 // Na záložku se dá odkázat zvenčí (?tab=accounting) — odjinud v aplikaci sem
@@ -488,6 +495,18 @@ async function saveSupplier() {
       cssz_vsdp: (supplier.value as any).cssz_vsdp ?? null,
       cssz_ossz_code: (supplier.value as any).cssz_ossz_code ?? null,
       health_insurance_number: (supplier.value as any).health_insurance_number ?? null,
+      // Vědomé příznaky poplatníka pro přiznání k dani z příjmů (migrace 1782).
+      // Prázdný typ poplatníka se posílá jako '' → backend uloží NULL (= neurčeno),
+      // což je jiný stav než výslovně potvrzená „1".
+      epo_taxpayer_code: (supplier.value as any).epo_taxpayer_code ?? '',
+      tax_entity_status: (supplier.value as any).tax_entity_status ?? 'normal',
+      tax_entity_status_date: (supplier.value as any).tax_entity_status_date ?? null,
+      tax_accounting_decree: (supplier.value as any).tax_accounting_decree ?? '500',
+      tax_investment_incentive: (supplier.value as any).tax_investment_incentive ?? false,
+      tax_atad_cfc: (supplier.value as any).tax_atad_cfc ?? false,
+      tax_public_benefit: (supplier.value as any).tax_public_benefit ?? false,
+      tax_cooperating_person: (supplier.value as any).tax_cooperating_person ?? false,
+      tax_foreign_income_credit: (supplier.value as any).tax_foreign_income_credit ?? false,
     })
     syncSupplierStore(supplier.value)
     originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
@@ -1534,6 +1553,82 @@ async function confirmTaxRepDelete() {
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.workplace_code') }}</label>
               <input v-model="supplier.workplace_code" type="text" maxlength="8"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            </div>
+            <!-- Přiznání k dani z příjmů — údaje, které aplikace z účetnictví odvodit
+                 neumí (migrace 1782). Blokují přiznání, které by o poplatníkovi tvrdilo
+                 nepravdu; nálezy se ukazují u přiznání (UnsupportedCaseDetector). -->
+            <div class="md:col-span-2 border border-neutral-200 rounded-md p-3">
+              <p class="text-sm font-medium text-neutral-700">{{ t('settings.income_tax_profile.title') }}</p>
+              <p class="text-xs text-neutral-500 mt-0.5 mb-3">{{ t('settings.income_tax_profile.hint') }}</p>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div v-if="supplier.taxpayer_type !== 'fo'">
+                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.income_tax_profile.taxpayer_code') }}</label>
+                  <select v-model="(supplier as any).epo_taxpayer_code" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                    <option value="">{{ t('settings.income_tax_profile.taxpayer_code_unset') }}</option>
+                    <option v-for="code in TAXPAYER_CODES" :key="code" :value="code">
+                      {{ code }} — {{ t('settings.income_tax_profile.taxpayer_code_' + code) }}
+                    </option>
+                  </select>
+                  <p class="text-xs text-neutral-500 mt-1">{{ t('settings.income_tax_profile.taxpayer_code_hint') }}</p>
+                </div>
+                <div v-if="supplier.taxpayer_type !== 'fo'">
+                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.income_tax_profile.accounting_decree') }}</label>
+                  <select v-model="(supplier as any).tax_accounting_decree" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                    <option v-for="decree in ACCOUNTING_DECREES" :key="decree" :value="decree">
+                      {{ decree }} — {{ t('settings.income_tax_profile.accounting_decree_' + decree) }}
+                    </option>
+                  </select>
+                  <p class="text-xs text-neutral-500 mt-1">{{ t('settings.income_tax_profile.accounting_decree_hint') }}</p>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.income_tax_profile.entity_status') }}</label>
+                  <select v-model="(supplier as any).tax_entity_status" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                    <option v-for="status in ENTITY_STATUSES" :key="status" :value="status">
+                      {{ t('settings.income_tax_profile.entity_status_' + status) }}
+                    </option>
+                  </select>
+                  <p class="text-xs text-neutral-500 mt-1">{{ t('settings.income_tax_profile.entity_status_hint') }}</p>
+                </div>
+                <div v-if="(supplier as any).tax_entity_status !== 'normal'">
+                  <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.income_tax_profile.entity_status_date') }}</label>
+                  <DateInput v-model="(supplier as any).tax_entity_status_date" class="w-full" />
+                </div>
+                <label v-if="supplier.taxpayer_type !== 'fo'" class="flex items-start gap-2 text-sm">
+                  <input v-model="(supplier as any).tax_public_benefit" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                  <span>
+                    <span class="font-medium text-neutral-700">{{ t('settings.income_tax_profile.public_benefit') }}</span>
+                    <span class="block text-xs text-neutral-500 mt-0.5">{{ t('settings.income_tax_profile.public_benefit_hint') }}</span>
+                  </span>
+                </label>
+                <label v-if="supplier.taxpayer_type !== 'fo'" class="flex items-start gap-2 text-sm">
+                  <input v-model="(supplier as any).tax_investment_incentive" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                  <span>
+                    <span class="font-medium text-neutral-700">{{ t('settings.income_tax_profile.investment_incentive') }}</span>
+                    <span class="block text-xs text-neutral-500 mt-0.5">{{ t('settings.income_tax_profile.investment_incentive_hint') }}</span>
+                  </span>
+                </label>
+                <label v-if="supplier.taxpayer_type !== 'fo'" class="flex items-start gap-2 text-sm">
+                  <input v-model="(supplier as any).tax_atad_cfc" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                  <span>
+                    <span class="font-medium text-neutral-700">{{ t('settings.income_tax_profile.atad_cfc') }}</span>
+                    <span class="block text-xs text-neutral-500 mt-0.5">{{ t('settings.income_tax_profile.atad_cfc_hint') }}</span>
+                  </span>
+                </label>
+                <label v-if="supplier.taxpayer_type !== 'po'" class="flex items-start gap-2 text-sm">
+                  <input v-model="(supplier as any).tax_cooperating_person" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                  <span>
+                    <span class="font-medium text-neutral-700">{{ t('settings.income_tax_profile.cooperating_person') }}</span>
+                    <span class="block text-xs text-neutral-500 mt-0.5">{{ t('settings.income_tax_profile.cooperating_person_hint') }}</span>
+                  </span>
+                </label>
+                <label v-if="supplier.taxpayer_type !== 'po'" class="flex items-start gap-2 text-sm">
+                  <input v-model="(supplier as any).tax_foreign_income_credit" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                  <span>
+                    <span class="font-medium text-neutral-700">{{ t('settings.income_tax_profile.foreign_income_credit') }}</span>
+                    <span class="block text-xs text-neutral-500 mt-0.5">{{ t('settings.income_tax_profile.foreign_income_credit_hint') }}</span>
+                  </span>
+                </label>
+              </div>
             </div>
             <!-- Zastoupení daňovým poradcem (§29/2 DŘ) — CRUD historie je okamžitá akce
                  přes API (vzor bloku Plátcovství DPH výše), NE součást společného Uložit. -->

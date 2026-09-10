@@ -9,6 +9,9 @@ faktury. Vedle fyzického stavu vede i **rezervace, zboží na cestě a skladovo
 u dodavatele** (§ 33.9), **objednávky vydané dodavatelům** (§ 33.11) a návrh
 **doplnění zásob** (§ 33.12).
 
+Prodejní objednávky v sekci **Prodej** rezervují skutečně dostupné zboží před
+fakturací a předávají rezervaci do vychystání (§ 33.13).
+
 V menu ho najdeš pod sekcí **Sklad** (zobrazí se jen po zapnutí modulu):
 **Skladové karty**, **Příjemky a výdejky**, **Objednávky dodavatelům**
 (§ 33.11), **U dodavatele** (§ 33.10), **Inventury**, **Sestavy**. Číselník
@@ -182,6 +185,36 @@ bez e-shopové prezentace. Druhý související příznak, **Skladem** (interně
 `is_stocked`), určuje, jestli e-shop pro danou kartu vůbec hlídá dostupnost skladem —
 podrobnosti k oběma příznakům a dalším e-shopovým polím (kategorie, parametry, ceny,
 dodavatelé) najdeš v kapitole [E-shop](34_Eshop.md).
+
+### 33.2.4 Virtuální sety
+
+Karta bez zapnuté volby **Skladem** může být virtuálním setem. Z detailu takové
+karty nebo z její úpravy otevři **Konfigurovat set**. Samotná karta nenese zásobu:
+rezervace, výdej a cena pracují se skutečnými komponentami setu.
+
+Konfigurátor obsahuje pevné komponenty a skupiny voleb. Pevná komponenta se přidá
+vždy. U skupiny zadáš minimum a maximum vybraných alternativ, například právě jednu
+barvu nebo volitelný doplněk. Každá alternativa může mít vlastní množství a příplatek
+v každé aktivní prodejní měně. Set může obsahovat jiný set, ale systém odmítne cyklus.
+
+Pro každou aktivní prodejní měnu vyber režim ceny: součet komponent, součet se slevou
+nebo pevnou cenu. Nezávazná kalkulace v pravém panelu vyžaduje měnu, množství a
+všechny povinné volby. Vypočte aktuální cenu a rozpad na komponenty. Údaj „od" ani
+napsaná pevná cena sama o sobě nenahrazuje tento quote: cenu objednávky vždy určuje
+její zachycený quote.
+
+### 33.2.5 Kompletace výrobku
+
+**Sklad → Kompletace výrobků** převádí komponenty virtuálního setu na vlastní
+skladovaný výrobek. Vybereš cílový aktivní výrobek vedený skladem, virtuální set jako
+recept, sklad, datum a množství. Před potvrzením stránka ukáže aktuální dostupnost
+všech komponent v daném skladu. Jednotkovou cenu výrobku nezadáváš: hodnota vznikne
+ze skutečně vydaných komponent.
+
+Kompletace v jediném kroku založí a zaúčtuje výdejku komponent i příjemku výrobku.
+Historie vždy odkazuje na oba doklady. Pokud je potřeba operaci vrátit, použij
+**Stornovat kompletaci** - stornují se společně oba doklady. Samostatné storno jedné
+strany není povolené, aby se nezdvojila nebo neztratila hodnota zásob.
 
 ## 33.3 Oceňování zásob
 
@@ -424,6 +457,23 @@ jakékoli skladové pohyby (na kterémkoli z obou směrů převodky), **nejde sm
 pokus o smazání vrátí chybu „Sklad nelze smazat — má nenulový stav nebo skladové
 pohyby. Deaktivujte jej místo mazání." (HTTP 409) a nabídne deaktivaci místo mazání.
 
+Sklad lze rozdělit na volitelné **lokace** s vlastním kódem a názvem. Lokace vždy
+patří právě jednomu skladu a nelze ji při editaci přesunout jinam. U karet se
+sledováním šarží nebo sériových čísel může příjemka, výdejka a převodka určit
+zdrojovou a cílovou lokaci. Karta bez zapnutého sledování dál používá běžný stav
+skladu a při fakturaci ani při skladovém pohybu nevyžaduje žádnou lokaci.
+
+Na kartě lze zapnout sledování **šarží a expirace** nebo **sériových čísel**.
+Zaúčtování sledované karty vyžaduje rozdělit celé množství řádku do alokací.
+Sériové číslo představuje vždy jeden nedělitelný kus a je jedinečné v rámci firmy
+a karty. Šarže dovoluje množství a volitelné datum expirace. Detail karty ukazuje
+aktuální rozpad i historii od příjmu přes převody a výdeje po vratku. Storno
+použije přesně stejné identity a množství jako původní doklad.
+
+Alternativní jednotky se definují přesným zlomkem vůči základní jednotce karty,
+například balení 12 kusů jako 12/1. Systém přijme jen převod, který lze beze zbytku
+vyjádřit v tisícinách základní jednotky; nepoužívá plovoucí desetinné zaokrouhlení.
+
 ## 33.7 Inventury
 
 **Sklad → Inventury** slouží k fyzické kontrole skutečného stavu zásob dle
@@ -476,6 +526,17 @@ v detailu inventury; po chybě lze přípravu opakovat a běžící přípravu z
 > Pokud v kroku sčítání jen uložíš rozpracovaný stav a odejdeš, inventura zůstává
 > „Probíhá sčítání" — nezapomeň se k ní vrátit a **uzavřít** ji, jinak zůstane blokovat
 > zaúčtování ostatních dokladů na daném skladu.
+
+Pro průběžné kontroly slouží na stejné stránce **cyklické inventury**. Příprava
+běží jako trvalá úloha a uloží přesný seznam dokladů zaúčtovaných v okamžiku založení.
+Koncept zaúčtovaný až později se do tohoto snapshotu nedostane. Běžný provoz skladu
+může pokračovat. Fyzický stav proto zadávej podle skutečnosti **v okamžiku uložení
+počtu**. Uložení pod zámkem zachytí i aktuální evidenční stav každého řádku a uzavření
+zaúčtuje rozdíl mezi těmito dvěma uloženými hodnotami. Pohyby provedené po uložení
+počtu tak zůstanou zachované. Opakované uložení stejného počtu zachová původní
+referenci i čas sčítání; změna počtu zaznamená nové sčítání. Lze inventarizovat celý sklad nebo konkrétní lokaci;
+u sledovaných karet vznikají řádky po šaržích a sériových číslech a manko za celý
+sklad se odečte ze skutečných lokací, na kterých je šarže vedena.
 
 ## 33.8 Skladové sestavy
 
@@ -983,7 +1044,77 @@ Tlačítko **Doplnění zásob** je v hlavičce seznamu objednávek (§ 33.11.5)
 > [REST API](99_API.md) a [MCP server](101_MCP_server.md)** — asistenta se tedy
 > zeptat můžeš, na obrazovce to zatím neuvidíš.
 
-## 33.13 Omezení a tipy
+## 33.13 Vychystání, expedice a vratky
+
+Stránka **Sklad → Vychystání a expedice** vede fyzický tok zboží odděleně od
+fakturace. Vychystávací úlohu lze založit z konceptu výdejky. Převzetím se
+koncept atomicky uzamkne pro tuto úlohu, takže jej už nelze samostatně upravit,
+smazat ani zaúčtovat a zásoba se nevydá dvakrát. Pro prodejní objednávku zvol
+příslušný zdroj a UUID objednávky, nebo otevři vychystání přímo z jejího detailu.
+
+Na mobilní obrazovce skladník skenuje **SKU nebo EAN**. Každý sken nese vlastní
+identifikátor operace, takže opakování stejného požadavku po výpadku nepřidá
+další kus. Cizí kód a množství nad požadovaný počet systém odmítne. Oprávněná
+odchylka vyžaduje samostatné právo a uvedený důvod.
+
+Z vychystaného množství vzniká jedna nebo více zásilek. Každá má vlastního
+dopravce, tracking a vlastní položky. Expedice zásilky vytvoří a zaúčtuje právě
+jednu výdejku přes běžnou skladovou knihu. Částečná expedice ponechá zbytek
+úlohy otevřený a neodeslané množství dál alokované.
+
+U sledovaných karet před zabalením vyber konkrétní sériová čísla nebo množství
+ze šarží a jejich skutečné lokace. Vratka nabídne jen jednotky z dané zásilky
+po odečtení předchozích vratek. Při změně cílového skladu vyber jeho lokaci znovu.
+
+Vratka se vždy váže na konkrétní expedovanou zásilku a nesmí překročit její
+historicky odeslané množství. U každé vratky se zvolí jeden výsledek:
+
+- **Vrátit do prodeje** vytvoří příjemku do aktivního prodejného skladu.
+- **Karanténa** vytvoří příjemku do aktivního skladu označeného jako neprodejný.
+- **Vyřadit** uloží historickou dispozici bez příjmu zásoby.
+
+Příjem vratky nepřipisuje peníze, nevytváří dobropis a nemění úhradu faktury.
+Pokud fyzický tok faktury spravuje objednávka nebo vychystání, její vystavení
+ani následný dobropis nevytvoří další automatický skladový pohyb. Fyzickou vratku
+zaznamenej u zásilky. Běžné faktury mimo tento tok používají dosavadní nastavení
+automatického výdeje a vratky.
+Snapshot komponent, sledovaných jednotek, šarží a sériových čísel zůstává u
+zásilky a vratky, takže pozdější změna karty nebo složení setu historii nepřepíše.
+
+Práva **Vychystání a expedice** dovolují skenovat, balit, expedovat a přijímat
+vratky. Právo **Odchylky při vychystání** navíc dovoluje potvrdit výslovně
+zdůvodněnou odchylku. Běžné čtení stránky vyžaduje skladové oprávnění.
+
+## 33.14 Prodejní objednávky a tvrdé rezervace
+
+Stránka **Prodej - Prodejní objednávky** odděluje obchodní stav, platební stav
+a stav expedice. Koncept lze měnit. Potvrzení uloží neměnný snapshot odběratele,
+cen, slev, měny, kurzu, režimu cen s DPH a skladových komponent a potom atomicky
+rezervuje dostupné množství na konkrétním skladu. Politika **Vše, nebo nic**
+potvrzení při nedostatku odmítne. Politika **Částečná rezervace** rezervuje dostupnou
+část a objednávku zařadí do fronty nedostatků.
+
+Po doplnění skladu použijte na detailu objednávky **Rezervovat zbývající množství**.
+Akce přidá pouze dosud chybějící rezervaci. Existující vychystání rozšíří o nové
+množství a zachová již odeslané zásilky; zbývající kusy lze odeslat další zásilkou.
+
+Rezervace je tvrdá: další objednávka ani samostatná vychystávací úloha nemůže stejné
+množství použít. Sklad musí být aktivní a prodejný. Částečná expedice spotřebuje jen
+odeslané množství a zbytek zůstane rezervovaný pro další zásilku. Zrušení nebo
+vypršení platnosti uvolní pouze dosud nespotřebovaný zbytek. Hromadné uvolnění
+prošlých rezervací běží jako trvalá úloha a obrazovka ukazuje skutečný počet
+zpracovaných objednávek.
+
+Akce **Vytvořit fakturu** založí jeden koncept vydané faktury a zachová režim
+**Ceny obsahují DPH**. Opakování akce vrátí stejný doklad. Faktura se automaticky
+nevystaví a běžná fakturace nezískává žádný nový povinný krok. Platební stav lze
+měnit nezávisle a sám o sobě nemění sklad.
+
+Vratka rozlišuje peněžní řešení, například dobropis nebo refundaci, od fyzického
+návratu zboží. Naskladnění vráceného zboží se provádí přes zásilku a skladový
+protidoklad; peněžní vypořádání tento pohyb samo nespouští.
+
+## 33.15 Omezení a tipy
 
 - Modul podporuje jen **způsob B** účtování zásob (průběžná evidence bez účtování,
   promítnutí do účetnictví až uzávěrkou) — způsob A není v tomto vydání funkční,
@@ -1001,7 +1132,7 @@ Tlačítko **Doplnění zásob** je v hlavičce seznamu objednávek (§ 33.11.5)
 - Zobrazení karty v e-shopu je nezávislé na jejím skladovém typu — řídí ho
   samostatný příznak **Exportovat do e-shopu** (§ 33.2.3).
 
-### 33.13.1 Co objednávky ještě neumí
+### 33.15.1 Co objednávky ještě neumí
 
 Nákupní část modulu je první vydání a záměrně řeší jen evidenci objednaného
 zboží. Tohle v ní **není**:

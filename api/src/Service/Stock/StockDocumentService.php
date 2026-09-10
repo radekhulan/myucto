@@ -66,6 +66,9 @@ final class StockDocumentService
         private readonly StockReferenceGuard $references,
         private readonly PurchaseOrderStateService $orderStates,
         private readonly \MyInvoice\Service\Eshop\Pricing\CatalogPriceJobService $priceJobs,
+        private readonly FulfillmentSourceClaimGuard $fulfillmentClaims,
+        private readonly TrackingAllocationService $tracking,
+        private readonly StockCommitmentService $commitments,
     ) {}
 
     // ── CRUD draftu ──────────────────────────────────────────────────────────────
@@ -111,6 +114,7 @@ final class StockDocumentService
             if ($existing === null) {
                 throw new StockException('not_found', 'Skladový doklad nenalezen.', 404);
             }
+            $this->fulfillmentClaims->assertMutable($supplierId, $id);
             if ($existing['status'] !== 'draft') {
                 throw new StockException('not_draft', 'Upravovat lze jen rozpracovaný (draft) doklad.', 409);
             }
@@ -168,14 +172,17 @@ final class StockDocumentService
 
     public function deleteDraft(int $supplierId, int $id, ?int $userId): bool
     {
-        $existing = $this->docs->find($supplierId, $id);
-        if ($existing === null) {
-            throw new StockException('not_found', 'Skladový doklad nenalezen.', 404);
-        }
-        if ($existing['status'] !== 'draft') {
-            throw new StockException('not_draft', 'Smazat lze jen rozpracovaný (draft) doklad.');
-        }
-        return $this->docs->deleteDraft($supplierId, $id);
+        return $this->runInTransaction(function () use ($supplierId, $id): bool {
+            $existing = $this->docs->lockForPost($supplierId, $id);
+            if ($existing === null) {
+                throw new StockException('not_found', 'Skladový doklad nenalezen.', 404);
+            }
+            $this->fulfillmentClaims->assertMutable($supplierId, $id);
+            if ($existing['status'] !== 'draft') {
+                throw new StockException('not_draft', 'Smazat lze jen rozpracovaný (draft) doklad.');
+            }
+            return $this->docs->deleteDraft($supplierId, $id);
+        });
     }
 
     // ── post (§4.3) ──────────────────────────────────────────────────────────────
@@ -192,13 +199,22 @@ final class StockDocumentService
         return $this->runInTransaction(fn (): array => $this->doPost($supplierId, $id, $userId));
     }
 
+    public function postFulfillmentShipment(int $supplierId, int $id, int $shipmentId, ?int $userId): array
+    {
+        return $this->runInTransaction(function () use ($supplierId, $id, $shipmentId, $userId): array {
+            $allowance = $this->fulfillmentClaims->bindShipmentDocument($supplierId, $shipmentId, $id);
+            return $this->doPost($supplierId, $id, $userId, $allowance);
+        });
+    }
+
     /** @return array<string,mixed> */
-    private function doPost(int $supplierId, int $id, ?int $userId): array
+    private function doPost(int $supplierId, int $id, ?int $userId, array $shipmentAllowance = []): array
     {
         $doc = $this->docs->lockForPost($supplierId, $id);
         if ($doc === null) {
             throw new StockException('not_found', 'Skladový doklad nenalezen.', 404);
         }
+        $this->fulfillmentClaims->assertMutable($supplierId, $id);
 
         // Idempotence dvojkliku (B2) — posted doklad se NIKDY nepřeúčtovává.
         if ($doc['status'] === 'posted') {
@@ -267,7 +283,11 @@ final class StockDocumentService
 
         // 5) Kontrola dostupnosti VŠECH výdejových noh najednou — PŘED výdejem
         //    čísla řady (B3), s úplným výčtem chybějících položek (A3).
-        $this->assertAvailability($supplierId, $docType, $warehouseId, $lines);
+        $this->assertAvailability($supplierId, $docType, $warehouseId, $lines, $shipmentAllowance);
+
+        foreach ($lines as $line) {
+            $this->tracking->postLine($supplierId, $docType, $warehouseId, $warehouseToId, $line);
+        }
 
         // 6) Aplikace pohybů v deterministickém pořadí řádků (line_no, id).
         foreach ($lines as $line) {
@@ -314,12 +334,18 @@ final class StockDocumentService
      * @param array<string,mixed> $meta volitelně ['reason' => string]
      * @return array{original:array<string,mixed>, reversal:array<string,mixed>}
      */
-    public function reverse(int $supplierId, int $id, array $meta, ?int $userId): array
+    public function reverse(int $supplierId, int $id, array $meta, ?int $userId, bool $assemblyOperation = false): array
     {
-        return $this->runInTransaction(function () use ($supplierId, $id, $meta, $userId): array {
+        return $this->runInTransaction(function () use ($supplierId, $id, $meta, $userId, $assemblyOperation): array {
             $orig = $this->docs->lockForPost($supplierId, $id);
             if ($orig === null) {
                 throw new StockException('not_found', 'Skladový doklad nenalezen.', 404);
+            }
+            $this->fulfillmentClaims->assertReversible($supplierId, $id);
+            if (!$assemblyOperation) {
+                $assembly = $this->db->pdo()->prepare('SELECT id FROM product_assemblies WHERE supplier_id = ? AND (issue_document_id = ? OR receipt_document_id = ?) LIMIT 1');
+                $assembly->execute([$supplierId, $id, $id]);
+                if ($assembly->fetchColumn() !== false) throw new StockException('assembly_reversal_required', 'Doklady kompletace se stornují společně z jejího detailu.', 409);
             }
             if ($orig['status'] === 'reversed') {
                 throw new StockException('already_reversed', 'Doklad už byl stornován.');
@@ -397,7 +423,7 @@ final class StockDocumentService
                 // cestu, ani do rezervací — bez chyby, bez varování, jen jiné číslo
                 // na kartě. Regresi hlídá InTransitTest (R-1 + zrcadlový případ
                 // výdejky), který bez těchhle dvou řádků padá.
-                $this->docs->insertLine($supplierId, [
+                $counterLineId = $this->docs->insertLine($supplierId, [
                     'document_id'              => $counterId,
                     'stock_item_id'            => (int) $line['stock_item_id'],
                     'qty'                      => (string) $line['qty'],
@@ -411,7 +437,9 @@ final class StockDocumentService
                     'source_qty'               => $line['source_qty'],
                     'line_no'                  => (int) $line['line_no'],
                     'note'                     => $line['note'],
+                    'tracking_input_json'      => $line['tracking_input_json'] ?? null,
                 ]);
+                $this->tracking->reverseLine($supplierId, (int) $line['id'], $counterLineId);
             }
 
             $docNumber = $this->series->next($supplierId, self::SERIES[$counterType], (int) substr($docDate, 0, 4));
@@ -491,7 +519,7 @@ final class StockDocumentService
      *
      * @param list<array<string,mixed>> $lines
      */
-    private function assertAvailability(int $supplierId, string $docType, int $sourceWarehouseId, array $lines): void
+    private function assertAvailability(int $supplierId, string $docType, int $sourceWarehouseId, array $lines, array $shipmentAllowance = []): void
     {
         if ($docType === 'receipt') {
             return;
@@ -512,17 +540,21 @@ final class StockDocumentService
             $need[$itemId]['qtyT'] += $qtyT;
         }
 
+        $pairs = array_map(static fn (int $itemId): array => ['warehouse_id' => $sourceWarehouseId, 'stock_item_id' => $itemId], array_keys($need));
+        $committed = $this->commitments->committedForPairs($supplierId, $pairs);
         $shortages = [];
         foreach ($need as $itemId => $n) {
             // Locking read — čerstvý stav, ne stale RR snapshot (CRITICAL 1).
             $cur = $this->levels->currentForUpdate($supplierId, $sourceWarehouseId, $itemId);
-            if ($n['qtyT'] > $cur['qtyT']) {
+            $key = $sourceWarehouseId . ':' . $itemId;
+            $availableT = $cur['qtyT'] - ($committed[$key] ?? 0) + ($shipmentAllowance[$key] ?? 0);
+            if ($n['qtyT'] > $availableT) {
                 $shortages[] = [
                     'stock_item_id' => $itemId,
                     'sku'           => $n['sku'],
                     'name'          => $n['name'],
                     'requested'     => StockValuation::tToDecimal($n['qtyT']),
-                    'available'     => StockValuation::tToDecimal($cur['qtyT']),
+                    'available'     => StockValuation::tToDecimal($availableT),
                 ];
             }
         }
@@ -797,6 +829,11 @@ final class StockDocumentService
                     ? StockValuation::tToDecimal(StockValuation::qtyToT((string) $rl['source_qty'])) : null,
                 'line_no'                  => $lineNo++,
                 'note'                     => self::nullableString($rl['note'] ?? null),
+                'tracking_input_json'      => $this->tracking->normalizeDraftInput(
+                    $supplierId,
+                    $itemId,
+                    is_array($rl['tracking_allocations'] ?? null) ? $rl['tracking_allocations'] : [],
+                ),
             ];
         }
 

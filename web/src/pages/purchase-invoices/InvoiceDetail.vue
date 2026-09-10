@@ -4,7 +4,7 @@ import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PurchaseDmsDocumentsPanel from '@/components/purchase/PurchaseDmsDocumentsPanel.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, type PurchaseInvoiceBrief, type PaymentQrResponse } from '@/api/purchaseInvoices'
@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { apiErrorMessage } from '@/api/errors'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import PostingPreviewModal from '@/components/accounting/PostingPreviewModal.vue'
@@ -22,7 +23,7 @@ import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.v
 import ExpenseRuleTemplateModal from '@/components/accounting/ExpenseRuleTemplateModal.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import StockReceiptModal from '@/components/stock/StockReceiptModal.vue'
-import { stockApi, type StockReceiptProposal } from '@/api/stock'
+import { stockApi, type StockDocument, type StockReceiptProposal } from '@/api/stock'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import WhyChip from '@/components/automation/WhyChip.vue'
 import { useSidePreview } from '@/composables/useSidePreview'
@@ -45,6 +46,7 @@ const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.is
 const loading = ref(true)
 const error = ref('')
 const acting = ref(false)
+let loadGeneration = 0
 
 // V režimu „ceny s DPH" nese unit_price_without_vat brutto (kvůli haléřově přesnému
 // výpočtu DPH koeficientem). Pro zobrazení proto ukazujeme skutečné NETTO dopočtené
@@ -215,39 +217,73 @@ onMounted(() => {
 // Detail se recykluje při navigaci /purchase-invoices/:id → :id (např. proklik na zálohu/vyúčtování),
 // onMounted se znovu nespustí → bez tohoto watch by se obsah nepřenačetl (vypadalo to jako „self / nic se neděje").
 watch(id, load)
+onBeforeUnmount(() => { loadGeneration++ })
 
 async function load() {
+  const generation = ++loadGeneration
+  const purchaseInvoiceId = id.value
   loading.value = true
+  error.value = ''
+  invoice.value = null
+  activity.value = []
+  stockProposal.value = null
+  stockReceipts.value = []
+  stockError.value = ''
+  stockLoading.value = stockIntegrationVisible.value
   try {
-    invoice.value = await purchaseInvoicesApi.get(id.value)
+    const loadedInvoice = await purchaseInvoicesApi.get(purchaseInvoiceId)
+    if (generation !== loadGeneration) return
+    invoice.value = loadedInvoice
   } catch (e) {
+    if (generation !== loadGeneration) return
     error.value = apiErrorMessage(e)
   } finally {
-    loading.value = false
+    if (generation === loadGeneration) loading.value = false
   }
+  if (generation !== loadGeneration || !invoice.value) return
   // Activity log paralel — ne-blokuje main load
-  purchaseInvoicesApi.activity(id.value)
-    .then(a => { activity.value = a })
+  purchaseInvoicesApi.activity(purchaseInvoiceId)
+    .then(a => { if (generation === loadGeneration) activity.value = a })
     .catch(() => {})
-  // Sklad (Epic SKLAD) — „Přijato X/Y" badge + „PF se po příjmu změnila" warning (B6).
-  if (stockEnabled.value) {
-    stockApi.receiptPropose(id.value)
-      .then(p => { stockProposal.value = p })
-      .catch(() => { stockProposal.value = null })
-  }
+  if (stockIntegrationVisible.value) void loadStockIntegration(purchaseInvoiceId, generation)
 }
 
 // ───── Sklad (Epic SKLAD) — příjem na sklad z PF ───────────────────────
 const stockProposal = ref<StockReceiptProposal | null>(null)
+const stockReceipts = ref<StockDocument[]>([])
+const stockLoading = ref(false)
+const stockError = ref('')
+const stockIntegrationVisible = computed(() => stockEnabled.value && auth.canRead('stock'))
 const stockReceiptOpen = ref(false)
 const stockReceivedTotal = computed(() => (stockProposal.value?.lines ?? []).reduce((s, l) => s + Number(l.already_received), 0))
 const stockRequestedTotal = computed(() => (stockProposal.value?.lines ?? []).reduce((s, l) => s + Number(l.quantity), 0))
 const stockFullyReceived = computed(() => !!stockProposal.value && stockRequestedTotal.value > 0 && stockReceivedTotal.value >= stockRequestedTotal.value)
 const hasStockReceiptLines = computed(() => (stockProposal.value?.lines ?? []).some(line =>
   line.stock_item_id !== null && Number(line.remaining_qty) > 0))
-function onStockReceiptCreated() {
+async function loadStockIntegration(purchaseInvoiceId = id.value, generation = loadGeneration) {
+  stockLoading.value = true
+  stockError.value = ''
+  try {
+    const [proposal, receipts] = await Promise.all([
+      stockApi.receiptPropose(purchaseInvoiceId),
+      stockApi.receiptList(purchaseInvoiceId),
+    ])
+    if (generation !== loadGeneration) return
+    stockProposal.value = proposal
+    stockReceipts.value = receipts
+  } catch (e) {
+    if (generation !== loadGeneration) return
+    stockProposal.value = null
+    stockReceipts.value = []
+    stockError.value = apiErrorMessage(e)
+  } finally {
+    if (generation === loadGeneration) stockLoading.value = false
+  }
+}
+
+function onStockReceiptCreated(document: StockDocument) {
   stockReceiptOpen.value = false
-  load()
+  router.push(`/stock/documents/${document.id}`)
 }
 
 async function deletePdf() {
@@ -678,7 +714,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
   items.push({ key: 'stock-receipt', label: t('stock.receipt.action'), icon: 'box', tier: 'secondary', variant: 'success',
     show: stockEnabled.value && hasStockReceiptLines.value
-      && w && inv.status !== 'draft' && inv.status !== 'cancelled',
+      && auth.canWrite('stock') && inv.status !== 'draft' && inv.status !== 'cancelled',
     run: () => { stockReceiptOpen.value = true } })
 
   items.push({ key: 'orig', label: t('purchase_invoice.pdf.download_original'), icon: 'doc', tier: 'overflow', variant: 'neutral',
@@ -931,6 +967,18 @@ const purchaseActions = computed<ActionItem[]>(() => {
       <div v-if="invoice._warnings?.includes('missing_vat_classification')"
         class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
         ⚠ {{ t('purchase_invoice.warning.missing_vat_classification') }}
+      </div>
+
+      <!-- ═══ Varování: pořízení zboží z EU bez data dodání → § 25 nelze dopočítat ═══ -->
+      <div v-if="invoice._warnings?.includes('eu_acquisition_delivery_date_missing')"
+        class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+        ⚠ {{ t('purchase_invoice.warning.eu_acquisition_delivery_date_missing') }}
+      </div>
+
+      <!-- ═══ Varování: DUZP neodpovídá § 25 dopočtu z data dodání ═══ -->
+      <div v-if="invoice._warnings?.includes('eu_acquisition_tax_date_mismatch')"
+        class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+        ⚠ {{ t('purchase_invoice.warning.eu_acquisition_tax_date_mismatch') }}
       </div>
 
       <!-- ═══ Úhrady dokladu → provenience (banka + pokladna + zaúčtování úhrady) ═══ -->
@@ -1643,6 +1691,45 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
       <!-- Přílohy: link/unlink DMS dokumentů (Epic F7) -->
       <PurchaseDmsDocumentsPanel v-if="invoice" class="mt-4 block" :invoice-id="invoice.id" />
+
+      <section v-if="invoice && stockIntegrationVisible"
+        class="mt-4 overflow-hidden rounded-lg border border-neutral-200 bg-surface shadow-sm">
+        <header class="border-b border-neutral-200 px-5 py-3">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">
+            {{ t('stock.receipt.history_title') }}
+          </h3>
+        </header>
+        <div v-if="stockLoading" class="px-5 py-4 text-sm text-neutral-500">
+          {{ t('common.loading') }}
+        </div>
+        <div v-else-if="stockError" class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+          <span class="text-sm text-danger-600">{{ stockError }}</span>
+          <button type="button" :class="btnOutline('neutral')" class="!h-8 !px-2.5 !text-xs"
+            @click="loadStockIntegration()">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" />
+            </svg>
+            {{ t('stock.invoice_card.retry') }}
+          </button>
+        </div>
+        <div v-else-if="stockReceipts.length === 0" class="px-5 py-4 text-sm text-neutral-500">
+          {{ t('stock.receipt.history_empty') }}
+        </div>
+        <div v-else class="divide-y divide-neutral-100">
+          <RouterLink v-for="document in stockReceipts" :key="document.id"
+            :to="`/stock/documents/${document.id}`"
+            class="flex items-center justify-between gap-3 px-5 py-2.5 text-sm hover:bg-neutral-50">
+            <span class="min-w-0">
+              <span class="font-mono text-xs text-neutral-500">{{ document.doc_number || t('stock.receipt.draft_number', { id: document.id }) }}</span>
+              <span class="ml-2 text-neutral-700">{{ document.warehouse_name || document.warehouse_code || '' }}</span>
+            </span>
+            <span class="shrink-0 rounded px-2 py-0.5 text-xs font-medium"
+              :class="document.status === 'posted' ? 'bg-success-50 text-success-600' : document.status === 'reversed' ? 'bg-danger-50 text-danger-500' : 'bg-neutral-100 text-neutral-600'">
+              {{ t(`stock.doc_status.${document.status}`) }}
+            </span>
+          </RouterLink>
+        </div>
+      </section>
 
       <StockReceiptModal v-if="stockReceiptOpen && invoice" :purchase-invoice-id="invoice.id"
         @close="stockReceiptOpen = false" @created="onStockReceiptCreated" />

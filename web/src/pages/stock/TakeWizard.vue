@@ -2,7 +2,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { stockApi, type StockTake, type Warehouse } from '@/api/stock'
+import { stockApi, type StockTake, type Warehouse, type WarehouseLocation, type StockCycleCount } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
@@ -23,12 +23,14 @@ const id = computed<number | null>(() => (route.params.id ? Number(route.params.
 
 // ── Seznam (bez :id) ────────────────────────────────────────────────────
 const takes = ref<StockTake[]>([])
+const cycles = ref<StockCycleCount[]>([])
 const warehouses = ref<Warehouse[]>([])
+const locations = ref<WarehouseLocation[]>([])
 const listLoading = ref(false)
 
 async function loadList() {
   listLoading.value = true
-  try { takes.value = await stockApi.listTakes() } catch { takes.value = [] } finally { listLoading.value = false }
+  try { [takes.value, cycles.value] = await Promise.all([stockApi.listTakes(), stockApi.listCycleCounts()]) } catch { takes.value = []; cycles.value = [] } finally { listLoading.value = false }
 }
 
 const createOpen = ref(false)
@@ -54,6 +56,29 @@ const createForm = reactive({
   responsible_inventory_name: '',
 })
 const creating = ref(false)
+const cycleOpen = ref(false)
+const cycle = ref<StockCycleCount | null>(null)
+const cycleForm = reactive({ warehouse_id: null as number | null, location_id: null as number | null, take_date: appIsoDate(), note: '' })
+async function createCycle() {
+  if (!cycleForm.warehouse_id) return
+  try {
+    cycle.value = await stockApi.createCycleCount({ warehouse_id: cycleForm.warehouse_id, location_id: cycleForm.location_id, take_date: cycleForm.take_date, note: cycleForm.note || undefined })
+    cycleOpen.value = true
+    await loadList()
+  } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
+}
+async function openCycle(row: StockCycleCount) {
+  try { cycle.value = await stockApi.getCycleCount(row.id); cycleOpen.value = true } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
+}
+async function saveCycle(close = false) {
+  if (!cycle.value) return
+  try {
+    cycle.value = await stockApi.updateCycleCount(cycle.value.id, cycle.value.lines.map(l => ({ id: l.id, counted_qty: l.counted_qty, surplus_unit_cost: l.surplus_unit_cost })))
+    if (close) cycle.value = await stockApi.closeCycleCount(cycle.value.id)
+    await loadList()
+    toast.success(t('common.saved'))
+  } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
+}
 async function createTake() {
   if (!createForm.warehouse_id) return
   creating.value = true
@@ -182,7 +207,7 @@ async function closeTake() {
 }
 
 onMounted(async () => {
-  try { warehouses.value = await stockApi.listWarehouses(true) } catch { warehouses.value = [] }
+  try { [warehouses.value, locations.value] = await Promise.all([stockApi.listWarehouses(true), stockApi.listLocations()]) } catch { warehouses.value = []; locations.value = [] }
   if (id.value) await loadTake()
   else await loadList()
 })
@@ -201,6 +226,7 @@ watch(id, async (newId, oldId) => {
   }
 })
 watch(preparationRunning, (value) => { if (preparationTimer) clearTimeout(preparationTimer); if (value) void pollPreparation() })
+watch(() => cycleForm.warehouse_id, () => { cycleForm.location_id = null })
 
 function warehouseName(wid: number): string {
   return warehouses.value.find(w => w.id === wid)?.name ?? `#${wid}`
@@ -257,6 +283,21 @@ const STATUS_BADGE: Record<string, string> = {
         </table>
       </div>
 
+      <div class="mt-4 bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <div class="px-5 py-3 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2">
+          <div><h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.cycles.title') }}</h2><p class="text-xs text-neutral-400 mt-0.5">{{ t('stock.cycles.hint') }}</p></div>
+          <div class="flex flex-wrap gap-2">
+            <select v-model="cycleForm.warehouse_id" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm"><option :value="null">{{ t('stock.takes.field_warehouse') }}</option><option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option></select>
+            <select v-model="cycleForm.location_id" :disabled="!cycleForm.warehouse_id" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm"><option :value="null">{{ t('stock.cycles.all_locations') }}</option><option v-for="location in locations.filter(l => l.is_active && l.warehouse_id === cycleForm.warehouse_id)" :key="location.id" :value="location.id">{{ location.code }} - {{ location.name }}</option></select>
+            <button v-if="auth.canWrite('stock.take')" type="button" @click="createCycle" :disabled="!cycleForm.warehouse_id" :class="btnFilled('primary')"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>{{ t('stock.cycles.new') }}</button>
+          </div>
+        </div>
+        <div v-if="cycles.length === 0" class="px-5 py-5 text-sm text-neutral-400">{{ t('stock.cycles.empty') }}</div>
+        <button v-for="row in cycles" :key="row.id" type="button" @click="openCycle(row)" class="w-full px-5 py-3 border-t border-neutral-100 flex flex-wrap items-center justify-between gap-2 text-left hover:bg-neutral-50">
+          <span>{{ warehouseName(row.warehouse_id) }} · {{ formatDate(row.take_date) }}</span><span class="text-xs px-2 py-0.5 rounded bg-neutral-100 text-neutral-600">{{ t(`stock.cycles.status.${row.status}`) }}</span>
+        </button>
+      </div>
+
       <!-- Modal: nová inventura -->
       <div v-if="createOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" @click.self="createOpen = false">
         <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
@@ -302,6 +343,23 @@ const STATUS_BADGE: Record<string, string> = {
               {{ creating ? t('common.saving') : t('common.create') }}
             </button>
           </div>
+        </div>
+      </div>
+      <div v-if="cycleOpen && cycle" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" @click.self="cycleOpen = false">
+        <div class="bg-surface rounded-xl shadow-lg max-w-4xl w-full p-5 max-h-[90vh] overflow-auto">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3"><h3 class="text-lg font-semibold">{{ t('stock.cycles.title') }} #{{ cycle.id }}</h3><button type="button" @click="openCycle(cycle)" :class="btnOutline('neutral')">{{ t('common.refresh') }}</button></div>
+          <CatalogJobProgress v-if="cycle.preparation_job && ['queued', 'running', 'failed', 'cancelled'].includes(cycle.preparation_job.status)" class="mb-3" :job="cycle.preparation_job" :can-cancel="false" />
+          <p v-if="cycle.status !== 'counting' && cycle.status !== 'closed'" class="text-sm text-neutral-500 py-5">{{ t('stock.cycles.preparing') }}</p>
+          <div v-else class="space-y-2">
+            <p v-if="cycle.status === 'counting'" class="text-sm text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-md px-3 py-2">{{ t('stock.cycles.reference_hint') }}</p>
+            <div v-for="line in cycle.lines" :key="line.id" class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center border-b border-neutral-100 py-2 text-sm">
+              <div class="sm:col-span-5"><span class="font-mono">{{ line.sku }}</span> {{ line.name }}<div v-if="line.serial_number || line.lot_code" class="text-xs text-neutral-500 font-mono">{{ line.serial_number ?? line.lot_code }}</div></div>
+              <div class="sm:col-span-2 text-right font-mono">{{ line.expected_qty }} {{ line.unit }}</div>
+              <input v-model="line.counted_qty" type="number" step="0.001" min="0" :disabled="cycle.status === 'closed'" class="sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-right font-mono" :placeholder="t('stock.cycles.counted')" />
+              <input v-model="line.surplus_unit_cost" type="number" step="0.000001" min="0" :disabled="cycle.status === 'closed'" class="sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md text-right font-mono" :placeholder="t('stock.cycles.surplus_cost')" />
+            </div>
+          </div>
+          <div class="flex flex-wrap justify-end gap-2 mt-4"><button type="button" @click="cycleOpen = false" :class="btnOutline('neutral')">{{ t('common.close') }}</button><button v-if="cycle.status === 'counting'" type="button" @click="saveCycle(false)" :class="btnOutline('primary')">{{ t('common.save') }}</button><button v-if="cycle.status === 'counting'" type="button" @click="saveCycle(true)" :class="btnFilled('success')"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>{{ t('stock.cycles.close') }}</button></div>
         </div>
       </div>
     </template>

@@ -58,7 +58,7 @@ abstract class StockTestCase extends TestCase
     protected string $vatRatePercent = '21.00';
 
     /** @var list<int> */
-    private array $supplierIds = [];
+    protected array $supplierIds = [];
     /** @var array<int,int> supplierId => vlastní tenant-scoped CZK currencies.id */
     private array $currencyIdBySupplier = [];
 
@@ -138,6 +138,7 @@ abstract class StockTestCase extends TestCase
             // supplier, takže je smaž explicitně PŘED finálním DELETE (které by jinak
             // mohlo zkusit cascade smazat stock_items dřív, než zmizí řádky, co na ně
             // odkazují).
+            $pdo->prepare('DELETE FROM stock_tracking_allocations WHERE supplier_id = ? ORDER BY id DESC')->execute([$sid]);
             $pdo->prepare('DELETE FROM stock_documents WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM stock_takes WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$sid]);

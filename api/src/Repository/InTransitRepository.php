@@ -248,7 +248,11 @@ final class InTransitRepository
                  WHERE ii.stock_item_id IS NOT NULL
                    AND i.invoice_type = 'invoice'
                    AND i.status NOT IN ('draft', 'cancelled')
-                   AND i.cancelled_at IS NULL" . $itemFilter;
+                   AND i.cancelled_at IS NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sales_order_invoice_links soil
+                        WHERE soil.supplier_id = i.supplier_id AND soil.invoice_id = i.id
+                   )" . $itemFilter;
 
         foreach ($itemIds as $id) {
             $params[] = (int) $id;
@@ -306,7 +310,11 @@ final class InTransitRepository
                  WHERE ii.stock_item_id IS NOT NULL
                    AND i.invoice_type = 'invoice'
                    AND i.status NOT IN ('draft', 'cancelled')
-                   AND i.cancelled_at IS NULL" . $itemFilter;
+                   AND i.cancelled_at IS NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sales_order_invoice_links soil
+                        WHERE soil.supplier_id = i.supplier_id AND soil.invoice_id = i.id
+                   )" . $itemFilter;
 
         foreach ($itemIds as $id) {
             $params[] = (int) $id;
@@ -330,6 +338,72 @@ final class InTransitRepository
             'issue_date'      => $r['issue_date'] !== null ? (string) $r['issue_date'] : null,
             'due_date'        => $r['due_date'] !== null ? (string) $r['due_date'] : null,
             'qty'             => (string) $r['qty'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Tvrdé rezervace prodejních objednávek. Order-linked faktury jsou z legacy
+     * dotazů výše vyloučené, takže se stejný kus započte právě jednou.
+     *
+     * @param list<int> $itemIds
+     * @return list<array{stock_item_id:int,warehouse_id:int,qty_reserved:string}>
+     */
+    public function salesOrderReservedForItems(int $supplierId, array $itemIds = [], ?int $warehouseId = null): array
+    {
+        $params = [$supplierId];
+        $sql = "SELECT stock_item_id, warehouse_id,
+                       SUM(GREATEST(qty_reserved - qty_consumed - qty_released, 0)) qty_reserved
+                  FROM sales_order_reservations
+                 WHERE supplier_id = ? AND status = 'active'";
+        if ($itemIds !== []) {
+            $sql .= ' AND stock_item_id IN (' . implode(',', array_fill(0, count($itemIds), '?')) . ')';
+            array_push($params, ...array_map('intval', $itemIds));
+        }
+        if ($warehouseId !== null) {
+            $sql .= ' AND warehouse_id = ?';
+            $params[] = $warehouseId;
+        }
+        $sql .= ' GROUP BY stock_item_id, warehouse_id HAVING qty_reserved > 0';
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return array_map(static fn (array $row): array => [
+            'stock_item_id' => (int) $row['stock_item_id'],
+            'warehouse_id' => (int) $row['warehouse_id'],
+            'qty_reserved' => (string) $row['qty_reserved'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /** @param list<int> $itemIds @return list<array<string,mixed>> */
+    public function reservationSalesOrders(int $supplierId, array $itemIds = [], ?int $warehouseId = null): array
+    {
+        $params = [$supplierId];
+        $sql = "SELECT r.stock_item_id, r.warehouse_id, o.id AS order_id, o.order_uuid,
+                       o.order_number, o.reservation_expires_at, c.company_name AS client_name,
+                       SUM(GREATEST(r.qty_reserved - r.qty_consumed - r.qty_released, 0)) qty
+                  FROM sales_order_reservations r
+                  JOIN sales_orders o ON o.id = r.order_id AND o.supplier_id = r.supplier_id
+                  JOIN clients c ON c.id = o.client_id AND c.supplier_id = o.supplier_id
+                 WHERE r.supplier_id = ? AND r.status = 'active'";
+        if ($itemIds !== []) {
+            $sql .= ' AND r.stock_item_id IN (' . implode(',', array_fill(0, count($itemIds), '?')) . ')';
+            array_push($params, ...array_map('intval', $itemIds));
+        }
+        if ($warehouseId !== null) {
+            $sql .= ' AND r.warehouse_id = ?';
+            $params[] = $warehouseId;
+        }
+        $sql .= ' GROUP BY r.stock_item_id, r.warehouse_id, o.id HAVING qty > 0 ORDER BY o.created_at, o.id';
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return array_map(static fn (array $row): array => [
+            'stock_item_id' => (int) $row['stock_item_id'],
+            'warehouse_id' => (int) $row['warehouse_id'],
+            'order_id' => (int) $row['order_id'],
+            'order_uuid' => (string) $row['order_uuid'],
+            'order_number' => (string) $row['order_number'],
+            'client_name' => (string) $row['client_name'],
+            'reservation_expires_at' => $row['reservation_expires_at'] !== null ? (string) $row['reservation_expires_at'] : null,
+            'qty' => (string) $row['qty'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 

@@ -73,6 +73,12 @@ final class InvoiceCreationStatsRecomputeCoverageTest extends TestCase
      * @var array<string, array<string, string>>
      */
     private const ALLOWED_WITHOUT_RECOMPUTE = [
+        'Action/Stock/SalesOrderAction.php' => [
+            'invoice' => 'Vytváří pouze koncept z objednávky; standardní vystavení zajišťuje přepočet statistik.',
+        ],
+        'Service/Stock/SalesOrderInvoiceService.php' => [
+            'createDraft' => 'Vytváří pouze status=draft, který nevstupuje do statistik; vystavení probíhá standardní cestou.',
+        ],
         // Generický nízkoúrovňový zapisovač draftu — vždy zapíše status='draft', tedy
         // mimo agregaci cache (ta počítá jen issued/sent/reminded/paid). Přepočet je
         // odpovědností VOLAJÍCÍHO, který doklad dál posouvá k reálnému stavu — sama

@@ -264,6 +264,19 @@ export interface Supplier {
   financial_office_code?: string | null
   workplace_code?: string | null
   cz_nace_code?: string | null
+  // Vědomé příznaky poplatníka pro přiznání k dani z příjmů (migrace 1782). Aplikace
+  // je z účetních dat odvodit neumí; blokují přiznání, které by o poplatníkovi tvrdilo
+  // nepravdu (UnsupportedCaseDetector). `epo_taxpayer_code` = číselník typ_popldpp
+  // formuláře DPPDP9; null/'' = účetní typ poplatníka nepotvrdila.
+  epo_taxpayer_code?: '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '' | null
+  tax_entity_status?: 'normal' | 'liquidation' | 'insolvency' | 'transformation'
+  tax_entity_status_date?: string | null
+  tax_accounting_decree?: '500' | '501' | '502' | '503' | '504' | '325' | '410'
+  tax_investment_incentive?: boolean
+  tax_atad_cfc?: boolean
+  tax_public_benefit?: boolean
+  tax_cooperating_person?: boolean
+  tax_foreign_income_credit?: boolean
   // Zastoupení daňovým poradcem (§29/2 DŘ, migrace 1662) — historie k datu, viz
   // TaxRepresentationHistoryEntry. Promítá se do dan_por (DPPO) / pln_moc (DPFO).
   tax_representation_history?: TaxRepresentationHistoryEntry[]

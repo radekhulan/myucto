@@ -791,13 +791,25 @@ final class AiPdfExtractor
 
             $duzpNote = '';
             if ($rcClassification === '23') {
-                $delivery = isset($data['tax_date']) && $data['tax_date'] ? (string) $data['tax_date'] : null;
+                // Datum dodání má od migrace 1785 vlastní sloupec. Dokud ho neměl,
+                // sloužilo k tomu vytěžené `tax_date` (které se hned přepsalo dopočteným
+                // DUZP) — fallback zůstává kvůli odpovědím bez `delivery_date`.
+                $delivery = self::firstNonEmptyDate([$data['delivery_date'] ?? null, $data['tax_date'] ?? null]);
                 $duzp = self::euAcquisitionTaxDate($delivery, (string) $data['issue_date']);
-                if ($duzp !== null && $duzp !== $delivery) {
+                if ($delivery !== null) {
+                    $data['delivery_date'] = $delivery;
+                }
+                if ($duzp !== null) {
                     $data['tax_date'] = $duzp;
+                }
+                if ($duzp !== null && $duzp !== $delivery) {
                     $duzpNote = ' DUZP stanoveno dle § 25 ZDPH na ' . $duzp
                         . ' (15. den měsíce následujícího po dodání, příp. dřívější datum'
                         . ' vystavení dokladu); ČNB kurz se váže k tomuto datu.';
+                } elseif ($duzp === null) {
+                    // „Raději prázdný atribut a varování než odhadnutá hodnota."
+                    $duzpNote = ' Datum dodání se z dokladu nepodařilo vytěžit, DUZP proto'
+                        . ' NEBYLO dopočteno dle § 25 ZDPH — doplňte datum dodání a DUZP ověřte.';
                 }
             }
 
@@ -865,6 +877,9 @@ final class AiPdfExtractor
             ),
             'issue_date'            => (string) $data['issue_date'],
             'tax_date'              => isset($data['tax_date']) && $data['tax_date'] ? (string) $data['tax_date'] : null,
+            // Datum dodání (migrace 1785) je vstup § 25, ne DUZP — ukládá se zvlášť,
+            // aby šel dopočet zpětně ověřit a nemusel se dohadovat z `tax_date`.
+            'delivery_date'         => self::firstNonEmptyDate([$data['delivery_date'] ?? null]),
             'due_date'              => (string) ($data['due_date'] ?? $data['issue_date']),
             'received_at'           => date('Y-m-d'),
             // C6 (§ 73/1/a): received_at je jen otisk data importu, ne skutečné držení
@@ -1974,12 +1989,11 @@ final class AiPdfExtractor
     }
 
     /**
-     * Zákonné DUZP pořízení zboží z JČS dle § 25 odst. 1 ZDPH: povinnost přiznat daň
-     * vzniká k 15. dni měsíce následujícího po měsíci pořízení; byl-li daňový doklad
-     * vystaven před tímto dnem, ke dni vystavení. Zahraniční doklad typicky nese jen
-     * datum dodání (Leistungsdatum / date of supply) — to NENÍ zákonné DUZP. Na
-     * korektním tax_date stojí zařazení do období ve VatLedgerService (issue #117)
-     * i ČNB kurz (§ 4 odst. 8 — kurz ke dni vzniku povinnosti přiznat daň).
+     * Zákonné DUZP pořízení zboží z JČS dle § 25 odst. 1 ZDPH.
+     *
+     * Pravidlo samo žije v {@see \MyInvoice\Service\Tax\Vat\EuAcquisitionTaxDate} —
+     * dokud bylo schované tady, uměla ho jedině AI cesta (nález M-7). Tahle metoda
+     * zůstává jako fasáda pro volající uvnitř extraktoru a pro jeho testy.
      *
      * @param ?string $deliveryDate datum dodání/převzetí (z dokladu), YYYY-MM-DD
      * @param string  $issueDate    datum vystavení dokladu, YYYY-MM-DD
@@ -1987,22 +2001,24 @@ final class AiPdfExtractor
      */
     public static function euAcquisitionTaxDate(?string $deliveryDate, string $issueDate): ?string
     {
-        if ($deliveryDate === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate)) {
-            return null;
+        return \MyInvoice\Service\Tax\Vat\EuAcquisitionTaxDate::for($deliveryDate, $issueDate);
+    }
+
+    /**
+     * První hodnota ve tvaru YYYY-MM-DD, jinak null.
+     *
+     * @param list<mixed> $candidates
+     */
+    private static function firstNonEmptyDate(array $candidates): ?string
+    {
+        foreach ($candidates as $candidate) {
+            $value = is_string($candidate) ? trim($candidate) : '';
+            if ($value !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                return $value;
+            }
         }
-        try {
-            $fifteenth = (new \DateTimeImmutable($deliveryDate))
-                ->modify('first day of next month')
-                ->format('Y-m') . '-15';
-        } catch (\Throwable) {
-            return null;
-        }
-        // Doklad vystavený před 15. dnem následujícího měsíce → DUZP = den vystavení.
-        // Lexikografické porovnání YYYY-MM-DD je korektní porovnání dat.
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $issueDate) && $issueDate < $fifteenth) {
-            return $issueDate;
-        }
-        return $fifteenth;
+
+        return null;
     }
 
     /**

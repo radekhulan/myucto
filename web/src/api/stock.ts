@@ -1,5 +1,6 @@
 import { api } from './client'
 import type { CatalogJob } from './catalogJobs'
+import type { ProductSetDefinition } from './eshop'
 
 /**
  * Skladová evidence (Epic SKLAD). Money/qty pole jsou DECIMAL uložené na backendu
@@ -9,8 +10,9 @@ import type { CatalogJob } from './catalogJobs'
 
 export type StockItemType = 'material' | 'goods' | 'product'
 export type StockItemLifecycleStatus = 'draft' | 'ready' | 'retired'
+export type StockTrackingMode = 'none' | 'lot' | 'serial'
 export type StockDocType = 'receipt' | 'issue' | 'transfer'
-export type StockDocOrigin = 'manual' | 'invoice' | 'credit_note' | 'purchase_invoice' | 'inventory'
+export type StockDocOrigin = 'manual' | 'invoice' | 'credit_note' | 'purchase_invoice' | 'inventory' | 'purchase_order'
 export type StockDocStatus = 'draft' | 'posted' | 'reversed'
 export type StockTakeStatus = 'draft' | 'preparing' | 'counting' | 'closed'
 export type LandedCostAllocation = 'by_value' | 'by_qty'
@@ -35,6 +37,7 @@ export interface StockItem extends StockItemEffectivePrice {
   item_type: StockItemType
   manufacturer_id: number | null
   unit: string
+  tracking_mode?: StockTrackingMode
   ean: string | null
   vat_rate_id: number | null
   sale_price_without_vat: string | null
@@ -43,6 +46,7 @@ export interface StockItem extends StockItemEffectivePrice {
   value_total?: string
   avg_unit_cost?: string
   is_active: boolean
+  is_stocked: boolean
   lifecycle_status?: StockItemLifecycleStatus
   retired_at?: string | null
   row_version: number
@@ -56,6 +60,7 @@ export interface StockItemPayload {
   name: string
   item_type: StockItemType
   unit: string
+  tracking_mode?: StockTrackingMode
   ean?: string | null
   vat_rate_id?: number | null
   sale_price_without_vat?: string | number | null
@@ -82,11 +87,44 @@ export interface StockItemTemplate {
   updated_at: string
 }
 
+export interface ProductAssembly {
+  id: number
+  supplier_id: number
+  stock_item_id: number
+  warehouse_id: number
+  quantity: string
+  status: 'posted' | 'reversed'
+  value_total: string
+  issue_document_id: number
+  receipt_document_id: number
+  definition: ProductSetDefinition
+  components: Array<Record<string, unknown>>
+  created_at: string
+}
+
+export interface ProductAssemblyCreatePayload {
+  operation_key: string
+  stock_item_id: number
+  warehouse_id: number
+  doc_date: string
+  quantity: string
+  definition: ProductSetDefinition
+  selections?: Record<string, Record<string, string[]>>
+  component_tracking_allocations?: Record<string, TrackingAllocationInput[]>
+  product_tracking_allocations?: TrackingAllocationInput[]
+}
+
+export interface ProductAssemblyListResponse {
+  items: ProductAssembly[]
+  pagination: { page: number; limit: number; total: number; pages: number }
+}
+
 export interface StockItemSearchResult extends StockItemEffectivePrice {
   id: number
   sku: string
   name: string
   unit: string
+  tracking_mode?: StockTrackingMode
   vat_rate_id: number | null
   sale_price_without_vat: string | null
 }
@@ -148,6 +186,7 @@ export interface Warehouse {
   name: string
   is_default: boolean
   is_active: boolean
+  is_sellable: boolean
   note: string | null
   created_at: string
   updated_at: string
@@ -160,7 +199,108 @@ export interface WarehousePayload {
   name: string
   is_default?: boolean
   is_active?: boolean
+  is_sellable?: boolean
   note?: string | null
+}
+
+export interface StockTrackingAllocation {
+  stock_tracking_unit_id?: number
+  quantity: string
+  serial_number?: string
+  lot_code?: string
+  expires_on?: string
+  location_id?: number
+}
+
+export type FulfillmentTaskStatus = 'picking' | 'packing' | 'partially_shipped' | 'shipped' | 'cancelled'
+export type FulfillmentDisposition = 'sellable' | 'quarantine' | 'scrap'
+
+export interface FulfillmentTaskLine {
+  id: number
+  task_id: number
+  source_line_id: string
+  stock_item_id: number
+  warehouse_id: number
+  component_snapshot: { sku: string; ean: string | null; name: string; unit: string; tracking_allocations: StockTrackingAllocation[] }
+  expected_qty: string
+  picked_qty: string
+  shipped_qty: string
+  returned_qty: string
+}
+
+export interface FulfillmentShipmentItem {
+  id: number
+  task_line_id: number
+  qty: string
+  returned_qty: string
+  tracking_snapshot: StockTrackingAllocation[]
+  component_snapshot: FulfillmentTaskLine['component_snapshot']
+}
+
+export interface FulfillmentReturn {
+  id: number
+  disposition: FulfillmentDisposition
+  warehouse_id: number | null
+  receipt_document_id: number | null
+  note: string | null
+  received_at: string
+  items: Array<{ id: number; shipment_item_id: number; qty: string; component_snapshot: Record<string, unknown> }>
+}
+
+export interface FulfillmentShipment {
+  id: number
+  task_id: number
+  carrier: string | null
+  tracking_number: string | null
+  status: 'packing' | 'shipped' | 'cancelled'
+  issue_document_id: number | null
+  shipped_at: string | null
+  items: FulfillmentShipmentItem[]
+  returns: FulfillmentReturn[]
+}
+
+export interface FulfillmentTask {
+  id: number
+  source_type: 'stock_issue_draft' | 'sales_order'
+  source_id: string
+  source_snapshot: Record<string, unknown>
+  status: FulfillmentTaskStatus
+  line_count?: number
+  expected_qty?: string
+  picked_qty?: string
+  shipped_qty?: string
+  lines?: FulfillmentTaskLine[]
+  shipments?: FulfillmentShipment[]
+  created_at: string
+  updated_at: string
+}
+
+export interface WarehouseLocation {
+  id: number
+  supplier_id: number
+  warehouse_id: number
+  code: string
+  name: string
+  is_active: boolean
+}
+
+export interface TrackingAllocationInput {
+  stock_tracking_unit_id?: number | null
+  quantity: string | number
+  unit_code?: string
+  serial_number?: string | null
+  lot_code?: string | null
+  expires_on?: string | null
+  location_id?: number | null
+  location_to_id?: number | null
+}
+
+export interface StockTrackingOverview {
+  tracking_mode: StockTrackingMode
+  base_unit: string
+  units: Array<{ id: number; unit_code: string; numerator: number; denominator: number }>
+  inventory: Array<{ stock_tracking_unit_id: number; tracking_type: 'lot' | 'serial'; lot_code: string | null; serial_number: string | null; expires_on: string | null; warehouse_id: number; location_id: number | null; warehouse_code: string; location_code: string | null; quantity: string }>
+  history: Array<Record<string, unknown>>
 }
 
 export interface StockLevelRow {
@@ -230,10 +370,13 @@ export interface StockDocumentLine {
   extra_cost?: string
   invoice_item_id?: number | null
   purchase_invoice_item_id?: number | null
+  purchase_order_line_id?: number | null
   source_description?: string | null
   source_qty?: string | null
   line_no?: number
   note?: string | null
+  tracking_mode?: StockTrackingMode
+  tracking_allocations?: TrackingAllocationInput[]
   // joined (read-only, jen v odpovědi)
   sku?: string
   name?: string
@@ -253,6 +396,7 @@ export interface StockDocument {
   partner_name: string | null
   invoice_id: number | null
   purchase_invoice_id: number | null
+  purchase_order_id: number | null
   stock_take_id: number | null
   journal_entry_id: number | null
   reversal_document_id: number | null
@@ -262,6 +406,7 @@ export interface StockDocument {
   created_by: number | null
   created_at: string
   updated_at: string
+  allow_over_delivery: boolean
   warehouse_code?: string | null
   warehouse_name?: string | null
   warehouse_to_code?: string | null
@@ -291,7 +436,20 @@ export interface StockDocumentPayload {
     source_description?: string
     source_qty?: string | number
     note?: string | null
+    tracking_allocations?: TrackingAllocationInput[]
   }>
+}
+
+export interface StockCycleCount {
+  id: number
+  warehouse_id: number
+  location_id: number | null
+  status: 'draft' | 'queued' | 'running' | 'counting' | 'closed' | 'cancelled' | 'failed'
+  preparation_job_id: number | null
+  preparation_job?: CatalogJob | null
+  take_date: string
+  note: string | null
+  lines: Array<{ id: number; stock_item_id: number; stock_tracking_unit_id: number | null; sku: string; name: string; unit: string; tracking_mode: StockTrackingMode; lot_code: string | null; serial_number: string | null; expires_on: string | null; expected_qty: string; counted_qty: string | null; surplus_unit_cost: string | null }>
 }
 
 export interface StockDocumentListFilters {
@@ -375,17 +533,10 @@ export interface StockValuationReport {
   totals: { value_total: string; count: number }
 }
 
-export interface StockReceiptProposal {
-  purchase_invoice: {
-    id: number
-    varsymbol: string | null
-    vendor_invoice_number: string
-    vendor_name: string | null
-    currency_code: string
-    exchange_rate: string | null
-  }
+interface StockReceiptProposalBase {
   lines: Array<{
     purchase_invoice_item_id: number
+    purchase_order_line_id: number | null
     stock_item_id: number | null
     description: string
     quantity: string
@@ -398,8 +549,30 @@ export interface StockReceiptProposal {
     description: string
     amount: string
   }>
-  pf_changed_after_receipt: boolean
 }
+
+export interface StockReceiptReadyProposal extends StockReceiptProposalBase {
+  purchase_invoice: {
+    id: number
+    varsymbol: string | null
+    vendor_invoice_number: string
+    vendor_name: string | null
+    currency_code: string
+    exchange_rate: string | null
+  }
+  pf_changed_after_receipt: boolean
+  purchase_invoice_id?: never
+  not_receivable_kind?: never
+}
+
+export interface StockReceiptUnavailableProposal extends StockReceiptProposalBase {
+  purchase_invoice_id: number
+  not_receivable_kind: 'advance' | 'tax_document' | 'credit_note'
+  purchase_invoice?: never
+  pf_changed_after_receipt?: false
+}
+
+export type StockReceiptProposal = StockReceiptReadyProposal | StockReceiptUnavailableProposal
 
 export interface StockReceiptLandedCost {
   purchase_invoice_id?: number
@@ -544,6 +717,23 @@ export const stockApi = {
   createWarehouse: (payload: WarehousePayload) => api.post<Warehouse>('/stock/warehouses', payload).then(r => r.data),
   updateWarehouse: (id: number, payload: WarehousePayload) => api.put<Warehouse>(`/stock/warehouses/${id}`, payload).then(r => r.data),
   deleteWarehouse: (id: number) => api.delete<{ deleted: true }>(`/stock/warehouses/${id}`).then(r => r.data),
+  listLocations: (warehouseId?: number) => api.get<WarehouseLocation[]>('/stock/locations', { params: warehouseId ? { warehouse_id: warehouseId } : undefined }).then(r => r.data),
+  createLocation: (payload: { warehouse_id: number; code: string; name: string; is_active?: boolean }) => api.post<WarehouseLocation>('/stock/locations', payload).then(r => r.data),
+  updateLocation: (id: number, payload: { warehouse_id: number; code: string; name: string; is_active?: boolean }) => api.put<WarehouseLocation>(`/stock/locations/${id}`, payload).then(r => r.data),
+
+  listFulfillmentTasks: () => api.get<{ items: FulfillmentTask[] }>('/stock/fulfillment/tasks').then(r => r.data.items),
+  getFulfillmentTask: (id: number) => api.get<FulfillmentTask>(`/stock/fulfillment/tasks/${id}`).then(r => r.data),
+  createFulfillmentTask: (sourceId: string | number, sourceType: FulfillmentTask['source_type'] = 'stock_issue_draft') => api.post<FulfillmentTask>('/stock/fulfillment/tasks', {
+    source_type: sourceType, source_id: String(sourceId),
+  }).then(r => r.data),
+  scanFulfillmentItem: (taskId: number, payload: { client_operation_id: string; code: string; quantity?: string }) =>
+    api.post<{ task_line_id: number; picked_qty: string; expected_qty: string; status: FulfillmentTaskStatus; replayed: boolean }>(`/stock/fulfillment/tasks/${taskId}/scan`, payload).then(r => r.data),
+  createFulfillmentShipment: (taskId: number, payload: { carrier: string; tracking_number: string; items: Array<{ task_line_id: number; quantity: string; tracking_allocations?: StockTrackingAllocation[] }> }) =>
+    api.post<FulfillmentShipment>(`/stock/fulfillment/tasks/${taskId}/shipments`, payload).then(r => r.data),
+  dispatchFulfillmentShipment: (shipmentId: number) =>
+    api.post<FulfillmentTask>(`/stock/fulfillment/shipments/${shipmentId}/dispatch`).then(r => r.data),
+  receiveFulfillmentReturn: (shipmentId: number, payload: { disposition: FulfillmentDisposition; warehouse_id?: number; note?: string; items: Array<{ shipment_item_id: number; quantity: string; tracking_allocations?: StockTrackingAllocation[] }> }) =>
+    api.post<FulfillmentReturn>(`/stock/fulfillment/shipments/${shipmentId}/returns`, payload).then(r => r.data),
 
   // ── Skladové karty ──────────────────────────────────────────────────────
   listItems: (filters: StockItemListFilters = {}, options: { signal?: AbortSignal } = {}) => {
@@ -585,6 +775,8 @@ export const stockApi = {
     const params = new URLSearchParams(toParams({ ...opts, format }) as Record<string, string>)
     return downloadUrl(`/stock/items/${id}/movements/export?${params.toString()}`)
   },
+  itemTracking: (id: number) => api.get<StockTrackingOverview>(`/stock/items/${id}/tracking`).then(r => r.data),
+  replaceItemUnits: (id: number, units: Array<{ unit_code: string; numerator: number; denominator: number }>) => api.put(`/stock/items/${id}/units`, { units }).then(r => r.data),
 
   // ── Stavy zásob ─────────────────────────────────────────────────────────
   levels: (filters: StockLevelFilters = {}) => {
@@ -598,6 +790,14 @@ export const stockApi = {
     api.get<Record<string, string>>('/stock/availability', {
       params: toParams({ item_ids: itemIds.join(','), warehouse_id: warehouseId }),
     }).then(r => r.data),
+
+  // ── Kompletace výrobku ──────────────────────────────────────────────────
+  listAssemblies: (page = 1, limit = 25) =>
+    api.get<ProductAssemblyListResponse>('/stock/assemblies', { params: { page, limit } }).then(r => r.data),
+  getAssembly: (id: number) => api.get<ProductAssembly>(`/stock/assemblies/${id}`).then(r => r.data),
+  createAssembly: (payload: ProductAssemblyCreatePayload) =>
+    api.post<ProductAssembly>('/stock/assemblies', payload).then(r => r.data),
+  reverseAssembly: (id: number) => api.post<ProductAssembly>(`/stock/assemblies/${id}/reverse`).then(r => r.data),
 
   // ── Skladové doklady ────────────────────────────────────────────────────
   listDocuments: (filters: StockDocumentListFilters = {}) =>
@@ -625,6 +825,11 @@ export const stockApi = {
   closeTake: (id: number) =>
     api.post<StockTake & { receipt_document: StockDocument | null; issue_document: StockDocument | null }>(`/stock/takes/${id}/close`).then(r => r.data),
   takePdfUrl: (id: number) => downloadUrl(`/stock/takes/${id}/pdf`),
+  listCycleCounts: () => api.get<StockCycleCount[]>('/stock/cycle-counts').then(r => r.data),
+  getCycleCount: (id: number) => api.get<StockCycleCount>(`/stock/cycle-counts/${id}`).then(r => r.data),
+  createCycleCount: (payload: { warehouse_id: number; location_id?: number | null; take_date: string; item_ids?: number[]; note?: string | null }) => api.post<StockCycleCount>('/stock/cycle-counts', payload).then(r => r.data),
+  updateCycleCount: (id: number, lines: Array<{ id: number; counted_qty: string | number | null; surplus_unit_cost?: string | number | null }>) => api.put<StockCycleCount>(`/stock/cycle-counts/${id}`, { lines }).then(r => r.data),
+  closeCycleCount: (id: number) => api.post<StockCycleCount>(`/stock/cycle-counts/${id}/close`).then(r => r.data),
 
   // ── Sestavy ─────────────────────────────────────────────────────────────
   reportStatus: (filters: StockLevelFilters = {}) =>

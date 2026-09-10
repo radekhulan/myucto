@@ -64,8 +64,8 @@ final class StockDocumentRepository
                     l.unit_cost, l.value_total, l.extra_cost, l.invoice_item_id,
                     l.purchase_invoice_item_id, l.purchase_order_line_id,
                     l.source_description, l.source_qty,
-                    l.line_no, l.note,
-                    si.sku, si.name, si.unit
+                    l.line_no, l.note, l.tracking_input_json,
+                    si.sku, si.name, si.unit, si.tracking_mode
                FROM stock_document_lines l
                JOIN stock_items si ON si.id = l.stock_item_id AND si.supplier_id = l.supplier_id
               WHERE l.supplier_id = ? AND l.document_id = ?
@@ -220,8 +220,8 @@ final class StockDocumentRepository
             'INSERT INTO stock_document_lines
                 (document_id, supplier_id, stock_item_id, doc_date, qty, unit_cost, value_total,
                  extra_cost, invoice_item_id, purchase_invoice_item_id, purchase_order_line_id,
-                 source_description, source_qty, line_no, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 source_description, source_qty, line_no, note, tracking_input_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             (int) $data['document_id'],
             $supplierId,
@@ -238,6 +238,7 @@ final class StockDocumentRepository
             $data['source_qty'] ?? null,
             (int) ($data['line_no'] ?? 0),
             $data['note'] ?? null,
+            $data['tracking_input_json'] ?? null,
         ]);
         return (int) $pdo->lastInsertId();
     }
@@ -603,6 +604,9 @@ final class StockDocumentRepository
         $r['purchase_invoice_item_id'] = $r['purchase_invoice_item_id'] !== null ? (int) $r['purchase_invoice_item_id'] : null;
         $r['purchase_order_line_id'] = $r['purchase_order_line_id'] !== null ? (int) $r['purchase_order_line_id'] : null;
         $r['line_no'] = (int) $r['line_no'];
+        $r['tracking_allocations'] = $r['tracking_input_json'] === null
+            ? []
+            : json_decode((string) $r['tracking_input_json'], true, 512, JSON_THROW_ON_ERROR);
         return $r;
     }
 }

@@ -22,6 +22,30 @@ use Slim\Psr7\Response as Psr7Response;
 #[Group('integration')]
 final class StockInvoiceIntegrationTest extends StockTestCase
 {
+    public function testOrderCreditNoteLeavesPhysicalReturnToFulfillment(): void
+    {
+        $supplierId = $this->createSupplier();
+        $warehouseId = $this->warehouse($supplierId);
+        $itemId = $this->item($supplierId, 'ORDER-CREDIT');
+        $this->receiveStock($supplierId, $warehouseId, $itemId, '1.000', 10.0);
+        $clientId = $this->client($supplierId);
+        $parentId = $this->invoiceDraft($supplierId, $clientId);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO sales_orders (order_uuid, supplier_id, client_id, order_number, currency_id, currency_code, customer_snapshot) VALUES (UUID(), ?, ?, ?, ?, ?, ?)')
+            ->execute([$supplierId, $clientId, 'TEST-ORDER-CREDIT', $this->currencyIdFor($supplierId), 'CZK', '{}']);
+        $orderId = (int) $pdo->lastInsertId();
+        try {
+            $pdo->prepare('INSERT INTO sales_order_invoice_links (supplier_id, order_id, invoice_id) VALUES (?, ?, ?)')->execute([$supplierId, $orderId, $parentId]);
+            $creditId = $this->invoiceDraft($supplierId, $clientId, 'credit_note', ['parent_invoice_id' => $parentId]);
+            $this->invoiceItem($creditId, $itemId, $warehouseId, '1.000');
+            $this->callIssueForInvoice($supplierId, $this->invoiceRow($creditId, $supplierId, 'credit_note'));
+            self::assertSame([], $this->docsRepo->listByInvoice($supplierId, $creditId));
+            self::assertSame(1000, $this->level($supplierId, $warehouseId, $itemId)['qtyT']);
+        } finally {
+            $pdo->prepare('DELETE FROM sales_orders WHERE supplier_id = ? AND id = ?')->execute([$supplierId, $orderId]);
+        }
+    }
+
     // ── 6) issue finálu → výdejka ────────────────────────────────────────────
 
     public function testIssueForRegularInvoiceCreatesPostedIssueAndDecrementsLevel(): void

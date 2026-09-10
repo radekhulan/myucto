@@ -101,6 +101,11 @@ final class StockRecomputeService
             // Přepis ocenění jen při reálné změně (šetří UPDATE na dlouhé historii).
             $newUnitCost   = StockValuation::microToDecimal($res['lineUnitCostMicro']);
             $newValueTotal = StockValuation::cToDecimal($res['lineValueC']);
+            if ($line['doc_type'] === 'issue' && StockValuation::valueToC($line['value_total']) !== $res['lineValueC']) {
+                $assembly = $this->db->pdo()->prepare("SELECT id FROM product_assemblies WHERE supplier_id = ? AND issue_document_id = ? AND status = 'posted' LIMIT 1");
+                $assembly->execute([$supplierId, $line['document_id']]);
+                if ($assembly->fetchColumn() !== false) throw new StockException('stock_backdate_assembly_unsupported', 'Zpětná změna by přecenila komponenty dokončené kompletace. Proveďte korekci po kompletaci nebo ji nejprve stornujte.', 409);
+            }
             if (StockValuation::valueToC($line['value_total']) !== $res['lineValueC']
                 || $this->unitCostMicro($line['unit_cost']) !== $res['lineUnitCostMicro']
             ) {

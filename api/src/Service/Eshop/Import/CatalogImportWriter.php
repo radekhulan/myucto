@@ -11,6 +11,9 @@ use MyInvoice\Service\Eshop\EshopException;
 use MyInvoice\Service\Eshop\ProductCardService;
 use MyInvoice\Service\Eshop\Pricing\PriceWriteService;
 use MyInvoice\Service\Eshop\Pricing\PriceCalculationService;
+use MyInvoice\Repository\ProductMasterRepository;
+use MyInvoice\Service\Eshop\ProductMasterService;
+use MyInvoice\Service\Eshop\ProductRelationService;
 
 final class CatalogImportWriter
 {
@@ -25,6 +28,9 @@ final class CatalogImportWriter
         private readonly PriceWriteService $prices,
         private readonly StockItemPriceRepository $priceRows,
         private readonly PriceCalculationService $calculation,
+        private readonly ProductMasterRepository $masters,
+        private readonly ProductMasterService $masterService,
+        private readonly ProductRelationService $relations,
     ) {}
 
     public function identify(int $supplierId, array $profile, array $values): ?array
@@ -62,6 +68,11 @@ final class CatalogImportWriter
         $fields = array_merge(self::CORE, self::PRODUCT, ['id', 'row_version', 'sale_price_without_vat']);
         $state = array_intersect_key($card, array_flip($fields));
         $state['prices'] = $this->priceRows->listForItem($supplierId, $itemId);
+        $context = $this->masters->variantContext($supplierId, $itemId);
+        $state['master_id'] = $context['master_id'] ?? null;
+        $state['variant_options'] = $card['variant']['options'] ?? [];
+        $state['inheritance'] = $card['variant']['inheritance'] ?? [];
+        $state['relations'] = $this->relations->get($supplierId, $itemId)['items'];
         return $state;
     }
 
@@ -89,6 +100,19 @@ final class CatalogImportWriter
                 throw new EshopException('manufacturer_invalid', 'Výrobce není dostupný nebo mapování není jednoznačné.', 422);
             }
             $values['manufacturer_id'] = (int) $manufacturer;
+        }
+        if (isset($values['master_external_id'])) {
+            if (!is_string($profile['source_key'] ?? null) || $profile['source_key'] === '') {
+                throw new EshopException('import_source_key_required', 'Externí master vyžaduje source_key.', 422);
+            }
+            $stmt = $pdo->prepare("SELECT internal_id FROM external_entity_map
+                WHERE supplier_id = ? AND source_key = ? AND entity_type = 'product_master' AND external_id = ?");
+            $stmt->execute([$supplierId, $profile['source_key'], $values['master_external_id']]);
+            $masterId = $stmt->fetchColumn();
+            if ($masterId === false || (isset($values['master_id']) && $values['master_id'] !== (int) $masterId)) {
+                throw new EshopException('master_invalid', 'Master produktu není dostupný nebo mapování není jednoznačné.', 422);
+            }
+            $values['master_id'] = (int) $masterId;
         }
         $base = array_replace($current ?? ['sku' => '', 'name' => '', 'item_type' => 'goods', 'unit' => 'ks', 'is_active' => true],
             array_intersect_key($values, array_flip(self::CORE)));
@@ -143,13 +167,21 @@ final class CatalogImportWriter
             $pdo->prepare("INSERT INTO external_entity_map (supplier_id, source_key, entity_type, external_id, internal_id)
                 VALUES (?, ?, 'stock_item', ?, ?)")->execute([$supplierId, $profile['source_key'], $values['external_id'], $id]);
         }
+        if (array_intersect(['master_id', 'variant_options', 'inheritance'], array_keys($values)) !== []) {
+            $this->writeVariant($supplierId, $id, $values);
+        }
+        if (array_key_exists('relations', $values)) {
+            $card = $this->cards->get($supplierId, $id)
+                ?? throw new EshopException('unavailable', 'Karta není dostupná.', 422);
+            $this->relations->replace($supplierId, $id, ['row_version' => $card['row_version'], 'items' => $values['relations']]);
+        }
         return $this->state($supplierId, $id);
     }
 
     public function comparable(array $state): array
     {
         unset($state['id'], $state['row_version']);
-        foreach (['i18n', 'categories', 'attributes', 'fees', 'prices'] as $section) {
+        foreach (['i18n', 'categories', 'attributes', 'fees', 'prices', 'variant_options', 'relations'] as $section) {
             foreach ($state[$section] ?? [] as $index => $row) {
                 if (!is_array($row)) {
                     continue;
@@ -166,5 +198,46 @@ final class CatalogImportWriter
         }
         ksort($state);
         return $state;
+    }
+
+    private function writeVariant(int $supplierId, int $itemId, array $values): void
+    {
+        $context = $this->masters->variantContext($supplierId, $itemId);
+        $targetMasterId = array_key_exists('master_id', $values) ? $values['master_id'] : ($context['master_id'] ?? null);
+        if ($targetMasterId === null) {
+            if ($context !== null) {
+                $preview = $this->masterService->detachPreview($supplierId, $context['master_id'], $itemId);
+                $this->masterService->detach($supplierId, $context['master_id'], $itemId, [
+                    'row_version' => $preview['row_version'], 'link_row_version' => $preview['link_row_version'],
+                ]);
+            } elseif (array_intersect(['variant_options', 'inheritance'], array_keys($values)) !== []) {
+                throw new EshopException('master_required', 'Volby a dědění vyžadují master produktu.', 422);
+            }
+            return;
+        }
+        if (!is_int($targetMasterId) || $targetMasterId < 1) {
+            throw new EshopException('master_invalid', 'Neplatný master produktu.', 422);
+        }
+        if ($context !== null && $context['master_id'] !== $targetMasterId) {
+            throw new EshopException('master_change_requires_detach', 'Změna masteru vyžaduje nejprve odpojení varianty.', 409);
+        }
+        $card = $this->cards->get($supplierId, $itemId)
+            ?? throw new EshopException('unavailable', 'Karta není dostupná.', 422);
+        $options = $values['variant_options'] ?? ($card['variant']['options'] ?? []);
+        $inheritance = $values['inheritance'] ?? ($card['variant']['inheritance'] ?? []);
+        if ($context === null) {
+            $master = $this->masters->find($supplierId, $targetMasterId)
+                ?? throw new EshopException('master_invalid', 'Master produktu není dostupný.', 422);
+            $this->masterService->attach($supplierId, $targetMasterId, [
+                'master_row_version' => $master['row_version'],
+                'variants' => [['stock_item_id' => $itemId, 'row_version' => $card['row_version'],
+                    'options' => $options, 'inheritance' => $inheritance]],
+            ]);
+            return;
+        }
+        $this->masterService->updateVariant($supplierId, $targetMasterId, $itemId, [
+            'row_version' => $card['row_version'], 'link_row_version' => $context['link_row_version'],
+            'options' => $options, 'inheritance' => $inheritance,
+        ]);
     }
 }

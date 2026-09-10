@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch, nextTick, useId } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type PaymentScheduleRow, type CashSettlementResult } from '@/api/invoices'
 import { useHotkey } from '@/composables/useHotkey'
@@ -45,6 +45,7 @@ import { priceListApi, type PriceListItem } from '@/api/priceList'
 import { cashApi, type CashRegister } from '@/api/cash'
 import { appIsoDate, addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import { groupInvoiceStockAvailability, invoiceStockAvailabilityKey } from './invoiceStockAvailability'
 
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
@@ -201,6 +202,7 @@ const stockOptionById = reactive<Record<number, { value: number; label: string; 
 const stockItemsCache = new Map<number, StockItemSearchResult>()
 // Dostupnost (nezávazný náhled) — jeden batch dotaz na všechny stock_item_id v řádcích.
 const availabilityMap = ref<Record<string, string>>({})
+let availabilityGeneration = 0
 
 /** Vybraná option pro daný řádek — dle stock_item_id (stabilní přes reorder/smazání). */
 function stockSelectedFor(item: InvoiceItem): { value: number; label: string; secondary?: string } | null {
@@ -210,6 +212,10 @@ function stockSelectedFor(item: InvoiceItem): { value: number; label: string; se
 async function loadStockWarehouses() {
   if (!stockEnabled.value) return
   try { stockWarehouses.value = await stockApi.listWarehouses(true) } catch { stockWarehouses.value = [] }
+}
+
+function rowWarehouseId(item: InvoiceItem): number | null {
+  return item.warehouse_id ?? defaultWarehouseId.value
 }
 
 // Hotovostní vyrovnání (migrace 1327): u formy úhrady „Hotově" nabídneme pokladnu a
@@ -251,11 +257,30 @@ function notifyCashSettlement(s?: CashSettlementResult): void {
 
 async function refreshAvailability() {
   if (!stockEnabled.value) return
-  const ids = [...new Set(form.value.items.map(it => it.stock_item_id).filter((v): v is number => !!v))]
-  if (ids.length === 0) { availabilityMap.value = {}; return }
-  // M3: auto-výdej kontroluje sklad řádku (default sklad) → availability scope musí sedět,
-  // jinak batch přes všechny sklady lže. Bez zapnutého skladu nemáme sklad → undefined.
-  try { availabilityMap.value = await stockApi.availability(ids, defaultWarehouseId.value ?? undefined) } catch { /* nezávazný náhled — tichý fail */ }
+  const generation = ++availabilityGeneration
+  availabilityMap.value = {}
+  const groups = groupInvoiceStockAvailability(form.value.items, defaultWarehouseId.value)
+  if (groups.length === 0) {
+    availabilityMap.value = {}
+    return
+  }
+
+  try {
+    const results = await Promise.all(groups.map(async ({ warehouseId, itemIds }) => ({
+      warehouseId,
+      values: await stockApi.availability(itemIds, warehouseId ?? undefined),
+    })))
+    if (generation !== availabilityGeneration) return
+    const next: Record<string, string> = {}
+    for (const { warehouseId, values } of results) {
+      for (const [stockItemId, qty] of Object.entries(values)) {
+        next[invoiceStockAvailabilityKey(Number(stockItemId), warehouseId)] = qty
+      }
+    }
+    availabilityMap.value = next
+  } catch {
+    if (generation === availabilityGeneration) availabilityMap.value = {}
+  }
 }
 
 async function onStockSearch(rowIndex: number, q: string) {
@@ -303,7 +328,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
 /** Dostupné množství (string, DECIMAL) pro řádek — undefined = žádný stav (bez karty na skladě). */
 function rowAvailability(item: InvoiceItem): string | null {
   if (!item.stock_item_id) return null
-  return availabilityMap.value[String(item.stock_item_id)] ?? '0'
+  return availabilityMap.value[invoiceStockAvailabilityKey(item.stock_item_id, rowWarehouseId(item))] ?? null
 }
 function rowAvailabilityInsufficient(item: InvoiceItem): boolean {
   const avail = rowAvailability(item)
@@ -318,6 +343,7 @@ async function hydrateStockSelections() {
     .map((it, i) => ({ it, i }))
     .filter(({ it }) => it.stock_item_id != null)
   await Promise.all(rows.map(async ({ it }) => {
+    if (it.warehouse_id == null) it.warehouse_id = defaultWarehouseId.value
     try {
       const si = await stockApi.getItem(it.stock_item_id!)
       stockItemsCache.set(si.id, {
@@ -750,7 +776,7 @@ onMounted(async () => {
   units.value = un
   vatClassifications.value = vc
   revenueCategories.value = rcat
-  void loadStockWarehouses()
+  await loadStockWarehouses()
   void loadCashRegisters()
   if (form.value.currency_id === 0) {
     const def = cur.find(c => c.is_default && c.code === 'CZK') || cur[0]
@@ -858,6 +884,10 @@ onMounted(async () => {
 
   await loadPriceListItems()
   loaded.value = true
+})
+
+onBeforeUnmount(() => {
+  availabilityGeneration++
 })
 
 async function loadProjects(clientId: number) {
@@ -2284,6 +2314,16 @@ async function deleteDraft() {
                   @search="(q: string) => onStockSearch(i, q)"
                   @select="(v: number | null) => onStockSelect(i, v)"
                 />
+                <label v-if="stockEnabled && item.stock_item_id && stockWarehouses.length > 0"
+                  class="mt-1.5 flex items-center gap-2 text-xs text-neutral-500">
+                  <span class="whitespace-nowrap">{{ t('stock.receipt.field_warehouse') }}</span>
+                  <select v-model.number="item.warehouse_id" @change="refreshAvailability"
+                    class="h-8 min-w-0 max-w-56 rounded-md border border-neutral-300 bg-surface px-2 text-xs text-neutral-700">
+                    <option v-for="warehouse in stockWarehouses" :key="warehouse.id" :value="warehouse.id">
+                      {{ warehouse.name }}
+                    </option>
+                  </select>
+                </label>
               </td>
               <td class="px-3 py-2">
                 <input v-model="item.quantity" v-math type="text" inputmode="decimal"
@@ -2441,6 +2481,16 @@ async function deleteDraft() {
                 @search="(q: string) => onStockSearch(i, q)"
                 @select="(v: number | null) => onStockSelect(i, v)"
               />
+              <label v-if="stockEnabled && item.stock_item_id && stockWarehouses.length > 0"
+                class="mt-1.5 block text-xs font-medium text-neutral-600">
+                <span class="mb-1 block">{{ t('stock.receipt.field_warehouse') }}</span>
+                <select v-model.number="item.warehouse_id" @change="refreshAvailability"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm text-neutral-700">
+                  <option v-for="warehouse in stockWarehouses" :key="warehouse.id" :value="warehouse.id">
+                    {{ warehouse.name }}
+                  </option>
+                </select>
+              </label>
             </div>
             <div v-if="assetSaleMode && assetSaleAvailable">
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.asset_sale.card') }}</label>

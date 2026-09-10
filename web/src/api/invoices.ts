@@ -113,6 +113,8 @@ export interface InvoiceItem {
   vat_code?: string
   vat_label_cs?: string
   vat_label_en?: string
+  /** Klasifikace DPH řádku (`invoice_items.vat_classification_code`); null = odvozená ze SSOT. */
+  vat_classification_code?: string | null
   /** Vazba na skladovou kartu (Epic SKLAD, B5) — FE MUSÍ posílat zpět v round-tripu, jinak se DELETE+INSERT tiše smaže. */
   stock_item_id?: number | null
   /** Sklad, ze kterého se položka vydá při vystavení (auto-výdejka); null = default sklad supplieru. */

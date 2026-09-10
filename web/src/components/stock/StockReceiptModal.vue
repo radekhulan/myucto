@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { stockApi, type StockReceiptProposal, type StockItemSearchResult, type Warehouse, type LandedCostAllocation } from '@/api/stock'
+import { stockApi, type StockDocument, type StockReceiptProposal, type StockItemSearchResult, type Warehouse, type LandedCostAllocation } from '@/api/stock'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -10,7 +10,7 @@ import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{ purchaseInvoiceId: number }>()
-const emit = defineEmits<{ (e: 'close'): void; (e: 'created'): void }>()
+const emit = defineEmits<{ (e: 'close'): void; (e: 'created', document: StockDocument): void }>()
 
 const { t } = useI18n()
 const toast = useToast()
@@ -143,7 +143,7 @@ async function submit() {
   saving.value = true
   error.value = ''
   try {
-    await stockApi.receiptCreate(props.purchaseInvoiceId, {
+    const document = await stockApi.receiptCreate(props.purchaseInvoiceId, {
       warehouse_id: warehouseId.value!,
       doc_date: docDate.value,
       lines: lines.value
@@ -164,7 +164,7 @@ async function submit() {
         : undefined,
     })
     toast.success(t('common.saved'))
-    emit('created')
+    emit('created', document)
   } catch (e: any) {
     const err = e?.response?.data?.error
     const code = err?.code

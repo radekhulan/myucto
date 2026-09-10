@@ -1187,7 +1187,7 @@ final class PurchaseInvoiceRepository
 
         $sql = 'INSERT INTO purchase_invoices
             (supplier_id, vendor_id, vendor_is_vat_payer, varsymbol, vendor_invoice_number, document_kind,
-             issue_date, tax_date, due_date, received_at, received_at_source,
+             issue_date, tax_date, delivery_date, due_date, received_at, received_at_source,
              currency_id, exchange_rate, exchange_rate_date, exchange_rate_source,
              reverse_charge, prices_include_vat, language, note_above_items, note_below_items,
              vendor_snapshot, own_snapshot,
@@ -1198,7 +1198,7 @@ final class PurchaseInvoiceRepository
              payment_variable_symbol, payment_account_source, payment_account_checked_at,
              payment_method, payment_method_source,
              status, vat_classification_code, vat_deduction, vat_deduction_percent, tax_deductible, is_fixed_asset, expense_category_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -1210,6 +1210,8 @@ final class PurchaseInvoiceRepository
             $documentKind,
             (string) $data['issue_date'],
             empty($data['tax_date']) ? null : (string) $data['tax_date'],
+            // Datum dodání (§ 25 vstup) je evidenční — zákonné DUZP zůstává v tax_date.
+            empty($data['delivery_date']) ? null : (string) $data['delivery_date'],
             (string) $data['due_date'],
             (string) ($data['received_at'] ?? $data['issue_date']),
             $receivedAtSource,
@@ -1740,7 +1742,7 @@ final class PurchaseInvoiceRepository
 
         $sql = 'UPDATE purchase_invoices SET
                 vendor_id = ?, vendor_invoice_number = ?, document_kind = ?,
-                issue_date = ?, tax_date = ?, due_date = ?, received_at = ?,
+                issue_date = ?, tax_date = ?, delivery_date = ?, due_date = ?, received_at = ?,
                 currency_id = ?'
               . $rateSet . ',
                 reverse_charge = ?, prices_include_vat = ?, language = ?,
@@ -1765,6 +1767,8 @@ final class PurchaseInvoiceRepository
             $documentKind,
             (string) $data['issue_date'],
             empty($data['tax_date']) ? null : (string) $data['tax_date'],
+            // Datum dodání (§ 25 vstup) je evidenční — zákonné DUZP zůstává v tax_date.
+            empty($data['delivery_date']) ? null : (string) $data['delivery_date'],
             (string) $data['due_date'],
             (string) ($data['received_at'] ?? $data['issue_date']),
             (int) $data['currency_id'],

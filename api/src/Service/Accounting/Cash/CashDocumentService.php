@@ -1659,9 +1659,11 @@ final class CashDocumentService
                 'base_amount' => $baseCents / 100.0,
                 'vat_amount'  => $vatCents / 100.0,
                 // Klasifikace odpočtu / uznatelnosti přepočtem měny neprochází změnou (M-7).
+                // Totéž platí o příznaku majetku pro ř. 47 (migrace 1784).
                 'vat_deduction'         => $l['vat_deduction'] ?? 'full',
                 'vat_deduction_percent' => $l['vat_deduction_percent'] ?? 100.0,
                 'tax_treatment'         => $l['tax_treatment'] ?? 'deductible',
+                'is_fixed_asset'        => !empty($l['is_fixed_asset']),
             ];
             $totalCents += $baseCents + $vatCents;
         }
@@ -1737,6 +1739,10 @@ final class CashDocumentService
                         self::TAX_TREATMENTS,
                         'deductible',
                     ),
+                    // L-4: hotovostní pořízení dlouhodobého majetku (ř. 47 přiznání,
+                    // doplňující údaj k odpočtu). Příznak dává smysl jen u výdajového
+                    // dokladu — u příjmového je to tržba, ne pořízení (migrace 1784).
+                    'is_fixed_asset'        => $docType === 'out' && !empty($vl['is_fixed_asset']),
                 ];
             }
             $vatLines = self::recomputeVatLines($vatLines);
@@ -1818,7 +1824,8 @@ final class CashDocumentService
         $out = [];
         foreach ($lines as $i => $l) {
             // Přepočet se týká jen ČÁSTEK — klasifikace odpočtu / uznatelnosti (M-7)
-            // je vstup uživatele a přes přepočet musí projít beze změny.
+            // i příznak majetku pro ř. 47 (L-4) jsou vstup uživatele a přes přepočet
+            // musí projít beze změny.
             $out[] = [
                 'vat_rate'    => $l['vat_rate'],
                 'base_amount' => $computed[$i]['base'],
@@ -1826,6 +1833,7 @@ final class CashDocumentService
                 'vat_deduction'         => $l['vat_deduction'] ?? 'full',
                 'vat_deduction_percent' => $l['vat_deduction_percent'] ?? 100.0,
                 'tax_treatment'         => $l['tax_treatment'] ?? 'deductible',
+                'is_fixed_asset'        => !empty($l['is_fixed_asset']),
             ];
         }
         return $out;

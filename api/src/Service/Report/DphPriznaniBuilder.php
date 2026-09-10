@@ -846,6 +846,49 @@ final class DphPriznaniBuilder
             $warnings[] = "Dobropis {$number} snižuje daň na výstupu. Ověřte, že datum zařazení odpovídá doručení opravného daňového dokladu nebo vynaložení rozumného úsilí o jeho doručení (§ 42 ZDPH).";
         }
 
+        // Platební / splátkový kalendář (§ 31a ZDPH) — audit VAT klasifikací 2026-08, H-4.
+        //
+        // Kalendář je plnohodnotný daňový doklad, ale rozpis plateb
+        // (`invoice_payment_schedule`) nemá v evidenci DPH žádného konzumenta: doklad
+        // vstupuje do ledgeru jako běžná faktura a CELÁ částka se přizná v jednom období
+        // podle `effective_tax_date`. Přitom vytištěné PDF i § 31a říkají, že každá platba
+        // z rozpisu je samostatným zdanitelným plněním s daní ke dni splatnosti nebo
+        // přijetí úplaty (co nastane dřív) — odběratel proto uplatní odpočet po splátkách
+        // a kontrolní hlášení se s protistranou rozejde.
+        //
+        // Rozpad do splátek je změna chování dokladu (storno, částečná úhrada, oprava
+        // splátky), ne oprava klasifikace, a dokud není hotový, je jediná poctivá odpověď
+        // varování. Vyloučit kalendář z evidence by daň naopak zatajilo, takže se čísla
+        // NEMĚNÍ — jen se nahlas řekne, že jsou nejspíš v jednom období navíc.
+        if ($this->db->hasColumn('invoice_payment_schedule', 'due_on')) {
+            $calendars = $this->db->pdo()->prepare(
+                "SELECT i.varsymbol, COUNT(s.id) AS instalments,
+                        SUM(CASE WHEN s.due_on < ? OR s.due_on > ? THEN 1 ELSE 0 END) AS outside
+                   FROM invoices i
+                   JOIN invoice_payment_schedule s ON s.invoice_id = i.id
+                  WHERE i.supplier_id = ?
+                    AND i.status NOT IN ('draft', 'cancelled')
+                    AND i.invoice_type = 'payment_calendar'
+                    AND COALESCE(i.tax_date, i.issue_date) BETWEEN ? AND ?
+               GROUP BY i.id, i.varsymbol
+                 HAVING outside > 0
+               ORDER BY i.varsymbol"
+            );
+            $calendars->execute([$start, $end, $supplierId, $start, $end]);
+            foreach ($calendars->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                $warnings[] = sprintf(
+                    'Platební kalendář %s má %d splátek, z toho %d se splatností mimo toto období, '
+                        . 'ale do přiznání i kontrolního hlášení vstupuje CELOU částkou v tomto období. '
+                        . 'Podle § 31a ZDPH je každá platba z rozpisu samostatným zdanitelným plněním '
+                        . '(daň ke dni splatnosti nebo přijetí úplaty, co nastane dřív) — rozpad do období '
+                        . 'systém zatím nedělá. Ověřte zařazení ručně, jinak se KH rozejde s odběratelem.',
+                    (string) ($row['varsymbol'] ?? '—'),
+                    (int) $row['instalments'],
+                    (int) $row['outside'],
+                );
+            }
+        }
+
         $ossFilter = $this->db->hasColumn('invoice_items', 'oss_applicable')
             ? 'AND COALESCE(ii.oss_applicable, 0) = 0'
             : '';

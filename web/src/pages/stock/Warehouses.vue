@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { stockApi, type Warehouse, type WarehousePayload } from '@/api/stock'
+import { stockApi, type Warehouse, type WarehousePayload, type WarehouseLocation } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
@@ -14,12 +14,14 @@ const auth = useAuthStore()
 const toast = useToast()
 
 const warehouses = ref<Warehouse[]>([])
+const locations = ref<WarehouseLocation[]>([])
 const loading = ref(false)
 
 async function load() {
   loading.value = true
   try {
     warehouses.value = await stockApi.listWarehouses()
+    locations.value = await stockApi.listLocations()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -43,17 +45,17 @@ const modalOpen = ref(false)
 const editing = ref<Warehouse | null>(null)
 const saving = ref(false)
 const error = ref('')
-const form = ref<WarehousePayload>({ code: '', name: '', is_default: false, is_active: true, note: null })
+const form = ref<WarehousePayload>({ code: '', name: '', is_default: false, is_active: true, is_sellable: true, note: null })
 
 function openCreate() {
   editing.value = null
-  form.value = { code: '', name: '', is_default: warehouses.value.length === 0, is_active: true, note: null }
+  form.value = { code: '', name: '', is_default: warehouses.value.length === 0, is_active: true, is_sellable: true, note: null }
   error.value = ''
   modalOpen.value = true
 }
 function openEdit(w: Warehouse) {
   editing.value = w
-  form.value = { code: w.code, name: w.name, is_default: w.is_default, is_active: w.is_active, note: w.note }
+  form.value = { code: w.code, name: w.name, is_default: w.is_default, is_active: w.is_active, is_sellable: w.is_sellable, note: w.note }
   error.value = ''
   modalOpen.value = true
 }
@@ -96,6 +98,25 @@ async function remove(w: Warehouse) {
     }
   }
 }
+
+const locationOpen = ref(false)
+const locationEditing = ref<WarehouseLocation | null>(null)
+const locationForm = ref({ warehouse_id: 0, code: '', name: '', is_active: true })
+function openLocation(warehouse: Warehouse, location: WarehouseLocation | null = null) {
+  locationEditing.value = location
+  locationForm.value = { warehouse_id: warehouse.id, code: location?.code ?? '', name: location?.name ?? '', is_active: location?.is_active ?? true }
+  locationOpen.value = true
+}
+async function saveLocation() {
+  if (!locationForm.value.code.trim() || !locationForm.value.name.trim()) return
+  try {
+    if (locationEditing.value) await stockApi.updateLocation(locationEditing.value.id, locationForm.value)
+    else await stockApi.createLocation(locationForm.value)
+    locationOpen.value = false
+    await load()
+    toast.success(t('common.saved'))
+  } catch (e: any) { toast.error(mapError(e)) }
+}
 </script>
 
 <template>
@@ -109,6 +130,27 @@ async function remove(w: Warehouse) {
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
         {{ t('stock.warehouses.new') }}
       </button>
+    </div>
+
+    <div v-if="warehouses.length" class="mt-4 bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <div class="px-5 py-3 border-b border-neutral-200">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.locations.title') }}</h2>
+      </div>
+      <div class="divide-y divide-neutral-100">
+        <div v-for="w in warehouses" :key="`locations-${w.id}`" class="px-5 py-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="font-medium">{{ w.name }}</span>
+            <button v-if="auth.canWrite('stock.items.write')" type="button" @click="openLocation(w)" :class="btnOutline('primary')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+              {{ t('stock.locations.new') }}
+            </button>
+          </div>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button v-for="location in locations.filter(l => l.warehouse_id === w.id)" :key="location.id" type="button" @click="openLocation(w, location)" class="px-2 py-1 rounded-md border border-neutral-200 text-sm font-mono" :class="location.is_active ? 'bg-neutral-50 text-neutral-700' : 'bg-neutral-100 text-neutral-400 line-through'">{{ location.code }} - {{ location.name }}</button>
+            <span v-if="locations.every(l => l.warehouse_id !== w.id)" class="text-sm text-neutral-400">{{ t('stock.locations.empty') }}</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
@@ -190,6 +232,10 @@ async function remove(w: Warehouse) {
             <input v-model="form.is_active" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             {{ t('stock.warehouses.field_active') }}
           </label>
+          <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
+            <input v-model="form.is_sellable" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+            {{ t('stock.warehouses.field_sellable') }}
+          </label>
         </div>
         <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
         <div class="flex justify-end gap-2 pt-2 border-t border-neutral-100">
@@ -198,6 +244,18 @@ async function remove(w: Warehouse) {
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ saving ? t('common.saving') : t('common.save') }}
           </button>
+        </div>
+      </div>
+    </Modal>
+
+    <Modal v-if="locationOpen" :title="locationEditing ? t('stock.locations.edit') : t('stock.locations.new')" widthClass="max-w-md" @close="locationOpen = false">
+      <div class="space-y-3">
+        <input v-model="locationForm.name" :placeholder="t('stock.locations.name')" maxlength="100" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        <input v-model="locationForm.code" :placeholder="t('stock.locations.code')" maxlength="50" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+        <label class="inline-flex items-center gap-2 text-sm"><input v-model="locationForm.is_active" type="checkbox" class="rounded border-neutral-300 text-primary-600" />{{ t('stock.warehouses.field_active') }}</label>
+        <div class="flex flex-wrap justify-end gap-2 pt-2 border-t border-neutral-100">
+          <button type="button" @click="locationOpen = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
+          <button type="button" @click="saveLocation" :class="btnFilled('primary')"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>{{ t('common.save') }}</button>
         </div>
       </div>
     </Modal>

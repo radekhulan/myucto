@@ -37,6 +37,9 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import MarkdownEditor from '@/components/ui/MarkdownEditor.vue'
+import ProductRelationsPanel from '@/components/stock/ProductRelationsPanel.vue'
+import ProductVariantInheritance from '@/components/stock/ProductVariantInheritance.vue'
+import type { ProductVariantContext, ProductWithMasterContext } from '@/api/productMasters'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -52,8 +55,8 @@ const canWriteEshop = computed(() => auth.canWrite('eshop.write'))
 const canSaveEditor = computed(() => auth.canWrite('stock.items.write') && (!isEdit.value || canWriteEshop.value))
 
 // ── Taby ────────────────────────────────────────────────────────────────
-type Tab = 'general' | 'languages' | 'categories' | 'parameters' | 'prices' | 'vendors' | 'attachments'
-const tabs: Tab[] = ['general', 'languages', 'categories', 'parameters', 'prices', 'vendors', 'attachments']
+type Tab = 'general' | 'languages' | 'master' | 'relations' | 'categories' | 'parameters' | 'prices' | 'vendors' | 'attachments'
+const tabs: Tab[] = ['general', 'languages', 'master', 'relations', 'categories', 'parameters', 'prices', 'vendors', 'attachments']
 const tab = ref<Tab>((tabs as string[]).includes(String(route.query.tab)) ? (route.query.tab as Tab) : 'general')
 watch(tab, (v) => {
   if (route.query.tab !== v) {
@@ -112,6 +115,7 @@ const errors = ref<Record<string, string[]>>({})
 const skuTouched = ref(false)
 const rowVersion = ref(0)
 const editorLoaded = ref(false)
+const variantContext = ref<ProductVariantContext | null>(null)
 const savedSnapshot = ref('')
 
 // ── Základní pole (skladová karta) ──────────────────────────────────────
@@ -120,6 +124,7 @@ const form = ref<StockItemPayload>({
   name: '',
   item_type: 'goods',
   unit: 'ks',
+  tracking_mode: 'none',
   ean: null,
   vat_rate_id: null,
   sale_price_without_vat: null,
@@ -570,7 +575,12 @@ async function loadCodebooks() {
 
 async function loadProduct(id: number) {
   editorLoaded.value = false
-  const p = await eshopApi.getProduct(id)
+  const p = await eshopApi.getProduct(id) as ProductWithMasterContext
+  variantContext.value = p.variant ? {
+    ...p.variant,
+    master_name: p.master?.name ?? p.variant.master_name,
+    effective: p.variant.effective ?? p.effective ?? undefined,
+  } : null
   rowVersion.value = p.row_version
   // základní pole
   form.value = {
@@ -578,6 +588,7 @@ async function loadProduct(id: number) {
     name: p.name,
     item_type: p.item_type,
     unit: p.unit,
+    tracking_mode: p.tracking_mode ?? 'none',
     ean: p.ean,
     vat_rate_id: p.vat_rate_id,
     sale_price_without_vat: p.sale_price_without_vat,
@@ -899,6 +910,8 @@ function onImgError(e: Event) {
           : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ tt === 'general' ? t('eshop.item.tab_general')
           : tt === 'languages' ? t('eshop.item.tab_languages')
+          : tt === 'master' ? t('eshop.item.tab_master')
+          : tt === 'relations' ? t('eshop.item.tab_relations')
           : tt === 'categories' ? t('eshop.item.tab_categories')
           : tt === 'parameters' ? t('eshop.item.tab_parameters')
           : tt === 'prices' ? t('eshop.item.tab_prices')
@@ -948,6 +961,14 @@ function onImgError(e: Event) {
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.field_ean') }}</label>
               <input v-model="form.ean" maxlength="20" class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.tracking.mode') }}</label>
+              <select v-model="form.tracking_mode" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
+                <option value="none">{{ t('stock.tracking.mode_none') }}</option>
+                <option value="lot">{{ t('stock.tracking.mode_lot') }}</option>
+                <option value="serial">{{ t('stock.tracking.mode_serial') }}</option>
+              </select>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.field_vat_rate') }}</label>
@@ -1027,6 +1048,13 @@ function onImgError(e: Event) {
                 {{ t('eshop.item.field_export') }}
               </label>
             </div>
+            <div v-if="isEdit && itemId && !eshop.is_stocked" class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary-500/20 bg-primary-50/50 px-3 py-2 text-sm dark:bg-primary-950/20">
+              <p class="text-neutral-700">{{ t('eshop.sets.editor_hint') }}</p>
+              <RouterLink :to="`/eshop/sets/${itemId}`" :class="btnOutline('primary')">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.tag" /></svg>
+                {{ t('eshop.sets.open') }}
+              </RouterLink>
+            </div>
           </div>
         </div>
       </div>
@@ -1104,6 +1132,21 @@ function onImgError(e: Event) {
           </div>
         </div>
       </div>
+
+      <ProductVariantInheritance v-if="isEdit && itemId && variantContext" v-show="tab === 'master'"
+        role="tabpanel" :id="`${pageId}-panel-master`" :aria-labelledby="`${pageId}-tab-master`"
+        :item-id="itemId" :row-version="rowVersion" :variant="variantContext" :can-write="canSaveEditor"
+        @updated="(value, version) => { variantContext = value; rowVersion = version }" />
+      <section v-else-if="isEdit && tab === 'master'" role="tabpanel" :id="`${pageId}-panel-master`" :aria-labelledby="`${pageId}-tab-master`" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+        <h2 class="text-lg font-semibold">{{ t('eshop.inheritance.title') }}</h2>
+        <p class="mt-1 text-sm text-neutral-500">{{ t('eshop.inheritance.not_variant') }}</p>
+        <RouterLink v-if="canSaveEditor" to="/eshop?tab=masters" :class="btnOutline('primary')" class="mt-4"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>{{ t('eshop.inheritance.choose_master') }}</RouterLink>
+      </section>
+
+      <ProductRelationsPanel v-if="isEdit && itemId" v-show="tab === 'relations'" role="tabpanel"
+        :id="`${pageId}-panel-relations`" :aria-labelledby="`${pageId}-tab-relations`"
+        :item-id="itemId" :can-write="canSaveEditor"
+        @updated="(version, previous) => { if (rowVersion === previous) rowVersion = version }" />
 
       <!-- ═══════════ TAB: KATEGORIE & ŠTÍTKY ═══════════ -->
       <div v-if="isEdit" v-show="tab === 'categories'" role="tabpanel" :id="`${pageId}-panel-categories`" :aria-labelledby="`${pageId}-tab-categories`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
@@ -1490,7 +1533,7 @@ function onImgError(e: Event) {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}
         </RouterLink>
-        <button v-if="tab !== 'attachments' && canSaveEditor" type="submit" :disabled="submitting || (isEdit && !editorLoaded)" :class="btnFilled('primary')">
+        <button v-if="!['attachments', 'master', 'relations'].includes(tab) && canSaveEditor" type="submit" :disabled="submitting || (isEdit && !editorLoaded)" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
         </button>

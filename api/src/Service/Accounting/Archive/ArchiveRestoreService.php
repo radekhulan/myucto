@@ -85,8 +85,13 @@ final class ArchiveRestoreService
         'tax_advance_schedules',
         // Sklad (jen pokud v archivu je):
         'warehouses',
+        'warehouse_locations',
         'stock_items',
+        'stock_item_units',
+        'stock_tracking_units',
         'manufacturers',
+        'product_masters',
+        'product_master_i18n',
         'stock_media',
         'stock_categories',
         'stock_category_i18n',
@@ -96,7 +101,12 @@ final class ArchiveRestoreService
         'stock_attributes',
         'stock_attribute_options',
         'stock_attribute_i18n',
+        'product_master_axes',
+        'product_variants',
+        'product_variant_options',
+        'product_variant_i18n_inheritance',
         'stock_item_attribute_values',
+        'stock_item_relations',
         'stock_fee_types',
         'stock_item_fees',
         'stock_item_prices',
@@ -105,9 +115,30 @@ final class ArchiveRestoreService
         'stock_levels',
         'stock_documents',
         'stock_document_lines',
+        'stock_tracking_allocations',
+        'stock_cycle_counts',
+        'stock_cycle_count_lines',
+        'stock_cycle_count_documents',
         'stock_landed_costs',
         'stock_takes',
         'stock_take_lines',
+        'product_sets',
+        'product_set_revisions',
+        'product_assemblies',
+        'sales_orders',
+        'sales_order_lines',
+        'sales_order_reservations',
+        'sales_order_operation_keys',
+        'sales_order_invoice_links',
+        'sales_order_returns',
+        'fulfillment_tasks',
+        'fulfillment_task_lines',
+        'fulfillment_scan_operations',
+        'fulfillment_shipments',
+        'fulfillment_shipment_items',
+        'fulfillment_returns',
+        'fulfillment_return_items',
+        'sales_order_fulfillment_links',
         'journal_entry_attachments',
         'exchange_rates',
     ];
@@ -120,6 +151,9 @@ final class ArchiveRestoreService
      * @var array<string, array<string,string>>
      */
     private const NONFK_REFS = [
+        'sales_order_fulfillment_links' => ['shipment_id' => 'fulfillment_shipments'],
+        'product_set_revisions' => ['stock_item_id' => 'stock_items'],
+        'product_assemblies' => ['issue_document_id' => 'stock_documents', 'receipt_document_id' => 'stock_documents'],
         'stock_documents' => [
             'stock_take_id' => 'stock_takes',
             'reversal_document_id' => 'stock_documents',
@@ -137,10 +171,19 @@ final class ArchiveRestoreService
 
     /** Tabulky bez sloupce `id` (PK = supplier_id / kompozit) — bez id-mapy. */
     private const NO_ID_TABLES = [
+        'sales_order_operation_keys',
+        'sales_order_invoice_links',
+        'sales_order_fulfillment_links',
         'accounting_supplier_settings',
         'stock_levels',
+        'product_sets',
+        'stock_cycle_count_documents',
         'stock_item_categories',
         'stock_item_tags',
+        'product_master_axes',
+        'product_variants',
+        'product_variant_options',
+        'product_variant_i18n_inheritance',
         'exchange_rates',
     ];
 
@@ -383,6 +426,17 @@ final class ArchiveRestoreService
             }
 
             $this->runDeferred($warnings);
+            if (isset($tables['product_variants'])) {
+                $variants = $pdo->prepare('SELECT master_id, stock_item_id FROM product_variants WHERE supplier_id = ?');
+                $variants->execute([$newSupplierId]);
+                $options = $pdo->prepare('SELECT attribute_id, option_id FROM product_variant_options WHERE supplier_id = ? AND master_id = ? AND stock_item_id = ? ORDER BY display_order, attribute_id');
+                $signature = $pdo->prepare('UPDATE product_variants SET option_signature = UNHEX(?) WHERE supplier_id = ? AND master_id = ? AND stock_item_id = ?');
+                foreach ($variants->fetchAll(\PDO::FETCH_ASSOC) as $variant) {
+                    $keys = [$newSupplierId, $variant['master_id'], $variant['stock_item_id']];
+                    $options->execute($keys);
+                    $signature->execute([\MyInvoice\Service\Eshop\ProductMasterService::optionSignature($options->fetchAll(\PDO::FETCH_ASSOC)), ...$keys]);
+                }
+            }
             $this->copyAttachmentBinaries($manifest, $tmpDir, $oldSupplierId, $newSupplierId, $warnings);
 
             $balance = $this->checkBalance($newSupplierId);
@@ -514,13 +568,21 @@ final class ArchiveRestoreService
      */
     private function buildInsert(string $table, array $row, int $target, array $processedSet, array &$warnings): array
     {
+        $row = $this->remapStockSnapshots($table, $row);
         $cols = [];
         $vals = [];
         $defers = [];
         $fks = $this->fkGraph[$table] ?? [];
+        if (in_array($table, ['product_variant_options', 'product_variant_i18n_inheritance'], true)) {
+            $fks['master_id'] = 'product_masters';
+            $fks['stock_item_id'] = 'stock_items';
+        }
         $nonFk = self::NONFK_REFS[$table] ?? [];
 
         foreach ($row as $col => $val) {
+            if ($table === 'product_variants' && $col === 'option_signature') {
+                continue;
+            }
             if ($col === 'id') {
                 continue; // AUTO_INCREMENT přidělí nové
             }
@@ -570,6 +632,87 @@ final class ArchiveRestoreService
         }
 
         return [$cols, $vals, $defers];
+    }
+
+    private function remapStockSnapshots(string $table, array $row): array
+    {
+        $columns = match ($table) {
+            'stock_document_lines' => ['tracking_input_json'],
+            'product_sets', 'product_set_revisions' => ['definition_json'],
+            'product_assemblies' => ['definition_json', 'components_json'],
+            'sales_order_lines' => ['product_snapshot', 'component_snapshot'],
+            'sales_order_operation_keys' => ['result_json'],
+            'fulfillment_tasks' => ['source_snapshot'],
+            'fulfillment_task_lines', 'fulfillment_return_items' => ['component_snapshot'],
+            'fulfillment_scan_operations' => ['payload_json', 'result_json'],
+            'fulfillment_shipment_items' => ['tracking_snapshot'],
+            default => [],
+        };
+        $remapId = function (string $reference, mixed $value): mixed {
+            if ($value === null || (string) $value === '0') return $value;
+            $mapped = $this->maps[$reference][(int) $value]
+                ?? throw new RestoreException('snapshot_reference', 'Chybí mapování ' . $reference . ' #' . $value . ' v historickém skladovém obsahu.');
+            return is_string($value) ? (string) $mapped : $mapped;
+        };
+        $references = [
+            'stock_item_id' => 'stock_items', 'item_id' => 'stock_items',
+            'warehouse_id' => 'warehouses', 'warehouse_to_id' => 'warehouses',
+            'order_id' => 'sales_orders', 'invoice_id' => 'invoices',
+            'invoice_item_id' => 'invoice_items',
+            'issue_document_line_id' => 'stock_document_lines',
+            'task_id' => 'fulfillment_tasks', 'task_line_id' => 'fulfillment_task_lines',
+            'stock_tracking_unit_id' => 'stock_tracking_units',
+            'location_id' => 'warehouse_locations', 'location_to_id' => 'warehouse_locations',
+        ];
+        $walk = function (array $value) use (&$walk, $remapId, $references): array {
+            foreach ($value as $key => $entry) {
+                if ($key === 'id' && ($value['kind'] ?? null) === 'stock_item') {
+                    $value[$key] = $remapId('stock_items', $entry);
+                } elseif (in_array($key, ['definition_snapshot', 'selections'], true) && is_array($entry)) {
+                    $value[$key] = [];
+                    foreach ($entry as $itemId => $definition) $value[$key][$remapId('stock_items', $itemId)] = is_array($definition) ? $walk($definition) : $definition;
+                } elseif ($key === 'component_cards' && is_array($entry)) {
+                    $value[$key] = array_map(static function (array $card) use ($remapId): array {
+                        $card['id'] = $remapId('stock_items', $card['id']);
+                        return $card;
+                    }, $entry);
+                } elseif (isset($references[$key]) && !is_array($entry)) {
+                    $value[$key] = $remapId($references[$key], $entry);
+                } elseif ($key === 'source_id' && ($value['source_type'] ?? null) === 'stock_issue_draft') {
+                    $value[$key] = $remapId('stock_documents', $entry);
+                } elseif ($key === 'source_line_id' && ($value['source_type'] ?? null) === 'stock_issue_draft') {
+                    $value[$key] = $remapId('stock_document_lines', $entry);
+                } elseif ($key === 'components' && is_array($entry) && $entry !== [] && !is_array(reset($entry))) {
+                    $value[$key] = [];
+                    foreach ($entry as $itemId => $quantity) $value[$key][$remapId('stock_items', $itemId)] = $quantity;
+                } elseif (is_array($entry)) {
+                    $value[$key] = $walk($entry);
+                }
+            }
+            return $value;
+        };
+        foreach ($columns as $column) {
+            if (!isset($row[$column])) continue;
+            $value = json_decode((string) $row[$column], true, 512, JSON_THROW_ON_ERROR);
+            $row[$column] = json_encode($walk($value), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        }
+        if ($table === 'fulfillment_tasks' && $row['source_type'] === 'stock_issue_draft') {
+            $row['source_id'] = $remapId('stock_documents', $row['source_id']);
+        }
+        if ($table === 'fulfillment_task_lines') {
+            $snapshot = json_decode($row['component_snapshot'], true, 512, JSON_THROW_ON_ERROR);
+            if (($snapshot['source_type'] ?? null) === 'stock_issue_draft') $row['source_line_id'] = $snapshot['source_line_id'];
+        }
+        if ($table === 'fulfillment_scan_operations') $row['payload_hash'] = hash('sha256', $row['payload_json']);
+        if ($table === 'stock_cycle_counts') {
+            $row['preparation_job_id'] = null;
+            if (in_array($row['status'], ['queued', 'running'], true)) $row['status'] = 'failed';
+            foreach (['cutoff_document_line_id' => 'stock_document_lines', 'cutoff_allocation_id' => 'stock_tracking_allocations'] as $column => $reference) {
+                $eligible = array_filter($this->maps[$reference] ?? [], static fn (int $oldId): bool => $oldId <= (int) $row[$column], ARRAY_FILTER_USE_KEY);
+                $row[$column] = $eligible === [] ? 0 : max($eligible);
+            }
+        }
+        return $row;
     }
 
     /**
@@ -847,8 +990,26 @@ final class ArchiveRestoreService
         $this->fkGraph = [];
         $this->nullable = [];
         $this->generated = [];
+        $references = [];
         foreach ($snapshot['foreignKeyRows'] as $r) {
-            $this->fkGraph[(string) $r['TABLE_NAME']][(string) $r['COLUMN_NAME']] = (string) $r['REFERENCED_TABLE_NAME'];
+            $references[(string) $r['TABLE_NAME']][(string) $r['COLUMN_NAME']] = [(string) $r['REFERENCED_TABLE_NAME'], (string) $r['REFERENCED_COLUMN_NAME']];
+        }
+        foreach ($references as $table => $columns) {
+            if (!in_array($table, $tables, true)) continue;
+            foreach ($columns as $column => [$referenceTable, $referenceColumn]) {
+                if ($column === 'supplier_id') {
+                    $this->fkGraph[$table][$column] = 'supplier';
+                    continue;
+                }
+                $visited = [];
+                while ($referenceColumn !== 'id' && isset($references[$referenceTable][$referenceColumn])) {
+                    $key = $referenceTable . '.' . $referenceColumn;
+                    if (isset($visited[$key])) throw new RestoreException('reference_cycle', 'Cyklická reference kompozitního klíče ' . $key);
+                    $visited[$key] = true;
+                    [$referenceTable, $referenceColumn] = $references[$referenceTable][$referenceColumn];
+                }
+                $this->fkGraph[$table][$column] = $referenceTable;
+            }
         }
         $tenantCols = [];
         foreach ($snapshot['columns'] as $t => $columns) {

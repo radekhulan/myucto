@@ -128,12 +128,29 @@ final class ProductEditorService
             throw new EshopException('validation_failed', 'Neplatný typ skladové karty.', 400);
         }
         $unit = trim((string) ($input['unit'] ?? 'ks'));
+        $trackingMode = (string) ($input['tracking_mode'] ?? $existing['tracking_mode'] ?? 'none');
+        if (!in_array($trackingMode, ['none', 'lot', 'serial'], true)) {
+            throw new EshopException('validation_failed', 'Neplatný režim sledování skladové karty.', 400);
+        }
+        if ($trackingMode !== ($existing['tracking_mode'] ?? 'none')) {
+            $stmt = $this->db->pdo()->prepare('SELECT 1 FROM stock_tracking_units WHERE supplier_id = ? AND stock_item_id = ? LIMIT 1');
+            $stmt->execute([$supplierId, $itemId]);
+            if ($stmt->fetchColumn() !== false) {
+                throw new EshopException('tracking_mode_in_use', 'Režim sledování nelze změnit po prvním pohybu.', 409);
+            }
+            $stmt = $this->db->pdo()->prepare('SELECT 1 FROM stock_levels WHERE supplier_id = ? AND stock_item_id = ? AND qty <> 0 LIMIT 1');
+            $stmt->execute([$supplierId, $itemId]);
+            if ($stmt->fetchColumn() !== false) {
+                throw new EshopException('tracking_mode_stock_exists', 'Režim sledování lze zapnout jen při nulovém stavu karty.', 409);
+            }
+        }
 
         return [
             'sku' => $sku,
             'name' => $name,
             'item_type' => $itemType,
             'unit' => $unit === '' ? 'ks' : $unit,
+            'tracking_mode' => $trackingMode,
             'ean' => $this->stringOrNull($input['ean'] ?? null),
             'vat_rate_id' => $this->intOrNull($input['vat_rate_id'] ?? null),
             'sale_price_without_vat' => $this->decimalOrNull($input['sale_price_without_vat'] ?? null),

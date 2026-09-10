@@ -7,8 +7,10 @@ namespace MyInvoice\Service\Tax\Return;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\AccountingModeRepository;
+use MyInvoice\Repository\PayrollMonthlyRecordRepository;
 use MyInvoice\Repository\TaxProfileRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Payroll\Report\PayrollAnnualReportService;
 use MyInvoice\Service\Tax\DpfoCalculator;
 use MyInvoice\Service\TaxEvidence\CashJournalService;
 use MyInvoice\Service\Vat\VatStatusService;
@@ -43,6 +45,9 @@ final class DpfoReturnDataProvider
         private readonly NonDeductibleCostsService $nonDeductibleCostsService,
         private readonly AccountingModeRepository $accountingModes,
         private readonly VatStatusService $vatStatus,
+        // Mzdy pro `kc_dpfmz18` — obě agendy najednou, viz payrollGross().
+        private readonly PayrollAnnualReportService $payrollReports,
+        private readonly PayrollMonthlyRecordRepository $payrollRecords,
     ) {}
 
     /**
@@ -130,6 +135,11 @@ final class DpfoReturnDataProvider
         $decrease = round((float) ($closing['adjustments']['decrease'] ?? 0), 2);
         $base = round($income - $expenses + $increase - $decrease, 2);
 
+        [$payrollGross, $payrollWarning] = $this->payrollGross($supplierId, $year);
+        if ($payrollWarning !== null) {
+            $warnings[] = $payrollWarning;
+        }
+
         return [
             'year' => $year,
             'profile' => $profile,
@@ -144,6 +154,13 @@ final class DpfoReturnDataProvider
             'closing' => $closing,
             's7_increase' => $increase,
             's7_decrease' => $decrease,
+            // Položkový rozpis oddílu E Přílohy č. 1 (VetaC/VetaE) — ze stejných řádků,
+            // ze kterých se sčítá $increase/$decrease výše, viz closing().
+            's7_increase_items' => (array) (($closing['adjustment_items'] ?? [])['increase'] ?? []),
+            's7_decrease_items' => (array) (($closing['adjustment_items'] ?? [])['decrease'] ?? []),
+            // Mzdy (Příloha 1, `kc_dpfmz18`) — toková veličina ze mzdové agendy, ne stav
+            // k datu; null = agenda nic za rok nedává (nevyplňuje se a nevaruje se).
+            'payroll_gross' => $payrollGross,
             'source_manifest' => (array) ($cash['source_manifest'] ?? []),
             'blocking_issues' => $blockingIssues,
             'warnings' => $warnings,
@@ -305,6 +322,60 @@ final class DpfoReturnDataProvider
         }
     }
 
+    /**
+     * Údaj „Mzdy" Přílohy č. 1 (`kc_dpfmz18`): celkový objem zúčtovaných mezd za
+     * zdaňovací období podle úředního popisu struktury DPFDP7 („Údaje o mzdách se
+     * přebírají ze mzdové agendy … Uveďte celkový objem zúčtovaných mezd za zdaňovací
+     * období."). Je to TOKOVÁ veličina, ne stav k datu — proto k němu neexistuje
+     * protějšek `kc_z_dpfmz18` a nepatří do tabulky majetku a dluhů.
+     *
+     * Mzdy můžou v aplikaci běžet dvěma cestami a rok se mezi ně smí rozpůlit:
+     * modul Mzdy (schválené revize běhů) a ruční mzdová rekapitulace v Účetnictví
+     * (`payroll_monthly_records`). Dvojímu započtení brání rezervace období
+     * ({@see \MyInvoice\Service\Payroll\PayrollPeriodOwnershipService}): měsíc převzatý
+     * modulem se v rekapitulaci odloží (`retired_at`) a čtení ho vynechává. Součet
+     * obou cest je proto úhrn roku, ne dvojnásobek.
+     *
+     * @return array{0:?float,1:?string} [úhrn v Kč nebo null, varování nebo null]
+     */
+    private function payrollGross(int $supplierId, int $year): array
+    {
+        $total = null;
+        $warning = null;
+
+        try {
+            $report = $this->payrollReports->report($supplierId, $year);
+            $grossMinor = $report['totals']['gross_minor'] ?? null;
+            if ((int) ($report['totals']['approved_revision_count'] ?? 0) > 0) {
+                if ($grossMinor === null) {
+                    // Schválená revize existuje, ale úhrn z ní přečíst nejde. Odhadnout
+                    // ho nelze a tiše poslat 0 už vůbec — údaj zůstane prázdný a účetní
+                    // se to dozví (zásada „radši prázdný atribut a varování").
+                    $warning = 'Mzdový modul má za rok schválené mzdové běhy, ale úhrn hrubých mezd z nich '
+                        . 'nejde přečíst — údaj „Mzdy" v Příloze č. 1 (kc_dpfmz18) zůstane prázdný. '
+                        . 'Doplňte ho ve formuláři přiznání ručně podle rekapitulace mezd.';
+                } else {
+                    $total = round((int) $grossMinor / 100, 2);
+                }
+            }
+        } catch (\Throwable $e) {
+            $warning = 'Úhrn hrubých mezd ze mzdového modulu se nepodařilo načíst ('
+                . $e->getMessage() . ') — údaj „Mzdy" v Příloze č. 1 zůstane prázdný.';
+        }
+
+        try {
+            $legacy = $this->payrollRecords->annualGross($supplierId, $year);
+            if ($legacy !== null) {
+                $total = round(($total ?? 0.0) + $legacy, 2);
+            }
+        } catch (\Throwable) {
+            // Ruční rekapitulace nemusí být v instalaci vůbec použitá — nečteme z ní
+            // nic povinného, takže selhání jen znamená „tahle cesta nic nedává".
+        }
+
+        return [$total, $warning];
+    }
+
     /** @return array<string,mixed>|null */
     private function closing(int $supplierId, int $year): ?array
     {
@@ -318,14 +389,33 @@ final class DpfoReturnDataProvider
         if ($row === false) {
             return null;
         }
+        // Položky, ne jen součty: oddíl E Přílohy č. 1 (VetaC/VetaE) chce ke každé úpravě
+        // § 23 vlastní řádek s popisem. Dokud se sem četlo jen `SUM(amount) GROUP BY
+        // direction`, jel stavěč XML v produkci VŽDY fallback větví „jeden souhrnný řádek
+        // + varování", přestože položky v téhle tabulce jsou. Souhrn se dopočítává ze
+        // stejných řádků, takže úhrn na ř. 105/106 a součet položek nemohou rozejít.
         $adjust = $this->db->pdo()->prepare(
-            "SELECT direction, COALESCE(SUM(amount),0) total FROM tax_evidence_non_cash_adjustments
-              WHERE supplier_id = ? AND closing_id = ? GROUP BY direction"
+            "SELECT direction, amount, description, evidence_ref, adjustment_on
+               FROM tax_evidence_non_cash_adjustments
+              WHERE supplier_id = ? AND closing_id = ?
+              ORDER BY adjustment_on, id"
         );
         $adjust->execute([$supplierId, (int) $row['id']]);
         $sums = ['increase' => 0.0, 'decrease' => 0.0, 'neutral' => 0.0];
-        foreach ($adjust->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $sum) {
-            $sums[(string) $sum['direction']] = round((float) $sum['total'], 2);
+        $items = ['increase' => [], 'decrease' => [], 'neutral' => []];
+        foreach ($adjust->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $adjustment) {
+            $direction = (string) $adjustment['direction'];
+            if (!array_key_exists($direction, $sums)) {
+                continue;
+            }
+            $amount = round((float) $adjustment['amount'], 2);
+            $sums[$direction] = round($sums[$direction] + $amount, 2);
+            $items[$direction][] = [
+                'amount' => $amount,
+                'description' => (string) ($adjustment['description'] ?? ''),
+                'evidence_ref' => (string) ($adjustment['evidence_ref'] ?? ''),
+                'date' => (string) ($adjustment['adjustment_on'] ?? ''),
+            ];
         }
         foreach (['checklist', 'opening_balances', 'closing_balances', 'unsupported_cases', 'source_snapshot'] as $key) {
             $decoded = json_decode((string) ($row[$key] ?? ''), true);
@@ -334,6 +424,7 @@ final class DpfoReturnDataProvider
         $row['id'] = (int) $row['id'];
         $row['row_version'] = (int) $row['row_version'];
         $row['adjustments'] = $sums;
+        $row['adjustment_items'] = $items;
         return $row;
     }
 

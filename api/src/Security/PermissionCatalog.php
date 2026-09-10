@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-08-client-company-settings-health-evidence-v1';
+    public const VERSION = '2026-09-stock-fulfillment-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -121,12 +121,15 @@ final class PermissionCatalog
             ['stock', 'stock', 'Sklad', $staffOnly],
             ['stock.items.write', 'stock', 'Skladové karty', $staffOnly],
             ['stock.documents.write', 'stock', 'Skladové doklady', $staffOnly],
+            ['stock.fulfillment.write', 'stock', 'Vychystání a expedice', $staffOnly],
+            ['stock.fulfillment.override', 'stock', 'Odchylky při vychystání', $staffOnly],
             ['stock.orders.write', 'stock', 'Objednávky dodavatelům', $staffOnly],
             ['stock.vendors.write', 'stock', 'Nabídky dodavatelů', $staffOnly],
             ['stock.take', 'stock', 'Inventura', $staffOnly],
             ['stock.close', 'stock', 'Skladová uzávěrka', $staffOnly],
             ['eshop', 'eshop', 'E-shop číselníky', $staffOnly],
             ['eshop.write', 'eshop', 'Spravovat e-shop číselníky', $staffOnly],
+            ['eshop.integrations', 'eshop', 'Spravovat integrace e-shopu', $staffOnly],
             ['logbook', 'logbook', 'Kniha jízd', $staffOnly],
             ['logbook.write', 'logbook', 'Spravovat knihu jízd', $staffOnly],
             ['logbook.import', 'logbook', 'Importovat jízdy', $staffOnly],

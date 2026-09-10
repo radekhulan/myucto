@@ -30,6 +30,7 @@ final class TaxReturnApiTest extends TestCase
 
     private Connection $db;
     private TaxReturnAction $action;
+    private \MyInvoice\Service\Tax\Return\TaxReturnService $returns;
     private AccountingPeriodRepository $periods;
     private int $supplierId = 0;
     private int $userId = 0;
@@ -49,6 +50,7 @@ final class TaxReturnApiTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(TaxReturnAction::class);
+            $this->returns = $container->get(\MyInvoice\Service\Tax\Return\TaxReturnService::class);
             $this->periods = $container->get(AccountingPeriodRepository::class);
             $seeder = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
@@ -211,6 +213,49 @@ final class TaxReturnApiTest extends TestCase
         self::assertSame(1, $subCount);
         $lastSub = $pdo->query("SELECT last_submission_id FROM income_tax_returns WHERE supplier_id = {$this->supplierId} AND taxpayer_type = 'po'")->fetchColumn();
         self::assertNotNull($lastSub);
+    }
+
+    /**
+     * P-1 — blokující nepodporovaný případ nesmí projít až k ostrému XML. Před touhle
+     * bránou se investičnímu fondu vygenerovalo a zarchivovalo přiznání s natvrdo
+     * zapsaným typem poplatníka „1" (ostatní), tedy podání tvrdící o poplatníkovi
+     * nepravdu — a nikdo se to nedozvěděl.
+     */
+    public function testBlockingUnsupportedCaseStopsXmlIssue(): void
+    {
+        $pdo = $this->db->pdo();
+        if ($pdo->query("SHOW COLUMNS FROM supplier LIKE 'epo_taxpayer_code'")->fetch() === false) {
+            self::markTestSkipped('Migrace 1782 (příznaky nepodporovaných případů) neproběhla.');
+        }
+        $args = ['type' => 'po', 'year' => (string) self::YEAR];
+
+        // Bez příznaku se XML vydá (kontrolní vzorek — brána nesmí blokovat běžnou firmu).
+        [$req, $res] = $this->req('GET', '/api/tax-return/po/' . self::YEAR . '/xml');
+        self::assertSame(200, $this->action->xml($req, $res, $args)->getStatusCode());
+
+        $pdo->prepare("UPDATE supplier SET epo_taxpayer_code = '4' WHERE id = ?")->execute([$this->supplierId]);
+
+        [$req, $res] = $this->req('GET', '/api/tax-return/po/' . self::YEAR . '/xml');
+        $r = $this->action->xml($req, $res, $args);
+        self::assertSame(422, $r->getStatusCode());
+        self::assertSame('unsupported_case_blocked', $this->json($r)['error']['code']);
+
+        // Typ poplatníka z nastavení firmy se skutečně dostane do XML místo natvrdo
+        // zapsané „1" — podklad (náhled/uzávěrkový balíček) se staví i s nálezem,
+        // blokované je až vydání ostrého XML výše.
+        $pdo->prepare("UPDATE supplier SET epo_taxpayer_code = '3' WHERE id = ?")->execute([$this->supplierId]);
+        $built = $this->returns->buildXml($this->supplierId, self::YEAR, 'po');
+        self::assertStringContainsString('typ_popldpp="3"', $built['xml']);
+        self::assertContains(
+            'taxpayer_type_unsupported',
+            array_column($built['unsupported_cases'], 'key'),
+        );
+
+        // Finalizace stojí na téže bráně.
+        [$req, $res] = $this->req('POST', '/api/tax-return/po/' . self::YEAR . '/finalize', ['row_version' => 1]);
+        $r = $this->action->finalize($req, $res, $args);
+        self::assertSame(422, $r->getStatusCode());
+        self::assertSame('prefinalize_blocked', $this->json($r)['error']['code']);
     }
 
     public function testReadonlyCannotWrite(): void

@@ -4,7 +4,8 @@ import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   stockApi, type StockDocument, type StockDocType, type StockDocumentPayload, type Warehouse,
-  type StockItemSearchResult, type LandedCostAllocation,
+  type StockItemSearchResult, type LandedCostAllocation, type StockTrackingMode,
+  type TrackingAllocationInput, type WarehouseLocation,
 } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -41,11 +42,15 @@ interface LineRow {
   purchase_invoice_item_id: number | null
   source_description: string | null
   source_qty: string | null
+  tracking_mode: StockTrackingMode
+  tracking_allocations: TrackingAllocationInput[]
+  tracking_units: Array<{ unit_code: string; numerator: number; denominator: number }>
 }
 function blankLine(): LineRow {
   return {
     stock_item_id: null, qty: '1', unit_cost: '', extra_cost: '', note: '', option: null,
     purchase_invoice_item_id: null, source_description: null, source_qty: null,
+    tracking_mode: 'none', tracking_allocations: [], tracking_units: [],
   }
 }
 
@@ -58,6 +63,7 @@ const form = reactive({
   partner_name: '',
 })
 const lines = ref<LineRow[]>([blankLine()])
+const locations = ref<WarehouseLocation[]>([])
 
 // L3: částky drž jako string (DECIMAL konvence) — přepočet do haléřů až v alokátoru.
 interface LandedCostRow { description: string; amount: string; allocation: LandedCostAllocation }
@@ -112,6 +118,7 @@ const isReceipt = computed(() => form.doc_type === 'receipt')
 
 async function loadRefData() {
   try { warehouses.value = await stockApi.listWarehouses(true) } catch { warehouses.value = [] }
+  try { locations.value = await stockApi.listLocations() } catch { locations.value = [] }
 }
 
 async function onSearch(rowIndex: number, q: string) {
@@ -126,14 +133,24 @@ async function onSearch(rowIndex: number, q: string) {
     }))
   } catch { rowOptions[rowIndex] = [] } finally { rowLoading[rowIndex] = false }
 }
+async function loadTrackingUnits(row: LineRow, itemId: number) {
+  if (row.tracking_mode === 'none') { row.tracking_units = []; return }
+  try {
+    const units = (await stockApi.itemTracking(itemId)).units
+    if (row.stock_item_id === itemId) row.tracking_units = units
+  } catch { if (row.stock_item_id === itemId) row.tracking_units = [] }
+}
 function onSelect(rowIndex: number, itemId: number | null) {
   const row = lines.value[rowIndex]
   if (!row) return
   row.stock_item_id = itemId
-  if (itemId === null) { row.option = null; return }
+  if (itemId === null) { row.option = null; row.tracking_mode = 'none'; row.tracking_allocations = []; row.tracking_units = []; return }
   const si = itemsCache.get(itemId)
   if (si) {
     row.option = { value: si.id, label: `${si.sku} — ${si.name}`, secondary: si.unit }
+    row.tracking_mode = si.tracking_mode ?? 'none'
+    row.tracking_allocations = []
+    void loadTrackingUnits(row, itemId)
     if (isReceipt.value && !row.unit_cost && si.sale_price_without_vat != null) {
       row.unit_cost = si.sale_price_without_vat
     }
@@ -143,6 +160,10 @@ function onSelect(rowIndex: number, itemId: number | null) {
 
 function addLine() { lines.value.push(blankLine()) }
 function removeLine(i: number) { lines.value.splice(i, 1) }
+function addTracking(row: LineRow) {
+  row.tracking_allocations.push({ quantity: row.tracking_mode === 'serial' ? '1.000' : row.qty, serial_number: null, lot_code: null, expires_on: null, location_id: null, location_to_id: null })
+}
+function locationsFor(warehouseId: number | null) { return locations.value.filter(l => l.warehouse_id === warehouseId && l.is_active) }
 function addLandedCost() { landedCosts.value.push({ description: '', amount: '', allocation: 'by_value' }) }
 function removeLandedCost(i: number) { landedCosts.value.splice(i, 1) }
 
@@ -182,9 +203,13 @@ async function loadDocument() {
         purchase_invoice_item_id: l.purchase_invoice_item_id ?? null,
         source_description: l.source_description ?? null,
         source_qty: l.source_qty != null ? String(l.source_qty) : null,
+        tracking_mode: l.tracking_mode ?? 'none',
+        tracking_allocations: (l.tracking_allocations ?? []).map(a => ({ ...a, unit_code: a.unit_code ?? '' })),
+        tracking_units: [],
       }
       return row
     })
+    await Promise.all(lines.value.filter(row => row.stock_item_id !== null).map(row => loadTrackingUnits(row, row.stock_item_id as number)))
     if (lines.value.length === 0) lines.value = [blankLine()]
     await refreshAvailability()
   } catch (e: any) {
@@ -251,6 +276,7 @@ function buildPayload(): StockDocumentPayload {
         source_description: l.source_description ?? undefined,
         source_qty: l.source_qty ?? undefined,
         note: l.note.trim() || undefined,
+        tracking_allocations: l.tracking_mode === 'none' ? undefined : l.tracking_allocations,
       }
     }),
   }
@@ -517,6 +543,35 @@ onMounted(async () => {
                 class="cursor-pointer w-9 h-9 inline-flex items-center justify-center text-danger-500 hover:bg-danger-50 rounded-md">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
               </button>
+            </div>
+            <div v-if="row.tracking_mode !== 'none'" class="sm:col-span-12 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
+              <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <p class="text-xs font-semibold text-neutral-700">{{ t(`stock.tracking.mode_${row.tracking_mode}`) }}</p>
+                <button v-if="!readOnly" type="button" @click="addTracking(row)" :class="btnOutline('primary')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                  {{ t('stock.tracking.add_allocation') }}
+                </button>
+              </div>
+              <p v-if="row.tracking_allocations.length === 0" class="text-xs text-warning-600">{{ t('stock.tracking.required_hint') }}</p>
+              <div v-for="(allocation, ai) in row.tracking_allocations" :key="ai" class="grid grid-cols-1 sm:grid-cols-7 gap-2 mb-2">
+                <input v-if="row.tracking_mode === 'serial'" v-model="allocation.serial_number" :disabled="readOnly" :placeholder="t('stock.tracking.serial_number')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+                <input v-else v-model="allocation.lot_code" :disabled="readOnly" :placeholder="t('stock.tracking.lot_code')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+                <input v-if="row.tracking_mode === 'lot'" v-model="allocation.expires_on" type="date" :disabled="readOnly" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                <input v-model="allocation.quantity" type="number" step="0.001" min="0.001" :disabled="readOnly || row.tracking_mode === 'serial'" class="h-9 px-2 border border-neutral-300 rounded-md text-sm text-right font-mono" />
+                <select v-model="allocation.unit_code" :disabled="readOnly || row.tracking_mode === 'serial'" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm">
+                  <option value="">{{ t('stock.tracking.base_unit', { unit: row.option?.secondary ?? '' }) }}</option>
+                  <option v-for="unit in row.tracking_units" :key="unit.unit_code" :value="unit.unit_code">{{ unit.unit_code }} ({{ unit.numerator }}/{{ unit.denominator }})</option>
+                </select>
+                <select v-model="allocation.location_id" :disabled="readOnly" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm">
+                  <option :value="null">{{ t('stock.tracking.no_location') }}</option>
+                  <option v-for="location in locationsFor(form.warehouse_id)" :key="location.id" :value="location.id">{{ location.code }} - {{ location.name }}</option>
+                </select>
+                <select v-if="isTransfer" v-model="allocation.location_to_id" :disabled="readOnly" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm">
+                  <option :value="null">{{ t('stock.tracking.no_location') }}</option>
+                  <option v-for="location in locationsFor(form.warehouse_to_id)" :key="location.id" :value="location.id">{{ location.code }} - {{ location.name }}</option>
+                </select>
+                <button v-if="!readOnly" type="button" @click="row.tracking_allocations.splice(ai, 1)" :class="btnOutline('danger')">{{ t('common.delete') }}</button>
+              </div>
             </div>
           </div>
         </div>

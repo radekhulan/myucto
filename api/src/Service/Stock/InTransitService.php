@@ -44,7 +44,10 @@ final class InTransitService
 
         $onHand    = $this->repo->onHandForItems($supplierId, $ids, $warehouseId);
         $inTransit = $this->repo->forItems($supplierId, $ids, $warehouseId);
-        $reserved  = $this->repo->reservedForItems($supplierId, $ids, $warehouseId);
+        $reserved  = [
+            ...$this->repo->reservedForItems($supplierId, $ids, $warehouseId),
+            ...$this->repo->salesOrderReservedForItems($supplierId, $ids, $warehouseId),
+        ];
         $orders    = $this->repo->ordersForItems($supplierId, $ids, $warehouseId);
         $offers    = $this->repo->vendorOffersForItems($supplierId, $ids);
 
@@ -194,11 +197,15 @@ final class InTransitService
      */
     public function reservations(int $supplierId, array $itemIds = [], ?int $warehouseId = null): array
     {
-        $rows = $this->repo->reservedForItems($supplierId, $itemIds, $warehouseId);
+        $rows = [
+            ...$this->repo->reservedForItems($supplierId, $itemIds, $warehouseId),
+            ...$this->repo->salesOrderReservedForItems($supplierId, $itemIds, $warehouseId),
+        ];
         if ($rows === []) {
             return [];
         }
         $invoices = $this->repo->reservationInvoices($supplierId, $itemIds, $warehouseId);
+        $orders = $this->repo->reservationSalesOrders($supplierId, $itemIds, $warehouseId);
 
         // Rezervace se v odpovědi agregují per KARTA (sklad je jen filtr) — uživatel
         // se ptá „co drží tenhle kus", ne „co ho drží na tomhle regálu".
@@ -225,6 +232,10 @@ final class InTransitService
                 'invoices'      => array_values(array_filter(
                     $invoices,
                     static fn (array $i): bool => $i['stock_item_id'] === (int) $id,
+                )),
+                'sales_orders'  => array_values(array_filter(
+                    $orders,
+                    static fn (array $order): bool => $order['stock_item_id'] === (int) $id,
                 )),
             ];
         }

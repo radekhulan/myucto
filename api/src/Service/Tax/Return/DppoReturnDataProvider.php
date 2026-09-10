@@ -46,6 +46,9 @@ final class DppoReturnDataProvider
         private readonly ?UnpaidLiabilityService $unpaidLiabilities = null,
         // § 23/7 — volitelná ze stejného důvodu jako předchozí dvě.
         private readonly ?\MyInvoice\Service\Tax\RelatedPartyService $relatedParties = null,
+        // Tabulka C přílohy č. 1 II. oddílu (VetaG) — volitelná ze stejného důvodu:
+        // bez ní se rozpad zákonných OP a rezerv jen přeskočí a builder varuje.
+        private readonly ?LegalProvisionLedgerService $legalProvisions = null,
     ) {}
 
     /**
@@ -65,6 +68,7 @@ final class DppoReturnDataProvider
      *   disposal_tax_increase: float, disposal_tax_decrease: float,
      *   disposals: list<array<string,mixed>>,
      *   closing_projection: array<string,mixed>,
+     *   legal_provisions: array<string,mixed>,
      *   suggestions: array{addbacks:list<array<string,mixed>>,deductions:list<array<string,mixed>>,unpaid_liabilities:array<string,mixed>},
      *   warnings: list<string>
      * }
@@ -91,6 +95,7 @@ final class DppoReturnDataProvider
                 'disposal_tax_decrease' => 0.0,
                 'disposals' => [],
                 'closing_projection' => (new ClosingProjectionCalculator())->project(0.0, []),
+                'legal_provisions' => LegalProvisionLedgerService::empty(),
                 'suggestions' => ['addbacks' => [], 'deductions' => []],
                 'warnings' => array_merge($warnings, [
                     'Pro rok ' . $year . ' neexistuje účetní období — podklady z deníku nejsou k dispozici. Zkontrolujte, že je zapnuté podvojné účetnictví a účetní období založené.',
@@ -109,6 +114,12 @@ final class DppoReturnDataProvider
         $relatedPartyAppendix = $this->relatedPartyAppendix($supplierId, $startsOn, $endsOn);
         [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
         $projection = $this->closingProjection($supplierId, (int) $period['id'], $endsOn, $vh);
+        // Tabulka C přílohy č. 1 II. oddílu (VetaG) — zákonné OP k pohledávkám (§8/§8a/§8b/§8c)
+        // a zákonné rezervy (§7). Bez služby (unit testy nad SQLite) zůstane prázdný podklad
+        // a builder z toho udělá varování, ne tichou nulu.
+        $legalProvisions = $this->legalProvisions !== null
+            ? $this->legalProvisions->forPeriod($supplierId, (int) $period['id'], $startsOn, $endsOn)
+            : LegalProvisionLedgerService::empty();
         $suggestions = [
             'addbacks' => $this->addbackSuggestions($supplierId, $startsOn, $endsOn),
             'deductions' => $this->deductionSuggestions($supplierId, $startsOn, $endsOn),
@@ -126,7 +137,16 @@ final class DppoReturnDataProvider
         ];
 
         return [
-            'period' => ['id' => (int) $period['id'], 'starts_on' => $startsOn, 'ends_on' => $endsOn],
+            'period' => [
+                'id' => (int) $period['id'],
+                'starts_on' => $startsOn,
+                'ends_on' => $endsOn,
+                // Existuje starší účetní období? Rozlišuje dva tvary, které z dvojice
+                // dat vypadají stejně: první (zkrácený) rok nově vzniklého poplatníka
+                // a přechodné období z hospodářského roku na kalendářní, které chce jiný
+                // typ přiznání. {@see UnsupportedCaseDetector::checkPeriodShape}
+                'is_first' => !$this->periods->existsBefore($supplierId, $startsOn),
+            ],
             'vh' => $vh,
             'non_deductible_costs' => $nonDeductible,
             'depreciation' => $dep,
@@ -140,6 +160,7 @@ final class DppoReturnDataProvider
             'disposal_tax_decrease' => $disposalDecrease,
             'disposals' => $disposals,
             'closing_projection' => $projection,
+            'legal_provisions' => $legalProvisions,
             'suggestions' => $suggestions,
             'warnings' => array_merge($warnings, $disposalWarnings),
         ];

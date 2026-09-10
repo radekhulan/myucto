@@ -281,6 +281,24 @@ final class AccountingPeriodRepository
     }
 
     /**
+     * Existuje účetní období končící dřív, než tohle začíná?
+     *
+     * Rozlišuje dva tvary období, které z dvojice dat vypadají stejně: první (a proto
+     * zkrácený) rok nově vzniklého poplatníka, a přechodné období při návratu
+     * z hospodářského roku na kalendářní. To druhé chce jiný typ přiznání
+     * (§ 21a, § 38ma ZDP), takže se o něm musí vědět.
+     */
+    public function existsBefore(int $supplierId, string $startsOn): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM accounting_periods WHERE supplier_id = ? AND ends_on < ? LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $startsOn]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
      * Zajistí existenci období pro dané datum. Vrátí existující (bez ohledu na stav
      * — otevřenost řeší PostingService), jinak založí kalendářní rok data jako open.
      * Pozn.: automaticky se zakládá jen kalendářní rok; hospodářský rok si firma

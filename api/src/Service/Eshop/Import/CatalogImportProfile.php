@@ -11,6 +11,7 @@ final class CatalogImportProfile
         'min_qty', 'is_active', 'note', 'manufacturer_code', 'manufacturer_id',
         'warranty_months', 'delivery_days', 'weight_g', 'export_eshop', 'is_stocked',
         'pricing_base', 'categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'price', 'prices',
+        'master_id', 'master_external_id', 'variant_options', 'inheritance', 'relations',
     ];
 
     public static function normalize(array $input): array
@@ -33,6 +34,9 @@ final class CatalogImportProfile
         $mapping = $input['mapping'] ?? null;
         if (!is_array($mapping) || !isset($mapping[$identity]) || array_diff(array_keys($mapping), self::FIELDS) !== []) {
             throw new \InvalidArgumentException('import_mapping_invalid');
+        }
+        if (isset($mapping['master_external_id']) && (!is_string($source) || !preg_match('/^[a-z0-9][a-z0-9_.-]{0,99}$/D', $source))) {
+            throw new \InvalidArgumentException('import_source_key_required');
         }
         foreach ($mapping as $header) {
             if (!is_string($header) || trim($header) === '' || mb_strlen($header) > 200) {
@@ -59,7 +63,7 @@ final class CatalogImportProfile
         }
         ksort($mapping);
         ksort($operations);
-        return ['identity' => $identity, 'source_key' => $identity === 'external_id' ? $source : null,
+        return ['identity' => $identity, 'source_key' => ($identity === 'external_id' || isset($mapping['master_external_id'])) ? $source : null,
             'mode' => $mode, 'mapping' => $mapping, 'blank' => $blank, 'operations' => $operations,
             'reader' => ['encoding' => $reader['encoding'] ?? 'UTF-8', 'delimiter' => $reader['delimiter'] ?? ';', 'sheet' => $reader['sheet'] ?? 0]];
     }
@@ -106,12 +110,26 @@ final class CatalogImportProfile
         if (in_array($field, ['id', 'external_id', 'sku', 'name', 'unit', 'item_type', 'pricing_base', 'is_active', 'is_stocked', 'export_eshop'], true)) {
             throw new \InvalidArgumentException('import_required_value');
         }
-        return in_array($field, ['categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'prices'], true) ? [] : null;
+        if ($field === 'inheritance') {
+            return [];
+        }
+        return in_array($field, ['categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'prices', 'variant_options', 'relations'], true) ? [] : null;
     }
 
     private static function value(string $field, string $value): mixed
     {
-        if (in_array($field, ['categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'prices'], true)) {
+        if ($field === 'inheritance') {
+            try {
+                $decoded = json_decode($value, true, 32, JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                throw new \InvalidArgumentException('import_json_invalid');
+            }
+            if (!str_starts_with($value, '{') || !is_array($decoded) || array_is_list($decoded)) {
+                throw new \InvalidArgumentException('import_json_invalid');
+            }
+            return $decoded;
+        }
+        if (in_array($field, ['categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'prices', 'variant_options', 'relations'], true)) {
             try {
                 $decoded = json_decode($value, true, 32, JSON_THROW_ON_ERROR);
             } catch (\JsonException) {
@@ -130,9 +148,9 @@ final class CatalogImportProfile
                 default => throw new \InvalidArgumentException('import_boolean_invalid'),
             };
         }
-        if (in_array($field, ['id', 'vat_rate_id', 'manufacturer_id', 'warranty_months', 'delivery_days', 'weight_g'], true)) {
+        if (in_array($field, ['id', 'vat_rate_id', 'manufacturer_id', 'warranty_months', 'delivery_days', 'weight_g', 'master_id'], true)) {
             if (!preg_match('/^\d{1,10}$/D', $value) || (int) $value > 2147483647
-                || (in_array($field, ['id', 'vat_rate_id', 'manufacturer_id'], true) && (int) $value < 1)) {
+                || (in_array($field, ['id', 'vat_rate_id', 'manufacturer_id', 'master_id'], true) && (int) $value < 1)) {
                 throw new \InvalidArgumentException('import_integer_invalid');
             }
             return (int) $value;
@@ -147,6 +165,7 @@ final class CatalogImportProfile
         }
         $limit = match ($field) {
             'sku', 'manufacturer_code' => 50,
+            'master_external_id' => 255,
             'unit', 'ean' => 20,
             'note' => 10000,
             default => 255,
@@ -177,6 +196,8 @@ final class CatalogImportProfile
                 'categories' => 'category_id',
                 'attributes' => 'attribute_id',
                 'fees' => 'fee_type_id',
+                'variant_options' => 'attribute_id',
+                'relations' => 'target_stock_item_id',
                 default => null,
             };
             if ($idKey !== null && (!is_int($row[$idKey] ?? null) || $row[$idKey] < 1 || $row[$idKey] > 2147483647)) {
@@ -200,6 +221,12 @@ final class CatalogImportProfile
             }
             if ($field === 'fees' && (!is_string($row['amount'] ?? null) || !preg_match('/^-?\d+(?:\.\d+)?$/D', $row['amount']))) {
                 throw new \InvalidArgumentException('import_decimal_invalid');
+            }
+            if ($field === 'variant_options' && (!is_int($row['option_id'] ?? null) || $row['option_id'] < 1)) {
+                throw new \InvalidArgumentException('import_reference_invalid');
+            }
+            if ($field === 'relations' && (!in_array($row['type'] ?? null, ['accessory', 'replacement', 'related'], true))) {
+                throw new \InvalidArgumentException('import_enum_invalid');
             }
         }
     }

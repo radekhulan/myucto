@@ -172,6 +172,18 @@ final class StockItemAction
         if ($bySku !== null && (int) $bySku['id'] !== $id) {
             return Json::error($response, 'sku_taken', 'Skladová karta s tímto SKU už existuje.', 409);
         }
+        if ($data['tracking_mode'] !== ($existing['tracking_mode'] ?? 'none')) {
+            $stmt = $this->db->pdo()->prepare('SELECT 1 FROM stock_tracking_units WHERE supplier_id = ? AND stock_item_id = ? LIMIT 1');
+            $stmt->execute([$supplierId, $id]);
+            if ($stmt->fetchColumn() !== false) {
+                return Json::error($response, 'tracking_mode_in_use', 'Režim sledování nelze změnit po prvním pohybu šarže nebo sériového čísla.', 409);
+            }
+            $stmt = $this->db->pdo()->prepare('SELECT 1 FROM stock_levels WHERE supplier_id = ? AND stock_item_id = ? AND qty <> 0 LIMIT 1');
+            $stmt->execute([$supplierId, $id]);
+            if ($stmt->fetchColumn() !== false) {
+                return Json::error($response, 'tracking_mode_stock_exists', 'Režim sledování lze zapnout jen při nulovém stavu karty.', 409);
+            }
+        }
         $this->items->update($supplierId, $id, $data);
         $this->log($request, 'stock.item_updated', $id, ['sku' => $data['sku']]);
         return Json::ok($response, $this->items->find($supplierId, $id));
@@ -453,11 +465,17 @@ final class StockItemAction
             $unit = 'ks';
         }
 
+        $trackingMode = (string) ($body['tracking_mode'] ?? $existing['tracking_mode'] ?? 'none');
+        if (!in_array($trackingMode, ['none', 'lot', 'serial'], true)) {
+            return [[], Json::error($response, 'validation_failed', "tracking_mode musí být 'none', 'lot' nebo 'serial'.", 400)];
+        }
+
         $data = [
             'sku'                    => $sku,
             'name'                   => $name,
             'item_type'              => $itemType,
             'unit'                   => $unit,
+            'tracking_mode'          => $trackingMode,
             'ean'                    => array_key_exists('ean', $body)
                 ? $this->nullable($body['ean']) : ($existing['ean'] ?? null),
             'vat_rate_id'            => array_key_exists('vat_rate_id', $body)

@@ -22,7 +22,7 @@ import ItemQuickDetailDrawer from '../ItemQuickDetailDrawer.vue'
 
 const item: StockItem = {
   id: 42, supplier_id: 1, sku: 'QUICK-42', name: 'Quick item', item_type: 'goods', manufacturer_id: 7,
-  unit: 'ks', ean: null, vat_rate_id: null, sale_price_without_vat: '100', min_qty: null, is_active: true,
+  unit: 'ks', ean: null, vat_rate_id: null, sale_price_without_vat: '100', min_qty: null, is_active: true, is_stocked: true,
   row_version: 1, note: null, created_at: '2026-01-01', updated_at: '2026-01-01', effective_price: '90.00', qty: '999',
 }
 

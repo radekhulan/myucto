@@ -174,10 +174,14 @@ final class WarehouseAction
             'name'       => $name,
             'is_default' => array_key_exists('is_default', $body) ? (bool) $body['is_default'] : (bool) ($existing['is_default'] ?? false),
             'is_active'  => array_key_exists('is_active', $body) ? (bool) $body['is_active'] : (bool) ($existing['is_active'] ?? true),
+            'is_sellable' => array_key_exists('is_sellable', $body) ? (bool) $body['is_sellable'] : (bool) ($existing['is_sellable'] ?? true),
             'note'       => array_key_exists('note', $body)
                 ? (trim((string) $body['note']) !== '' ? trim((string) $body['note']) : null)
                 : ($existing['note'] ?? null),
         ];
+        if ($data['is_default'] && !$data['is_sellable']) {
+            return [[], Json::error($response, 'validation_failed', 'Výchozí sklad musí být prodejný.', 400)];
+        }
         return [$data, null];
     }
 

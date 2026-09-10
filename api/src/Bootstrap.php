@@ -134,6 +134,8 @@ final class Bootstrap
 
             ResponseFactory::class => fn () => new ResponseFactory(),
             Connection::class      => fn (ContainerInterface $c) => new Connection($c->get(Config::class), $c->get(LoggerInterface::class)),
+            \MyInvoice\Service\Stock\SalesOrderLineExpander::class => fn (ContainerInterface $c) =>
+                $c->get(\MyInvoice\Service\Stock\ProductSetSalesOrderLineExpander::class),
             \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifier::class,
@@ -427,6 +429,9 @@ final class Bootstrap
                 // takže bez tohohle bindu by podklad ke spojeným osobám zůstal v produkci
                 // navždy prázdný a nikdo by se to nedozvěděl.
                 $c->get(\MyInvoice\Service\Tax\RelatedPartyService::class),
+                // Tabulka C přílohy č. 1 II. oddílu (VetaG) — bez bindu by rozpad zákonných
+                // OP a rezerv zůstal v produkci prázdný a přiznání by k ř. 62/162 přílohu nemělo.
+                $c->get(\MyInvoice\Service\Tax\Return\LegalProvisionLedgerService::class),
             ),
             // JMHZ transport — poslední dva argumenty jsou volitelné kvůli
             // testovacím dvojníkům (falešný VREP, mockovaný ledger), ale
@@ -1016,6 +1021,16 @@ final class Bootstrap
         // Cena je jen konstrukce objektu — spojení do Redisu si RedisFactory
         // otevírá až při prvním použití.
         $container->get(\MyInvoice\Infrastructure\Cache\EntityCache::class);
+
+        // Číselník státních svátků (migrace 1781). Lhůty podání se posouvají podle
+        // § 33 odst. 4 daňového řádu a `CzechWorkingDays` je jejich jediný zdroj —
+        // jenže je to statický helper volaný z desítek míst bez DI, takže mu zdroj
+        // musí předat kontejner. Továrna je LÍNÁ: helper se používá i tam, kde by
+        // otevírat spojení do databáze byla čistá režie.
+        \MyInvoice\Service\Report\CzechWorkingDays::configure(
+            static fn (): \MyInvoice\Service\Report\PublicHolidayProvider
+                => $container->get(\MyInvoice\Repository\PublicHolidayRepository::class),
+        );
 
         return $container;
     }

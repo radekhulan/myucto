@@ -71,8 +71,11 @@ final class CatalogPricingRuleRepository
 
     public function itemContext(int $supplierId, int $stockItemId): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT manufacturer_id FROM stock_items
-            WHERE supplier_id = ? AND id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT CASE WHEN v.inherit_manufacturer = 1 THEN m.manufacturer_id ELSE s.manufacturer_id END
+            FROM stock_items s
+            LEFT JOIN product_variants v ON v.supplier_id = s.supplier_id AND v.stock_item_id = s.id
+            LEFT JOIN product_masters m ON m.supplier_id = v.supplier_id AND m.id = v.master_id
+            WHERE s.supplier_id = ? AND s.id = ?');
         $stmt->execute([$supplierId, $stockItemId]);
         $manufacturerId = $stmt->fetchColumn();
 

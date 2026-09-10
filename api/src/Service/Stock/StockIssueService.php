@@ -39,6 +39,7 @@ final class StockIssueService
         private readonly WarehouseRepository $warehouses,
         private readonly StockLevelService $levels,
         private readonly CommercialFeatureAccess $commercialFeatures,
+        private readonly StockCommitmentService $commitments,
     ) {}
 
     /**
@@ -62,6 +63,7 @@ final class StockIssueService
             return;
         }
         $invoiceId = (int) $invoice['id'];
+        if ($this->commitments->isInvoiceStockManaged($supplierId, $invoiceId)) return;
         if ($this->docsRepo->findPostedIssueByInvoice($supplierId, $invoiceId) !== null) {
             return; // už vydáno — žádný nový nárok na zásobu
         }
@@ -138,6 +140,7 @@ final class StockIssueService
         $this->assertInTransaction();
 
         $invoiceId = (int) $invoice['id'];
+        if ($this->commitments->isInvoiceStockManaged($supplierId, $invoiceId)) return;
         $rows = $this->stockItemsOfInvoice($supplierId, $invoiceId);
         if ($rows === []) {
             return;
@@ -239,6 +242,8 @@ final class StockIssueService
     public function returnForCreditNote(int $supplierId, array $creditNote, ?int $userId = null): void
     {
         $this->assertInTransaction();
+        $parentId = (int) ($creditNote['parent_invoice_id'] ?? 0);
+        if ($parentId > 0 && $this->commitments->isInvoiceStockManaged($supplierId, $parentId)) return;
 
         $creditNoteId = (int) $creditNote['id'];
         foreach ($this->docsRepo->listByInvoice($supplierId, $creditNoteId) as $doc) {
@@ -255,7 +260,6 @@ final class StockIssueService
             return;
         }
 
-        $parentId = (int) ($creditNote['parent_invoice_id'] ?? 0);
         $costs = $parentId > 0 ? $this->parentIssueCosts($supplierId, $parentId) : [];
 
         foreach ($rows as &$row) {

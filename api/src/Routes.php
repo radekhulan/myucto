@@ -545,8 +545,16 @@ final class Routes
         $app->put   ('/api/codebooks/oss-member-state-rates/{id:[0-9]+}',    [\MyInvoice\Action\Codebook\OssMemberStateRatesAction::class, 'update']);
         $app->delete('/api/codebooks/oss-member-state-rates/{id:[0-9]+}',    [\MyInvoice\Action\Codebook\OssMemberStateRatesAction::class, 'delete']);
 
+        // Státní a ostatní svátky (globální číselník, z. 245/2000 Sb.; zápis jen superadmin — migrace 1781).
+        // Jeden řádek posouvá přes § 33 odst. 4 daňového řádu lhůty všech firem v instanci.
+        $app->get   ('/api/codebooks/public-holidays',              [\MyInvoice\Action\Codebook\PublicHolidaysAction::class, 'list']);
+        $app->post  ('/api/codebooks/public-holidays',              [\MyInvoice\Action\Codebook\PublicHolidaysAction::class, 'create']);
+        $app->put   ('/api/codebooks/public-holidays/{id:[0-9]+}',  [\MyInvoice\Action\Codebook\PublicHolidaysAction::class, 'update']);
+        $app->delete('/api/codebooks/public-holidays/{id:[0-9]+}',  [\MyInvoice\Action\Codebook\PublicHolidaysAction::class, 'delete']);
+
         // VAT klasifikační kódy (pro DPHDP3 + KH)
         $app->get   ('/api/vat-classifications',                 [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'list']);
+        $app->get   ('/api/vat-classifications/lines',           [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'lines']);
         $app->post  ('/api/vat-classifications',                 [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'create']);
         $app->put   ('/api/vat-classifications/{id:[0-9]+}',     [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'update']);
         $app->delete('/api/vat-classifications/{id:[0-9]+}',     [\MyInvoice\Action\Codebook\VatClassificationsAction::class, 'delete']);
@@ -3021,6 +3029,9 @@ final class Routes
             $g->get   ('/warehouses/{id:[0-9]+}',       [\MyInvoice\Action\Stock\WarehouseAction::class, 'get']);
             $g->put   ('/warehouses/{id:[0-9]+}',       [\MyInvoice\Action\Stock\WarehouseAction::class, 'update']);
             $g->delete('/warehouses/{id:[0-9]+}',       [\MyInvoice\Action\Stock\WarehouseAction::class, 'delete']);
+            $g->get   ('/locations',                    [\MyInvoice\Action\Stock\StockTrackingAction::class, 'locations']);
+            $g->post  ('/locations',                    [\MyInvoice\Action\Stock\StockTrackingAction::class, 'saveLocation']);
+            $g->put   ('/locations/{id:[0-9]+}',        [\MyInvoice\Action\Stock\StockTrackingAction::class, 'saveLocation']);
 
             $g->get   ('/items/search',                 [\MyInvoice\Action\Stock\StockItemAction::class, 'search']);
             $g->get   ('/item-templates',               [\MyInvoice\Action\Stock\StockItemAction::class, 'templates']);
@@ -3029,6 +3040,8 @@ final class Routes
             $g->get   ('/items',                        [\MyInvoice\Action\Stock\StockItemAction::class, 'list']);
             $g->post  ('/items',                        [\MyInvoice\Action\Stock\StockItemAction::class, 'create']);
             $g->get   ('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'get']);
+            $g->get   ('/items/{id:[0-9]+}/tracking',   [\MyInvoice\Action\Stock\StockTrackingAction::class, 'item']);
+            $g->put   ('/items/{id:[0-9]+}/units',      [\MyInvoice\Action\Stock\StockTrackingAction::class, 'replaceUnits']);
             $g->post  ('/items/{id:[0-9]+}/neighbors',  \MyInvoice\Action\Stock\StockItemNeighborsAction::class);
             $g->post  ('/items/{id:[0-9]+}/lifecycle',  [\MyInvoice\Action\Stock\StockItemAction::class, 'lifecycle']);
             $g->post  ('/items/{id:[0-9]+}/duplicate',  [\MyInvoice\Action\Stock\StockItemAction::class, 'duplicate']);
@@ -3057,6 +3070,20 @@ final class Routes
             $g->get   ('/in-transit',                   [\MyInvoice\Action\Stock\StockQuantityAction::class, 'inTransit']);
             $g->get   ('/reservations',                 [\MyInvoice\Action\Stock\StockQuantityAction::class, 'reservations']);
             $g->get   ('/replenishment',                [\MyInvoice\Action\Stock\StockQuantityAction::class, 'replenishment']);
+
+            $g->get   ('/sales-orders/shortages',                    [\MyInvoice\Action\Stock\SalesOrderAction::class, 'shortages']);
+            $g->post  ('/sales-orders/expiry-jobs/run',              [\MyInvoice\Action\Stock\SalesOrderAction::class, 'runExpiry']);
+            $g->post  ('/sales-orders/expiry-jobs',                  [\MyInvoice\Action\Stock\SalesOrderAction::class, 'enqueueExpiry']);
+            $g->get   ('/sales-orders/expiry-jobs/{id:[0-9]+}',      [\MyInvoice\Action\Stock\SalesOrderAction::class, 'expiryJob']);
+            $g->get   ('/sales-orders',                              [\MyInvoice\Action\Stock\SalesOrderAction::class, 'list']);
+            $g->post  ('/sales-orders',                              [\MyInvoice\Action\Stock\SalesOrderAction::class, 'create']);
+            $g->get   ('/sales-orders/{id:[0-9]+}',                  [\MyInvoice\Action\Stock\SalesOrderAction::class, 'get']);
+            $g->put   ('/sales-orders/{id:[0-9]+}',                  [\MyInvoice\Action\Stock\SalesOrderAction::class, 'update']);
+            $g->post  ('/sales-orders/{id:[0-9]+}/confirm',          [\MyInvoice\Action\Stock\SalesOrderAction::class, 'confirm']);
+            $g->post  ('/sales-orders/{id:[0-9]+}/cancel',           [\MyInvoice\Action\Stock\SalesOrderAction::class, 'cancel']);
+            $g->post  ('/sales-orders/{id:[0-9]+}/payment-status',   [\MyInvoice\Action\Stock\SalesOrderAction::class, 'payment']);
+            $g->post  ('/sales-orders/{id:[0-9]+}/invoice',          [\MyInvoice\Action\Stock\SalesOrderAction::class, 'invoice']);
+            $g->post  ('/sales-orders/{id:[0-9]+}/returns',          [\MyInvoice\Action\Stock\SalesOrderAction::class, 'createReturn']);
 
             // Objednávky dodavatelům (fáze 1) — literální /bulk PŘED generickým /{id}.
             $g->post  ('/purchase-orders/bulk',                    [\MyInvoice\Action\Stock\PurchaseOrderBulkAction::class, 'create']);
@@ -3087,6 +3114,14 @@ final class Routes
             $g->post  ('/documents/{id:[0-9]+}/reverse',[\MyInvoice\Action\Stock\StockDocumentAction::class, 'reverse']);
             $g->get   ('/documents/{id:[0-9]+}/pdf',    [\MyInvoice\Action\Stock\StockDocumentAction::class, 'pdf']);
 
+            $g->get   ('/fulfillment/tasks',                                      [\MyInvoice\Action\Stock\FulfillmentAction::class, 'list']);
+            $g->post  ('/fulfillment/tasks',                                      [\MyInvoice\Action\Stock\FulfillmentAction::class, 'create']);
+            $g->get   ('/fulfillment/tasks/{id:[0-9]+}',                          [\MyInvoice\Action\Stock\FulfillmentAction::class, 'get']);
+            $g->post  ('/fulfillment/tasks/{id:[0-9]+}/scan',                     [\MyInvoice\Action\Stock\FulfillmentAction::class, 'scan']);
+            $g->post  ('/fulfillment/tasks/{id:[0-9]+}/shipments',                [\MyInvoice\Action\Stock\FulfillmentAction::class, 'createShipment']);
+            $g->post  ('/fulfillment/shipments/{shipmentId:[0-9]+}/dispatch',     [\MyInvoice\Action\Stock\FulfillmentAction::class, 'dispatch']);
+            $g->post  ('/fulfillment/shipments/{shipmentId:[0-9]+}/returns',      [\MyInvoice\Action\Stock\FulfillmentAction::class, 'receiveReturn']);
+
             // Inventury (§7.2 TakeWizard) — specifické cesty před generickým /{id}.
             $g->get   ('/takes',                        [\MyInvoice\Action\Stock\StockTakeAction::class, 'list']);
             $g->post  ('/takes',                        [\MyInvoice\Action\Stock\StockTakeAction::class, 'create']);
@@ -3097,8 +3132,18 @@ final class Routes
             $g->post  ('/takes/{id:[0-9]+}/close',      [\MyInvoice\Action\Stock\StockTakeAction::class, 'close']);
             $g->get   ('/takes/{id:[0-9]+}/pdf',        [\MyInvoice\Action\Stock\StockTakeAction::class, 'pdf']);
 
+            $g->get   ('/cycle-counts',                 [\MyInvoice\Action\Stock\CycleCountAction::class, 'list']);
+            $g->post  ('/cycle-counts',                 [\MyInvoice\Action\Stock\CycleCountAction::class, 'create']);
+            $g->get   ('/cycle-counts/{id:[0-9]+}',     [\MyInvoice\Action\Stock\CycleCountAction::class, 'get']);
+            $g->put   ('/cycle-counts/{id:[0-9]+}',     [\MyInvoice\Action\Stock\CycleCountAction::class, 'update']);
+            $g->post  ('/cycle-counts/{id:[0-9]+}/close', [\MyInvoice\Action\Stock\CycleCountAction::class, 'close']);
+
             // Sestavy (§6) — /export s literálním jménem PŘED generickým /{name}? zde
             // name je vždy poslední segment /reports/{name}/export, konflikt nehrozí.
+            $g->get('/assemblies', [\MyInvoice\Action\Stock\ProductAssemblyAction::class, 'list']);
+            $g->post('/assemblies', [\MyInvoice\Action\Stock\ProductAssemblyAction::class, 'create']);
+            $g->get('/assemblies/{id:[0-9]+}', [\MyInvoice\Action\Stock\ProductAssemblyAction::class, 'get']);
+            $g->post('/assemblies/{id:[0-9]+}/reverse', [\MyInvoice\Action\Stock\ProductAssemblyAction::class, 'reverse']);
             $g->get   ('/reports/status',                [\MyInvoice\Action\Stock\StockReportAction::class, 'status']);
             $g->get   ('/reports/valuation',              [\MyInvoice\Action\Stock\StockReportAction::class, 'valuation']);
             $g->post  ('/reports/valuation-jobs',         [\MyInvoice\Action\Stock\StockReportAction::class, 'createValuationJob']);
@@ -3117,7 +3162,17 @@ final class Routes
         $app->post('/api/catalog/exports', [\MyInvoice\Action\Eshop\CatalogExportAction::class, 'create']);
         $app->get('/api/catalog/exports/{id:[0-9]+}/download', [\MyInvoice\Action\Eshop\CatalogExportAction::class, 'download']);
         $app->post('/api/catalog/prices/batch', [\MyInvoice\Action\Eshop\CatalogReadAction::class, 'prices']);
+        $app->get('/api/catalog/changes', [\MyInvoice\Action\Eshop\IntegrationChangeFeedAction::class, 'list']);
+        $app->post('/api/public/integrations/webhooks/{uuid:[0-9a-f-]{36}}', [\MyInvoice\Action\Eshop\IntegrationWebhookAction::class, 'receive']);
         $app->group('/api/eshop', function ($g) {
+            $g->get('/integrations', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'list']);
+            $g->post('/integrations', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'create']);
+            $g->put('/integrations/{id:[0-9]+}', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'update']);
+            $g->put('/integrations/{id:[0-9]+}/credentials', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'credentials']);
+            $g->post('/integrations/{id:[0-9]+}/webhook-secret', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'rotateWebhookSecret']);
+            $g->get('/integrations/{id:[0-9]+}/diagnostics', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'diagnostics']);
+            $g->post('/integrations/{id:[0-9]+}/reconcile', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'reconcile']);
+            $g->post('/integrations/{id:[0-9]+}/outbox/{eventId:[0-9]+}/retry', [\MyInvoice\Action\Eshop\IntegrationAction::class, 'retryOutbox']);
             $g->post('/imports/sources', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'upload']);
             $g->get('/imports/sources/{id:[0-9]+}/sample', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'sample']);
             $g->get('/imports/profiles', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'profiles']);
@@ -3125,6 +3180,9 @@ final class Routes
             $g->put('/imports/profiles/{id:[0-9]+}', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'saveProfile']);
             $g->post('/imports/preview', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'preview']);
             $g->post('/imports/{id:[0-9]+}/apply', [\MyInvoice\Action\Eshop\CatalogImportAction::class, 'apply']);
+            $g->get('/sets/{id:[0-9]+}', [\MyInvoice\Action\Eshop\ProductSetAction::class, 'get']);
+            $g->put('/sets/{id:[0-9]+}', [\MyInvoice\Action\Eshop\ProductSetAction::class, 'save']);
+            $g->post('/sets/{id:[0-9]+}/quote', [\MyInvoice\Action\Eshop\ProductSetAction::class, 'quote']);
             $g->post('/bulk/preview', [\MyInvoice\Action\Eshop\CatalogBulkAction::class, 'preview']);
             $g->post('/bulk/{id:[0-9]+}/apply', [\MyInvoice\Action\Eshop\CatalogBulkAction::class, 'apply']);
             $g->post('/bulk/{id:[0-9]+}/restore', [\MyInvoice\Action\Eshop\CatalogBulkAction::class, 'restore']);
@@ -3201,6 +3259,17 @@ final class Routes
 
             // Import zboží (XLS/CSV) — literální cesta PŘED generickými /products/{id}.
             $g->post  ('/products/import',                     [\MyInvoice\Action\Eshop\ProductImportAction::class, 'import']);
+            $g->get   ('/product-masters',                     [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'list']);
+            $g->post  ('/product-masters',                     [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'create']);
+            $g->get   ('/product-masters/{id:[0-9]+}',         [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'get']);
+            $g->put   ('/product-masters/{id:[0-9]+}',         [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'update']);
+            $g->post  ('/product-masters/{id:[0-9]+}/{operation:archive|restore}', [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'status']);
+            $g->post  ('/product-masters/{id:[0-9]+}/variants', [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'attach']);
+            $g->put   ('/product-masters/{id:[0-9]+}/variants/{itemId:[0-9]+}', [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'updateVariant']);
+            $g->get   ('/product-masters/{id:[0-9]+}/variants/{itemId:[0-9]+}/detach-preview', [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'detachPreview']);
+            $g->post  ('/product-masters/{id:[0-9]+}/variants/{itemId:[0-9]+}/detach', [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'detach']);
+            $g->post  ('/product-masters/{id:[0-9]+}/content-transfer/preview', [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'transferPreview']);
+            $g->post  ('/product-masters/{id:[0-9]+}/content-transfer/apply', [\MyInvoice\Action\Eshop\ProductMasterAction::class, 'transferApply']);
             $g->get   ('/jobs',                                [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'list']);
             $g->post  ('/jobs/prices-recompute',                [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'prices']);
             $g->get   ('/jobs/{id:[0-9]+}',                     [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'get']);
@@ -3209,6 +3278,8 @@ final class Routes
 
             // Karta Zboží (agregát) + média; specifické PŘED generickými.
             $g->get   ('/products/{id:[0-9]+}/i18n',           [\MyInvoice\Action\Eshop\ProductCardAction::class, 'getI18n']);
+            $g->get   ('/products/{id:[0-9]+}/relations',      [\MyInvoice\Action\Eshop\ProductRelationAction::class, 'get']);
+            $g->put   ('/products/{id:[0-9]+}/relations',      [\MyInvoice\Action\Eshop\ProductRelationAction::class, 'put']);
             $g->put   ('/products/{id:[0-9]+}/editor',         [\MyInvoice\Action\Eshop\ProductCardAction::class, 'saveEditor']);
             $g->get   ('/products/{id:[0-9]+}/media',          [\MyInvoice\Action\Eshop\ProductMediaAction::class, 'list']);
             $g->post  ('/products/{id:[0-9]+}/media',          [\MyInvoice\Action\Eshop\ProductMediaAction::class, 'upload']);

@@ -1,19 +1,31 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { PurchaseInvoice } from '@/api/purchaseInvoices'
+import type { StockDocument } from '@/api/stock'
 
 // ── Mockovaný stav (hoisted) ──────────────────────────────────────────────────
 const m = vi.hoisted(() => ({
   get: vi.fn(),
   activity: vi.fn(),
+  receiptPropose: vi.fn(),
+  receiptList: vi.fn(),
+  push: vi.fn(),
+  route: null as null | { params: { id: string } },
+  stockEnabled: false,
+  stockRead: true,
+  stockWrite: true,
 }))
 
 // vue-router — useRoute (id), useRouter (push), RouterLink jako jednoduchý stub.
-vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { id: '258' } }),
-  useRouter: () => ({ push: vi.fn() }),
-  RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
-}))
+vi.mock('vue-router', async () => {
+  const { reactive } = await vi.importActual<typeof import('vue')>('vue')
+  m.route = reactive({ params: { id: '258' } })
+  return {
+    useRoute: () => m.route,
+    useRouter: () => ({ push: m.push }),
+    RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+  }
+})
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
@@ -55,8 +67,9 @@ vi.mock('@/api/errors', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    canRead: () => true,
-    canWrite: () => true,
+    canRead: (permission: string) => permission === 'stock' ? m.stockRead : true,
+    canWrite: (permission: string) => permission === 'stock' ? m.stockWrite : true,
+    hasCommercialFeatures: true,
     isClientRole: false,
     isSuperadmin: false,
     user: { id: 1 },
@@ -65,7 +78,10 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({
-    currentSupplier: { accounting_mode: 'double_entry', stock_enabled: false },
+    currentSupplier: {
+      accounting_mode: 'double_entry',
+      get stock_enabled() { return m.stockEnabled },
+    },
   }),
 }))
 
@@ -75,7 +91,7 @@ vi.mock('@/api/accounting', () => ({
 }))
 
 vi.mock('@/api/stock', () => ({
-  stockApi: { receiptPropose: vi.fn() },
+  stockApi: { receiptPropose: m.receiptPropose, receiptList: m.receiptList },
 }))
 
 import InvoiceDetail from '@/pages/purchase-invoices/InvoiceDetail.vue'
@@ -171,15 +187,49 @@ function makeInvoice(overrides: Partial<PurchaseInvoice> = {}): PurchaseInvoice 
   } as unknown as PurchaseInvoice
 }
 
+function makeStockDocument(id: number, status: StockDocument['status'], number: string | null): StockDocument {
+  return {
+    id,
+    supplier_id: 1,
+    doc_type: 'receipt',
+    origin: 'purchase_invoice',
+    warehouse_id: 3,
+    warehouse_to_id: null,
+    doc_number: number,
+    doc_date: '2026-06-02',
+    description: 'Příjem z přijaté faktury',
+    partner_name: 'Dodavatel s.r.o.',
+    invoice_id: null,
+    purchase_invoice_id: 258,
+    purchase_order_id: null,
+    stock_take_id: null,
+    journal_entry_id: null,
+    reversal_document_id: null,
+    status,
+    booked_at: status === 'draft' ? null : '2026-06-02 10:00:00',
+    booked_by: status === 'draft' ? null : 1,
+    created_by: 1,
+    created_at: '2026-06-02 09:00:00',
+    updated_at: '2026-06-02 10:00:00',
+    allow_over_delivery: false,
+    warehouse_code: 'HL',
+    warehouse_name: 'Hlavní sklad',
+  }
+}
+
 const stubs = {
-  ActionBar: true,
+  ActionBar: { name: 'ActionBar', props: ['actions'], template: '<div />' },
   LockedBadge: true,
   PostingBadge: true,
   WhyChip: true,
   PdfDropzone: true,
   LinkedDocumentsPanel: true,
   PurchaseDmsDocumentsPanel: true,
-  StockReceiptModal: true,
+  StockReceiptModal: {
+    name: 'StockReceiptModal',
+    emits: ['close', 'created'],
+    template: '<button data-test="create-receipt" @click="$emit(\'created\', { id: 777 })" />',
+  },
 }
 
 const bankLinks = (wrapper: ReturnType<typeof mount>) =>
@@ -195,6 +245,15 @@ describe('InvoiceDetail.vue — bankovní úhrady', () => {
     m.get.mockReset()
     m.activity.mockReset()
     m.activity.mockResolvedValue([])
+    m.receiptPropose.mockReset()
+    m.receiptList.mockReset()
+    m.receiptPropose.mockResolvedValue({ lines: [], cost_candidates: [], purchase_invoice_id: 258, not_receivable_kind: 'advance' })
+    m.receiptList.mockResolvedValue([])
+    m.push.mockReset()
+    m.stockEnabled = false
+    m.stockRead = true
+    m.stockWrite = true
+    if (m.route) m.route.params.id = '258'
   })
 
   it('zaplacená faktura s bank_payments → odkaz(y) na bankovní výpis se správným statement_id', async () => {
@@ -320,5 +379,98 @@ describe('InvoiceDetail.vue — vazba daňového dokladu k platbě', () => {
 
     expect(wrapper.text()).toContain('purchase_invoice.advance_link.settled_by')
     expect(wrapper.text()).not.toContain('purchase_invoice.tax_document_link.missing')
+  })
+})
+
+describe('InvoiceDetail.vue — skladové příjemky', () => {
+  beforeEach(() => {
+    m.get.mockReset()
+    m.get.mockResolvedValue(makeInvoice({ status: 'received' }))
+    m.activity.mockReset()
+    m.activity.mockResolvedValue([])
+    m.receiptPropose.mockReset()
+    m.receiptPropose.mockResolvedValue({
+      purchase_invoice: { id: 258, varsymbol: '2026258', vendor_invoice_number: 'FP-258', vendor_name: 'Dodavatel s.r.o.', currency_code: 'CZK', exchange_rate: null },
+      lines: [{ purchase_invoice_item_id: 1, purchase_order_line_id: null, stock_item_id: 10, description: 'Zboží', quantity: '2', already_received: '0', remaining_qty: '2', unit_cost: '100' }],
+      cost_candidates: [],
+      pf_changed_after_receipt: false,
+    })
+    m.receiptList.mockReset()
+    m.receiptList.mockResolvedValue([])
+    m.push.mockReset()
+    m.stockEnabled = true
+    m.stockRead = true
+    m.stockWrite = true
+    if (m.route) m.route.params.id = '258'
+  })
+
+  it('řídí vytvoření příjemky oprávněním ke skladu a otevře vytvořený draft', async () => {
+    m.stockWrite = false
+    const withoutPermission = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    const deniedAction = (withoutPermission.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; show?: boolean }>).find(a => a.key === 'stock-receipt')
+    expect(deniedAction?.show).toBe(false)
+    withoutPermission.unmount()
+
+    m.stockWrite = true
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    const action = (wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; show?: boolean; run?: () => void }>).find(a => a.key === 'stock-receipt')
+    expect(action?.show).toBe(true)
+    action?.run?.()
+    await flushPromises()
+    await wrapper.find('[data-test="create-receipt"]').trigger('click')
+    expect(m.push).toHaveBeenCalledWith('/stock/documents/777')
+  })
+
+  it('zobrazí historii draft, posted i reversed příjemek a rozliší prázdný stav', async () => {
+    m.receiptList.mockResolvedValue([
+      makeStockDocument(41, 'draft', null),
+      makeStockDocument(42, 'posted', 'PRI-2026-0042'),
+      makeStockDocument(43, 'reversed', 'PRI-2026-0043'),
+    ])
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    const targets = wrapper.findAllComponents({ name: 'RouterLink' }).map(link => link.props('to'))
+    expect(targets).toEqual(expect.arrayContaining(['/stock/documents/41', '/stock/documents/42', '/stock/documents/43']))
+    expect(wrapper.text()).toContain('stock.receipt.draft_number')
+    expect(wrapper.text()).toContain('stock.doc_status.posted')
+    expect(wrapper.text()).toContain('stock.doc_status.reversed')
+
+    wrapper.unmount()
+    m.receiptList.mockResolvedValue([])
+    const emptyWrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    expect(emptyWrapper.text()).toContain('stock.receipt.history_empty')
+  })
+
+  it('zobrazí chybu načtení skladu místo prázdné historie', async () => {
+    m.receiptList.mockRejectedValue(new Error('Sklad není dostupný'))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Sklad není dostupný')
+    expect(wrapper.text()).not.toContain('stock.receipt.history_empty')
+  })
+
+  it('po rychlé změně faktury nepřepíše historii opožděná odpověď předchozí faktury', async () => {
+    let resolveFirst: ((documents: StockDocument[]) => void) | undefined
+    const first = new Promise<StockDocument[]>(resolve => { resolveFirst = resolve })
+    m.get.mockImplementation((invoiceId: number) => Promise.resolve(makeInvoice({ id: invoiceId, vendor_invoice_number: `FP-${invoiceId}` })))
+    m.receiptList.mockImplementation((invoiceId: number) => invoiceId === 258
+      ? first
+      : Promise.resolve([makeStockDocument(259, 'posted', 'PRI-NOVA')]))
+
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    m.route!.params.id = '259'
+    await flushPromises()
+    expect(wrapper.text()).toContain('PRI-NOVA')
+
+    resolveFirst?.([makeStockDocument(258, 'posted', 'PRI-STARA')])
+    await flushPromises()
+    expect(wrapper.text()).toContain('PRI-NOVA')
+    expect(wrapper.text()).not.toContain('PRI-STARA')
   })
 })

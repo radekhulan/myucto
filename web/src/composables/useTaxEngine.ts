@@ -23,12 +23,14 @@ export interface BandResult {
 
 function effBand(declared: string, rate: number, income: number, c: TaxConstantsData): BandResult {
   if (declared === 'none' || !(declared in c.pausal_annual)) return { ok: false, reason: 'not_in_pausal' }
-  if (income > c.vat_limit_low) return { ok: false, reason: 'over_2m' }
+  // `ceiling` nese i zamítavá odpověď — text „příjem > X → nelze" musí jmenovat práh,
+  // proti kterému se skutečně porovnávalo, ne zamrzlé číslo v překladu.
+  if (income > c.vat_limit_low) return { ok: false, reason: 'over_2m', ceiling: c.vat_limit_low }
   const cl = c.band_ceilings[rate] || c.band_ceilings[40]
   let i = ORDER.indexOf(declared as typeof ORDER[number])
   while (i < 2 && income > cl[ORDER[i]]) i++
   const eff = ORDER[i]
-  if (income > cl[eff]) return { ok: false, reason: 'over_2m' }
+  if (income > cl[eff]) return { ok: false, reason: 'over_2m', ceiling: cl[eff] }
   return {
     ok: true, declared, eff, ceiling: cl[eff],
     surcharge: eff !== declared ? c.pausal_annual[eff] - c.pausal_annual[declared] : 0,
@@ -43,12 +45,14 @@ export interface PausalResult {
   declared?: string
   surcharge?: number
   note?: boolean
+  /** Práh, o který se zamítnutí opřelo (reason 'over_2m') — podklad pro text v UI. */
+  ceiling?: number
 }
 
 export function pausal(p: EngineProfile, income: number, c: TaxConstantsData): PausalResult {
   if (p.is_vat_payer) return { ok: false, reason: 'vat_payer', total: null }
   const b = effBand(p.flat_tax_band, p.activity_rate, income, c)
-  if (!b.ok) return { ok: false, reason: b.reason, total: null }
+  if (!b.ok) return { ok: false, reason: b.reason, total: null, ceiling: b.ceiling }
   return { ok: true, eff: b.eff, declared: b.declared, surcharge: b.surcharge, total: c.pausal_annual[b.eff!], note: b.eff !== b.declared }
 }
 
@@ -178,6 +182,8 @@ export interface SecondarySocial { threshold: number; profit: number; will: bool
 export interface PredictResult {
   run: number; proj: number; profit: number; cross: Crossing[]
   secondary: SecondarySocial | null; deferMonth: number | null; ytd: number; months: number
+  /** Práh, který se v prosinci překročí (vat_limit_low daného roku) — text rady ho jmenuje. */
+  deferLimit: number | null
 }
 
 export function predict(p: EngineProfile, ytd: number, months: number, c: TaxConstantsData): PredictResult {
@@ -199,6 +205,7 @@ export function predict(p: EngineProfile, ytd: number, months: number, c: TaxCon
 
   const v = cross.find(x => x.key === 'vatLow')
   const deferMonth = v && v.will && v.month! >= 11 && v.month! <= 12 ? v.month : null
+  const deferLimit = deferMonth !== null && v ? v.val : null
 
   // Projekce ZISKU (příjmy − výdaje) pro limit vedlejší činnosti — výdaje dle profilu,
   // stejně jako regular(). Rozhodná částka se měří proti zisku, ne proti příjmu.
@@ -216,5 +223,5 @@ export function predict(p: EngineProfile, ytd: number, months: number, c: TaxCon
     secondary = { threshold, profit, will, month: will && profitRun > 0 ? Math.ceil(threshold / profitRun) : null }
   }
 
-  return { run, proj, profit, cross, secondary, deferMonth, ytd, months }
+  return { run, proj, profit, cross, secondary, deferMonth, deferLimit, ytd, months }
 }

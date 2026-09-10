@@ -161,7 +161,7 @@ final class StockLevelRepository
 
     /**
      * Dávková dostupnost karet pro badge v editoru FV. Bez skladu = součet přes
-     * všechny sklady. Karty bez řádku stavu v mapě chybí (= 0).
+     * aktivní prodejné sklady. Karty bez řádku stavu v mapě chybí (= 0).
      *
      * @param list<int> $itemIds
      * @return array<int,string> stock_item_id => dostupné qty (DECIMAL string)
@@ -175,7 +175,8 @@ final class StockLevelRepository
         $place  = implode(',', array_fill(0, count($ids), '?'));
         $sql    = "SELECT stock_item_id, SUM(qty) AS available
                      FROM stock_levels
-                    WHERE supplier_id = ? AND stock_item_id IN ($place)";
+                    WHERE supplier_id = ? AND stock_item_id IN ($place)
+                      AND warehouse_id IN (SELECT id FROM warehouses WHERE is_active = 1 AND is_sellable = 1)";
         $params = array_merge([$supplierId], $ids);
         if ($warehouseId !== null) {
             $sql     .= ' AND warehouse_id = ?';

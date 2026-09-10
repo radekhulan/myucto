@@ -11,10 +11,12 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class CatalogJobAccessPolicy
 {
     private const KINDS = [
-        'price_recompute', 'stock_valuation', 'catalog_export',
+        'price_recompute', 'stock_valuation', 'stock_cycle_prepare', 'sales_order_expiry', 'catalog_export',
         'catalog_bulk_preview', 'catalog_bulk_apply', 'catalog_bulk_restore',
         'catalog_import_stage', 'catalog_import_apply',
         'price_matrix_preview', 'price_matrix_apply',
+        'product_content_transfer_preview', 'product_content_transfer_apply',
+        'integration_reconcile',
     ];
 
     public static function allows(Request $request, string $kind, bool $write = false, bool $audit = false): bool
@@ -22,10 +24,18 @@ final class CatalogJobAccessPolicy
         if (!in_array($kind, self::KINDS, true)) {
             return false;
         }
+        if ($kind === 'stock_cycle_prepare' || $kind === 'sales_order_expiry') {
+            return !$write && RequestAuthorization::allows($request, 'stock', AccessLevel::READ);
+        }
         if ($kind === 'stock_valuation') {
             return RequestAuthorization::allows($request, 'stock', $write ? AccessLevel::WRITE : AccessLevel::READ);
         }
-        if (str_starts_with($kind, 'catalog_bulk_') || str_starts_with($kind, 'catalog_import_') || str_starts_with($kind, 'price_matrix_')) {
+        if ($kind === 'integration_reconcile') {
+            return (!$write || RequestAuthorization::isSessionAuth($request))
+                && RequestAuthorization::allows($request, 'eshop.integrations', $write ? AccessLevel::WRITE : AccessLevel::READ);
+        }
+        if (str_starts_with($kind, 'catalog_bulk_') || str_starts_with($kind, 'catalog_import_') || str_starts_with($kind, 'price_matrix_')
+            || str_starts_with($kind, 'product_content_transfer_')) {
             if ($write && !RequestAuthorization::isSessionAuth($request)) {
                 return false;
             }

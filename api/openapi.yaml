@@ -6881,6 +6881,26 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/VatClassification' }
 
+  /api/v1/vat-classifications/lines:
+    get:
+      tags: [Codebooks]
+      summary: Řádky přiznání, které smí klasifikace nést
+      description: >-
+        Whitelist hodnot pro `dphdp3_line` / `dphdp3_line_secondary`. UI z něj staví výběr,
+        aby se číslo řádku nedalo zaměnit s názvem kódu (kód „42" ≠ řádek 42).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      responses:
+        '200':
+          description: Seznam podporovaných řádků
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lines:
+                    type: array
+                    items: { type: string, example: '51b' }
+
   /api/v1/vat-classifications/{id}:
     put:
       tags: [Codebooks]
@@ -7020,6 +7040,62 @@ paths:
                   rates:
                     type: array
                     items: { $ref: '#/components/schemas/OssMemberStateRate' }
+
+  # ── Státní a ostatní svátky (globální číselník) ──────────────────────────
+  /api/v1/codebooks/public-holidays:
+    get:
+      tags: [Codebooks]
+      summary: Číselník státních a ostatních svátků (z. č. 245/2000 Sb.)
+      description: |
+        GLOBÁLNÍ číselník (ne per-supplier). Svátek posouvá podle § 33 odst. 4
+        daňového řádu VŠECHNY lhůty podání — přiznání k DPH, kontrolní i souhrnné
+        hlášení, přehledy OSVČ, odvody ze mzdy — takže jeden řádek platí pro celou
+        instanci.
+
+        Řádky nejsou konkrétní data, ale PRAVIDLA s datovanou platností:
+        `rule_type = fixed` nese pevné `month_day` (MM-DD), `rule_type = easter`
+        nese `easter_offset`, tedy posun ve dnech od Velikonoční neděle (Velký
+        pátek −2, Velikonoční pondělí +1). Datum Velikonoc se počítá, protože ho
+        neurčuje zákon, ale gregoriánský computus.
+
+        `preview` je číselník rozpočítaný na konkrétní rok (parametr `year`,
+        výchozí je aktuální). `fallback = true` znamená, že tabulka je prázdná
+        nebo nedostupná a lhůty se počítají z pojistky zapečené v kódu — tedy
+        podle stavu zákona k vydání aplikace.
+
+        Zápis je záměrně mimo veřejné API: mění autoritu společnou pro všechny
+        firmy v instanci a je dostupný jen správci instance z webového rozhraní.
+      parameters:
+        - in: query
+          name: year
+          required: false
+          schema: { type: integer, minimum: 1900, maximum: 2200, example: 2026 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  can_write: { type: boolean, example: false }
+                  fallback:  { type: boolean, example: false }
+                  year:      { type: integer, example: 2026 }
+                  rule_types:
+                    type: array
+                    items: { type: string, enum: [fixed, easter] }
+                  rules:
+                    type: array
+                    items: { $ref: '#/components/schemas/PublicHoliday' }
+                  preview:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date: { type: string, format: date, example: '2026-04-03' }
+                        code: { type: string, example: good_friday }
+                        name: { type: string, example: Velký pátek }
+        '403': { description: Chybí oprávnění k číselníkům }
 
   # ── Purchase invoices — chybějící endpointy ──────────────────────────────
   /api/v1/purchase-invoices/export:
@@ -11201,6 +11277,8 @@ paths:
         §8a (18 měs. 50 %, 30 měs. 100 %) a §8c (do 30 000 Kč nad 12 měs. 100 %).
         Od 36 měsíců se automatický návrh vynuluje a položka nese upozornění na možné promlčení.
         Systém návrh jen nabízí — účetní ho per pohledávka potvrdí/upraví v /steps/provisions/run.
+        U již zaúčtované OP nese `existing.legal_section` paragraf zvolený účetní (podklad
+        rozpadu tabulky C přílohy č. 1 II. oddílu DPPO); `null` = nezařazeno.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -11278,6 +11356,11 @@ paths:
                       invoice_id: { type: integer }
                       legal_amount: { type: number, description: "Zákonná OP (558)" }
                       acct_amount: { type: number, description: "Účetní OP nad rámec (559)" }
+                      legal_section:
+                        type: string
+                        nullable: true
+                        enum: ['8', 8a, 8b, 8c]
+                        description: "Paragraf zákona o rezervách u zákonné OP — podklad rozpadu tabulky C přílohy č. 1 II. oddílu DPPO (§8 → ř. 3/4, §8a → ř. 6/7, §8b → ř. 8/9, §8c → ř. 10/11). Neznámá hodnota se uloží jako nezařazeno."
                       note: { type: string }
                 bank_rows:
                   type: array
@@ -12175,7 +12258,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [register_id, doc_type, purpose, issue_date, description, total_amount], properties: { register_id: { type: integer }, doc_type: { type: string, enum: [in, out] }, purpose: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] }, issue_date: { type: string, format: date }, tax_date: { type: string, format: date }, partner_name: { type: string }, partner_ic: { type: string }, partner_dic: { type: string }, description: { type: string }, vat_mode: { type: string, enum: [none, vat] }, total_amount: { type: number }, amount_foreign: { type: number, nullable: true, description: "Částka v měně pokladny u valutové pokladny (§11); CZK ekvivalent do total_amount dopočítá server" }, fx_rate: { type: number, description: "Ruční kurz; vynechte, ať se použije kurz ČNB k datu vystavení" }, vat_lines: { type: array, items: { type: object, properties: { vat_rate: { type: number }, base_amount: { type: number }, vat_amount: { type: number }, vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Rozsah nároku na odpočet DPH řádku (§ 75/76)" }, vat_deduction_percent: { type: number, default: 100, description: "Poměrný / skutečný roční koeficient odpočtu v procentech (0–100)" }, tax_treatment: { type: string, enum: [deductible, non_deductible, not_expense], default: deductible, description: "Uznatelnost řádku pro daň z příjmů (§ 24/25), nezávislá na DPH" } } } }, invoice_id: { type: integer }, purchase_invoice_id: { type: integer }, rule_key: { type: string }, counter_account_code: { type: string }, post: { type: boolean, default: true } } } } }
+        content: { application/json: { schema: { type: object, required: [register_id, doc_type, purpose, issue_date, description, total_amount], properties: { register_id: { type: integer }, doc_type: { type: string, enum: [in, out] }, purpose: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] }, issue_date: { type: string, format: date }, tax_date: { type: string, format: date }, partner_name: { type: string }, partner_ic: { type: string }, partner_dic: { type: string }, description: { type: string }, vat_mode: { type: string, enum: [none, vat] }, total_amount: { type: number }, amount_foreign: { type: number, nullable: true, description: "Částka v měně pokladny u valutové pokladny (§11); CZK ekvivalent do total_amount dopočítá server" }, fx_rate: { type: number, description: "Ruční kurz; vynechte, ať se použije kurz ČNB k datu vystavení" }, vat_lines: { type: array, items: { type: object, properties: { vat_rate: { type: number }, base_amount: { type: number }, vat_amount: { type: number }, vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Rozsah nároku na odpočet DPH řádku (§ 75/76)" }, vat_deduction_percent: { type: number, default: 100, description: "Poměrný / skutečný roční koeficient odpočtu v procentech (0–100)" }, tax_treatment: { type: string, enum: [deductible, non_deductible, not_expense], default: deductible, description: "Uznatelnost řádku pro daň z příjmů (§ 24/25), nezávislá na DPH" }, is_fixed_asset: { type: boolean, default: false, description: "Pořízení dlouhodobého majetku (§ 4 odst. 4) — hodnota se v přiznání uvede navíc na ř. 47. Uplatní se jen u výdajového dokladu (doc_type=out); u příjmového se ignoruje." } } } }, invoice_id: { type: integer }, purchase_invoice_id: { type: integer }, rule_key: { type: string }, counter_account_code: { type: string }, post: { type: boolean, default: true } } } } }
       responses:
         '201': { description: Vytvořeno, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -12971,6 +13054,35 @@ paths:
       responses:
         '200': { description: Smazáno }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/eshop/product-masters:
+    parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+    get:
+      tags: [Eshop]
+      summary: Seznam neprodejných masterů produktů
+      parameters:
+        - { in: query, name: status, schema: { type: string, enum: [active, archived, all], default: active } }
+        - { in: query, name: query, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses: { '200': { description: OK } }
+  /api/v1/eshop/product-masters/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Eshop]
+      summary: Detail masteru, os a variant s efektivním obsahem
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ProductMaster' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/eshop/products/{id}/relations:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Eshop]
+      summary: Typované produktové vazby
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ProductRelations' } } } } }
   /api/v1/eshop/products/import:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -13575,7 +13687,14 @@ paths:
           schema: { type: boolean }
           description: Jen aktivní sklady.
       responses:
-        '200': { description: OK }
+        '200':
+          description: Seznam skladů včetně fyzické hodnoty zásob.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StockWarehouse'
     post:
       tags: [Stock]
       summary: Nový sklad
@@ -13640,6 +13759,50 @@ paths:
         '200': { description: OK }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Sklad má nenulový stav nebo pohyby — nelze smazat.' }
+  /api/v1/stock/locations:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Stock]
+      summary: Seznam skladových lokací
+      parameters:
+        - in: query
+          name: warehouse_id
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Lokace patřící aktuální firmě, volitelně omezené na sklad. }
+    post:
+      tags: [Stock]
+      summary: Nová skladová lokace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WarehouseLocationInput'
+      responses:
+        '201': { description: Vytvořeno }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/stock/locations/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    put:
+      tags: [Stock]
+      summary: Úprava skladové lokace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WarehouseLocationInput'
+      responses:
+        '200': { description: Uloženo }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/stock/items/search:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -13814,6 +13977,10 @@ paths:
                 unit:
                   type: string
                   default: ks
+                tracking_mode:
+                  type: string
+                  enum: [none, lot, serial]
+                  default: none
                 ean:
                   type:
                   - string
@@ -13876,6 +14043,7 @@ paths:
                 name: { type: string, maxLength: 255 }
                 item_type: { type: string, enum: [material, goods, product] }
                 unit: { type: string }
+                tracking_mode: { type: string, enum: [none, lot, serial] }
                 ean: { type: [string, "null"] }
                 vat_rate_id: { type: [integer, "null"] }
                 sale_price_without_vat: { type: [string, "null"] }
@@ -13897,6 +14065,45 @@ paths:
         '200': { description: OK }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Karta má skladové pohyby — nelze smazat.' }
+  /api/v1/stock/items/{id}/tracking:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Stock]
+      summary: Šarže, série, expirace a historie skladové karty
+      responses:
+        '200':
+          description: Režim sledování, přesné převodní jednotky, aktuální alokace a úplná historie.
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/stock/items/{id}/units:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    put:
+      tags: [Stock]
+      summary: Nahradí převodní jednotky skladové karty
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [units]
+              properties:
+                units:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/StockItemUnitInput'
+      responses:
+        '200': { description: Uloženo }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/stock/items/{id}/neighbors:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14022,8 +14229,9 @@ paths:
       tags: [Stock]
       summary: Dávková dostupnost skladových karet
       description: |
-        Použito pro badge dostupnosti v editoru faktury — vrátí dostupné množství
-        pro zadané karty (volitelně na konkrétním skladu).
+        Použito pro badge dostupnosti v editoru faktury. Vrátí fyzické množství
+        v aktivních prodejných skladech pro zadané karty (volitelně na konkrétním skladu).
+        Karanténní a neaktivní sklady se nezahrnují. Množství zde není snížené o rezervace.
       parameters:
         - in: query
           name: item_ids
@@ -14152,6 +14360,75 @@ paths:
       responses:
         '200': { description: OK }
         '403': { description: Skladový modul není pro firmu zapnutý. }
+  /api/v1/stock/sales-orders:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Stock]
+      summary: Prodejní objednávky
+      description: Čtecí seznam prodejních objednávek s odděleným obchodním, platebním a expedičním stavem.
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: commercial_status
+          schema: { type: string, enum: [draft, confirmed, cancelled, completed] }
+        - in: query
+          name: payment_status
+          schema: { type: string, enum: [unpaid, authorized, partially_paid, paid, refunded, partially_refunded] }
+        - in: query
+          name: fulfillment_status
+          schema: { type: string, enum: [unfulfilled, partially_reserved, reserved, partially_fulfilled, fulfilled, cancelled] }
+        - in: query
+          name: shortage
+          schema: { type: boolean }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Seznam objednávek
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/SalesOrder' } }
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+        '403': { description: Skladový modul není pro firmu zapnutý. }
+  /api/v1/stock/sales-orders/shortages:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Stock]
+      summary: Fronta prodejních objednávek s nedostatkem
+      responses:
+        '200': { description: Objednávky čekající na doplnění zásob. }
+        '403': { description: Skladový modul není pro firmu zapnutý. }
+  /api/v1/stock/sales-orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Stock]
+      summary: Detail prodejní objednávky
+      responses:
+        '200':
+          description: Objednávka včetně neměnných snapshotů řádků a zbývajících rezervací.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SalesOrder' }
+        '404': { description: Objednávka nebyla nalezena. }
   /api/v1/stock/purchase-orders:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14839,6 +15116,7 @@ paths:
                   - credit_note
                   - purchase_invoice
                   - inventory
+                  - purchase_order
                   default: manual
                 doc_date:
                   type: string
@@ -14907,6 +15185,11 @@ paths:
                         type:
                         - string
                         - 'null'
+                      tracking_allocations:
+                        type: array
+                        description: Povinné a množstevně úplné při zaúčtování karty v režimu lot nebo serial.
+                        items:
+                          $ref: '#/components/schemas/StockTrackingAllocationInput'
                 allow_over_delivery:
                   type: boolean
                   default: false
@@ -14964,6 +15247,7 @@ paths:
                   - credit_note
                   - purchase_invoice
                   - inventory
+                  - purchase_order
                 doc_date:
                   type: string
                   format: date
@@ -15075,6 +15359,88 @@ paths:
             application/pdf:
               schema: { type: string, format: binary }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/stock/cycle-counts:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Stock]
+      summary: Seznam cyklických inventur
+      responses:
+        '200': { description: Poslední cyklické inventury firmy. }
+    post:
+      tags: [Stock]
+      summary: Založí durable přípravu cyklické inventury
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [warehouse_id, take_date]
+              properties:
+                warehouse_id: { type: integer, minimum: 1 }
+                location_id: { type: [integer, 'null'], minimum: 1 }
+                take_date: { type: string, format: date }
+                item_ids:
+                  type: array
+                  maxItems: 30000
+                  items: { type: integer, minimum: 1 }
+                note: { type: [string, 'null'] }
+      responses:
+        '202': { description: Inventura a její přípravná catalog_jobs úloha byly založeny. }
+        '409': { description: Pro stejný sklad a lokaci už inventura probíhá. }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/stock/cycle-counts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Stock]
+      summary: Detail cyklické inventury
+      responses:
+        '200': { description: Stav přípravy, cutoff a řádky inventury. }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Stock]
+      summary: Uloží zjištěné počty cyklické inventury
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [id]
+                    properties:
+                      id: { type: integer, minimum: 1 }
+                      counted_qty: { type: [string, 'null'] }
+                      surplus_unit_cost: { type: [string, 'null'] }
+      responses:
+        '200': { description: Uloženo }
+        '409': { description: Inventura není ve stavu counting. }
+  /api/v1/stock/cycle-counts/{id}/close:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags: [Stock]
+      summary: Uzavře cyklickou inventuru a atomicky zaúčtuje rozdíly
+      description: Rozdíly se počítají proti aktuálnímu uzamčenému stavu, takže pohyby po cutoffu se nezapočítají dvakrát.
+      responses:
+        '200': { description: Uzavřeno, odpověď obsahuje vytvořené příjemky a výdejky. }
+        '409': { description: Inventura není ve stavu counting. }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/stock/takes:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -16665,10 +17031,16 @@ paths:
     get:
       tags: [Invoices, Stock]
       summary: Skladové doklady vázané na vydanou fakturu
-      description: Vrací výdejky/doklady vytvořené k této faktuře (např. výdej ze skladu při fakturaci). 400, pokud sklad není u dodavatele zapnutý.
+      description: Vrací výdejky/doklady vytvořené k této faktuře (např. výdej ze skladu při fakturaci).
       responses:
-        '200': { description: OK }
-        '400': { description: Skladový modul není u tohoto dodavatele zapnutý }
+        '200':
+          description: Skladové doklady svázané s fakturou.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockDocument' }
+        '403': { description: Skladový modul není u tohoto dodavatele zapnutý nebo token nemá právo číst sklad. }
   /api/v1/invoices/{id}/book:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -16781,10 +17153,15 @@ paths:
     get:
       tags: [Purchase invoices, Stock]
       summary: Návrh příjemky ke skladovým položkám přijaté faktury
-      description: Vrací, co zbývá přijmout na sklad, navrhované pořizovací ceny a kandidáty vedlejších nákladů. 400, pokud sklad není u dodavatele zapnutý.
+      description: Vrací, co zbývá přijmout na sklad, navrhované pořizovací ceny a kandidáty vedlejších nákladů.
       responses:
-        '200': { description: OK }
-        '400': { description: Skladový modul není u tohoto dodavatele zapnutý }
+        '200':
+          description: Návrh příjemky nebo prázdný návrh pro druh dokladu, ze kterého příjemku nelze vytvořit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockReceiptProposal' }
+        '403': { description: Skladový modul není u tohoto dodavatele zapnutý nebo token nemá právo číst sklad. }
+        '404': { $ref: '#/components/responses/NotFound' }
     post:
       tags: [Purchase invoices, Stock]
       summary: Založí skladovou příjemku (DRAFT) z přijaté faktury
@@ -16794,11 +17171,16 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              description: Položky příjemky (podle návrhu z GET stock-receipt, upravitelné).
+              $ref: '#/components/schemas/StockReceiptCreate'
       responses:
-        '201': { description: Příjemka vytvořena }
-        '400': { description: Skladový modul není u tohoto dodavatele zapnutý }
+        '201':
+          description: Draft příjemky vytvořen.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockDocument' }
+        '403': { description: Skladový modul není u tohoto dodavatele zapnutý nebo token nemá právo zapisovat do skladu. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Požadované množství překračuje dosud nepřijaté množství. }
         '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/purchase-invoices/{id}/stock-receipts:
     parameters:
@@ -16811,8 +17193,14 @@ paths:
       tags: [Purchase invoices, Stock]
       summary: Přehled skladových příjmů vytvořených z této přijaté faktury
       responses:
-        '200': { description: OK }
-        '400': { description: Skladový modul není u tohoto dodavatele zapnutý }
+        '200':
+          description: Draft, zaúčtované i stornované příjemky svázané s fakturou.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockDocument' }
+        '403': { description: Skladový modul není u tohoto dodavatele zapnutý nebo token nemá právo číst sklad. }
   /api/v1/logbook/trip-categories/{id}:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -17631,6 +18019,13 @@ paths:
     get:
       tags: [TaxReturn]
       summary: Řádky, ruční vstupy a upozornění přiznání
+      description: >-
+        U DPFO (`type=fo`) nese `podklady.section10_codebook` číselník druhů ostatních
+        příjmů podle § 10 odst. 1 zákona (`kinds`, A–H) a volitelných kódů (`codes`,
+        P/S/Z/N) pro položky `inputs.s10_items[]`; `podklady.payroll_gross` je úhrn
+        zúčtovaných mezd nabídnutý mzdovou agendou pro ruční vstup `inputs.s7_payroll_gross`
+        (null = agenda za rok nic nevykazuje). Zrušený jednořádkový vstup `inputs.s10_other`
+        se při čtení i uložení převádí na jednu položku `inputs.s10_items[]`.
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '400': { description: Neplatný typ/rok/variant }
@@ -18625,6 +19020,38 @@ paths:
                 $ref: '#/components/schemas/CatalogBatchResponse'
         '400': { description: Neplatná dávka }
         '403': { description: Chybějící oprávnění nebo vypnutý sklad }
+  /api/v1/catalog/changes:
+    parameters:
+    - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Eshop]
+      summary: Přírůstkový seznam změn katalogu
+      description: |
+        Read-only change feed s rostoucím cursorem. Zachytí změny karty, cen,
+        médií, překladů, fyzické dostupnosti a rezervací. Smazaná nebo archivovaná
+        entita má change_type `tombstone`. Spotřebitel po každé stránce uloží
+        `next_cursor`; při HTTP 410 provede nový snapshot přes dávkové produkty a
+        pokračuje od `minimum_cursor`. Cursor je izolovaný podle firmy.
+      parameters:
+      - in: query
+        name: after_cursor
+        schema: { type: integer, minimum: 0, default: 0 }
+      - in: query
+        name: limit
+        schema: { type: integer, minimum: 1, maximum: 1000, default: 250 }
+      responses:
+        '200':
+          description: Stránka změn v pořadí cursoru
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogChangeFeed' }
+        '400': { description: Neplatný cursor nebo limit }
+        '403': { description: Chybějící oprávnění nebo vypnutý sklad }
+        '410':
+          description: Cursor již není v retenčním okně a je vyžadovaný nový snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogChangeFeed' }
   /api/v1/catalog/exports:
     parameters:
     - $ref: '#/components/parameters/SupplierIdHeader'
@@ -19079,6 +19506,54 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    SalesOrder:
+      type: object
+      required: [id, order_uuid, order_number, commercial_status, payment_status, fulfillment_status, currency_code, prices_include_vat, total_with_vat, row_version]
+      properties:
+        id: { type: integer, format: int64 }
+        order_uuid: { type: string, format: uuid }
+        order_number: { type: string }
+        client_id: { type: integer, format: int64 }
+        client_name: { type: string }
+        commercial_status: { type: string, enum: [draft, confirmed, cancelled, completed] }
+        payment_status: { type: string, enum: [unpaid, authorized, partially_paid, paid, refunded, partially_refunded] }
+        fulfillment_status: { type: string, enum: [unfulfilled, partially_reserved, reserved, partially_fulfilled, fulfilled, cancelled] }
+        currency_code: { type: string }
+        prices_include_vat: { type: boolean }
+        total_without_vat: { type: string }
+        total_vat: { type: string }
+        total_with_vat: { type: string }
+        reservation_expires_at: { type: string, format: date-time, nullable: true }
+        row_version: { type: integer }
+        invoice_id: { type: integer, format: int64, nullable: true }
+        fulfillment_task_id: { type: integer, format: int64, nullable: true, description: ID existujícího vychystání v detailu objednávky. }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_uuid, description, quantity, unit_price, vat_rate_snapshot, product_snapshot, component_snapshot]
+            properties:
+              line_uuid: { type: string, format: uuid }
+              description: { type: string }
+              quantity: { type: string }
+              unit_price: { type: string }
+              discount_percent: { type: string }
+              vat_rate_snapshot: { type: string }
+              product_snapshot: { type: object, additionalProperties: true }
+              component_snapshot: { type: array, items: { type: object, additionalProperties: true } }
+        reservations:
+          type: array
+          items:
+            type: object
+            required: [source_line_id, warehouse_id, stock_item_id, qty_reserved, qty_consumed, qty_released, remaining_qty]
+            properties:
+              source_line_id: { type: string }
+              warehouse_id: { type: integer, format: int64 }
+              stock_item_id: { type: integer, format: int64 }
+              qty_reserved: { type: string }
+              qty_consumed: { type: string }
+              qty_released: { type: string }
+              remaining_qty: { type: string }
     StockTakePreparation:
       type: object
       properties:
@@ -19199,11 +19674,11 @@ components:
         fields:
           type: array
           minItems: 1
-          maxItems: 23
+          maxItems: 27
           default: [sku, name, ean, is_active]
           items:
             type: string
-            enum: [sku, name, item_type, unit, ean, manufacturer_id, vat_rate_id, is_active, is_stocked, export_eshop, min_qty, weight_g, warranty_months, delivery_days, i18n, categories, tag_ids, attributes, fees, media, prices, availability, costs]
+            enum: [sku, name, item_type, unit, ean, manufacturer_id, vat_rate_id, is_active, is_stocked, export_eshop, min_qty, weight_g, warranty_months, delivery_days, i18n, categories, tag_ids, attributes, fees, media, prices, availability, costs, master, variant, effective, relations]
         locales:
           type: array
           minItems: 1
@@ -19345,11 +19820,11 @@ components:
         fields:
           type: array
           minItems: 1
-          maxItems: 22
+          maxItems: 26
           default: [sku, name, ean, is_active]
           items:
             type: string
-            enum: [sku, name, item_type, unit, ean, manufacturer_id, vat_rate_id, is_active, is_stocked, export_eshop, min_qty, weight_g, warranty_months, delivery_days, i18n, categories, tag_ids, attributes, fees, media, prices, availability]
+            enum: [sku, name, item_type, unit, ean, manufacturer_id, vat_rate_id, is_active, is_stocked, export_eshop, min_qty, weight_g, warranty_months, delivery_days, i18n, categories, tag_ids, attributes, fees, media, prices, availability, master, variant, effective, relations]
         locales:
           type: array
           minItems: 1
@@ -19406,6 +19881,129 @@ components:
         before: { type: [object, array, 'null'] }
         after: { type: [object, array, 'null'] }
         updated_at: { type: string }
+    ProductMasterI18n:
+      type: object
+      required: [locale, name]
+      properties:
+        locale: { type: string, maxLength: 5 }
+        name: { type: string, maxLength: 255 }
+        short_desc: { type: [string, 'null'], maxLength: 500 }
+        description: { type: [string, 'null'] }
+        seo_title: { type: [string, 'null'], maxLength: 255 }
+        seo_description: { type: [string, 'null'], maxLength: 320 }
+    ProductInheritance:
+      type: object
+      properties:
+        manufacturer: { type: boolean, default: true }
+        i18n:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              name: { type: boolean, default: true }
+              short_desc: { type: boolean, default: true }
+              description: { type: boolean, default: true }
+              seo_title: { type: boolean, default: true }
+              seo_description: { type: boolean, default: true }
+    ProductVariantWrite:
+      type: object
+      required: [row_version]
+      properties:
+        stock_item_id: { type: integer, format: int64 }
+        row_version: { type: integer, minimum: 1 }
+        link_row_version: { type: integer, minimum: 1 }
+        options:
+          type: array
+          items:
+            type: object
+            required: [attribute_id, option_id]
+            properties:
+              attribute_id: { type: integer, format: int64 }
+              option_id: { type: integer, format: int64 }
+        inheritance: { $ref: '#/components/schemas/ProductInheritance' }
+    ProductMasterWrite:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 255 }
+        manufacturer_id: { type: [integer, 'null'], format: int64 }
+        axis_attribute_ids: { type: array, maxItems: 8, items: { type: integer, format: int64 } }
+        i18n: { type: array, items: { $ref: '#/components/schemas/ProductMasterI18n' } }
+    ProductMaster:
+      allOf:
+        - $ref: '#/components/schemas/ProductMasterWrite'
+        - type: object
+          required: [id, status, row_version, axes, variants]
+          properties:
+            id: { type: integer, format: int64 }
+            status: { type: string, enum: [active, archived] }
+            row_version: { type: integer, minimum: 1 }
+            axes: { type: array, items: { type: object, additionalProperties: true } }
+            variants: { type: array, items: { type: object, additionalProperties: true } }
+    ProductDetachPreview:
+      type: object
+      required: [master_id, stock_item_id, row_version, link_row_version, materialized]
+      properties:
+        master_id: { type: integer, format: int64 }
+        stock_item_id: { type: integer, format: int64 }
+        row_version: { type: integer, minimum: 1 }
+        link_row_version: { type: integer, minimum: 1 }
+        materialized:
+          type: object
+          properties:
+            manufacturer_id: { type: [integer, 'null'], format: int64 }
+            i18n: { type: array, items: { $ref: '#/components/schemas/ProductMasterI18n' } }
+    ProductContentTransferPreviewWrite:
+      type: object
+      required: [master_row_version, stock_item_ids, fields, overwrite]
+      properties:
+        master_row_version: { type: integer, minimum: 1 }
+        stock_item_ids: { type: array, minItems: 1, maxItems: 30000, items: { type: integer, format: int64 } }
+        fields:
+          type: array
+          minItems: 1
+          items: { type: string, pattern: '^(manufacturer|i18n\.[a-z]{2}(-[A-Z]{2})?\.(name|short_desc|description|seo_title|seo_description))$' }
+        overwrite: { type: boolean }
+    ProductRelations:
+      type: object
+      required: [row_version, items]
+      properties:
+        row_version: { type: integer, minimum: 1 }
+        items:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [type, target_stock_item_id]
+            properties:
+              type: { type: string, enum: [accessory, replacement, related] }
+              target_stock_item_id: { type: integer, format: int64 }
+              target_sku: { type: string, readOnly: true }
+              target_name: { type: string, readOnly: true }
+              display_order: { type: integer }
+    CatalogChange:
+      type: object
+      required: [cursor, entity_type, entity_id, change_type, source_area, occurred_at]
+      properties:
+        cursor: { type: integer, minimum: 1 }
+        entity_type: { type: string, enum: [stock_item] }
+        entity_id: { type: integer, minimum: 1 }
+        change_type: { type: string, enum: [upsert, tombstone] }
+        source_area: { type: string, enum: [product, price, media, i18n, availability, reservation] }
+        occurred_at: { type: string, format: date-time }
+    CatalogChangeFeed:
+      type: object
+      required: [cursor_expired, snapshot_required, minimum_cursor, next_cursor, has_more, items]
+      properties:
+        cursor_expired: { type: boolean }
+        snapshot_required: { type: boolean }
+        snapshot_path: { type: string, example: /api/v1/catalog/products/batch }
+        minimum_cursor: { type: integer, minimum: 0 }
+        next_cursor: { type: integer, minimum: 0 }
+        has_more: { type: boolean }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CatalogChange' }
     CatalogJob:
       type: object
       properties:
@@ -19456,9 +20054,39 @@ components:
           type:
           - string
           - 'null'
+    StockWarehouse:
+      type: object
+      properties:
+        id: { type: integer }
+        supplier_id: { type: integer }
+        code: { type: string }
+        name: { type: string }
+        is_default: { type: boolean }
+        is_active: { type: boolean }
+        is_sellable:
+          type: boolean
+          description: Prodejný sklad. Karanténa má false, její zásoby se oceňují, ale nevstupují do prodejné dostupnosti.
+        value: { type: string }
+        note: { type: [string, 'null'] }
     CatalogProduct:
       type: object
       properties:
+        availability:
+          type: object
+          description: Fyzická množství pouze v aktivních prodejných skladech, bez odečtení rezervací. Ocenění costs zahrnuje i neprodejné sklady.
+          properties:
+            qty: { type: string }
+            warehouses:
+              type: array
+              items:
+                type: object
+                properties:
+                  warehouse_id: { type: integer }
+                  qty: { type: string }
+        tracking_mode:
+          type: string
+          enum: [none, lot, serial]
+          description: Opt-in způsob sledování zásoby. Aktivní lot a serial vyžadují úplné alokace při zaúčtování.
         lifecycle_status:
           type: string
           enum: [draft, ready, retired]
@@ -19477,6 +20105,21 @@ components:
           type: string
         avg_unit_cost:
           type: string
+        master:
+          type: [object, 'null']
+          description: Neprodejný master varianty, pokud je karta připojena.
+          additionalProperties: true
+        variant:
+          type: [object, 'null']
+          description: Volby, verze vazby a příznaky dědění varianty.
+          additionalProperties: true
+        effective:
+          type: object
+          description: Efektivní výrobce a překlady po vyhodnocení dědění.
+          additionalProperties: true
+        relations:
+          type: array
+          items: { type: object, additionalProperties: true }
     CatalogEditorInput:
       type: object
       required:
@@ -19506,6 +20149,152 @@ components:
           type: array
           items:
             type: object
+    StockDocumentLine:
+      type: object
+      required: [stock_item_id, qty]
+      properties:
+        id: { type: integer, format: int64 }
+        document_id: { type: integer, format: int64 }
+        supplier_id: { type: integer, format: int64 }
+        stock_item_id: { type: integer, format: int64 }
+        doc_date: { type: [string, 'null'], format: date }
+        qty: { type: string }
+        unit_cost: { type: string }
+        value_total: { type: string }
+        extra_cost: { type: string }
+        invoice_item_id: { type: [integer, 'null'], format: int64 }
+        purchase_invoice_item_id: { type: [integer, 'null'], format: int64 }
+        purchase_order_line_id: { type: [integer, 'null'], format: int64 }
+        source_description: { type: [string, 'null'] }
+        source_qty: { type: [string, 'null'] }
+        line_no: { type: integer }
+        note: { type: [string, 'null'] }
+        sku: { type: string, readOnly: true }
+        name: { type: string, readOnly: true }
+        unit: { type: string, readOnly: true }
+    StockDocument:
+      type: object
+      required:
+        - id
+        - supplier_id
+        - doc_type
+        - origin
+        - warehouse_id
+        - doc_date
+        - description
+        - status
+        - allow_over_delivery
+      properties:
+        id: { type: integer, format: int64 }
+        supplier_id: { type: integer, format: int64 }
+        doc_type: { type: string, enum: [receipt, issue, transfer] }
+        origin: { type: string, enum: [manual, invoice, credit_note, purchase_invoice, inventory, purchase_order] }
+        warehouse_id: { type: integer, format: int64 }
+        warehouse_to_id: { type: [integer, 'null'], format: int64 }
+        doc_number: { type: [string, 'null'] }
+        doc_date: { type: string, format: date }
+        description: { type: string }
+        partner_name: { type: [string, 'null'] }
+        invoice_id: { type: [integer, 'null'], format: int64 }
+        purchase_invoice_id: { type: [integer, 'null'], format: int64 }
+        purchase_order_id: { type: [integer, 'null'], format: int64 }
+        stock_take_id: { type: [integer, 'null'], format: int64 }
+        journal_entry_id: { type: [integer, 'null'], format: int64 }
+        reversal_document_id: { type: [integer, 'null'], format: int64 }
+        status: { type: string, enum: [draft, posted, reversed] }
+        booked_at: { type: [string, 'null'], format: date-time }
+        booked_by: { type: [integer, 'null'], format: int64 }
+        created_by: { type: [integer, 'null'], format: int64 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        allow_over_delivery: { type: boolean }
+        warehouse_code: { type: [string, 'null'], readOnly: true }
+        warehouse_name: { type: [string, 'null'], readOnly: true }
+        warehouse_to_code: { type: [string, 'null'], readOnly: true }
+        warehouse_to_name: { type: [string, 'null'], readOnly: true }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/StockDocumentLine' }
+        warnings:
+          type: array
+          items: { type: string }
+    StockReceiptProposalLine:
+      type: object
+      required: [purchase_invoice_item_id, stock_item_id, description, quantity, already_received, remaining_qty, unit_cost]
+      properties:
+        purchase_invoice_item_id: { type: integer, format: int64 }
+        purchase_order_line_id: { type: [integer, 'null'], format: int64 }
+        stock_item_id: { type: [integer, 'null'], format: int64 }
+        description: { type: string }
+        quantity: { type: string }
+        already_received: { type: string }
+        remaining_qty: { type: string }
+        unit_cost: { type: string }
+    StockReceiptCostCandidate:
+      type: object
+      required: [purchase_invoice_item_id, description, amount]
+      properties:
+        purchase_invoice_item_id: { type: integer, format: int64 }
+        description: { type: string }
+        amount: { type: string }
+    StockReceiptProposal:
+      oneOf:
+        - type: object
+          required: [purchase_invoice, lines, cost_candidates, pf_changed_after_receipt]
+          properties:
+            purchase_invoice:
+              type: object
+              required: [id, vendor_invoice_number, currency_code]
+              properties:
+                id: { type: integer, format: int64 }
+                varsymbol: { type: [string, 'null'] }
+                vendor_invoice_number: { type: string }
+                vendor_name: { type: [string, 'null'] }
+                currency_code: { type: string }
+                exchange_rate: { type: [string, 'null'] }
+            lines:
+              type: array
+              items: { $ref: '#/components/schemas/StockReceiptProposalLine' }
+            cost_candidates:
+              type: array
+              items: { $ref: '#/components/schemas/StockReceiptCostCandidate' }
+            pf_changed_after_receipt: { type: boolean }
+        - type: object
+          required: [purchase_invoice_id, lines, cost_candidates, not_receivable_kind]
+          properties:
+            purchase_invoice_id: { type: integer, format: int64 }
+            lines: { type: array, maxItems: 0 }
+            cost_candidates: { type: array, maxItems: 0 }
+            not_receivable_kind: { type: string, enum: [advance, tax_document, credit_note] }
+    StockReceiptCreate:
+      type: object
+      required: [warehouse_id, doc_date, lines]
+      properties:
+        warehouse_id: { type: integer, format: int64 }
+        doc_date: { type: string, format: date }
+        description: { type: string, maxLength: 255 }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [purchase_invoice_item_id, quantity]
+            properties:
+              purchase_invoice_item_id: { type: integer, format: int64 }
+              stock_item_id: { type: integer, format: int64 }
+              quantity: { type: [string, number] }
+              unit_cost: { type: [string, number, 'null'] }
+        landed_costs:
+          type: array
+          items:
+            type: object
+            required: [amount]
+            properties:
+              purchase_invoice_id: { type: integer, format: int64 }
+              purchase_invoice_item_id: { type: integer, format: int64 }
+              description: { type: string }
+              amount: { type: number }
+              allocation: { type: string, enum: [by_value, by_qty], default: by_value }
     StockDocumentState:
       type: object
       properties:
@@ -19519,6 +20308,35 @@ components:
           - draft
           - posted
           - reversed
+    WarehouseLocationInput:
+      type: object
+      required: [warehouse_id, code, name]
+      properties:
+        warehouse_id: { type: integer, minimum: 1 }
+        code: { type: string, maxLength: 50 }
+        name: { type: string, maxLength: 100 }
+        is_active: { type: boolean, default: true }
+    StockItemUnitInput:
+      type: object
+      required: [unit_code, numerator, denominator]
+      properties:
+        unit_code: { type: string, maxLength: 20 }
+        numerator: { type: integer, minimum: 1, maximum: 1000000 }
+        denominator: { type: integer, minimum: 1, maximum: 1000000 }
+      description: Přesný racionální převod na základní jednotku numerator/denominator bez float zaokrouhlení.
+    StockTrackingAllocationInput:
+      type: object
+      required: [quantity]
+      properties:
+        stock_tracking_unit_id: { type: integer, minimum: 1 }
+        quantity: { type: string, pattern: '^\\d+(\\.\\d{1,3})?$' }
+        unit_code: { type: string, maxLength: 20 }
+        serial_number: { type: [string, 'null'], maxLength: 184 }
+        lot_code: { type: [string, 'null'], maxLength: 100 }
+        expires_on: { type: [string, 'null'], format: date }
+        location_id: { type: [integer, 'null'], minimum: 1 }
+        location_to_id: { type: [integer, 'null'], minimum: 1 }
+      description: Příjem může založit identitu pomocí čísla série nebo kódu šarže. Výdej a převod používají existující identitu. Sériový kus má vždy quantity 1.000.
     EshopPriceInput:
       type: object
       required: [currency_code]
@@ -22127,6 +22945,26 @@ components:
         created_at:         { type: string, format: date-time }
         updated_at:         { type: string, format: date-time, nullable: true }
 
+    PublicHoliday:
+      type: object
+      description: |
+        Pravidlo jednoho svátku podle z. č. 245/2000 Sb. Není to konkrétní datum, ale
+        předpis, ze kterého se datum v daném roce teprve spočítá — a k tomu datovaná
+        platnost, takže novela zákona je řádek v číselníku, ne nová verze aplikace.
+        `month_day` je vyplněné právě pro `rule_type = fixed`, `easter_offset` právě
+        pro `rule_type = easter`.
+      properties:
+        id:            { type: integer }
+        code:          { type: string, example: good_friday }
+        name:          { type: string, example: Velký pátek }
+        rule_type:     { type: string, enum: [fixed, easter] }
+        month_day:     { type: string, nullable: true, pattern: '^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$', example: '07-05' }
+        easter_offset: { type: integer, nullable: true, example: -2 }
+        valid_from:    { type: string, format: date }
+        valid_to:      { type: string, format: date, nullable: true }
+        note:          { type: string, nullable: true }
+        updated_at:    { type: string, format: date-time }
+
     Currency:
       type: object
       properties:
@@ -23753,6 +24591,20 @@ components:
         default_branding_profile_id: { type: [integer, "null"], readOnly: true }
         auto_send_reminders: { type: boolean }
         reminder_days_after_due: { type: integer, minimum: 1, maximum: 365 }
+        epo_taxpayer_code:
+          type: [string, "null"]
+          enum: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", null]
+          description: |
+            Typ poplatníka podle číselníku `typ_popldpp` formuláře DPPDP9. Prázdný
+            řetězec se uloží jako `null` (= účetní typ poplatníka nepotvrdila).
+        tax_entity_status: { type: string, enum: [normal, liquidation, insolvency, transformation], default: normal }
+        tax_entity_status_date: { type: [string, "null"], format: date }
+        tax_accounting_decree: { type: string, enum: ["500", "501", "502", "503", "504", "325", "410"], default: "500" }
+        tax_investment_incentive: { type: boolean }
+        tax_atad_cfc: { type: boolean }
+        tax_public_benefit: { type: boolean }
+        tax_cooperating_person: { type: boolean }
+        tax_foreign_income_credit: { type: boolean }
 
     SupplierFull:
       type: object
@@ -23841,6 +24693,32 @@ components:
         vat_period: { type: [string, "null"], enum: [monthly, quarterly, null] }
         financial_office_code: { type: [string, "null"], description: "Kód FÚ pro EPO (= CRPDPH cisloFu)" }
         flat_tax_band: { type: string, enum: [none, band1, band2, band3], description: "Pásmo paušální daně" }
+        epo_taxpayer_code:
+          type: [string, "null"]
+          enum: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", null]
+          description: |
+            Typ poplatníka podle číselníku `typ_popldpp` formuláře DPPDP9 (0 a 8/9
+            investiční pobídky, 1 ostatní, 2 daňový nerezident, 3 veřejně prospěšný
+            poplatník, 4 investiční fond, 5 investiční společnost, 6 penzijní
+            společnost, 7 část období základní investiční fond). `null` = účetní typ
+            poplatníka nepotvrdila; přiznání se pak staví jako pro typ 1. Aplikace
+            umí sestavit přiznání jen pro typ 1 — u ostatních se finalizace zastaví.
+        tax_entity_status:
+          type: string
+          enum: [normal, liquidation, insolvency, transformation]
+          default: normal
+          description: "Stav poplatníka. Jiný než `normal` mění typ přiznání (`typ_dapdpp`) a finalizaci zastaví."
+        tax_entity_status_date: { type: [string, "null"], format: date, description: "Rozhodný den stavu poplatníka" }
+        tax_accounting_decree:
+          type: string
+          enum: ["500", "501", "502", "503", "504", "325", "410"]
+          default: "500"
+          description: "Účetní vyhláška závěrky (`uv_vyhl`). Aplikace sestavuje výkazy jen podle 500/2002 Sb."
+        tax_investment_incentive: { type: boolean, default: false, description: "Nositel příslibu investiční pobídky (§ 35a/§ 35b ZDP)" }
+        tax_atad_cfc: { type: boolean, default: false, description: "Dotčen pravidly ATAD/CFC (§ 23e-23h, § 38fa ZDP)" }
+        tax_public_benefit: { type: boolean, default: false, description: "Veřejně prospěšný poplatník (§ 17a ZDP)" }
+        tax_cooperating_person: { type: boolean, default: false, description: "FO rozděluje příjmy na spolupracující osobu (§ 13 ZDP)" }
+        tax_foreign_income_credit: { type: boolean, default: false, description: "FO má zahraniční příjmy se zápočtem daně (§ 38f ZDP)" }
         email_branding_enabled: { type: boolean }
         email_accent_color: { type: string, example: "#3B2D83" }
         has_email_logo: { type: boolean }
@@ -24084,6 +24962,10 @@ components:
               unit_price_without_vat: { type: number, format: float, description: "Může být záporná pro slevový řádek." }
               vat_rate_id: { type: integer }
               vat_rate_percent: { type: number, format: float }
+              vat_classification_code:
+                type: [string, "null"]
+                maxLength: 8
+                description: "Ručně zvolená klasifikace DPH přenášená na každou vygenerovanou fakturu. NULL = odvodit ze sazby a měrné jednotky při generování. Na OSS řádku se ignoruje (plnění se přiznává v zemi spotřeby)."
               order_index: { type: integer }
               oss_applicable:
                 type: boolean
@@ -24177,6 +25059,10 @@ components:
               unit: { type: string, default: ks }
               unit_price_without_vat: { type: number, format: float, description: "Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
               vat_rate_id: { type: integer }
+              vat_classification_code:
+                type: [string, "null"]
+                maxLength: 8
+                description: "Ručně zvolená klasifikace DPH (kód z `/vat-classifications` se `direction` sale/both). Přenese se na každou vygenerovanou fakturu a přebije automatické odvození ze sazby a jednotky. NULL/vynecháno = odvodit. Neznámý kód je chyba validace; u neplátce DPH a u OSS řádku se rozhodnutí zahodí."
               order_index: { type: integer }
               oss_applicable:
                 type: boolean
@@ -24503,6 +25389,7 @@ components:
         advance_link_suggested_id: { type: [integer, "null"], description: "AI/auto návrh na propojení zálohy (čeká na potvrzení)" }
         issue_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date }
+        delivery_date: { type: [string, "null"], format: date, description: "Datum dodání / převzetí z dokladu (vstup § 25 ZDPH pro DUZP). NULL = na dokladu neuvedeno; systém ho NEDOMÝŠLÍ, doklad jen dostane varování eu_acquisition_delivery_date_missing." }
         due_date: { type: string, format: date }
         received_at: { type: string, format: date }
         received_at_source: { type: string, enum: [manual, import], description: "Odkud pochází datum přijetí. 'manual' = zadal ho uživatel → vstupuje do období odpočtu (§ 73 odst. 1 písm. a ZDPH); 'import' = jen otisk dne importu / AI extrakce → do zařazení se nepočítá. Překlápí se až SKUTEČNOU změnou pole, ne pouhým přeuložením dokladu." }
@@ -24700,7 +25587,7 @@ components:
         _warnings:
           type: array
           items: { type: string }
-          description: "Jen v odpovědi POST/PUT — non-blocking varování (credit_note_positive_total, vendor_non_payer_deduction, vendor_unreliable_payer — CRPDPH nespolehlivý plátce, audit 2026-07), uložení neblokují."
+          description: "Jen v odpovědi POST/PUT — non-blocking varování (credit_note_positive_total, vendor_non_payer_deduction, vendor_unreliable_payer — CRPDPH nespolehlivý plátce, audit 2026-07, public_authority_fee_out_of_scope, missing_vat_classification, eu_acquisition_delivery_date_missing, eu_acquisition_tax_date_mismatch), uložení neblokují."
 
     PurchaseVatAllocation:
       type: object
@@ -24730,6 +25617,7 @@ components:
         document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document], default: invoice }
         issue_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date }
+        delivery_date: { type: [string, "null"], format: date, description: "Datum dodání / převzetí z dokladu (vstup § 25 ZDPH pro DUZP). NULL = na dokladu neuvedeno; systém ho NEDOMÝŠLÍ, doklad jen dostane varování eu_acquisition_delivery_date_missing." }
         due_date: { type: string, format: date }
         received_at: { type: string, format: date }
         payment_method:
