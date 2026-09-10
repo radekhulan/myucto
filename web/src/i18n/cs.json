@@ -20035,6 +20035,7 @@
     "overdue_title": "Doklady bez úhrady po splatnosti",
     "overdue_note": "Otevřené položky pohledávek (311) a závazků (321) s datem splatnosti v minulosti.",
     "overdue_empty": "Žádné doklady po splatnosti bez úhrady.",
+    "overdue_truncated": "Otevřených položek je příliš mnoho — seznam i součet platí jen za nejstarší část. Úplný přehled najdete v Saldokontu se zúženým výběrem.",
     "col_doc": "Doklad",
     "col_due": "Splatnost",
     "col_overdue_days": "Po splatnosti (dní)",

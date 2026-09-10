@@ -275,11 +275,13 @@ final class InvoiceSettlementServiceTest extends TestCase
             0.0001,
             'Den před zápočtem je závazek pořád otevřený.'
         );
-        self::assertEqualsWithDelta(
-            1.0,
-            $this->purchasePaidRatio($pfId, self::YEAR . '-06-30'),
-            0.0001,
-            'Ode dne zápočtu je vyrovnaný, i když status dál tvrdí „received".'
+        // Vyrovnaný doklad ze seznamu otevřených položek MIZÍ — poměr 1,0 znamená
+        // nulový zbytek a `SaldoRepository` uzavřené položky nevrací (dřív je vracel
+        // a zahazoval je až `SaldoService`). Chování sestavy je totožné, mění se jen
+        // to, kde padne rozhodnutí; test proto tvrdí totéž jinak vyjádřené.
+        self::assertNull(
+            $this->purchasePaidRatioOrNull($pfId, self::YEAR . '-06-30'),
+            'Ode dne zápočtu je vyrovnaný (mimo otevřené položky), i když status dál tvrdí „received".'
         );
     }
 
@@ -535,6 +537,17 @@ final class InvoiceSettlementServiceTest extends TestCase
     /** `paid_ratio` přijaté faktury na účtu 321 tak, jak ho k datu vidí saldo. */
     private function purchasePaidRatio(int $pfId, string $asOf): float
     {
+        $ratio = $this->purchasePaidRatioOrNull($pfId, $asOf);
+        if ($ratio === null) {
+            self::fail('Přijatá faktura ' . $pfId . ' není k ' . $asOf . ' mezi otevřenými položkami 321.');
+        }
+
+        return $ratio;
+    }
+
+    /** Totéž, ale `null` = doklad je k datu vyrovnaný, takže mezi otevřenými položkami není. */
+    private function purchasePaidRatioOrNull(int $pfId, string $asOf): ?float
+    {
         $account = $this->saldo->resolveAccount($this->supplierId, '321');
         self::assertNotNull($account, 'Účet 321 chybí v osnově.');
 
@@ -543,6 +556,7 @@ final class InvoiceSettlementServiceTest extends TestCase
                 return (float) $item['paid_ratio'];
             }
         }
-        self::fail('Přijatá faktura ' . $pfId . ' není k ' . $asOf . ' mezi otevřenými položkami 321.');
+
+        return null;
     }
 }

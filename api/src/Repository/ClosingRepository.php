@@ -1138,7 +1138,7 @@ final class ClosingRepository
                 -- samostatný doklad a výpis se páruje NA NI (variabilní symbol nese ona),
                 -- kdežto na 321 visí předpis až konečné faktury. Bez tohohle kanálu se
                 -- úhrada a závazek nikdy nepotkají a plně předplacená faktura se hlásí jako
-                -- otevřené saldo v plné výši. Zrcadlo SaldoRepository::advanceOnAccountSql.
+                -- otevřené saldo v plné výši. Zrcadlo SaldoRepository::advanceOnAccountCte.
                 --
                 -- Podmínka „záloha nemá vlastní předpis na 321\" brání dvojímu započtení:
                 -- když účetní zálohu na saldokonto předepsala, vyrovná si ji sama ve své
@@ -1331,7 +1331,7 @@ final class ClosingRepository
      * Uznává se debet na 314 NEBO na saldokontní 321. Účtovat zálohu rovnou na 321 je
      * legitimní varianta — na 321 pak visí předpis konečné faktury a úhrada zálohy ho
      * vyruší, takže deník o penězích ví a saldo sedí (zrcadlo
-     * {@see SaldoRepository::advanceOnAccountSql}). Trvat jen na 314 znamenalo hlásit
+     * {@see SaldoRepository::advanceOnAccountCte}). Trvat jen na 314 znamenalo hlásit
      * takovou zálohu jako „deník o úhradě neví", přestože o ní ví — jen jinou nohou.
      *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>

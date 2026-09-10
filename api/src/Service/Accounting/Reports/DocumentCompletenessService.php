@@ -32,6 +32,21 @@ final class DocumentCompletenessService
     /** Prahové hranice stáří pro aging (dny). */
     private const BUCKETS = ['d0_30' => 30, 'd31_60' => 60, 'd61_90' => 90, 'd91_180' => 180];
 
+    /**
+     * Strop otevřených položek načtených z jednoho saldokontního účtu.
+     *
+     * Na rozdíl od saldokonta se tady nad stropem NEODMÍTÁ, ale zkracuje s příznakem
+     * `truncated`. Důvod je v povaze obou sestav: saldokonto je inventarizační podklad,
+     * kde useknutý seznam rozbije konfrontaci se zůstatkem hlavní knihy, kdežto tohle je
+     * pracovní upozorňovací seznam „doklad po splatnosti bez úhrady" řazený od nejstarších.
+     * Prvních pár tisíc nejstarších je přesně to, co má účetní řešit; odmítnout jí celou
+     * kontrolu úplnosti kvůli počtu je horší než jí ukázat začátek a říct, že pokračuje.
+     *
+     * Bez stropu si tahle sestava brala saldo DVAKRÁT (311 + 321) a nad ~200 tis. doklady
+     * spadla na `memory_limit` stejně jako saldokonto.
+     */
+    private const MAX_OPEN_ITEMS_PER_ACCOUNT = 5000;
+
     public function __construct(
         private readonly Connection $db,
         private readonly SaldoRepository $saldo,
@@ -158,13 +173,25 @@ final class DocumentCompletenessService
         $todayDt = new \DateTimeImmutable($today);
         $items = [];
         $totalCzk = 0.0;
+        $truncated = false;
         foreach (['311', '321'] as $code) {
             $acc = $this->saldo->resolveAccount($supplierId, $code);
             if ($acc === null) {
                 continue;
             }
             $normalSide = $acc['normal_side'] ?? (in_array($acc['account_type'], ['asset', 'expense'], true) ? 'debit' : 'credit');
-            foreach ($this->saldo->openItems($supplierId, $acc['id'], $today, $acc['code']) as $it) {
+            $open = $this->saldo->openItems(
+                $supplierId,
+                $acc['id'],
+                $today,
+                $acc['code'],
+                self::MAX_OPEN_ITEMS_PER_ACCOUNT + 1,
+            );
+            if (count($open) > self::MAX_OPEN_ITEMS_PER_ACCOUNT) {
+                $truncated = true;
+                $open = array_slice($open, 0, self::MAX_OPEN_ITEMS_PER_ACCOUNT);
+            }
+            foreach ($open as $it) {
                 // Orientace na normální stranu účtu — stejná transformace jako SaldoService::buildAccount.
                 $bookedNative = $normalSide === 'debit' ? $it['booked_signed'] : -$it['booked_signed'];
                 $paidNative = round($bookedNative * $it['paid_ratio'], 2);
@@ -197,7 +224,14 @@ final class DocumentCompletenessService
 
         return [
             'items'   => $items,
-            'summary' => ['total_count' => count($items), 'total_czk' => $totalCzk],
+            'summary' => [
+                'total_count' => count($items),
+                'total_czk'   => $totalCzk,
+                // true = otevřených položek bylo nad strop, seznam i součet jsou jen
+                // za načtenou část. Bez tohoto příznaku by zkrácený součet vypadal
+                // jako úplný.
+                'truncated'   => $truncated,
+            ],
         ];
     }
 

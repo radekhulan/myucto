@@ -20035,6 +20035,7 @@
     "overdue_title": "Documents unpaid past due date",
     "overdue_note": "Open receivable (311) and payable (321) items with a due date in the past.",
     "overdue_empty": "No overdue unpaid documents.",
+    "overdue_truncated": "There are too many open items — the list and its total cover only the oldest part. Use Saldo with a narrower selection for the complete picture.",
     "col_doc": "Document",
     "col_due": "Due date",
     "col_overdue_days": "Overdue (days)",

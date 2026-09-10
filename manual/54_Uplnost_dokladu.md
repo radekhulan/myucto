@@ -80,6 +80,11 @@ vede na detail vydané nebo přijaté faktury.
 v měně dokladu. Záporná otevřená položka může znamenat přeplatek nebo dobropis
 a musí se posoudit podle detailu saldokonta.
 
+Z každého z obou účtů se načte nejvýše 5 000 otevřených položek. Pokud jich je
+víc, obrazovka to napíše nad tabulkou a seznam i jeho součet pak platí jen za
+načtenou nejstarší část — úplný přehled dá [Saldokonto](53_Saldokonto.md) se
+zúženým výběrem.
+
 ## 54.3 Doporučený postup
 
 1. Nastavte práh podle interního rytmu předávání dokladů; pro měsíční práci je

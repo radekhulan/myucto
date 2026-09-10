@@ -68,7 +68,7 @@ final class PurchaseSettledExpr
      *
      * Pro čtecí stranu (saldo, konfrontace s hlavní knihou), která se ptá „jak to vypadalo
      * k rozvahovému dni". {@see settled()} je oproti tomu stav K TEĎ a banku obsahuje —
-     * saldo si ji počítá vlastním, přesnějším datem uznání (`SaldoRepository::MATCH_SETTLEMENT_DATE`
+     * saldo si ji počítá vlastním, přesnějším datem uznání (`SaldoRepository::bankSettleCte()`
      * bere `entry_date` zaúčtovaného bankovního zápisu), takže by se tudy jen zdvojila.
      *
      * Datum uznání zápočtu je `settled_on` / `agreement_date` — přesně to, s čím se zakládá

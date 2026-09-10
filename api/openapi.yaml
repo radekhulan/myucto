@@ -10212,12 +10212,25 @@ paths:
         Σ otevřených položek proti zůstatku účtu z hlavní knihy k rozvahovému dni.
         Rozdíl (inventarizační hodnota) odhalí ruční zápisy, storna či zapomenuté
         faktury nepokryté fakturačním zdrojem.
+
+        Sestava má strop 25 000 otevřených položek (přes všechny účty dohromady);
+        nad ním vrací 422 `too_many_rows` a je nutné výběr zúžit (`account`,
+        `partner_id`, `as_of`). Useknutý seznam se nevrací záměrně — konfrontace se
+        zůstatkem hlavní knihy dává smysl jen nad úplným seznamem.
+
+        `page`/`per_page` stránkují POUZE seznam partnerů k zobrazení. Součty
+        (`gl_balance`, `open_items_total`, `open_items_count`, `difference`,
+        `matches`) jsou vždy za celou sestavu, ne za stránku; blok účtu nese
+        `partners_pagination` (`page`, `per_page`, `total`, `pages`). Bez `page`
+        se vrací celá sestava.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
         - { in: query, name: as_of, description: "Rozvahový den (default min(konec období, dnešek)). Smí ležet mimo period_id (i v uzavřeném období) — odpověď nese as_of_period se skutečným obdobím.", schema: { type: string, format: date } }
         - { in: query, name: account, description: "Kód účtu (např. 311) nebo 'all' pro default sadu", schema: { type: string, default: all } }
         - { in: query, name: partner_id, description: "Volitelný filtr na jednoho partnera", schema: { type: integer } }
+        - { in: query, name: page, description: "Stránka seznamu partnerů (1..N). Bez parametru se vrací celá sestava.", schema: { type: integer, minimum: 1 } }
+        - { in: query, name: per_page, description: "Partnerů na stránku (default 50, max 200). Platí jen s page.", schema: { type: integer, minimum: 1, maximum: 200 } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -10247,6 +10260,11 @@ paths:
       description: |
         Read-only report — bankovní pohyby bez napárovaného dokladu starší
         prahu X dní + doklady po splatnosti (REAL_data_followup_UX.md E).
+
+        Seznam dokladů po splatnosti má strop 5 000 otevřených položek na
+        saldokontní účet (311, 321). Při překročení je
+        `documents_overdue_unpaid.summary.truncated = true` a seznam i jeho
+        součet platí jen za načtenou (nejstarší) část.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: days, schema: { type: integer, minimum: 0, maximum: 3650, default: 30 } }

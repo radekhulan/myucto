@@ -31,6 +31,12 @@ Server podporuje i jiný existující číselný účet a volitelné omezení na
 partnera, běžná obrazovka však nabízí uvedenou čtveřici. Explicitně zvolený
 účet se zobrazí i s nulami.
 
+Sestava zvládne 25 000 otevřených položek napříč zvolenými účty. Nad tímto
+počtem ji server odmítne sestavit a vyzve k zúžení výběru — jedním účtem,
+jedním partnerem nebo dřívějším rozvahovým dnem. Zkrácený seznam se záměrně
+nevrací: součet otevřených položek by pak neodpovídal zůstatku hlavní knihy a
+chybějící řádky by se vykázaly jako inventarizační rozdíl.
+
 ## 53.2 Dvě nezávislé strany konfrontace
 
 **Zůstatek hlavní knihy** vychází ze všech zaúčtovaných řádků účtu do

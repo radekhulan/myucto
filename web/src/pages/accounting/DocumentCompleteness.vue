@@ -120,6 +120,13 @@ function bucketLabel(bucket: string): string {
       <h2 class="text-lg font-medium mb-1">{{ t('documentCompleteness.overdue_title') }}</h2>
       <p class="text-xs text-neutral-400 mb-3">{{ t('documentCompleteness.overdue_note') }}</p>
 
+      <p
+        v-if="data.documents_overdue_unpaid.summary.truncated"
+        class="text-xs px-3 py-2 mb-3 rounded bg-warning-50 text-warning-700 font-medium"
+      >
+        {{ t('documentCompleteness.overdue_truncated') }}
+      </p>
+
       <EmptyState v-if="data.documents_overdue_unpaid.items.length === 0" boxed accent="success" icon="checkCircle" :title="t('documentCompleteness.overdue_empty')" />
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
         <table class="w-full text-sm">
