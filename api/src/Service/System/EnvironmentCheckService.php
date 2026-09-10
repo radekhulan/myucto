@@ -14,6 +14,7 @@ use MyInvoice\Service\Cron\CronDispatcher;
 use MyInvoice\Service\Cron\CronHealth;
 use MyInvoice\Service\Cron\CronJobGate;
 use MyInvoice\Service\Cron\CronScheduleMode;
+use MyInvoice\Service\System\Schema\SchemaIntegrityService;
 use MyInvoice\Service\Update\VersionService;
 use PDO;
 
@@ -795,6 +796,29 @@ final class EnvironmentCheckService
             '98_Aktualizace',
             ['pending' => array_slice((array) ($mig['pending'] ?? []), 0, 20)]
         );
+
+        // Struktura proti migracím. Čte celé information_schema (asi sekundu), takže
+        // se počítá, jen když o ni volající stojí — preflight ne.
+        if ($onlyIds === null || in_array('schema_integrity', $onlyIds, true)) {
+            $schema = $this->guard(
+                fn () => SchemaIntegrityService::forConnection($this->db)->report(),
+                ['status' => self::STATUS_SKIP, 'reason' => 'unavailable', 'counts' => ['fail' => 0, 'warn' => 0], 'findings' => []],
+            );
+            $checks[] = $this->check(
+                'schema_integrity',
+                $schema['status'],
+                $schema['status'] === self::STATUS_SKIP
+                    ? $schema['reason']
+                    : $schema['counts']['fail'] . ' / ' . $schema['counts']['warn'],
+                '0 / 0',
+                '999_Reseni_problemu',
+                [
+                    'counts'   => $schema['counts'],
+                    'total'    => count($schema['findings']),
+                    'findings' => array_slice($schema['findings'], 0, 50),
+                ]
+            );
+        }
 
         $cron     = $runtime['cron'] ?? [];
         $stale    = (array) ($cron['stale'] ?? []);

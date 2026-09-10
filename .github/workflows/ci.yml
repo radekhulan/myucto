@@ -151,6 +151,13 @@ jobs:
           MYINVOICE_DB_NAME=myinvoice_ci_test php api/bin/migrate.php
           MYINVOICE_DB_NAME=myinvoice_ci_test php api/bin/ci-seed.php
 
+      # Čistá databáze z migrací musí strukturou přesně sedět na db/schema.snapshot.json.
+      # Jinak je otisk zastaralý (migrace bez přegenerování otisku) a diagnostika
+      # instalací by hlásila odchylky, které nejsou. Běží nad `_test` databází, protože
+      # ta má výslovně založenou collation; výchozí databáze kontejneru ji nemá.
+      - name: Struktura databáze proti otisku
+        run: MYINVOICE_DB_NAME=myinvoice_ci_test php api/bin/check-schema.php --strict
+
       # Část integračních testů mluví na běžící instanci přes HTTP (bearer auth,
       # rate-limit hlavičky, cross-tenant vazba tokenu). Bez serveru se přeskočí.
       #

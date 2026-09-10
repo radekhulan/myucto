@@ -75,6 +75,10 @@ if (-not $SkipData) {
         & $PhpBin (Join-Path $apiDir 'bin/cross-check.php')
     }
 
+    Invoke-Step 'Struktura databáze proti migracím (read-only)' {
+        & $PhpBin (Join-Path $apiDir 'bin/check-schema.php')
+    }
+
     $compareDph = Join-Path $repoRoot 'private/scripts/compare_dph.php'
     if (Test-Path $compareDph) {
         Invoke-Step 'Smír DPH proti podaným XML' { & $PhpBin $compareDph }

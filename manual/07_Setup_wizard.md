@@ -29,7 +29,8 @@ v image a v `docker-compose.yml`, ne v `php.ini` na hostiteli. Po nápravě
 klikni na **Zkontrolovat znovu**.
 
 Stejná kontrola je i po instalaci v **Systém → Diagnostika**, kde navíc hlídá
-plánované úlohy, velikost logů a dostupnost novější verze — viz
+plánované úlohy, velikost logů, strukturu databáze proti migracím a dostupnost
+novější verze — viz
 [999. Řešení problémů](999_Reseni_problemu.md).
 
 ## 7.2 Krok 1 — Administrátor

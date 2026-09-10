@@ -462,8 +462,8 @@ a odkaz do příslušné kapitoly manuálu.
 Kontroluje se verze PHP a povinná rozšíření, klíčové hodnoty `php.ini`
 (`memory_limit`, limity nahrávání, časové pásmo, OPcache), verze a nastavení
 MariaDB, dostupnost Redisu, volné místo a práva zápisu, shoda časových pásem,
-stav databázových migrací, poslední běhy plánovaných úloh, stav licence
-a dostupnost novější verze aplikace.
+stav databázových migrací, struktura databáze proti migracím (viz 999.9.3),
+poslední běhy plánovaných úloh, stav licence a dostupnost novější verze aplikace.
 
 Nálezy jsou seřazené od problémů k varováním, takže shora dolů odpovídají
 pořadí, v jakém má smysl je řešit.
@@ -511,6 +511,44 @@ co a kdy bylo předáno.
 
 Velikost je omezená na 25 MB, což je limit přílohy na portálu podpory. Když ji
 rozsah logů přesáhne, stránka to ohlásí ještě před vytvořením balíčku.
+
+### 999.9.3 Struktura databáze
+
+Stav migrací říká, že každá migrace proběhla. Kontrola **Struktura databáze**
+říká, jestli to, co migrace vytvořily, v databázi pořád je a vypadá tak, jak má.
+Porovnává tabulky, sloupce, indexy, cizí klíče, kontroly CHECK, triggery, uložené
+procedury a auditní historii deníku s referenčním otiskem, který vzniká z čisté
+databáze postavené jen z migrací dané verze aplikace.
+
+Typické příčiny odchylky:
+
+- obnova databáze ze zálohy pořízené starší verzí aplikace,
+- ruční úprava struktury (`ALTER TABLE`) mimo migrace,
+- tabulka deníku bez auditní historie (`SYSTEM VERSIONING`), kdy se historie
+  změn zápisů tiše neukládá.
+
+| Závažnost | Co znamená |
+|---|---|
+| **Nevyhovuje** | chybí tabulka, sloupec, unikátní index, cizí klíč, kontrola CHECK, trigger, uložená procedura nebo auditní historie, případně má sloupec jiný typ |
+| **S výhradami** | jiná collation, výchozí hodnota nebo engine, obyčejný index, jiné tělo triggeru, objekty navíc |
+
+Dokud čekají nespuštěné migrace, kontrola se **přeskočí**: rozdíl by byl jen
+seznam toho, co migrace teprve přinesou. Nejdřív proto spusť
+`php api/bin/migrate.php`.
+
+Stránka ukazuje prvních 50 nálezů, očekávanou a skutečnou definici uvidíš po
+najetí myší. Úplný výpis dá příkaz:
+
+```bash
+php api/bin/check-schema.php          # návratový kód 1 při nálezu typu „nevyhovuje"
+php api/bin/check-schema.php --json   # strojový výstup
+```
+
+Kontrola jen čte, nic neopravuje. Chybějící objekt vytvoří migrace, která ho měla
+přinést (najdeš ji podle názvu objektu v adresáři `db/migrations`). U migrace
+evidované jako proběhlá to znamená smazat její řádek z tabulky `migrations`
+a spustit `php api/bin/migrate.php` znovu, migrace jsou opakovatelně spustitelné.
+Druhou cestou je obnova ze zálohy pořízené stejnou verzí aplikace.
 
 ## 999.10 Hlášení chyb
 

@@ -51,6 +51,34 @@ function checkValue(check: DiagnosticCheck, part: 'actual' | 'expected' | 'info'
   return value && te(key) ? t(key) : value
 }
 
+interface CheckFinding {
+  severity: string
+  code: string
+  object: string
+  expected: string
+  actual: string
+}
+
+/** Jednotlivé nálezy kontroly, která je nese v `meta.findings` (struktura databáze). */
+function findingsOf(check: DiagnosticCheck): CheckFinding[] {
+  const list = check.meta?.findings
+  return Array.isArray(list) ? (list as CheckFinding[]) : []
+}
+
+/** Kolik nálezů se kvůli stropu na stránku nevešlo. */
+function moreFindings(check: DiagnosticCheck): number {
+  return Math.max(0, Number(check.meta?.total ?? 0) - findingsOf(check).length)
+}
+
+function findingLabel(code: string): string {
+  const key = `diagnostics.schema_findings.${code}`
+  return te(key) ? t(key) : code
+}
+
+function findingTitle(finding: CheckFinding): string {
+  return [finding.expected, finding.actual].filter((v) => v !== '').join(' → ')
+}
+
 function rowClass(status: string): string {
   switch (status) {
     case 'fail':
@@ -113,6 +141,26 @@ function statusPill(status: string): string {
           <dd class="font-mono break-all">{{ checkValue(check, 'info') }}</dd>
         </div>
       </dl>
+
+      <ul
+        v-if="(check.status === 'fail' || check.status === 'warn') && findingsOf(check).length"
+        class="mt-1.5 space-y-0.5 text-xs"
+      >
+        <li
+          v-for="(finding, index) in findingsOf(check)"
+          :key="index"
+          class="flex flex-wrap gap-x-1.5"
+          :title="findingTitle(finding)"
+        >
+          <span :class="finding.severity === 'fail' ? 'text-danger-600 font-semibold' : 'text-warning-800'">
+            {{ findingLabel(finding.code) }}
+          </span>
+          <span class="font-mono break-all text-neutral-700">{{ finding.object }}</span>
+        </li>
+        <li v-if="moreFindings(check) > 0" class="text-neutral-500">
+          {{ t('diagnostics.findings_more', { n: moreFindings(check) }) }}
+        </li>
+      </ul>
 
       <template v-if="check.status === 'fail' || check.status === 'warn'">
         <p v-if="checkText(check.id, 'impact')" class="mt-1.5 text-sm text-neutral-700">

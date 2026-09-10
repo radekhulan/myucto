@@ -22167,6 +22167,20 @@
         "actual_label": "Nespuštěných migrací",
         "expected_label": "Očekáváno"
       },
+      "schema_integrity": {
+        "label": "Struktura databáze",
+        "impact": "Databáze se liší od struktury, kterou vytvářejí migrace. Chybějící tabulka, sloupec nebo index způsobí chyby při ukládání, chybějící trigger nebo auditní historie tiše vypne ochranu dat.",
+        "fix": "Úplný výpis dá php api/bin/check-schema.php. Chybějící objekty vytvoří migrace, která je měla přinést, nebo obnova ze zálohy pořízené touto verzí aplikace.",
+        "actual_label": "Chyb / varování",
+        "expected_label": "Očekáváno",
+        "values": {
+          "snapshot_missing": "chybí referenční otisk struktury",
+          "snapshot_outdated": "otisk neodpovídá migracím této verze",
+          "migrations_pending": "nejdřív je potřeba spustit čekající migrace",
+          "migrations_table_missing": "chybí tabulka migrací",
+          "unavailable": "kontrolu se nepodařilo provést"
+        }
+      },
       "cron_health": {
         "label": "Plánované úlohy",
         "impact": "Bez cronu nevznikají zálohy, neodcházejí upomínky a nestahují se kurzy ČNB.",
@@ -22190,6 +22204,41 @@
         "impact": "Je k dispozici novější verze — problém, který řešíte, už může být opravený.",
         "fix": "Podívejte se do sekce Aktualizace, co nová verze přináší."
       }
+    },
+    "findings_more": "a dalších {n}, úplný výpis dá php api/bin/check-schema.php",
+    "schema_findings": {
+      "database_collation": "Jiná collation databáze",
+      "table_missing": "Chybí tabulka",
+      "table_extra": "Tabulka navíc",
+      "table_type": "Jiný typ tabulky (auditní historie)",
+      "table_engine": "Jiný úložný engine",
+      "table_collation": "Jiná collation tabulky",
+      "view_changed": "Změněný pohled",
+      "column_missing": "Chybí sloupec",
+      "column_extra": "Sloupec navíc",
+      "column_changed": "Jiný typ sloupce",
+      "column_attributes": "Jiná výchozí hodnota nebo atribut sloupce",
+      "index_missing": "Chybí index",
+      "index_extra": "Index navíc",
+      "index_changed": "Změněný index",
+      "index_renamed": "Index pod jiným názvem",
+      "foreign_key_missing": "Chybí cizí klíč",
+      "foreign_key_extra": "Cizí klíč navíc",
+      "foreign_key_changed": "Změněný cizí klíč",
+      "foreign_key_renamed": "Cizí klíč pod jiným názvem",
+      "check_missing": "Chybí kontrola CHECK",
+      "check_extra": "Kontrola CHECK navíc",
+      "check_changed": "Změněná kontrola CHECK",
+      "check_renamed": "Kontrola CHECK pod jiným názvem",
+      "trigger_missing": "Chybí trigger",
+      "trigger_extra": "Trigger navíc",
+      "trigger_changed": "Změněný trigger",
+      "trigger_renamed": "Trigger pod jiným názvem",
+      "routine_missing": "Chybí uložená procedura",
+      "routine_extra": "Uložená procedura navíc",
+      "routine_changed": "Změněná uložená procedura",
+      "routine_renamed": "Uložená procedura pod jiným názvem",
+      "migration_unknown": "Migrace, kterou tato verze nezná"
     },
     "bundle": {
       "title": "Diagnostický balíček",

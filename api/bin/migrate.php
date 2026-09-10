@@ -212,6 +212,18 @@ foreach ($pending as $file) {
 
 echo "Hotovo.\n";
 
+// Auditní historie deníku (§ 12 ZoÚ) — po importu dumpu tabulky deníku ztratí
+// SYSTEM VERSIONING a migrace 1029/1167 se už nespustí. Kontrola běží po každém
+// migrate.php, i bez pending migrací. Selhání deploy nezastaví, jen hlasitě varuje;
+// chybějící versioning hlásí i Diagnostika (check-schema) a invariant I29.
+try {
+    foreach ((new \MyInvoice\Service\System\Schema\JournalVersioningSelfHeal($db))->heal() as $table) {
+        echo "Samooprava: tabulka {$table} znovu dostala SYSTEM VERSIONING (auditní historie deníku).\n";
+    }
+} catch (\Throwable $e) {
+    fwrite(STDERR, 'VAROVÁNÍ: deníku se nepodařilo doplnit SYSTEM VERSIONING: ' . $e->getMessage() . "\n");
+}
+
 // Zahoď sdílenou cache introspekce schématu (hasTable/hasColumn). Ta drží odpovědi
 // mezi requesty a migrace je právě mohla změnit — bez invalidace by aplikace až do
 // vypršení TTL tvrdila, že nový sloupec neexistuje, a tiše by běžela bez feature,

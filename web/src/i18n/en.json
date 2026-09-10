@@ -22167,6 +22167,20 @@
         "actual_label": "Pending migrations",
         "expected_label": "Expected"
       },
+      "schema_integrity": {
+        "label": "Database structure",
+        "impact": "The database differs from the structure the migrations create. A missing table, column or index causes errors on save; a missing trigger or audit history silently switches off data protection.",
+        "fix": "Run php api/bin/check-schema.php for the full list. Missing objects are created by the migration that should have brought them, or by restoring a backup taken with this application version.",
+        "actual_label": "Errors / warnings",
+        "expected_label": "Expected",
+        "values": {
+          "snapshot_missing": "reference structure snapshot is missing",
+          "snapshot_outdated": "snapshot does not match the migrations of this version",
+          "migrations_pending": "run the pending migrations first",
+          "migrations_table_missing": "migrations table is missing",
+          "unavailable": "the check could not run"
+        }
+      },
       "cron_health": {
         "label": "Scheduled jobs",
         "impact": "Without cron there are no backups, no reminders go out and exchange rates are not fetched.",
@@ -22190,6 +22204,41 @@
         "impact": "A newer version is available — the problem you are chasing may already be fixed.",
         "fix": "Check the Updates section to see what the new version brings."
       }
+    },
+    "findings_more": "and {n} more; run php api/bin/check-schema.php for the full list",
+    "schema_findings": {
+      "database_collation": "Different database collation",
+      "table_missing": "Missing table",
+      "table_extra": "Extra table",
+      "table_type": "Different table type (audit history)",
+      "table_engine": "Different storage engine",
+      "table_collation": "Different table collation",
+      "view_changed": "Changed view",
+      "column_missing": "Missing column",
+      "column_extra": "Extra column",
+      "column_changed": "Different column type",
+      "column_attributes": "Different column default or attribute",
+      "index_missing": "Missing index",
+      "index_extra": "Extra index",
+      "index_changed": "Changed index",
+      "index_renamed": "Index under a different name",
+      "foreign_key_missing": "Missing foreign key",
+      "foreign_key_extra": "Extra foreign key",
+      "foreign_key_changed": "Changed foreign key",
+      "foreign_key_renamed": "Foreign key under a different name",
+      "check_missing": "Missing CHECK constraint",
+      "check_extra": "Extra CHECK constraint",
+      "check_changed": "Changed CHECK constraint",
+      "check_renamed": "CHECK constraint under a different name",
+      "trigger_missing": "Missing trigger",
+      "trigger_extra": "Extra trigger",
+      "trigger_changed": "Changed trigger",
+      "trigger_renamed": "Trigger under a different name",
+      "routine_missing": "Missing stored routine",
+      "routine_extra": "Extra stored routine",
+      "routine_changed": "Changed stored routine",
+      "routine_renamed": "Stored routine under a different name",
+      "migration_unknown": "Migration unknown to this version"
     },
     "bundle": {
       "title": "Diagnostic bundle",

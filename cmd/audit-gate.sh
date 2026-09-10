@@ -63,6 +63,9 @@ if [ "$SKIP_DATA" -eq 0 ]; then
     run_step 'Křížové kontroly (read-only)' \
         "$PHP_BIN" "$API_DIR/bin/cross-check.php"
 
+    run_step 'Struktura databáze proti migracím (read-only)' \
+        "$PHP_BIN" "$API_DIR/bin/check-schema.php"
+
     if [ -f "$REPO_ROOT/private/scripts/compare_dph.php" ]; then
         run_step 'Smír DPH proti podaným XML' \
             "$PHP_BIN" "$REPO_ROOT/private/scripts/compare_dph.php"

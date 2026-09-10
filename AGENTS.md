@@ -70,6 +70,7 @@ php tools/generateManualHtml.php
 - Cílová DB je MariaDB 11.8+: v SQL preferuj **window functions a CTE** před vnořenými subselecty; nepoužívej `SQL_CALC_FOUND_ROWS`.
 - **Číslo je vždy nejbližší volné, nikdy „s rezervou".** Nové číslo = nejvyšší existující + 1. Nepřeskakuj na kulaté číslo, nenech si mezeru „pro jistotu" a nevolej po vlastním rozsahu — souvislá řada je jediný způsob, jak je poznat pořadí. Sáhne-li po číslech víc agentů naráz, kolizi řeší ten, kdo integruje: přečísluje na nejbližší volné, přejmenuje řádek v tabulce `migrations` v lokálních DB a opraví odkazy na název souboru v testech.
 - Migrace se eviduje **podle názvu souboru** (`migrations.filename`), takže přejmenování ji spustí znovu. Právě proto musí být idempotentní. Přečíslovat jde jen migraci, která ještě není nasazená u zákazníků; u nasazené se číslo nemění nikdy.
+- **Po každé nové migraci přegeneruj otisk struktury** `db/schema.snapshot.json` z čisté databáze postavené z migrací (`api/bin/schema-snapshot.php`, postup v jeho hlavičce). Podle otisku kontroluje Diagnostika strukturu databáze instalací; hlídá to `SchemaSnapshotCoverageTest` a v CI `check-schema.php --strict`.
 
 ### i18n
 - Veškeré nové UI texty přes `t()` z vue-i18n — **nikdy** natvrdo česky/anglicky v šablonách. Vždy doplň **obě** locale (`web/src/i18n/cs.json` i `en.json`).
